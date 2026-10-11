@@ -13,6 +13,9 @@ let previewAttached = false;
 let previewPollTimer = null;
 let previewWatchdogTimer = null;
 let lastPreviewSentAt = 0;
+// Phone-sized emulation while the seller drives the draft from a phone. Null
+// means the tab's own desktop layout, which is what every fill runs on.
+let previewViewport = null;
 
 function sendPreviewFrame(jobId, data, extra) {
   if (typeof send !== 'function' || !jobId || !data) {
@@ -503,16 +506,64 @@ async function preparePageForCapture(tabId) {
       state: 'active',
     });
   } catch (_) {}
+  previewViewport = null;
   try {
     await chrome.debugger.sendCommand({ tabId }, 'Emulation.clearDeviceMetricsOverride');
   } catch (_) {}
 }
 
+function sameViewport(a, b) {
+  return Boolean(a && b) && a.width === b.width && a.height === b.height && a.scale === b.scale;
+}
+
+// Lay the attached tab out at a phone's size, or pass null to go back to desktop.
+async function setPreviewViewport(tabId, viewport) {
+  if (!previewAttached || previewTabId !== tabId) {
+    return false;
+  }
+  if (!viewport) {
+    if (!previewViewport) {
+      return true;
+    }
+    previewViewport = null;
+    try {
+      await chrome.debugger.sendCommand({ tabId }, 'Emulation.setTouchEmulationEnabled', { enabled: false });
+    } catch (_) {}
+    try {
+      await chrome.debugger.sendCommand({ tabId }, 'Emulation.clearDeviceMetricsOverride');
+    } catch (_) {}
+    return true;
+  }
+  if (sameViewport(previewViewport, viewport)) {
+    return true;
+  }
+  try {
+    await chrome.debugger.sendCommand({ tabId }, 'Emulation.setDeviceMetricsOverride', {
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: viewport.scale,
+      mobile: true,
+    });
+    await chrome.debugger.sendCommand({ tabId }, 'Emulation.setTouchEmulationEnabled', {
+      enabled: true,
+      maxTouchPoints: 1,
+    });
+  } catch (err) {
+    log(`Phone layout unavailable (${err.message})`);
+    return false;
+  }
+  previewViewport = { ...viewport };
+  return true;
+}
+
 async function captureDebuggerScreenshot(tabId) {
-  const attempts = [
-    { fromSurface: false, captureBeyondViewport: false },
-    { fromSurface: true, captureBeyondViewport: false },
-  ];
+  // Only the surface capture honors the emulated size and pixel density.
+  const attempts = previewViewport
+    ? [{ fromSurface: true, captureBeyondViewport: false }]
+    : [
+      { fromSurface: false, captureBeyondViewport: false },
+      { fromSurface: true, captureBeyondViewport: false },
+    ];
   for (const options of attempts) {
     try {
       const result = await chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', {
@@ -627,6 +678,7 @@ async function stopJobPreview() {
   previewAttached = false;
   previewTabId = null;
   previewJobId = null;
+  previewViewport = null;
   lastPreviewSentAt = 0;
   if (attached && tabId != null) {
     try {
@@ -646,6 +698,9 @@ async function startJobPreview(tabId, jobId) {
     return;
   }
   if (previewTabId === tabId && previewJobId === jobId && (previewAttached || previewPollTimer)) {
+    // Whoever starts a preview gets the desktop layout. The browser session
+    // asks for the phone layout again once nothing is filling.
+    await setPreviewViewport(tabId, null);
     return;
   }
   await stopJobPreview();
@@ -687,6 +742,7 @@ try {
   chrome.debugger.onDetach.addListener((source, reason) => {
     if (source.tabId === previewTabId) {
       previewAttached = false;
+      previewViewport = null;
       log(`Preview debugger detached (${reason || 'unknown'})`);
       if (previewTabId && previewJobId) {
         tabIsInFront(previewTabId).then((inFront) => {

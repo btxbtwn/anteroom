@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.229 — 2026-10-11
+
+- The browser now works from your phone. The Vendoo draft shows in a phone-sized layout that fills the screen instead of a shrunken desktop page, and you drive it with your finger: tap to press, drag to scroll.
+- A new **Keyboard** button in the browser opens your phone's keyboard so you can type into the field you tapped.
+
 ## 0.1.228 — 2026-10-11
 
 - Studio opens much faster on a phone or a slow connection. Everything it sends is now compressed, which cuts the first load and pages like Sourcing to roughly a quarter of the size.

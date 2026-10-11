@@ -1,8 +1,9 @@
 // Interactive Vendoo browser for Studio.
 //
 // Studio shows the draft tab as a live frame. This module lets the seller drive
-// that tab from Studio (pointer, wheel, keyboard), point at fields, and lets the
-// listing agent read and act on the page. Everything goes through the Chrome
+// that tab from Studio (pointer, touch, wheel, keyboard), point at fields, and lets the
+// listing agent read and act on the page. From a phone the tab is laid out at the
+// phone's size. Everything goes through the Chrome
 // debugger session the preview already holds, so the tab can stay in the
 // background engine window.
 
@@ -13,6 +14,10 @@ const BROWSER_MODIFIER_MASK = 1 | 2 | 4 | 8;
 
 const BROWSER_MOUSE_TYPES = new Set(['mousePressed', 'mouseReleased', 'mouseMoved', 'mouseWheel']);
 const BROWSER_MOUSE_BUTTONS = new Set(['none', 'left', 'middle', 'right']);
+const BROWSER_TOUCH_TYPES = new Set(['touchStart', 'touchMove', 'touchEnd', 'touchCancel']);
+const BROWSER_VIEWPORT_MIN = 240;
+const BROWSER_VIEWPORT_MAX_WIDTH = 1024;
+const BROWSER_VIEWPORT_MAX_HEIGHT = 2000;
 
 // Keys without printable text. CDP needs the Windows virtual key code for these.
 const BROWSER_SPECIAL_KEYS = {
@@ -88,7 +93,28 @@ async function resumeBrowserSessionPreview() {
   }
   // Input needs the debugger even when the tab happens to be in front.
   await attachDebuggerPreview(session.tabId, session.jobId);
+  if (!browserAutomationJob()) {
+    await setPreviewViewport(session.tabId, session.viewport);
+  }
   return previewAttached && previewTabId === session.tabId;
+}
+
+// The size Studio's pane has on the seller's phone, or null on a desktop.
+function browserViewportFrom(value) {
+  if (!value || typeof value !== 'object') return null;
+  const width = Math.round(Number(value.width));
+  const height = Math.round(Number(value.height));
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
+  if (width < BROWSER_VIEWPORT_MIN || height < BROWSER_VIEWPORT_MIN) return null;
+  return {
+    width: Math.min(BROWSER_VIEWPORT_MAX_WIDTH, width),
+    height: Math.min(BROWSER_VIEWPORT_MAX_HEIGHT, height),
+    scale: Math.max(1, Math.min(3, Number(value.scale) || 1)),
+  };
+}
+
+function browserViewportSettled(session) {
+  return session.viewport ? sameViewport(previewViewport, session.viewport) : !previewViewport;
 }
 
 function browserSessionFor(msg) {
@@ -155,6 +181,19 @@ async function dispatchMouse(tabId, viewport, event) {
   await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', params);
 }
 
+async function dispatchTouch(tabId, viewport, event) {
+  if (!BROWSER_TOUCH_TYPES.has(event.type)) return;
+  const lifted = event.type === 'touchEnd' || event.type === 'touchCancel';
+  await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchTouchEvent', {
+    type: event.type,
+    touchPoints: lifted ? [] : [{
+      x: clampRatio(event.x_ratio) * viewport.width,
+      y: clampRatio(event.y_ratio) * viewport.height,
+    }],
+    modifiers: browserModifiers(event.modifiers),
+  });
+}
+
 async function dispatchKey(tabId, event) {
   const key = String(event.key || '');
   const modifiers = browserModifiers(event.modifiers);
@@ -199,6 +238,8 @@ async function runBrowserInput(tabId, viewport, events) {
     if (!event || typeof event !== 'object') continue;
     if (event.kind === 'mouse') {
       await dispatchMouse(tabId, viewport, event);
+    } else if (event.kind === 'touch') {
+      await dispatchTouch(tabId, viewport, event);
     } else if (event.kind === 'key') {
       await dispatchKey(tabId, event);
     } else if (event.kind === 'text') {
@@ -226,7 +267,7 @@ async function openBrowserSession(msg) {
     return { ok: false, error: 'Another automation job is running' };
   }
   if (running) {
-    browserSession = { jobId, tabId: running.tabId, itemId: browserDraftItemId(payload) };
+    browserSession = { jobId, tabId: running.tabId, itemId: browserDraftItemId(payload), viewport: null };
     return { ok: true, tab_id: running.tabId };
   }
   if (browserSession && browserSession.jobId !== jobId) {
@@ -237,7 +278,7 @@ async function openBrowserSession(msg) {
     { reload: false, preview: true, marketplace: payload.marketplace || '' },
   );
   if (!opened.ok) return opened;
-  browserSession = { jobId, tabId: opened.tabId, itemId: browserDraftItemId(payload) };
+  browserSession = { jobId, tabId: opened.tabId, itemId: browserDraftItemId(payload), viewport: null };
   const attached = await resumeBrowserSessionPreview();
   return {
     ok: true,
@@ -395,6 +436,25 @@ async function handleBrowserMessage(msg) {
       return;
     }
 
+    case 'browser.viewport': {
+      // Fire-and-forget like input, and in the same queue so a tap sent right
+      // after a rotation lands on the new layout.
+      browserInputChain = browserInputChain.then(async () => {
+        const jobId = msg.job_id || payload.job_id;
+        if (!browserSession || browserSession.jobId !== jobId) return;
+        browserSession.viewport = browserViewportFrom(payload);
+        if (browserAutomationJob()) return;
+        try {
+          await resumeBrowserSessionPreview();
+          capturePreviewSoon();
+        } catch (err) {
+          log(`Browser viewport failed (${err.message})`);
+        }
+      });
+      await browserInputChain;
+      return;
+    }
+
     case 'browser.pick':
     case 'browser.snapshot': {
       const jobId = msg.job_id || payload.job_id;
@@ -444,7 +504,10 @@ const BROWSER_KEEPALIVE_MS = 2000;
 let browserResuming = false;
 setInterval(async () => {
   if (!browserSession || browserResuming || browserAutomationJob()) return;
-  if (previewTabId === browserSession.tabId && previewJobId === browserSession.jobId && previewPollTimer) return;
+  if (
+    previewTabId === browserSession.tabId && previewJobId === browserSession.jobId && previewPollTimer
+    && browserViewportSettled(browserSession)
+  ) return;
   browserResuming = true;
   try {
     await resumeBrowserSessionPreview();

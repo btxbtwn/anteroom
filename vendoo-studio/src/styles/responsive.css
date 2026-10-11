@@ -382,6 +382,11 @@
     max-height: none;
   }
 
+  .browser-tool {
+    height: 32px;
+    padding: 0 12px;
+  }
+
   .chat-column {
     min-height: 180px;
   }

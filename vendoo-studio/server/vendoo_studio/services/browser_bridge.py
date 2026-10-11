@@ -2,7 +2,7 @@
 
 Studio shows a Vendoo draft tab as a live frame. These helpers send
 ``browser.*`` messages over the extension WebSocket and wait for the matching
-``browser.result``. Pointer and keyboard input is fire-and-forget.
+``browser.result``. Pointer, touch, and keyboard input is fire-and-forget.
 """
 from __future__ import annotations
 
@@ -76,12 +76,12 @@ async def close_session(job) -> dict:
     return await request(job, "browser.close", timeout=READ_TIMEOUT_SEC)
 
 
-_TAKEOVER_MOUSE = frozenset({"mousePressed", "mouseWheel"})
+_TAKEOVER_MOUSE = frozenset({"mousePressed", "mouseWheel", "touchStart"})
 _last_human_input: dict[str, float] = {}
 
 
 def _is_takeover(event: dict) -> bool:
-    # Hovering over the pane is not taking control; pressing, scrolling, or typing is.
+    # Hovering over the pane is not taking control; pressing, touching, scrolling, or typing is.
     return event.get("kind") in {"key", "text"} or event.get("type") in _TAKEOVER_MOUSE
 
 
@@ -99,6 +99,17 @@ async def send_input(job, events: list[dict]) -> bool:
         type="browser.input",
         job_id=job.id,
         payload={"job_id": job.id, "events": events},
+    ).model_dump(mode="json"))
+
+
+async def send_viewport(job, viewport: dict) -> bool:
+    manager = _manager()
+    if not manager.connected:
+        return False
+    return await manager.send_message(ProtocolMessage(
+        type="browser.viewport",
+        job_id=job.id,
+        payload={**viewport, "job_id": job.id},
     ).model_dump(mode="json"))
 
 
