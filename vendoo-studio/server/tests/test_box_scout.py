@@ -833,8 +833,7 @@ class SoldListingsTest(unittest.TestCase):
     def test_ebay_cards_without_a_real_sale_price_are_left_out(self):
         for changes in ({"offer": True}, {"price": "$20.00 to $35.00"}, {"price": "AU $20.00"}, {"caption": ""},
                         {"caption": "Ended Oct 3, 2026"}, {"caption": "Sold Oct 6, 2026"}, {"caption": "Sold Jun 1, 2026"},
-                        {"caption": "Sold Feb 30, 2026"}, {"id": "Shop on eBay"}, {"title": ""},
-                        {"title": "Lot of 10 cartoon tees"}, {"title": "Cartoon tee bundle 5 pcs"}):
+                        {"caption": "Sold Feb 30, 2026"}, {"id": "Shop on eBay"}, {"title": ""}):
             with self.subTest(changes=changes):
                 self.assertEqual(sold_listings.parse_ebay_cards([self._card(**changes)], self.TODAY), [])
         self.assertEqual(len(sold_listings.parse_ebay_cards([self._card(), self._card(), "junk"], self.TODAY)), 1)
@@ -847,7 +846,6 @@ class SoldListingsTest(unittest.TestCase):
                 _poshmark_listing(30, 2, 3, status="available"),
                 _poshmark_listing(30, 2, 4, price_amount={"val": "30.0", "currency_code": "CAD"}),
                 _poshmark_listing(30, 120, 5),
-                _poshmark_listing(30, 2, 6, title="Bundle of 3 tees"),
                 {"id": "x"}, None,
             ]
         comps = sold_listings.parse_poshmark_sold(listings, self.TODAY)
@@ -920,6 +918,49 @@ class PriceEvidenceTest(unittest.TestCase):
         short = self._price([*poshmark, *ebay[:1]])
         self.assertEqual((short["per_piece"], short["source"]), (60, "eBay + Poshmark"))
         self.assertEqual(self._price(poshmark)["source"], "Poshmark")
+
+    def test_a_sale_must_be_one_used_piece_of_the_themes_garment(self):
+        mismatch = box_scout.scout().sale_mismatch
+        for theme, title, reason in (
+            ("carhartt t-shirts", "Carhartt K87 Pocket T-Shirt Mens Large", None),
+            ("carhartt t-shirts", "Carhartt Detroit Jacket Mens XL", "garment"),
+            ("harley davidson t-shirts", "Vintage Harley Davidson Shirt XL", None),  # titles call tees shirts
+            ("hoodies", "Nike Hoodie Sweatshirt", None),
+            ("vintage sweatshirts", "Ugly Christmas Sweater", "garment"),
+            ("sports t-shirts", "Dallas Cowboys Jersey", "garment"),
+            ("levis shorts", "Levis 501 Jeans", "garment"),
+            ("denim jackets", "Levi's Denim Trucker", None),  # denim describes, it is not jeans
+            ("pants", "Y2K Crop Hoodie", "garment"),
+            ("vintage t-shirts", "1998 Harley Davidson Sturgis XL", None),  # names no garment
+            ("mixed clothing", "Zara Dress", None),  # the theme names no garment
+            ("cartoon t-shirts", "Lot of 3 Looney Tunes Tees", "bundle"),
+            ("cartoon t-shirts", "Vintage Lot 29 Looney Tunes Taz Shirt", None),  # a label, not a lot
+            ("skirts", "2 Piece Skirt Set", "bundle"),
+            ("cartoon t-shirts", "Taz Tee NWT", "unworn"),
+        ):
+            with self.subTest(theme=theme, title=title):
+                self.assertEqual(mismatch(theme, title), reason)
+        self.assertEqual(mismatch("cartoon t-shirts", "Taz Tee", "Condition: New with tags"), "unworn")
+
+    def test_listings_that_do_not_fit_the_theme_cannot_price_or_cap_it(self):
+        sold = _comps("cartoon t-shirts", 20)
+        for comp, title in zip(sold, ("Looney Tunes Taz Varsity Jacket", "Lot of 3 Looney Tunes Tees", "Taz T-Shirt NWT"), strict=True):
+            comp["title"] = title
+        asking = [_poshmark_listing(10, 0, lid, status="available", title="Cartoon tee bundle") for lid in range(3)]
+        with mock.patch.object(sold_listings, "ebay_sold", return_value={"cartoon t-shirt": [*sold, *_comps("cartoon t-shirts", 30, vid=50)]}), \
+                mock.patch.object(sold_listings, "poshmark_listings", return_value=asking), \
+                mock.patch.object(box_scout, "RESEARCH_PAUSE_SEC", 0):
+            entry = box_scout._research_prices(["cartoon t-shirts"], {}, self.now)["cartoon t-shirts"]
+        self.assertEqual([c["price"] for c in entry["comps"]], [30, 30, 30])
+        self.assertEqual(entry["active"], [])
+
+    def test_cached_sales_are_rechecked_against_the_theme(self):
+        comps = _comps("cartoon t-shirts", 30)
+        comps[0]["title"] = "Cartoon Hoodie"
+        fresh = box_scout._fresh_research({"resale": {"cartoon t-shirts": {
+            "comps": comps, "updated_at": self.now.isoformat(),
+        }}}, self.now, {})
+        self.assertEqual(fresh, {})
 
     def test_current_competition_caps_estimated_resale(self):
         active = [{"url": f"https://poshmark.com/listing/{100 + i}", "title": "Cartoon tee", "price": price,

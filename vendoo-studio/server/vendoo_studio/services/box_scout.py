@@ -305,18 +305,23 @@ def price_evidence(web: dict, own: list[dict], *, now: datetime | None = None) -
 def _research_prices(themes: list[str], own: dict[str, list[dict]], now: datetime) -> dict[str, dict]:
     """Sold listings for themes the seller's own sales cannot price: eBay's, read
     through Chrome, then Poshmark's for a theme still short of evidence. Poshmark
-    also supplies the current asking prices."""
+    also supplies the current asking prices. A listing counts only when its title
+    fits the theme (the skill's `sale_mismatch`)."""
     today = now.date()
+
+    def fitting(theme: str, listings: list[dict]) -> list[dict]:
+        return [c for c in listings if not scout().sale_mismatch(theme, c["title"], c["snippet"])]
+
     queries = {theme: query for theme in themes if (query := sold_listings.search_query(theme))}
     ebay = sold_listings.ebay_sold(list(dict.fromkeys(queries.values())), today)
     found = {}
     for theme, query in queries.items():
-        entry = {"comps": list(ebay.get(query, [])), "active": [], "ebay": query in ebay}
+        entry = {"comps": fitting(theme, ebay.get(query, [])), "active": [], "ebay": query in ebay}
         try:
             if price_evidence(entry, own.get(theme, []), now=now) is None:
-                entry["comps"] += sold_listings.parse_poshmark_sold(sold_listings.poshmark_listings(query, sold=True), today)
+                entry["comps"] += fitting(theme, sold_listings.parse_poshmark_sold(sold_listings.poshmark_listings(query, sold=True), today))
                 time.sleep(RESEARCH_PAUSE_SEC)
-            entry["active"] = sold_listings.parse_poshmark_active(sold_listings.poshmark_listings(query, sold=False))[:8]
+            entry["active"] = fitting(theme, sold_listings.parse_poshmark_active(sold_listings.poshmark_listings(query, sold=False)))[:8]
             time.sleep(RESEARCH_PAUSE_SEC)
         except FETCH_ERRORS as exc:
             log.warning("Poshmark sold listings for %s were not read: %s", theme, exc)
@@ -329,10 +334,14 @@ def _research_prices(themes: list[str], own: dict[str, list[dict]], now: datetim
 
 def _fresh_research(state: dict, now: datetime, own: dict[str, list[dict]]) -> dict[str, dict]:
     """Themes with enough current evidence: the seller's own sales, and cached sold
-    listings under a week old, rechecked as their sale dates age out."""
+    listings under a week old, rechecked as their sale dates age out and against the
+    theme they must fit."""
     fresh = {}
     for name in set(state["resale"]) | set(own):
         entry = _cached_research(state, name, now, RESALE_MAX_AGE)
+        if entry:
+            entry = {**entry, **{key: [c for c in entry.get(key) or [] if isinstance(c, dict) and not scout().sale_mismatch(
+                name, str(c.get("title") or ""), str(c.get("snippet") or ""))] for key in ("comps", "active")}}
         if priced := price_evidence(entry or {}, own.get(name, []), now=now):
             fresh[name] = {**(entry or {"updated_at": now.isoformat()}), **priced}
     return fresh

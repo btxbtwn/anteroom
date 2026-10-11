@@ -6,8 +6,9 @@ request, with the time each listing sold. Mercari shows no sale date on a search
 result, Depop has no sold filter and Etsy hides the price of a sold item, so
 those three are not read here; the seller's own sales on them still count.
 
-Nothing here estimates a price. It returns the listings, and ``box_scout`` decides
-whether there are enough of them.
+Nothing here estimates a price or judges a listing. It returns what a search
+found; ``box_scout`` drops the ones that do not fit the theme and decides whether
+enough are left.
 """
 
 from __future__ import annotations
@@ -43,8 +44,6 @@ SINGULAR = {
     "sweaters": "sweater", "jerseys": "jersey", "t-shirts": "t-shirt", "tops": "top", "blouses": "blouse",
     "shirts": "shirt", "dresses": "dress", "skirts": "skirt", "rompers": "romper", "kimonos": "kimono",
 }
-# Several pieces sold together say nothing about the price of one.
-BUNDLE_RE = re.compile(r"\b(?:lots?|bundles?|wholesale|bulk|resellers?)\b|\b\d+\s*(?:pcs?|pieces|pack)\b", re.I)
 EBAY_SOLD_RE = re.compile(r"Sold\s+([A-Z][a-z]{2}) (\d{1,2}), (\d{4})")
 EBAY_PRICE_RE = re.compile(r"\$([\d,]+\.\d{2})")
 
@@ -59,7 +58,7 @@ def search_query(theme: str) -> str | None:
 
 
 def _usable(title: str, price: float, sold_at: date, today: date) -> bool:
-    return bool(title) and not BUNDLE_RE.search(title) and 1 <= price <= 500 and 0 <= (today - sold_at).days <= MAX_AGE_DAYS
+    return bool(title) and 1 <= price <= 500 and 0 <= (today - sold_at).days <= MAX_AGE_DAYS
 
 
 # --- eBay, through the seller's Chrome -----------------------------------------------
@@ -208,7 +207,7 @@ def parse_poshmark_active(listings: list) -> list[dict]:
         if not found:
             continue
         url, title, price, _ = found
-        if title and not BUNDLE_RE.search(title) and 1 <= price <= 500:
+        if title and 1 <= price <= 500:
             active.append({"url": url, "title": title[:200], "price": price, "marketplace": "Poshmark",
                            "currency": "USD", "snippet": f"For sale on Poshmark at ${price:.2f}."})
     return active

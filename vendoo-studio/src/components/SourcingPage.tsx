@@ -553,7 +553,7 @@ function ResearchEvidence({ lot, onOpenListing }: { lot: SourcingLot; onOpenList
     {data ? <>
       <p className="sourcing-hint">{data.source === "Your sales"
         ? "These are your own recorded sales of this kind of piece."
-        : "Studio read these sold listings from the marketplaces by searching for this kind of piece. It does not check that each one matches the box’s brand, era or condition. Review the links before buying."}</p>
+        : "Studio read these sold listings from the marketplaces by searching for this kind of piece, leaving out any whose title shows a different garment, a bundle or new with tags. It cannot check brand, era or condition. Review the links before buying."}</p>
       <ul className="sourcing-comps">
         {data.comps.map((comp) => <li key={comp.conversation_id ?? comp.url}>
           {comp.conversation_id
