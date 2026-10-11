@@ -29,13 +29,12 @@ import {
 const QUERY_KEY = ["sourcing"];
 
 interface Props {
-  onOpenProviders: () => void;
   onOpenListing: (convId: string) => void;
 }
 
 const TAB_KEY = "studio.sourcing.tab";
 
-export function SourcingPage({ onOpenProviders, onOpenListing }: Props) {
+export function SourcingPage({ onOpenListing }: Props) {
   const [tab, setTab] = useState(() => localStorage.getItem(TAB_KEY) === "scout" ? "scout" : "boxes");
   const choose = (next: "boxes" | "scout") => {
     localStorage.setItem(TAB_KEY, next);
@@ -70,14 +69,14 @@ export function SourcingPage({ onOpenProviders, onOpenListing }: Props) {
             <ScoutPanel onOpenListing={onOpenListing} />
           </>
         ) : (
-          <BoxSourcing onOpenProviders={onOpenProviders} onOpenListing={onOpenListing} />
+          <BoxSourcing onOpenListing={onOpenListing} />
         )}
       </div>
     </div>
   );
 }
 
-function BoxSourcing({ onOpenProviders, onOpenListing }: Props) {
+function BoxSourcing({ onOpenListing }: Props) {
   const queryClient = useQueryClient();
   const [choice, setChoice] = useState("all");
   const query = useQuery({
@@ -147,11 +146,11 @@ function BoxSourcing({ onOpenProviders, onOpenListing }: Props) {
           <>
             <StoreProblems snapshot={snapshot} />
             <SeasonalContext snapshot={snapshot} />
-            <ResearchCoverage snapshot={snapshot} />
+            <ResearchCoverage snapshot={snapshot} ebayConnected={data.ebay_connected} />
             <Choices snapshot={snapshot} choice={choice} onChoose={setChoice} />
             {updating ? <p className="sourcing-hint" role="status">Updating your options. Cart links will be ready when the check finishes.</p> : null}
             {selectedSnapshot ? <>
-              <BuyList data={data} snapshot={selectedSnapshot} choice={choice} updating={updating} onOpenProviders={onOpenProviders} onOpenListing={onOpenListing} />
+              <BuyList snapshot={selectedSnapshot} choice={choice} updating={updating} onOpenListing={onOpenListing} />
               <AvailableBoxes snapshot={selectedSnapshot} onOpenListing={onOpenListing} />
             </> : null}
             <BoughtBoxes />
@@ -193,8 +192,23 @@ function Settings({
   onSave: (prefs: Partial<SourcingPrefs>) => void;
 }) {
   const otherZips = prefs.recent_zips.filter((zip) => zip !== prefs.zip);
+  const weeks = (count: number) => `${count} ${count === 1 ? "week" : "weeks"}`;
   return (
     <div className="sourcing-settings">
+      <span className="sourcing-setting">
+        Budget
+        <DraftInput
+          value={String(prefs.budget)}
+          label="Most to spend on boxes and inbound shipping before tax"
+          prefix="$"
+          width="5.5rem"
+          inputMode="decimal"
+          disabled={saving}
+          clean={(text) => text.replace(/[^\d.]/g, "")}
+          accept={(text) => Number.isFinite(Number(text)) && Number(text) > 0}
+          onCommit={(text) => onSave({ budget: Number(text) })}
+        />
+      </span>
       <span className="sourcing-setting">
         Ship to
         <DraftInput
@@ -223,7 +237,7 @@ function Settings({
         ))}
       </span>
       <span className="sourcing-setting">
-        Minimum ROI
+        Minimum return
         <DraftInput
           value={String(Math.round(prefs.min_roi * 100))}
           label="Minimum estimated profit as a percentage of purchase cost"
@@ -236,61 +250,45 @@ function Settings({
           onCommit={(text) => onSave({ min_roi: Number(text) / 100 })}
         />
       </span>
-      <span className="sourcing-setting">
-        Purchase budget
-        <DraftInput
-          value={String(prefs.budget)}
-          label="Most to spend on boxes and inbound shipping before tax"
-          prefix="$"
-          width="5.5rem"
-          inputMode="decimal"
-          disabled={saving}
-          clean={(text) => text.replace(/[^\d.]/g, "")}
-          accept={(text) => Number.isFinite(Number(text)) && Number(text) > 0}
-          onCommit={(text) => onSave({ budget: Number(text) })}
-        />
-      </span>
-      <label className="sourcing-setting sourcing-check">
-        <input
-          type="checkbox"
-          checked={prefs.raghouse_vip}
-          disabled={saving}
-          onChange={(event) => onSave({ raghouse_vip: event.target.checked })}
-        />
-        I'm a Raghouse VIP
-      </label>
-      <div className="sourcing-settings sourcing-window-settings" aria-label="Selling window settings">
-        <span className="sourcing-setting">Ready to sell in
-          <DraftInput value={String(prefs.ready_in_weeks)} label="Weeks for shipping, preparation and listing" suffix="weeks" width="6rem" inputMode="numeric" disabled={saving}
-            clean={(text) => text.replace(/\D/g, "")} accept={(text) => text !== "" && Number(text) <= 26}
-            onCommit={(text) => onSave({ ready_in_weeks: Number(text) })} />
-        </span>
-        <span className="sourcing-setting">Then selling for
-          <DraftInput value={String(prefs.selling_window_weeks)} label="Length of the target selling window in weeks" suffix="weeks" width="6rem" inputMode="numeric" disabled={saving}
-            clean={(text) => text.replace(/\D/g, "")} accept={(text) => Number(text) >= 1 && Number(text) <= 26}
-            onCommit={(text) => onSave({ selling_window_weeks: Number(text) })} />
-        </span>
-      </div>
       <details className="sourcing-assumptions">
-        <summary>Your planning assumptions: {Math.round(prefs.sell_through * 100)}% sell, {Math.round(prefs.fees * 100)}% fees, {formatMoney(prefs.cost_per_piece)} costs per usable piece</summary>
+        <summary>More options: selling in {weeks(prefs.ready_in_weeks)} for {weeks(prefs.selling_window_weeks)} · {Math.round(prefs.sell_through * 100)}% sells · {Math.round(prefs.fees * 100)}% fees · {formatMoney(prefs.cost_per_piece)} per piece{prefs.raghouse_vip ? " · Raghouse VIP" : ""}</summary>
         <div className="sourcing-settings">
-          <span className="sourcing-setting">Usable pieces expected to sell
+          <span className="sourcing-setting">Start selling in
+            <DraftInput value={String(prefs.ready_in_weeks)} label="Weeks for shipping, preparation and listing" suffix="weeks" width="5rem" inputMode="numeric" disabled={saving}
+              clean={(text) => text.replace(/\D/g, "")} accept={(text) => text !== "" && Number(text) <= 26}
+              onCommit={(text) => onSave({ ready_in_weeks: Number(text) })} />
+          </span>
+          <span className="sourcing-setting">Sell for
+            <DraftInput value={String(prefs.selling_window_weeks)} label="Length of the target selling window in weeks" suffix="weeks" width="5rem" inputMode="numeric" disabled={saving}
+              clean={(text) => text.replace(/\D/g, "")} accept={(text) => Number(text) >= 1 && Number(text) <= 26}
+              onCommit={(text) => onSave({ selling_window_weeks: Number(text) })} />
+          </span>
+          <span className="sourcing-setting">Pieces that sell
             <DraftInput value={String(Math.round(prefs.sell_through * 100))} label="Percentage of usable pieces you plan to sell" suffix="%" width="5rem" inputMode="decimal" disabled={saving}
               clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => Number(text) > 0 && Number(text) <= 100}
               onCommit={(text) => onSave({ sell_through: Number(text) / 100 })} />
           </span>
-          <span className="sourcing-setting">Effective marketplace fees
+          <span className="sourcing-setting">Selling fees
             <DraftInput value={String(Math.round(prefs.fees * 100))} label="Effective marketplace and payment fees as a percentage of item revenue" suffix="%" width="5rem" inputMode="decimal" disabled={saving}
               clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => text !== "" && Number(text) >= 0 && Number(text) < 100}
               onCommit={(text) => onSave({ fees: Number(text) / 100 })} />
           </span>
-          <span className="sourcing-setting">Other costs per usable piece
-            <DraftInput value={String(prefs.cost_per_piece)} label="Operating allowance per usable piece" prefix="$" width="5.5rem" inputMode="decimal" disabled={saving}
+          <span className="sourcing-setting">Cost per piece
+            <DraftInput value={String(prefs.cost_per_piece)} label="Operating allowance per usable piece" prefix="$" width="5rem" inputMode="decimal" disabled={saving}
               clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => text !== "" && Number.isFinite(Number(text)) && Number(text) >= 0}
               onCommit={(text) => onSave({ cost_per_piece: Number(text) })} />
           </span>
+          <label className="sourcing-setting sourcing-check">
+            <input
+              type="checkbox"
+              checked={prefs.raghouse_vip}
+              disabled={saving}
+              onChange={(event) => onSave({ raghouse_vip: event.target.checked })}
+            />
+            Raghouse VIP member
+          </label>
         </div>
-        <p className="sourcing-hint">These are your planning inputs, not measured probabilities. Use your actual costs for cleaning, repairs, photography, labor, packaging, seller-paid postage, fixed fees and returns. The allowance is charged for every usable piece, even those that don’t sell. Purchase tax is extra.</p>
+        <p className="sourcing-hint">Cost per piece is what you spend on cleaning, photos, packaging and postage. It is charged for every usable piece, sold or not. Purchase tax is extra.</p>
       </details>
     </div>
   );
@@ -330,7 +328,7 @@ function Choices({ snapshot, choice, onChoose }: {
       })}
       {snapshot.vip_upside && snapshot.vip_upside.boxes > 0 ? <p className="sourcing-hint">
         Raghouse VIP ({formatMoney(snapshot.vip_upside.monthly_fee)}/month) would add {boxCount(snapshot.vip_upside.boxes)} to this list,
-        about {formatMoney(Math.round(snapshot.vip_upside.extra_profit))} more estimated profit. Turn on “I'm a Raghouse VIP” above once you join.
+        about {formatMoney(Math.round(snapshot.vip_upside.extra_profit))} more estimated profit. Turn on “Raghouse VIP member” under More options once you join.
       </p> : null}
       <div className="sourcing-choices">
         {["all", ...Object.keys(snapshot.stores)].map((key) => {
@@ -357,18 +355,14 @@ function Choices({ snapshot, choice, onChoose }: {
 }
 
 function BuyList({
-  data,
   snapshot,
   choice,
   updating,
-  onOpenProviders,
   onOpenListing,
 }: {
-  data: SourcingState;
   snapshot: SourcingSnapshot;
   choice: string;
   updating: boolean;
-  onOpenProviders: () => void;
   onOpenListing: (convId: string) => void;
 }) {
   const plan = snapshot.buy_list;
@@ -379,18 +373,6 @@ function BuyList({
         <div className="sourcing-empty-title">{storeName(choice)} is unavailable</div>
         <p>Studio couldn’t check this store. Try updating again, or compare the other buy lists.</p>
       </div>;
-    }
-    // Prices found earlier stay good for one week, so a list can stand without a model connected.
-    if (!data.research_available && snapshot.lots.length > 0 && !hasEvidence) {
-      return (
-        <div className="sourcing-empty">
-          <div className="sourcing-empty-title">One step before Studio can pick boxes</div>
-          <p>Connect ChatGPT, Cursor or MiMo to research recent sold items. A box qualifies only when the evidence and cost checks pass.</p>
-          <button type="button" className="btn btn-primary btn-sm" onClick={onOpenProviders}>
-            Connect an AI
-          </button>
-        </div>
-      );
     }
     return (
       <div className="sourcing-empty">
@@ -565,19 +547,19 @@ function ResearchEvidence({ lot, onOpenListing }: { lot: SourcingLot; onOpenList
   if (!lot.comps_count) return <div className="sourcing-item-why">Not enough recent sold evidence to estimate resale.</div>;
   const data = evidence.data;
   return <details className="sourcing-evidence" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{lot.comps_count} {lot.research_source === "Your sales" ? "of your sales" : "reported sales"} · {lot.research_at ? clockTime(lot.research_at) : ""}</summary>
+    <summary>{lot.comps_count} sales · {lot.research_source} · {lot.research_at ? clockTime(lot.research_at) : ""}</summary>
     {evidence.isLoading ? <p className="sourcing-hint">Loading the sales…</p> : null}
     {evidence.isError ? <p className="sourcing-hint">{(evidence.error as Error).message}</p> : null}
     {data ? <>
       <p className="sourcing-hint">{data.source === "Your sales"
         ? "These are your own recorded sales of this kind of piece."
-        : `${data.source} reported the web sales. Sale status, dates, condition and relevance are AI-reported; Studio checks the supplied data but does not independently verify each source page. Your own recorded sales count too. Review the links before buying.`}</p>
+        : "Studio read these sold listings from the marketplaces by searching for this kind of piece. It does not check that each one matches the box’s brand, era or condition. Review the links before buying."}</p>
       <ul className="sourcing-comps">
         {data.comps.map((comp) => <li key={comp.conversation_id ?? comp.url}>
           {comp.conversation_id
             ? <button type="button" className="sourcing-link" onClick={() => onOpenListing(comp.conversation_id!)}>{comp.title}</button>
             : <a href={comp.url} target="_blank" rel="noopener noreferrer">{comp.title}</a>}
-          <span>{comp.conversation_id ? "Your sale" : comp.marketplace} · {formatMoney(comp.price)} · {comp.conversation_id ? "sold" : "reported sold"} {saleDate(comp.sold_at)}</span>
+          <span>{comp.conversation_id ? "Your sale" : comp.marketplace} · {formatMoney(comp.price)} · sold {saleDate(comp.sold_at)}</span>
           {comp.conversation_id ? null : <q>{comp.snippet}</q>}
         </li>)}
       </ul>
@@ -593,11 +575,12 @@ function ResearchEvidence({ lot, onOpenListing }: { lot: SourcingLot; onOpenList
   </details>;
 }
 
-function ResearchCoverage({ snapshot }: { snapshot: SourcingSnapshot }) {
+function ResearchCoverage({ snapshot, ebayConnected }: { snapshot: SourcingSnapshot; ebayConnected: boolean }) {
   const priced = snapshot.lots.filter((lot) => lot.resale_per_pc != null).length;
   return <div className="sourcing-research-status" role="status">
     <strong>{boxCount(snapshot.lots.length)} in this check · {priced} with enough recent sold evidence.</strong>
-    <span>At least 3 distinct reported sales within 30 days. Older sales provide context. Prices are checked weekly. Sales evidence supports an estimate; it does not measure the chance your box will sell.</span>
+    <span>At least 3 distinct sales within 30 days: your own sales first, then eBay sold listings, then Poshmark. Prices are checked weekly. Sales evidence supports an estimate; it does not measure the chance your box will sell.</span>
+    {ebayConnected ? null : <span>Chrome isn’t connected, so eBay sold listings can’t be read. Connect Chrome and update to add them.</span>}
   </div>;
 }
 

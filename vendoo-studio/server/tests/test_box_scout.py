@@ -12,7 +12,7 @@ from unittest import mock
 from fastapi.testclient import TestClient
 
 from vendoo_studio.main import app
-from vendoo_studio.services import box_scout
+from vendoo_studio.services import box_scout, sold_listings
 from vendoo_studio.services.inventory_analytics import AnalyticsItem
 from vendoo_studio.services.sourcing_seasonality import historical_windows, selling_window
 from vendoo_studio.services.comp_research import ModelSearch
@@ -382,17 +382,27 @@ def _search(label: str, answers: list[str]) -> ModelSearch:
     return ModelSearch(label, search)
 
 
-def _price_evidence(theme: str, per_piece: float, vid: int = 1) -> dict:
-    return {
-        "theme": theme,
-        "comps": [{
-            "url": f"https://www.ebay.com/itm/{vid + index}",
-            "title": f"{theme} used clothing",
-            "currency": "USD",
-            "sold_at": (box_scout._now().date() - timedelta(days=index + 1)).isoformat(),
-            "snippet": f"Sold for US ${per_piece:.2f} on {(box_scout._now().date() - timedelta(days=index + 1)).isoformat()}",
-        } for index in range(3)],
-    }
+def _comps(theme: str, price: float, vid: int = 1, marketplace: str = "eBay", count: int = 3) -> list[dict]:
+    today = box_scout._now().date()
+    base = "https://www.ebay.com/itm/" if marketplace == "eBay" else "https://poshmark.com/listing/"
+    return [{
+        "url": f"{base}{vid + index}", "title": f"{theme} used clothing", "currency": "USD",
+        "sold_at": (today - timedelta(days=index + 1)).isoformat(), "price": float(price),
+        "marketplace": marketplace, "snippet": f"Sold for ${price:.2f}",
+    } for index in range(count)]
+
+
+def _ebay(by_theme: dict[str, list[dict]]):
+    """What Chrome reads from eBay: every search answers, most with nothing."""
+    by_query = {sold_listings.search_query(theme): comps for theme, comps in by_theme.items()}
+    return lambda queries, today: {query: by_query.get(query, []) for query in queries}
+
+
+def _poshmark_listing(price: float, days_ago: int, lid: int = 1, *, status: str = "sold_out", **changes) -> dict:
+    changed = (box_scout._now() - timedelta(days=days_ago)).strftime("%Y-%m-%dT10:00:00-07:00")
+    return {"id": f"{lid:024x}", "title": "Cartoon tee", "condition": "ug",
+            "price_amount": {"val": str(price), "currency_code": "USD"},
+            "inventory": {"status": status, "status_changed_at": changed}, **changes}
 
 
 def _planning_context(prefs, now):
@@ -420,23 +430,23 @@ class RefreshTest(unittest.TestCase):
         mock.patch.object(box_scout, "_own_sales", return_value=[]).start()
         mock.patch.object(box_scout, "_announce_new_picks").start()
         mock.patch.dict(box_scout._catalogs, clear=True).start()
+        # Chrome is not connected and Poshmark has nothing, unless a test says otherwise.
+        self.ebay = mock.patch.object(sold_listings, "ebay_sold", return_value={}).start()
+        self.poshmark = mock.patch.object(sold_listings, "poshmark_listings", return_value=[]).start()
+        mock.patch.object(box_scout, "RESEARCH_PAUSE_SEC", 0).start()
         self.addCleanup(mock.patch.stopall)
 
     def _models(self, search=None):
         return mock.patch("vendoo_studio.services.comp_research.model_search", return_value=search)
 
     def test_researches_trends_and_prices_then_builds_the_buy_list(self):
-        prices = json.dumps({"prices": [
-            _price_evidence("cartoon t-shirts", 30),
-            {"theme": "not asked for", "per_piece": 99},
-        ]})
-        model = _search("ChatGPT", ['```json\n{"terms": ["Cartoon", "y2k"]}\n```', prices, "{}"])
+        self.ebay.side_effect = _ebay({"cartoon t-shirts": _comps("cartoon t-shirts", 30)})
+        model = _search("ChatGPT", ['```json\n{"terms": ["Cartoon", "y2k"]}\n```'])
         with self._models(model):
             snapshot = box_scout.refresh()
         state = json.loads(self.state_file.read_text())
         self.assertEqual(state["trend"]["terms"], ["cartoon", "y2k"])
-        self.assertEqual(set(state["resale"]), {"cartoon t-shirts"})
-        self.assertEqual(state["resale"]["cartoon t-shirts"]["source"], "ChatGPT")
+        self.assertTrue(state["resale"]["cartoon t-shirts"]["ebay"])
         lots = snapshot["buy_list"]["carts"][0]["lots"]
         self.assertEqual(lots[0]["title"], "Cartoon T-Shirts 60 pcs")
         self.assertEqual(lots[0]["comps_count"], 3)
@@ -444,15 +454,46 @@ class RefreshTest(unittest.TestCase):
         self.assertTrue(snapshot["research"])
         shown = box_scout.evidence("cartoon t-shirts")
         self.assertEqual([c["url"] for c in shown["comps"]], [f"https://www.ebay.com/itm/{i}" for i in range(1, 4)])
-        self.assertEqual((shown["per_piece"], shown["source"]), (30, "ChatGPT"))
+        self.assertEqual((shown["per_piece"], shown["source"]), (30, "eBay"))
         self.assertIsNone(box_scout.evidence("hawaiian shirts"))
 
+    def test_prices_need_no_model(self):
+        self.ebay.side_effect = _ebay({"cartoon t-shirts": _comps("cartoon t-shirts", 30)})
+        with self._models():
+            snapshot = box_scout.refresh()
+        self.assertFalse(snapshot["research"])  # no model, so no trend words
+        self.assertEqual(snapshot["buy_list"]["carts"][0]["lots"][0]["research_source"], "eBay")
+
+    def test_ebay_goes_before_poshmark_and_poshmark_fills_a_short_theme(self):
+        self.ebay.side_effect = _ebay({"cartoon t-shirts": _comps("cartoon t-shirts", 30),
+                                       "vintage graphic t-shirts": _comps("vintage graphic t-shirts", 100, vid=100, count=1)})
+        self.poshmark.side_effect = lambda query, sold: [_poshmark_listing(90, day, day) for day in (1, 2)] if sold else []
+        with self._models():
+            box_scout.refresh()
+        sold_searches = [call.args[0] for call in self.poshmark.call_args_list if call.kwargs["sold"]]
+        self.assertNotIn("cartoon t-shirt", sold_searches)  # eBay already had three
+        self.assertIn("vintage graphic t-shirt", sold_searches)
+        self.assertEqual(box_scout.evidence("cartoon t-shirts")["source"], "eBay")
+        graphic = box_scout.evidence("vintage graphic t-shirts")
+        self.assertEqual((graphic["source"], graphic["per_piece"]), ("eBay + Poshmark", 90))
+
+    def test_a_theme_searched_without_chrome_is_searched_again_once_ebay_can_be_read(self):
+        self.poshmark.side_effect = lambda query, sold: [_poshmark_listing(30, day, day) for day in (1, 2, 3)] if sold else []
+        with self._models():
+            box_scout.refresh()
+        self.assertEqual(box_scout.evidence("cartoon t-shirts")["source"], "Poshmark")
+        research = mock.Mock(return_value={})
+        with self._models(), mock.patch.object(box_scout, "_research_prices", research):
+            box_scout.refresh(recrawl=False)
+            self.assertEqual(research.call_args.args[0], [])  # priced a moment ago, and still no Chrome
+            with mock.patch.object(sold_listings, "ebay_ready", return_value=True):
+                box_scout.refresh(recrawl=False)
+        self.assertIn("cartoon t-shirts", research.call_args.args[0])
+
     def test_both_store_choices_use_the_same_budget_and_keep_evidence(self):
-        prices = json.dumps({"prices": [
-            _price_evidence("cartoon t-shirts", 30),
-            _price_evidence("vintage graphic t-shirts", 100, vid=100),
-        ]})
-        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}', prices, "{}"])):
+        self.ebay.side_effect = _ebay({"cartoon t-shirts": _comps("cartoon t-shirts", 30),
+                                       "vintage graphic t-shirts": _comps("vintage graphic t-shirts", 100, vid=100)})
+        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])):
             snapshot = box_scout.refresh()
         self.assertEqual(set(snapshot["store_buy_lists"]), {"raghouse", "tvf", "papercrane"})
         for store, plan in snapshot["store_buy_lists"].items():
@@ -482,33 +523,30 @@ class RefreshTest(unittest.TestCase):
         self.state_file.write_text(json.dumps(state))
         from vendoo_studio.routes.sourcing import _response
 
-        with mock.patch.object(box_scout, "research_available", return_value=False):
-            self.assertIsNone(_response().snapshot)
+        self.assertIsNone(_response().snapshot)
         self.assertTrue(box_scout.refresh_is_due())
 
     def test_cached_research_is_not_repeated(self):
-        prices = json.dumps({"prices": [_price_evidence("cartoon t-shirts", 30)]})
-        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}', prices, "{}"])):
+        self.ebay.side_effect = _ebay({"cartoon t-shirts": _comps("cartoon t-shirts", 30)})
+        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])):
             box_scout.refresh()
+        searched = self.ebay.call_args.args[0]
+        self.assertIn("cartoon t-shirt", searched)
+        self.assertFalse([query for query in searched if "mixed clothing" in query])
         trends = mock.AsyncMock(return_value=([], None))
-        research = mock.AsyncMock(return_value=({}, None))
-        with self._models(_search("ChatGPT", [])), \
-                mock.patch.object(box_scout, "_research_trends", trends), \
-                mock.patch.object(box_scout, "_research_prices", research):
+        with self._models(_search("ChatGPT", [])), mock.patch.object(box_scout, "_research_trends", trends):
             box_scout.refresh()
         trends.assert_not_called()  # a week has not passed
-        asked = [theme for call in research.call_args_list for theme in call.args[0]]
-        self.assertTrue(asked)
-        self.assertNotIn("cartoon t-shirts", asked)  # priced a moment ago
+        self.assertEqual(self.ebay.call_args.args[0], [])  # priced, or found nothing, a moment ago
 
     def test_selling_window_change_researches_new_themes_but_reuses_recent_prices(self):
-        prices = json.dumps({"prices": [_price_evidence("cartoon t-shirts", 30)]})
-        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}', prices, "{}"])):
+        self.ebay.side_effect = _ebay({"cartoon t-shirts": _comps("cartoon t-shirts", 30)})
+        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])):
             box_scout.refresh()
         box_scout.set_prefs(ready_in_weeks=8, selling_window_weeks=6)
         self.assertTrue(box_scout.refresh_is_due())
         trends = mock.AsyncMock(return_value=(["flannel"], "ChatGPT"))
-        prices = mock.AsyncMock(return_value=({}, None))
+        prices = mock.Mock(return_value={})
         with self._models(_search("ChatGPT", [])), \
                 mock.patch.object(box_scout, "_research_trends", trends), \
                 mock.patch.object(box_scout, "_research_prices", prices):
@@ -522,21 +560,20 @@ class RefreshTest(unittest.TestCase):
         self.assertFalse(box_scout.refresh_is_due())
 
     def test_changed_window_discards_old_themes_without_a_model(self):
-        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}', "{}", "{}", "{}"])):
+        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])):
             box_scout.refresh()
         box_scout.set_prefs(ready_in_weeks=0)
         snapshot = box_scout.refresh(recrawl=False, research=False)
         self.assertEqual(box_scout.read_state()["trend"]["terms"], [])
         self.assertTrue(all(not lot["trend_hits"] for lot in snapshot["lots"]))
 
-    def test_research_prompts_include_dated_window_and_history(self):
+    def test_trend_research_prompt_includes_dated_window_and_history(self):
         ask = mock.AsyncMock(return_value=(None, None))
         context = _planning_context(box_scout.DEFAULT_PREFS, datetime(2026, 10, 7, tzinfo=UTC))
         context["seller_history"]["groups"] = [{"category_path": "Clothing > Coats", "count": 5}]
         import asyncio
         with mock.patch.object(box_scout, "_ask", ask):
             asyncio.run(box_scout._research_trends(context))
-            asyncio.run(box_scout._research_prices(["coats"], {"coats": "Coats 20 pcs"}, context))
         for call in ask.call_args_list:
             self.assertIn("2026-11-04", call.args[1])
             self.assertIn("2026-12-01", call.args[1])
@@ -585,11 +622,11 @@ class RefreshTest(unittest.TestCase):
 
 
     def test_preferences_saved_during_research_survive_and_request_a_rebuild(self):
-        async def research(themes, examples, context):
+        def research(themes, own, now):
             box_scout.set_prefs(budget=200, min_roi=1.5, zip="10001", raghouse_vip=True,
                                 sell_through=0.6, fees=0.25, cost_per_piece=1.5,
                                 ready_in_weeks=8, selling_window_weeks=6)
-            return box_scout.clean_prices([_price_evidence("cartoon t-shirts", 40)], set(themes)), "ChatGPT"
+            return {"cartoon t-shirts": {"comps": _comps("cartoon t-shirts", 40), "active": [], "ebay": True}}
 
         with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])), \
                 mock.patch.object(box_scout, "_research_prices", side_effect=research):
@@ -615,15 +652,15 @@ class RefreshTest(unittest.TestCase):
         self.assertTrue(all(p["resale_per_pc"] is None for p in snapshot["lots"]))
 
     def test_sources_and_costs_are_in_the_api_snapshot(self):
-        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}',
-                                               json.dumps({"prices": [_price_evidence("cartoon t-shirts", 40)]}), "{}"])):
+        self.ebay.side_effect = _ebay({"cartoon t-shirts": _comps("cartoon t-shirts", 40)})
+        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])):
             box_scout.refresh()
         from vendoo_studio.routes.sourcing import SourcingSnapshot
 
         snapshot = SourcingSnapshot.model_validate(box_scout.read_state()["snapshot"])
         lot = snapshot.buy_list.carts[0].lots[0]
         self.assertEqual(lot.comps_count, 3)
-        self.assertEqual(lot.research_source, "ChatGPT")
+        self.assertEqual(lot.research_source, "eBay")
         self.assertGreater(lot.operating_cost, 0)
         self.assertGreaterEqual(lot.downside_profit, 0)
 
@@ -649,8 +686,8 @@ class ShippingAndVipTest(RefreshTest):
         self.assertEqual(snapshot["shipping"]["calibration"]["tvf"]["orders"], 2)
 
     def test_vip_upside_counts_members_only_boxes_that_would_qualify(self):
-        prices = json.dumps({"prices": [_price_evidence("y2k blouses", 40)]})
-        with self._models(_search("ChatGPT", ['{"terms": ["y2k"]}', prices, "{}"])):
+        self.ebay.side_effect = _ebay({"y2k blouses": _comps("y2k blouses", 40)})
+        with self._models(_search("ChatGPT", ['{"terms": ["y2k"]}'])):
             snapshot = box_scout.refresh()
         self.assertEqual(snapshot["buy_list"]["carts"], [])  # the Y2K lot is VIP only
         self.assertEqual(snapshot["vip_upside"]["boxes"], 1)
@@ -683,17 +720,23 @@ class OwnSalesTest(RefreshTest):
         shown = box_scout.evidence("cartoon t-shirts")
         self.assertEqual([c["conversation_id"] for c in shown["comps"]], ["c2", "c3", "c4", "c6"])
         self.assertEqual(shown["source"], "Your sales")
-        self.assertEqual(json.loads(self.state_file.read_text())["resale"], {})  # nothing cached as web research
+        self.assertNotIn("cartoon t-shirts", json.loads(self.state_file.read_text())["resale"])  # never searched for
 
     def test_own_sales_and_web_sales_price_a_theme_together(self):
         mock.patch.object(box_scout, "_own_sales", return_value=self.SALES[1:3]).start()
-        web = json.dumps({"prices": [{**_price_evidence("cartoon t-shirts", 30), "comps": _price_evidence("cartoon t-shirts", 30)["comps"][:1]}]})
-        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}', web, "{}"])):
+        self.ebay.side_effect = _ebay({"cartoon t-shirts": _comps("cartoon t-shirts", 30, count=1)})
+        with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])):
             snapshot = box_scout.refresh()
         lot = snapshot["buy_list"]["carts"][0]["lots"][0]
-        self.assertEqual((lot["resale_per_pc"], lot["comps_count"]), (30, 3))
+        self.assertEqual((lot["resale_per_pc"], lot["comps_count"], lot["research_source"]), (30, 3, "Your sales + eBay"))
         comps = box_scout.evidence("cartoon t-shirts")["comps"]
         self.assertEqual({c.get("conversation_id") for c in comps}, {"c2", "c3", None})
+
+    def test_enough_own_sales_leave_the_marketplaces_out_of_the_price(self):
+        own = box_scout.own_evidence(self.SALES, {"cartoon t-shirts"})["cartoon t-shirts"]
+        priced = box_scout.price_evidence({"comps": _comps("cartoon t-shirts", 99)}, own)
+        self.assertEqual((priced["per_piece"], priced["source"]), (30, "Your sales"))
+        self.assertFalse([c for c in priced["comps"] if c.get("url")])
 
     def test_a_theme_needs_every_style_it_names(self):
         sales = [_sale(f"Harley Davidson Tee {i}", 20, i, f"h{i}") for i in range(3)]
@@ -723,7 +766,7 @@ class SourcingRouteTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         mock.patch.object(box_scout, "state_path", return_value=Path(tmp.name) / "sourcing.json").start()
-        mock.patch.object(box_scout, "research_available", return_value=False).start()
+        mock.patch.object(box_scout, "_research_prices", return_value={}).start()
         self.background = mock.patch.object(box_scout, "refresh_in_background").start()
         mock.patch.object(box_scout, "planning_context", side_effect=_planning_context).start()
         mock.patch.object(box_scout, "_calibration", return_value={}).start()
@@ -771,95 +814,138 @@ class SourcingRouteTest(unittest.TestCase):
         self.assertEqual(set(body["snapshot"]["stores"]), {"raghouse", "tvf", "papercrane"})
 
 
-class ResearchEvidenceTest(unittest.TestCase):
+class SoldListingsTest(unittest.TestCase):
+    TODAY = date(2026, 10, 5)
+
+    def _card(self, **changes):
+        return {"id": "101", "title": "Cartoon Tee Mens L\nOpens in a new window or tab", "caption": "Sold Oct 3, 2026",
+                "price": "$20.00", "offer": False, **changes}
+
+    def test_ebay_cards_become_dated_comps(self):
+        comps = sold_listings.parse_ebay_cards([self._card(), self._card(id="102", title="NEW LISTINGGarfield Tee", price="$1,234.50"),
+                                                self._card(id="103", price="$31.50", caption="Sold Jul 9, 2026")], self.TODAY)
+        self.assertEqual([(c["url"], c["title"], c["sold_at"], c["price"]) for c in comps], [
+            ("https://www.ebay.com/itm/101", "Cartoon Tee Mens L", "2026-10-03", 20.0),
+            ("https://www.ebay.com/itm/103", "Cartoon Tee Mens L", "2026-07-09", 31.5),  # 88 days: context only
+        ])
+        self.assertEqual({c["marketplace"] for c in comps}, {"eBay"})
+
+    def test_ebay_cards_without_a_real_sale_price_are_left_out(self):
+        for changes in ({"offer": True}, {"price": "$20.00 to $35.00"}, {"price": "AU $20.00"}, {"caption": ""},
+                        {"caption": "Ended Oct 3, 2026"}, {"caption": "Sold Oct 6, 2026"}, {"caption": "Sold Jun 1, 2026"},
+                        {"caption": "Sold Feb 30, 2026"}, {"id": "Shop on eBay"}, {"title": ""},
+                        {"title": "Lot of 10 cartoon tees"}, {"title": "Cartoon tee bundle 5 pcs"}):
+            with self.subTest(changes=changes):
+                self.assertEqual(sold_listings.parse_ebay_cards([self._card(**changes)], self.TODAY), [])
+        self.assertEqual(len(sold_listings.parse_ebay_cards([self._card(), self._card(), "junk"], self.TODAY)), 1)
+
+    def test_poshmark_sold_listings_carry_the_day_they_sold(self):
+        with mock.patch.object(box_scout, "_now", return_value=datetime(2026, 10, 5, 12, tzinfo=UTC)):
+            listings = [
+                _poshmark_listing(22, 2, 1),
+                _poshmark_listing(30, 2, 2, condition="nwt"),  # new with tags is not a thrifted piece
+                _poshmark_listing(30, 2, 3, status="available"),
+                _poshmark_listing(30, 2, 4, price_amount={"val": "30.0", "currency_code": "CAD"}),
+                _poshmark_listing(30, 120, 5),
+                _poshmark_listing(30, 2, 6, title="Bundle of 3 tees"),
+                {"id": "x"}, None,
+            ]
+        comps = sold_listings.parse_poshmark_sold(listings, self.TODAY)
+        self.assertEqual([(c["url"], c["sold_at"], c["price"], c["marketplace"]) for c in comps],
+                         [(f"https://poshmark.com/listing/{1:024x}", "2026-10-03", 22.0, "Poshmark")])
+        self.assertIn("listed at $22.00 when it sold", comps[0]["snippet"])
+        active = sold_listings.parse_poshmark_active(listings)
+        self.assertEqual([(c["url"], c["price"]) for c in active], [(f"https://poshmark.com/listing/{3:024x}", 30.0)])
+
+    def test_a_theme_without_a_garment_is_not_searched(self):
+        self.assertEqual(sold_listings.search_query("y2k jeans"), "y2k jeans")
+        self.assertEqual(sold_listings.search_query("vintage brand name t-shirts"), "vintage t-shirt")  # one piece, not a lot
+        self.assertEqual(sold_listings.search_query("premium brand jackets"), "jacket")
+        self.assertEqual(sold_listings.search_query("levis denim shorts"), "levis denim shorts")
+        for theme in ("mixed clothing", "y2k mixed clothing", "accessories"):
+            self.assertIsNone(sold_listings.search_query(theme))
+
+    def test_without_chrome_ebay_is_not_asked(self):
+        self.assertFalse(sold_listings.ebay_ready())
+        self.assertEqual(sold_listings.ebay_sold(["y2k jeans"], self.TODAY), {})
+
+    def test_what_chrome_read_is_parsed_per_search(self):
+        from vendoo_studio.routes.extension import extension_manager
+
+        async def read(queries):
+            return {"ok": False, "error": "eBay did not show search results",
+                    "results": {"y2k jeans": [self._card()], "never asked": [self._card()]}}
+
+        import asyncio
+        loop = asyncio.new_event_loop()
+        thread = threading.Thread(target=loop.run_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(loop.call_soon_threadsafe, loop.stop)
+        with mock.patch.object(extension_manager, "loop", loop), \
+                mock.patch.object(sold_listings, "ebay_ready", return_value=True), \
+                mock.patch.object(sold_listings, "_read_ebay", read):
+            found = sold_listings.ebay_sold(["y2k jeans", "y2k dresses"], self.TODAY)
+        self.assertEqual({query: len(comps) for query, comps in found.items()}, {"y2k jeans": 1})  # the batch stopped early
+
+
+class PriceEvidenceTest(unittest.TestCase):
     def setUp(self):
         self.now = datetime(2026, 10, 5, 12, tzinfo=UTC)
         patcher = mock.patch.object(box_scout, "_now", return_value=self.now)
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _clean(self, item):
-        return box_scout.clean_prices([item], {"cartoon t-shirts"}, now=self.now)
+    def _price(self, comps, active=()):
+        return box_scout.price_evidence({"comps": comps, "active": list(active)}, [], now=self.now)
 
-    def test_prices_come_from_sale_evidence_not_an_ai_estimated_number(self):
-        item = _price_evidence("cartoon t-shirts", 20)
-        item["per_piece"] = 499
-        item["comps"][2]["snippet"] = "Sold for US $40.00"
-        cleaned = self._clean(item)["cartoon t-shirts"]
-        self.assertEqual(cleaned["per_piece"], 20)
-        self.assertEqual((cleaned["low"], cleaned["high"]), (20, 40))
-
-    def test_duplicate_listings_cannot_fill_the_minimum_sample(self):
-        item = _price_evidence("cartoon t-shirts", 20)
-        item["comps"][1]["url"] = "http://ebay.com/itm/other-title/1?tracking=abc"
-        item["comps"][2]["url"] = "https://www.ebay.com/itm/1#tracking"
-        self.assertEqual(self._clean(item), {})
-
-    def test_old_future_or_unknown_dates_do_not_qualify(self):
-        for date_text in ("2026-07-01", "2026-10-06", "", "not-a-date"):
-            with self.subTest(date_text=date_text):
-                item = _price_evidence("cartoon t-shirts", 20)
-                item["comps"][0]["sold_at"] = date_text
-                self.assertEqual(self._clean(item), {})
+    def test_the_price_is_the_median_of_recent_sales(self):
+        comps = _comps("cartoon t-shirts", 20)
+        comps[2]["price"] = 40.0
+        priced = self._price(comps)
+        self.assertEqual(priced["per_piece"], 20)
+        self.assertEqual((priced["low"], priced["high"]), (20, 40))
 
     def test_sale_sample_needs_three_examples_from_the_last_thirty_days(self):
-        item = _price_evidence("cartoon t-shirts", 20)
-        for comp in item["comps"][1:]:
+        comps = _comps("cartoon t-shirts", 20)
+        for comp in comps[1:]:
             comp["sold_at"] = "2026-09-01"
-        self.assertEqual(self._clean(item), {})
+        self.assertIsNone(self._price(comps))
+        self.assertIsNone(self._price([]))
 
-    def test_active_or_hidden_offer_prices_cannot_be_called_sales(self):
-        for snippet in ("Buy it now $20", "$20 best offer accepted", "$20 sold out", "63 items sold $20",
-                        "Not sold $20", "Sold AU $20"):
-            with self.subTest(snippet=snippet):
-                item = _price_evidence("cartoon t-shirts", 20)
-                item["comps"][0]["snippet"] = snippet
-                self.assertEqual(self._clean(item), {})
-
-    def test_non_usd_or_non_listing_sources_do_not_qualify(self):
-        for changes in ({"currency": "CAD"}, {"url": "https://www.ebay.com/sch/sold"},
-                        {"url": "https://ebay.com.evil.example/itm/1"},
-                        {"url": "https://[broken/itm/1"}, {"title": ""}):
-            with self.subTest(changes=changes):
-                item = _price_evidence("cartoon t-shirts", 20)
-                item["comps"][0].update(changes)
-                self.assertEqual(self._clean(item), {})
+    def test_poshmark_is_only_used_when_ebay_is_short(self):
+        ebay, poshmark = _comps("cartoon t-shirts", 20), _comps("cartoon t-shirts", 60, marketplace="Poshmark")
+        self.assertEqual((self._price([*poshmark, *ebay])["per_piece"], self._price([*poshmark, *ebay])["source"]), (20, "eBay"))
+        ebay[0]["price"] = 55.0
+        short = self._price([*poshmark, *ebay[:1]])
+        self.assertEqual((short["per_piece"], short["source"]), (60, "eBay + Poshmark"))
+        self.assertEqual(self._price(poshmark)["source"], "Poshmark")
 
     def test_current_competition_caps_estimated_resale(self):
-        item = _price_evidence("cartoon t-shirts", 30)
-        item["active"] = [{"url": f"https://www.ebay.com/itm/{100 + i}", "title": "Cartoon tee",
-                           "currency": "USD", "snippet": f"Buy it now US ${price}"}
-                          for i, price in enumerate((10, 15, 20))]
-        cleaned = self._clean(item)["cartoon t-shirts"]
-        self.assertEqual(cleaned["sold_median"], 30)
-        self.assertEqual(cleaned["per_piece"], 15)
-        self.assertEqual(cleaned["active_median"], 15)
-        self.assertEqual(len(cleaned["active"]), 3)
+        active = [{"url": f"https://poshmark.com/listing/{100 + i}", "title": "Cartoon tee", "price": price,
+                   "marketplace": "Poshmark", "currency": "USD"} for i, price in enumerate((10, 15, 20))]
+        priced = self._price(_comps("cartoon t-shirts", 30), active)
+        self.assertEqual((priced["sold_median"], priced["per_piece"], priced["active_median"]), (30, 15, 15))
+        self.assertEqual(len(priced["active"]), 3)
 
     def test_thin_competition_sample_is_unknown(self):
-        item = _price_evidence("cartoon t-shirts", 30)
-        item["active"] = [{"url": "https://www.ebay.com/itm/100", "title": "Cartoon tee",
-                           "currency": "USD", "snippet": "Buy it now US $5"}]
-        cleaned = self._clean(item)["cartoon t-shirts"]
-        self.assertEqual(cleaned["per_piece"], 30)
-        self.assertIsNone(cleaned["active_median"])
+        priced = self._price(_comps("cartoon t-shirts", 30), [{"url": "https://poshmark.com/listing/100", "price": 5}])
+        self.assertEqual(priced["per_piece"], 30)
+        self.assertIsNone(priced["active_median"])
 
     def test_research_cache_expires_after_a_week(self):
-        cleaned = self._clean(_price_evidence("cartoon t-shirts", 30))["cartoon t-shirts"]
         for age, qualifies in ((6, True), (7, False), (-1, False)):
-            entry = {**cleaned, "updated_at": (self.now - timedelta(days=age)).isoformat()}
+            entry = {"comps": _comps("cartoon t-shirts", 30), "updated_at": (self.now - timedelta(days=age)).isoformat()}
             fresh = box_scout._fresh_research({"resale": {"cartoon t-shirts": entry}}, self.now, {})
             self.assertEqual(bool(fresh), qualifies)
 
     def test_cached_dates_are_rechecked_even_before_the_week_is_up(self):
-        item = _price_evidence("cartoon t-shirts", 30)
-        for comp in item["comps"]:
+        comps = _comps("cartoon t-shirts", 30)
+        for comp in comps:
             comp["sold_at"] = "2026-09-05"
-        cleaned = self._clean(item)["cartoon t-shirts"]
-        fresh = box_scout._fresh_research({"resale": {"cartoon t-shirts": {
-            **cleaned, "updated_at": self.now.isoformat(),
-        }}}, self.now + timedelta(days=1), {})
-        self.assertEqual(fresh, {})
+        entry = {"comps": comps, "updated_at": self.now.isoformat()}
+        self.assertTrue(box_scout._fresh_research({"resale": {"cartoon t-shirts": entry}}, self.now, {}))
+        self.assertEqual(box_scout._fresh_research({"resale": {"cartoon t-shirts": entry}}, self.now + timedelta(days=1), {}), {})
 
 
 class RefreshConcurrencyTest(unittest.TestCase):

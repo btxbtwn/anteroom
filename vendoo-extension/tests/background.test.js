@@ -332,3 +332,40 @@ test('api log lines wait until Studio is paired', () => {
     vm.runInContext('vendooApiLogQueue.length = 0;', worker);
   }
 });
+
+test('eBay sold search asks for sold, pre-owned, US listings', () => {
+  const url = new URL(call(worker, 'ebaySoldSearchUrl', 'y2k jeans'));
+  assert.equal(url.origin + url.pathname, 'https://www.ebay.com/sch/i.html');
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    _nkw: 'y2k jeans', LH_Sold: '1', LH_Complete: '1', LH_ItemCondition: '3000', LH_PrefLoc: '1', _ipg: '60', rt: 'nc',
+  });
+});
+
+test('eBay sold listings keep what loaded when a later search is blocked', async () => {
+  const vm = require('node:vm');
+  const result = JSON.parse(JSON.stringify(await vm.runInContext(`(async () => {
+    const pages = [{ loaded: true, cards: [{ id: '1' }] }, { loaded: false, cards: [] }];
+    const removed = [];
+    let listener = null;
+    const before = { tabs: chrome.tabs, scripting: chrome.scripting };
+    chrome.tabs = {
+      onUpdated: { addListener: (fn) => { listener = fn; }, removeListener: () => {} },
+      create: async () => ({ id: 7 }),
+      update: async (id, { url }) => { listener(id, { status: 'complete' }, { url }); },
+      remove: async (id) => { removed.push(id); },
+    };
+    chrome.scripting = { executeScript: async () => [{ result: pages.shift() }] };
+    const setTimeoutBefore = setTimeout;
+    // The worker context's timers never fire; let the pause between searches pass.
+    setTimeout = (fn, ms) => { if (ms < 5000) Promise.resolve().then(fn); return 0; };
+    try {
+      return { ...(await readEbaySoldListings(['y2k jeans', 'y2k dress', 'never reached'])), removed };
+    } finally {
+      setTimeout = setTimeoutBefore;
+      Object.assign(chrome, before);
+    }
+  })()`, worker)));
+  assert.deepEqual(result, {
+    ok: false, results: { 'y2k jeans': [{ id: '1' }] }, error: 'eBay did not show search results', removed: [7],
+  });
+});

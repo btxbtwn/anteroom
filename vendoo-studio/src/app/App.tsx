@@ -49,20 +49,30 @@ import { initialListingTabs, listingTabsReducer } from "./listingTabs";
 const ListingEditor = lazy(() =>
   import("../components/ListingEditor").then((module) => ({ default: module.ListingEditor })),
 );
-const SettingsPage = lazy(() =>
-  import("../components/SettingsPage").then((module) => ({ default: module.SettingsPage })),
-);
-const AnalyticsPage = lazy(() =>
-  import("../components/AnalyticsPage").then((module) => ({ default: module.AnalyticsPage })),
-);
-const AssistantPage = lazy(() =>
-  import("../components/AssistantPage").then((module) => ({ default: module.AssistantPage })),
-);
-const MarketingPage = lazy(() =>
-  import("../components/MarketingPage").then((module) => ({ default: module.MarketingPage })),
-);
-const SourcingPage = lazy(() =>
-  import("../components/SourcingPage").then((module) => ({ default: module.SourcingPage })),
+const loadSettingsPage = () =>
+  import("../components/SettingsPage").then((module) => ({ default: module.SettingsPage }));
+const SettingsPage = lazy(loadSettingsPage);
+const loadAnalyticsPage = () =>
+  import("../components/AnalyticsPage").then((module) => ({ default: module.AnalyticsPage }));
+const AnalyticsPage = lazy(loadAnalyticsPage);
+const loadAssistantPage = () =>
+  import("../components/AssistantPage").then((module) => ({ default: module.AssistantPage }));
+const AssistantPage = lazy(loadAssistantPage);
+const loadMarketingPage = () =>
+  import("../components/MarketingPage").then((module) => ({ default: module.MarketingPage }));
+const MarketingPage = lazy(loadMarketingPage);
+const loadSourcingPage = () =>
+  import("../components/SourcingPage").then((module) => ({ default: module.SourcingPage }));
+const SourcingPage = lazy(loadSourcingPage);
+// A page's code is fetched the first time it is opened. Fetching it once the
+// app has settled means a tap does not wait on the network for it.
+const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketingPage, loadSourcingPage];
+const pageLoading = (
+  <div className="analytics-page">
+    <div className="analytics-inner">
+      <p className="analytics-status" role="status">Loading…</p>
+    </div>
+  </div>
 );
 const FirstRunGuide = lazy(() =>
   import("../components/FirstRunGuide").then((module) => ({ default: module.FirstRunGuide })),
@@ -150,6 +160,11 @@ export function App() {
     refetchInterval: (query) =>
       pollMs(hasOpenJob(query.state.data?.jobs) || query.state.data?.work.length ? BUSY_POLL_MS : IDLE_POLL_MS),
   });
+  const inventoryLoaded = conversations !== undefined;
+  useEffect(() => {
+    if (!inventoryLoaded) return;
+    for (const load of PAGE_LOADERS) void load().catch(() => {});
+  }, [inventoryLoaded]);
   const previousQueueJobs = useRef<Map<string, string> | null>(null);
   useEffect(() => {
     if (!queue.data) return;
@@ -738,7 +753,7 @@ export function App() {
           >
             <main className="panel main-panel" ref={mainPanelRef}>
               {activeView === "settings" ? (
-                <Suspense fallback={null}>
+                <Suspense fallback={pageLoading}>
                   <SettingsPage
                     onOpenListing={openListing}
                     section={settingsSection}
@@ -752,20 +767,20 @@ export function App() {
                   bulk={bulk} titles={new Map((conversations ?? []).map((c) => [c.id, c.title || "Untitled listing"]))}
                   onOpenListing={openListing} />
               ) : activeView === "analytics" ? (
-                <Suspense fallback={null}>
+                <Suspense fallback={pageLoading}>
                   <AnalyticsPage onOpenListing={openListing} />
                 </Suspense>
               ) : activeView === "marketing" ? (
-                <Suspense fallback={null}>
+                <Suspense fallback={pageLoading}>
                   <MarketingPage onOpenListing={openListing} />
                 </Suspense>
               ) : activeView === "assistant" ? (
-                <Suspense fallback={null}>
+                <Suspense fallback={pageLoading}>
                   <AssistantPage onOpenProviders={openProviders} onOpenListing={openListing} />
                 </Suspense>
               ) : activeView === "sourcing" ? (
-                <Suspense fallback={null}>
-                  <SourcingPage onOpenProviders={openProviders} onOpenListing={openListing} />
+                <Suspense fallback={pageLoading}>
+                  <SourcingPage onOpenListing={openListing} />
                 </Suspense>
               ) : selectedConvId ? null : needsSetup ? (
                 <SetupChecklist

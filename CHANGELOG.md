@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.226 — 2026-10-10
+
+- Studio opens much faster on a phone or a slow connection. Everything it sends is now compressed, which cuts the first load and pages like Sourcing to roughly a quarter of the size.
+- Opening Sourcing, Analytics, Marketing, the Assistant or Settings no longer shows an empty screen while the page arrives: it says "Loading…", and the pages are fetched ahead of time so a tap usually opens them straight away.
+- Fixed Studio on a Mac re-checking every piece of the interface with the server each time it opened, instead of keeping what it already had.
+- Sourcing finds sold prices again. It was getting none, because the AI search it relied on is blocked by eBay and Mercari. Prices now come from your own sales first, then eBay sold listings read through your connected Chrome, then Poshmark sold listings. Each box shows which of those its price came from.
+- Sourcing asks for three things up front: budget, ZIP and minimum return. The selling window, your selling assumptions and Raghouse VIP moved under "More options", with shorter labels.
+
 ## 0.1.225 — 2026-10-10
 
 - The Assistant now knows more about each listing: its size, condition, colour, labels, SKU and which marketplaces it is listed on, so you can ask things like "which sizes sell fastest?" or "what is only on eBay?".

@@ -83,6 +83,8 @@ class ExtensionManager:
         self.version: str | None = None
         self.build: str | None = None
         self.reload_generation: str | None = None
+        # The server's event loop, for the sourcing thread to reach Chrome through.
+        self.loop: asyncio.AbstractEventLoop | None = None
         self._pairing_token: str | None = None
         self._waits: dict[str, asyncio.Future] = {}
         self._wait_jobs: dict[str, str] = {}
@@ -705,6 +707,7 @@ async def extension_websocket(ws: WebSocket):
                     continue
                 old = extension_manager.connection
                 extension_manager.connection = ws
+                extension_manager.loop = asyncio.get_running_loop()
                 extension_manager.version = _reported_version(payload)
                 extension_manager.build = _reported_build(payload)
                 extension_manager.reload_generation = _reported_reload_generation(payload)
@@ -759,6 +762,11 @@ async def extension_websocket(ws: WebSocket):
                 continue
 
             if msg_type == "catalog.children":
+                payload = message.get("payload") or {}
+                extension_manager.resolve_wait(str(payload.get("request_id") or ""), payload)
+                continue
+
+            if msg_type == "market.sold_listings_result":
                 payload = message.get("payload") or {}
                 extension_manager.resolve_wait(str(payload.get("request_id") or ""), payload)
                 continue
