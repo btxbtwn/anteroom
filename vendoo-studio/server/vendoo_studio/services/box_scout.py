@@ -1,9 +1,9 @@
 """Keep a buy list of wholesale clothing boxes ready without anyone asking for it.
 
-Every few hours Studio crawls Raghouse and Thrift Vintage Fashion, refreshes the
-trending words and comparable sales once a week with the listing model's web
-search (the same one sold comps use), and picks qualifying boxes
-within the seller's budget. The crawl, scoring and buy list live in the box-scout
+Every few hours Studio crawls Raghouse and Thrift Vintage Fashion and picks
+qualifying boxes within the seller's budget. Once a week it refreshes the trending
+words with the listing model's web search, and the comparable sales from the
+seller's own sales first, then eBay's and Poshmark's sold listings. The crawl, scoring and buy list live in the box-scout
 skill's script, loaded from the skills directory, so Studio and the skill agree.
 
 Nothing here buys anything. The Sourcing page links to each store's cart with the
@@ -22,32 +22,27 @@ import re
 import statistics
 import sys
 import threading
+import time
 import urllib.error
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
-from urllib.parse import urlparse
 
 from vendoo_studio.config import skills_dir, user_data_root
 from vendoo_studio.services.inventory_analytics import AnalyticsItem
 from vendoo_studio.services.sourcing_seasonality import planning_context, research_context
-from vendoo_studio.services.sold_comps import (
-    MIN_CONFIDENT_COMPS,
-    extract_live_price,
-    extract_sold_price,
-    marketplace_from_url,
-    trim_outliers,
-)
+from vendoo_studio.services import sold_listings
+from vendoo_studio.services.sold_comps import MIN_CONFIDENT_COMPS, trim_outliers
 
 log = logging.getLogger("vendoo_studio.box_scout")
 
 REFRESH_INTERVAL = timedelta(hours=6)
 TREND_MAX_AGE = timedelta(days=7)
 RESALE_MAX_AGE = timedelta(days=7)
-RESEARCH_RETRY = timedelta(days=1)  # before asking again about a theme the web could not price
-RESEARCH_THEMES = 24  # themes priced per refresh at most
-RESEARCH_BATCH = 4  # each theme needs several sold and active source pages
+RESEARCH_RETRY = timedelta(days=1)  # before searching again for a theme the marketplaces could not price
+RESEARCH_THEMES = 40  # themes searched per refresh at most
+RESEARCH_PAUSE_SEC = 1  # between Poshmark searches
 MODEL_TIMEOUT_SEC = 240
 ZONE_CHART_MAX_AGE = timedelta(days=30)
 RECENT_ZIPS = 4
@@ -73,32 +68,6 @@ TRENDS_PROMPT = (
     'only: {"terms":["carhartt","y2k"]} with 10 to 20 lowercase terms of one or two words: '
     "brands, eras, themes and garment types, spelled the way wholesale lot titles spell "
     'them (for example "harley", "cartoon", "workwear", "90s"). No commentary.'
-)
-
-RESALE_PROMPT = (
-    "You price wholesale clothing lots for a reseller. For each category below, search sold "
-    "listings from the last 90 days on eBay, Poshmark, Depop and Mercari and estimate what "
-    "ONE typical piece from a mixed wholesale lot of that category sells for. Look for "
-    "comparable everyday pieces with matching garment type, brand tier, era and condition, "
-    "not premium finds, multi-item bundles, new-with-tags pieces or rare examples. "
-    "Give each listing's own title, word for word: listings whose title shows another "
-    "garment, a bundle or new with tags are discarded. "
-    "Return actual sold listings, never active asking prices or supplier resale claims. "
-    "Collect at least 3 distinct sales per theme in the last 30 days, 5 when you can, so "
-    "discarded ones do not sink the theme. Older sales within "
-    "90 days can provide context, but cannot qualify a theme or set today's price. "
-    "Use USD item prices excluding shipping, and exclude "
-    "accepted offers when the actual price is hidden. Return JSON only: "
-    '{"prices":[{"theme":"<exactly as given>","comps":[{"url":"https://www.ebay.com/itm/...",'
-    '"title":"Cartoon T-shirt","sold_at":"YYYY-MM-DD","currency":"USD",'
-    '"snippet":"Exact source text showing this item sold and its actual USD sale price"}],'
-    '"active":[{"url":"https://www.ebay.com/itm/...","title":"Comparable T-shirt",'
-    '"currency":"USD","snippet":"Exact source text showing an item for sale and asking price"}]}]}. '
-    "Also collect 3 comparable active listings per theme to check current competition. "
-    "Use ordinary items, excluding condition or rarity mismatches, for both samples. "
-    "Copy each theme exactly as given. Open sources and quote the sale evidence; dates "
-    "must be sale dates, not crawl or listing dates. Skip themes without enough evidence. "
-    "Do not invent sales, dates, snippets or URLs. Trends never prove that an item will sell."
 )
 
 _state_lock = threading.RLock()
@@ -280,136 +249,93 @@ def clean_terms(raw: list) -> list[str]:
     return terms[:20]
 
 
-def _listing_identity(url: str, marketplace: str) -> str:
-    path = urlparse(url).path.rstrip("/")
-    return f"{marketplace}:{path.rsplit('/', 1)[-1] if marketplace == 'eBay' else path}"
-
-
-def validate_research(raw: list, asked: set[str], *, now: datetime | None = None) -> dict[str, dict]:
-    """The dated, distinct, explicitly sold USD examples and comparable asking prices
-    reported by research, per asked theme, whether or not they are enough to price it.
-    An example counts only when its title fits the theme (the skill's `sale_mismatch`).
-
-    This validates the supplied evidence, not the source pages themselves. The
-    seller can inspect every retained example; no probability of sale is inferred.
-    """
-    today = (now or _now()).date()
-    research: dict[str, dict] = {}
-    for item in raw:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("theme") or "").strip().lower()
-        if name not in asked or not isinstance(item.get("comps"), list):
-            continue
-        comps = []
-        seen = set()
-        for comp in item["comps"]:
-            if not isinstance(comp, dict) or comp.get("currency") != "USD":
-                continue
-            url = str(comp.get("url") or "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
-            try:
-                marketplace = marketplace_from_url(url)
-                identity = _listing_identity(url, marketplace)
-            except ValueError:
-                continue
-            if marketplace not in {"eBay", "Poshmark", "Mercari", "Depop"} or identity in seen:
-                continue
-            snippet = str(comp.get("snippet") or "").strip()
-            price = extract_sold_price(snippet)
-            try:
-                sold_at = date.fromisoformat(str(comp.get("sold_at") or ""))
-            except ValueError:
-                continue
-            age = (today - sold_at).days
-            if not 0 <= age <= 90 or price is None or not math.isfinite(price) or not 1 <= price <= 500:
-                continue
-            title = str(comp.get("title") or "").strip()
-            if not title or scout().sale_mismatch(name, title, snippet):
-                continue
-            seen.add(identity)
-            comps.append({"url": url, "title": title[:200], "sold_at": sold_at.isoformat(),
-                          "price": price, "marketplace": marketplace, "snippet": snippet[:1500], "currency": "USD"})
-        active = []
-        for comp in item.get("active", []) if isinstance(item.get("active"), list) else []:
-            if not isinstance(comp, dict) or comp.get("currency") != "USD":
-                continue
-            url = str(comp.get("url") or "").strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
-            try:
-                marketplace = marketplace_from_url(url)
-                identity = _listing_identity(url, marketplace)
-            except ValueError:
-                continue
-            price = extract_live_price(str(comp.get("snippet") or ""))
-            title = str(comp.get("title") or "").strip()
-            if identity in seen or marketplace not in {"eBay", "Poshmark", "Mercari", "Depop"} or not title:
-                continue
-            if scout().sale_mismatch(name, title, str(comp.get("snippet") or "")):
-                continue
-            if price is None or not math.isfinite(price) or not 1 <= price <= 500:
-                continue
-            seen.add(identity)
-            active.append({"url": url, "title": title[:200], "price": price, "marketplace": marketplace,
-                           "snippet": str(comp["snippet"])[:1500], "currency": "USD"})
-        research[name] = {"comps": comps, "active": active[:8]}
-    return research
-
-
-def price_evidence(web: dict, own: list[dict], *, now: datetime | None = None) -> dict | None:
-    """One theme's price from the seller's own sales and validated web sales
-    together: the median of distinct sales within 30 days, at least
-    MIN_CONFIDENT_COMPS of them, capped by the asking-price median when enough
-    current listings were found. Older sales within 90 days stay as context."""
-    today = (now or _now()).date()
-    comps = [c for c in own if 0 <= (today - date.fromisoformat(c["sold_at"])).days <= 90 and 1 <= c["price"] <= 500]
-    comps += [c for c in web.get("comps") or [] if isinstance(c, dict) and c.get("url")]
-    comps.sort(key=lambda comp: comp["sold_at"], reverse=True)
-    recent = [c for c in comps if (today - date.fromisoformat(c["sold_at"])).days <= 30]
-    kept_prices = trim_outliers([c["price"] for c in recent])
-    recent = [c for c in recent if c["price"] in kept_prices][:16]
-    if len(recent) < MIN_CONFIDENT_COMPS:
-        return None
-    comps = [*recent, *(c for c in comps if (today - date.fromisoformat(c["sold_at"])).days > 30)][:16]
-    values = [comp["price"] for comp in recent]
-    active = web.get("active") or []
-    sold_median = statistics.median(values)
-    active_median = statistics.median(trim_outliers([c["price"] for c in active])) if len(active) >= MIN_CONFIDENT_COMPS else None
-    return {
-        "per_piece": round(min(sold_median, active_median) if active_median is not None else sold_median, 2),
-        "sold_median": round(sold_median, 2), "active_median": active_median, "active": active,
-        "low": min(values), "high": max(values), "comps": comps,
-    }
-
-
-def clean_prices(raw: list, asked: set[str], *, now: datetime | None = None,
-                 own: dict[str, list[dict]] | None = None) -> dict[str, dict]:
-    """The themes reported research and the seller's own sales can price, with their prices."""
-    research = validate_research(raw, asked, now=now)
-    prices = {}
-    for name in asked:
-        priced = price_evidence(research.get(name, {}), (own or {}).get(name, []), now=now)
-        if priced:
-            prices[name] = priced
-    return prices
-
-
 async def _research_trends(context: dict) -> tuple[list[str], str | None]:
     payload, source = await _ask(TRENDS_PROMPT, research_context(context), "terms")
     return (clean_terms(payload["terms"]) if payload else []), source
 
 
-async def _research_prices(themes: list[str], examples: dict[str, str], context: dict) -> tuple[dict[str, dict], str | None]:
-    lines = "\n".join(f"- {t} (example lot: {examples.get(t, t)})" for t in themes)
-    payload, source = await _ask(RESALE_PROMPT, f"{research_context(context)}\nCategories:\n{lines}", "prices")
-    return (validate_research(payload["prices"], set(themes)) if payload else {}), source
+# --- Comparable sales ---------------------------------------------------------------------
+
+
+def price_evidence(web: dict, own: list[dict], *, now: datetime | None = None) -> dict | None:
+    """One theme's price from sold listings, taking the sources in order until there
+    are MIN_CONFIDENT_COMPS distinct sales within 30 days: the seller's own sales,
+    then eBay's sold listings, then any other marketplace's. The price is the median
+    of those, capped by the asking-price median when enough current listings were
+    found. Older sales within 90 days stay as context."""
+    today = (now or _now()).date()
+
+    def age(comp: dict) -> int:
+        return (today - date.fromisoformat(comp["sold_at"])).days
+
+    found = [c for c in web.get("comps") or [] if isinstance(c, dict) and c.get("url")]
+    tiers = (
+        [c for c in own if 0 <= age(c) <= 90 and 1 <= c["price"] <= 500],
+        [c for c in found if c.get("marketplace") == "eBay"],
+        [c for c in found if c.get("marketplace") != "eBay"],
+    )
+    comps: list[dict] = []
+    recent: list[dict] = []
+    for tier in tiers:
+        if not tier:
+            continue
+        comps = sorted([*comps, *tier], key=lambda comp: comp["sold_at"], reverse=True)
+        recent = [c for c in comps if age(c) <= 30]
+        kept_prices = trim_outliers([c["price"] for c in recent])
+        recent = [c for c in recent if c["price"] in kept_prices][:16]
+        if len(recent) >= MIN_CONFIDENT_COMPS:
+            break
+    if len(recent) < MIN_CONFIDENT_COMPS:
+        return None
+    comps = [*recent, *(c for c in comps if age(c) > 30)][:16]
+    values = [comp["price"] for comp in recent]
+    active = web.get("active") or []
+    sold_median = statistics.median(values)
+    active_median = statistics.median(trim_outliers([c["price"] for c in active])) if len(active) >= MIN_CONFIDENT_COMPS else None
+    # Named in the order they were taken: the seller's sales, eBay, then the rest.
+    sources = sorted({OWN_SOURCE if c.get("conversation_id") else c["marketplace"] for c in recent},
+                     key=lambda name: (name != OWN_SOURCE, name != "eBay", name))
+    return {
+        "per_piece": round(min(sold_median, active_median) if active_median is not None else sold_median, 2),
+        "sold_median": round(sold_median, 2), "active_median": active_median, "active": active,
+        "low": min(values), "high": max(values), "comps": comps, "source": " + ".join(sources),
+    }
+
+
+def _research_prices(themes: list[str], own: dict[str, list[dict]], now: datetime) -> dict[str, dict]:
+    """Sold listings for themes the seller's own sales cannot price: eBay's, read
+    through Chrome, then Poshmark's for a theme still short of evidence. Poshmark
+    also supplies the current asking prices. A listing counts only when its title
+    fits the theme (the skill's `sale_mismatch`)."""
+    today = now.date()
+
+    def fitting(theme: str, listings: list[dict]) -> list[dict]:
+        return [c for c in listings if not scout().sale_mismatch(theme, c["title"], c["snippet"])]
+
+    queries = {theme: query for theme in themes if (query := sold_listings.search_query(theme))}
+    ebay = sold_listings.ebay_sold(list(dict.fromkeys(queries.values())), today)
+    found = {}
+    for theme, query in queries.items():
+        entry = {"comps": fitting(theme, ebay.get(query, [])), "active": [], "ebay": query in ebay}
+        try:
+            if price_evidence(entry, own.get(theme, []), now=now) is None:
+                entry["comps"] += fitting(theme, sold_listings.parse_poshmark_sold(sold_listings.poshmark_listings(query, sold=True), today))
+                time.sleep(RESEARCH_PAUSE_SEC)
+            entry["active"] = fitting(theme, sold_listings.parse_poshmark_active(sold_listings.poshmark_listings(query, sold=False)))[:8]
+            time.sleep(RESEARCH_PAUSE_SEC)
+        except FETCH_ERRORS as exc:
+            log.warning("Poshmark sold listings for %s were not read: %s", theme, exc)
+        found[theme] = entry
+    return found
 
 
 # --- Refresh --------------------------------------------------------------------------------
 
 
 def _fresh_research(state: dict, now: datetime, own: dict[str, list[dict]]) -> dict[str, dict]:
-    """Themes with enough current evidence: cached web research under a week old,
-    rechecked as its sale dates age out and against the theme its examples must fit,
-    together with the seller's own sales."""
+    """Themes with enough current evidence: the seller's own sales, and cached sold
+    listings under a week old, rechecked as their sale dates age out and against the
+    theme they must fit."""
     fresh = {}
     for name in set(state["resale"]) | set(own):
         entry = _cached_research(state, name, now, RESALE_MAX_AGE)
@@ -417,8 +343,18 @@ def _fresh_research(state: dict, now: datetime, own: dict[str, list[dict]]) -> d
             entry = {**entry, **{key: [c for c in entry.get(key) or [] if isinstance(c, dict) and not scout().sale_mismatch(
                 name, str(c.get("title") or ""), str(c.get("snippet") or ""))] for key in ("comps", "active")}}
         if priced := price_evidence(entry or {}, own.get(name, []), now=now):
-            fresh[name] = {**(entry or {"updated_at": now.isoformat(), "source": OWN_SOURCE}), **priced}
+            fresh[name] = {**(entry or {"updated_at": now.isoformat()}), **priced}
     return fresh
+
+
+def _wants_research(state: dict, theme: str, now: datetime, fresh: dict[str, dict], ebay_ready: bool) -> bool:
+    """Whether to search the marketplaces for `theme` in this refresh."""
+    if sold_listings.search_query(theme) is None:
+        return False
+    # Searched while Chrome was away, so eBay, which goes before Poshmark, was never read.
+    if ebay_ready and (state["resale"].get(theme) or {}).get("ebay") is False:
+        return True
+    return theme not in fresh and _cached_research(state, theme, now, RESEARCH_RETRY) is None
 
 
 def _cached_research(state: dict, name: str, now: datetime, max_age: timedelta) -> dict | None:
@@ -614,19 +550,14 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
     baselines, all_rows = s.score_lots(catalogs, cfg, zones, filters, {k: v["per_piece"] for k, v in fresh.items()}, factors,
                                      resale_low={k: v["low"] for k, v in fresh.items()})
 
-    if can_research:
-        research_rows = [r for r in all_rows if r["price"] <= prefs["budget"]]
-        missing = s.research_themes([r for r in research_rows if r["theme"] not in fresh
-                                     and _cached_research(state, r["theme"], now, RESEARCH_RETRY) is None],
+    if research:
+        ebay_ready = sold_listings.ebay_ready()
+        missing = s.research_themes([r for r in all_rows if r["price"] <= prefs["budget"]
+                                     and _wants_research(state, r["theme"], now, fresh, ebay_ready)],
                                     limit=RESEARCH_THEMES)
-        examples = {}
-        for row in research_rows:
-            examples.setdefault(row["theme"], row["title"])
-        for start in range(0, len(missing), RESEARCH_BATCH):
-            batch = missing[start : start + RESEARCH_BATCH]
-            prices, source = asyncio.run(_research_prices(batch, examples, context))
-            for name, entry in prices.items():
-                state["resale"][name] = {**entry, "updated_at": now.isoformat(), "source": source}
+        for name, entry in _research_prices(missing, own, now).items():
+            # A theme nothing was found for is kept too, so it waits RESEARCH_RETRY before the next search.
+            state["resale"][name] = {**entry, "updated_at": now.isoformat()}
         fresh = _fresh_research(state, now, own)
         baselines, all_rows = s.score_lots(catalogs, cfg, zones, filters, {k: v["per_piece"] for k, v in fresh.items()}, factors,
                                          resale_low={k: v["low"] for k, v in fresh.items()})

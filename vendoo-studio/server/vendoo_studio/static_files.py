@@ -29,5 +29,8 @@ def cache_control(path: str) -> str:
 class FrontendFiles(StaticFiles):
     def file_response(self, full_path: PathLike, stat_result: os.stat_result, scope: Scope, status_code: int = 200):
         response = super().file_response(full_path, stat_result, scope, status_code)
-        response.headers["Cache-Control"] = cache_control(os.path.relpath(full_path, self.directory))
+        # Starlette hands over the resolved path, so the directory is resolved
+        # too: behind a symlink the two would otherwise never share a root.
+        relative = os.path.relpath(full_path, os.path.realpath(self.directory))
+        response.headers["Cache-Control"] = cache_control(relative)
         return response

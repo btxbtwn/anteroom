@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from vendoo_studio.services import box_scout
+from vendoo_studio.services import box_scout, sold_listings
 
 router = APIRouter(prefix="/api/sourcing", tags=["sourcing"])
 
@@ -229,7 +229,7 @@ class SourcingTrend(BaseModel):
 
 class SourcingResponse(BaseModel):
     refreshing: bool
-    research_available: bool
+    ebay_connected: bool
     prefs: SourcingPrefs
     trend: SourcingTrend
     snapshot: SourcingSnapshot | None
@@ -251,7 +251,7 @@ def _response() -> SourcingResponse:
     state = box_scout.read_state()
     return SourcingResponse(
         refreshing=box_scout.refreshing(),
-        research_available=box_scout.research_available(),
+        ebay_connected=sold_listings.ebay_ready(),
         prefs=SourcingPrefs.model_validate(state["prefs"]),
         trend=SourcingTrend.model_validate(state["trend"]),
         snapshot=SourcingSnapshot.model_validate(state["snapshot"]) if state["snapshot"] else None,

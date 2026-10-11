@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
 from vendoo_studio.database import init_db
@@ -96,6 +97,10 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Content-Type"],
 )
+# The inventory, the buy list and the bundle are each around a megabyte of
+# text, and over Tailscale a phone pulls them across a mobile connection.
+# Live event streams and photos are left alone by the middleware's defaults.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(health.router)
 app.include_router(conversations.router)
