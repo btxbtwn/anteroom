@@ -693,7 +693,7 @@ export interface SourcingPrefs {
 
 export interface SourcingState {
   refreshing: boolean;
-  research_available: boolean;
+  ebay_connected: boolean;
   prefs: SourcingPrefs;
   trend: { terms: string[]; updated_at: string | null; source: string | null };
   snapshot: SourcingSnapshot | null;

@@ -98,7 +98,7 @@ function state(): SourcingState {
   };
   const plan = { budget: 300, total: 132, expected_profit: 388, carts: [cart({ lots: [lot()] })], exclusions: {} };
   return {
-    refreshing: false, research_available: true, prefs,
+    refreshing: false, ebay_connected: true, prefs,
     trend: { terms: [], updated_at: null, source: null },
     snapshot: {
       updated_at: "2026-10-05T12:00:00Z", destination_zip: "70115",

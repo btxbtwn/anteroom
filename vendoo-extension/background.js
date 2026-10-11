@@ -37,6 +37,7 @@ importScripts('background/vendoo-api.js');
 importScripts('background/job-steps.js');
 importScripts('background/import-listing.js');
 importScripts('background/popup-actions.js');
+importScripts('background/sold-listings.js');
 importScripts('browser-session.js');
 
 var STUDIO_EXTENSION_BUILD = null;
@@ -692,6 +693,15 @@ async function handleStudioMessage(msg) {
         result = {ok: false, error: error.message};
       }
       send({type: 'catalog.children', payload: {...result, request_id: msg.payload.request_id}});
+      break;
+    }
+
+    case 'market.sold_listings': {
+      const queries = Array.isArray(msg.payload?.queries) ? msg.payload.queries.map(String) : [];
+      const result = msg.payload?.marketplace === 'ebay'
+        ? await readEbaySoldListings(queries)
+        : { ok: false, results: {}, error: 'Unsupported marketplace' };
+      send({ type: 'market.sold_listings_result', payload: { ...result, request_id: msg.payload?.request_id } });
       break;
     }
 
