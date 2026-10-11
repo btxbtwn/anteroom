@@ -810,6 +810,7 @@ export function App() {
                       cancelling={cancelJob.isPending}
                       onCancel={listingJob?.id ? () => cancelJob.mutate(listingJob.id) : undefined}
                       interactive={browserOpen}
+                      mobile={isMobile}
                       automationRunning={automationRunning}
                       onClose={closeBrowser}
                       expanded={browserExpanded}

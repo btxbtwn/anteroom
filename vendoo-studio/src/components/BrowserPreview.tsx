@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { api } from "../api/client";
 import type { BrowserField, BrowserInputEvent, BrowserRect, BrowserViewport } from "../api/client";
 import { addToast } from "../ui/toast";
+import { KEYBOARD_REST, typedEvents } from "./browserKeyboard";
 import { OpenListingButton } from "./OpenListingButton";
 
 interface PreviewFrame {
@@ -39,6 +40,8 @@ interface Props {
   cancelling?: boolean;
   /** The seller opened this draft to work in it, not just to watch a fill. */
   interactive?: boolean;
+  /** Studio is on a phone: the draft is laid out at the pane's size and typing uses the on-screen keyboard. */
+  mobile?: boolean;
   /** Studio is typing into the draft right now. Input and annotation wait. */
   automationRunning?: boolean;
   onClose?: () => void;
@@ -98,6 +101,11 @@ const SNAPSHOT_REFRESH_MS = 3000;
 const SNAPSHOT_SETTLE_MS = 700;
 const DOUBLE_CLICK_MS = 400;
 const MIN_BOX_RATIO = 0.01;
+const MIN_VIEWPORT = 240;
+const MAX_VIEWPORT_WIDTH = 1024;
+const MAX_VIEWPORT_HEIGHT = 2000;
+const MAX_VIEWPORT_SCALE = 2;
+const VIEWPORT_RETRY_MS = 3000;
 
 const MOUSE_BUTTONS = ["left", "middle", "right"] as const;
 
@@ -155,6 +163,7 @@ export function BrowserPreview({
   onCancel,
   cancelling,
   interactive = false,
+  mobile = false,
   automationRunning = false,
   onClose,
   expanded = false,
@@ -174,7 +183,15 @@ export function BrowserPreview({
   const [hovered, setHovered] = useState<string | null>(null);
   const [marks, setMarks] = useState<Mark[]>([]);
   const [drawing, setDrawing] = useState<Mark | null>(null);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [keyboardInset, setKeyboardInset] = useState(0);
 
+  const sectionRef = useRef<HTMLElement>(null);
+  const keyboardRef = useRef<HTMLTextAreaElement>(null);
+  const typed = useRef(KEYBOARD_REST);
+  const composing = useRef(false);
+  const touchPointer = useRef<number | null>(null);
+  const sentViewport = useRef<{ jobId: string; width: number; height: number; at: number } | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const pendingEvents = useRef<BrowserInputEvent[]>([]);
@@ -238,6 +255,44 @@ export function BrowserPreview({
     const scale = Math.min(stageSize.width / width, stageSize.height / height);
     return { width: Math.floor(width * scale), height: Math.floor(height * scale) };
   }, [natural, frame?.viewport_width, frame?.viewport_height, stageSize]);
+
+  useEffect(() => {
+    if (!mobile || !jobId || !controlsEnabled) return;
+    const width = Math.round(stageSize.width);
+    const height = Math.min(MAX_VIEWPORT_HEIGHT, Math.round(stageSize.height));
+    if (width < MIN_VIEWPORT || width > MAX_VIEWPORT_WIDTH || height < MIN_VIEWPORT) return;
+    const last = sentViewport.current;
+    // The on-screen keyboard makes the pane shorter. Keep the page's layout and let the picture shrink.
+    const current = last && last.jobId === jobId && last.width === width && height <= last.height ? last : null;
+    if (current) {
+      // Chrome answers with frames at the new width. Ask again when they keep the old one.
+      const shown = frame?.viewport_width || 0;
+      if (!shown || Math.abs(shown - width) <= 1 || Date.now() - current.at < VIEWPORT_RETRY_MS) return;
+    }
+    const viewport = { width, height: current ? current.height : height };
+    sentViewport.current = { jobId, ...viewport, at: Date.now() };
+    const scale = Math.max(1, Math.min(MAX_VIEWPORT_SCALE, window.devicePixelRatio || 1));
+    void api.jobs.browser.viewport(jobId, { ...viewport, scale }).catch(() => {});
+  }, [mobile, jobId, controlsEnabled, stageSize, frame]);
+
+  useEffect(() => {
+    // iOS draws the keyboard over the page instead of resizing it. Lift the pane clear.
+    const viewport = window.visualViewport;
+    if (!keyboardOpen || !viewport) return;
+    const measure = () => {
+      const section = sectionRef.current;
+      if (!section) return;
+      const covered = section.getBoundingClientRect().bottom - (viewport.offsetTop + viewport.height);
+      setKeyboardInset(Math.max(0, Math.round(covered)));
+    };
+    measure();
+    viewport.addEventListener("resize", measure);
+    viewport.addEventListener("scroll", measure);
+    return () => {
+      viewport.removeEventListener("resize", measure);
+      viewport.removeEventListener("scroll", measure);
+    };
+  }, [keyboardOpen]);
 
   const refreshSnapshot = useCallback(async () => {
     if (!jobId || !controlsEnabled || snapshotInFlight.current) return;
@@ -323,7 +378,7 @@ export function BrowserPreview({
   }, [jobId, settleSnapshot]);
 
   const queueInput = useCallback((event: BrowserInputEvent, { immediate = false } = {}) => {
-    if (event.type === "mouseMoved") {
+    if (event.type === "mouseMoved" || event.type === "touchMove") {
       pendingMove.current = event;
     } else {
       if (pendingMove.current) {
@@ -438,9 +493,17 @@ export function BrowserPreview({
     if (!controlsEnabled) return;
     const point = ratioOf(event.clientX, event.clientY);
     if (!point) return;
-    surfaceRef.current?.focus({ preventScroll: true });
+    const touch = event.pointerType === "touch";
+    // A tap must leave focus alone, or the phone's keyboard goes away between fields.
+    if (touch) event.preventDefault();
+    else surfaceRef.current?.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
-    if (tool === "interact") {
+    if (tool === "interact" && touch) {
+      // One finger drives the draft: Chrome turns it into taps, scrolls, and long presses.
+      if (touchPointer.current !== null) return;
+      touchPointer.current = event.pointerId;
+      queueInput({ kind: "touch", type: "touchStart", x_ratio: point.x, y_ratio: point.y }, { immediate: true });
+    } else if (tool === "interact") {
       const now = Date.now();
       const last = lastPress.current;
       const repeat = last && now - last.at < DOUBLE_CLICK_MS && Math.abs(last.x - point.x) < 0.01 && Math.abs(last.y - point.y) < 0.01;
@@ -468,6 +531,12 @@ export function BrowserPreview({
     if (!controlsEnabled) return;
     const point = ratioOf(event.clientX, event.clientY);
     if (!point) return;
+    if (tool === "interact" && event.pointerType === "touch") {
+      if (touchPointer.current === event.pointerId) {
+        queueInput({ kind: "touch", type: "touchMove", x_ratio: point.x, y_ratio: point.y });
+      }
+      return;
+    }
     if (tool === "interact") {
       queueInput({
         kind: "mouse",
@@ -499,7 +568,12 @@ export function BrowserPreview({
     if (!controlsEnabled) return;
     const point = ratioOf(event.clientX, event.clientY);
     if (!point) return;
-    if (tool === "interact") {
+    if (tool === "interact" && event.pointerType === "touch") {
+      if (touchPointer.current !== event.pointerId) return;
+      touchPointer.current = null;
+      queueInput({ kind: "touch", type: "touchEnd" }, { immediate: true });
+      settleSnapshot();
+    } else if (tool === "interact") {
       queueInput({
         kind: "mouse",
         type: "mouseReleased",
@@ -518,6 +592,45 @@ export function BrowserPreview({
       setDrawing(null);
       finishMark(done);
     }
+  };
+
+  const handlePointerCancel = (event: ReactPointerEvent<HTMLDivElement>) => {
+    setDrawing(null);
+    if (touchPointer.current !== event.pointerId) return;
+    touchPointer.current = null;
+    queueInput({ kind: "touch", type: "touchCancel" }, { immediate: true });
+  };
+
+  const restKeyboard = () => {
+    const box = keyboardRef.current;
+    if (!box) return;
+    box.value = KEYBOARD_REST;
+    box.setSelectionRange(KEYBOARD_REST.length, KEYBOARD_REST.length);
+    typed.current = KEYBOARD_REST;
+  };
+
+  const handleTyped = (box: HTMLTextAreaElement) => {
+    const next = box.value;
+    const events = typedEvents(typed.current, next);
+    typed.current = next;
+    if (controlsEnabled) {
+      events.forEach((item, index) => queueInput(item, { immediate: index === events.length - 1 }));
+      if (events.length) settleSnapshot();
+    }
+    // A word still being composed has to stay in the box or the keyboard loses it.
+    if (!composing.current) restKeyboard();
+  };
+
+  const toggleKeyboard = () => {
+    const box = keyboardRef.current;
+    if (!box) return;
+    if (keyboardOpen) {
+      box.blur();
+      return;
+    }
+    setTool("interact");
+    restKeyboard();
+    box.focus({ preventScroll: true });
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -547,7 +660,12 @@ export function BrowserPreview({
   const hoveredBox = tool === "pick" && hovered ? fieldBoxes.find(({ field }) => fieldId(field) === hovered) : null;
 
   return (
-    <section className="browser-preview is-open" aria-label="Live listing browser">
+    <section
+      ref={sectionRef}
+      className="browser-preview is-open"
+      aria-label="Live listing browser"
+      style={keyboardOpen && keyboardInset ? { paddingBottom: keyboardInset } : undefined}
+    >
       <div className="browser-preview-bar">
         <span className="browser-preview-title">Browser</span>
         <span className="browser-preview-url" title={url}>
@@ -617,6 +735,21 @@ export function BrowserPreview({
               {item.label}
             </button>
           ))}
+          {mobile && (
+            <button
+              type="button"
+              className={`browser-tool${keyboardOpen ? " is-active" : ""}`}
+              title="Type into the field you tapped in the Vendoo draft"
+              aria-pressed={keyboardOpen}
+              disabled={!controlsEnabled}
+              // Keep focus where it is, or the open keyboard closes before the tap lands.
+              onPointerDown={(event) => event.preventDefault()}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={toggleKeyboard}
+            >
+              Keyboard
+            </button>
+          )}
           <span className="browser-tools-sep" aria-hidden="true" />
           <button
             type="button"
@@ -651,15 +784,44 @@ export function BrowserPreview({
       )}
 
       <div className="browser-preview-stage" ref={stageRef}>
+        {mobile && interactive && (
+          <textarea
+            ref={keyboardRef}
+            className="browser-keyboard"
+            aria-label="Type into the Vendoo draft"
+            defaultValue={KEYBOARD_REST}
+            rows={1}
+            autoCapitalize="none"
+            autoCorrect="off"
+            autoComplete="off"
+            spellCheck={false}
+            onFocus={() => {
+              restKeyboard();
+              setKeyboardOpen(true);
+            }}
+            onBlur={() => setKeyboardOpen(false)}
+            onInput={(event) => handleTyped(event.currentTarget)}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={(event) => {
+              composing.current = false;
+              handleTyped(event.currentTarget);
+            }}
+          />
+        )}
         {frame ? (
           <div
             ref={surfaceRef}
             className={`browser-surface tool-${tool}${controlsEnabled ? " is-interactive" : ""}`}
             style={surfaceSize ? { width: surfaceSize.width, height: surfaceSize.height } : undefined}
-            tabIndex={controlsEnabled ? 0 : -1}
+            // On a phone the hidden keyboard box owns focus, so the picture must not take it.
+            tabIndex={mobile ? undefined : controlsEnabled ? 0 : -1}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+            onMouseDown={(event) => mobile && event.preventDefault()}
             onPointerLeave={() => setHovered(null)}
             onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}

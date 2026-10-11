@@ -702,6 +702,7 @@ async function handleStudioMessage(msg) {
     case 'browser.open':
     case 'browser.close':
     case 'browser.input':
+    case 'browser.viewport':
     case 'browser.pick':
     case 'browser.snapshot':
     case 'browser.act':

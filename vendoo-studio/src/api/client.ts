@@ -144,7 +144,7 @@ export interface BrowserField {
 }
 
 export interface BrowserInputEvent {
-  kind: "mouse" | "key" | "text";
+  kind: "mouse" | "touch" | "key" | "text";
   type?: string;
   x_ratio?: number;
   y_ratio?: number;
@@ -534,6 +534,11 @@ export const api = {
         request<{ sent: boolean }>(`/jobs/${id}/browser/input`, {
           method: "POST",
           body: JSON.stringify({ events }),
+        }),
+      viewport: (id: string, viewport: { width: number; height: number; scale: number }) =>
+        request<{ sent: boolean }>(`/jobs/${id}/browser/viewport`, {
+          method: "POST",
+          body: JSON.stringify(viewport),
         }),
       pick: (id: string, xRatio: number, yRatio: number) =>
         request<{ ok: boolean; viewport: BrowserViewport; field: BrowserField | null; element: { text: string; danger: boolean } | null }>(

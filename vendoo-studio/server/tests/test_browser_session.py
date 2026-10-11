@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -120,6 +121,37 @@ class BrowserRouteTest(unittest.TestCase):
         self.assertEqual(response.json(), {"sent": True})
         self.assertEqual(connection.sent[0]["type"], "browser.input")
         self.assertEqual(connection.sent[0]["payload"]["events"][0]["key"], "Enter")
+
+    def test_touch_is_forwarded_and_counts_as_taking_over(self):
+        from vendoo_studio.services import browser_bridge
+
+        connection = self.connect({"ok": True})
+        before = time.monotonic()
+        moved = [{"kind": "touch", "type": "touchMove", "x_ratio": 0.5, "y_ratio": 0.5}]
+        self.client.post(f"/api/jobs/{self.job_id}/browser/input", json={"events": moved})
+        self.assertFalse(browser_bridge.human_input_since(self.job_id, before))
+        pressed = [{"kind": "touch", "type": "touchStart", "x_ratio": 0.5, "y_ratio": 0.5}]
+        response = self.client.post(f"/api/jobs/{self.job_id}/browser/input", json={"events": pressed})
+        self.assertEqual(response.json(), {"sent": True})
+        self.assertEqual(connection.sent[-1]["payload"]["events"][0]["type"], "touchStart")
+        self.assertTrue(browser_bridge.human_input_since(self.job_id, before))
+
+    def test_phone_viewport_is_forwarded(self):
+        connection = self.connect({"ok": True})
+        response = self.client.post(
+            f"/api/jobs/{self.job_id}/browser/viewport", json={"width": 390, "height": 640, "scale": 2},
+        )
+        self.assertEqual(response.json(), {"sent": True})
+        self.assertEqual(connection.sent[0]["type"], "browser.viewport")
+        self.assertEqual(connection.sent[0]["payload"]["width"], 390)
+        self.assertEqual(connection.sent[0]["payload"]["height"], 640)
+
+    def test_phone_viewport_is_bounded(self):
+        self.connect({"ok": True})
+        for body in ({"width": 100, "height": 640}, {"width": 390, "height": 9000}, {"width": 390, "height": 640, "scale": 8}):
+            response = self.client.post(f"/api/jobs/{self.job_id}/browser/viewport", json=body)
+            self.assertEqual(response.status_code, 422)
+
 
 class BrowserResultOverWebSocketTest(unittest.TestCase):
     def test_browser_result_resolves_pending_request(self):

@@ -22,6 +22,7 @@ class MessageType(str, enum.Enum):
     BROWSER_OPEN = "browser.open"
     BROWSER_CLOSE = "browser.close"
     BROWSER_INPUT = "browser.input"
+    BROWSER_VIEWPORT = "browser.viewport"
     BROWSER_PICK = "browser.pick"
     BROWSER_SNAPSHOT = "browser.snapshot"
     BROWSER_ACT = "browser.act"

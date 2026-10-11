@@ -20,7 +20,7 @@ class OpenRequest(BaseModel):
 
 
 class InputEvent(BaseModel):
-    kind: Literal["mouse", "key", "text"]
+    kind: Literal["mouse", "touch", "key", "text"]
     type: str | None = Field(default=None, max_length=20)
     x_ratio: float | None = Field(default=None, ge=0, le=1)
     y_ratio: float | None = Field(default=None, ge=0, le=1)
@@ -37,6 +37,14 @@ class InputEvent(BaseModel):
 
 class InputRequest(BaseModel):
     events: list[InputEvent] = Field(max_length=40)
+
+
+class ViewportRequest(BaseModel):
+    """The pane's size on a phone, in CSS pixels. Chrome lays the draft out to match."""
+
+    width: int = Field(ge=240, le=1024)
+    height: int = Field(ge=240, le=2000)
+    scale: float = Field(default=1, ge=1, le=3)
 
 
 class PickRequest(BaseModel):
@@ -92,6 +100,12 @@ async def browser_input(job_id: str, body: InputRequest, db: Session = Depends(g
     job = _job(db, job_id)
     events = [event.model_dump(exclude_none=True) for event in body.events]
     return {"sent": await browser_bridge.send_input(job, events)}
+
+
+@router.post("/viewport")
+async def browser_viewport(job_id: str, body: ViewportRequest, db: Session = Depends(get_db)):
+    job = _job(db, job_id)
+    return {"sent": await browser_bridge.send_viewport(job, body.model_dump())}
 
 
 @router.post("/pick")

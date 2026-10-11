@@ -379,6 +379,7 @@
 }
 
 .browser-preview-stage {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -403,6 +404,27 @@
   max-height: 100%;
   outline: none;
   touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Out of sight but focusable, so a phone opens its keyboard for it. 16px keeps
+   iOS from zooming the page when it takes focus. */
+.browser-keyboard {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  opacity: 0;
+  font-size: 16px;
+  pointer-events: none;
 }
 
 .browser-surface.is-interactive:focus-visible {
