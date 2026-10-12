@@ -151,6 +151,19 @@ describe("staleness", () => {
     ]);
   });
 
+  it("ages a listing from its oldest live marketplace", () => {
+    const bulkRelisted = {
+      ...tee,
+      vendoo_listed_at: "2026-09-18T00:00:00Z",
+      vendoo_marketplaces: ["ebay", "sellwild"],
+      vendoo_listed_dates: { ebay: "2026-01-05T00:00:00Z", sellwild: "2026-09-18T00:00:00Z" },
+    };
+    expect(isStale(bulkRelisted, 90, now)).toBe(true);
+    // A marketplace the item sold on is finished; only live copies age it.
+    const soldOnEbay = { ...bulkRelisted, vendoo_sold_dates: { ebay: "2026-02-01T00:00:00Z" } };
+    expect(isStale(soldOnEbay, 90, now)).toBe(false);
+  });
+
   it("counts the staleness cutoff as a filter", () => {
     expect(activeFilterCount(withFilters({ staleDays: 60 }))).toBe(1);
   });

@@ -668,6 +668,32 @@ def vendoo_dates(item: dict | None, form: dict | None = None) -> dict[str, Any]:
     }
 
 
+def oldest_live_listed_at(notes: dict[str, Any]) -> str:
+    """When the longest-standing live listing went up, as an ISO string.
+
+    An item is only as fresh as its stalest live listing: a new Sellwild
+    listing says nothing about the copy that has sat on eBay for 90 days. A
+    sold marketplace is finished and a delisted one has no copy to age, so
+    neither counts. An item with no per-marketplace dates falls back to the
+    item-wide listing date.
+    """
+    from datetime import datetime
+
+    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
+    listed_by = dates.get("listedByMarketplace") if isinstance(dates.get("listedByMarketplace"), dict) else {}
+    sold_by = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
+    live = notes.get("vendooMarketplaces") if isinstance(notes.get("vendooMarketplaces"), list) else []
+    stamps = [
+        _as_iso(listed_by[market])
+        for market in live
+        if listed_by.get(market) and not sold_by.get(market)
+    ]
+    stamps = [stamp for stamp in stamps if stamp]
+    if stamps:
+        return min(stamps, key=datetime.fromisoformat)
+    return str(dates.get("listed") or "")
+
+
 def _sale_price(entry: Any) -> float:
     """``price_sold`` off a sale record or a listing's sale, as a number."""
     if not isinstance(entry, dict):

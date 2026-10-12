@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.conversation import Photo
 from vendoo_studio.models.listing import Listing
 from vendoo_studio.repositories.queries import BUSY_LISTING_STATUSES, ConversationRepo
-from vendoo_studio.services.vendoo_import import parse_notes
+from vendoo_studio.services.vendoo_import import oldest_live_listed_at, parse_notes
 
 MAX_SUGGESTIONS = 20
 STALE_MIN_DAYS = 60
@@ -176,8 +176,7 @@ def _marketplaces(notes: dict[str, Any]) -> list[str]:
 
 
 def _listed_days_ago(notes: dict[str, Any], now: datetime) -> int | None:
-    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
-    text = str(dates.get("listed") or "").strip()
+    text = oldest_live_listed_at(notes).strip()
     if not text:
         return None
     try:
