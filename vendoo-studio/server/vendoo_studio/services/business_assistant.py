@@ -113,6 +113,9 @@ TABLES = {
     "sale_events": EVENT_COLUMNS,
 }
 _RANGE_LABELS = {
+    "wtd": "this week so far (Monday to now)",
+    "mtd": "this month so far",
+    "ytd": "this year so far",
     "7d": "last 7 days",
     "30d": "last 30 days",
     "90d": "last 90 days",
