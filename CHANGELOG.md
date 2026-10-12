@@ -6,6 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.235 — 2026-10-12
+
+- Sourcing's selling fees now follow your own sales. Once you have 30 recorded sales in the past year, the fee rate is what those sales actually paid, and it updates itself on every check. Typing a rate yourself switches this off; tick "From your recent sales" to turn it back on.
+- The share of pieces you plan to sell now follows the sell-through rate Analytics shows for your last 12 months, once you have 30 sales. Typing a percentage yourself switches this off.
+- Sourcing has a new "Most to pay per piece" limit under More options. A box is left out when its price plus shipping, divided by the pieces you can sell, is above it. Leave it empty for no limit.
+- Sourcing's estimates are now checked against what you actually sell for. When your own sales of a kind of piece ran lower than the marketplace listings (yours: about half), marketplace prices are scaled down to match, and the page says so. Prices taken from your own sales are never scaled.
+- Cost per piece is now charged on the pieces you plan to sell, in the plan and in the lower-sales test alike. Before, the plan charged it on every usable piece and the test only on sold ones, so the two disagreed. Break-even sales follow the same rule.
+- Mixed-clothing and accessories boxes, which can't be searched piece by piece, are now priced from what your own sales of any kind sold for in the last 90 days.
+- Each kind of piece uses its own sell-through from your sales and listings (blended toward your overall rate until there are 10 pieces), and Studio can recommend more than one box of a kind while the planned sales fit your monthly pace less the pieces you already have listed. Boxes of a kind you already hold plenty of are labelled as such.
+- Sourcing researches more kinds of box per check (60) and starts with the kinds that unlock the most boxes.
+
 ## 0.1.234 — 2026-10-12
 
 - Regenerating from the sidebar now opens a review first: each listing's photos (drag to reorder), SKU, COG, labels and measurements, filled in from what is saved, so you can check and fix them before anything is rewritten.
@@ -38,14 +49,6 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 - Fixed Studio on a Mac re-checking every piece of the interface with the server each time it opened, instead of keeping what it already had.
 - Sourcing finds sold prices again. It was getting none, because the AI search it relied on is blocked by eBay and Mercari. Prices now come from your own sales first, then eBay sold listings read through your connected Chrome, then Poshmark sold listings. Each box shows which of those its price came from.
 - Sourcing asks for three things up front: budget, ZIP and minimum return. The selling window, your selling assumptions and Raghouse VIP moved under "More options", with shorter labels.
-- Sourcing's selling fees now follow your own sales. Once you have 30 recorded sales in the past year, the fee rate is what those sales actually paid, and it updates itself on every check. Typing a rate yourself switches this off; tick "From your recent sales" to turn it back on.
-- The share of pieces you plan to sell now follows the sell-through rate Analytics shows for your last 12 months, once you have 30 sales. Typing a percentage yourself switches this off.
-- Sourcing has a new "Most to pay per piece" limit under More options. A box is left out when its price plus shipping, divided by the pieces you can sell, is above it. Leave it empty for no limit.
-- Sourcing's estimates are now checked against what you actually sell for. When your own sales of a kind of piece ran lower than the marketplace listings (yours: about half), marketplace prices are scaled down to match, and the page says so. Prices taken from your own sales are never scaled.
-- Cost per piece is now charged on the pieces you plan to sell, in the plan and in the lower-sales test alike. Before, the plan charged it on every usable piece and the test only on sold ones, so the two disagreed. Break-even sales follow the same rule.
-- Mixed-clothing and accessories boxes, which can't be searched piece by piece, are now priced from what your own sales of any kind sold for in the last 90 days.
-- Each kind of piece uses its own sell-through from your sales and listings (blended toward your overall rate until there are 10 pieces), and Studio can recommend more than one box of a kind while the planned sales fit your monthly pace less the pieces you already have listed. Boxes of a kind you already hold plenty of are labelled as such.
-- Sourcing researches more kinds of box per check (60) and starts with the kinds that unlock the most boxes.
 
 ## 0.1.227 — 2026-10-10
 
