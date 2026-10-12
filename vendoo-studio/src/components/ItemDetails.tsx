@@ -70,12 +70,12 @@ const DEFAULTS: ItemDetailsData = {
   vendooLabels: "",
   poshmarkOriginalPrice: "0",
   garment: "top",
-  measurements: { top: {}, pants: {} },
+  measurements: { top: {}, pants: {}, skirt: {} },
 };
 
 function parseMeasurements(raw: unknown): Measurements {
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const out: Measurements = { top: {}, pants: {} };
+  const out: Measurements = { top: {}, pants: {}, skirt: {} };
   for (const garment of GARMENTS) {
     // Listings saved before shorts folded into pants kept a separate shorts set.
     const values = source[garment.id] ?? (garment.id === "pants" ? source.shorts : undefined);

@@ -5,12 +5,21 @@ describe("guessGarment", () => {
   it("reads pants from the folder name and defaults to a top", () => {
     expect(guessGarment("Levi's 505 Jeans")).toBe("pants");
     expect(guessGarment("nike shorts 2")).toBe("pants");
+    expect(guessGarment("pleated midi skirt")).toBe("skirt");
     expect(guessGarment("Harley tee")).toBe("top");
     expect(guessGarment("Jeanswear logo hoodie")).toBe("top");
   });
 });
 
 describe("typedMeasurements", () => {
+  it("keeps a skirt's waist, hip and length", () => {
+    expect(typedMeasurements("skirt", { waist: "14", hip: "19", length: "22", sleeve: "9" })).toEqual({
+      waist: "14",
+      hip: "19",
+      length: "22",
+    });
+  });
+
   it("keeps the garment's own filled fields only", () => {
     expect(typedMeasurements("top", { pitToPit: " 22.5 ", length: "", waist: "16" })).toEqual({ pitToPit: "22.5" });
   });

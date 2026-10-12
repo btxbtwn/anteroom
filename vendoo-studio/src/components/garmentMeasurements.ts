@@ -1,4 +1,4 @@
-export type Garment = "top" | "pants";
+export type Garment = "top" | "pants" | "skirt";
 
 export interface MeasurementField {
   key: string;
@@ -28,6 +28,15 @@ export const GARMENTS: { id: Garment; label: string; fields: MeasurementField[] 
       { key: "legOpening", label: "Leg Opening", placeholder: "8" },
     ],
   },
+  {
+    id: "skirt",
+    label: "Skirt",
+    fields: [
+      { key: "waist", label: "Waist", placeholder: "14" },
+      { key: "hip", label: "Hip", placeholder: "19" },
+      { key: "length", label: "Length", placeholder: "22" },
+    ],
+  },
 ];
 
 export type Measurements = Record<Garment, Record<string, string>>;
@@ -38,8 +47,11 @@ export function garmentFields(garment: Garment): MeasurementField[] {
 
 const PANTS_WORDS = /\b(pants|jeans|shorts|trousers|slacks|chinos|cargos?|joggers|sweatpants|leggings|overalls)\b/i;
 
-/** A folder called "Levi's 505 jeans" is measured as pants; anything else starts as a top. */
+const SKIRT_WORDS = /\b(skirts?|skorts?)\b/i;
+
+/** A folder called "Levi's 505 jeans" is measured as pants, "pleated skirt" as a skirt; anything else starts as a top. */
 export function guessGarment(title: string): Garment {
+  if (SKIRT_WORDS.test(title)) return "skirt";
   return PANTS_WORDS.test(title) ? "pants" : "top";
 }
 
