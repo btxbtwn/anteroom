@@ -41,11 +41,18 @@ REFRESH_INTERVAL = timedelta(hours=6)
 TREND_MAX_AGE = timedelta(days=7)
 RESALE_MAX_AGE = timedelta(days=7)
 RESEARCH_RETRY = timedelta(days=1)  # before searching again for a theme the marketplaces could not price
-RESEARCH_THEMES = 40  # themes searched per refresh at most
+RESEARCH_THEMES = 60  # themes searched per refresh at most
 RESEARCH_PAUSE_SEC = 1  # between Poshmark searches
 MODEL_TIMEOUT_SEC = 240
 ZONE_CHART_MAX_AGE = timedelta(days=30)
 RECENT_ZIPS = 4
+MEASURED_MIN_SALES = 30  # recorded sales in MEASURED_WINDOW before the seller's own rates replace the settings
+MEASURED_WINDOW = timedelta(days=365)
+THEME_MIN_ITEMS = 10  # the seller's own sold and listed pieces of a theme before its sell-through is its own
+THEME_PRIOR = 10  # pieces of the seller's overall rate blended into a theme's own
+CAPACITY_MIN = 15  # planned sales a theme can take on, however slow the seller's recent pace
+HAIRCUT_MIN_THEMES = 3  # themes priced both ways before marketplace prices are scaled to the seller's own
+HAIRCUT_RANGE = (0.25, 1.0)
 # Bump when the snapshot's shape changes: a snapshot written by another build is
 # a stale cache, dropped and rebuilt rather than served to a page that cannot
 # read it.
@@ -53,12 +60,12 @@ SNAPSHOT_FORMAT = 4
 
 DEFAULT_PREFS = {
     "budget": 300.0, "min_roi": 1.0, "raghouse_vip": False, "zip": "70115", "recent_zips": ["70115"],
-    "sell_through": 0.5, "fees": 0.2,
-    "cost_per_piece": 2.0,
+    "sell_through": 0.5, "sell_through_auto": True, "fees": 0.2, "fees_auto": True,
+    "cost_per_piece": 2.0, "max_cog_per_piece": 0.0,
     "ready_in_weeks": 4, "selling_window_weeks": 4,
 }
 PLAN_PREFS = ("budget", "min_roi", "raghouse_vip", "zip", "sell_through", "fees", "cost_per_piece",
-              "ready_in_weeks", "selling_window_weeks")
+              "max_cog_per_piece", "ready_in_weeks", "selling_window_weeks")
 
 TRENDS_PROMPT = (
     "You track what secondhand and vintage clothing sells fastest on eBay, Poshmark, Depop "
@@ -155,8 +162,11 @@ def set_prefs(
     raghouse_vip: bool | None = None,
     zip: str | None = None,
     sell_through: float | None = None,
+    sell_through_auto: bool | None = None,
     fees: float | None = None,
+    fees_auto: bool | None = None,
     cost_per_piece: float | None = None,
+    max_cog_per_piece: float | None = None,
     ready_in_weeks: int | None = None,
     selling_window_weeks: int | None = None,
 ) -> dict:
@@ -164,7 +174,8 @@ def set_prefs(
         state = read_state()
         prefs = state["prefs"]
         for name, value in (("budget", budget), ("min_roi", min_roi), ("sell_through", sell_through),
-                            ("fees", fees), ("cost_per_piece", cost_per_piece)):
+                            ("fees", fees), ("cost_per_piece", cost_per_piece),
+                            ("max_cog_per_piece", max_cog_per_piece)):
             if value is not None and (not math.isfinite(value) or
                                      (value <= 0 if name in {"budget", "sell_through"} else value < 0) or
                                      (name == "sell_through" and value > 1) or (name == "fees" and value >= 1)):
@@ -190,10 +201,19 @@ def set_prefs(
             prefs["raghouse_vip"] = bool(raghouse_vip)
         if sell_through is not None:
             prefs["sell_through"] = float(sell_through)
+            prefs["sell_through_auto"] = False if sell_through_auto is None else bool(sell_through_auto)
+        elif sell_through_auto is not None:
+            prefs["sell_through_auto"] = bool(sell_through_auto)
         if fees is not None:
             prefs["fees"] = float(fees)
+            # Typing a rate takes over from the measured one, unless the caller says otherwise.
+            prefs["fees_auto"] = False if fees_auto is None else bool(fees_auto)
+        elif fees_auto is not None:
+            prefs["fees_auto"] = bool(fees_auto)
         if cost_per_piece is not None:
             prefs["cost_per_piece"] = float(cost_per_piece)
+        if max_cog_per_piece is not None:
+            prefs["max_cog_per_piece"] = float(max_cog_per_piece)
         _write_state(state)
         return prefs
 
@@ -340,10 +360,14 @@ def _fresh_research(state: dict, now: datetime, own: dict[str, list[dict]]) -> d
     for name in set(state["resale"]) | set(own):
         entry = _cached_research(state, name, now, RESALE_MAX_AGE)
         if entry:
-            entry = {**entry, **{key: [c for c in entry.get(key) or [] if isinstance(c, dict) and not scout().sale_mismatch(
-                name, str(c.get("title") or ""), str(c.get("snippet") or ""))] for key in ("comps", "active")}}
+            entry = _fitting(name, entry)
         if priced := price_evidence(entry or {}, own.get(name, []), now=now):
             fresh[name] = {**(entry or {"updated_at": now.isoformat()}), **priced}
+            haircut = (state.get("market_haircut") or {}).get("factor")
+            # Prices that came, in whole or part, from the seller's own sales are already theirs.
+            if haircut and OWN_SOURCE not in priced["source"]:
+                fresh[name]["per_piece"] = round(priced["per_piece"] * haircut, 2)
+                fresh[name]["low"] = round(priced["low"] * haircut, 2)
     return fresh
 
 
@@ -436,6 +460,147 @@ def _own_sales() -> list[AnalyticsItem]:
         db.close()
 
 
+def measured_fees(sales: list[AnalyticsItem], now: datetime) -> dict | None:
+    """The share of revenue the seller's recent sales paid in marketplace and
+    payment fees, once there are enough of them to trust."""
+    recent = [item for item in sales if item.fees is not None and item.sold_at is not None
+              and (item.sold_at if item.sold_at.tzinfo else item.sold_at.replace(tzinfo=UTC)) >= now - MEASURED_WINDOW]
+    if len(recent) < MEASURED_MIN_SALES:
+        return None
+    revenue = sum(item.sold_price for item in recent)
+    if revenue <= 0:
+        return None
+    return {"rate": round(min(0.5, max(0.0, sum(item.fees for item in recent) / revenue)), 3), "sales": len(recent)}
+
+
+def measured_sell_through(rows: list[AnalyticsItem], now: datetime) -> dict | None:
+    """The sell-through rate the Analytics page shows for the last 12 months:
+    sales in the period against sales plus what is still listed."""
+    from vendoo_studio.services.inventory_analytics import summarize
+
+    payload = summarize(rows, range_id="12m", now=now)
+    sales = payload["sales"]["count"]
+    rate = payload["sell_through_rate"]
+    if sales < MEASURED_MIN_SALES or rate is None:
+        return None
+    return {"rate": round(min(1.0, max(0.05, rate / 100)), 3), "sales": sales}
+
+
+def _follow_measured(name: str, measured: dict | None) -> None:
+    """While a setting is on automatic, its saved value tracks the seller's own."""
+    with _state_lock:
+        state = read_state()
+        prefs = state["prefs"]
+        if measured and prefs[f"{name}_auto"] and prefs[name] != measured["rate"]:
+            prefs[name] = measured["rate"]
+            _write_state(state)
+
+
+def _own_rows() -> list[AnalyticsItem]:
+    """Every listing the seller has recorded, sold or not."""
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.services.inventory_analytics import load_rows
+
+    db = SessionLocal()
+    try:
+        return load_rows(db)
+    finally:
+        db.close()
+
+
+def theme_inventory(rows: list[AnalyticsItem], themes: set[str], now: datetime) -> dict[str, dict[str, int]]:
+    """Per theme, the seller's pieces of that kind sold in the last 12 months and
+    still listed now."""
+    s = scout()
+    counted = []
+    for item in rows:
+        if item.status == "active":
+            counted.append((item, False))
+        elif item.status == "sold" and item.sold_at is not None:
+            moment = item.sold_at if item.sold_at.tzinfo else item.sold_at.replace(tzinfo=UTC)
+            if moment >= now - MEASURED_WINDOW:
+                counted.append((item, True))
+    parts = [(sold, *s.theme_parts(item.title)) for item, sold in counted]
+    result = {}
+    for name in themes:
+        matching = [sold for sold, styles, garment in parts if s.theme_matches(name, styles, garment)]
+        result[name] = {"sold": sum(matching), "active": len(matching) - sum(matching)}
+    return result
+
+
+def theme_sell_through(inventory: dict[str, dict[str, int]], overall: float) -> dict[str, float]:
+    """Each theme's own sell-through, blended toward the seller's overall rate until
+    there are enough of its pieces to stand alone."""
+    rates = {}
+    for name, counts in inventory.items():
+        n = counts["sold"] + counts["active"]
+        if n >= THEME_MIN_ITEMS:
+            rates[name] = round(min(1.0, max(0.05, (counts["sold"] + THEME_PRIOR * overall) / (n + THEME_PRIOR))), 3)
+    return rates
+
+
+def theme_capacity(rows: list[AnalyticsItem], inventory: dict[str, dict[str, int]], now: datetime) -> dict[str, float] | None:
+    """Planned sales a theme can take on: the seller's monthly pace over the last
+    90 days, less the pieces of that kind they already hold. None without enough
+    history to know a pace."""
+    recent = [item for item in rows if item.status == "sold" and item.sold_at is not None
+              and (item.sold_at if item.sold_at.tzinfo else item.sold_at.replace(tzinfo=UTC)) >= now - timedelta(days=90)]
+    if len(recent) < MEASURED_MIN_SALES // 2:
+        return None
+    pace = max(CAPACITY_MIN, round(len(recent) / 3))
+    return {name: max(0, pace - counts["active"]) for name, counts in inventory.items()}
+
+
+def _fitting(name: str, entry: dict) -> dict:
+    """A cached theme entry with the listings that do not fit the theme dropped."""
+    return {**entry, **{key: [c for c in entry.get(key) or [] if isinstance(c, dict) and not scout().sale_mismatch(
+        name, str(c.get("title") or ""), str(c.get("snippet") or ""))] for key in ("comps", "active")}}
+
+
+def market_haircut(state: dict, now: datetime, own: dict[str, list[dict]]) -> dict | None:
+    """How the seller's own sold prices of the last 12 months compare with what the
+    marketplaces' sold listings said for the same themes: the median of own median /
+    marketplace median. Marketplace prices are scaled by it, never up."""
+    ratios = []
+    for name, comps in own.items():
+        mine = [c["price"] for c in comps
+                if 0 <= (now.date() - date.fromisoformat(c["sold_at"])).days <= MEASURED_WINDOW.days]
+        entry = _cached_research(state, name, now, RESALE_MAX_AGE)
+        if len(mine) < MIN_CONFIDENT_COMPS or not entry:
+            continue
+        market = price_evidence(_fitting(name, entry), [], now=now)
+        if market and market["per_piece"] > 0:
+            ratios.append(statistics.median(mine) / market["per_piece"])
+    if len(ratios) < HAIRCUT_MIN_THEMES:
+        return None
+    low, high = HAIRCUT_RANGE
+    return {"factor": round(min(high, max(low, statistics.median(ratios))), 2), "themes": len(ratios)}
+
+
+def all_sales_price(sales: list[AnalyticsItem], now: datetime) -> dict | None:
+    """What a piece of any kind sold for lately: the price of a mixed box, whose
+    contents no single-garment search can price."""
+    recent = [item for item in sales if item.sold_at is not None
+              and 0 <= (now.date() - item.sold_at.date()).days <= 90 and 1 <= item.sold_price <= 500]
+    if len(recent) < MEASURED_MIN_SALES:
+        return None
+    prices = sorted(float(item.sold_price) for item in recent)
+    median = statistics.median(prices)
+    low = prices[len(prices) // 5]
+    newest = sorted(recent, key=lambda item: item.sold_at, reverse=True)[:16]
+    return {
+        "per_piece": round(median, 2), "sold_median": round(median, 2), "active_median": None, "active": [],
+        "low": round(low, 2), "high": prices[-1], "source": f"{OWN_SOURCE} (all items)",
+        "updated_at": now.isoformat(),
+        "comps": [{
+            "url": "", "conversation_id": item.conversation_id, "title": item.title[:200],
+            "sold_at": item.sold_at.date().isoformat(), "price": float(item.sold_price),
+            "marketplace": item.marketplace, "currency": "USD",
+            "snippet": f"Your sale on {item.marketplace}, recorded in Studio.",
+        } for item in newest],
+    }
+
+
 def own_evidence(sales: list[AnalyticsItem], themes: set[str]) -> dict[str, list[dict]]:
     """The seller's own sales that sold the kind of piece each theme names, newest
     first, as comps alongside the web's. A sale matches a theme when it is the same
@@ -465,6 +630,8 @@ def evidence(theme: str) -> dict | None:
     state = read_state()
     own = own_evidence(_own_sales(), {theme})
     entry = _fresh_research(state, _now(), own).get(theme)
+    if entry is None and sold_listings.search_query(theme) is None:
+        entry = state.get("all_sales_price")
     if entry is None:
         return None
     return {"theme": theme, **{key: entry.get(key) for key in (
@@ -507,6 +674,12 @@ def refresh(*, recrawl: bool = True, research: bool = True) -> dict:
 def _refresh(*, recrawl: bool, research: bool) -> dict:
     s = scout()
     now = _now()
+    sales = _own_sales()
+    own_rows = _own_rows()
+    fees_measured = measured_fees(sales, now)
+    sell_through_measured = measured_sell_through(own_rows, now)
+    _follow_measured("fees", fees_measured)
+    _follow_measured("sell_through", sell_through_measured)
     state = read_state()
     prefs = state["prefs"]
     errors: dict[str, str] = {}
@@ -545,10 +718,28 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
                         sell_through=prefs["sell_through"], fees=prefs["fees"], cost_per_piece=prefs["cost_per_piece"])
     calibration = _calibration()
     factors = {store: c["factor"] for store, c in calibration.items() if c["factor"] is not None}
-    own = own_evidence(_own_sales(), _lot_themes(catalogs))
-    fresh = _fresh_research(state, now, own)
-    baselines, all_rows = s.score_lots(catalogs, cfg, zones, filters, {k: v["per_piece"] for k, v in fresh.items()}, factors,
-                                     resale_low={k: v["low"] for k, v in fresh.items()})
+    themes = _lot_themes(catalogs)
+    own = own_evidence(sales, themes)
+    inventory = theme_inventory(own_rows, themes, now)
+    own_rates = theme_sell_through(inventory, prefs["sell_through"]) if prefs["sell_through_auto"] else {}
+    capacity = theme_capacity(own_rows, inventory, now)
+    state["all_sales_price"] = all_sales_price(sales, now)
+
+    def price_boxes():
+        """Current prices, then every box scored with them. The haircut is read
+        from what is cached, so it is taken again after a research pass."""
+        state["market_haircut"] = market_haircut(state, now, own)
+        fresh = _fresh_research(state, now, own)
+        if state["all_sales_price"]:
+            for theme in themes:
+                if theme not in fresh and sold_listings.search_query(theme) is None:
+                    fresh[theme] = state["all_sales_price"]
+        baselines, all_rows = s.score_lots(
+            catalogs, cfg, zones, filters, {k: v["per_piece"] for k, v in fresh.items()}, factors,
+            resale_low={k: v["low"] for k, v in fresh.items()}, theme_sell_through=own_rates)
+        return fresh, baselines, all_rows
+
+    fresh, baselines, all_rows = price_boxes()
 
     if research:
         ebay_ready = sold_listings.ebay_ready()
@@ -558,14 +749,13 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
         for name, entry in _research_prices(missing, own, now).items():
             # A theme nothing was found for is kept too, so it waits RESEARCH_RETRY before the next search.
             state["resale"][name] = {**entry, "updated_at": now.isoformat()}
-        fresh = _fresh_research(state, now, own)
-        baselines, all_rows = s.score_lots(catalogs, cfg, zones, filters, {k: v["per_piece"] for k, v in fresh.items()}, factors,
-                                         resale_low={k: v["low"] for k, v in fresh.items()})
+        fresh, baselines, all_rows = price_boxes()
     rows = [r for r in all_rows if prefs["raghouse_vip"] or not r["vip"]]
 
     planning = {"budget": prefs["budget"], "min_roi": prefs["min_roi"],
                 "sell_through": prefs["sell_through"], "fees": prefs["fees"],
-                "cost_per_piece": prefs["cost_per_piece"]}
+                "cost_per_piece": prefs["cost_per_piece"], "max_cog_per_piece": prefs["max_cog_per_piece"],
+                "theme_capacity": capacity}
     plan = s.buy_list(rows, cfg, **planning)
     store_plans = {
         store: s.buy_list([r for r in rows if r["store"] == store], cfg, **planning)
@@ -610,6 +800,8 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
                      "calibration": shipping_calibration},
         "vip_upside": vip_upside,
         "assumptions": {"sell_through": prefs["sell_through"], "fees": prefs["fees"],
+                        "fees_measured": fees_measured, "sell_through_measured": sell_through_measured,
+                        "market_haircut": state["market_haircut"],
                         "grade_yield": s.GRADE_YIELD, "cost_per_piece": prefs["cost_per_piece"]},
         "buy_list": plan,
         "store_buy_lists": store_plans,

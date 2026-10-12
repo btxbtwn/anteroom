@@ -623,6 +623,7 @@ def score_lots(
     resale: dict[str, float] | None = None,
     resale_factor: dict[str, float] | None = None,
     *, resale_low: dict[str, float] | None = None,
+    theme_sell_through: dict[str, float] | None = None,
 ):
     """Return {store: baseline sell-out rate} and every in-stock lot passing `f`, ranked.
 
@@ -637,6 +638,7 @@ def score_lots(
     resale = resale or {}
     resale_low = resale_low or {}
     resale_factor = resale_factor or {}
+    theme_sell_through = theme_sell_through or {}
     baselines: dict[str, float] = {}
     rows = []
     for store, products in catalogs.items():
@@ -674,6 +676,9 @@ def score_lots(
                 "trend_hits": hits,
                 "resale_low": resale_low.get(lot["theme"], resale.get(lot["theme"])),
             }
+            own_rate = theme_sell_through.get(lot["theme"])
+            if own_rate is not None:
+                row["theme_sell_through"] = own_rate
             # Historical underperformance can reduce forecasts; it cannot lift
             # them above current comparable-sale/asking-price evidence.
             factor = min(1.0, resale_factor.get(store, 1.0))
@@ -682,7 +687,8 @@ def score_lots(
             if row["resale_low"] is not None:
                 row["resale_low"] = round(row["resale_low"] * factor, 2)
             rows.append(price_lot(row, ship, round(per_piece * factor, 2) if per_piece else per_piece,
-                                  sell_through=f.sell_through, fees=f.fees, cost_per_piece=f.cost_per_piece))
+                                  sell_through=row.get("theme_sell_through", f.sell_through),
+                                  fees=f.fees, cost_per_piece=f.cost_per_piece))
     for row in rows:
         boost = 1 + 0.25 * min(len(row["trend_hits"]), 2)
         if row["roi"] is not None:
@@ -701,7 +707,9 @@ def price_lot(
 ) -> dict:
     """Fill in landed cost and, when the theme has a resale price, profit and ROI."""
     landed = row["price"] + ship + row.get("checkout_fee", 0)
-    operating_cost = row["usable_pcs"] * cost_per_piece
+    # The allowance is charged on the pieces planned to sell, in the plan and in
+    # the lower-sales test alike, so the two tests price the same costs.
+    operating_cost = row["usable_pcs"] * sell_through * cost_per_piece
     row.update({
         "ship_est": round(ship, 2),
         "landed": round(landed, 2),
@@ -721,7 +729,8 @@ def price_lot(
         row["expected_revenue"] = round(revenue, 2)
         row["expected_profit"] = round(revenue - operating_cost - landed, 2)
         row["roi"] = round((revenue - operating_cost - landed) / landed, 2)
-        row["break_even_pcs"] = math.ceil((landed + operating_cost) / (per_piece * (1 - fees)))
+        margin = per_piece * (1 - fees) - cost_per_piece
+        row["break_even_pcs"] = math.ceil(landed / margin) if margin > 0 else None
         # Lower-sales test: half the planned pieces sell, at the lowest price seen.
         # The operating allowance is charged on the pieces that sell in that
         # scenario; charging it on pieces that never list or ship as well ruled
@@ -733,15 +742,17 @@ def price_lot(
 
 
 def research_themes(rows: list[dict], limit: int = 24) -> list[str]:
-    """Themes worth pricing, best demand first per store, shared evenly between stores."""
+    """Themes worth pricing, per store the one that unlocks the most boxes first
+    (best demand breaking ties), shared evenly between stores."""
     if limit <= 0:
         return []
-    best: dict[str, dict[str, float]] = {}
+    best: dict[str, dict[str, tuple[int, float]]] = {}
     for row in rows:
         weight = row["demand"] * (1 + 0.25 * min(len(row["trend_hits"]), 2))
         store = best.setdefault(row["store"], {})
-        store[row["theme"]] = max(store.get(row["theme"], 0.0), weight)
-    ranked = [[theme for theme, _ in sorted(themes.items(), key=lambda kv: -kv[1])]
+        boxes, top = store.get(row["theme"], (0, 0.0))
+        store[row["theme"]] = (boxes + 1, max(top, weight))
+    ranked = [[theme for theme, _ in sorted(themes.items(), key=lambda kv: (-kv[1][0], -kv[1][1]))]
               for themes in best.values()]
     result: list[str] = []
     # Alternate stores so a larger catalog cannot use the entire research allowance.
@@ -758,11 +769,19 @@ def buy_list(
     rows: list[dict], cfg: dict, *, budget: float, min_roi: float = 1.0,
     sell_through: float = BASE_SELL_THROUGH, fees: float = MARKETPLACE_FEES,
     cost_per_piece: float = OPERATING_COST_PER_PIECE,
+    max_cog_per_piece: float = 0.0,
+    theme_capacity: dict[str, float] | None = None,
 ) -> dict:
     """Prefer researched selling-window matches, then incremental return, within `budget`.
 
     Evaluate shipping on the complete proposed cart. Also consider two-lot
     bundles that unlock free shipping even when neither lot qualifies alone.
+    A positive `max_cog_per_piece` rules out any box whose landed cost per usable
+    piece, shipping included, is above it; 0 sets no limit.
+    Without `theme_capacity`, one box is taken per theme. With it, a theme maps to
+    the planned sales the seller can take on in it (pieces they already hold
+    counted out): the first box of a theme is always allowed while capacity is
+    left, and further boxes only while the theme's planned sales fit within it.
     This is a greedy recommendation, not an exhaustive portfolio optimizer:
     against the live catalogs it comes within 0.3% of the best combination
     on average, and it keeps the cheaper lot of a theme and the selling-window
@@ -780,11 +799,23 @@ def buy_list(
             and sum(p["price"] for p in proposed if p["store"] == store) >= threshold
         }
         return [price_lot(dict(p), 0.0 if p["store"] in free_stores else p["ship_est"],
-                          p["resale_per_pc"], sell_through=sell_through, fees=fees,
-                          cost_per_piece=cost_per_piece) for p in proposed]
+                          p["resale_per_pc"], sell_through=p.get("theme_sell_through", sell_through),
+                          fees=fees, cost_per_piece=cost_per_piece) for p in proposed]
+
+    def planned_sales(row: dict) -> float:
+        return row["usable_pcs"] * row.get("theme_sell_through", sell_through)
+
+    def fits(row: dict) -> bool:
+        """Whether the plan can take this box without overfilling its theme."""
+        if theme_capacity is None:
+            return row["theme"] not in seen
+        allowance = theme_capacity.get(row["theme"], math.inf)
+        used = sum(planned_sales(p) for p in picks if p["theme"] == row["theme"])
+        return allowance > 0 and (used == 0 or used + planned_sales(row) <= allowance)
 
     while True:
-        remaining = [r for r in priced if r["theme"] not in seen]
+        chosen = {(p["store"], p["variant_id"]) for p in picks}
+        remaining = [r for r in priced if (r["store"], r["variant_id"]) not in chosen and fits(r)]
         options = ([row] for row in remaining)
 
         def bundles():
@@ -806,7 +837,9 @@ def buy_list(
         for additions in chain(options, bundles()):
             candidate = evaluate(additions)
             total = round(sum(p["landed"] for p in candidate), 2)
-            if total > budget or any(p["roi"] < min_roi or p["downside_profit"] < 0 for p in candidate):
+            if total > budget or any(p["roi"] < min_roi or p["downside_profit"] < 0
+                                     or (max_cog_per_piece and p["cog_per_usable_pc"] > max_cog_per_piece)
+                                     for p in candidate):
                 continue
             profit = sum(p["expected_profit"] for p in candidate)
             extra_cost = total - current_total
@@ -855,12 +888,16 @@ def buy_list(
             continue
         if row["roi"] is None:
             reason = "needs_research"
-        elif row["theme"] in seen:
+        elif theme_capacity is not None and theme_capacity.get(row["theme"], math.inf) <= 0:
+            reason = "theme_stocked"
+        elif not fits(row):
             reason = "same_theme"
         else:
             candidate = evaluate([row])
             lot = candidate[-1]
-            if lot["roi"] < min_roi:
+            if max_cog_per_piece and lot["cog_per_usable_pc"] > max_cog_per_piece:
+                reason = "cog_cap"
+            elif lot["roi"] < min_roi:
                 reason = "return_target"
             elif lot["downside_profit"] < 0:
                 reason = "downside"
