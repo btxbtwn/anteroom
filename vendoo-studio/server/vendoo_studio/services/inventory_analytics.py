@@ -110,6 +110,7 @@ def inventory_analytics(
             list_entries(db),
             start=_window_start(range_id, clock),
             marketplace_revenue={row["id"]: row["revenue"] for row in payload["marketplaces"]},
+            marketplace_profit={row["id"]: row["profit"] for row in payload["marketplaces"]},
             profit=payload["sales"]["profit"],
         ),
         "last_updated_at": vendoo_inventory_synced_at(),

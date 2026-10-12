@@ -112,10 +112,13 @@ class AnalyticsAdMarketplace(BaseModel):
     cost_per_click: float | None
     sales_revenue: float
     spend_percent: float | None
+    profit: float | None
+    profit_after_ads: float | None
 
 
 class AnalyticsAds(BaseModel):
     spend: float
+    profit: float | None
     profit_after_ads: float | None
     marketplaces: list[AnalyticsAdMarketplace]
 

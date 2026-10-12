@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.241 — 2026-10-12
+
+- Marketing's profit-after-ads card now says what it is: your profit across every marketplace, less your ad spend, with both figures shown. Each marketplace's ad card also shows that marketplace's own profit after its ads.
+
 ## 0.1.240 — 2026-10-12
 
 - Analytics can now show sales for the week to date (from Monday), month to date and year to date, alongside the rolling 7, 30 and 90 day views.

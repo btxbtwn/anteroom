@@ -45,7 +45,7 @@ const data: InventoryAnalytics = {
     label: "Over 3 months", count: 1, asking_value: 60,
     listings: [{ conversation_id: "old-stock", title: "Older jacket", price: 60, days_listed: 110 }],
   }],
-  ads: { spend: 0, profit_after_ads: 50, marketplaces: [] },
+  ads: { spend: 0, profit: 50, profit_after_ads: 50, marketplaces: [] },
 };
 
 function render(

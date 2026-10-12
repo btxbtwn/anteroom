@@ -76,13 +76,16 @@ def summarize_ads(
     *,
     start: datetime | None,
     marketplace_revenue: dict[str, float],
+    marketplace_profit: dict[str, float | None],
     profit: float | None,
 ) -> dict[str, Any]:
     """Ad totals for the range beginning ``start`` (None for all time).
 
     ``marketplace_revenue`` is each marketplace's recorded sales revenue in the
     same range, so spend can be read as a share of everything that sold there,
-    not only the sales the dashboard credits to the ads.
+    not only the sales the dashboard credits to the ads. ``marketplace_profit``
+    is the same per marketplace (None where no sale there has a cost recorded),
+    and ``profit`` the total across every marketplace, ads or not.
     """
     first = start.date() if start is not None else None
     totals = {market: _empty() for market in AD_MARKETPLACES}
@@ -98,13 +101,16 @@ def summarize_ads(
             if value is not None:
                 bucket[key] = (bucket[key] or 0.0) + value * share
     markets = [
-        _market_view(market, bucket, marketplace_revenue.get(market, 0.0))
+        _market_view(
+            market, bucket, marketplace_revenue.get(market, 0.0), marketplace_profit.get(market),
+        )
         for market, bucket in totals.items()
         if bucket["entries"]
     ]
     spend = sum(market["spend"] for market in markets)
     return {
         "spend": _money(spend),
+        "profit": _money(profit) if profit is not None else None,
         "profit_after_ads": _money(profit - spend) if profit is not None else None,
         "marketplaces": markets,
     }
@@ -124,7 +130,9 @@ def _empty() -> dict[str, Any]:
     return {"entries": 0, "spend": 0.0, "clicks": None, "orders": None, "revenue": None}
 
 
-def _market_view(market: str, bucket: dict[str, Any], sales_revenue: float) -> dict[str, Any]:
+def _market_view(
+    market: str, bucket: dict[str, Any], sales_revenue: float, profit: float | None,
+) -> dict[str, Any]:
     spend = bucket["spend"]
     return {
         "id": market,
@@ -137,6 +145,8 @@ def _market_view(market: str, bucket: dict[str, Any], sales_revenue: float) -> d
         "cost_per_click": _ratio(spend, bucket["clicks"]),
         "sales_revenue": _money(sales_revenue),
         "spend_percent": round(spend / sales_revenue * 100, 1) if sales_revenue else None,
+        "profit": _money(profit) if profit is not None else None,
+        "profit_after_ads": _money(profit - spend) if profit is not None else None,
     }
 
 

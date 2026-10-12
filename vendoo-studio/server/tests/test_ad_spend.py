@@ -24,23 +24,28 @@ def entry(market="poshmark", start=date(2026, 9, 1), end=date(2026, 9, 10), spen
 def test_all_time_counts_every_entry_and_reads_the_dashboard_figures():
     ads = summarize_ads(
         [entry(clicks=100, orders=2, revenue=150), entry("etsy", spend=20)],
-        start=None, marketplace_revenue={"poshmark": 500.0}, profit=300.0,
+        start=None, marketplace_revenue={"poshmark": 500.0},
+        marketplace_profit={"poshmark": 200.0}, profit=300.0,
     )
     assert ads["spend"] == 70
+    assert ads["profit"] == 300
     assert ads["profit_after_ads"] == 230
     posh, etsy = ads["marketplaces"]
     assert posh == {"id": "poshmark", "entries": 1, "spend": 50, "clicks": 100, "orders": 2,
                     "revenue": 150, "roas": 3.0, "cost_per_click": 0.5,
-                    "sales_revenue": 500, "spend_percent": 10.0}
+                    "sales_revenue": 500, "spend_percent": 10.0,
+                    "profit": 200, "profit_after_ads": 150}
     # Figures the seller left blank stay unknown rather than reading as zero.
     assert etsy["revenue"] is None and etsy["roas"] is None and etsy["cost_per_click"] is None
     assert etsy["spend_percent"] is None
+    # No Etsy sale has a cost recorded, so there is no Etsy profit to subtract from.
+    assert etsy["profit"] is None and etsy["profit_after_ads"] is None
 
 
 def test_a_range_carries_only_the_days_it_covers():
     ads = summarize_ads(
         [entry(spend=100, revenue=40), entry(start=date(2026, 8, 1), end=date(2026, 8, 31))],
-        start=datetime(2026, 9, 7, tzinfo=UTC), marketplace_revenue={}, profit=None,
+        start=datetime(2026, 9, 7, tzinfo=UTC), marketplace_revenue={}, marketplace_profit={}, profit=None,
     )
     # Four of the ten days fall in the range; the August entry falls outside it.
     assert ads["spend"] == 40
@@ -50,8 +55,10 @@ def test_a_range_carries_only_the_days_it_covers():
 
 
 def test_no_entries_reports_no_marketplaces():
-    assert summarize_ads([], start=None, marketplace_revenue={}, profit=10.0) == {
-        "spend": 0, "profit_after_ads": 10, "marketplaces": [],
+    assert summarize_ads(
+        [], start=None, marketplace_revenue={}, marketplace_profit={}, profit=10.0,
+    ) == {
+        "spend": 0, "profit": 10, "profit_after_ads": 10, "marketplaces": [],
     }
 
 
