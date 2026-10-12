@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -72,6 +72,28 @@ class SummarizeAnalyticsTest(unittest.TestCase):
                      "missing": ["sale date", "sale price", "cost", "fees", "marketplace"]},
                     {"conversation_id": "old", "title": "B boots", "missing": ["cost"]},
                 ])
+
+    def test_custom_range_covers_whole_days_and_compares_with_the_span_before(self):
+        items = [
+            _item(conversation_id="in-end", sold_at=datetime(2026, 9, 10, 23, 30, tzinfo=UTC)),
+            _item(conversation_id="in-start", sold_at=datetime(2026, 9, 5, 0, 0, tzinfo=UTC)),
+            _item(conversation_id="after", sold_at=datetime(2026, 9, 11, 0, 0, tzinfo=UTC)),
+            _item(conversation_id="before", sold_at=datetime(2026, 9, 4, 23, 59, tzinfo=UTC)),
+        ]
+        payload = summarize(
+            items, range_id="custom", now=NOW, start=date(2026, 9, 5), end=date(2026, 9, 10),
+        )
+        self.assertEqual(payload["sales"]["count"], 2)
+        self.assertEqual([row["label"] for row in payload["periods"]][:2], ["9/5", "9/6"])
+        self.assertEqual(len(payload["periods"]), 6)
+        self.assertEqual(payload["previous"]["sales"]["count"], 1)
+
+    def test_long_custom_range_uses_month_buckets_and_stops_at_today(self):
+        payload = summarize(
+            [_item()], range_id="custom", now=NOW, start=date(2026, 6, 15), end=date(2026, 12, 31),
+        )
+        self.assertEqual([row["label"] for row in payload["periods"]], ["Jun", "Jul", "Aug", "Sep"])
+        self.assertEqual(payload["sales"]["count"], 1)
 
     def test_seven_days_has_daily_buckets_and_previous_week_comparison(self):
         start = NOW - timedelta(days=7)

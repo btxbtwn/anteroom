@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import statistics
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 ANALYTICS_RANGES = ("wtd", "mtd", "ytd", "7d", "30d", "90d", "12m", "all")
 _RECENT = 8
 _MAX_MONTHS = 18
+_MAX_DAILY_DAYS = 31
 _MONTHS = (
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -87,12 +88,18 @@ def inventory_analytics(
     range_id: str = "12m",
     now: datetime | None = None,
     rows: list[AnalyticsItem] | None = None,
+    start: date | None = None,
+    end: date | None = None,
 ) -> dict[str, Any]:
-    """Totals for ``range_id`` (``wtd``, ``mtd``, ``ytd``, ``7d``, ``30d``, ``90d``, ``12m``, or ``all``).
+    """Totals for ``range_id`` (``wtd``, ``mtd``, ``ytd``, ``7d``, ``30d``, ``90d``, ``12m``, ``all``, or ``custom``).
 
     ``rows`` lets a caller that wants several ranges load the listings once.
+    ``custom`` takes the first and last day to include, both in UTC.
     """
-    if range_id not in ANALYTICS_RANGES:
+    if range_id == "custom":
+        if start is None or end is None or start > end:
+            raise ValueError("custom range needs a start on or before its end")
+    elif range_id not in ANALYTICS_RANGES:
         raise ValueError(range_id)
     from vendoo_studio.services.ad_spend import list_entries, summarize_ads
     from vendoo_studio.services.sale_events import windows
@@ -103,12 +110,15 @@ def inventory_analytics(
         clock = clock.replace(tzinfo=UTC)
     payload = summarize(
         load_rows(db) if rows is None else rows, range_id=range_id, now=clock, events=windows(db),
+        start=start, end=end,
     )
+    window_start, window_end = _window(range_id, clock, start, end)
     return {
         **payload,
         "ads": summarize_ads(
             list_entries(db),
-            start=_window_start(range_id, clock),
+            start=window_start,
+            end=window_end if range_id == "custom" else None,
             marketplace_revenue={row["id"]: row["revenue"] for row in payload["marketplaces"]},
             marketplace_profit={row["id"]: row["profit"] for row in payload["marketplaces"]},
             profit=payload["sales"]["profit"],
@@ -196,16 +206,21 @@ def summarize(
     range_id: str,
     now: datetime,
     events: list[EventWindow] | None = None,
+    start: date | None = None,
+    end: date | None = None,
 ) -> dict[str, Any]:
     """Group already-loaded rows. ``now`` keeps the window testable."""
-    start = _window_start(range_id, now)
+    window_start, window_end = _window(range_id, now, start, end)
     include_undated = range_id == "all"
     sales = [
         item for item in items
-        if item.status == "sold" and _in_window(item, start, now, include_undated=include_undated)
+        if item.status == "sold"
+        and _in_window(item, window_start, window_end, include_undated=include_undated)
     ]
     dated = [item for item in sales if item.sold_at is not None]
-    buckets, truncated = _buckets(range_id, now, [item.sold_at for item in dated if item.sold_at])
+    buckets, truncated = _buckets(
+        range_id, window_start, window_end, [item.sold_at for item in dated if item.sold_at],
+    )
     period_sales: list[list[AnalyticsItem]] = [[] for _ in buckets]
     for item in dated:
         index = _place(item.sold_at, buckets) if item.sold_at is not None else None
@@ -213,16 +228,19 @@ def summarize(
             period_sales[index].append(item)
 
     previous = None
-    if start is not None:
-        previous_start = start - (now - start)
+    if window_start is not None:
+        span = window_end - window_start
+        if range_id == "custom":
+            span += timedelta(microseconds=1)
+        previous_start = window_start - span
         previous_sales = [
             item for item in items
             if item.status == "sold" and item.sold_at is not None
-            and previous_start <= item.sold_at < start
+            and previous_start <= item.sold_at < window_start
         ]
         previous = {
             "start": previous_start.isoformat(),
-            "end": start.isoformat(),
+            "end": window_start.isoformat(),
             "sales": _sales_stats(previous_sales),
         }
     inventory = _inventory(items, now)
@@ -519,6 +537,19 @@ def _oldest(items: list[AnalyticsItem], now: datetime) -> list[dict[str, Any]]:
     } for item in stale[:_RECENT]]
 
 
+def _window(
+    range_id: str, now: datetime, start: date | None, end: date | None,
+) -> tuple[datetime | None, datetime]:
+    """The sales window. A custom range ends at the close of its last day, or now if sooner."""
+    if range_id != "custom":
+        return _window_start(range_id, now), now
+    if start is None or end is None:
+        raise ValueError("custom range needs a start and an end")
+    first = datetime(start.year, start.month, start.day, tzinfo=UTC)
+    last = datetime(end.year, end.month, end.day, tzinfo=UTC) + timedelta(days=1)
+    return first, min(last - timedelta(microseconds=1), now)
+
+
 def _window_start(range_id: str, now: datetime) -> datetime | None:
     """Start of the range. Calendar ranges start at UTC midnight (weeks on Monday)."""
     today = datetime(now.year, now.month, now.day, tzinfo=UTC)
@@ -547,11 +578,19 @@ def _in_window(
 
 def _buckets(
     range_id: str,
+    start: datetime | None,
     now: datetime,
     dated: list[datetime],
 ) -> tuple[list[tuple[datetime, datetime, str]], bool]:
     if range_id in ("wtd", "mtd"):
-        return _day_buckets(_window_start(range_id, now), now), False
+        assert start is not None
+        return _day_buckets(start, now), False
+    if range_id == "custom":
+        assert start is not None
+        if (now - start).days < _MAX_DAILY_DAYS:
+            return _day_buckets(start, now), False
+        count = (now.year * 12 + now.month) - (start.year * 12 + start.month) + 1
+        return _month_buckets(now, min(count, _MAX_MONTHS)), count > _MAX_MONTHS
     if range_id == "ytd":
         return _month_buckets(now, now.month), False
     if range_id == "7d":

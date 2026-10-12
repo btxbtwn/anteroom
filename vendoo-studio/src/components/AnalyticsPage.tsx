@@ -7,19 +7,31 @@ import { marketplaceName } from "./marketplaceNames";
 import { Stat } from "./AnalyticsStat";
 import { VendooImportButton } from "./VendooImportButton";
 
+const PERIODS: { id: AnalyticsRange; label: string }[] = [
+  ...ANALYTICS_RANGES,
+  { id: "custom", label: "Custom" },
+];
+
 interface Props {
   onOpenListing: (id: string) => void;
 }
 
 export function AnalyticsPage({ onOpenListing }: Props) {
   const [range, setRange] = useState<AnalyticsRange>("12m");
+  const [customStart, setCustomStart] = useState(() => isoDay(addDays(new Date(), -29)));
+  const [customEnd, setCustomEnd] = useState(() => isoDay(new Date()));
+  const custom = range === "custom";
+  const customValid = customStart !== "" && customEnd !== "" && customStart <= customEnd;
   const query = useQuery({
-    queryKey: ["analytics", range],
-    queryFn: () => api.analytics.get(range),
+    queryKey: ["analytics", range, custom ? customStart : null, custom ? customEnd : null],
+    queryFn: () => api.analytics.get(range, custom ? { start: customStart, end: customEnd } : undefined),
     placeholderData: keepPreviousData,
+    enabled: !custom || customValid,
   });
   const data = query.data;
-  const heading = ANALYTICS_RANGES.find((item) => item.id === (data?.range ?? range))?.heading ?? "Sales";
+  const heading = data?.range === "custom"
+    ? customHeading(customStart, customEnd)
+    : ANALYTICS_RANGES.find((item) => item.id === (data?.range ?? range))?.heading ?? "Sales";
 
   return (
     <div className="analytics-page">
@@ -43,7 +55,7 @@ export function AnalyticsPage({ onOpenListing }: Props) {
           ) : null}
           {data ? <InventoryStrip inventory={data.inventory} /> : null}
           <div className="pr-pills" role="tablist" aria-label="Sales period">
-            {ANALYTICS_RANGES.map((item) => (
+            {PERIODS.map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -56,6 +68,31 @@ export function AnalyticsPage({ onOpenListing }: Props) {
               </button>
             ))}
           </div>
+          {custom ? (
+            <div className="analytics-custom-range">
+              <label>
+                From
+                <input
+                  type="date"
+                  value={customStart}
+                  max={customEnd || undefined}
+                  onChange={(event) => setCustomStart(event.target.value)}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  value={customEnd}
+                  min={customStart || undefined}
+                  onChange={(event) => setCustomEnd(event.target.value)}
+                />
+              </label>
+              {!customValid ? (
+                <span className="analytics-note">Pick a start date on or before the end date.</span>
+              ) : null}
+            </div>
+          ) : null}
         </header>
 
         {query.isLoading && !data ? <p className="analytics-status">Loading analytics…</p> : null}
@@ -66,7 +103,7 @@ export function AnalyticsPage({ onOpenListing }: Props) {
           </p>
         ) : null}
 
-        {data ? (
+        {data && (!custom || customValid) ? (
           <>
             {data.incomplete_sales.length > 0 ? (
               <section className="analytics-section analytics-reminder" aria-label="Missing sales data">
@@ -399,4 +436,22 @@ function formatSold(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function isoDay(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function customHeading(start: string, end: string): string {
+  const format = (value: string) =>
+    new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return start === end ? format(start) : `${format(start)} – ${format(end)}`;
 }
