@@ -3,14 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import {
   bulkRegenerateToast,
-  bulkRegenerateWarning,
   listingCanRegenerate,
   mergeRegenerateIds,
   toggleListingSelection,
   type BulkPriceDrop,
   type BulkRegenerateListing,
 } from "../bulkRegenerate";
-import { confirmDialog, isConfirmDialogOpen } from "../ui/confirmDialog";
+import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { addToast } from "../ui/toast";
 import { jobsPollMs } from "../api/polling";
 import { UpdateButton } from "./UpdateButton";
@@ -30,6 +29,7 @@ import { marketplacesNeedingRelist, relistStage } from "./relistStatus";
 import { marketplaceName } from "./marketplaceNames";
 import type { BulkRegenerate, BulkRegenerateRun } from "./useBulkRegenerate";
 import { BulkRegeneratePriceDialog } from "./BulkRegeneratePriceDialog";
+import { RegenerateReviewDialog } from "./RegenerateReviewDialog";
 import { stopTitlebarDrag } from "./WorkspaceTopbar";
 import type { WorkspaceView } from "./workspaceCrumbs";
 import type { Suggestion } from "../api/types";
@@ -389,6 +389,10 @@ export function ListingSidebar({
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const [selecting, setSelecting] = useState(false);
   const [pricePrompt, setPricePrompt] = useState<BulkRegenerateListing[] | null>(null);
+  // Photos, labels and measurements are checked before anything is wiped.
+  const [reviewPrompt, setReviewPrompt] = useState<
+    { rows: BulkRegenerateListing[]; drops?: ReadonlyMap<string, BulkPriceDrop> } | null
+  >(null);
   const [pickedIds, setPickedIds] = useState<Set<string>>(() => new Set());
   const settingsSearchRef = useRef<HTMLInputElement>(null);
   const selectionAnchor = useRef<string | null>(null);
@@ -500,14 +504,14 @@ export function ListingSidebar({
   useEffect(() => {
     if (!selecting || bulk.running) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt) return;
+      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt) return;
       setSelecting(false);
       setPickedIds(new Set());
       selectionAnchor.current = null;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, bulk.running, pricePrompt]);
+  }, [selecting, bulk.running, pricePrompt, reviewPrompt]);
 
   const exitSelecting = useCallback(() => {
     setSelecting(false);
@@ -570,16 +574,11 @@ export function ListingSidebar({
       };
     });
     if (!rows.some((row) => row.price != null)) {
-      const confirmed = await confirmDialog(bulkRegenerateWarning(ids.length), {
-        variant: "destructive",
-        confirmLabel: "Rewrite",
-      });
-      if (!confirmed) return;
-      await finishRegenerate(ids);
+      setReviewPrompt({ rows });
       return;
     }
     setPricePrompt(rows);
-  }, [bulk.running, eligibleIds, finishRegenerate, listingsById, selectedIds, suggestions]);
+  }, [bulk.running, eligibleIds, listingsById, selectedIds, suggestions]);
 
   const visibleSettled = useMemo(() => {
     const visible = settledListings.slice(0, settledVisibleCount);
@@ -1131,6 +1130,17 @@ export function ListingSidebar({
           onConfirm={(drops) => {
             const rows = pricePrompt;
             setPricePrompt(null);
+            setReviewPrompt({ rows, drops });
+          }}
+        />
+      ) : null}
+      {reviewPrompt ? (
+        <RegenerateReviewDialog
+          listings={reviewPrompt.rows.map((row) => ({ id: row.id, title: row.title }))}
+          onClose={() => setReviewPrompt(null)}
+          onRewrite={() => {
+            const { rows, drops } = reviewPrompt;
+            setReviewPrompt(null);
             void finishRegenerate(rows.map((row) => row.id), drops);
           }}
         />
