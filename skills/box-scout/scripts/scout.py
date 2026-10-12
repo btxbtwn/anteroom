@@ -769,15 +769,12 @@ def buy_list(
     rows: list[dict], cfg: dict, *, budget: float, min_roi: float = 1.0,
     sell_through: float = BASE_SELL_THROUGH, fees: float = MARKETPLACE_FEES,
     cost_per_piece: float = OPERATING_COST_PER_PIECE,
-    max_cog_per_piece: float = 0.0,
     theme_capacity: dict[str, float] | None = None,
 ) -> dict:
     """Prefer researched selling-window matches, then incremental return, within `budget`.
 
     Evaluate shipping on the complete proposed cart. Also consider two-lot
     bundles that unlock free shipping even when neither lot qualifies alone.
-    A positive `max_cog_per_piece` rules out any box whose landed cost per usable
-    piece, shipping included, is above it; 0 sets no limit.
     Without `theme_capacity`, one box is taken per theme. With it, a theme maps to
     the planned sales the seller can take on in it (pieces they already hold
     counted out): the first box of a theme is always allowed while capacity is
@@ -838,7 +835,6 @@ def buy_list(
             candidate = evaluate(additions)
             total = round(sum(p["landed"] for p in candidate), 2)
             if total > budget or any(p["roi"] < min_roi or p["downside_profit"] < 0
-                                     or (max_cog_per_piece and p["cog_per_usable_pc"] > max_cog_per_piece)
                                      for p in candidate):
                 continue
             profit = sum(p["expected_profit"] for p in candidate)
@@ -895,9 +891,7 @@ def buy_list(
         else:
             candidate = evaluate([row])
             lot = candidate[-1]
-            if max_cog_per_piece and lot["cog_per_usable_pc"] > max_cog_per_piece:
-                reason = "cog_cap"
-            elif lot["roi"] < min_roi:
+            if lot["roi"] < min_roi:
                 reason = "return_target"
             elif lot["downside_profit"] < 0:
                 reason = "downside"

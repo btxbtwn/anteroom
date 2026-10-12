@@ -28,7 +28,6 @@ Raghouse and TVF are Shopify shops, so their public `/products.json` feeds list 
 | sell_through | number | No | Seller’s planned share of usable pieces that sell, 0–1. Default 0.5. This is not a measured probability. |
 | fees | number | No | Effective marketplace and payment fee allowance, 0–1. Default 0.2; replace with actual effective costs. |
 | cost_per_piece | number | No | Operating allowance for each piece planned to sell, including prep, labor, packaging, seller-paid postage, fixed fees and returns. Default $2 is a planning input, not a market fact. |
-| max_cog_per_piece | number | No | Most a usable piece may cost landed (price plus shipping, divided by usable pieces). Boxes above it are left out of the buy list. 0 or omitted sets no limit. |
 | ready_in_weeks | integer | No | Weeks for inbound shipping, prep and listing before selling starts, 0–26. Studio default 4. |
 | selling_window_weeks | integer | No | Length of the target selling period, 1–26 weeks. Studio default 4 (selling 4–8 weeks after buying). |
 | vip | boolean | No | The seller has Raghouse VIP ($64/month). Boxes tagged `VIP_Product` are members-only; they are left out of the buy list unless `--vip`. Studio still scores and researches them so a non-member sees what joining would add to the list (`vip_upside`). |
