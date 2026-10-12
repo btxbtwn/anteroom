@@ -340,6 +340,8 @@ def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db)):
 
     listing, revisions, analysis, outcomes, age_days = _preview_inputs(conv_id, db)
     evidence = fields_from_listing(listing)
+    # Sold comps run for minutes; do not pin a pool connection for the stream.
+    db.close()
 
     def preview(comps_text: str) -> str:
         return json.dumps(build_preview(

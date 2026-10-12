@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.236 — 2026-10-11
+
+- Listings no longer sit on "Loading..." for half a minute. Open live previews and price-drop searches were holding on to all of Studio's database connections, so everything else had to wait; they now let go straight away.
+
 ## 0.1.235 — 2026-10-12
 
 - Sourcing's selling fees now follow your own sales. Once you have 30 recorded sales in the past year, the fee rate is what those sales actually paid, and it updates itself on every check. Typing a rate yourself switches this off; tick "From your recent sales" to turn it back on.

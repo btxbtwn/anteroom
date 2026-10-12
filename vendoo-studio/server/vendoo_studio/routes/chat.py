@@ -342,10 +342,12 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
 
     existing = active_generation(conv_id)
     if existing is not None:
+        db.close()
         return stream_generation(existing)
     if resume:
         # Reconnecting after the run ended must not start a second one: that
         # posted a second photo analysis and comps card beside the first.
+        db.close()
         return stream_finished()
 
     photos = repo.get_photos(conv_id)
