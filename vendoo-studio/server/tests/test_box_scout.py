@@ -159,6 +159,19 @@ class ScoutScriptTest(unittest.TestCase):
         self.assertLessEqual(plan["total"], 200)
         self.assertEqual(plan["carts"][0]["cart_url"], "https://raghouse.com/cart/1:1,4:1")
 
+    def test_cost_cap_leaves_out_boxes_that_cost_more_per_usable_piece(self):
+        resale = {"cartoon t-shirts": 15, "blank t-shirts": 6, "flannel shirts": 12}
+        rows = self.s.score_lots(CATALOGS, self.cfg, ZONES, self.s.Filters(cost_per_piece=0), resale)[1]
+        open_plan = self.s.buy_list(rows, self.cfg, budget=200, min_roi=0.5, cost_per_piece=0)
+        cost = {f"{r['store']}:{r['variant_id']}": r["cog_per_usable_pc"] for r in rows}
+        picked = [f"{lot['store']}:{lot['variant_id']}" for cart in open_plan["carts"] for lot in cart["lots"]]
+        cap = min(cost[key] for key in picked)
+        capped = self.s.buy_list(rows, self.cfg, budget=200, min_roi=0.5, cost_per_piece=0, max_cog_per_piece=cap)
+        kept = [lot for cart in capped["carts"] for lot in cart["lots"]]
+        self.assertTrue(kept)
+        self.assertTrue(all(lot["cog_per_usable_pc"] <= cap for lot in kept))
+        self.assertIn("cog_cap", capped["exclusions"].values())
+
     def test_window_matches_prioritize_qualifying_boxes_without_changing_profit(self):
         catalogs = {"raghouse": [_raghouse("Flannel Shirts 60 pcs", "60", 12701, vid=10),
                                  _raghouse("Cartoon T-Shirts 60 pcs", "60", 12701, vid=11)]}
@@ -239,15 +252,32 @@ class ScoutScriptTest(unittest.TestCase):
         self.assertEqual(slow["sell_through"], 0.5)
         self.assertEqual(slow["expected_profit"], popular["expected_profit"])
 
-    def test_operating_allowance_and_break_even_include_unsold_pieces(self):
+    def test_operating_allowance_is_charged_on_planned_sales_and_break_even_follows_it(self):
         row = {"price": 60, "pcs": 20, "usable_pcs": 10, "demand": 50, "resale_low": 15}
         priced = self.s.price_lot(row, 20, 20, sell_through=0.6, fees=0.25, cost_per_piece=2)
-        self.assertEqual(priced["operating_cost"], 20)
+        self.assertEqual(priced["operating_cost"], 12)  # 6 planned sales x $2
         self.assertEqual(priced["expected_revenue"], 90)
-        self.assertEqual(priced["expected_profit"], -10)
-        self.assertEqual(priced["break_even_pcs"], 7)
+        self.assertEqual(priced["expected_profit"], -2)
+        self.assertEqual(priced["break_even_pcs"], 7)  # $80 landed / ($15 - $2) per sale
         # Half the 6 planned sales at the $15 low: 3 x ($15 x 0.75 - $2) - $80 landed.
         self.assertEqual(priced["downside_profit"], -52.25)
+
+    def test_theme_capacity_allows_more_boxes_of_a_theme_until_it_is_full_or_stocked(self):
+        # Three $40 boxes of one theme, each planning 10 sales at $40 a piece.
+        rows = [self.s.price_lot({"store": "raghouse", "variant_id": 200 + i, "theme": "dresses", "price": 40,
+                                  "pcs": 20, "usable_pcs": 20.0, "demand": 1, "trend_hits": [], "vip": False,
+                                  "resale_low": 40}, 20, 40) for i in range(3)]
+
+        def picked(cap):
+            plan = self.s.buy_list(rows, self.cfg, budget=500, min_roi=0, theme_capacity=cap)
+            return sum(len(c["lots"]) for c in plan["carts"])
+
+        self.assertEqual(picked(None), 1)  # one box per theme without a capacity
+        self.assertEqual(picked({"dresses": 25}), 2)
+        self.assertEqual(picked({"dresses": 5}), 1)  # the first box is allowed while any capacity is left
+        plan = self.s.buy_list(rows, self.cfg, budget=500, min_roi=0, theme_capacity={"dresses": 0})
+        self.assertEqual(plan["carts"], [])
+        self.assertEqual(set(plan["exclusions"].values()), {"theme_stocked"})
 
     def test_lower_sales_test_charges_operating_costs_on_the_pieces_that_sell(self):
         # A $66 box of 40 usable jackets at $30 (low $18) with a 500% return must not fail
@@ -428,6 +458,8 @@ class RefreshTest(unittest.TestCase):
         mock.patch.object(box_scout, "_calibration", return_value={}).start()
         mock.patch.object(box_scout, "_shipping_calibration", return_value={}).start()
         mock.patch.object(box_scout, "_own_sales", return_value=[]).start()
+        mock.patch.object(box_scout, "measured_sell_through", return_value=None).start()
+        mock.patch.object(box_scout, "_own_rows", return_value=[]).start()
         mock.patch.object(box_scout, "_announce_new_picks").start()
         mock.patch.dict(box_scout._catalogs, clear=True).start()
         # Chrome is not connected and Poshmark has nothing, unless a test says otherwise.
@@ -558,6 +590,72 @@ class RefreshTest(unittest.TestCase):
         self.assertNotIn("cartoon t-shirts", [theme for call in prices.call_args_list for theme in call.args[0]])
         self.assertTrue(any(lot["trend_hits"] == ["flannel"] for lot in snapshot["lots"]))
         self.assertFalse(box_scout.refresh_is_due())
+
+    def test_fees_follow_the_sellers_recent_sales_until_they_type_a_rate(self):
+        now = datetime(2026, 10, 7, tzinfo=UTC)
+        sales = [AnalyticsItem(
+            conversation_id=str(i), title="Cartoon t-shirt", status="sold", price=10, cost=None, brand="",
+            category="", sold_price=10.0, sold_at=now - timedelta(days=i), listed_at=None,
+            marketplace="eBay", days_listed=None, fees=2.5,
+        ) for i in range(box_scout.MEASURED_MIN_SALES)]
+        self.assertIsNone(box_scout.measured_fees(sales[:-1], now))
+        self.assertEqual(box_scout.measured_fees(sales, now), {"rate": 0.25, "sales": len(sales)})
+        mock.patch.object(box_scout, "_own_sales", return_value=sales).start()
+        snapshot = box_scout.refresh(recrawl=False, research=False)
+        self.assertEqual(snapshot["assumptions"]["fees"], 0.25)
+        self.assertEqual(box_scout.read_state()["prefs"]["fees"], 0.25)
+        box_scout.set_prefs(fees=0.1)
+        self.assertFalse(box_scout.read_state()["prefs"]["fees_auto"])
+        self.assertEqual(box_scout.refresh(recrawl=False, research=False)["assumptions"]["fees"], 0.1)
+
+    def test_sell_through_follows_analytics_until_the_seller_types_a_rate(self):
+        mock.patch.object(box_scout, "measured_sell_through", return_value={"rate": 0.431, "sales": 426}).start()
+        snapshot = box_scout.refresh(recrawl=False, research=False)
+        self.assertEqual(snapshot["assumptions"]["sell_through"], 0.431)
+        self.assertEqual(snapshot["assumptions"]["sell_through_measured"], {"rate": 0.431, "sales": 426})
+        box_scout.set_prefs(sell_through=0.6)
+        self.assertEqual(box_scout.refresh(recrawl=False, research=False)["assumptions"]["sell_through"], 0.6)
+
+    def _sale(self, title, price, days_ago=5, now=datetime(2026, 10, 7, tzinfo=UTC), status="sold"):
+        return AnalyticsItem(
+            conversation_id=f"{title}-{price}-{days_ago}", title=title, status=status, price=price, cost=None,
+            brand="", category="", sold_price=price if status == "sold" else None,
+            sold_at=now - timedelta(days=days_ago) if status == "sold" else None, listed_at=None,
+            marketplace="eBay", days_listed=None, fees=0.0)
+
+    def test_theme_sell_through_blends_toward_the_overall_rate_and_capacity_counts_what_is_held(self):
+        now = datetime(2026, 10, 7, tzinfo=UTC)
+        rows = [self._sale("Floral dress", 10, i) for i in range(8)] + \
+               [self._sale("Floral dress", 0, status="active") for _ in range(12)] + \
+               [self._sale("Graphic t-shirt", 10, i) for i in range(30)]
+        inventory = box_scout.theme_inventory(rows, {"dresses", "t-shirts", "kimonos"}, now)
+        self.assertEqual(inventory["dresses"], {"sold": 8, "active": 12})
+        self.assertEqual(inventory["kimonos"], {"sold": 0, "active": 0})
+        rates = box_scout.theme_sell_through(inventory, 0.5)
+        # (8 sold + 10 x 0.5) / (20 + 10); a theme with under 10 pieces has no rate of its own.
+        self.assertEqual(rates["dresses"], round(13 / 30, 3))
+        self.assertNotIn("kimonos", rates)
+        capacity = box_scout.theme_capacity(rows, inventory, now)
+        self.assertEqual(capacity["dresses"], max(0, round(38 / 3) - 12) if round(38 / 3) > 15 else 15 - 12)
+        self.assertEqual(capacity["kimonos"], max(15, round(38 / 3)))
+        self.assertIsNone(box_scout.theme_capacity(rows[:3], inventory, now))
+
+    def test_marketplace_prices_are_scaled_to_the_sellers_own_and_mixed_boxes_use_all_sales(self):
+        now = datetime(2026, 10, 7, tzinfo=UTC)
+        themes = ["dresses", "t-shirts", "jackets"]
+        own = {name: [{"price": 10.0, "sold_at": (now - timedelta(days=3 + i)).date().isoformat()} for i in range(3)]
+               for name in themes}
+        comps = [{"url": f"u{i}", "title": "Dress", "snippet": "", "price": 30.0, "marketplace": "Poshmark",
+                  "sold_at": (now - timedelta(days=2 + i)).date().isoformat()} for i in range(4)]
+        state = {"resale": {name: {"comps": comps, "active": [], "updated_at": now.isoformat()} for name in themes}}
+        mock.patch.object(box_scout.scout(), "sale_mismatch", return_value=None).start()
+        self.assertEqual(box_scout.market_haircut(state, now, own), {"factor": 0.33, "themes": 3})
+        self.assertIsNone(box_scout.market_haircut(state, now, {"dresses": own["dresses"]}))
+        sales = [self._sale(f"Piece {i}", 8.0 + i % 5, i % 30) for i in range(40)]
+        mixed = box_scout.all_sales_price(sales, now)
+        self.assertEqual(mixed["source"], "Your sales (all items)")
+        self.assertLessEqual(mixed["low"], mixed["per_piece"])
+        self.assertIsNone(box_scout.all_sales_price(sales[:5], now))
 
     def test_changed_window_discards_old_themes_without_a_model(self):
         with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])):

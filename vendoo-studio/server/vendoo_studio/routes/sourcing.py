@@ -137,9 +137,22 @@ class SourcingVipUpside(BaseModel):
     monthly_fee: float
 
 
+class SourcingMeasured(BaseModel):
+    rate: float
+    sales: int
+
+
+class SourcingHaircut(BaseModel):
+    factor: float
+    themes: int
+
+
 class SourcingAssumptions(BaseModel):
+    market_haircut: SourcingHaircut | None = None
     sell_through: float
+    sell_through_measured: SourcingMeasured | None
     fees: float
+    fees_measured: SourcingMeasured | None
     grade_yield: dict[str, float]
     cost_per_piece: float
 
@@ -215,8 +228,11 @@ class SourcingPrefs(BaseModel):
     zip: str
     recent_zips: list[str]
     sell_through: float
+    sell_through_auto: bool
     fees: float
+    fees_auto: bool
     cost_per_piece: float
+    max_cog_per_piece: float
     ready_in_weeks: int
     selling_window_weeks: int
 
@@ -239,8 +255,11 @@ class SourcingPrefsUpdate(BaseModel):
     budget: float | None = Field(None, gt=0, allow_inf_nan=False)
     min_roi: float | None = Field(None, ge=0, allow_inf_nan=False)
     sell_through: float | None = Field(None, gt=0, le=1, allow_inf_nan=False)
+    sell_through_auto: bool | None = None
     fees: float | None = Field(None, ge=0, lt=1, allow_inf_nan=False)
+    fees_auto: bool | None = None
     cost_per_piece: float | None = Field(None, ge=0, allow_inf_nan=False)
+    max_cog_per_piece: float | None = Field(None, ge=0, allow_inf_nan=False)
     ready_in_weeks: int | None = Field(None, ge=0, le=26, strict=True)
     selling_window_weeks: int | None = Field(None, ge=1, le=26, strict=True)
     raghouse_vip: bool | None = None

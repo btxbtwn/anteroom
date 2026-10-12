@@ -105,7 +105,9 @@ export function planMetrics(plan: SourcingBuyList) {
 
 const EXCLUSION_LABELS = {
   needs_research: "Needs recent sold evidence",
-  same_theme: "Another box of this kind was selected",
+  same_theme: "Selected boxes already cover what you can sell of this kind",
+  theme_stocked: "You already hold enough of this kind",
+  cog_cap: "Costs more per piece than your limit",
   return_target: "Below your return target",
   downside: "Loses money in the lower-sales test",
   budget: "Doesn’t fit this cart’s budget",
@@ -123,6 +125,8 @@ export function exclusionSummary(plan: SourcingBuyList): string {
   const phrases: Record<string, string> = {
     needs_research: "need recent sold evidence",
     same_theme: "are another box of a kind already picked",
+    theme_stocked: "are a kind you already hold plenty of",
+    cog_cap: "cost more per piece than your limit",
     return_target: "are below your return target",
     downside: "lose money in the lower-sales test",
     budget: "don’t fit the budget",

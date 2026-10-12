@@ -125,7 +125,7 @@ function BoxSourcing({ onOpenListing }: Props) {
             A mixed box’s contents and future sales remain uncertain.
           </p>
           {data ? (
-            <Settings prefs={data.prefs} saving={savePrefs.isPending} onSave={(prefs) => savePrefs.mutate(prefs)} />
+            <Settings prefs={data.prefs} measured={data.snapshot?.assumptions ?? null} saving={savePrefs.isPending} onSave={(prefs) => savePrefs.mutate(prefs)} />
           ) : null}
         </header>
 
@@ -184,10 +184,12 @@ function UpdateStatus({
 
 function Settings({
   prefs,
+  measured,
   saving,
   onSave,
 }: {
   prefs: SourcingPrefs;
+  measured: SourcingSnapshot["assumptions"] | null;
   saving: boolean;
   onSave: (prefs: Partial<SourcingPrefs>) => void;
 }) {
@@ -267,16 +269,35 @@ function Settings({
             <DraftInput value={String(Math.round(prefs.sell_through * 100))} label="Percentage of usable pieces you plan to sell" suffix="%" width="5rem" inputMode="decimal" disabled={saving}
               clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => Number(text) > 0 && Number(text) <= 100}
               onCommit={(text) => onSave({ sell_through: Number(text) / 100 })} />
+            <label className="sourcing-check">
+              <input type="checkbox" checked={prefs.sell_through_auto} disabled={saving || !measured?.sell_through_measured}
+                onChange={(event) => onSave({ sell_through_auto: event.target.checked })} />
+              {measured?.sell_through_measured
+                ? `From your Analytics: ${measured.sell_through_measured.sales} sales in 12 months`
+                : "From your Analytics once you have 30 sales in a year"}
+            </label>
           </span>
           <span className="sourcing-setting">Selling fees
             <DraftInput value={String(Math.round(prefs.fees * 100))} label="Effective marketplace and payment fees as a percentage of item revenue" suffix="%" width="5rem" inputMode="decimal" disabled={saving}
               clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => text !== "" && Number(text) >= 0 && Number(text) < 100}
               onCommit={(text) => onSave({ fees: Number(text) / 100 })} />
+            <label className="sourcing-check">
+              <input type="checkbox" checked={prefs.fees_auto} disabled={saving || !measured?.fees_measured}
+                onChange={(event) => onSave({ fees_auto: event.target.checked })} />
+              {measured?.fees_measured
+                ? `From your ${measured.fees_measured.sales} recent sales`
+                : "From your sales once you have 30 in a year"}
+            </label>
           </span>
-          <span className="sourcing-setting">Cost per piece
+          <span className="sourcing-setting">Cost per sold piece
             <DraftInput value={String(prefs.cost_per_piece)} label="Operating allowance per usable piece" prefix="$" width="5rem" inputMode="decimal" disabled={saving}
               clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => text !== "" && Number.isFinite(Number(text)) && Number(text) >= 0}
               onCommit={(text) => onSave({ cost_per_piece: Number(text) })} />
+          </span>
+          <span className="sourcing-setting">Most to pay per piece
+            <DraftInput value={prefs.max_cog_per_piece ? String(prefs.max_cog_per_piece) : ""} label="Most a usable piece may cost landed, including shipping; empty for no limit" prefix="$" width="5rem" inputMode="decimal" disabled={saving}
+              clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => text === "" || (Number.isFinite(Number(text)) && Number(text) >= 0)}
+              onCommit={(text) => onSave({ max_cog_per_piece: Number(text) })} />
           </span>
           <label className="sourcing-setting sourcing-check">
             <input
@@ -288,7 +309,7 @@ function Settings({
             Raghouse VIP member
           </label>
         </div>
-        <p className="sourcing-hint">Cost per piece is what you spend on cleaning, photos, packaging and postage. It is charged for every usable piece, sold or not. Purchase tax is extra.</p>
+        <p className="sourcing-hint">Most to pay per piece is a limit: a box is left out when its price plus shipping, divided by the pieces you can sell, is above it. Leave it empty for no limit. Cost per piece is what you spend to prepare, pack and ship each piece that sells. It is charged on the pieces planned to sell, in the plan and in the lower-sales test. Purchase tax is extra.</p>
       </details>
     </div>
   );
@@ -326,6 +347,9 @@ function Choices({ snapshot, choice, onChoose }: {
         const note = calibrationNote(storeName(store), calibration);
         return note ? <p key={store} className="sourcing-hint">{note}</p> : null;
       })}
+      {snapshot.assumptions.market_haircut && snapshot.assumptions.market_haircut.factor < 1 ? <p className="sourcing-hint">
+        Marketplace prices are scaled to {Math.round(snapshot.assumptions.market_haircut.factor * 100)}% because your own sales ran lower than the listings for {snapshot.assumptions.market_haircut.themes} kinds of piece. Prices from your own sales are not scaled.
+      </p> : null}
       {snapshot.vip_upside && snapshot.vip_upside.boxes > 0 ? <p className="sourcing-hint">
         Raghouse VIP ({formatMoney(snapshot.vip_upside.monthly_fee)}/month) would add {boxCount(snapshot.vip_upside.boxes)} to this list,
         about {formatMoney(Math.round(snapshot.vip_upside.extra_profit))} more estimated profit. Turn on “Raghouse VIP member” under More options once you join.
