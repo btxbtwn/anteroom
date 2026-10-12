@@ -99,6 +99,13 @@ class ListingGenerateHelpersTest(unittest.TestCase):
         parsed = extract_listing_json(json.dumps(LISTING_JSON))
         self.assertEqual(parsed["price"], 18)
 
+    def test_seller_item_details_for_a_skirt(self):
+        notes = json.dumps({
+            "garment": "skirt",
+            "measurements": {"skirt": {"waist": "14", "hip": "19", "length": "22"}},
+        })
+        self.assertIn('Measurements (skirt): Waist: 14"; Hip: 19"; Length: 22"', seller_item_details(notes))
+
     def test_rejects_error_text(self):
         self.assertIsNone(extract_listing_json("Error: timeout"))
 

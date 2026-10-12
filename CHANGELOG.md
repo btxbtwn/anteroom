@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.232 — 2026-10-12
+
+- Skirts now have their own measurements (waist, hip, length) in Item Details and in the bulk upload measurement grid, and a folder with "skirt" in its name starts on Skirt.
+
 ## 0.1.231 — 2026-10-12
 
 - Discard unsent edits from the editor header to put a listing back to exactly what Vendoo has, for example after regenerating by mistake.

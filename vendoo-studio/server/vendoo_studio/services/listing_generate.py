@@ -847,6 +847,7 @@ GARMENT_MEASUREMENTS: dict[str, tuple[str, tuple[tuple[str, str], ...]]] = {
         "Pants",
         (("waist", "Waist"), ("rise", "Rise"), ("inseam", "Inseam"), ("legOpening", "Leg opening")),
     ),
+    "skirt": ("Skirt", (("waist", "Waist"), ("hip", "Hip"), ("length", "Length"))),
 }
 
 
