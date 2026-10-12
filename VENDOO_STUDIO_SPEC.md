@@ -1060,6 +1060,12 @@ the seller copies each dashboard's figures for a stretch of days: the spend,
 and optionally the clicks, orders, and revenue the dashboard attributes to the
 ads. Entries may overlap and any length works; a week or a month is typical.
 
+Etsy Ads can instead be uploaded as the stats CSV Etsy exports. Each day with
+activity becomes a one-day Etsy entry, and a later upload replaces the entries
+an earlier upload wrote for the days it covers. Entries the seller typed are
+never replaced; the upload says when one covers the same days, so the spend is
+not counted twice.
+
 Each entry's spend, clicks, orders, and attributed revenue are spread evenly
 over its days, so a sales period carries only the share of an entry that falls
 inside it. Totals per programme show spend, return on ad spend (attributed
