@@ -122,16 +122,16 @@ class SuggestionsTest(unittest.TestCase):
         with patch.object(self.db, "commit", side_effect=AssertionError("suggestions wrote")):
             self.assertEqual(self._by_title("Flagged")["kind"], "fix_validation")
 
-    def test_stale_starts_at_thirty_days_and_older_ranks_first(self):
+    def test_stale_starts_at_sixty_days_and_older_ranks_first(self):
         thirty = self.convs.create(title="Thirty")
+        fifty_nine = self.convs.create(title="FiftyNine")
         sixty = self.convs.create(title="Sixty")
         ninety = self.convs.create(title="Ninety")
-        fresh = self.convs.create(title="Fresh")
         for conv, listed in (
             (thirty, "2026-08-21T00:00:00Z"),
+            (fifty_nine, "2026-07-23T00:00:00Z"),
             (sixty, "2026-07-22T00:00:00Z"),
             (ninety, "2026-06-22T00:00:00Z"),
-            (fresh, "2026-08-22T00:00:00Z"),
         ):
             conv.notes = json.dumps({
                 "vendooMarketplaces": ["ebay"],
@@ -140,11 +140,11 @@ class SuggestionsTest(unittest.TestCase):
             self.convs.update_status(conv.id, "active")
         self.db.commit()
         cards = [card for card in list_suggestions(self.db, now=NOW) if card["kind"] == "stale_active"]
-        self.assertEqual([card["title"] for card in cards], ["Ninety", "Sixty", "Thirty"])
-        self.assertEqual([card["age_days"] for card in cards], [90, 60, 30])
-        self.assertIn("30 days", cards[-1]["reason"])
+        self.assertEqual([card["title"] for card in cards], ["Ninety", "Sixty"])
+        self.assertEqual([card["age_days"] for card in cards], [90, 60])
+        self.assertIn("60 days", cards[-1]["reason"])
         self.assertIn("eBay", cards[-1]["reason"])
-        self.assertTrue(cards[0]["score"] > cards[1]["score"] > cards[2]["score"])
+        self.assertTrue(cards[0]["score"] > cards[1]["score"])
 
     def test_draft_with_revision_is_ready_to_review(self):
         conv = self.convs.create(title="Ready draft")

@@ -19,7 +19,7 @@ from vendoo_studio.repositories.queries import BUSY_LISTING_STATUSES, Conversati
 from vendoo_studio.services.vendoo_import import parse_notes
 
 MAX_SUGGESTIONS = 20
-STALE_MIN_DAYS = 30
+STALE_MIN_DAYS = 60
 COVER_THUMB_SIZE = 96
 
 KIND_FAILED = "failed"
