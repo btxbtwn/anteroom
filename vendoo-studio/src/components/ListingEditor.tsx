@@ -29,6 +29,7 @@ import {
 import { withDropdownOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { addToast } from "../ui/toast";
+import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./ChatPanel";
 import { fetchVendooItemLive, VENDOO_ITEM_STALE_MS, vendooItemQueryKey } from "../api/vendooItemQuery";
 import {
@@ -108,6 +109,33 @@ export function ListingEditor({
     && ["queued", "awaiting_extension", "dispatched"].includes(String(listingJob?.status || "")),
   );
   const [ensureError, setEnsureError] = React.useState<string | null>(null);
+  const discardUnsent = useMutation({
+    mutationFn: () => api.vendooApi.pull(convId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["listing", convId] });
+      queryClient.invalidateQueries({ queryKey: ["listing-fields", convId] });
+      queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["vendoo-item"] });
+      queryClient.invalidateQueries({ queryKey: ["vendoo-item-peek"] });
+      queryClient.invalidateQueries({ queryKey: ["vendoo-sync", convId] });
+      addToast({ type: "success", title: "Back to the Vendoo listing" });
+    },
+    onError: (err: Error) => {
+      addToast({
+        type: "error",
+        title: "Could not pull from Vendoo",
+        description: err.message || "Is Chrome connected?",
+      });
+    },
+  });
+  async function confirmDiscardUnsent() {
+    const confirmed = await confirmDialog(
+      "Discard unsent edits?\nThis listing goes back to what Vendoo has. Edits and anything regenerated since the last send are replaced.",
+      { variant: "destructive", confirmLabel: "Discard edits" },
+    );
+    if (confirmed) discardUnsent.mutate();
+  }
   const ensureDraftMutation = useMutation({
     mutationFn: async (opts?: { importDraft?: boolean }) => {
       const job = await api.jobs.ensureDraft(convId);
@@ -352,12 +380,25 @@ export function ListingEditor({
             bound={Boolean(listingJob?.vendoo_item_id || importedItemId)}
           />
           {conversation?.unsent_edits ? (
-            <span
-              className="editor-unsent"
-              title="This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
-            >
-              Unsent edits
-            </span>
+            <>
+              <span
+                className="editor-unsent"
+                title="This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+              >
+                Unsent edits
+              </span>
+              {listingJob?.vendoo_item_id || importedItemId ? (
+                <button
+                  type="button"
+                  className="editor-unsent-discard"
+                  disabled={discardUnsent.isPending || generating}
+                  title="Replace this listing with the copy Vendoo has"
+                  onClick={() => void confirmDiscardUnsent()}
+                >
+                  {discardUnsent.isPending ? "Pulling…" : "Discard"}
+                </button>
+              ) : null}
+            </>
           ) : null}
           {data?.can_send && !generating && <span className="editor-ready">Ready</span>}
         </div>

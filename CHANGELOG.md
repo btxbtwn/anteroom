@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.231 — 2026-10-12
+
+- Discard unsent edits from the editor header to put a listing back to exactly what Vendoo has, for example after regenerating by mistake.
+
 ## 0.1.230 — 2026-10-12
 
 - Suggestions now flag an active listing as stale only once it has been up for 60 days or more. Listings between 30 and 59 days old no longer show up in the Suggestions list.
