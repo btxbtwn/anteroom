@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
@@ -711,6 +712,11 @@ async def open_listing(job_id: str, db: Session = Depends(get_db)):
     url = listing_url_for_job(job.vendoo_item_id, job.vendoo_url)
     if not url:
         raise HTTPException(400, "No Vendoo draft is available yet. Send the listing first.")
+
+    # Plain values from here on, and the transaction ended: the extension wait
+    # and the Chrome launch below must not hold a pool connection.
+    job = SimpleNamespace(id=job.id, vendoo_item_id=job.vendoo_item_id, vendoo_url=job.vendoo_url)
+    db.commit()
 
     if extension_manager.connected:
         sent = await dispatch_open_listing(job)

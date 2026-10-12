@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.238 — 2026-10-11
+
+- Open listing no longer sits on "Opening…". It was holding one of Studio's database connections while it waited for Chrome, so it stalled whenever Studio was already busy; it now lets go first.
+
 ## 0.1.237 — 2026-10-11
 
 - Update Vendoo no longer hangs on "Reading the Vendoo draft…". Checking Vendoo, pulling a draft and opening a listing's fields were holding on to Studio's database connections while they waited for Chrome, so a few slow checks left everything else waiting; they now let go first.
