@@ -116,10 +116,12 @@ export function AdSpend() {
         <div className="analytics-stats">
           <Stat label="Ad spend" value={formatMoney(ads.spend)} hint="Spread evenly over the days each entry covers" />
           <Stat
-            label="Profit after ads"
+            label="Business profit after ads"
             value={ads.profit_after_ads == null ? "—" : formatMoney(ads.profit_after_ads)}
             negative={ads.profit_after_ads != null && ads.profit_after_ads < 0}
-            hint={ads.profit_after_ads == null ? "Record sale prices and costs to see profit" : "Profit on sales with recorded cost, less all ad spend"}
+            hint={ads.profit == null || ads.profit_after_ads == null
+              ? "Record sale prices and costs to see profit"
+              : `${formatMoney(ads.profit)} profit on every marketplace, less ${formatMoney(ads.spend)} of ads`}
           />
           {ads.marketplaces.map((market) => <MarketStat key={market.id} market={market} />)}
         </div>
@@ -159,6 +161,9 @@ function MarketStat({ market }: { market: AdMarketplaceTotals }) {
     market.spend_percent != null
       ? `${market.spend_percent}% of ${formatMoney(market.sales_revenue)} ${marketplaceName(market.id)} sales`
       : `No ${marketplaceName(market.id)} sales recorded`,
+    market.profit_after_ads != null
+      ? `${formatMoney(market.profit_after_ads)} ${marketplaceName(market.id)} profit after ads`
+      : null,
   ];
   return (
     <Stat
