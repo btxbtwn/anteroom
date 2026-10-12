@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.240 — 2026-10-12
+
+- Analytics can now show sales for the week to date (from Monday), month to date and year to date, alongside the rolling 7, 30 and 90 day views.
+
 ## 0.1.239 — 2026-10-12
 
 - Marketing → Ads can take Etsy's stats CSV: download it from Etsy Ads and press Upload Etsy Ads CSV instead of typing the figures. Each day with activity becomes an entry, and uploading a newer export replaces those days.

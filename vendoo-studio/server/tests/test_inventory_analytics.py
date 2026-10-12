@@ -35,6 +35,26 @@ def _item(**overrides) -> AnalyticsItem:
 
 
 class SummarizeAnalyticsTest(unittest.TestCase):
+    def test_calendar_to_date_ranges_start_at_week_month_and_year(self):
+        # NOW is Sunday 2026-09-27.
+        items = [
+            _item(conversation_id="a", sold_at=datetime(2026, 9, 21, 0, 0, tzinfo=UTC)),
+            _item(conversation_id="b", sold_at=datetime(2026, 9, 20, 23, 59, tzinfo=UTC)),
+            _item(conversation_id="c", sold_at=datetime(2026, 9, 1, tzinfo=UTC)),
+            _item(conversation_id="d", sold_at=datetime(2026, 8, 31, 23, tzinfo=UTC)),
+            _item(conversation_id="e", sold_at=datetime(2026, 1, 1, tzinfo=UTC)),
+            _item(conversation_id="f", sold_at=datetime(2025, 12, 31, tzinfo=UTC)),
+        ]
+        week = summarize(items, range_id="wtd", now=NOW)
+        month = summarize(items, range_id="mtd", now=NOW)
+        year = summarize(items, range_id="ytd", now=NOW)
+        self.assertEqual(week["sales"]["count"], 1)
+        self.assertEqual(len(week["periods"]), 7)
+        self.assertEqual(month["sales"]["count"], 3)
+        self.assertEqual(len(month["periods"]), 27)
+        self.assertEqual(year["sales"]["count"], 5)
+        self.assertEqual(len(year["periods"]), 9)
+
     def test_missing_sales_data_includes_undated_and_old_sales_in_every_range(self):
         items = [
             _item(conversation_id="undated", title="A jacket", sold_at=None, sold_price=None,

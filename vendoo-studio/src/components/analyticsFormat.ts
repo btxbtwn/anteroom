@@ -2,6 +2,9 @@ import type { AnalyticsRange } from "../api/types";
 
 /** The sales periods Analytics and Marketing both total over. */
 export const ANALYTICS_RANGES: { id: AnalyticsRange; label: string; heading: string }[] = [
+  { id: "wtd", label: "Week to date", heading: "Week to date" },
+  { id: "mtd", label: "Month to date", heading: "Month to date" },
+  { id: "ytd", label: "Year to date", heading: "Year to date" },
   { id: "7d", label: "7 days", heading: "Last 7 days" },
   { id: "30d", label: "30 days", heading: "Last 30 days" },
   { id: "90d", label: "90 days", heading: "Last 90 days" },

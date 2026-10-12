@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from vendoo_studio.services.sale_events import EventWindow
 
-ANALYTICS_RANGES = ("7d", "30d", "90d", "12m", "all")
+ANALYTICS_RANGES = ("wtd", "mtd", "ytd", "7d", "30d", "90d", "12m", "all")
 _RECENT = 8
 _MAX_MONTHS = 18
 _MONTHS = (
@@ -88,7 +88,7 @@ def inventory_analytics(
     now: datetime | None = None,
     rows: list[AnalyticsItem] | None = None,
 ) -> dict[str, Any]:
-    """Totals for ``range_id`` (``7d``, ``30d``, ``90d``, ``12m``, or ``all``).
+    """Totals for ``range_id`` (``wtd``, ``mtd``, ``ytd``, ``7d``, ``30d``, ``90d``, ``12m``, or ``all``).
 
     ``rows`` lets a caller that wants several ranges load the listings once.
     """
@@ -519,7 +519,14 @@ def _oldest(items: list[AnalyticsItem], now: datetime) -> list[dict[str, Any]]:
 
 
 def _window_start(range_id: str, now: datetime) -> datetime | None:
-    """Start of the range. Twelve months follows the chart's calendar months."""
+    """Start of the range. Calendar ranges start at UTC midnight (weeks on Monday)."""
+    today = datetime(now.year, now.month, now.day, tzinfo=UTC)
+    if range_id == "wtd":
+        return today - timedelta(days=today.weekday())
+    if range_id == "mtd":
+        return today.replace(day=1)
+    if range_id == "ytd":
+        return today.replace(month=1, day=1)
     if range_id == "12m":
         year, month = _add_months(now.year, now.month, -11)
         return datetime(year, month, 1, tzinfo=UTC)
@@ -542,6 +549,10 @@ def _buckets(
     now: datetime,
     dated: list[datetime],
 ) -> tuple[list[tuple[datetime, datetime, str]], bool]:
+    if range_id in ("wtd", "mtd"):
+        return _day_buckets(_window_start(range_id, now), now), False
+    if range_id == "ytd":
+        return _month_buckets(now, now.month), False
     if range_id == "7d":
         return _span_buckets(now, days=7, count=7), False
     if range_id == "30d":
@@ -568,6 +579,15 @@ def _span_buckets(now: datetime, *, days: int, count: int):
         bucket_start = start + step * index
         bucket_end = now if index == count - 1 else start + step * (index + 1)
         buckets.append((bucket_start, bucket_end, f"{bucket_start.month}/{bucket_start.day}"))
+    return buckets
+
+
+def _day_buckets(start: datetime, now: datetime):
+    buckets = []
+    day = start
+    while day <= now:
+        buckets.append((day, day + timedelta(days=1), f"{day.month}/{day.day}"))
+        day += timedelta(days=1)
     return buckets
 
 

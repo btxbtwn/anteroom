@@ -407,7 +407,7 @@ export interface SuggestionsResponse {
   suggestions: Suggestion[];
 }
 
-export type AnalyticsRange = "7d" | "30d" | "90d" | "12m" | "all";
+export type AnalyticsRange = "wtd" | "mtd" | "ytd" | "7d" | "30d" | "90d" | "12m" | "all";
 
 export interface AnalyticsInventory {
   active: number;
