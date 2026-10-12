@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guessGarment, notesWithMeasurements, typedMeasurements } from "./garmentMeasurements";
+import { guessGarment, notesWithItemDetails, notesWithMeasurements, parseItemDetails, typedMeasurements } from "./garmentMeasurements";
 
 describe("guessGarment", () => {
   it("reads pants from the folder name and defaults to a top", () => {
@@ -49,6 +49,48 @@ describe("notesWithMeasurements", () => {
     expect(JSON.parse(notesWithMeasurements(saved, "top", { length: "27" })).measurements).toEqual({
       pants: { waist: "15" },
       top: { length: "27" },
+    });
+  });
+});
+
+describe("parseItemDetails and notesWithItemDetails", () => {
+  it("reads the saved garment, measurements, labels, COG and SKU", () => {
+    const notes = JSON.stringify({
+      garment: "pants",
+      cog: "3.5",
+      sku: "LV-1",
+      vendooLabels: "To List, Bin 4",
+      measurements: { pants: { waist: "16", inseam: 30 } },
+    });
+    expect(parseItemDetails(notes, "top")).toEqual({
+      garment: "pants",
+      measurements: { waist: "16", inseam: "30" },
+      labels: "To List, Bin 4",
+      cog: "3.5",
+      sku: "LV-1",
+    });
+  });
+
+  it("falls back to the guessed garment for empty or plain notes", () => {
+    expect(parseItemDetails(null, "skirt")).toMatchObject({ garment: "skirt", measurements: {}, labels: "" });
+    expect(parseItemDetails("just text", "top").garment).toBe("top");
+  });
+
+  it("writes the reviewed details and keeps other note fields", () => {
+    const next = JSON.parse(notesWithItemDetails(JSON.stringify({ flaws: "small stain" }), {
+      garment: "top",
+      measurements: { pitToPit: "22", length: "" },
+      labels: " Bin 2 ",
+      cog: "4",
+      sku: "",
+    }));
+    expect(next).toEqual({
+      flaws: "small stain",
+      garment: "top",
+      measurements: { top: { pitToPit: "22" } },
+      vendooLabels: "Bin 2",
+      cog: "4",
+      sku: "",
     });
   });
 });

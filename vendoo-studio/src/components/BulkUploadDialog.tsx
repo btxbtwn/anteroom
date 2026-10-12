@@ -319,7 +319,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   );
 }
 
-function PhotoZoom({
+export function PhotoZoom({
   urls,
   index,
   onStep,

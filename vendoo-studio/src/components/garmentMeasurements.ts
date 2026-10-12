@@ -91,3 +91,53 @@ export function notesWithMeasurements(
     measurements: { ...existing, [garment]: typedMeasurements(garment, values) },
   });
 }
+
+export interface ItemDetails {
+  garment: Garment;
+  measurements: Record<string, string>;
+  labels: string;
+  cog: string;
+  sku: string;
+}
+
+function parseNotesObject(notes: string | null | undefined): Record<string, unknown> {
+  try {
+    const raw = notes ? JSON.parse(notes) : {};
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  } catch {
+    return notes ? { sellerNotes: notes } : {};
+  }
+  return {};
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+}
+
+/** The Item Details a listing already holds, for the regenerate review. */
+export function parseItemDetails(notes: string | null | undefined, fallbackGarment: Garment): ItemDetails {
+  const parsed = parseNotesObject(notes);
+  const garment = GARMENTS.find((g) => g.id === parsed.garment)?.id ?? fallbackGarment;
+  const all = parsed.measurements && typeof parsed.measurements === "object"
+    ? (parsed.measurements as Record<string, unknown>)
+    : {};
+  const mine = all[garment] && typeof all[garment] === "object" ? (all[garment] as Record<string, unknown>) : {};
+  return {
+    garment,
+    measurements: Object.fromEntries(Object.entries(mine).map(([key, value]) => [key, text(value)])),
+    labels: text(parsed.vendooLabels),
+    cog: text(parsed.cog),
+    sku: text(parsed.sku),
+  };
+}
+
+/** Notes with the reviewed details set; every other note field is kept. */
+export function notesWithItemDetails(notes: string | null | undefined, details: ItemDetails): string {
+  const withMeasurements = JSON.parse(notesWithMeasurements(notes, details.garment, details.measurements));
+  return JSON.stringify({
+    ...withMeasurements,
+    vendooLabels: details.labels.trim(),
+    cog: details.cog.trim(),
+    sku: details.sku.trim(),
+  });
+}

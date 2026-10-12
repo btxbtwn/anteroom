@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.234 — 2026-10-12
+
+- Regenerating from the sidebar now opens a review first: each listing's photos (drag to reorder), SKU, COG, labels and measurements, filled in from what is saved, so you can check and fix them before anything is rewritten.
+
 ## 0.1.233 — 2026-10-12
 
 - A listing's age now counts from its oldest live marketplace, so bulk-listing to one marketplace no longer makes items that are 60+ days old on the others look new in the stale filters, sorting and suggestions.
