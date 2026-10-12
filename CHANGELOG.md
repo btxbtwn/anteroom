@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.238 — 2026-10-11
+
+- Sourcing now sets itself up from your sales. Your cost per sold piece (what shipping out your pieces really costs you) and how long you sell for (how long your pieces take to sell) follow your own history, next to your sell-through and fees, so you can open Sourcing and see recommended boxes without touching a setting. Type your own number in More options to take one over.
+- The "Most to pay per piece" limit is gone. Sourcing no longer leaves boxes out for costing more per piece than a number you set; the return target and the lower-sales test still decide.
+
 ## 0.1.237 — 2026-10-11
 
 - Update Vendoo no longer hangs on "Reading the Vendoo draft…". Checking Vendoo, pulling a draft and opening a listing's fields were holding on to Studio's database connections while they waited for Chrome, so a few slow checks left everything else waiting; they now let go first.

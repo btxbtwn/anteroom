@@ -631,7 +631,7 @@ export interface SourcingBuyList {
   total: number;
   expected_profit: number;
   carts: SourcingCart[];
-  exclusions: Record<string, "needs_research" | "same_theme" | "theme_stocked" | "cog_cap" | "return_target" | "downside" | "budget" | "alternative">;
+  exclusions: Record<string, "needs_research" | "same_theme" | "theme_stocked" | "return_target" | "downside" | "budget" | "alternative">;
 }
 
 export interface SourcingSeasonality {
@@ -657,7 +657,7 @@ export interface SourcingSeasonality {
 export interface SourcingSnapshot {
   updated_at: string;
   destination_zip: string;
-  preferences: Omit<SourcingPrefs, "recent_zips" | "fees_auto" | "sell_through_auto">;
+  preferences: Omit<SourcingPrefs, "recent_zips" | "fees_auto" | "sell_through_auto" | "cost_per_piece_auto" | "selling_window_auto">;
   stores: Record<string, { name: string; error: string | null; sellout: number | null; zone: number | null; origins: number }>;
   research: boolean;
   priced_themes: number;
@@ -668,7 +668,7 @@ export interface SourcingSnapshot {
     factors: Record<string, number>;
     calibration: Record<string, { factor: number | null; orders: number; needed: number }>;
   };
-  assumptions: { market_haircut?: { factor: number; themes: number } | null; sell_through: number; sell_through_measured: { rate: number; sales: number } | null; fees: number; fees_measured: { rate: number; sales: number } | null; grade_yield: Record<string, number>; cost_per_piece: number };
+  assumptions: { market_haircut?: { factor: number; themes: number } | null; sell_through: number; sell_through_measured: { rate: number; sales: number } | null; fees: number; fees_measured: { rate: number; sales: number } | null; grade_yield: Record<string, number>; cost_per_piece: number; cost_per_piece_measured: { value: number; sales: number } | null; selling_window_measured: { value: number; sales: number } | null };
   buy_list: SourcingBuyList;
   store_buy_lists: Record<string, SourcingBuyList>;
   lots: SourcingLot[];
@@ -689,10 +689,10 @@ export interface SourcingPrefs {
   fees: number;
   fees_auto: boolean;
   cost_per_piece: number;
-  /** Most a usable piece may cost landed; 0 sets no limit. */
-  max_cog_per_piece: number;
+  cost_per_piece_auto: boolean;
   ready_in_weeks: number;
   selling_window_weeks: number;
+  selling_window_auto: boolean;
 }
 
 export interface SourcingState {
