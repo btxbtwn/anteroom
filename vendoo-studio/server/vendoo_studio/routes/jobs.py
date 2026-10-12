@@ -285,6 +285,9 @@ async def stream_job_preview(job_id: str, db: Session = Depends(get_db)):
     job = repo.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    # The stream outlives the request; FastAPI would keep this session's pool
+    # connection checked out until the viewer disconnects.
+    db.close()
 
     from vendoo_studio.services.preview_hub import preview_hub
 
