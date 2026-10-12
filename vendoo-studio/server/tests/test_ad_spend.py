@@ -54,6 +54,16 @@ def test_a_range_carries_only_the_days_it_covers():
     assert ads["profit_after_ads"] is None
 
 
+def test_a_custom_range_stops_at_its_end_day():
+    ads = summarize_ads(
+        [entry(spend=100)],
+        start=datetime(2026, 9, 3, tzinfo=UTC), end=datetime(2026, 9, 6, 23, 59, tzinfo=UTC),
+        marketplace_revenue={}, marketplace_profit={}, profit=None,
+    )
+    # Sept 3-6 is four of the entry's ten days.
+    assert ads["spend"] == 40
+
+
 def test_no_entries_reports_no_marketplaces():
     assert summarize_ads(
         [], start=None, marketplace_revenue={}, marketplace_profit={}, profit=10.0,

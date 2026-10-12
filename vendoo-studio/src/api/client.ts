@@ -208,7 +208,14 @@ export const api = {
     list: () => request<SuggestionsResponse>("/suggestions"),
   },
   analytics: {
-    get: (range: AnalyticsRange) => request<InventoryAnalytics>(`/analytics?range=${range}`),
+    get: (range: AnalyticsRange, custom?: { start: string; end: string }) => {
+      const params = new URLSearchParams({ range });
+      if (custom) {
+        params.set("start", custom.start);
+        params.set("end", custom.end);
+      }
+      return request<InventoryAnalytics>(`/analytics?${params}`);
+    },
   },
   scout: {
     list: () => request<ScoutState>("/scout"),

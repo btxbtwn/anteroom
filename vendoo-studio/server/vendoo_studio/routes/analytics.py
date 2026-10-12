@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -147,10 +149,12 @@ class AnalyticsResponse(BaseModel):
 @router.get("", response_model=AnalyticsResponse)
 def get_analytics(
     span: str = Query("12m", alias="range"),
+    start: date | None = None,
+    end: date | None = None,
     db: Session = Depends(get_db),
 ):
     try:
-        payload = inventory_analytics(db, range_id=span)
+        payload = inventory_analytics(db, range_id=span, start=start, end=end)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Unknown analytics range.") from exc
+        raise HTTPException(status_code=400, detail="Unknown analytics range, or a custom range without a start on or before its end.") from exc
     return AnalyticsResponse.model_validate(payload)

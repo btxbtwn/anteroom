@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.242 — 2026-10-12
+
+- Analytics ranges now read as This week, This month, This year, Last 7, 30 and 90 days, Last 12 months and All time, and a new Custom range lets you pick any From and To dates. Ad spend follows the custom dates too.
+
 ## 0.1.241 — 2026-10-12
 
 - Marketing's profit-after-ads card now says what it is: your profit across every marketplace, less your ad spend, with both figures shown. Each marketplace's ad card also shows that marketplace's own profit after its ads.

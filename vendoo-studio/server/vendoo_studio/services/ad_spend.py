@@ -75,11 +75,14 @@ def summarize_ads(
     entries: list[AdSpend],
     *,
     start: datetime | None,
+    end: datetime | None = None,
     marketplace_revenue: dict[str, float],
     marketplace_profit: dict[str, float | None],
     profit: float | None,
 ) -> dict[str, Any]:
     """Ad totals for the range beginning ``start`` (None for all time).
+
+    ``end`` closes a custom range; otherwise the range runs to the present.
 
     ``marketplace_revenue`` is each marketplace's recorded sales revenue in the
     same range, so spend can be read as a share of everything that sold there,
@@ -88,9 +91,10 @@ def summarize_ads(
     and ``profit`` the total across every marketplace, ads or not.
     """
     first = start.date() if start is not None else None
+    last = end.date() if end is not None else None
     totals = {market: _empty() for market in AD_MARKETPLACES}
     for row in entries:
-        share = _share(row.start_date, row.end_date, first)
+        share = _share(row.start_date, row.end_date, first, last)
         if share <= 0:
             continue
         bucket = totals.setdefault(row.marketplace, _empty())
@@ -116,14 +120,14 @@ def summarize_ads(
     }
 
 
-def _share(first_day: date, last_day: date, window_start: date | None) -> float:
-    """The part of an entry's days that fall on or after ``window_start``."""
+def _share(
+    first_day: date, last_day: date, window_start: date | None, window_end: date | None = None,
+) -> float:
+    """The part of an entry's days that fall inside the window."""
     days = (last_day - first_day).days + 1
-    if window_start is None or first_day >= window_start:
-        return 1.0
-    if last_day < window_start:
-        return 0.0
-    return ((last_day - window_start).days + 1) / days
+    inside_start = max(first_day, window_start) if window_start is not None else first_day
+    inside_end = min(last_day, window_end) if window_end is not None else last_day
+    return max((inside_end - inside_start).days + 1, 0) / days
 
 
 def _empty() -> dict[str, Any]:
