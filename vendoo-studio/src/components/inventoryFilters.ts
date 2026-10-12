@@ -123,9 +123,24 @@ export function matchesSearch(listing: FilterableListing, needle: string): boole
   );
 }
 
-/** Days since the listing went live, or null for one that never did. */
+/**
+ * When the longest-standing live listing went up. An item is only as fresh as
+ * its stalest live marketplace, so a new listing elsewhere does not reset it.
+ * Falls back to the item-wide listing date when no per-marketplace date is known.
+ */
+export function oldestLiveListedMs(listing: FilterableListing): number {
+  const listedDates = listing.vendoo_listed_dates || {};
+  const sold = listing.vendoo_sold_dates || {};
+  const stamps = (listing.vendoo_marketplaces || [])
+    .filter((id) => !sold[id])
+    .map((id) => timeMs(listedDates[id]))
+    .filter((ms) => ms > 0);
+  return stamps.length ? Math.min(...stamps) : timeMs(listing.vendoo_listed_at);
+}
+
+/** Days since the oldest live listing went up, or null for one that never did. */
 export function listedDaysAgo(listing: FilterableListing, now: number = Date.now()): number | null {
-  const listed = timeMs(listing.vendoo_listed_at);
+  const listed = oldestLiveListedMs(listing);
   return listed ? Math.floor((now - listed) / DAY_MS) : null;
 }
 
@@ -223,9 +238,9 @@ export function compareListings(sort: ListingSortId): ((left: FilterableListing,
     // A listing that never went live has no staleness to compare, so it sorts
     // last either way rather than pretending to be the oldest.
     case "stalest":
-      return (l, r) => byNumber(timeMs(l.vendoo_listed_at) || null, timeMs(r.vendoo_listed_at) || null, 1);
+      return (l, r) => byNumber(oldestLiveListedMs(l) || null, oldestLiveListedMs(r) || null, 1);
     case "freshest":
-      return (l, r) => byNumber(timeMs(l.vendoo_listed_at) || null, timeMs(r.vendoo_listed_at) || null, -1);
+      return (l, r) => byNumber(oldestLiveListedMs(l) || null, oldestLiveListedMs(r) || null, -1);
     case "sold_desc":
       return (l, r) => byNumber(timeMs(l.vendoo_sold_at) || null, timeMs(r.vendoo_sold_at) || null, -1);
     default:

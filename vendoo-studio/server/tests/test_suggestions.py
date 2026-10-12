@@ -122,6 +122,23 @@ class SuggestionsTest(unittest.TestCase):
         with patch.object(self.db, "commit", side_effect=AssertionError("suggestions wrote")):
             self.assertEqual(self._by_title("Flagged")["kind"], "fix_validation")
 
+    def test_stale_follows_the_oldest_live_marketplace(self):
+        conv = self.convs.create(title="Bulk relisted")
+        conv.notes = json.dumps({
+            "vendooMarketplaces": ["ebay", "sellwild"],
+            "vendooDates": {
+                "listed": "2026-08-22T00:00:00Z",
+                "listedByMarketplace": {
+                    "ebay": "2026-06-22T00:00:00Z",
+                    "sellwild": "2026-08-22T00:00:00Z",
+                },
+            },
+        })
+        self.convs.update_status(conv.id, "active")
+        self.db.commit()
+        cards = [card for card in list_suggestions(self.db, now=NOW) if card["kind"] == "stale_active"]
+        self.assertEqual([card["age_days"] for card in cards], [90])
+
     def test_stale_starts_at_sixty_days_and_older_ranks_first(self):
         thirty = self.convs.create(title="Thirty")
         fifty_nine = self.convs.create(title="FiftyNine")

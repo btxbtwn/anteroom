@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.233 — 2026-10-12
+
+- A listing's age now counts from its oldest live marketplace, so bulk-listing to one marketplace no longer makes items that are 60+ days old on the others look new in the stale filters, sorting and suggestions.
+
 ## 0.1.232 — 2026-10-12
 
 - Skirts now have their own measurements (waist, hip, length) in Item Details and in the bulk upload measurement grid, and a folder with "skirt" in its name starts on Skirt.
