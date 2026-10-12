@@ -337,6 +337,9 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Conversation not found")
     revisions = ListingRepo(db).get_revisions(conv_id)
     listing = revisions[0].listing_json if revisions else {}
+    # End the read transaction: the Chrome round-trip below can take 45s+, and a
+    # session that has queried keeps its pool connection until it commits.
+    db.commit()
 
     from vendoo_studio.models.listing_values import marketplace_dropdown_forms
 
@@ -485,7 +488,9 @@ async def _save_claimed_draft(db, conv, conv_id, *args):
     from vendoo_studio.services.vendoo_watch import listing_lock
 
     # Waits out a sync already reading this draft; syncs started meanwhile
-    # see the lock and skip.
+    # see the lock and skip. The wait and the Chrome reads that follow must not
+    # hold a pool connection, so the read transaction ends first.
+    db.commit()
     async with listing_lock(conv_id):
         return await _write_claimed_draft(db, conv, conv_id, *args)
 
@@ -668,6 +673,9 @@ async def pull_from_vendoo(conv_id: str, db: Session = Depends(get_db)):
     item_id = vendoo_binding(conv.notes).get("vendooItemId")
     if not item_id:
         raise HTTPException(409, "This listing has no Vendoo draft to pull from.")
+    # End the read transaction: the Chrome round-trip below can take 45s+, and a
+    # session that has queried keeps its pool connection until it commits.
+    db.commit()
     try:
         reply = await run_ops(
             SimpleNamespace(id=None), [{"op": "get_item", "item_id": item_id}],
@@ -787,6 +795,7 @@ async def sync_with_vendoo(conv_id: str, db: Session = Depends(get_db)):
 
     if not ConversationRepo(db).get(conv_id):
         raise HTTPException(404, "Conversation not found")
+    db.commit()
     return {"ok": True, **await sync_conversation(db, conv_id)}
 
 

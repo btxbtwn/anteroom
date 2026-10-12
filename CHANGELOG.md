@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.237 — 2026-10-11
+
+- Update Vendoo no longer hangs on "Reading the Vendoo draft…". Checking Vendoo, pulling a draft and opening a listing's fields were holding on to Studio's database connections while they waited for Chrome, so a few slow checks left everything else waiting; they now let go first.
+
 ## 0.1.236 — 2026-10-11
 
 - Listings no longer sit on "Loading..." for half a minute. Open live previews and price-drop searches were holding on to all of Studio's database connections, so everything else had to wait; they now let go straight away.

@@ -388,6 +388,9 @@ async def sync_conversation(db: Session, conv_id: str) -> dict[str, Any]:
         item_id = vendoo_binding(conv.notes if conv else None).get("vendooItemId")
         if not item_id:
             return {"action": "none", "reason": "no vendoo draft"}
+        # Release the pool connection while Chrome answers (up to 45s); the
+        # reads after it start a fresh transaction.
+        db.commit()
         try:
             reply = await run_ops(
                 SimpleNamespace(id=None), [{"op": "get_item", "item_id": item_id}],
