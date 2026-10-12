@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.239 — 2026-10-12
+
+- Marketing → Ads can take Etsy's stats CSV: download it from Etsy Ads and press Upload Etsy Ads CSV instead of typing the figures. Each day with activity becomes an entry, and uploading a newer export replaces those days.
+
 ## 0.1.238 — 2026-10-11
 
 - Sourcing now sets itself up from your sales. Your cost per sold piece (what shipping out your pieces really costs you) and how long you sell for (how long your pieces take to sell) follow your own history, next to your sell-through and fees, so you can open Sourcing and see recommended boxes without touching a setting. Type your own number in More options to take one over.

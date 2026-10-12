@@ -35,7 +35,7 @@ const adEntry: AdSpendEntry = {
 };
 
 function render(payload: MarketingData, adEntries: AdSpendEntry[] = []) {
-  useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
+  useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false, isSuccess: false, isError: false });
   useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) =>
     queryKey[0] === "sale-calendar"
       ? { data: { events: [], patterns: [], items: [], timezone: "UTC" }, isError: false }
@@ -46,6 +46,12 @@ function render(payload: MarketingData, adEntries: AdSpendEntry[] = []) {
 }
 
 describe("MarketingPage", () => {
+  it("takes the Etsy Ads CSV from Etsy instead of typed figures", () => {
+    const html = render(data);
+    expect(html).toContain("Upload Etsy Ads CSV");
+    expect(html).toContain('accept=".csv,text/csv"');
+  });
+
   it("holds the sale calendar and lists stale stock with how deep to cut", () => {
     const html = render(data);
     expect(html).toContain("<h1>Marketing</h1>");

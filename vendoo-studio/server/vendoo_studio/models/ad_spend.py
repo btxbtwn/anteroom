@@ -23,5 +23,7 @@ class AdSpend(Base):
     orders = Column(Integer, nullable=True)
     revenue = Column(Float, nullable=True)
     notes = Column(Text, nullable=False, default="")
+    # Set on rows an uploaded Etsy Ads CSV wrote, so the next upload can replace them.
+    source = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow)
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

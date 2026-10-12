@@ -38,3 +38,14 @@ export interface AnalyticsAds {
   profit_after_ads: number | null;
   marketplaces: AdMarketplaceTotals[];
 }
+
+/** What an Etsy Ads stats CSV upload added. */
+export interface EtsyAdsImport {
+  /** Days with ad activity; idle days are not recorded. */
+  days: number;
+  start: string;
+  end: string;
+  spend: number;
+  /** Typed Etsy entries that cover some of the same days, left as they were. */
+  overlapping_entries: number;
+}

@@ -45,7 +45,7 @@ import type {
   SourcingState,
 } from "./types";
 import { readSse } from "./sse";
-import type { AdSpendEntry, AdSpendInput } from "./adSpend";
+import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
 import { AssistantRefused, type AssistantMessage, type AssistantStreamHandlers } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 
@@ -250,6 +250,14 @@ export const api = {
     create: (entry: AdSpendInput) => request<AdSpendEntry>("/analytics/ads", { method: "POST", body: JSON.stringify(entry) }),
     update: (id: string, entry: AdSpendInput) => request<AdSpendEntry>(`/analytics/ads/${id}`, { method: "PUT", body: JSON.stringify(entry) }),
     remove: (id: string) => request<{ ok: boolean }>(`/analytics/ads/${id}`, { method: "DELETE" }),
+    uploadEtsyCsv: async (file: File): Promise<EtsyAdsImport> => {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(`${BASE}/analytics/ads/etsy-csv`, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `Upload failed: ${response.status}`);
+      return data;
+    },
   },
   saleCalendar: {
     record: (record: SaleRecord) => request<{ id: string }>("/analytics/calendar/records", { method: "POST", body: JSON.stringify(record) }),

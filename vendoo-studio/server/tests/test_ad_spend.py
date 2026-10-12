@@ -102,3 +102,47 @@ def test_routes_reject_bad_entries(workspace, change):
     _db, client = workspace
     body = {"marketplace": "poshmark", "start_date": "2026-09-01", "end_date": "2026-09-07", "spend": 10}
     assert client.post("/api/analytics/ads", json={**body, **change}).status_code == 422
+
+
+ETSY_HEADER = "Date (ET),Views,Clicks,Orders,Revenue (USD),Spend (USD),ROAS,Click rate,Ending budget (USD)\n"
+ETSY_EXPORT = (
+    "﻿" + ETSY_HEADER
+    + '"Oct 6, 2026",0,0,0,0,0,0,0,0\n'
+    + '"Oct 9, 2026",1424,19,0,0,5,0,1.3,5\n'
+    + '"Oct 10, 2026",1672,22,1,48.75,4.98,9.79,1.3,5\n'
+).encode()
+
+
+def test_etsy_csv_adds_one_entry_per_active_day(workspace):
+    _, client = workspace
+    result = client.post("/api/analytics/ads/etsy-csv", files={"file": ("ads.csv", ETSY_EXPORT)})
+    assert result.json() == {"days": 2, "start": "2026-10-06", "end": "2026-10-10",
+                             "spend": 9.98, "overlapping_entries": 0}
+    entries = client.get("/api/analytics/ads").json()
+    assert [(e["marketplace"], e["start_date"], e["spend"]) for e in entries] == [
+        ("etsy", "2026-10-10", 4.98), ("etsy", "2026-10-09", 5.0),
+    ]
+    assert entries[0]["roas"] == 9.79
+
+
+def test_etsy_csv_reupload_replaces_its_days_and_spares_typed_entries(workspace):
+    _, client = workspace
+    typed = {"marketplace": "etsy", "start_date": "2026-10-01", "end_date": "2026-10-31",
+             "spend": 90, "clicks": None, "orders": None, "revenue": None, "notes": "month"}
+    client.post("/api/analytics/ads", json=typed)
+    client.post("/api/analytics/ads/etsy-csv", files={"file": ("ads.csv", ETSY_EXPORT)})
+    corrected = (ETSY_HEADER + '"Oct 10, 2026",1672,22,1,50,5,10,1.3,5\n').encode()
+    result = client.post("/api/analytics/ads/etsy-csv", files={"file": ("ads.csv", corrected)}).json()
+    assert result["overlapping_entries"] == 1
+    entries = client.get("/api/analytics/ads").json()
+    by_start = {(e["start_date"], e["end_date"]): e for e in entries}
+    assert by_start[("2026-10-10", "2026-10-10")]["revenue"] == 50
+    assert ("2026-10-09", "2026-10-09") in by_start
+    assert ("2026-10-01", "2026-10-31") in by_start
+    assert len(entries) == 3
+
+
+def test_etsy_csv_rejects_other_files(workspace):
+    _, client = workspace
+    result = client.post("/api/analytics/ads/etsy-csv", files={"file": ("x.csv", b"sku,title\n1,a\n")})
+    assert result.status_code == 400
