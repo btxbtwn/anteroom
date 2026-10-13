@@ -50,6 +50,8 @@ from vendoo_studio.services.vendoo_api import (
 log = logging.getLogger("vendoo_studio.vendoo_create")
 
 REQUEST_TIMEOUT_SEC = 240.0
+# Rereads of a just-created draft that is not readable yet, about 10s in all.
+CREATED_DRAFT_WAITS_SEC = (0.5, 1.0, 2.0, 3.0, 4.0)
 # Reads that only decorate the result must not hold up the caller for as long as
 # a form fill may legitimately take.
 LOOKUP_TIMEOUT_SEC = 10.0
@@ -986,11 +988,27 @@ async def create_item(
 
     mark("vendoo_api_create")
     if recovered is None:
+        read_back = {"op": "get_item", "item_id": item_id, "allow_missing": True, "with_version": True}
         created = await run_ops(job, [
             {"op": "create_item", "item": item, "subscription_version": subscription_version},
-            {"op": "get_item", "item_id": item_id, "with_version": True},
+            read_back,
         ])
         stored = _result(created, "get_item").get("item")
+        # createItem can answer before the draft is readable. Wait for it
+        # rather than failing a send that worked.
+        for delay in CREATED_DRAFT_WAITS_SEC:
+            if stored:
+                break
+            await asyncio.sleep(delay)
+            retried = await run_ops(job, [read_back])
+            created["results"].extend(retried["results"])
+            stored = _result(retried, "get_item").get("item")
+        if not stored:
+            raise VendooCreateError(
+                "Vendoo accepted the draft but has not saved it yet. Retry Send in a moment: "
+                "it picks up the same draft instead of making a second one.",
+                results=created["results"],
+            )
     else:
         created = {"results": []}
         stored = recovered

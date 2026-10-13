@@ -225,7 +225,35 @@ class CreateTest(_NoExtraMapping):
         self.assertEqual(item["userID"], "u1")
         self.assertEqual(item["generalDetails"]["condition"]["value"], "v_pre_owned_good")
         self.assertEqual([img["id"] for img in item["generalDetails"]["images"]], ["images/u1/a.jpg", "images/u1/b.png"])
-        self.assertEqual(create_ops[1], {"op": "get_item", "item_id": "NEWid1234567890abcde", "with_version": True})
+        self.assertEqual(create_ops[1], {
+            "op": "get_item", "item_id": "NEWid1234567890abcde", "allow_missing": True, "with_version": True,
+        })
+
+    def test_waits_for_a_created_draft_that_is_not_readable_yet(self):
+        replies = self._replies()
+        item = replies[1]["results"][1]["item"]
+        replies[1]["results"][1] = {"op": "get_item", "ok": True, "item": None}
+        missing = {"ok": True, "results": [{"op": "get_item", "ok": True, "item": None}]}
+        found = {"ok": True, "results": [{"op": "get_item", "ok": True, "item": item}]}
+        fake = FakeBridge([*replies, missing, found])
+        with mock.patch.object(vendoo_create.browser_bridge, "request", fake.request), \
+             mock.patch.object(vendoo_create.asyncio, "sleep", mock.AsyncMock()) as sleep:
+            out = run(create_item(JOB, LISTING, PHOTOS))
+        self.assertEqual(out["item_id"], "NEWid1234567890abcde")
+        self.assertEqual(len(every_op(fake, "create_item")), 1)
+        self.assertEqual(sleep.await_count, 2)
+
+    def test_a_created_draft_that_never_appears_fails_with_a_retry_message(self):
+        replies = self._replies()
+        replies[1]["results"][1] = {"op": "get_item", "ok": True, "item": None}
+        missing = {"ok": True, "results": [{"op": "get_item", "ok": True, "item": None}]}
+        waits = len(vendoo_create.CREATED_DRAFT_WAITS_SEC)
+        fake = FakeBridge([*replies, *[deepcopy(missing) for _ in range(waits)]])
+        with mock.patch.object(vendoo_create.browser_bridge, "request", fake.request), \
+             mock.patch.object(vendoo_create.asyncio, "sleep", mock.AsyncMock()):
+            with self.assertRaisesRegex(VendooCreateError, "Retry Send in a moment"):
+                run(create_item(JOB, LISTING, PHOTOS))
+        self.assertEqual(len(every_op(fake, "create_item")), 1)
 
     def test_concurrent_schema_requests_share_one_remote_lookup(self):
         async def exercise():
