@@ -290,15 +290,38 @@ def encode_scaled(spec: FieldSpec, value: Any) -> tuple[str, str, bool]:
     text = str(value or "").strip()
     if not text:
         return "", "", True
-    wanted = _norm(text)
     for scale_id, scale in spec.scales.items():
-        options = scale.get("options") or {}
-        if text in options:
-            return scale_id, text, True
-        for code, display in options.items():
-            if _norm(display) == wanted or _norm(code) == wanted:
-                return scale_id, code, True
+        code = _labelled_code(scale.get("options") or {}, text)
+        if code is not None:
+            return scale_id, code, True
+    for scale_id, scale in spec.scales.items():
+        code = _coded(scale.get("options") or {}, text)
+        if code is not None:
+            return scale_id, code, True
     return "", "", False
+
+
+def _labelled_code(options: dict[str, str], text: str) -> str | None:
+    """The code of the option the seller sees as ``text``.
+
+    Labels are read before codes because a code can spell another option's
+    label: Depop numbers its sizes, so code ``14`` is the size shown as "12"
+    and size "14" is code ``22``. When several options share the label, the one
+    coded the same way is the plain one (Poshmark's ``32`` beside ``32Plus``).
+    """
+    wanted = _norm(text)
+    matches = [code for code, display in options.items() if _norm(display) == wanted]
+    if text in matches:
+        return text
+    return matches[0] if matches else None
+
+
+def _coded(options: dict[str, str], text: str) -> str | None:
+    """``text`` as an option code, for a value that is already Vendoo's id."""
+    if text in options:
+        return text
+    wanted = _norm(text)
+    return next((code for code in options if _norm(code) == wanted), None)
 
 
 def _parts(value: Any) -> list[str]:
@@ -338,12 +361,12 @@ def _encode_one(spec: FieldSpec, text: str) -> str | None:
     """A single human value into the option id Vendoo stores."""
     if not spec.options:
         return text
-    if text in spec.options:
-        return text
+    code = _labelled_code(spec.options, text)
+    if code is None:
+        code = _coded(spec.options, text)
+    if code is not None:
+        return code
     wanted = _norm(text)
-    for code, display in spec.options.items():
-        if _norm(display) == wanted or _norm(code) == wanted:
-            return code
     # Some vocabularies qualify the label — Mercari sizes read "M (8-10)" where
     # a listing just says "M". Accept that only when one option matches, so a
     # genuinely ambiguous size is reported instead of guessed.

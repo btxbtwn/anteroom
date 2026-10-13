@@ -176,6 +176,33 @@ class MercariSpecificsTest(unittest.TestCase):
         self.assertEqual([r for r in unresolved if "mercari" in r["field"]], [])
 
 
+class NumberedSizeCodesTest(unittest.TestCase):
+    """Depop numbers its sizes, so a code can spell another size's label."""
+
+    def test_a_size_is_read_as_its_label_before_a_code(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
+
+        size = FieldSpec("size", display="Size", selection_only=True, options={
+            "12": "10", "14": "12", "17": "M", "22": "14",
+        })
+        self.assertEqual(encode_specific(size, "14"), ("22", True))
+        self.assertEqual(encode_specific(size, "12"), ("14", True))
+        self.assertEqual(encode_specific(size, "M"), ("17", True))
+        # No size is shown as "17", so it can only be Vendoo's own id.
+        self.assertEqual(encode_specific(size, "17"), ("17", True))
+
+    def test_a_scaled_size_is_read_as_its_label_before_a_code(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_scaled
+
+        size = FieldSpec("size", display="Size", scales={
+            "numbered": {"display": "Numbered", "options": {"14": "12", "22": "14"}},
+            "plus": {"display": "Plus", "options": {"32Plus": "32", "32": "32"}},
+        })
+        self.assertEqual(encode_scaled(size, "14"), ("numbered", "22", True))
+        self.assertEqual(encode_scaled(size, "32"), ("plus", "32", True))
+        self.assertEqual(encode_scaled(size, "22"), ("numbered", "22", True))
+
+
 class SchemaFeedsTheGapFillerTest(unittest.TestCase):
     """The cached schema is what the gap filler asks the model to fill."""
 

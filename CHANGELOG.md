@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.245 — 2026-10-13
+
+- Depop gets the size the listing says. A size 14 was landing on Depop as a 12 (and a 12 as a 10, an 8 as a 6, and so on) because Depop numbers its sizes behind the scenes and Studio was reading the listing's size as that number instead of as the size shown in the dropdown.
+
 ## 0.1.244 — 2026-10-13
 
 - A regenerated listing is no longer replaced by the old Vendoo copy the next time Studio checks Vendoo. This was putting back the old condition (Poshmark showed Like New, Depop Used - Excellent), the old brand and description, and dropping fields the regenerate had filled, like Facebook's Shorts Length.
