@@ -192,6 +192,18 @@ class NumberedSizeCodesTest(unittest.TestCase):
         # Vendoo's id 17 — that would list the item as an M.
         self.assertEqual(encode_specific(size, "17"), ("", False))
 
+    def test_a_waist_size_matches_its_label_in_inches(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
+
+        # Mercari's jeans: id 26 is the 36 in. waist, and a 26 is id 17.
+        size = FieldSpec("Size", display="Size", selection_only=True, options={
+            "17": "26 in.", "26": "36 in.", "329": "58+ in.", "396": "M",
+        })
+        self.assertEqual(encode_specific(size, "26"), ("17", True))
+        self.assertEqual(encode_specific(size, "26 in."), ("17", True))
+        self.assertEqual(encode_specific(size, "36"), ("26", True))
+        self.assertEqual(encode_specific(size, "17"), ("", False))
+
     def test_a_named_code_is_still_read_as_a_code(self):
         from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
 

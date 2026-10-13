@@ -342,6 +342,7 @@ def _parts(value: Any) -> list[str]:
 
 
 _PARENTHETICAL = re.compile(r"\s*\([^)]*\)")
+_INCHES = re.compile(r"(?<=\d)\s*in\.?$", re.IGNORECASE)
 # What a model says when an attribute does not apply to the item. Only a real
 # answer when the field actually offers it as a choice.
 _DECLINED = frozenset({
@@ -376,11 +377,12 @@ def _encode_one(spec: FieldSpec, text: str) -> str | None:
         return code
     wanted = _norm(text)
     # Some vocabularies qualify the label — Mercari sizes read "M (8-10)" where
-    # a listing just says "M". Accept that only when one option matches, so a
-    # genuinely ambiguous size is reported instead of guessed.
+    # a listing just says "M", and its waist sizes read "26 in." for a 26.
+    # Accept that only when one option matches, so a genuinely ambiguous size
+    # is reported instead of guessed.
     stripped = [
         code for code, display in spec.options.items()
-        if _norm(_PARENTHETICAL.sub("", display)) == wanted
+        if _norm(_INCHES.sub("", _PARENTHETICAL.sub("", display))) == wanted
     ]
     if len(stripped) == 1:
         return stripped[0]
