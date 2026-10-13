@@ -317,7 +317,15 @@ def _labelled_code(options: dict[str, str], text: str) -> str | None:
 
 
 def _coded(options: dict[str, str], text: str) -> str | None:
-    """``text`` as an option code, for a value that is already Vendoo's id."""
+    """``text`` as an option code, for a value that is already Vendoo's id.
+
+    A bare number is never taken for one. Numbered ids are the marketplace's
+    own (Depop, Mercari, Etsy) and nothing in a listing is written in them,
+    while a number a seller does write is a size: a juniors 15 that Depop has
+    no label for is reported, not stored as id ``15``, the 24" waist.
+    """
+    if text.isdigit():
+        return None
     if text in options:
         return text
     wanted = _norm(text)
