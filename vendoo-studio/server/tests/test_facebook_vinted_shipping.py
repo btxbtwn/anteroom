@@ -86,6 +86,31 @@ class FacebookShippingTest(unittest.TestCase):
         self.assertNotIn("carrier", specifics)
         self.assertIn("facebook:Shipping carrier", [row["field"] for row in unresolved])
 
+    def test_offers_are_allowed_down_to_half_the_price(self):
+        for price, minimum in ((22, "11"), (25, "13"), (19.99, "10")):
+            with self.subTest(price=price):
+                item, _ = build_vendoo_item(_listing(price=price))
+                specifics = item["listings"]["facebook"]["marketplaceSpecifics"]
+                self.assertIs(specifics["allowOffers"], True)
+                self.assertEqual(specifics["minimumPrice"], minimum)
+
+    def test_an_unpriced_listing_allows_offers_without_a_minimum(self):
+        item, _ = build_vendoo_item(_listing())
+        specifics = item["listings"]["facebook"]["marketplaceSpecifics"]
+        self.assertIs(specifics["allowOffers"], True)
+        self.assertNotIn("minimumPrice", specifics)
+
+    def test_a_repriced_listing_moves_the_minimum_on_the_form(self):
+        current = {"listings": {"facebook": {
+            "overrides": {"categoryV2": {"id": "fb1"}},
+            "marketplaceSpecifics": {"allowOffers": False, "minimumPrice": "20"},
+        }}}
+        desired, _ = build_vendoo_item(_listing(price=30))
+        apply_update_all(current, desired)
+        updates = changed_fields(current, desired)
+        self.assertIs(updates["listings.facebook.marketplaceSpecifics.allowOffers"], True)
+        self.assertEqual(updates["listings.facebook.marketplaceSpecifics.minimumPrice"], "15")
+
     def test_no_facebook_category_leaves_the_form_alone(self):
         item, unresolved = build_vendoo_item({"title": "Thing", "weight_oz": 8})
         self.assertEqual(item["listings"]["facebook"]["marketplaceSpecifics"], {})

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from copy import deepcopy
 from typing import Any
@@ -975,6 +976,21 @@ def _apply_facebook_shipping(
         unresolved.append({"field": "facebook:Shipping carrier", "value": ""})
 
 
+def _apply_facebook_offers(known: dict[str, Any], price: Any) -> None:
+    """Turn Allow Offers on, with the lowest Minimum price Facebook accepts.
+
+    Facebook refuses a minimum under half the price, so the floor is half,
+    rounded up to a whole dollar.
+    """
+    known["allowOffers"] = True
+    try:
+        amount = float(_num_str(price))
+    except ValueError:
+        return
+    if amount > 0:
+        known["minimumPrice"] = str(math.ceil(amount / 2))
+
+
 # Vinted's Shoulder Width is the garment's width across, measured pit to pit.
 _PIT_TO_PIT_RE = re.compile(r"(?i)\bpit[\s-]*to[\s-]*pit\s*:\s*(\d+(?:\.\d+)?)")
 _LENGTH_RE = re.compile(r"(?i)\blength\s*:\s*(\d+(?:\.\d+)?)")
@@ -1707,6 +1723,7 @@ def _listing_section(
         _apply_depop_option_codes(known, unresolved)
     elif marketplace == "facebook" and section["overrides"].get("categoryV2"):
         _apply_facebook_shipping(known, general.get("weight"), schema, unresolved)
+        _apply_facebook_offers(known, listing.get("price") or general.get("price"))
 
     _apply_marketplace_brand(section, marketplace, listing)
     return section
