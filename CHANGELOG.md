@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.248 — 2026-10-13
+
+- Mercari gets the right waist size on jeans. A size 26 was landing on Mercari as 36 in.; it now lands on 26 in.
+
 ## 0.1.247 — 2026-10-13
 
 - Depop no longer gets a made-up size when it does not offer the listing's size. A juniors 15 was landing on Depop as a 24" waist. Studio now leaves Depop's size for you to pick and tells you it could not match it.
