@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.250 — 2026-10-13
+
+- The bulk upload window and the review window before a rewrite no longer close when you click outside them or press Escape. They close from the new x in the corner, or Cancel, so a stray click cannot throw away the measurements you typed.
+- You can rotate photos in both windows: hover a photo and use the arrow in its corner, or click it to enlarge and rotate left or right there.
+- You can remove a photo in both windows from the x in its corner. A listing always keeps its last photo.
+
 ## 0.1.249 — 2026-10-13
 
 - A plain size like 28 now goes to Depop as 28, not 28". The inches option is only picked when the listing's size says inches (28", 28 in.), or when the marketplace has no plain 28 to pick.

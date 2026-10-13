@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { bulkListingNotes, createBulkPhotoListings } from "./bulkPhotoUpload";
+import { bulkListingNotes, createBulkPhotoListings, rotationForTurns } from "./bulkPhotoUpload";
 
 function photo(name: string): File {
   return new File(["photo"], name, { type: "image/jpeg" });
@@ -48,7 +48,7 @@ describe("createBulkPhotoListings", () => {
         { folder: "upload/Item B", files: [photo("b.jpg")] },
       ],
       { cog: "8", labels: "To List, Shelf A" },
-      { create, uploadPhotos },
+      { create, uploadPhotos, rotatePhoto: vi.fn() },
     );
 
     const expectedNotes = JSON.stringify({ cog: "8", vendooLabels: "To List, Shelf A" });
@@ -71,7 +71,7 @@ describe("createBulkPhotoListings", () => {
         { folder: "upload/Item B", files: [photo("b.jpg")] },
       ],
       { cog: "", labels: "" },
-      { create, uploadPhotos },
+      { create, uploadPhotos, rotatePhoto: vi.fn() },
     );
 
     expect(create).toHaveBeenNthCalledWith(1, { title: "Item A", notes: JSON.stringify({ sku: "A1" }) });
@@ -85,9 +85,50 @@ describe("createBulkPhotoListings", () => {
     await createBulkPhotoListings(
       [{ folder: "upload/Item A", files: [photo("a.jpg")] }],
       { cog: "", labels: "", boxId: "box-1" },
-      { create, uploadPhotos },
+      { create, uploadPhotos, rotatePhoto: vi.fn() },
     );
 
     expect(create).toHaveBeenCalledWith({ title: "Item A", box_id: "box-1" });
+  });
+
+  it("turns the photos rotated in the window once they are saved", async () => {
+    const upright = photo("front.jpg");
+    const sideways = photo("tag.jpg");
+    const lost = photo("lost.jpg");
+    const create = vi.fn().mockResolvedValue({ id: "listing-a" });
+    // lost.jpg failed to upload, so it has no saved photo to turn.
+    const uploadPhotos = vi.fn().mockResolvedValue({
+      ok: true,
+      count: 2,
+      photos: [
+        { id: "photo-1", original_filename: "front.jpg" },
+        { id: "photo-2", original_filename: "tag.jpg" },
+      ],
+      errors: ["lost.jpg: File is not a valid image"],
+    });
+    const rotatePhoto = vi.fn().mockRejectedValue(new Error("This photo format cannot be rotated"));
+
+    const result = await createBulkPhotoListings(
+      [{
+        folder: "upload/Item A",
+        files: [upright, sideways, lost],
+        rotations: new Map([[sideways, -90], [lost, 180]]),
+      }],
+      { cog: "", labels: "" },
+      { create, uploadPhotos, rotatePhoto },
+    );
+
+    expect(rotatePhoto).toHaveBeenCalledTimes(1);
+    expect(rotatePhoto).toHaveBeenCalledWith("listing-a", "photo-2", -90);
+    expect(result[0]!.errors).toEqual([
+      "lost.jpg: File is not a valid image",
+      "tag.jpg: This photo format cannot be rotated",
+    ]);
+  });
+});
+
+describe("rotationForTurns", () => {
+  it("maps quarter turns to the degrees the server rotates by", () => {
+    expect([0, 1, 2, 3, 4, -1].map(rotationForTurns)).toEqual([null, 90, 180, -90, null, -90]);
   });
 });

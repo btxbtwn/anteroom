@@ -203,6 +203,12 @@
   user-select: none;
 }
 
+/* Turned on its side, the picture's width runs down the screen. */
+.photo-lightbox-image.is-quarter-turned {
+  max-width: min(86vh, calc(100vh - 104px));
+  max-height: min(92vw, 1200px);
+}
+
 .photo-lightbox-close,
 .photo-lightbox-nav,
 .photo-lightbox-rotate button {

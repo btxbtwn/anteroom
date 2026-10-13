@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Photo } from "../api/types";
 import { moveItem } from "../photoDrop";
+import { addToast } from "../ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
 import {
   GARMENTS,
@@ -30,29 +31,21 @@ interface Props {
  * Regenerate's version of the bulk upload window: each listing's photos
  * (drag to reorder), SKU, COG, labels and measurements, checked before
  * anything is wiped. Edits are written back to Item Details, which the
- * rewrite keeps and treats as fact.
+ * rewrite keeps and treats as fact. Only the x and Cancel close it.
  */
 export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) {
   const [rows, setRows] = useState<Record<string, ItemDetails> | null>(null);
   const savedRef = useRef<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [zoom, setZoom] = useState<{ photos: Photo[]; index: number } | null>(null);
+  const [zoom, setZoom] = useState<{ convId: string; index: number } | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const zoomRef = useRef(zoom);
-  const onCloseRef = useRef(onClose);
   const count = listings.length;
 
   useEffect(() => {
-    zoomRef.current = zoom;
-    onCloseRef.current = onClose;
-  }, [zoom, onClose]);
-
-  useEffect(() => {
+    // Escape only puts an enlarged photo away; it never closes the window.
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (zoomRef.current) setZoom(null);
-      else onCloseRef.current();
+      if (event.key === "Escape") setZoom(null);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -114,7 +107,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
 
   return createPortal(
     <div className="confirm-dialog bulk-upload-dialog" role="presentation">
-      <button type="button" className="confirm-dialog-backdrop" aria-label="Close without rewriting" onClick={onClose} />
+      <div className="confirm-dialog-backdrop" />
       <form
         ref={formRef}
         className="confirm-dialog-popup bulk-upload-popup"
@@ -126,12 +119,21 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
           if (!saving && rows) void rewrite();
         }}
       >
+        <button
+          type="button"
+          className="confirm-dialog-close"
+          disabled={saving}
+          onClick={onClose}
+          aria-label="Close without rewriting"
+        >
+          x
+        </button>
         <div className="confirm-dialog-header">
           <h2 id="regenerate-review-title" className="confirm-dialog-title">
             Review {count} {noun} before rewriting
           </h2>
           <p className="confirm-dialog-description">
-            Drag photos to set their order; the first one is the cover, and a click enlarges one.
+            Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
             Chat and every generated field are discarded, then each listing is written again from its
             photos and these details, one at a time. Flaws and notes are kept. Vendoo stays as it is
             until you send again.
@@ -145,7 +147,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
                 listing={listing}
                 details={rows[listing.id]!}
                 onChange={(patch) => setRow(listing.id, patch)}
-                onZoom={(photos, index) => setZoom({ photos, index })}
+                onZoom={(index) => setZoom({ convId: listing.id, index })}
                 onInputKeyDown={onInputKeyDown}
               />
             ))
@@ -163,8 +165,8 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
         </div>
       </form>
       {zoom ? (
-        <PhotoZoom
-          urls={zoom.photos.map((photo) => photo.url)}
+        <ReviewZoom
+          convId={zoom.convId}
           index={zoom.index}
           onStep={(index) => setZoom({ ...zoom, index })}
           onClose={() => setZoom(null)}
@@ -185,7 +187,7 @@ function ReviewRow({
   listing: RegenerateReviewListing;
   details: ItemDetails;
   onChange: (patch: Partial<ItemDetails>) => void;
-  onZoom: (photos: Photo[], index: number) => void;
+  onZoom: (index: number) => void;
   onInputKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
 }) {
   const title = listing.title || "Untitled";
@@ -273,8 +275,24 @@ function ReviewRow({
   );
 }
 
-/** The listing's saved photos in order; a drop saves the new order straight away, like the photo tray. */
-function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (photos: Photo[], index: number) => void }) {
+/** Turning a saved photo rewrites its stored file straight away, like the photo tray. */
+function usePhotoRotate(convId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ photoId, degrees }: { photoId: string; degrees: 90 | -90 }) =>
+      api.conversations.rotatePhoto(convId, photoId, degrees),
+    onSuccess: (rotated) => {
+      queryClient.setQueryData<Photo[]>(["photos", convId], (current) =>
+        current?.map((photo) => (photo.id === rotated.id ? rotated : photo)),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: Error) => addToast({ type: "error", title: "Could not rotate photo", description: err.message }),
+  });
+}
+
+/** The listing's saved photos in order; a drop, turn or removal is saved straight away, like the photo tray. */
+function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: number) => void }) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["photos", convId],
@@ -308,6 +326,16 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (photos: Pho
     },
   });
 
+  const rotate = usePhotoRotate(convId);
+  const remove = useMutation({
+    mutationFn: (photoId: string) => api.conversations.deletePhoto(convId, photoId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["photos", convId] });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: Error) => addToast({ type: "error", title: "Could not remove photo", description: err.message }),
+  });
+
   const resetDrag = () => {
     setDragId(null);
     setDropId(null);
@@ -338,7 +366,7 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (photos: Pho
           ].filter(Boolean).join(" ")}
           draggable={canReorder}
           title={canReorder ? "Drag to reorder, click to enlarge" : undefined}
-          onClick={() => onZoom(photos, index)}
+          onClick={() => onZoom(index)}
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", photo.id);
@@ -360,8 +388,72 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (photos: Pho
         >
           <img src={photo.url} alt="" draggable={false} />
           <div className="photo-thumb-num">{String(index + 1).padStart(2, "0")}</div>
+          <button
+            type="button"
+            tabIndex={-1}
+            className="photo-thumb-rotate"
+            aria-label={`Rotate photo ${index + 1} right`}
+            title="Rotate right"
+            disabled={rotate.isPending && rotate.variables.photoId === photo.id}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!rotate.isPending) rotate.mutate({ photoId: photo.id, degrees: 90 });
+            }}
+          >
+            ↻
+          </button>
+          {/* A listing keeps at least one photo; there is nothing to rewrite from otherwise. */}
+          {canReorder ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              className="photo-thumb-delete"
+              aria-label={`Remove photo ${index + 1}`}
+              title="Remove photo"
+              disabled={remove.isPending}
+              onClick={(event) => {
+                event.stopPropagation();
+                remove.mutate(photo.id);
+              }}
+            >
+              x
+            </button>
+          ) : null}
         </div>
       ))}
     </div>
+  );
+}
+
+/** One saved photo enlarged, with the same turn buttons as the photo tray's. */
+function ReviewZoom({
+  convId,
+  index,
+  onStep,
+  onClose,
+}: {
+  convId: string;
+  index: number;
+  onStep: (index: number) => void;
+  onClose: () => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ["photos", convId],
+    queryFn: () => api.conversations.photos(convId),
+  });
+  const photos = data || [];
+  const photo = photos[index];
+  const rotate = usePhotoRotate(convId);
+
+  if (!photo) return null;
+  return (
+    <PhotoZoom
+      urls={photos.map((item) => item.url)}
+      index={index}
+      rotating={rotate.isPending}
+      onRotate={(degrees) => rotate.mutate({ photoId: photo.id, degrees })}
+      onStep={onStep}
+      onClose={onClose}
+    />
   );
 }
