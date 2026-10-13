@@ -6,9 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.245 — 2026-10-13
+## 0.1.246 — 2026-10-13
 
 - Depop gets the size the listing says. A size 14 was landing on Depop as a 12 (and a 12 as a 10, an 8 as a 6, and so on) because Depop numbers its sizes behind the scenes and Studio was reading the listing's size as that number instead of as the size shown in the dropdown.
+
+## 0.1.245 — 2026-10-13
+
+- Send to Vendoo no longer fails with "Read draft version returned 404" when Vendoo takes a moment to save a new draft. Studio now waits for the draft to appear, and if it still has not, says so and picks up the same draft on the next Send instead of making a second one.
+- When a linked Vendoo draft is gone, the error now says that in plain words instead of showing a database path.
 
 ## 0.1.244 — 2026-10-13
 
