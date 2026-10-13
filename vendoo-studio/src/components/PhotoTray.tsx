@@ -49,6 +49,24 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     },
   });
 
+  const rotateMutation = useMutation({
+    mutationFn: ({ photoId, degrees }: { photoId: string; degrees: 90 | -90 }) =>
+      api.conversations.rotatePhoto(convId, photoId, degrees),
+    onSuccess: (rotated) => {
+      queryClient.setQueryData<Photo[]>(["photos", convId], (current) =>
+        current?.map((photo) => (photo.id === rotated.id ? rotated : photo)),
+      );
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: Error) => setUploadError(err.message || "Rotate failed"),
+  });
+  const rotatingId = rotateMutation.isPending ? rotateMutation.variables?.photoId : null;
+  const rotate = (photoId: string, degrees: 90 | -90) => {
+    if (rotateMutation.isPending) return;
+    setUploadError(null);
+    rotateMutation.mutate({ photoId, degrees });
+  };
+
   const reorderMutation = useMutation({
     mutationFn: (orderedIds: string[]) => api.conversations.reorderPhotos(convId, orderedIds),
     onMutate: async (orderedIds) => {
@@ -308,6 +326,19 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
               <div className="photo-thumb-num">{String(i + 1).padStart(2, "0")}</div>
               <button
                 type="button"
+                className="photo-thumb-rotate"
+                aria-label={`Rotate photo ${i + 1} right`}
+                title="Rotate right"
+                disabled={rotatingId === p.id}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  rotate(p.id, 90);
+                }}
+              >
+                ↻
+              </button>
+              <button
+                type="button"
                 className="photo-thumb-delete"
                 aria-label={`Delete photo ${i + 1}`}
                 onClick={(event) => {
@@ -335,6 +366,26 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           <button type="button" className="photo-lightbox-close" onClick={() => setPreviewId(null)} aria-label="Close">
             x
           </button>
+          <div className="photo-lightbox-rotate">
+            <button
+              type="button"
+              onClick={() => rotate(previewPhoto.id, -90)}
+              disabled={rotateMutation.isPending}
+              aria-label="Rotate left"
+              title="Rotate left"
+            >
+              ↺
+            </button>
+            <button
+              type="button"
+              onClick={() => rotate(previewPhoto.id, 90)}
+              disabled={rotateMutation.isPending}
+              aria-label="Rotate right"
+              title="Rotate right"
+            >
+              ↻
+            </button>
+          </div>
           {photos.length > 1 && (
             <button type="button" className="photo-lightbox-nav photo-lightbox-prev" onClick={() => stepPreview(-1)} aria-label="Previous photo">
               ‹

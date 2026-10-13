@@ -386,6 +386,12 @@ export const api = {
     photos: (id: string) => request<Photo[]>(`/conversations/${id}/photos`),
     deletePhoto: (convId: string, photoId: string) =>
       request<OkResponse>(`/conversations/${convId}/photos/${photoId}`, { method: "DELETE" }),
+    /** Rotate the stored image clockwise by `degrees` (90, -90 or 180). */
+    rotatePhoto: (convId: string, photoId: string, degrees: 90 | -90 | 180) =>
+      request<Photo>(`/conversations/${convId}/photos/${photoId}/rotate`, {
+        method: "POST",
+        body: JSON.stringify({ degrees }),
+      }),
     delete: (id: string) =>
       request<DeleteConversationResult>(`/conversations/${id}`, { method: "DELETE" }),
     reset: (id: string, opts?: { keepInputs?: boolean }) =>

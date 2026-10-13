@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.243 — 2026-10-13
+
+- Photos can be rotated. Hover a photo and click ↻ to turn it right, or open it and use ↺ / ↻. The saved photo itself turns, so Vendoo, the marketplaces and listing generation all get it the right way up.
+
 ## 0.1.242 — 2026-10-12
 
 - Analytics ranges now read as This week, This month, This year, Last 7, 30 and 90 days, Last 12 months and All time, and a new Custom range lets you pick any From and To dates. Ad spend follows the custom dates too.

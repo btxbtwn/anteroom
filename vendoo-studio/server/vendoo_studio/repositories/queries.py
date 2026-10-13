@@ -191,26 +191,26 @@ class ConversationRepo:
         )
         return _facet(*row) if row else _facet(None, None)
 
-    def cover_photo_ids(self) -> dict[str, str]:
-        """Map each conversation to its first photo, for sidebar thumbnails."""
+    def cover_photos(self) -> dict[str, tuple[str, str | None]]:
+        """Map each conversation to its first photo's id and checksum, for sidebar thumbnails."""
         rows = (
-            self.db.query(Photo.conversation_id, Photo.id)
+            self.db.query(Photo.conversation_id, Photo.id, Photo.checksum)
             .order_by(Photo.conversation_id, Photo.display_order, Photo.created_at)
             .all()
         )
-        covers: dict[str, str] = {}
-        for conv_id, photo_id in rows:
-            covers.setdefault(conv_id, photo_id)
+        covers: dict[str, tuple[str, str | None]] = {}
+        for conv_id, photo_id, checksum in rows:
+            covers.setdefault(conv_id, (photo_id, checksum))
         return covers
 
-    def cover_photo_id(self, conv_id: str) -> str | None:
+    def cover_photo(self, conv_id: str) -> tuple[str, str | None] | None:
         row = (
-            self.db.query(Photo.id)
+            self.db.query(Photo.id, Photo.checksum)
             .filter(Photo.conversation_id == conv_id)
             .order_by(Photo.display_order, Photo.created_at)
             .first()
         )
-        return row[0] if row else None
+        return (row[0], row[1]) if row else None
 
     def write_notes(
         self,
@@ -407,6 +407,17 @@ class ConversationRepo:
         _recheck_error_flag(self.db, conv_id)
         self.db.commit()
         return True
+
+    def replace_photo_file(self, photo: Photo, meta: dict) -> Photo:
+        """Point a photo at a rewritten file, e.g. after a rotation."""
+        photo.stored_filename = meta["stored_filename"]
+        photo.size_bytes = meta["size_bytes"]
+        photo.checksum = meta["checksum"]
+        photo.width = meta["width"]
+        photo.height = meta["height"]
+        self.db.commit()
+        self.db.refresh(photo)
+        return photo
 
     def reorder_photos(self, conv_id: str, ordered_ids: list[str]) -> list[Photo]:
         for idx, photo_id in enumerate(ordered_ids):

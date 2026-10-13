@@ -4,16 +4,21 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.repositories.queries import ConversationRepo
+from vendoo_studio.routes.conversations import _photo_response
 from vendoo_studio.services.photos import (
     THUMBNAIL_MIME,
     THUMBNAIL_SIZES,
+    delete_thumbnails,
     get_or_create_thumbnail,
+    photo_url,
     process_upload,
+    rotate_file,
 )
 
 router = APIRouter(tags=["photos"])
@@ -71,7 +76,7 @@ async def upload_photos(
             "width": photo.width,
             "height": photo.height,
             "created_at": photo.created_at.isoformat() if photo.created_at else "",
-            "url": f"/api/photos/{photo.id}",
+            "url": photo_url(photo.id, photo.checksum),
         })
 
     if failures and not results:
@@ -93,6 +98,36 @@ def reorder_photos(conv_id: str, ordered_ids: list[str], db: Session = Depends(g
     repo = ConversationRepo(db)
     repo.reorder_photos(conv_id, ordered_ids)
     return {"ok": True}
+
+
+class RotateRequest(BaseModel):
+    # Clockwise; -90 turns the photo left.
+    degrees: int
+
+
+@router.post("/api/conversations/{conv_id}/photos/{photo_id}/rotate")
+def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session = Depends(get_db)):
+    repo = ConversationRepo(db)
+    photo = next((p for p in repo.get_photos(conv_id) if p.id == photo_id), None)
+    if not photo:
+        raise HTTPException(404, "Photo not found")
+
+    try:
+        meta = rotate_file(photo.stored_filename, photo.mime_type, body.degrees)
+    except FileNotFoundError:
+        raise HTTPException(404, "Photo file not found") from None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+
+    previous = photo.stored_filename
+    try:
+        photo = repo.replace_photo_file(photo, meta)
+    except Exception:
+        os.remove(Path(PHOTOS_DIR) / meta["stored_filename"])
+        raise
+    (Path(PHOTOS_DIR) / previous).unlink(missing_ok=True)
+    delete_thumbnails(previous)
+    return _photo_response(photo)
 
 
 @router.get("/api/photos/{photo_id}")
