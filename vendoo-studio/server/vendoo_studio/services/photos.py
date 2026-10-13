@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
+from io import BytesIO
 from pathlib import Path
 
 from fastapi import UploadFile
@@ -52,7 +53,6 @@ def process_bytes(contents: bytes, filename: str | None = None, content_type: st
 
     width = None
     height = None
-    from io import BytesIO
     try:
         img = Image.open(BytesIO(contents))
         img.load()
@@ -79,6 +79,66 @@ async def process_upload(conv_id: str, file: UploadFile):
 
 THUMBNAIL_SIZES = (96, 192)
 THUMBNAIL_MIME = "image/jpeg"
+COVER_THUMB_SIZE = 96
+
+
+def photo_url(photo_id: str, checksum: str | None) -> str:
+    """The original's URL, versioned by content so a rotated photo is refetched."""
+    return f"/api/photos/{photo_id}" + (f"?v={checksum[:12]}" if checksum else "")
+
+
+def cover_thumb_url(photo_id: str, checksum: str | None) -> str:
+    url = f"/api/photos/{photo_id}/thumb?size={COVER_THUMB_SIZE}"
+    return url + (f"&v={checksum[:12]}" if checksum else "")
+
+
+ROTATIONS = {
+    90: Image.Transpose.ROTATE_270,
+    -90: Image.Transpose.ROTATE_90,
+    180: Image.Transpose.ROTATE_180,
+}
+SAVE_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
+
+
+def rotate_file(stored_filename: str, mime_type: str, degrees: int) -> dict:
+    """Write a rotated copy of a stored photo under a new name; ``degrees`` is clockwise.
+
+    The pixels are rewritten rather than flagged with an EXIF orientation, so
+    every consumer — Vendoo uploads, model vision, thumbnails — sees the same
+    picture. The caller swaps the record over and deletes the old file.
+    """
+    if degrees not in ROTATIONS:
+        raise ValueError("Rotate by 90, -90 or 180 degrees")
+    fmt = SAVE_FORMATS.get(mime_type)
+    if not fmt:
+        raise ValueError("This photo format cannot be rotated")
+    source = Path(PHOTOS_DIR) / stored_filename
+    if not source.exists():
+        raise FileNotFoundError(stored_filename)
+
+    with Image.open(source) as img:
+        icc_profile = img.info.get("icc_profile")
+        rotated = ImageOps.exif_transpose(img).transpose(ROTATIONS[degrees])
+    options: dict = {"icc_profile": icc_profile} if icc_profile else {}
+    if fmt == "JPEG":
+        if rotated.mode not in ("RGB", "L"):
+            rotated = rotated.convert("RGB")
+        options.update(quality=95, subsampling=0)
+    elif fmt == "WEBP":
+        options.update(quality=95)
+
+    stored_name = f"{uuid.uuid4().hex}{source.suffix}"
+    buffer = BytesIO()
+    rotated.save(buffer, fmt, **options)
+    contents = buffer.getvalue()
+    (Path(PHOTOS_DIR) / stored_name).write_bytes(contents)
+    return {
+        "stored_filename": stored_name,
+        "size_bytes": len(contents),
+        "checksum": hashlib.sha256(contents).hexdigest(),
+        "width": rotated.width,
+        "height": rotated.height,
+    }
 
 
 def thumbnail_path(stored_filename: str, size: int) -> Path:
