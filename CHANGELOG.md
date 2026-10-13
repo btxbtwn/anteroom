@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.245 — 2026-10-13
+
+- The bulk upload window and the review window before a rewrite no longer close when you click outside them or press Escape. They close from the new x in the corner, or Cancel, so a stray click cannot throw away the measurements you typed.
+- You can rotate photos in both windows: hover a photo and use the arrow in its corner, or click it to enlarge and rotate left or right there.
+- You can remove a photo in both windows from the x in its corner. A listing always keeps its last photo.
+
 ## 0.1.244 — 2026-10-13
 
 - A regenerated listing is no longer replaced by the old Vendoo copy the next time Studio checks Vendoo. This was putting back the old condition (Poshmark showed Like New, Depop Used - Excellent), the old brand and description, and dropping fields the regenerate had filled, like Facebook's Shorts Length.

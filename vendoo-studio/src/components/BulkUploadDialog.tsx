@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { BulkUploadDefaults, BulkUploadItem } from "../bulkPhotoUpload";
+import { rotationForTurns, type BulkUploadDefaults, type BulkUploadItem, type PhotoRotation } from "../bulkPhotoUpload";
 import { formatMoney } from "./analyticsFormat";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
@@ -24,7 +24,9 @@ type Row = { sku: string; garment: Garment; measurements: Record<string, string>
 /**
  * Everything a bulk upload needs in one window, before anything is created:
  * photo order, the box, COG and labels every draft shares, and each item's
- * own SKU and measurements. Click a photo to read the tape in it.
+ * own SKU and measurements. Click a photo to read the tape in it, or to turn
+ * it the right way up. Only the x and Cancel close it, so a stray click
+ * outside cannot throw away what was typed.
  */
 export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }: Props) {
   const [defaults, setDefaults] = useState<BulkUploadDefaults>(EMPTY_DEFAULTS);
@@ -39,12 +41,12 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const [dragFrom, setDragFrom] = useState<DragSpot | null>(null);
   const [dropOn, setDropOn] = useState<DragSpot | null>(null);
   const [zoom, setZoom] = useState<DragSpot | null>(null);
+  // Quarter turns clockwise per file; the files are not saved yet, so the server turns them after upload.
+  const [turns, setTurns] = useState<Map<File, number>>(() => new Map());
   // One preview URL per picked file; reordering only shuffles which file sits where.
   const [previewUrls, setPreviewUrls] = useState<Map<File, string>>(() => new Map());
   const formRef = useRef<HTMLFormElement>(null);
   const cogRef = useRef<HTMLInputElement>(null);
-  const zoomRef = useRef(zoom);
-  const onCancelRef = useRef(onCancel);
   const count = groups.length;
 
   // Created and revoked in the same effect so StrictMode's remount gets fresh URLs.
@@ -73,17 +75,20 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     i === index ? { ...row, ...patch } : row
   )));
 
-  useEffect(() => {
-    zoomRef.current = zoom;
-    onCancelRef.current = onCancel;
-  }, [zoom, onCancel]);
+  const rotate = (file: File, degrees: 90 | -90) => setTurns((current) => (
+    new Map(current).set(file, ((current.get(file) || 0) + degrees / 90 + 4) % 4)
+  ));
+
+  // A listing keeps at least one photo; there is nothing to generate from otherwise.
+  const removePhoto = (spot: DragSpot) => setGroups((current) => current.map((group, index) => (
+    index === spot.group ? { ...group, files: group.files.filter((_, photo) => photo !== spot.photo) } : group
+  )));
 
   useEffect(() => {
     const focusTimer = window.setTimeout(() => cogRef.current?.focus(), 0);
+    // Escape only puts an enlarged photo away; it never closes the window.
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (zoomRef.current) setZoom(null);
-      else onCancelRef.current();
+      if (event.key === "Escape") setZoom(null);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {
@@ -97,7 +102,14 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
 
   const confirm = (generate: boolean) => {
     if (invalidCog) return;
-    onConfirm(defaults, groups.map((group, index) => ({ ...group, ...rows[index]! })), generate);
+    onConfirm(defaults, groups.map((group, index) => {
+      const rotations = new Map<File, PhotoRotation>();
+      for (const file of group.files) {
+        const degrees = rotationForTurns(turns.get(file) || 0);
+        if (degrees) rotations.set(file, degrees);
+      }
+      return { ...group, ...rows[index]!, rotations };
+    }), generate);
   };
 
   // Enter moves on like a spreadsheet instead of submitting half a box.
@@ -112,12 +124,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
 
   return createPortal(
     <div className="confirm-dialog bulk-upload-dialog" role="presentation">
-      <button
-        type="button"
-        className="confirm-dialog-backdrop"
-        aria-label="Cancel bulk upload"
-        onClick={onCancel}
-      />
+      <div className="confirm-dialog-backdrop" />
       <form
         ref={formRef}
         className="confirm-dialog-popup bulk-upload-popup"
@@ -129,13 +136,16 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           confirm(true);
         }}
       >
+        <button type="button" className="confirm-dialog-close" onClick={onCancel} aria-label="Cancel bulk upload">
+          x
+        </button>
         <div className="confirm-dialog-header">
           <h2 id="bulk-upload-title" className="confirm-dialog-title">
             Set details for {count} listings
           </h2>
           <p className="confirm-dialog-description">
             Box, COG and labels go on every draft. Drag photos to set their order; the first one is
-            the cover, and a click enlarges one. Type each item's SKU and measurements in inches, or
+            the cover, and a click enlarges one. Rotate or remove a photo from its corners. Type each item's SKU and measurements in inches, or
             leave them blank: a typed SKU is kept as is, a blank one is made up from the brand and size.
           </p>
         </div>
@@ -264,8 +274,43 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                         }}
                         onDragEnd={resetDrag}
                       >
-                        {previewUrls.has(file) ? <img src={previewUrls.get(file)} alt="" draggable={false} /> : null}
+                        {previewUrls.has(file) ? (
+                          <img
+                            src={previewUrls.get(file)}
+                            alt=""
+                            draggable={false}
+                            style={turns.get(file) ? { transform: `rotate(${turns.get(file)! * 90}deg)` } : undefined}
+                          />
+                        ) : null}
                         <div className="photo-thumb-num">{String(photoIndex + 1).padStart(2, "0")}</div>
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          className="photo-thumb-rotate"
+                          aria-label={`Rotate photo ${photoIndex + 1} right`}
+                          title="Rotate right"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            rotate(file, 90);
+                          }}
+                        >
+                          ↻
+                        </button>
+                        {canReorder ? (
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            className="photo-thumb-delete"
+                            aria-label={`Remove photo ${photoIndex + 1}`}
+                            title="Remove photo"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removePhoto(spot);
+                            }}
+                          >
+                            x
+                          </button>
+                        ) : null}
                       </div>
                     );
                   })}
@@ -310,6 +355,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
         <PhotoZoom
           urls={zoomFiles.map((file) => previewUrls.get(file) || "")}
           index={zoom.photo}
+          turns={turns.get(zoomFiles[zoom.photo]!) || 0}
+          onRotate={(degrees) => rotate(zoomFiles[zoom.photo]!, degrees)}
           onStep={(photo) => setZoom({ ...zoom, photo })}
           onClose={() => setZoom(null)}
         />
@@ -322,11 +369,18 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
 export function PhotoZoom({
   urls,
   index,
+  turns = 0,
+  rotating = false,
+  onRotate,
   onStep,
   onClose,
 }: {
   urls: string[];
   index: number;
+  /** Quarter turns to show a photo by when the turn is not in the file yet. */
+  turns?: number;
+  rotating?: boolean;
+  onRotate: (degrees: 90 | -90) => void;
   onStep: (index: number) => void;
   onClose: () => void;
 }) {
@@ -354,12 +408,26 @@ export function PhotoZoom({
       <button type="button" className="photo-lightbox-close" onClick={onClose} aria-label="Close">
         x
       </button>
+      <div className="photo-lightbox-rotate">
+        <button type="button" onClick={() => onRotate(-90)} disabled={rotating} aria-label="Rotate left" title="Rotate left">
+          ↺
+        </button>
+        <button type="button" onClick={() => onRotate(90)} disabled={rotating} aria-label="Rotate right" title="Rotate right">
+          ↻
+        </button>
+      </div>
       {urls.length > 1 && (
         <button type="button" className="photo-lightbox-nav photo-lightbox-prev" onClick={() => step(-1)} aria-label="Previous photo">
           ‹
         </button>
       )}
-      <img className="photo-lightbox-image" src={urls[index]} alt={`Photo ${index + 1}`} onClick={onClose} />
+      <img
+        className={`photo-lightbox-image${turns % 2 ? " is-quarter-turned" : ""}`}
+        style={turns ? { transform: `rotate(${turns * 90}deg)` } : undefined}
+        src={urls[index]}
+        alt={`Photo ${index + 1}`}
+        onClick={onClose}
+      />
       {urls.length > 1 && (
         <button type="button" className="photo-lightbox-nav photo-lightbox-next" onClick={() => step(1)} aria-label="Next photo">
           ›
