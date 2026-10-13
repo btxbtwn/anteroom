@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.249 — 2026-10-13
+
+- A plain size like 28 now goes to Depop as 28, not 28". The inches option is only picked when the listing's size says inches (28", 28 in.), or when the marketplace has no plain 28 to pick.
+
 ## 0.1.248 — 2026-10-13
 
 - Mercari gets the right waist size on jeans. A size 26 was landing on Mercari as 36 in.; it now lands on 26 in.

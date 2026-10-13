@@ -204,6 +204,20 @@ class NumberedSizeCodesTest(unittest.TestCase):
         self.assertEqual(encode_specific(size, "36"), ("26", True))
         self.assertEqual(encode_specific(size, "17"), ("", False))
 
+    def test_a_plain_size_is_not_the_same_size_in_inches(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
+
+        # Depop's jeans: 28" is a waist, 28 a size of its own.
+        size = FieldSpec("size", display="Size", selection_only=True, options={
+            "18": '27"', "19": '28"', "44": "28",
+        })
+        self.assertEqual(encode_specific(size, "28"), ("44", True))
+        self.assertEqual(encode_specific(size, '28"'), ("19", True))
+        self.assertEqual(encode_specific(size, "28 in."), ("19", True))
+        self.assertEqual(encode_specific(size, "28 inches"), ("19", True))
+        # No plain 27 is offered, so the waist is the only 27 there is.
+        self.assertEqual(encode_specific(size, "27"), ("18", True))
+
     def test_a_named_code_is_still_read_as_a_code(self):
         from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
 
