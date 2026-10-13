@@ -517,6 +517,9 @@ async function getVendooItem(session, itemId, { allowMissing = false, withVersio
       { token: session.access_token },
     );
     if (allowMissing && doc.status === 404) return null;
+    if (doc.status === 404) {
+      throw new Error('Vendoo has no draft for this listing. It may have been deleted in Vendoo, or Chrome is signed in to a different Vendoo account.');
+    }
     if (!doc.ok || !doc.data?.updateTime) throw new Error(vendooError('Read draft version', doc));
     version = doc.data.updateTime;
     // PATCH writes Firestore fields. The item API reshapes category specifics

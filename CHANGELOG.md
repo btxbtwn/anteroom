@@ -6,11 +6,32 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.245 — 2026-10-13
+## 0.1.250 — 2026-10-13
 
 - The bulk upload window and the review window before a rewrite no longer close when you click outside them or press Escape. They close from the new x in the corner, or Cancel, so a stray click cannot throw away the measurements you typed.
 - You can rotate photos in both windows: hover a photo and use the arrow in its corner, or click it to enlarge and rotate left or right there.
 - You can remove a photo in both windows from the x in its corner. A listing always keeps its last photo.
+
+## 0.1.249 — 2026-10-13
+
+- A plain size like 28 now goes to Depop as 28, not 28". The inches option is only picked when the listing's size says inches (28", 28 in.), or when the marketplace has no plain 28 to pick.
+
+## 0.1.248 — 2026-10-13
+
+- Mercari gets the right waist size on jeans. A size 26 was landing on Mercari as 36 in.; it now lands on 26 in.
+
+## 0.1.247 — 2026-10-13
+
+- Depop no longer gets a made-up size when it does not offer the listing's size. A juniors 15 was landing on Depop as a 24" waist. Studio now leaves Depop's size for you to pick and tells you it could not match it.
+
+## 0.1.246 — 2026-10-13
+
+- Depop gets the size the listing says. A size 14 was landing on Depop as a 12 (and a 12 as a 10, an 8 as a 6, and so on) because Depop numbers its sizes behind the scenes and Studio was reading the listing's size as that number instead of as the size shown in the dropdown.
+
+## 0.1.245 — 2026-10-13
+
+- Send to Vendoo no longer fails with "Read draft version returned 404" when Vendoo takes a moment to save a new draft. Studio now waits for the draft to appear, and if it still has not, says so and picks up the same draft on the next Send instead of making a second one.
+- When a linked Vendoo draft is gone, the error now says that in plain words instead of showing a database path.
 
 ## 0.1.244 — 2026-10-13
 

@@ -176,6 +176,69 @@ class MercariSpecificsTest(unittest.TestCase):
         self.assertEqual([r for r in unresolved if "mercari" in r["field"]], [])
 
 
+class NumberedSizeCodesTest(unittest.TestCase):
+    """Depop numbers its sizes, so a code can spell another size's label."""
+
+    def test_a_size_is_read_as_its_label_before_a_code(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
+
+        size = FieldSpec("size", display="Size", selection_only=True, options={
+            "12": "10", "14": "12", "17": "M", "22": "14",
+        })
+        self.assertEqual(encode_specific(size, "14"), ("22", True))
+        self.assertEqual(encode_specific(size, "12"), ("14", True))
+        self.assertEqual(encode_specific(size, "M"), ("17", True))
+        # No size is shown as "17". It is a size Depop does not offer, never
+        # Vendoo's id 17 — that would list the item as an M.
+        self.assertEqual(encode_specific(size, "17"), ("", False))
+
+    def test_a_waist_size_matches_its_label_in_inches(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
+
+        # Mercari's jeans: id 26 is the 36 in. waist, and a 26 is id 17.
+        size = FieldSpec("Size", display="Size", selection_only=True, options={
+            "17": "26 in.", "26": "36 in.", "329": "58+ in.", "396": "M",
+        })
+        self.assertEqual(encode_specific(size, "26"), ("17", True))
+        self.assertEqual(encode_specific(size, "26 in."), ("17", True))
+        self.assertEqual(encode_specific(size, "36"), ("26", True))
+        self.assertEqual(encode_specific(size, "17"), ("", False))
+
+    def test_a_plain_size_is_not_the_same_size_in_inches(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
+
+        # Depop's jeans: 28" is a waist, 28 a size of its own.
+        size = FieldSpec("size", display="Size", selection_only=True, options={
+            "18": '27"', "19": '28"', "44": "28",
+        })
+        self.assertEqual(encode_specific(size, "28"), ("44", True))
+        self.assertEqual(encode_specific(size, '28"'), ("19", True))
+        self.assertEqual(encode_specific(size, "28 in."), ("19", True))
+        self.assertEqual(encode_specific(size, "28 inches"), ("19", True))
+        # No plain 27 is offered, so the waist is the only 27 there is.
+        self.assertEqual(encode_specific(size, "27"), ("18", True))
+
+    def test_a_named_code_is_still_read_as_a_code(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
+
+        grouping = FieldSpec("attribute_body-fit", display="Size grouping", selection_only=True, options={
+            "plus-size": "Plus", "tall": "Tall",
+        })
+        self.assertEqual(encode_specific(grouping, "plus-size"), ("plus-size", True))
+
+    def test_a_scaled_size_is_read_as_its_label_before_a_code(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_scaled
+
+        size = FieldSpec("size", display="Size", scales={
+            "numbered": {"display": "Numbered", "options": {"14": "12", "22": "14"}},
+            "plus": {"display": "Plus", "options": {"32Plus": "32", "32": "32"}},
+        })
+        self.assertEqual(encode_scaled(size, "14"), ("numbered", "22", True))
+        self.assertEqual(encode_scaled(size, "32"), ("plus", "32", True))
+        self.assertEqual(encode_scaled(size, "32Plus"), ("plus", "32Plus", True))
+        self.assertEqual(encode_scaled(size, "22"), ("", "", False))
+
+
 class SchemaFeedsTheGapFillerTest(unittest.TestCase):
     """The cached schema is what the gap filler asks the model to fill."""
 
