@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.247 — 2026-10-13
+
+- Depop no longer gets a made-up size when it does not offer the listing's size. A juniors 15 was landing on Depop as a 24" waist. Studio now leaves Depop's size for you to pick and tells you it could not match it.
+
 ## 0.1.246 — 2026-10-13
 
 - Depop gets the size the listing says. A size 14 was landing on Depop as a 12 (and a 12 as a 10, an 8 as a 6, and so on) because Depop numbers its sizes behind the scenes and Studio was reading the listing's size as that number instead of as the size shown in the dropdown.

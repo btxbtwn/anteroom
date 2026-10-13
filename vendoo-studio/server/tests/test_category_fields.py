@@ -188,8 +188,17 @@ class NumberedSizeCodesTest(unittest.TestCase):
         self.assertEqual(encode_specific(size, "14"), ("22", True))
         self.assertEqual(encode_specific(size, "12"), ("14", True))
         self.assertEqual(encode_specific(size, "M"), ("17", True))
-        # No size is shown as "17", so it can only be Vendoo's own id.
-        self.assertEqual(encode_specific(size, "17"), ("17", True))
+        # No size is shown as "17". It is a size Depop does not offer, never
+        # Vendoo's id 17 — that would list the item as an M.
+        self.assertEqual(encode_specific(size, "17"), ("", False))
+
+    def test_a_named_code_is_still_read_as_a_code(self):
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
+
+        grouping = FieldSpec("attribute_body-fit", display="Size grouping", selection_only=True, options={
+            "plus-size": "Plus", "tall": "Tall",
+        })
+        self.assertEqual(encode_specific(grouping, "plus-size"), ("plus-size", True))
 
     def test_a_scaled_size_is_read_as_its_label_before_a_code(self):
         from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_scaled
@@ -200,7 +209,8 @@ class NumberedSizeCodesTest(unittest.TestCase):
         })
         self.assertEqual(encode_scaled(size, "14"), ("numbered", "22", True))
         self.assertEqual(encode_scaled(size, "32"), ("plus", "32", True))
-        self.assertEqual(encode_scaled(size, "22"), ("numbered", "22", True))
+        self.assertEqual(encode_scaled(size, "32Plus"), ("plus", "32Plus", True))
+        self.assertEqual(encode_scaled(size, "22"), ("", "", False))
 
 
 class SchemaFeedsTheGapFillerTest(unittest.TestCase):
