@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.244 — 2026-10-13
+
+- A regenerated listing is no longer replaced by the old Vendoo copy the next time Studio checks Vendoo. This was putting back the old condition (Poshmark showed Like New, Depop Used - Excellent), the old brand and description, and dropping fields the regenerate had filled, like Facebook's Shorts Length.
+- Facebook now has Allow Offers turned on, with the Minimum price set to half the price.
+
 ## 0.1.243 — 2026-10-13
 
 - Photos can be rotated. Hover a photo and click ↻ to turn it right, or open it and use ↺ / ↻. The saved photo itself turns, so Vendoo, the marketplaces and listing generation all get it the right way up.

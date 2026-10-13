@@ -167,7 +167,11 @@ def _vendoo_content_unchanged(db: Session, conv_id: str, item: dict[str, Any], n
             return listing_content_fingerprint(listing_from_vendoo(item, None)) == listing_content_fingerprint(
                 revision.listing_json if isinstance(revision.listing_json, dict) else {}
             )
-    return False
+    # Regenerate wiped the synced revision, and with it the only record of what
+    # Vendoo held. A newer stamp alone is no content change — listing on a
+    # marketplace moves it — and pulling on it would put the listing Regenerate
+    # replaced back over the new one.
+    return True
 
 
 def sync_state(db: Session, conv_id: str, item: dict[str, Any]) -> dict[str, Any]:
