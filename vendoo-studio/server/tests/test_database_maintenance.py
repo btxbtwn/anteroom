@@ -133,3 +133,17 @@ class TableSizesTest(_DbTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConnectionPoolTest(unittest.TestCase):
+    def test_a_checkout_never_waits_for_another_session_to_close(self):
+        # A sweep on the event loop opening one more session than the pool's
+        # old cap of 15 used to block the whole server for the pool timeout.
+        from vendoo_studio.database import engine
+
+        held = [engine.connect() for _ in range(40)]
+        try:
+            self.assertEqual(len(held), 40)
+        finally:
+            for connection in held:
+                connection.close()

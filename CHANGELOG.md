@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.252 — 2026-10-14
+## 0.1.253 — 2026-10-14
 
 - The sidebar's Not listed filter can now be pointed at a marketplace: turn it on, tick eBay, and you see everything that is not on eBay yet. Tick more than one to see what is missing from any of them, and combine it with labels, status and the other filters.
+
+## 0.1.252 — 2026-10-13
+
+- Studio no longer freezes on "Loading..." while it checks your Vendoo inventory in the background. Opening a listing during a sync could leave the chat, photos and every other panel waiting for minutes; they now load straight away.
 
 ## 0.1.251 — 2026-10-13
 
