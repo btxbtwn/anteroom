@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.252 — 2026-10-14
+## 0.1.253 — 2026-10-14
 
 - Pressing Cancel on a send that had just finished no longer shows "Job is already completed" as an error on the listing, and no longer offers to send that message to chat as something to fix. The listing simply shows the finished send.
+
+## 0.1.252 — 2026-10-13
+
+- Studio no longer freezes on "Loading..." while it checks your Vendoo inventory in the background. Opening a listing during a sync could leave the chat, photos and every other panel waiting for minutes; they now load straight away.
 
 ## 0.1.251 — 2026-10-13
 
