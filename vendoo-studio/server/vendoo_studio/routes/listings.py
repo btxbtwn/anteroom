@@ -248,17 +248,24 @@ def get_revision(conv_id: str, revision_id: str, db: Session = Depends(get_db)):
     return {"id": target.id, "listing": target.listing_json}
 
 
+def listing_busy(conv_id: str, db: Session) -> bool:
+    """Whether Studio is generating, answering about, or sending this listing right now."""
+    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
+    from vendoo_studio.repositories.queries import JobRepo
+    from vendoo_studio.services import activity
+    from vendoo_studio.services.streaming import active_generation
+
+    return bool(active_generation(conv_id) or activity.running(conv_id) or any(
+        job.status in ACTIVE_JOB_STATUSES for job in JobRepo(db).list_by_conversation(conv_id)
+    ))
+
+
 class RevisionRestoreRequest(BaseModel):
     expected_revision_id: str
 
 
 @router.post("/api/conversations/{conv_id}/revisions/{revision_id}/restore")
 def restore_revision(conv_id: str, revision_id: str, body: RevisionRestoreRequest, db: Session = Depends(get_db)):
-    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
-    from vendoo_studio.repositories.queries import JobRepo
-    from vendoo_studio.services import activity
-    from vendoo_studio.services.streaming import active_generation
-
     listing_repo = ListingRepo(db)
     target = listing_repo.get_revision(revision_id)
     if not target or target.conversation_id != conv_id:
@@ -267,9 +274,7 @@ def restore_revision(conv_id: str, revision_id: str, body: RevisionRestoreReques
     current = listing_repo.get_current(conv_id)
     if not current or current.current_revision_id != body.expected_revision_id:
         raise HTTPException(409, "This listing changed while you were comparing revisions. Review it again before restoring.")
-    if active_generation(conv_id) or activity.running(conv_id) or any(
-        job.status in ACTIVE_JOB_STATUSES for job in JobRepo(db).list_by_conversation(conv_id)
-    ):
+    if listing_busy(conv_id, db):
         raise HTTPException(409, "Wait for generation or sending to finish before restoring a revision.")
     result = update_listing(conv_id, ListingUpdate(listing=copy.deepcopy(target.listing_json)), db)
     listing_repo.get_revision(result["revision_id"]).source = "restore"

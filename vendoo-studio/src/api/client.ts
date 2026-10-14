@@ -251,6 +251,11 @@ export const api = {
       followAssistant("/assistant/messages/resume", undefined, handlers, signal),
     /** Stop the answer in progress; what it had written is kept. */
     stop: () => request<{ ok: boolean }>("/assistant/messages/stop", { method: "POST" }),
+    /** Write the changes an answer proposed. Resolves with the answer and what became of each listing. */
+    applyChanges: (messageId: string) =>
+      request<AssistantMessage>(`/assistant/messages/${messageId}/changes/apply`, { method: "POST" }),
+    dismissChanges: (messageId: string) =>
+      request<AssistantMessage>(`/assistant/messages/${messageId}/changes/dismiss`, { method: "POST" }),
   },
   adSpend: {
     list: () => request<AdSpendEntry[]>("/analytics/ads"),

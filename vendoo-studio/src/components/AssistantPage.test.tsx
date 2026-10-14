@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { AssistantMessage } from "../api/assistant";
+import type { AssistantChanges, AssistantMessage } from "../api/assistant";
+import { changeValue, changesHeading } from "./AssistantChangesCard";
 import { ASSISTANT_STARTERS, AssistantPage, linkedListingId, liveParts } from "./AssistantPage";
 
 const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }));
@@ -23,7 +24,7 @@ describe("AssistantPage", () => {
   it("opens with what it reads and questions to start from", () => {
     const html = render([]);
     expect(html).toContain("<h1>Ask about your business</h1>");
-    expect(html).toContain("it never changes a listing or sends anything");
+    expect(html).toContain("You review every change before it is saved");
     for (const starter of ASSISTANT_STARTERS) expect(html).toContain(starter);
     expect(html).toContain("About your business");
     expect(html).not.toContain("Clear conversation");
@@ -38,6 +39,43 @@ describe("AssistantPage", () => {
     expect(html).toContain('<div class="msg msg-assistant"><p>Three items for $96.</p></div>');
     expect(html).toContain("Clear conversation");
     expect(html).not.toContain("Ask about your business");
+  });
+
+  it("shows proposed changes before and after with Apply, and only the outcome once settled", () => {
+    const changes: AssistantChanges = {
+      status: "proposed",
+      items: [
+        { listing_id: "abc", title: "Chore Coat", fields: [
+          { field: "asking", old: 120, new: 100 },
+          { field: "cost", old: null, new: 4.5 },
+          { field: "labels", old: [], new: ["Sale", "Bin 2"] },
+          { field: "ebay_size", old: "34", new: "M" },
+        ] },
+        { listing_id: "def", title: "501 Jeans", fields: [{ field: "box", old: "Raghouse · Denim", new: null }] },
+      ],
+    };
+    const answer = (value: AssistantChanges): AssistantMessage[] => [
+      { id: "a", role: "assistant", text: "Ready to review.", created_at: null, changes: value },
+    ];
+    const proposed = render(answer(changes));
+    expect(proposed).toContain("Proposed changes to 2 listings");
+    expect(proposed).toContain('<a class="assistant-change-title" href="#listing-abc">Chore Coat</a>');
+    expect(proposed).toContain('<span class="assistant-change-old">$120</span>');
+    expect(proposed).toContain('<span class="assistant-change-new">$100</span>');
+    expect(proposed).toContain('<span class="assistant-change-new">$4.50</span>');
+    expect(proposed).toContain('<span class="assistant-change-new">Sale, Bin 2</span>');
+    expect(proposed).toContain('<span class="assistant-change-label">eBay size</span>');
+    expect(proposed).toContain(">Apply</button>");
+
+    const applied = render(answer({
+      status: "applied",
+      items: [changes.items[0], { ...changes.items[1], skipped: "It is no longer in Studio." }],
+    }));
+    expect(applied).toContain("Applied to 1 listing, 1 skipped");
+    expect(applied).toContain("Not changed. It is no longer in Studio.");
+    expect(applied).not.toContain(">Apply</button>");
+    expect(changesHeading({ ...changes, status: "dismissed" })).toBe("Dismissed. Nothing was changed.");
+    expect(changeValue("title", "")).toBe("none");
   });
 
   it("holds the welcome back while the conversation loads, and reports a failed load", () => {

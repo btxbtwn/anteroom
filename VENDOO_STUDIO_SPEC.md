@@ -1118,6 +1118,41 @@ keeps what was written.
 **Links.** An answer names a listing as `[title](#listing-<id>)`; clicking it
 opens that listing in Studio.
 
-The Assistant only reads. Its routes write nothing but its own conversation and
-the seller's note: they never edit a listing, call Vendoo, or reach a
-marketplace. Photos and secrets are in neither the brief nor the copy.
+**Changes.** The assistant can change listings, and only by proposing. When the
+seller asks for a change, or agrees to one it suggested, the answer ends with
+one fenced `changes` block: a JSON array of `{"listing": id, "set": {...}}`.
+`set` may hold `asking`, `cost`, `title`, `description`, `brand`, `size`, `sku`,
+`labels` and `box`; condition, colour, category and other marketplace fields
+stay with the listing's own chat. The block never reaches the seller as text.
+Studio checks it against the listings as they are (unknown listings, fields it
+may not set, and values a listing already has are dropped; at most 300
+listings), and stores what is left with the answer in
+`assistant_messages.changes` as a proposal showing each value before and after.
+The proposal is worked out by running the listing editor's own save on a copy,
+so it shows everything saving would move, not only what the model named: a new
+size appears with each marketplace form's size and the title that follow it.
+
+**Sizing.** A listing has one general size, and saving makes every marketplace
+form and the title carry it. `services/size_audit.py` flags an unsold listing
+when a save would rewrite a form's size or the title, when it has form sizes
+but no general size, or when the latest photo analysis read a different size.
+The brief lists those listings with the general size, each form's size, and the
+size the photos showed and where it was read; the lookup copy carries the same
+as `form_sizes`, `photo_size` and `size_issue` on every listing. The assistant
+fixes sizing by proposing the right `size`, and leaves out a listing whose
+evidence does not settle it.
+
+The page draws the proposal as a card under the answer with **Apply** and
+**Dismiss**. Nothing is written until Apply
+(`POST /api/assistant/messages/{id}/changes/apply`), which saves each listing
+through the listing editor's own save as a new revision with source
+`assistant`, so the listing's revision history can restore it. A listing that
+is gone, or that Studio is generating or sending, is skipped and says why; the
+rest apply. A proposal is settled once, and later questions tell the model
+whether it was applied or dismissed.
+
+Applied changes are saved in Studio only. The Assistant never sends, lists,
+delists or publishes, and never calls Vendoo or a marketplace: a listing already
+on Vendoo keeps its old values there until the seller sends it again. Asking a
+question still writes nothing but the conversation and the seller's note.
+Photos and secrets are in neither the brief nor the copy.

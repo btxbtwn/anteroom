@@ -1,4 +1,10 @@
-"""The business assistant's chat. These routes read Studio's data and change none of it."""
+"""The business assistant's chat.
+
+Asking reads Studio's data and changes none of it. An answer may propose
+changes to listings; they are written only when the seller applies them here,
+through the same save the listing editor uses. Nothing here sends, lists,
+delists or publishes.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +16,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal, get_db
-from vendoo_studio.services import business_assistant
+from vendoo_studio.models.assistant import AssistantMessage
+from vendoo_studio.services import assistant_changes, business_assistant
 from vendoo_studio.services.listing_provider import get_listing_provider
 from vendoo_studio.services.streaming import (
     GenerationRun,
@@ -37,6 +44,11 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
 # The one answer that can be in progress, in the registry listing generations use.
 ANSWER_RUN = "assistant"
+# How a listing's revision history names a save the seller applied from here.
+REVISION_SOURCE = "assistant"
+UNREADABLE_CHANGES = (
+    "I could not put those changes in a form Studio can apply, so nothing is waiting for review. Ask me again."
+)
 
 
 class AssistantQuestion(BaseModel):
@@ -68,6 +80,14 @@ def save_note(body: BusinessNote):
     return {"note": set_business_note(body.note)}
 
 
+def _propose(block: str) -> dict | None:
+    db = SessionLocal()
+    try:
+        return assistant_changes.propose(db, block)
+    finally:
+        db.close()
+
+
 def _prepare(question: str):
     """Read the shop and build the prompt, on a worker thread with its own session."""
     db = SessionLocal()
@@ -85,6 +105,7 @@ async def _answer(run: GenerationRun, provider, question: str) -> None:
     that locks or drops off the network mid-answer finds it when it comes back.
     """
     answer = ""
+    changes = None
     shop = None
     try:
         run.publish(sse_event("status", "Reading your shop…"))
@@ -98,6 +119,17 @@ async def _answer(run: GenerationRun, provider, question: str) -> None:
             if kind == "text":
                 answer += text
                 run.publish(sse_data(text))
+            elif kind == "changes":
+                changes = _propose(text)
+                if changes is None:
+                    note = UNREADABLE_CHANGES
+                elif not answer.strip():
+                    note = "These changes are ready for you to review."
+                else:
+                    continue
+                note = f"\n\n{note}" if answer.strip() else note
+                answer += note
+                run.publish(sse_data(note))
             else:
                 run.publish(sse_event(kind, text))
         if not answer.strip():
@@ -116,6 +148,7 @@ async def _answer(run: GenerationRun, provider, question: str) -> None:
                     save_db, "assistant", answer,
                     provider=getattr(provider, "name", None),
                     model=getattr(provider, "listing_model", None),
+                    changes=changes,
                 )
             finally:
                 save_db.close()
@@ -152,3 +185,72 @@ async def stop():
     # What was written so far is saved as the run unwinds; answer once it is there to read.
     await wait_generation(ANSWER_RUN)
     return {"ok": True}
+
+
+def _proposal(message_id: str, db: Session) -> AssistantMessage:
+    row = db.get(AssistantMessage, message_id)
+    if row is None or not row.changes:
+        raise HTTPException(404, "Those changes are no longer in the conversation.")
+    if row.changes.get("status") != "proposed":
+        raise HTTPException(409, "Those changes were already applied or dismissed.")
+    return row
+
+
+def _apply_to_listing(item: dict, db: Session) -> str | None:
+    """Write one listing's proposed values. Returns why it was skipped, or None once it is saved."""
+    from vendoo_studio.models.listing_evidence import ListingCorrection
+    from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+    from vendoo_studio.routes.listings import ListingUpdate, listing_busy, update_listing
+    from vendoo_studio.services import boxes
+
+    conv_id = item["listing_id"]
+    conv = ConversationRepo(db).get(conv_id)
+    if conv is None:
+        return "It is no longer in Studio."
+    if listing_busy(conv_id, db):
+        return "Studio was generating or sending it."
+    to_set = item["set"]
+    if to_set.get("box") and boxes.get_box(db, to_set["box"]) is None:
+        return "That box is no longer in Studio."
+    if any(field != "box" for field in to_set):
+        revisions = ListingRepo(db).get_revisions(conv_id)
+        if not revisions or not isinstance(revisions[0].listing_json, dict):
+            return "It has no listing to change yet."
+        updated = assistant_changes.apply_fields(revisions[0].listing_json, to_set)
+        try:
+            saved = update_listing(conv_id, ListingUpdate(listing=updated), db)
+        except HTTPException as refused:
+            return str(refused.detail)
+        ListingRepo(db).get_revision(saved["revision_id"]).source = REVISION_SOURCE
+        # A change the assistant wrote is not an example of how the seller edits.
+        db.query(ListingCorrection).filter_by(revision_id=saved["revision_id"]).update({"source": REVISION_SOURCE})
+    if "box" in to_set:
+        boxes.assign_box(db, conv, to_set["box"])
+    db.commit()
+    return None
+
+
+@router.post("/messages/{message_id}/changes/apply")
+def apply_changes(message_id: str, db: Session = Depends(get_db)):
+    """Write the changes an answer proposed, now that the seller has reviewed them.
+
+    Each listing is saved as the listing editor saves it, as a new revision the
+    seller can restore from. A listing that cannot be changed right now is
+    skipped and says why; the rest still apply.
+    """
+    row = _proposal(message_id, db)
+    items = []
+    for item in row.changes["items"]:
+        skipped = _apply_to_listing(item, db)
+        items.append({**item, "skipped": skipped} if skipped else item)
+    row.changes = {"status": "applied", "items": items}
+    db.commit()
+    return business_assistant.message_view(row)
+
+
+@router.post("/messages/{message_id}/changes/dismiss")
+def dismiss_changes(message_id: str, db: Session = Depends(get_db)):
+    row = _proposal(message_id, db)
+    row.changes = {**row.changes, "status": "dismissed"}
+    db.commit()
+    return business_assistant.message_view(row)
