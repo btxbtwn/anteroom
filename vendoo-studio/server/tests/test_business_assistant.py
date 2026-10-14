@@ -1,4 +1,4 @@
-"""The business assistant: what it is told about the shop, and its read-only chat."""
+"""The business assistant: what it is told about the shop, its chat, and the changes it proposes."""
 import asyncio
 import functools
 import json
@@ -15,7 +15,7 @@ from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.models.ad_spend import AdSpend
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.routes import assistant as assistant_route
-from vendoo_studio.services import boxes, business_assistant
+from vendoo_studio.services import assistant_changes, boxes, business_assistant
 
 NOW = datetime(2026, 10, 1, tzinfo=UTC)
 
@@ -361,3 +361,174 @@ def test_stop_keeps_what_was_written_and_a_second_question_waits_its_turn(worksp
 
     assert asyncio.run(scenario()) == 409
     assert [row.text for row in business_assistant.list_messages(db)] == ["What sold?", "Half of it "]
+
+
+def changes_reply(*entries):
+    return f"Ready to review.\n\n```changes\n{json.dumps(list(entries))}\n```"
+
+
+def propose(client, monkeypatch, *pieces, question="Change them"):
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(tuple(pieces)))
+    response = client.post("/api/assistant/messages", json={"text": question})
+    return response, client.get("/api/assistant/messages").json()[-1]
+
+
+def test_a_reply_with_changes_becomes_a_proposal_and_changes_nothing(workspace, monkeypatch):
+    db, client = workspace
+    box, jeans, coat = (row.id for row in seed(db))
+    reply = changes_reply(
+        {"listing": coat, "set": {"asking": 99.6, "labels": "Sale, Bin 2, Sale", "brand": "Carhartt", "condition": "New"}},
+        {"listing": jeans, "set": {"box": None, "cost": 4}},
+        {"listing": "no-such-listing", "set": {"asking": 5}},
+    )
+    # The fence arrives split across pieces; none of the block reaches the seller.
+    cut = reply.index("```changes") + 4
+    response, saved = propose(client, monkeypatch, reply[:cut], reply[cut:cut + 20], reply[cut + 20:])
+
+    assert "changes" not in response.text and "asking" not in response.text
+    assert saved["text"].strip() == "Ready to review."
+    assert saved["changes"] == {"status": "proposed", "items": [
+        # The brand it already has and a field the assistant may not set are left out.
+        {"listing_id": coat, "title": "Carhartt | Chore Coat",
+         "set": {"asking": 100, "brand": "Carhartt", "labels": ["Sale", "Bin 2"]},
+         "fields": [
+             {"field": "asking", "old": 120, "new": 100},
+             {"field": "labels", "old": [], "new": ["Sale", "Bin 2"]},
+         ]},
+        # Saving the jeans also puts their size in the title and on the eBay form, so those are shown too.
+        {"listing_id": jeans, "title": "Levi's 501 Jeans", "set": {"cost": 4.0, "box": None}, "fields": [
+            {"field": "cost", "old": None, "new": 4.0},
+            {"field": "title", "old": "Levi's 501 Jeans", "new": "Levi's 34 501 Jeans"},
+            {"field": "ebay_size", "old": None, "new": "34"},
+            {"field": "box", "old": "Raghouse · Mixed denim", "new": None},
+        ]},
+    ]}
+    db.expire_all()
+    assert ListingRepo(db).get_revisions(coat)[0].listing_json["price"] == 120
+    assert ConversationRepo(db).get(jeans).box_id == box
+
+
+def test_applying_saves_each_listing_as_a_revision_and_skips_what_it_cannot_change(workspace, monkeypatch):
+    db, client = workspace
+    _box, jeans, coat = (row.id for row in seed(db))
+    gone = add_listing(db, "Sold elsewhere", {"price": 30}).id
+    _response, saved = propose(client, monkeypatch, changes_reply(
+        {"listing": coat, "set": {"asking": 100, "title": "Carhartt Chore Coat Brown"}},
+        {"listing": jeans, "set": {"box": None, "sku": "A-13"}},
+        {"listing": gone, "set": {"asking": 20}},
+    ))
+    db.delete(ConversationRepo(db).get(gone))
+    db.commit()
+
+    applied = client.post(f"/api/assistant/messages/{saved['id']}/changes/apply").json()
+    assert applied["changes"]["status"] == "applied"
+    assert [item.get("skipped") for item in applied["changes"]["items"]] == [None, None, "It is no longer in Studio."]
+
+    db.expire_all()
+    newest = ListingRepo(db).get_revisions(coat)[0]
+    assert newest.source == "assistant"
+    assert (newest.listing_json["price"], newest.listing_json["title"]) == (100, "Carhartt Chore Coat Brown")
+    # Poshmark keeps the higher was-price, as a price drop in the listing does.
+    assert newest.listing_json["poshmark_specifics"]["originalPrice"] == 120
+    assert ListingRepo(db).get_revisions(jeans)[0].listing_json["sku"] == "A-13"
+    assert ConversationRepo(db).get(jeans).box_id is None
+
+    # A proposal is settled once; the model is told what became of it.
+    assert client.post(f"/api/assistant/messages/{saved['id']}/changes/apply").status_code == 409
+    assert client.post(f"/api/assistant/messages/{saved['id']}/changes/dismiss").status_code == 409
+    note = business_assistant.build_messages(db, "And now?", business_assistant.read_shop(db, now=NOW))[-2]["content"]
+    assert "The seller applied them; 2 listings changed and 1 were skipped." in note
+    assert f'{{"listing":"{coat}","set":{{"asking":100,"title":"Carhartt Chore Coat Brown"}}}}' in note
+
+
+def test_a_busy_listing_is_skipped(workspace, monkeypatch):
+    db, client = workspace
+    _box, _jeans, coat = (row.id for row in seed(db))
+    _response, saved = propose(client, monkeypatch, changes_reply({"listing": coat, "set": {"asking": 100}}))
+    monkeypatch.setattr("vendoo_studio.routes.listings.listing_busy", lambda conv_id, db: True)
+    applied = client.post(f"/api/assistant/messages/{saved['id']}/changes/apply").json()
+    assert applied["changes"]["items"][0]["skipped"] == "Studio was generating or sending it."
+    db.expire_all()
+    assert ListingRepo(db).get_revisions(coat)[0].listing_json["price"] == 120
+
+
+def test_dismissing_changes_nothing(workspace, monkeypatch):
+    db, client = workspace
+    _box, _jeans, coat = (row.id for row in seed(db))
+    _response, saved = propose(client, monkeypatch, changes_reply({"listing": coat, "set": {"asking": 100}}))
+    dismissed = client.post(f"/api/assistant/messages/{saved['id']}/changes/dismiss").json()
+    assert dismissed["changes"]["status"] == "dismissed"
+    assert client.post(f"/api/assistant/messages/{saved['id']}/changes/apply").status_code == 409
+    assert client.post("/api/assistant/messages/nope/changes/apply").status_code == 404
+    db.expire_all()
+    assert len(ListingRepo(db).get_revisions(coat)) == 2
+
+
+def test_changes_studio_cannot_read_say_so_and_propose_nothing(workspace, monkeypatch):
+    db, client = workspace
+    _box, _jeans, coat = (row.id for row in seed(db))
+    for block in ("not json", json.dumps([{"listing": coat, "set": {"asking": -5, "title": ""}}])):
+        response, saved = propose(client, monkeypatch, f"Here you go.\n```changes\n{block}\n```")
+        assert saved["changes"] is None
+        assert saved["text"].endswith(assistant_route.UNREADABLE_CHANGES)
+        assert "nothing is waiting for review" in response.text
+
+
+def test_only_a_changes_fence_is_held_back():
+    assert assistant_changes.visible_text("Use `code` and ``") == "Use `code` and "
+    assert assistant_changes.visible_text("```\ntable\n```\nDone. ```chang") == "```\ntable\n```\nDone. "
+    assert assistant_changes.visible_text("Done.\n```Changes\n[") == "Done.\n"
+    assert assistant_changes.split_reply("Just words. ```") == ("Just words. ```", None)
+    assert assistant_changes.split_reply("Words\n```changes\n[1]") == ("Words\n", "[1]")
+
+
+def test_sizing_out_of_step_is_pointed_out_and_one_size_fixes_every_form(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    shorts = add_listing(
+        db, "ASOS M 34 Board Shorts Navy",
+        {"price": 20, "brand": "ASOS", "size": "M", "category_path": "Men > Swimwear",
+         "ebay_specifics": {"size": "34"}, "poshmark_specifics": {"size": "L"}, "depop_specifics": {"size": "M"}},
+        {"vendooStatus": "active"},
+    )
+    ConversationRepo(db).add_message(shorts.id, "system", "Photo analysis:\n\n- brand: ASOS\n- size: M (source: tag)\n")
+    tee = add_listing(db, "Gap L Tee", {"price": 9, "brand": "Gap", "size": "L", "depop_specifics": {"size": "L"}},
+                      {"vendooStatus": "active"})
+    ConversationRepo(db).add_message(tee.id, "system", "Photo analysis:\n- size: XL (source: tag)")
+    shorts, tee = shorts.id, tee.id
+
+    shop = business_assistant.read_shop(db, now=NOW)
+    assert "--- Listings whose sizing needs a look (2) ---" in shop.brief
+    assert (
+        f"{shorts} | ASOS M 34 Board Shorts Navy | active | Swimwear | M | ebay: 34, poshmark: L, depop: M"
+        " | M (source: tag) | ebay, poshmark differ from the general size"
+    ) in shop.brief
+    assert f"{tee} | Gap L Tee | active |  | L | depop: L | XL (source: tag) | the photos read a different size" in shop.brief
+    assert business_assistant.run_lookup(
+        shop.lookups, "SELECT count(*) FROM listings WHERE size_issue IS NOT NULL AND status = 'active'",
+    ).endswith("\n2")
+    shop.lookups.close()
+
+    # The general size is already right; setting it is what carries it to the forms.
+    _response, saved = propose(client, monkeypatch, changes_reply(
+        {"listing": shorts, "set": {"size": "M"}}, {"listing": tee, "set": {"size": " XL "}},
+    ))
+    assert [(item["set"], item["fields"]) for item in saved["changes"]["items"]] == [
+        ({"size": "M"}, [
+            {"field": "ebay_size", "old": "34", "new": "M"},
+            {"field": "poshmark_size", "old": "L", "new": "M"},
+        ]),
+        ({"size": "XL"}, [
+            {"field": "title", "old": "Gap L Tee", "new": "Gap XL Tee"},
+            {"field": "size", "old": "L", "new": "XL"},
+            {"field": "depop_size", "old": "L", "new": "XL"},
+        ]),
+    ]
+    client.post(f"/api/assistant/messages/{saved['id']}/changes/apply")
+    db.expire_all()
+    fixed = ListingRepo(db).get_revisions(shorts)[0].listing_json
+    assert {fixed["size"], fixed["ebay_specifics"]["size"], fixed["poshmark_specifics"]["size"]} == {"M"}
+    assert ListingRepo(db).get_revisions(tee)[0].listing_json["title"] == "Gap XL Tee"
+    shop = business_assistant.read_shop(db, now=NOW)
+    assert "--- Listings whose sizing needs a look (0) ---" in shop.brief
+    shop.lookups.close()

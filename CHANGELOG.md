@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.251 — 2026-10-13
+
+- The Assistant can now change listings for you. Ask it to mark down stale stock, fix costs, relabel a batch, move listings to a box, or reword a title, and it shows every change as before and after under its answer. Nothing is saved until you press Apply, and Dismiss throws the proposal away.
+- Ask it to fix sizing. It now sees which listings have a different size on one marketplace form than another, a title without the size, or a size that disagrees with the tag in your photos. Setting the right size updates every form and the title together, and the proposal shows each form's old and new size.
+- Applied changes are saved in Studio as a new revision of each listing, so you can restore the old one from the listing's history. A listing already on Vendoo keeps its old values there until you send it again; the Assistant still never sends or publishes anything.
+
 ## 0.1.250 — 2026-10-13
 
 - The bulk upload window and the review window before a rewrite no longer close when you click outside them or press Escape. They close from the new x in the corner, or Cancel, so a stray click cannot throw away the measurements you typed.

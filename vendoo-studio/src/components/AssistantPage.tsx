@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { AssistantRefused, type AssistantMessage } from "../api/assistant";
 import { confirmDialog } from "../ui/confirmDialog";
 import { addToast } from "../ui/toast";
+import { AssistantChangesCard } from "./AssistantChangesCard";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { stableStreamingText } from "./streamingText";
 
@@ -13,6 +14,8 @@ export const ASSISTANT_STARTERS = [
   "Which brands and categories make me the most profit?",
   "What has been listed longest, and what should I do with it?",
   "Which wholesale boxes paid off, and which did not?",
+  "Mark down everything listed over 90 days by 15%.",
+  "Find listings whose size differs between forms and fix them.",
 ];
 
 /** Streamed text reaches the page at most this often, so a long answer does not re-render per token. */
@@ -59,7 +62,8 @@ export interface LiveTurn {
 
 /**
  * A chat about the business as a whole, apart from any listing's chat. Every
- * question is answered from all of Studio's data, and it changes none of it.
+ * question is answered from all of Studio's data. An answer can propose
+ * changes to listings; they are written only when the seller applies them.
  */
 export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
   const queryClient = useQueryClient();
@@ -201,6 +205,13 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
     await queryClient.invalidateQueries({ queryKey: MESSAGES_KEY });
   };
 
+  // Applied changes reach every page that shows a listing, a total or a box.
+  const changesSettled = (message: AssistantMessage, applied: boolean) => {
+    queryClient.setQueryData<AssistantMessage[]>(MESSAGES_KEY, (saved) =>
+      saved?.map((turn) => (turn.id === message.id ? message : turn)));
+    if (applied) void queryClient.invalidateQueries();
+  };
+
   // Answers link the listings they name; open those in Studio instead of a new tab.
   const openLinkedListing = (event: MouseEvent<HTMLDivElement>) => {
     const link = (event.target as HTMLElement).closest("a");
@@ -236,7 +247,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
               <h1>Ask about your business</h1>
               <p className="analytics-lead">
                 The assistant reads every listing, sale, box, ad and sale event in Studio each time you ask. It
-                answers questions and gives advice; it never changes a listing or sends anything.
+                answers questions, gives advice, and can fix listings for you: prices, costs, labels, titles, and
+                sizes that differ between marketplace forms. You review every change before it is saved, and it
+                never sends or publishes anything.
               </p>
               <ul className="assistant-starters">
                 {ASSISTANT_STARTERS.map((starter) => (
@@ -255,6 +268,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
           {turns.map((turn) => (
             <div key={turn.id} className={`msg ${turn.role === "user" ? "msg-user" : "msg-assistant"}`}>
               <ChatMarkdown text={turn.text} lineBreaks={turn.role === "user"} />
+              {turn.changes ? (
+                <AssistantChangesCard message={turn} changes={turn.changes} onSettled={changesSettled} />
+              ) : null}
             </div>
           ))}
           {live ? (
@@ -298,7 +314,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
               className="chat-composer-input"
               rows={1}
               value={input}
-              placeholder="Ask about sales, profit, stock, sourcing…"
+              placeholder="Ask a question, or ask for a change…"
               aria-label="Ask the business assistant"
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
