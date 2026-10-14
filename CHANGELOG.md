@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.252 — 2026-10-14
+
+- The sidebar's Not listed filter can now be pointed at a marketplace: turn it on, tick eBay, and you see everything that is not on eBay yet. Tick more than one to see what is missing from any of them, and combine it with labels, status and the other filters.
+
 ## 0.1.251 — 2026-10-13
 
 - The Assistant can now change listings for you. Ask it to mark down stale stock, fix costs, relabel a batch, move listings to a box, or reword a title, and it shows every change as before and after under its answer. Nothing is saved until you press Apply, and Dismiss throws the proposal away.

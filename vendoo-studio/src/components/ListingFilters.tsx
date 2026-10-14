@@ -89,6 +89,7 @@ export function ListingFilters({
   /** Label counts, keyed lowercase the way `labelCounts` returns them. */
   labelCounts: Record<string, number>;
   marketplaces: string[];
+  /** What each marketplace row would keep: listed there, or missing from there under Not listed. */
   marketplaceCounts: Record<string, number>;
   notListedCount: number;
   /** How many live listings are behind the last write Studio made to Vendoo. */
@@ -207,16 +208,14 @@ export function ListingFilters({
               aria-label="Filter listings"
               onKeyDown={moveFocus}
             >
-              <span className="listing-filter-menu-label">Marketplaces</span>
+              <span className="listing-filter-menu-label">
+                {filters.notListed ? "Not listed on" : "Marketplaces"}
+              </span>
               {marketplaces.length ? (
                 marketplaces.map((id) => (
                   <FilterRow
                     key={id}
                     checked={filters.marketplaces.includes(id)}
-                    // "Not listed" asks the opposite question, so it takes the
-                    // marketplaces over rather than fighting them.
-                    disabled={filters.notListed}
-                    title={filters.notListed ? "Turn off Not listed to pick marketplaces" : undefined}
                     count={marketplaceCounts[id] || 0}
                     glyph={<MarketplaceLogo id={id} label={marketplaceLabel(id)} size={14} />}
                     label={marketplaceLabel(id)}
@@ -230,9 +229,20 @@ export function ListingFilters({
               <FilterRow
                 checked={filters.notListed}
                 count={notListedCount}
+                // "Not listed" asks the opposite question of the marketplace
+                // rows, so it turns them around rather than fighting them.
+                title="Listings no marketplace carries — pick marketplaces above to see what is missing from them"
                 glyph={<span className="listing-filter-row-dot" aria-hidden="true" />}
                 label="Not listed"
-                onSelect={() => onChange({ ...filters, notListed: !filters.notListed })}
+                // Turning it off drops the picks: a marketplace nothing sits
+                // on has no row to untick once the question is "listed on".
+                onSelect={() =>
+                  onChange(
+                    filters.notListed
+                      ? { ...filters, notListed: false, marketplaces: [] }
+                      : { ...filters, notListed: true },
+                  )
+                }
               />
               <FilterRow
                 checked={filters.needsRelist}

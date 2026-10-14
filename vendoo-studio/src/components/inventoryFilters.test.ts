@@ -15,6 +15,7 @@ import {
   listedDaysAgo,
   marketplaceCounts,
   notListedCount,
+  notListedOnCounts,
   staleCounts,
   unsentCount,
   toggleValue,
@@ -106,8 +107,29 @@ describe("filterListings", () => {
     expect(filterListings(inventory, "", withFilters({ labels: ["to list"] }))).toEqual([tee]);
   });
 
-  it("shows only unlisted items, over any marketplace chips", () => {
-    expect(filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["ebay"] }))).toEqual([draft]);
+  it("shows only unlisted items when no marketplace is picked", () => {
+    expect(filterListings(inventory, "", withFilters({ notListed: true }))).toEqual([draft]);
+  });
+
+  it("shows what is missing from any picked marketplace", () => {
+    expect(filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["ebay"] }))).toEqual([
+      boots,
+      draft,
+    ]);
+    expect(filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["ebay", "poshmark"] }))).toEqual([
+      boots,
+      draft,
+    ]);
+    expect(filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["ebay", "depop"] }))).toEqual(
+      inventory,
+    );
+  });
+
+  it("keeps the other filters working under Not listed", () => {
+    expect(
+      filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["depop"], labels: ["A19"] })),
+    ).toEqual([tee]);
+    expect(filterListings(inventory, "", withFilters({ notListed: true, labels: ["A19"] }))).toEqual([]);
   });
 
   it("combines search with the filters", () => {
@@ -209,11 +231,21 @@ describe("filter options", () => {
 
   it("keeps Settings' marketplace order and appends the rest", () => {
     expect(marketplaceOptions(inventory, ["poshmark", "ebay", "mercari"])).toEqual(["poshmark", "ebay", "depop"]);
+    // Asking what is missing from a marketplace needs the ones nothing sits on yet.
+    expect(marketplaceOptions(inventory, ["poshmark", "ebay", "mercari"], true)).toEqual([
+      "poshmark",
+      "ebay",
+      "mercari",
+      "depop",
+    ]);
   });
 
   it("counts what is filtering the list", () => {
     expect(activeFilterCount(DEFAULT_LISTING_FILTERS)).toBe(0);
     expect(activeFilterCount(withFilters({ status: "sold", labels: ["A19"], notListed: true }))).toBe(3);
+    // "Not listed on eBay" is one narrowing; a second marketplace is a second.
+    expect(activeFilterCount(withFilters({ notListed: true, marketplaces: ["ebay"] }))).toBe(1);
+    expect(activeFilterCount(withFilters({ notListed: true, marketplaces: ["ebay", "etsy"] }))).toBe(2);
   });
 
   it("counts what each marketplace and label row would keep", () => {
@@ -221,6 +253,7 @@ describe("filter options", () => {
     expect(labelCounts(inventory)).toEqual({ a19: 1, "to list": 1, vintage: 1 });
     // The draft carries no marketplaces, so it is already one of the unlisted.
     expect(notListedCount([...inventory, { title: "Nothing yet" }])).toBe(2);
+    expect(notListedOnCounts(inventory, ["ebay", "depop", "vinted"])).toEqual({ ebay: 2, depop: 2, vinted: 3 });
   });
 
   it("counts what each staleness cutoff would keep", () => {
