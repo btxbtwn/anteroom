@@ -1161,7 +1161,11 @@ function SendToVendooButton({
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
-    onError: (err: Error) => setError(err.message || "Failed to cancel"),
+    onError: (err: Error) => {
+      setError(err.message || "Failed to cancel");
+      // The job on screen was stale enough to fail; show what it really is.
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
   });
 
   const existingJob = preferredSendJob(

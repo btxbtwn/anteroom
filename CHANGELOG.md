@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.252 — 2026-10-14
+
+- Pressing Cancel on a send that had just finished no longer shows "Job is already completed" as an error on the listing, and no longer offers to send that message to chat as something to fix. The listing simply shows the finished send.
+
 ## 0.1.251 — 2026-10-13
 
 - The Assistant can now change listings for you. Ask it to mark down stale stock, fix costs, relabel a batch, move listings to a box, or reword a title, and it shows every change as before and after under its answer. Nothing is saved until you press Apply, and Dismiss throws the proposal away.

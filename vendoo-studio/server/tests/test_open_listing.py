@@ -58,6 +58,13 @@ class OpenListingRouteTest(unittest.TestCase):
         app.dependency_overrides.clear()
         extension_manager.connection = None
         extension_manager.paired = False
+
+    def test_cancel_on_finished_job_is_not_an_error(self):
+        res = self.client.post(f"/api/jobs/{self.job.id}/cancel")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["status"], "completed")
+        self.db.refresh(self.job)
+        self.assertEqual(self.job.status, "completed")
         self.db.close()
 
     def _connect_chrome(self):
