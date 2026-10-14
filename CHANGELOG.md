@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.253 — 2026-10-14
+## 0.1.254 — 2026-10-14
 
 - Pressing Cancel on a send that had just finished no longer shows "Job is already completed" as an error on the listing, and no longer offers to send that message to chat as something to fix. The listing simply shows the finished send.
+
+## 0.1.253 — 2026-10-14
+
+- The sidebar's Not listed filter can now be pointed at a marketplace: turn it on, tick eBay, and you see everything that is not on eBay yet. Tick more than one to see what is missing from any of them, and combine it with labels, status and the other filters.
 
 ## 0.1.252 — 2026-10-13
 

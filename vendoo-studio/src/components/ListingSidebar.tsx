@@ -43,6 +43,7 @@ import {
   marketplaceCounts,
   marketplaceOptions,
   notListedCount,
+  notListedOnCounts,
   needsRelistCount,
   unsentCount,
   staleCounts,
@@ -613,17 +614,21 @@ export function ListingSidebar({
     () => searched.filter((listing) => inStatusTab(listing, filters.status)),
     [searched, filters.status],
   );
-  const filterMarketplaceCounts = useMemo(() => marketplaceCounts(facetSource), [facetSource]);
+  const filterMarketplaces = useMemo(
+    () => marketplaceOptions(conversations || [], marketplaceSettings?.selected || [], filters.notListed),
+    [conversations, marketplaceSettings, filters.notListed],
+  );
+  // Under "Not listed" a marketplace row keeps what is missing from it.
+  const filterMarketplaceCounts = useMemo(
+    () => (filters.notListed ? notListedOnCounts(facetSource, filterMarketplaces) : marketplaceCounts(facetSource)),
+    [facetSource, filterMarketplaces, filters.notListed],
+  );
   const filterLabelCounts = useMemo(() => labelCounts(facetSource), [facetSource]);
   const filterNotListedCount = useMemo(() => notListedCount(facetSource), [facetSource]);
   const filterStaleCounts = useMemo(() => staleCounts(facetSource), [facetSource]);
   const filterRelistCount = useMemo(() => needsRelistCount(facetSource), [facetSource]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
   const labels = useMemo(() => labelOptions(conversations || []), [conversations]);
-  const filterMarketplaces = useMemo(
-    () => marketplaceOptions(conversations || [], marketplaceSettings?.selected || []),
-    [conversations, marketplaceSettings],
-  );
   // Cached Vendoo statuses for every rendered thread, so rows can badge where
   // they're listed without hovering. Reads the server cache only.
   const renderedJobIds = useMemo(

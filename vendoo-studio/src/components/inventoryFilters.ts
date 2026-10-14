@@ -67,6 +67,10 @@ export interface ListingFilters {
   status: ListingStatusFilter;
   marketplaces: string[];
   labels: string[];
+  /**
+   * Turns the marketplace picks around: keep the listings missing from one of
+   * them, or, with none picked, the listings no marketplace carries.
+   */
   notListed: boolean;
   /** Keep only listings whose live marketplaces are behind the last Vendoo write. */
   needsRelist: boolean;
@@ -163,10 +167,14 @@ export function matchesFilters(
 ): boolean {
   if (!inStatusTab(listing, filters.status)) return false;
   const listed = listedOn(listing);
-  // Vendoo's "View Not Listed" asks for the items no marketplace carries, which
-  // is the opposite of picking marketplaces, so it wins over the chips.
-  if (filters.notListed) return listed.length === 0;
-  if (filters.marketplaces.length && !filters.marketplaces.some((id) => listed.includes(id))) return false;
+  if (filters.notListed) {
+    // Vendoo's "View Not Listed" asks for the items no marketplace carries.
+    // Picking marketplaces narrows the question to those: what still has to go
+    // up on any one of them.
+    if (!filters.marketplaces.length) {
+      if (listed.length) return false;
+    } else if (filters.marketplaces.every((id) => listed.includes(id))) return false;
+  } else if (filters.marketplaces.length && !filters.marketplaces.some((id) => listed.includes(id))) return false;
   if (filters.labels.length) {
     const own = new Set((listing.vendoo_labels || []).map(lower));
     if (!filters.labels.some((label) => own.has(lower(label)))) return false;
@@ -275,13 +283,21 @@ export function labelOptions(listings: FilterableListing[]): string[] {
   return [...seen.values()].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }));
 }
 
-/** Marketplace chips: the ones Settings shows, kept in that order, plus any other the inventory uses. */
-export function marketplaceOptions(listings: FilterableListing[], preferred: string[]): string[] {
+/**
+ * Marketplace rows: the ones Settings shows, kept in that order, plus any other
+ * the inventory uses. A marketplace nothing sits on yet is only worth a row when
+ * the question is what is missing from it, which is what `includeUnused` asks.
+ */
+export function marketplaceOptions(
+  listings: FilterableListing[],
+  preferred: string[],
+  includeUnused = false,
+): string[] {
   const used = new Set<string>();
   for (const listing of listings) {
     for (const id of listedOn(listing)) used.add(id);
   }
-  const ordered = preferred.filter((id) => used.has(id));
+  const ordered = includeUnused ? preferred : preferred.filter((id) => used.has(id));
   const extra = [...used].filter((id) => !preferred.includes(id)).sort();
   return [...ordered, ...extra];
 }
@@ -289,9 +305,9 @@ export function marketplaceOptions(listings: FilterableListing[], preferred: str
 export function activeFilterCount(filters: ListingFilters): number {
   return (
     (filters.status === "all" ? 0 : 1) +
-    filters.marketplaces.length +
+    // "Not listed on eBay" is one narrowing, not two.
+    Math.max(filters.marketplaces.length, filters.notListed ? 1 : 0) +
     filters.labels.length +
-    (filters.notListed ? 1 : 0) +
     (filters.needsRelist ? 1 : 0) +
     (filters.unsent ? 1 : 0) +
     (filters.staleDays ? 1 : 0)
@@ -321,6 +337,12 @@ export function marketplaceCounts(listings: FilterableListing[]): Record<string,
     for (const id of new Set(listedOn(listing))) counts[id] = (counts[id] || 0) + 1;
   }
   return counts;
+}
+
+/** How many of these listings each of the marketplaces is missing from. */
+export function notListedOnCounts(listings: FilterableListing[], marketplaces: string[]): Record<string, number> {
+  const carried = marketplaceCounts(listings);
+  return Object.fromEntries(marketplaces.map((id) => [id, listings.length - (carried[id] || 0)]));
 }
 
 /** The same for Vendoo labels, keyed the way `labelOptions` names them. */
