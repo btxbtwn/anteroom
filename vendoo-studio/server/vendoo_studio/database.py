@@ -13,6 +13,12 @@ BUSY_TIMEOUT_SEC = 30
 engine = create_engine(
     f"sqlite:///{DATABASE_PATH}",
     connect_args={"check_same_thread": False, "timeout": BUSY_TIMEOUT_SEC},
+    # Never make a checkout wait for another session to close. Sweeps open
+    # sessions on the event loop, and a request's session is only returned by
+    # that same loop, so a capped pool that runs dry stalls the whole server
+    # for the pool timeout on every checkout. SQLite connections are cheap;
+    # the bound that matters is SQLite's own write lock.
+    max_overflow=-1,
     echo=False,
 )
 

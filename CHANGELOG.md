@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.252 — 2026-10-13
+
+- Studio no longer freezes on "Loading..." while it checks your Vendoo inventory in the background. Opening a listing during a sync could leave the chat, photos and every other panel waiting for minutes; they now load straight away.
+
 ## 0.1.251 — 2026-10-13
 
 - The Assistant can now change listings for you. Ask it to mark down stale stock, fix costs, relabel a batch, move listings to a box, or reword a title, and it shows every change as before and after under its answer. Nothing is saved until you press Apply, and Dismiss throws the proposal away.
