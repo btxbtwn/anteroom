@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.255 — 2026-10-14
+
+- Studio stays quick with a large inventory. Refreshing the listing sidebar used to tie Studio up for over a second each time, so with a few listings open, Send to Vendoo could sit on "Updating…" and listings could hang on "Loading..." while everything waited its turn. The sidebar now refreshes about ten times faster.
+
 ## 0.1.254 — 2026-10-14
 
 - Pressing Cancel on a send that had just finished no longer shows "Job is already completed" as an error on the listing, and no longer offers to send that message to chat as something to fix. The listing simply shows the finished send.
