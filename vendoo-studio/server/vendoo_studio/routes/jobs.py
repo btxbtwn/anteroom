@@ -730,8 +730,10 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
     job = repo.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    # A job that finished while the seller was reaching for Cancel has nothing
+    # left to stop. Answer with the job as it stands instead of an error.
     if job.status in {"completed", "cancelled"}:
-        raise HTTPException(400, f"Job is already {job.status}")
+        return _job_response(job)
 
     job.status = "cancelled"
     job.current_step = None
