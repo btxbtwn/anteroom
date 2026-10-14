@@ -38,6 +38,7 @@ Requirements: macOS, Python 3.12+, Node.js 20+, Google Chrome.
 | `vendoo-extension/` | Chrome MV3 extension. **Connect Chrome** opens everyday Chrome; load this folder unpacked there once. |
 | `skills/list-this/` | Canonical listing rules used by Studio. |
 | `skills/box-scout/` | Sourcing skill: finds the wholesale clothing boxes worth buying on Raghouse and Thrift Vintage Fashion. Studio's Sourcing page runs it. |
+| `skills/measure-this/` | Reads garment measurements from photos with a yardstick laid on the item and offers only the ones two reads agree on. Not wired into Studio yet. |
 
 ## Manual extension fallback
 
