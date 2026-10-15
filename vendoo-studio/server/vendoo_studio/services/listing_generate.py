@@ -28,11 +28,12 @@ def photo_analysis_failure(reason: object) -> PhotoAnalysisError:
     """
     if isinstance(reason, BaseException):
         reason = str(reason).strip() or type(reason).__name__
-    detail = " ".join(str(reason or "").split())[:240].rstrip(" .")
+    detail = " ".join(str(reason or "").split())[:240].strip()
     if not detail:
         return PhotoAnalysisError(PHOTO_ANALYSIS_RETRY_MESSAGE)
     log.warning("photo analysis failed: %s", detail)
-    return PhotoAnalysisError(f"Photo analysis failed: {detail}. Retry to analyze the photos again.")
+    stop = "" if detail.endswith((".", "!", "?", '"')) else "."
+    return PhotoAnalysisError(f"Photo analysis failed: {detail}{stop} Retry to analyze the photos again.")
 
 
 def _evidence_value(field: Any) -> str | None:
@@ -142,6 +143,13 @@ def require_photo_analysis(result: Any) -> tuple[dict, str]:
     evidence = normalize_evidence(result.get("evidence", {}) or {})
     analysis_text = format_photo_analysis(evidence)
     if not photo_analysis_usable(analysis_text):
+        # The reply is the only clue to why: a model that cannot see images
+        # says so in prose, which leaves nothing to parse.
+        reply = " ".join(str(result.get("raw") or "").split())
+        if reply:
+            log.warning("photo analysis reply had no details: %s", reply[:4000])
+            raise photo_analysis_failure(f'the AI did not describe the photos. It replied: "{reply[:150]}"')
+        log.warning("photo analysis returned no details: %s", json.dumps(evidence, default=str)[:4000])
         raise photo_analysis_failure("the AI read no details from the photos")
     return evidence, analysis_text
 

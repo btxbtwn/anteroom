@@ -1471,6 +1471,20 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
             "Photo analysis failed: TLS connection failed. Retry to analyze the photos again.",
         )
 
+    async def test_analyze_photos_endpoint_quotes_a_reply_without_details(self):
+        self.provider.analysis = {"evidence": {}, "raw": "I can't view images in this conversation."}
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            with self.assertLogs("vendoo_studio.listing_generate", "WARNING") as logs:
+                resp = await client.post(f"/api/conversations/{self.conv_id}/analyze-photos")
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(
+            resp.json()["detail"],
+            'Photo analysis failed: the AI did not describe the photos. It replied: '
+            '"I can\'t view images in this conversation." Retry to analyze the photos again.',
+        )
+        self.assertTrue(any("I can't view images" in line for line in logs.output))
+
     async def test_analyze_photos_endpoint_names_a_raised_provider_error(self):
         async def fail(*_args, **_kwargs):
             raise RuntimeError("Invalid User API Key")
