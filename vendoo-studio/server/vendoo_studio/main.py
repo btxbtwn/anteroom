@@ -17,6 +17,9 @@ from vendoo_studio.version import app_version
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from vendoo_studio.services.error_log import install as install_error_log
+
+    install_error_log()
     init_db()
     try:
         from vendoo_studio.services.keychain import warm_keychain

@@ -202,6 +202,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["remote access", "mobile", "phone", "remote", "tailnet", "serve", "network"],
   },
   {
+    id: "error-logs",
+    title: "Errors",
+    section: "logs",
+    targetId: "error-logs",
+    searchTerms: ["error", "warning", "failed", "problem", "log", "debug", "crash"],
+  },
+  {
     id: "vendoo-api-logs",
     title: "Vendoo API logs",
     section: "logs",

@@ -335,6 +335,15 @@ export interface ProviderTestResult {
 }
 
 /** One Vendoo HTTP call as the log list shows it. Credentials in the URL are masked. */
+export interface StudioErrorLogEntry {
+  id: number;
+  at: string;
+  level: "warning" | "error" | "critical";
+  source: string;
+  message: string;
+  detail: string | null;
+}
+
 export interface VendooApiLogEntry {
   id: number;
   at: string;

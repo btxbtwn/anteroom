@@ -76,7 +76,98 @@ function LogDetail({ id }: { id: number }) {
   );
 }
 
-export function LogsSettings() {
+function ErrorLogSection() {
+  const queryClient = useQueryClient();
+  const { data, error } = useQuery({
+    queryKey: ["error-logs"],
+    queryFn: api.settings.errorLogs,
+    refetchInterval: () => (document.hidden ? false : 5000),
+  });
+  const clear = useMutation({
+    mutationFn: api.settings.clearErrorLogs,
+    onSuccess: () => queryClient.setQueryData(["error-logs"], { entries: [] }),
+  });
+  const [openId, setOpenId] = useState<number | null>(null);
+  const entries = data?.entries ?? [];
+  return (
+    <SettingsSection id="errors" title="Errors">
+      <SettingsRow
+        id="error-logs"
+        title="Warnings and errors"
+        description="Problems Studio ran into while it was open, such as an AI provider rejecting its key or photos it could not read. Click one with details to see them. Keys and tokens are masked. The list clears when Studio restarts; the log file keeps them."
+        status={entries.length ? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}` : undefined}
+        control={
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            disabled={!entries.length || clear.isPending}
+            onClick={() => {
+              setOpenId(null);
+              clear.mutate();
+            }}
+          >
+            Clear
+          </button>
+        }
+      >
+        {error ? <p className="settings-row-desc text-error" role="alert">{error.message}</p> : null}
+        {entries.length === 0 ? (
+          <p className="settings-row-desc settings-api-log-empty">No warnings or errors since Studio started.</p>
+        ) : (
+          <div className="settings-api-log">
+            <table className="settings-api-log-table" aria-label="Studio warnings and errors">
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Level</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((entry) => {
+                  const open = openId === entry.id;
+                  return (
+                    <Fragment key={entry.id}>
+                      <tr className={[entry.level === "warning" ? "" : "is-failed", open ? "is-open" : ""].filter(Boolean).join(" ") || undefined}>
+                        <td>{formatLogTime(entry.at)}</td>
+                        <td>{entry.level}</td>
+                        <td>{entry.source}</td>
+                        <td className="settings-api-log-path">
+                          {entry.detail ? (
+                            <button
+                              type="button"
+                              className="settings-api-log-toggle"
+                              aria-expanded={open}
+                              onClick={() => setOpenId(open ? null : entry.id)}
+                            >
+                              {entry.message}
+                            </button>
+                          ) : (
+                            entry.message
+                          )}
+                        </td>
+                      </tr>
+                      {open && entry.detail ? (
+                        <tr className="settings-api-log-detail-row">
+                          <td colSpan={4}>
+                            <pre className="settings-api-log-body">{entry.detail}</pre>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SettingsRow>
+    </SettingsSection>
+  );
+}
+
+function VendooApiLogSection() {
   const queryClient = useQueryClient();
   const { data, error } = useQuery({
     queryKey: ["vendoo-api-logs"],
@@ -167,3 +258,11 @@ export function LogsSettings() {
   );
 }
 
+export function LogsSettings() {
+  return (
+    <>
+      <ErrorLogSection />
+      <VendooApiLogSection />
+    </>
+  );
+}

@@ -28,6 +28,7 @@ import type {
   PriceDropPreview,
   ProviderStatus,
   ProviderTestResult,
+  StudioErrorLogEntry,
   VendooApiLogDetail,
   VendooApiLogEntry,
   ChatGPTPendingLogin,
@@ -886,6 +887,8 @@ export const api = {
     vendooApiLogs: () => request<{ entries: VendooApiLogEntry[] }>("/settings/vendoo-api-logs"),
     vendooApiLog: (id: number) => request<VendooApiLogDetail>(`/settings/vendoo-api-logs/${id}`),
     clearVendooApiLogs: () => request<{ ok: boolean }>("/settings/vendoo-api-logs", { method: "DELETE" }),
+    errorLogs: () => request<{ entries: StudioErrorLogEntry[] }>("/settings/error-logs"),
+    clearErrorLogs: () => request<{ ok: boolean }>("/settings/error-logs", { method: "DELETE" }),
   },
 
   extension: {
