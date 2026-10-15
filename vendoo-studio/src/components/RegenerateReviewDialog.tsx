@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Photo } from "../api/types";
 import { moveItem } from "../photoDrop";
+import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
 import { addToast } from "../ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
 import {
@@ -39,6 +40,14 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<{ convId: string; index: number } | null>(null);
+  // Fields filled from the photos and not yet edited, and what each reading found.
+  const [suggested, setSuggested] = useState<Record<string, string[]>>({});
+  const [readNotes, setReadNotes] = useState<Record<string, string>>({});
+  const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  const rowsRef = useRef(rows);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
   const formRef = useRef<HTMLFormElement>(null);
   const count = listings.length;
 
@@ -75,6 +84,37 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
   const setRow = (id: string, patch: Partial<ItemDetails>) => setRows((current) => (
     current ? { ...current, [id]: { ...current[id]!, ...patch } } : current
   ));
+
+  // Fills blank measurement fields from each listing's yardstick photos; typed values stay.
+  const readFromPhotos = async () => {
+    if (!rows) return;
+    setReading({ done: 0, total: listings.length });
+    await readEach(listings, READ_CONCURRENCY, async (listing) => {
+      const garment = rows[listing.id]!.garment;
+      setReadNotes((current) => ({ ...current, [listing.id]: "Reading the yardstick…" }));
+      try {
+        const result = await api.measurements.readSaved(listing.id, garment);
+        // Fold into what is there now: the seller may have typed while it read.
+        const details = rowsRef.current?.[listing.id];
+        if (details?.garment === garment) {
+          const outcome = applyReading(garment, details.measurements, result);
+          setRow(listing.id, { measurements: outcome.measurements });
+          setSuggested((current) => ({
+            ...current,
+            [listing.id]: [...new Set([...(current[listing.id] || []), ...outcome.suggested])],
+          }));
+          setReadNotes((current) => ({ ...current, [listing.id]: outcome.note }));
+        } else {
+          // The garment changed while it read; the reading was for the old fields.
+          setReadNotes((current) => ({ ...current, [listing.id]: "" }));
+        }
+      } catch (err) {
+        setReadNotes((current) => ({ ...current, [listing.id]: err instanceof Error ? err.message : "Reading failed." }));
+      }
+      setReading((current) => current && { ...current, done: current.done + 1 });
+    });
+    setReading(null);
+  };
 
   const rewrite = async () => {
     if (!rows) return;
@@ -136,7 +176,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
             Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
             Chat and every generated field are discarded, then each listing is written again from its
             photos and these details, one at a time. Flaws and notes are kept. Vendoo stays as it is
-            until you send again.
+            until you send again. Read from photos fills blank measurements from yardstick photos; check them before rewriting.
           </p>
         </div>
         <ul className="bulk-upload-groups" aria-label="Each listing's photos and details">
@@ -146,7 +186,20 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
                 key={listing.id}
                 listing={listing}
                 details={rows[listing.id]!}
-                onChange={(patch) => setRow(listing.id, patch)}
+                suggested={suggested[listing.id] || []}
+                readNote={readNotes[listing.id]}
+                onChange={(patch) => {
+                  setRow(listing.id, patch);
+                  if (patch.measurements) {
+                    const edited = Object.keys(patch.measurements).filter(
+                      (key) => patch.measurements![key] !== rows[listing.id]!.measurements[key],
+                    );
+                    setSuggested((current) => ({
+                      ...current,
+                      [listing.id]: (current[listing.id] || []).filter((key) => !edited.includes(key)),
+                    }));
+                  }
+                }}
                 onZoom={(index) => setZoom({ convId: listing.id, index })}
                 onInputKeyDown={onInputKeyDown}
               />
@@ -159,7 +212,16 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
             Cancel
           </button>
           <span className="bulk-measure-spacer" />
-          <button type="submit" className="btn btn-primary" disabled={saving || !rows}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={saving || !rows || reading !== null}
+            title="Fill blank measurements from photos with a yardstick on the item"
+            onClick={() => void readFromPhotos()}
+          >
+            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read from photos"}
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !rows || reading !== null}>
             {saving ? "Saving…" : `Rewrite ${count}`}
           </button>
         </div>
@@ -180,12 +242,16 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
 function ReviewRow({
   listing,
   details,
+  suggested,
+  readNote,
   onChange,
   onZoom,
   onInputKeyDown,
 }: {
   listing: RegenerateReviewListing;
   details: ItemDetails;
+  suggested: string[];
+  readNote?: string;
   onChange: (patch: Partial<ItemDetails>) => void;
   onZoom: (index: number) => void;
   onInputKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
@@ -230,11 +296,12 @@ function ReviewRow({
           <label className="bulk-measure-field" key={`${details.garment}-${field.key}`}>
             <span className="label">{field.label}</span>
             <input
-              className="input"
+              className={`input${suggested.includes(field.key) ? " is-suggested" : ""}`}
               type="number"
               step="0.25"
               min="0"
               inputMode="decimal"
+              title={suggested.includes(field.key) ? "Read from the photos. Check it before rewriting." : undefined}
               value={details.measurements[field.key] || ""}
               onChange={(event) => onChange({
                 measurements: { ...details.measurements, [field.key]: event.target.value },
@@ -244,6 +311,7 @@ function ReviewRow({
           </label>
         ))}
       </div>
+      {readNote ? <p className="bulk-upload-help bulk-measure-note">{readNote}</p> : null}
       <div className="bulk-measure-fields">
         <label className="bulk-measure-field">
           <span className="label">Cost of goods (COG)</span>

@@ -229,6 +229,12 @@ export const api = {
       if (!response.ok) throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
       return data as MeasurementReadResult;
     },
+    /** The same, from a saved listing's photos. */
+    readSaved: (convId: string, garment: string) =>
+      request<MeasurementReadResult>(`/conversations/${convId}/measurements/read`, {
+        method: "POST",
+        body: JSON.stringify({ garment }),
+      }),
   },
   scout: {
     list: () => request<ScoutState>("/scout"),

@@ -12,7 +12,7 @@ triggers:
 ## Purpose
 Read pit to pit, length, waist, rise, inseam and the other flat measurements from photos in which the seller laid a yardstick on the garment, and hand them back as the `measurements` line that `list-this` takes (see the `measurements` parameter in `skills/list-this/SKILL.md`). A value is offered only when two independent reads of an enlarged crop agree within 1/4 inch. Everything else goes back to the seller to measure by hand.
 
-Studio's bulk upload runs this skill from **Read from photos** (`vendoo_studio/services/measure_read.py`): the script cuts the crops, and the seller's photo model does steps 2-3 twice, independently, from the text of this file. The result is a suggestion for the seller to confirm. Never write a measurement into a listing or draft without the seller confirming it, and never put a reading's uncertainty into listing copy: an unsure measurement is left out and named to the seller instead.
+Studio's bulk upload and Regenerate review windows run this skill from **Read from photos** (`vendoo_studio/services/measure_read.py`): the script cuts the crops, and the seller's photo model does steps 2-3 twice, independently, from the text of this file. The result is a suggestion for the seller to confirm. Never write a measurement into a listing or draft without the seller confirming it, and never put a reading's uncertainty into listing copy: an unsure measurement is left out and named to the seller instead.
 
 ## Parameters
 

@@ -1,6 +1,9 @@
 import type { MeasurementReadResult } from "./api/types";
 import { garmentFields, type Garment } from "./components/garmentMeasurements";
 
+/** Items read at once from a window's Read from photos. */
+export const READ_CONCURRENCY = 2;
+
 export interface ReadingOutcome {
   /** The row's measurements with read values filled into blank fields only. */
   measurements: Record<string, string>;
@@ -38,8 +41,20 @@ export function applyReading(
     }
   }
   const parts: string[] = [];
-  if (suggested.length) parts.push("Read from photos, check before creating.");
+  if (suggested.length) parts.push("Filled from the photos. Check them.");
   else parts.push("Nothing new could be read from the photos.");
   if (byHand.length) parts.push(`Measure by hand: ${byHand.join(", ")}.`);
   return { measurements, suggested, note: parts.join(" ") };
+}
+
+/** Run `work` over every item, `limit` at a time; each reading is several photo-model calls. */
+export async function readEach<T>(items: T[], limit: number, work: (item: T) => Promise<void>): Promise<void> {
+  const queue = [...items];
+  const next = async (): Promise<void> => {
+    const item = queue.shift();
+    if (item === undefined) return;
+    await work(item);
+    await next();
+  };
+  await Promise.all(Array.from({ length: limit }, next));
 }

@@ -3,13 +3,20 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
+from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes import measurements as route
 
 
@@ -103,6 +110,46 @@ class ReadMeasurementsRouteTest(unittest.TestCase):
 
     def test_rejects_an_unknown_garment(self):
         self.assertEqual(self.post(FakeProvider([]), [_ruler_photo()], garment="hat").status_code, 400)
+
+
+class ReadSavedMeasurementsRouteTest(unittest.TestCase):
+    """Regenerate's review window reads a saved listing's photos the same way."""
+
+    def setUp(self):
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        self.db = sessionmaker(bind=engine)()
+        photos = tempfile.TemporaryDirectory()
+        self.addCleanup(photos.cleanup)
+        folder = Path(photos.name)
+        directory = patch.object(route, "PHOTOS_DIR", str(folder))
+        directory.start()
+        self.addCleanup(directory.stop)
+        repo = ConversationRepo(self.db)
+        self.conv = repo.create(title="Graphic tee")
+        for name, body in (("tag.jpg", _plain_photo()), ("ruler.jpg", _ruler_photo())):
+            (folder / name).write_bytes(body)
+            repo.add_photo(self.conv.id, name, name, "image/jpeg", len(body), checksum=name * 8, width=1, height=1)
+
+        def override_get_db():
+            yield self.db
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.addCleanup(app.dependency_overrides.clear)
+
+    def post(self, provider, conv_id, garment="top"):
+        with patch.object(route, "get_photo_provider", return_value=provider):
+            return TestClient(app).post(f"/api/conversations/{conv_id}/measurements/read", json={"garment": garment})
+
+    def test_reads_the_saved_photos(self):
+        provider = FakeProvider([{"pit_to_pit": 19.5, "length": 26}, {"pit_to_pit": 19.5, "length": 26.125}])
+        body = self.post(provider, self.conv.id).json()
+        self.assertEqual(body["photos_read"], 1)
+        self.assertEqual(body["measurements"]["pitToPit"]["value"], 19.5)
+        self.assertEqual(body["measurements"]["length"]["value"], 26.0)
+
+    def test_unknown_listing(self):
+        self.assertEqual(self.post(FakeProvider([]), "missing").status_code, 404)
 
 
 if __name__ == "__main__":
