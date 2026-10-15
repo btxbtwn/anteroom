@@ -1,7 +1,7 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { ListingNames, ListingProviderId, PhotoProviderChoice, VendooApiLogEntry } from "../api/types";
+import type { ListingNames, ListingProviderId, PhotoProviderChoice } from "../api/types";
 import { backupSummary, formatBytes } from "./backupSummary";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import { ExtensionLoadPath } from "./ExtensionLoadPath";
@@ -1883,8 +1883,71 @@ function formatLogTime(iso: string): string {
   return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function logTarget(entry: VendooApiLogEntry): string {
-  return `${entry.host}${entry.path}`;
+function prettyLogBody(body: string): string {
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
+}
+
+function LogHeaders({ title, headers }: { title: string; headers: Record<string, string> }) {
+  const names = Object.keys(headers);
+  return (
+    <section className="settings-api-log-detail-section">
+      <h4>{title}</h4>
+      {names.length ? (
+        <dl className="settings-api-log-headers">
+          {names.map((name) => (
+            <div key={name}>
+              <dt>{name}</dt>
+              <dd>{headers[name]}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="settings-api-log-none">None</p>
+      )}
+    </section>
+  );
+}
+
+function LogBody({ title, body }: { title: string; body: string | null }) {
+  return (
+    <section className="settings-api-log-detail-section">
+      <h4>{title}</h4>
+      {body ? <pre className="settings-api-log-body">{prettyLogBody(body)}</pre> : <p className="settings-api-log-none">None</p>}
+    </section>
+  );
+}
+
+function LogDetail({ id }: { id: number }) {
+  const { data, error, isPending } = useQuery({
+    queryKey: ["vendoo-api-log", id],
+    queryFn: () => api.settings.vendooApiLog(id),
+    staleTime: Infinity,
+  });
+  if (isPending) return <p className="settings-api-log-none">Loading…</p>;
+  if (error) return <p className="settings-api-log-none text-error" role="alert">{error.message}</p>;
+  return (
+    <div className="settings-api-log-detail">
+      <section className="settings-api-log-detail-section">
+        <h4>General</h4>
+        <dl className="settings-api-log-headers">
+          <div><dt>URL</dt><dd>{data.url}</dd></div>
+          <div><dt>Method</dt><dd>{data.method}</dd></div>
+          <div><dt>Status</dt><dd>{data.status ?? "No response"}</dd></div>
+          <div><dt>Time</dt><dd>{new Date(data.at).toLocaleString()}</dd></div>
+          <div><dt>Duration</dt><dd>{data.duration_ms} ms</dd></div>
+          {data.error ? <div><dt>Error</dt><dd>{data.error}</dd></div> : null}
+        </dl>
+      </section>
+      <LogHeaders title="Request headers" headers={data.request_headers} />
+      <LogBody title="Request body" body={data.request_body} />
+      <LogHeaders title="Response headers" headers={data.response_headers} />
+      <LogBody title="Response body" body={data.response_body} />
+    </div>
+  );
 }
 
 function LogsPanel() {
@@ -1898,20 +1961,24 @@ function LogsPanel() {
     mutationFn: api.settings.clearVendooApiLogs,
     onSuccess: () => queryClient.setQueryData(["vendoo-api-logs"], { entries: [] }),
   });
+  const [openId, setOpenId] = useState<number | null>(null);
   const entries = data?.entries ?? [];
   return (
     <SettingsSection id="logs" title="Vendoo API">
       <SettingsRow
         id="vendoo-api-logs"
         title="Live requests"
-        description="Calls the extension makes to Vendoo while Studio is open. Query strings, tokens, and request bodies stay off this page. The list clears when Studio restarts."
+        description="Calls the extension makes to Vendoo while Studio is open. Click a request to see its full URL, headers, and bodies. Tokens, API keys, and cookies are masked. The list clears when Studio restarts."
         status={entries.length ? `${entries.length} ${entries.length === 1 ? "call" : "calls"}` : undefined}
         control={
           <button
             type="button"
             className="btn btn-sm btn-ghost"
             disabled={!entries.length || clear.isPending}
-            onClick={() => clear.mutate()}
+            onClick={() => {
+              setOpenId(null);
+              clear.mutate();
+            }}
           >
             Clear
           </button>
@@ -1935,15 +2002,36 @@ function LogsPanel() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry) => (
-                  <tr key={entry.id} className={entry.ok ? undefined : "is-failed"}>
-                    <td>{formatLogTime(entry.at)}</td>
-                    <td>{entry.method}</td>
-                    <td>{entry.status ?? entry.error ?? ""}</td>
-                    <td>{entry.duration_ms} ms</td>
-                    <td className="settings-api-log-path">{logTarget(entry)}</td>
-                  </tr>
-                ))}
+                {entries.map((entry) => {
+                  const open = openId === entry.id;
+                  return (
+                    <Fragment key={entry.id}>
+                      <tr className={[entry.ok ? "" : "is-failed", open ? "is-open" : ""].filter(Boolean).join(" ") || undefined}>
+                        <td>{formatLogTime(entry.at)}</td>
+                        <td>{entry.method}</td>
+                        <td>{entry.status ?? entry.error ?? ""}</td>
+                        <td>{entry.duration_ms} ms</td>
+                        <td className="settings-api-log-path">
+                          <button
+                            type="button"
+                            className="settings-api-log-toggle"
+                            aria-expanded={open}
+                            onClick={() => setOpenId(open ? null : entry.id)}
+                          >
+                            {entry.url}
+                          </button>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr className="settings-api-log-detail-row">
+                          <td colSpan={5}>
+                            <LogDetail id={entry.id} />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

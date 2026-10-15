@@ -111,9 +111,11 @@ function send(message) {
   }
 }
 
-// Request lines waiting for a paired socket. Kept in memory only: a service
-// worker restart drops them, and nothing here is a token or a body.
+// Requests waiting for a paired socket. Kept in memory only: a service worker
+// restart drops them. Credentials are masked when the entry is built. Sent in
+// small batches so a backlog of large bodies stays well under the socket limit.
 const VENDOO_API_LOG_LIMIT = 200;
+const VENDOO_API_LOG_BATCH = 20;
 const vendooApiLogQueue = [];
 
 function recordVendooApiLog(entry) {
@@ -125,14 +127,16 @@ function recordVendooApiLog(entry) {
 
 function flushVendooApiLogs() {
   if (!paired || !ws || ws.readyState !== WebSocket.OPEN || vendooApiLogQueue.length === 0) return;
-  const entries = vendooApiLogQueue.splice(0, vendooApiLogQueue.length);
-  send({
-    version: 1,
-    type: 'vendoo.api_log',
-    message_id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36),
-    sent_at: new Date().toISOString(),
-    payload: { entries },
-  });
+  while (vendooApiLogQueue.length) {
+    const entries = vendooApiLogQueue.splice(0, VENDOO_API_LOG_BATCH);
+    send({
+      version: 1,
+      type: 'vendoo.api_log',
+      message_id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36),
+      sent_at: new Date().toISOString(),
+      payload: { entries },
+    });
+  }
 }
 
 async function fetchStudioPairingToken() {
