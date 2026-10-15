@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import Conversation
@@ -268,51 +269,85 @@ console.log(JSON.stringify({ probe, probeUpdate, fill, update, cached, auditOnly
 
 
 class SchemaProbeDispatchTest(unittest.TestCase):
-    def test_dispatch_sets_schema_probe_mode(self):
+    def setUp(self):
+        # Dispatch reads and writes from a worker thread.
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        self.Session = sessionmaker(bind=engine)
+        with self.Session() as db:
+            conv = Conversation(title="Probe")
+            db.add(conv)
+            db.commit()
+            self.job_id = JobRepo(db).create(
+                conv_id=conv.id,
+                approved_revision_id="rev1",
+                listing_snapshot={
+                    "title": "Tee",
+                    "category_path": MEN_PATH,
+                    "platforms": ["ebay", "poshmark"],
+                    SCHEMA_PROBE_FLAG: True,
+                },
+            ).id
+
+    def _dispatch(self, calls: int = 1) -> list[dict]:
+        import asyncio
+        import threading
+
         from vendoo_studio.routes import extension as extension_routes
 
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
-        Session = sessionmaker(bind=engine)
-        db = Session()
-        conv = Conversation(title="Probe")
-        db.add(conv)
-        db.commit()
-        JobRepo(db).create(
-            conv_id=conv.id,
-            approved_revision_id="rev1",
-            listing_snapshot={
-                "title": "Tee",
-                "category_path": MEN_PATH,
-                "platforms": ["ebay", "poshmark"],
-                SCHEMA_PROBE_FLAG: True,
-            },
-        )
-
-        captured = {}
+        sent: list[dict] = []
+        test = self
 
         class FakeManager:
             connected = True
             paired = True
 
             async def send_message(self, message):
-                captured["message"] = message
+                test.assertIs(threading.current_thread(), threading.main_thread())
+                sent.append(message)
+                await asyncio.sleep(0)
                 return True
 
         async def run():
-            with patch.object(extension_routes, "SessionLocal", return_value=db), \
+            with patch.object(extension_routes, "SessionLocal", self.Session), \
                  patch.object(extension_routes, "extension_manager", FakeManager()):
-                await extension_routes.dispatch_queued_jobs()
+                await asyncio.gather(*(extension_routes.dispatch_queued_jobs() for _ in range(calls)))
 
-        import asyncio
         asyncio.run(run())
-        payload = captured["message"]["payload"]
+        return sent
+
+    def test_dispatch_sets_schema_probe_mode(self):
+        sent = self._dispatch()
+        self.assertEqual(len(sent), 1)
+        payload = sent[0]["payload"]
         self.assertEqual(payload["options"]["mode"], "schema_probe")
         self.assertTrue(payload["options"]["skipPhotos"])
         self.assertEqual(payload["options"]["platforms"], ["ebay", "poshmark"])
         self.assertNotIn(SCHEMA_PROBE_FLAG, payload["listing"])
         self.assertEqual(payload["listing"]["category_path"], MEN_PATH)
-        db.close()
+        with self.Session() as db:
+            self.assertEqual(JobRepo(db).get(self.job_id).status, "dispatched")
+
+    def test_concurrent_dispatches_start_the_job_once(self):
+        sent = self._dispatch(calls=3)
+        self.assertEqual([message["job_id"] for message in sent], [self.job_id])
+
+    def test_database_work_runs_off_the_event_loop(self):
+        import threading
+
+        from vendoo_studio.routes import extension as extension_routes
+
+        threads = []
+        real = extension_routes._next_dispatch
+
+        def spy():
+            threads.append(threading.current_thread())
+            return real()
+
+        with patch.object(extension_routes, "_next_dispatch", spy):
+            self._dispatch()
+        self.assertEqual(len(threads), 1)
+        self.assertIsNot(threads[0], threading.main_thread())
 
 
 if __name__ == "__main__":
