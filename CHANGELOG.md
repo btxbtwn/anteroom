@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.269 — 2026-10-15
+
+- iPhone HEIC photos dragged in from Finder or the Files app are now saved as JPEGs, so the AI can read them and their thumbnails show. Before, the AI received a file it couldn't open and found no details.
+
 ## 0.1.268 — 2026-10-15
 
 - When the AI answers without describing your photos — for example because its model can't see images — the error now quotes what it said, so you know to pick a different photo model.
