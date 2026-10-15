@@ -16,6 +16,9 @@ import type {
   ListingRevision,
   ListingUpdateResult,
   ConversationActivity,
+  MarkdownApplyResult,
+  MarkdownDropRequest,
+  MarkdownPreviewRow,
   Message,
   OkResponse,
   Photo,
@@ -508,6 +511,18 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }, "Saving the price took too long. Check the listing's price before confirming again; you do not need to restart Studio."),
+    /** A suggested markdown for each listing, from the seller's own sales. Changes nothing. */
+    markdownPreview: (conversationIds: string[]) =>
+      request<{ rows: MarkdownPreviewRow[] }>("/price-drop/batch/preview", {
+        method: "POST",
+        body: JSON.stringify({ conversation_ids: conversationIds }),
+      }),
+    /** Save confirmed prices as Studio revisions. Never sends to Vendoo. */
+    applyMarkdowns: (drops: MarkdownDropRequest[]) =>
+      requestWithTimeout<MarkdownApplyResult>("/price-drop/batch", {
+        method: "POST",
+        body: JSON.stringify({ drops }),
+      }, "Saving the prices took too long. Check the listings' prices before applying again; you do not need to restart Studio."),
   },
 
   jobs: {

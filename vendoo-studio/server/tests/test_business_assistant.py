@@ -445,7 +445,7 @@ def test_a_busy_listing_is_skipped(workspace, monkeypatch):
     db, client = workspace
     _box, _jeans, coat = (row.id for row in seed(db))
     _response, saved = propose(client, monkeypatch, changes_reply({"listing": coat, "set": {"asking": 100}}))
-    monkeypatch.setattr("vendoo_studio.routes.listings.listing_busy", lambda conv_id, db: True)
+    monkeypatch.setattr("vendoo_studio.services.price_markdown.listing_busy", lambda conv_id, db: True)
     applied = client.post(f"/api/assistant/messages/{saved['id']}/changes/apply").json()
     assert applied["changes"]["items"][0]["skipped"] == "Studio was generating or sending it."
     db.expire_all()

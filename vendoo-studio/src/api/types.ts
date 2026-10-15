@@ -221,6 +221,38 @@ export interface PriceDropApplyResult extends OkResponse {
   validation: ValidationResult;
 }
 
+/** One listing in a batch markdown review. ``skip_reason`` set means it cannot be dropped. */
+export interface MarkdownPreviewRow {
+  conversation_id: string;
+  title: string;
+  cover_photo_url: string | null;
+  revision_id: string | null;
+  current_price: number | null;
+  suggested_price: number | null;
+  suggested_effective_percent: number | null;
+  suggested_mode: string | null;
+  suggested_reason: string;
+  age_days: number | null;
+  skip_reason: string | null;
+}
+
+export interface MarkdownDropRequest {
+  conversation_id: string;
+  price: number;
+  expected_revision_id?: string | null;
+}
+
+export interface MarkdownApplyResult {
+  applied: {
+    conversation_id: string;
+    revision_id: string;
+    price: number;
+    previous_price: number | null;
+    valid: boolean;
+  }[];
+  skipped: { conversation_id: string; reason: string }[];
+}
+
 export interface Job {
   id: string;
   conversation_id: string;

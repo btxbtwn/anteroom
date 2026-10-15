@@ -29,6 +29,7 @@ import { marketplacesNeedingRelist, relistStage } from "./relistStatus";
 import { marketplaceName } from "./marketplaceNames";
 import type { BulkRegenerate, BulkRegenerateRun } from "./useBulkRegenerate";
 import { BulkRegeneratePriceDialog } from "./BulkRegeneratePriceDialog";
+import { BulkPriceDropDialog } from "./BulkPriceDropDialog";
 import { RegenerateReviewDialog } from "./RegenerateReviewDialog";
 import { stopTitlebarDrag } from "./WorkspaceTopbar";
 import type { WorkspaceView } from "./workspaceCrumbs";
@@ -395,6 +396,7 @@ export function ListingSidebar({
     { rows: BulkRegenerateListing[]; drops?: ReadonlyMap<string, BulkPriceDrop> } | null
   >(null);
   const [pickedIds, setPickedIds] = useState<Set<string>>(() => new Set());
+  const [markdownIds, setMarkdownIds] = useState<string[] | null>(null);
   const settingsSearchRef = useRef<HTMLInputElement>(null);
   const selectionAnchor = useRef<string | null>(null);
   const migratedSettledRef = useRef(false);
@@ -505,14 +507,14 @@ export function ListingSidebar({
   useEffect(() => {
     if (!selecting || bulk.running) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt) return;
+      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds) return;
       setSelecting(false);
       setPickedIds(new Set());
       selectionAnchor.current = null;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, bulk.running, pricePrompt, reviewPrompt]);
+  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds]);
 
   const exitSelecting = useCallback(() => {
     setSelecting(false);
@@ -1033,6 +1035,15 @@ export function ListingSidebar({
             </button>
             <button
               type="button"
+              className="btn btn-outline btn-sm"
+              title="Review a lower price for each selected listing. Saves in Studio only; nothing is sent to Vendoo."
+              disabled={bulk.running || selectedIds.size === 0}
+              onClick={() => setMarkdownIds(eligibleIds.filter((id) => selectedIds.has(id)))}
+            >
+              Mark down
+            </button>
+            <button
+              type="button"
               className="btn btn-ghost btn-sm"
               disabled={Boolean(bulk.run?.cancelRequested)}
               onClick={() => {
@@ -1136,6 +1147,15 @@ export function ListingSidebar({
             const rows = pricePrompt;
             setPricePrompt(null);
             setReviewPrompt({ rows, drops });
+          }}
+        />
+      ) : null}
+      {markdownIds ? (
+        <BulkPriceDropDialog
+          conversationIds={markdownIds}
+          onClose={() => {
+            setMarkdownIds(null);
+            exitSelecting();
           }}
         />
       ) : null}
