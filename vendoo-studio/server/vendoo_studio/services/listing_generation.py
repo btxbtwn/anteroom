@@ -20,7 +20,6 @@ from vendoo_studio.services.comp_research import (
     research_sold_comps,
 )
 from vendoo_studio.services.listing_generate import (
-    PHOTO_ANALYSIS_RETRY_MESSAGE,
     PhotoAnalysisError,
     analysis_with_photo_count,
     analyze_photos_with_tag_retry,
@@ -28,6 +27,7 @@ from vendoo_studio.services.listing_generate import (
     latest_photo_analysis,
     listing_save_summary,
     persist_generated_listing_with_repair,
+    photo_analysis_failure,
     require_photo_analysis,
 )
 from vendoo_studio.services.schema_probe import (
@@ -113,7 +113,7 @@ async def run_listing_generation(
             except PhotoAnalysisError:
                 raise
             except Exception as exc:
-                raise PhotoAnalysisError(PHOTO_ANALYSIS_RETRY_MESSAGE) from exc
+                raise photo_analysis_failure(exc) from exc
             prompt_analysis = analysis_with_photo_count(photo_count, analysis_text)
             still_current()
             analysis_message = stream_repo.add_message(

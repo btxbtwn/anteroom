@@ -374,6 +374,34 @@ class ListingProviderCursorTest(unittest.TestCase):
             self.assertTrue(listing_provider.provider_is_configured())
 
 
+    def _provider_with_only_cursor_key(self, order):
+        from vendoo_studio.services import listing_provider
+
+        with (
+            patch(
+                "vendoo_studio.services.listing_provider.get_listing_provider_order",
+                return_value=order,
+            ),
+            patch("vendoo_studio.services.listing_provider.chatgpt_signed_in", return_value=False),
+            patch("vendoo_studio.services.listing_provider.claude_signed_in", return_value=False),
+            patch("vendoo_studio.services.listing_provider.get_api_key", return_value=None),
+            patch(
+                "vendoo_studio.services.listing_provider.get_cursor_api_key",
+                return_value="cursor_test",
+            ),
+        ):
+            return listing_provider.get_listing_provider()
+
+    def test_uses_cursor_when_it_is_the_only_provider_set_up(self):
+        from vendoo_studio.providers.cursor_agent import CursorProvider
+
+        # The default order, untouched after only a Cursor key was added.
+        provider = self._provider_with_only_cursor_key(("chatgpt", "mimo"))
+        self.assertIsInstance(provider, CursorProvider)
+
+    def test_fallback_none_does_not_reach_for_other_providers(self):
+        self.assertIsNone(self._provider_with_only_cursor_key(("chatgpt", "none")))
+
 class CursorSettingsRouteTest(unittest.TestCase):
     def test_put_and_get_cursor_key(self):
         from fastapi.testclient import TestClient

@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.266 — 2026-10-15
+
+- When photos can't be read, the error now says why — for example an invalid API key or a plan out of usage — instead of only "Photo analysis failed."
+- Adding just a Cursor (or any one) AI key is enough: Studio uses it for photos and listings even if ChatGPT is still set as Primary and isn't signed in.
+
 ## 0.1.265 — 2026-10-15
 
 - Studio no longer freezes for several seconds when the next send in line starts while it is busy saving, and a send can no longer be started twice at once.

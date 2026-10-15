@@ -20,6 +20,21 @@ class PhotoAnalysisError(RuntimeError):
     pass
 
 
+def photo_analysis_failure(reason: object) -> PhotoAnalysisError:
+    """The retry error, naming why the photos could not be read.
+
+    A bare "failed" left a seller whose key or plan was the problem with
+    nothing to fix, so the provider's own reason goes into the message.
+    """
+    if isinstance(reason, BaseException):
+        reason = str(reason).strip() or type(reason).__name__
+    detail = " ".join(str(reason or "").split())[:240].rstrip(" .")
+    if not detail:
+        return PhotoAnalysisError(PHOTO_ANALYSIS_RETRY_MESSAGE)
+    log.warning("photo analysis failed: %s", detail)
+    return PhotoAnalysisError(f"Photo analysis failed: {detail}. Retry to analyze the photos again.")
+
+
 def _evidence_value(field: Any) -> str | None:
     if isinstance(field, dict):
         raw = field.get("value")
@@ -120,12 +135,14 @@ def format_photo_analysis(evidence: dict) -> str:
 
 def require_photo_analysis(result: Any) -> tuple[dict, str]:
     """Return usable photo evidence or stop the listing flow for a retry."""
-    if not isinstance(result, dict) or result.get("error"):
-        raise PhotoAnalysisError(PHOTO_ANALYSIS_RETRY_MESSAGE)
+    if not isinstance(result, dict):
+        raise photo_analysis_failure("the AI returned no answer")
+    if result.get("error"):
+        raise photo_analysis_failure(result["error"])
     evidence = normalize_evidence(result.get("evidence", {}) or {})
     analysis_text = format_photo_analysis(evidence)
     if not photo_analysis_usable(analysis_text):
-        raise PhotoAnalysisError(PHOTO_ANALYSIS_RETRY_MESSAGE)
+        raise photo_analysis_failure("the AI read no details from the photos")
     return evidence, analysis_text
 
 
