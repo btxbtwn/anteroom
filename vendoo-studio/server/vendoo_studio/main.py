@@ -11,7 +11,7 @@ from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
 from vendoo_studio.database import init_db
 from vendoo_studio.static_files import FrontendFiles
 from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports
-from vendoo_studio.routes import ad_spend, analytics, assistant, backups, boxes, browser, catalog, changelog, sale_calendar, scout, sourcing, vendoo_api, suggestions
+from vendoo_studio.routes import ad_spend, analytics, assistant, backups, boxes, browser, catalog, changelog, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
 
 
@@ -105,6 +105,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(health.router)
 app.include_router(conversations.router)
 app.include_router(photos.router)
+app.include_router(measurements.router)
 app.include_router(listings.router)
 app.include_router(jobs.router)
 app.include_router(imports.router)

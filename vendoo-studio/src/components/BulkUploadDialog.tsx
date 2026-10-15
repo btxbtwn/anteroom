@@ -7,6 +7,7 @@ import { formatMoney } from "./analyticsFormat";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
+import { applyReading } from "../measurementReading";
 
 interface Props {
   groups: PhotoFolderGroup[];
@@ -19,7 +20,18 @@ const EMPTY_DEFAULTS: BulkUploadDefaults = { cog: "", labels: "" };
 
 type DragSpot = { group: number; photo: number };
 
-type Row = { sku: string; garment: Garment; measurements: Record<string, string> };
+type Row = {
+  sku: string;
+  garment: Garment;
+  measurements: Record<string, string>;
+  /** Fields filled from the photos and not yet touched by the seller. */
+  suggested: string[];
+  /** What the last photo reading found, in plain words. */
+  readNote?: string;
+};
+
+// Items read at once; each reading is several photo-model calls.
+const READ_CONCURRENCY = 2;
 
 /**
  * Everything a bulk upload needs in one window, before anything is created:
@@ -37,7 +49,9 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     sku: "",
     garment: guessGarment(listingTitleForFolder(group.folder)),
     measurements: {},
+    suggested: [],
   })));
+  const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
   const [dragFrom, setDragFrom] = useState<DragSpot | null>(null);
   const [dropOn, setDropOn] = useState<DragSpot | null>(null);
   const [zoom, setZoom] = useState<DragSpot | null>(null);
@@ -75,6 +89,37 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     i === index ? { ...row, ...patch } : row
   )));
 
+  // Fills blank measurement fields from each item's yardstick photos; typed values stay.
+  const readFromPhotos = async () => {
+    const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
+    setReading({ done: 0, total: todo.length });
+    const next = async (): Promise<void> => {
+      const index = todo.shift();
+      if (index === undefined) return;
+      const garment = rows[index]!.garment;
+      setRow(index, { readNote: "Reading the yardstick…" });
+      try {
+        const result = await api.measurements.read(groups[index]!.files, garment);
+        setRows((current) => current.map((row, i) => {
+          if (i !== index || row.garment !== garment) return row;
+          const outcome = applyReading(garment, row.measurements, result);
+          return {
+            ...row,
+            measurements: outcome.measurements,
+            suggested: [...new Set([...row.suggested, ...outcome.suggested])],
+            readNote: outcome.note,
+          };
+        }));
+      } catch (error) {
+        setRow(index, { readNote: error instanceof Error ? error.message : "Reading failed." });
+      }
+      setReading((current) => current && { ...current, done: current.done + 1 });
+      await next();
+    };
+    await Promise.all(Array.from({ length: READ_CONCURRENCY }, next));
+    setReading(null);
+  };
+
   const rotate = (file: File, degrees: 90 | -90) => setTurns((current) => (
     new Map(current).set(file, ((current.get(file) || 0) + degrees / 90 + 4) % 4)
   ));
@@ -108,7 +153,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
         const degrees = rotationForTurns(turns.get(file) || 0);
         if (degrees) rotations.set(file, degrees);
       }
-      return { ...group, ...rows[index]!, rotations };
+      const { sku, garment, measurements } = rows[index]!;
+      return { ...group, sku, garment, measurements, rotations };
     }), generate);
   };
 
@@ -147,6 +193,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             Box, COG and labels go on every draft. Drag photos to set their order; the first one is
             the cover, and a click enlarges one. Rotate or remove a photo from its corners. Type each item's SKU and measurements in inches, or
             leave them blank: a typed SKU is kept as is, a blank one is made up from the brand and size.
+            Read from photos fills blank measurements from yardstick photos; check them before creating.
           </p>
         </div>
         <div className="bulk-upload-fields">
@@ -320,20 +367,23 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                     <label className="bulk-measure-field" key={`${row.garment}-${field.key}`}>
                       <span className="label">{field.label}</span>
                       <input
-                        className="input"
+                        className={`input${row.suggested.includes(field.key) ? " is-suggested" : ""}`}
                         type="number"
                         step="0.25"
                         min="0"
                         inputMode="decimal"
+                        title={row.suggested.includes(field.key) ? "Read from the photos. Check it before creating." : undefined}
                         value={row.measurements[field.key] || ""}
                         onChange={(event) => setRow(groupIndex, {
                           measurements: { ...row.measurements, [field.key]: event.target.value },
+                          suggested: row.suggested.filter((key) => key !== field.key),
                         })}
                         onKeyDown={onInputKeyDown}
                       />
                     </label>
                   ))}
                 </div>
+                {row.readNote ? <p className="bulk-upload-help bulk-measure-note">{row.readNote}</p> : null}
               </li>
             );
           })}
@@ -343,10 +393,19 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             Cancel
           </button>
           <span className="bulk-measure-spacer" />
-          <button type="button" className="btn btn-secondary" disabled={invalidCog} onClick={() => confirm(false)}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={reading !== null}
+            title="Fill blank measurements from photos with a yardstick on the item"
+            onClick={() => void readFromPhotos()}
+          >
+            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read from photos"}
+          </button>
+          <button type="button" className="btn btn-secondary" disabled={invalidCog || reading !== null} onClick={() => confirm(false)}>
             Create drafts only
           </button>
-          <button type="submit" className="btn btn-primary" disabled={invalidCog}>
+          <button type="submit" className="btn btn-primary" disabled={invalidCog || reading !== null}>
             Create and generate {count}
           </button>
         </div>

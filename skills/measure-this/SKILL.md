@@ -12,7 +12,7 @@ triggers:
 ## Purpose
 Read pit to pit, length, waist, rise, inseam and the other flat measurements from photos in which the seller laid a yardstick on the garment, and hand them back as the `measurements` line that `list-this` takes (see the `measurements` parameter in `skills/list-this/SKILL.md`). A value is offered only when two independent reads of an enlarged crop agree within 1/4 inch. Everything else goes back to the seller to measure by hand.
 
-The result is a suggestion for the seller to confirm. Never write a measurement into a listing or draft without the seller confirming it, and never put a reading's uncertainty into listing copy: an unsure measurement is left out and named to the seller instead.
+Studio's bulk upload runs this skill from **Read from photos** (`vendoo_studio/services/measure_read.py`): the script cuts the crops, and the seller's photo model does steps 2-3 twice, independently, from the text of this file. The result is a suggestion for the seller to confirm. Never write a measurement into a listing or draft without the seller confirming it, and never put a reading's uncertainty into listing copy: an unsure measurement is left out and named to the seller instead.
 
 ## Parameters
 
@@ -93,4 +93,6 @@ Run of 2026-10-14, against the measurements in the seller's Vendoo descriptions:
 | Confidently wrong | 1 | 1 |
 
 Of the 112 accepted values, 110 are within 1/2 inch. The two misses: a waist read flat at 16 in that the listing gives as 32 in around (the same measurement), and a sweater length read at 24 1/4 in against a listed 25 in. Most refusals are measurements that were never photographed: 23 of the 80 listings had no yardstick across the garment in any photo the scan picked (tag and detail shots), and sleeves and rises are rarely shot. On listings with a real measurement photo, 70 of 80 top measurements and 42 of 71 pants measurements were accepted. Rise was accepted once in 17 tries: the crotch seam is almost always under a fold, the pointer or the stick. Inseam and leg opening were accepted 28 times, all within 1/2 inch.
+
+Studio's **Read from photos** (2026-10-15), Claude Opus as the photo model, on 16 of those listings (42 measurements): 22 accepted, 21 within 1/4 inch; the other is the 16 in flat waist listed as 32 in around. The blind readers accepted 24 of the same 42. Studio reads each item in 6-96 seconds.
 

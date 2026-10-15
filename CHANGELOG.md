@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.258 — 2026-10-15
+
+- Bulk upload has a **Read from photos** button. It reads the yardstick in each item's photos and fills the blank measurement fields, outlined so you can check them before creating the drafts. Measurements the photos can't settle (usually rise and sleeve) stay blank and are named under the item. Anything you typed stays as you typed it.
+
 ## 0.1.257 — 2026-10-15
 
 - The browser responds faster to taps, typing and swipes on your phone, and Back and Forward buttons let you retrace your browsing.

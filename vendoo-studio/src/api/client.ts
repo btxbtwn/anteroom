@@ -36,6 +36,7 @@ import type {
   SuggestionsResponse,
   AnalyticsRange,
   InventoryAnalytics,
+  MeasurementReadResult,
   ScoutCheck,
   ScoutState,
   SourceBoxInput,
@@ -215,6 +216,18 @@ export const api = {
         params.set("end", custom.end);
       }
       return request<InventoryAnalytics>(`/analytics?${params}`);
+    },
+  },
+  measurements: {
+    /** Suggest measurements from an item's yardstick photos. Nothing is saved. */
+    read: async (files: File[], garment: string): Promise<MeasurementReadResult> => {
+      const form = new FormData();
+      files.forEach((file) => form.append("files", file));
+      form.append("garment", garment);
+      const response = await fetch(`${BASE}/measurements/read`, { method: "POST", body: form });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
+      return data as MeasurementReadResult;
     },
   },
   scout: {
