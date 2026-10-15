@@ -537,3 +537,11 @@
   opacity: 0.55;
   cursor: default;
 }
+
+
+@media (max-width: 900px) {
+  .browser-navigation .browser-tool {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

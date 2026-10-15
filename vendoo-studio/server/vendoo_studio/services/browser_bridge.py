@@ -123,3 +123,8 @@ async def snapshot(job) -> dict:
 
 async def act(job, action: dict) -> dict:
     return await request(job, "browser.act", action, timeout=ACT_TIMEOUT_SEC)
+
+
+async def navigate(job, direction: str) -> dict:
+    _last_human_input[job.id] = time.monotonic()
+    return await request(job, "browser.navigate", {"direction": direction}, timeout=ACT_TIMEOUT_SEC)

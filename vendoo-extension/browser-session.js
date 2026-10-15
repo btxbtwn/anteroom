@@ -82,6 +82,8 @@ function sendBrowserResult(msg, result) {
 async function resumeBrowserSessionPreview() {
   const session = browserSession;
   if (!session) return false;
+  if (previewAttached && previewTabId === session.tabId && previewJobId === session.jobId
+      && previewPollTimer && browserViewportSettled(session)) return true;
   try {
     await chrome.tabs.get(session.tabId);
   } catch (_) {
@@ -155,6 +157,9 @@ function browserModifiers(value) {
 }
 
 async function browserViewport(tabId) {
+  if (browserSessionOwnsTab(tabId) && browserSession.capturedViewport?.width && browserSession.capturedViewport?.height) {
+    return browserSession.capturedViewport;
+  }
   const info = await tabPreviewInfo(tabId, { attached: true });
   return {
     width: info.viewportWidth || 0,
@@ -466,6 +471,31 @@ async function handleBrowserMessage(msg) {
         ? { type: 'PICK_FIELD_AT', x_ratio: payload.x_ratio, y_ratio: payload.y_ratio }
         : { type: 'SNAPSHOT_FIELDS' };
       sendBrowserResult(msg, await browserContentCommand(browserSession.tabId, command));
+      return;
+    }
+
+    case 'browser.navigate': {
+      // History is a seller control; agent actions remain scoped to the draft.
+      browserInputChain = browserInputChain.then(async () => {
+        const { session, error } = browserSessionFor(msg);
+        if (!session) {
+          sendBrowserResult(msg, { ok: false, error });
+          return;
+        }
+        try {
+          if (!['back', 'forward'].includes(payload.direction)) throw new Error('Invalid navigation direction');
+          if (!await resumeBrowserSessionPreview()) throw new Error('Chrome refused the debugger for this tab');
+          const history = await chrome.debugger.sendCommand({ tabId: session.tabId }, 'Page.getNavigationHistory');
+          const entry = history.entries[history.currentIndex + (payload.direction === 'back' ? -1 : 1)];
+          if (entry) await chrome.debugger.sendCommand({ tabId: session.tabId }, 'Page.navigateToHistoryEntry', { entryId: entry.id });
+          session.capturedViewport = null;
+          capturePreviewSoon(40);
+          sendBrowserResult(msg, { ok: true });
+        } catch (err) {
+          sendBrowserResult(msg, { ok: false, error: err.message });
+        }
+      });
+      await browserInputChain;
       return;
     }
 

@@ -715,6 +715,7 @@ async function handleStudioMessage(msg) {
     case 'browser.viewport':
     case 'browser.pick':
     case 'browser.snapshot':
+    case 'browser.navigate':
     case 'browser.act':
       await handleBrowserMessage(msg);
       break;

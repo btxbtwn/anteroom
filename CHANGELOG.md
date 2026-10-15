@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.257 — 2026-10-15
+
+- The browser responds faster to taps, typing and swipes on your phone, and Back and Forward buttons let you retrace your browsing.
+
 ## 0.1.256 — 2026-10-15
 
 - On phones, the listing title and navigation now have room to fit, listing tabs keep their close buttons visible, and chat, settings and dialogs stay within the screen.

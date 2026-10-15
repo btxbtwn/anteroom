@@ -47,6 +47,10 @@ class ViewportRequest(BaseModel):
     scale: float = Field(default=1, ge=1, le=3)
 
 
+class NavigateRequest(BaseModel):
+    direction: Literal["back", "forward"]
+
+
 class PickRequest(BaseModel):
     x_ratio: float = Field(ge=0, le=1)
     y_ratio: float = Field(ge=0, le=1)
@@ -132,5 +136,14 @@ async def act(job_id: str, body: ActRequest, db: Session = Depends(get_db)):
     job = _job(db, job_id)
     try:
         return _reply(await browser_bridge.act(job, body.model_dump(exclude_none=True)))
+    except BrowserBridgeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/navigate")
+async def navigate(job_id: str, body: NavigateRequest, db: Session = Depends(get_db)):
+    job = _job(db, job_id)
+    try:
+        return _reply(await browser_bridge.navigate(job, body.direction))
     except BrowserBridgeError as exc:
         raise HTTPException(400, str(exc)) from exc
