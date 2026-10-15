@@ -566,6 +566,10 @@ export const api = {
           method: "POST",
           body: JSON.stringify(viewport),
         }),
+      navigate: (id: string, direction: "back" | "forward") =>
+        request<{ ok: boolean }>(`/jobs/${id}/browser/navigate`, {
+          method: "POST", body: JSON.stringify({ direction }),
+        }),
       pick: (id: string, xRatio: number, yRatio: number) =>
         request<{ ok: boolean; viewport: BrowserViewport; field: BrowserField | null; element: { text: string; danger: boolean } | null }>(
           `/jobs/${id}/browser/pick`,

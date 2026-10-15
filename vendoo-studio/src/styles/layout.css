@@ -752,3 +752,14 @@
 .status-outdated {
   color: var(--color-draft);
 }
+
+
+.browser-navigation {
+  display: flex;
+  gap: 4px;
+}
+
+.browser-navigation .browser-tool {
+  min-width: 32px;
+  font-size: 18px;
+}

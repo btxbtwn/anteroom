@@ -1,10 +1,12 @@
 const PREVIEW_PROTOCOL = '1.3';
-const PREVIEW_MIN_INTERVAL_MS = 250;
+const PREVIEW_MIN_INTERVAL_MS = 100;
 const PREVIEW_MAX_WIDTH = 1024;
 const PREVIEW_MAX_HEIGHT = 720;
-// Frames go over a local WebSocket, so favor a crisp picture over bandwidth.
-const PREVIEW_QUALITY = 85;
-const PREVIEW_POLL_MS = 400;
+// Reduce transfer and decode time on phones while keeping text readable.
+const PREVIEW_QUALITY = 70;
+const PREVIEW_POLL_MS = 150;
+const PREVIEW_IDLE_POLL_MS = 400;
+let previewInteractiveUntil = 0;
 const PREVIEW_WATCHDOG_MS = 800;
 
 let previewTabId = null;
@@ -526,6 +528,7 @@ async function setPreviewViewport(tabId, viewport) {
       return true;
     }
     previewViewport = null;
+    if (typeof browserSessionOwnsTab === 'function' && browserSessionOwnsTab(tabId)) browserSession.capturedViewport = null;
     try {
       await chrome.debugger.sendCommand({ tabId }, 'Emulation.setTouchEmulationEnabled', { enabled: false });
     } catch (_) {}
@@ -537,6 +540,7 @@ async function setPreviewViewport(tabId, viewport) {
   if (sameViewport(previewViewport, viewport)) {
     return true;
   }
+  if (typeof browserSessionOwnsTab === 'function' && browserSessionOwnsTab(tabId)) browserSession.capturedViewport = null;
   try {
     await chrome.debugger.sendCommand({ tabId }, 'Emulation.setDeviceMetricsOverride', {
       width: viewport.width,
@@ -581,24 +585,45 @@ async function captureDebuggerScreenshot(tabId) {
 
 function startDebuggerScreenshotPoll(tabId, jobId) {
   stopPreviewPolling();
-  const captureOnce = async () => {
+  let capturing = false;
+  let lastData = null;
+  let lastInfo = null;
+  let lastCaptureAt = 0;
+  const captureOnce = async (force = false) => {
+    if (capturing) return;
+    const now = Date.now();
+    const interval = now < previewInteractiveUntil ? PREVIEW_POLL_MS : PREVIEW_IDLE_POLL_MS;
+    if (!force && now - lastCaptureAt < interval) return;
     if (!previewJobId || previewJobId !== jobId || previewTabId !== tabId || !previewAttached) {
       return;
     }
+    capturing = true;
+    lastCaptureAt = now;
     try {
       const data = await captureDebuggerScreenshot(tabId);
       if (!data) {
         return;
       }
-      sendPreviewFrame(jobId, data, await tabPreviewInfo(tabId, { attached: true }));
+      if (previewTabId !== tabId || previewJobId !== jobId || !previewAttached) return;
+      const info = await tabPreviewInfo(tabId, { attached: true });
+      if (typeof browserSessionOwnsTab === 'function' && browserSessionOwnsTab(tabId)) {
+        browserSession.capturedViewport = { width: info.viewportWidth, height: info.viewportHeight };
+      }
+      const infoKey = JSON.stringify(info);
+      if (data === lastData && infoKey === lastInfo) return;
+      lastData = data;
+      lastInfo = infoKey;
+      sendPreviewFrame(jobId, data, info);
     } catch (_) {
       if (!previewAttached && await tabIsInFront(tabId)) {
         startVisibleTabPoll(tabId, jobId);
       }
+    } finally {
+      capturing = false;
     }
   };
-  previewCaptureNow = captureOnce;
-  captureOnce();
+  previewCaptureNow = () => captureOnce(true);
+  captureOnce(true);
   previewPollTimer = setInterval(captureOnce, PREVIEW_POLL_MS);
 }
 
@@ -606,7 +631,8 @@ let previewCaptureNow = null;
 let previewSoonTimer = null;
 
 // Interactive input should show up faster than the idle poll interval.
-function capturePreviewSoon(delayMs = 120) {
+function capturePreviewSoon(delayMs = 40) {
+  previewInteractiveUntil = Date.now() + 1500;
   if (previewSoonTimer || typeof previewCaptureNow !== 'function') {
     return;
   }
