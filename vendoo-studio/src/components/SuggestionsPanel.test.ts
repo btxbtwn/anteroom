@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SUGGESTION_KIND_LABELS,
+  markDownStaleLabel,
   staleAgeLabel,
   suggestionCaption,
   suggestionKindLabel,
@@ -42,5 +43,12 @@ describe("suggestionCaption", () => {
     expect(suggestionCaption({ kind: "fix_validation", age_days: null }, true)).toBe(
       "Fix listing fields",
     );
+  });
+});
+
+describe("markDownStaleLabel", () => {
+  it("counts the stale listings the markdown covers", () => {
+    expect(markDownStaleLabel(1)).toBe("Mark down 1 stale listing");
+    expect(markDownStaleLabel(4)).toBe("Mark down 4 stale listings");
   });
 });

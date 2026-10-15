@@ -200,7 +200,8 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
     """Write one listing's proposed values. Returns why it was skipped, or None once it is saved."""
     from vendoo_studio.models.listing_evidence import ListingCorrection
     from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-    from vendoo_studio.routes.listings import ListingUpdate, listing_busy, update_listing
+    from vendoo_studio.routes.listings import ListingUpdate, update_listing
+    from vendoo_studio.services.price_markdown import listing_busy
     from vendoo_studio.services import boxes
 
     conv_id = item["listing_id"]

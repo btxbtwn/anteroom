@@ -8,10 +8,11 @@ from fastapi.testclient import TestClient
 
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.main import app
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import live_trace
 from vendoo_studio.services.comp_research import CompsEvent
 from vendoo_studio.services.price_drop import PRICE_DROP_SOURCE
+from vendoo_studio.services.vendoo_watch import SYNCED_REVISION
 
 
 class PriceDropRouteTest(unittest.TestCase):
@@ -111,6 +112,125 @@ class PriceDropRouteTest(unittest.TestCase):
         empty = ConversationRepo(self.db).create(title="Empty")
         missing = self.client.post(f"/api/conversations/{empty.id}/price-drop/preview")
         self.assertEqual(missing.status_code, 400)
+
+
+class BatchMarkdownRouteTest(unittest.TestCase):
+    def setUp(self):
+        self.db = SessionLocal()
+        self.client = TestClient(app)
+        self.convs = ConversationRepo(self.db)
+        self.listings = ListingRepo(self.db)
+        self.tee = self._listing("Stale tee", 48)
+        self.coat = self._listing("Stale coat", 120)
+
+    def tearDown(self):
+        self.db.close()
+
+    def _listing(self, title: str, price, *, synced: bool = True):
+        conv = self.convs.create(title=title)
+        listing = {"title": title, "description": "Soft.", "condition": "Pre-Owned - Good", "quantity": 1}
+        if price is not None:
+            listing["price"] = price
+        revision = self.listings.save_revision(conv.id, listing, source="generation")
+        if synced:
+            conv.notes = json.dumps({SYNCED_REVISION: revision.id})
+            self.db.commit()
+        return conv
+
+    def _preview(self, *ids):
+        with patch("vendoo_studio.services.price_drop.comps_search_available", return_value=False):
+            res = self.client.post("/api/price-drop/batch/preview", json={"conversation_ids": list(ids)})
+        self.assertEqual(res.status_code, 200, res.text)
+        return {row["conversation_id"]: row for row in res.json()["rows"]}
+
+    def test_preview_suggests_each_listing_and_reports_the_ones_it_cannot_drop(self):
+        empty = self._listing("No price", None)
+        busy = self._listing("Sending", 30)
+        revision = self.listings.get_revisions(busy.id)[0]
+        JobRepo(self.db).create(busy.id, revision.id, revision.listing_json, status="dispatched")
+
+        with patch("vendoo_studio.services.sell_through.collect_outcomes", return_value=[]) as outcomes:
+            rows = self._preview(self.tee.id, self.coat.id, empty.id, busy.id, "missing")
+        outcomes.assert_called_once()
+
+        tee = rows[self.tee.id]
+        self.assertEqual(tee["title"], "Stale tee")
+        self.assertEqual(tee["current_price"], 48)
+        self.assertEqual(tee["suggested_price"], 43)
+        self.assertTrue(tee["suggested_reason"])
+        self.assertIsNone(tee["skip_reason"])
+        self.assertEqual(tee["revision_id"], self.listings.get_revisions(self.tee.id)[0].id)
+        self.assertEqual(rows[self.coat.id]["suggested_price"], 108)
+        self.assertEqual(rows[empty.id]["skip_reason"], "Listing has no price to drop")
+        self.assertEqual(rows[busy.id]["skip_reason"], "Studio is generating or sending this listing")
+        self.assertEqual(rows["missing"]["skip_reason"], "It is no longer in Studio")
+        self.assertEqual(self.listings.get_revisions(self.tee.id)[0].source, "generation")
+
+    def test_apply_saves_price_drop_revisions_and_never_queues_a_send(self):
+        rows = self._preview(self.tee.id, self.coat.id)
+        res = self.client.post("/api/price-drop/batch", json={"drops": [
+            {"conversation_id": self.tee.id, "price": 40, "expected_revision_id": rows[self.tee.id]["revision_id"]},
+            {"conversation_id": self.coat.id, "price": 99.6},
+        ]})
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["skipped"], [])
+        applied = {row["conversation_id"]: row for row in body["applied"]}
+        self.assertEqual(applied[self.tee.id]["price"], 40)
+        self.assertEqual(applied[self.tee.id]["previous_price"], 48)
+        self.assertEqual(applied[self.coat.id]["price"], 100)
+
+        self.db.expire_all()
+        for conv, price in ((self.tee, 40), (self.coat, 100)):
+            latest = self.listings.get_revisions(conv.id)[0]
+            self.assertEqual(latest.source, PRICE_DROP_SOURCE)
+            self.assertEqual(latest.listing_json["price"], price)
+            self.assertEqual(JobRepo(self.db).list_by_conversation(conv.id), [])
+
+        listed = {row["id"]: row for row in self.client.get("/api/conversations").json()}
+        self.assertTrue(listed[self.tee.id]["unsent_edits"])
+        self.assertTrue(listed[self.coat.id]["unsent_edits"])
+
+    def test_apply_skips_what_cannot_drop_and_saves_the_rest(self):
+        rows = self._preview(self.tee.id, self.coat.id)
+        stale_revision = rows[self.coat.id]["revision_id"]
+        self.client.post(f"/api/conversations/{self.coat.id}/price-drop", json={"price": 110})
+        empty = self._listing("No price", None)
+
+        res = self.client.post("/api/price-drop/batch", json={"drops": [
+            {"conversation_id": self.tee.id, "price": 48},
+            {"conversation_id": self.coat.id, "price": 90, "expected_revision_id": stale_revision},
+            {"conversation_id": empty.id, "price": 5},
+            {"conversation_id": "missing", "price": 5},
+        ]})
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["applied"], [])
+        self.assertEqual({row["conversation_id"]: row["reason"] for row in body["skipped"]}, {
+            self.tee.id: "New price must be lower than the current price",
+            self.coat.id: "This listing changed since you reviewed it",
+            empty.id: "Listing has no price to drop",
+            "missing": "Conversation not found",
+        })
+        self.db.expire_all()
+        self.assertEqual(self.listings.get_revisions(self.coat.id)[0].listing_json["price"], 110)
+
+    def test_apply_skips_a_listing_studio_is_sending(self):
+        revision = self.listings.get_revisions(self.tee.id)[0]
+        JobRepo(self.db).create(self.tee.id, revision.id, revision.listing_json, status="queued")
+        res = self.client.post("/api/price-drop/batch", json={"drops": [
+            {"conversation_id": self.tee.id, "price": 40},
+            {"conversation_id": self.coat.id, "price": 100},
+        ]})
+        body = res.json()
+        self.assertEqual([row["conversation_id"] for row in body["applied"]], [self.coat.id])
+        self.assertEqual(body["skipped"], [
+            {"conversation_id": self.tee.id, "reason": "Studio is generating or sending this listing"},
+        ])
+
+    def test_empty_batches_are_rejected(self):
+        self.assertEqual(self.client.post("/api/price-drop/batch/preview", json={"conversation_ids": []}).status_code, 422)
+        self.assertEqual(self.client.post("/api/price-drop/batch", json={"drops": []}).status_code, 422)
 
 
 if __name__ == "__main__":

@@ -467,6 +467,90 @@
   font-variant-numeric: tabular-nums;
 }
 
+.price-drop-row-price.is-error {
+  color: var(--color-danger, #c44);
+}
+
+.bulk-markdown-popup {
+  max-width: 44rem;
+}
+
+.bulk-markdown-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bulk-markdown-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.bulk-markdown-row.is-skipped .bulk-markdown-row-body,
+.bulk-markdown-row.is-skipped .bulk-markdown-row-price {
+  opacity: 0.55;
+}
+
+.bulk-markdown-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.bulk-markdown-row-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-markdown-row-reason {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.bulk-markdown-row-error {
+  color: var(--color-danger, #c44);
+  font-size: 12px;
+}
+
+.bulk-markdown-row-price {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bulk-markdown-row-current {
+  color: var(--color-text-muted);
+}
+
+.price-drop-custom.bulk-markdown-input {
+  width: 5.5rem;
+  padding: 5px 8px;
+}
+
+.bulk-markdown-row-percent {
+  width: 3.5rem;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.bulk-markdown-skip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
 .price-drop-body .sold-comps-card {
   margin-top: 4px;
 }
