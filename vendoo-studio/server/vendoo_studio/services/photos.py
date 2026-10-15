@@ -18,6 +18,8 @@ MIME_EXTENSIONS = {
     "image/heic": ".heic",
     "image/heif": ".heif",
 }
+HEIC_MIME = {"image/heic", "image/heif"}
+HEIC_JPEG_QUALITY = 92
 
 
 def _normalize_mime(content_type: str | None, contents: bytes) -> str:
@@ -35,6 +37,20 @@ def _normalize_mime(content_type: str | None, contents: bytes) -> str:
     raise ValueError(f"Unsupported file type: {content_type}")
 
 
+def _heic_to_jpeg(contents: bytes) -> bytes:
+    """Upright JPEG of a HEIC photo: AI models and marketplaces take JPEG, not HEIC."""
+    try:
+        with Image.open(BytesIO(contents)) as img:
+            img = ImageOps.exif_transpose(img)
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=HEIC_JPEG_QUALITY)
+    except Exception as exc:
+        raise ValueError("File is not a valid image") from exc
+    return buf.getvalue()
+
+
 def process_bytes(contents: bytes, filename: str | None = None, content_type: str | None = None) -> dict:
     mime_type = _normalize_mime(content_type, contents)
     size_mb = len(contents) / (1024 * 1024)
@@ -42,7 +58,11 @@ def process_bytes(contents: bytes, filename: str | None = None, content_type: st
         raise ValueError(f"File too large ({size_mb:.1f}MB). Max {MAX_PHOTO_SIZE_MB}MB")
 
     ext = os.path.splitext(filename or "image.jpg")[1].lower()
-    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"):
+    if mime_type in HEIC_MIME or ext in (".heic", ".heif"):
+        contents = _heic_to_jpeg(contents)
+        mime_type = "image/jpeg"
+        ext = ".jpg"
+    elif ext not in (".jpg", ".jpeg", ".png", ".webp"):
         ext = MIME_EXTENSIONS.get(mime_type, ".jpg")
 
     stored_name = f"{uuid.uuid4().hex}{ext}"

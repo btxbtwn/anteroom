@@ -81,6 +81,7 @@ hiddenimports = [
     "PIL.Image",
     "PIL.ImageDraw",
     "PIL.ImageOps",
+    "pillow_heif",
 ]
 
 try:
