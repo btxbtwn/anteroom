@@ -578,6 +578,15 @@ def _extras_for(db: Session, conv_id: str) -> dict:
     )
 
 
+# Revisions are never rewritten, so whether two of them hold the same listing
+# is settled the first time it is asked. Normalizing both sides costs about a
+# millisecond per listing, and the sidebar polls the whole inventory: answered
+# fresh every time, it held the GIL for over a second per poll and stalled
+# every other request behind it.
+_REVISIONS_MATCH: dict[tuple[str, str], bool] = {}
+_REVISIONS_MATCH_MAX = 20_000
+
+
 def _unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -> set[str]:
     """Conversations whose listing moved on after Studio and Vendoo were last level.
 
@@ -597,11 +606,14 @@ def _unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -
         synced = str(parse_notes(conv.notes).get(SYNCED_REVISION) or "")
         if current and synced and current != synced:
             pairs[conv.id] = (current, synced)
-    bodies = ListingRepo(db).revision_bodies({rev for pair in pairs.values() for rev in pair})
-    return {
-        conv_id for conv_id, (current, synced) in pairs.items()
-        if not listings_match(bodies.get(current), bodies.get(synced))
-    }
+    unknown = {pair for pair in pairs.values() if pair not in _REVISIONS_MATCH}
+    if unknown:
+        bodies = ListingRepo(db).revision_bodies({rev for pair in unknown for rev in pair})
+        if len(_REVISIONS_MATCH) + len(unknown) > _REVISIONS_MATCH_MAX:
+            _REVISIONS_MATCH.clear()
+        for current, synced in unknown:
+            _REVISIONS_MATCH[(current, synced)] = listings_match(bodies.get(current), bodies.get(synced))
+    return {conv_id for conv_id, pair in pairs.items() if not _REVISIONS_MATCH[pair]}
 
 
 def _relist_pending(notes: dict) -> list[str]:
