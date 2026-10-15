@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.263 — 2026-10-15
+
+- A send or fill that stops responding no longer holds up your other listings. After 10 minutes of silence, or right away if Studio was closed mid-send, Studio stops it, marks it failed with a note, and starts the next send in line.
+
 ## 0.1.262 — 2026-10-15
 
 - **Settings → Logs → Live requests** now shows everything about each Vendoo call. Click a request to see its full URL with the query string, the request and response headers, and both bodies, pretty-printed. Tokens, API keys, cookies, and upload signatures are still masked.
