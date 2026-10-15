@@ -345,6 +345,15 @@ function SettingsSectionIcon({ section }: { section: SettingsSectionId }) {
       </svg>
     );
   }
+  if (section === "help") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.75" />
+        <path d="M9.6 9.3a2.5 2.5 0 0 1 4.85.85c0 1.65-2.45 2.2-2.45 3.6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="12" cy="17" r="1" fill="currentColor" />
+      </svg>
+    );
+  }
   if (section === "logs") {
     return (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
