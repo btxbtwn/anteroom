@@ -4,9 +4,12 @@
 The eval set lives outside the repo: listing photos never get committed. A manifest
 lists each ruler photo, the garment type, the measurements to read, and the truth:
 
-    {"cases": [{"id": "shirt-1", "photo": "/path/IMG_1.jpg", "garment": "top",
+    {"cases": [{"id": "shirt-1", "photos": ["/path/IMG_1.jpg"], "garment": "top",
                 "measures": ["pit_to_pit", "length"],
                 "truth": {"pit_to_pit": 20.5, "length": 27}}]}
+
+A case may have several ruler photos (pants usually take two); each is cut into its
+own numbered folder and the reader decides which photo carries which measurement.
 
 Cases with no truth are read but not scored. Two independent reads come back as JSON,
 each {"<case id>": {"<measure>": 20.5 | "cannot read"}}:
@@ -30,8 +33,9 @@ from ruler import crop, parse_inches, settle_one
 
 def make_crops(manifest: dict, out: Path) -> None:
     for case in manifest["cases"]:
-        report = crop(Path(case["photo"]), out / case["id"], [], set())
-        print(case["id"], [(stick["stick"], len(stick["tiles"])) for stick in report["sticks"]])
+        for number, photo in enumerate(case["photos"], 1):
+            report = crop(Path(photo), out / case["id"] / str(number), [], set())
+            print(case["id"], number, [(stick["stick"], len(stick["tiles"])) for stick in report["sticks"]])
 
 
 def score(manifest: dict, first: dict, second: dict) -> dict:

@@ -47,7 +47,7 @@ If a strip shows no yardstick (most often on a cream or tan garment), or the num
 ### 2. Name each stick's measurement
 Open `overview.jpg` and the strips. Decide which measurement each stick carries:
 - **top:** pit to pit is the stick across the chest under the sleeves; length runs from the shoulder down past the hem; sleeve runs along the sleeve.
-- **pants:** waist runs along the top of the waistband; rise runs from the waistband down to the crotch seam; inseam runs down the inside leg to the hem; leg opening lies across the hem.
+- **pants:** waist runs along the top of the waistband and is the flat width, not the circumference (a 16 in flat waist is 32 in around); rise runs from the waistband down to the crotch seam; inseam runs down the inside leg to the hem; leg opening lies across the hem.
 - **skirt:** waist along the waistband; hip across the widest point; length from waistband to hem.
 
 ### 3. Read the end point
@@ -82,3 +82,15 @@ Run of 2026-10-13: 21 tops from Studio with a ruler photo and typed pit to pit a
 | Confidently wrong (accepted, over 1/2 in off) | 1/42 (2%) |
 
 The seller types to the nearest half inch, so 1/4 inch is as close as the truth itself goes. The one confidently-wrong case is a length the photo shows at about 27 3/4 in that was typed as 25; the photo was not re-measured, so it may be a typing slip rather than a misread. A shirt typed both as 22.5/27 and 21/24 in different conversations from the same photo was scored as 21/24: 22.5/27/9 is the example line in `skills/list-this/SKILL.md`. Refusals: a sleeve over the armpit (twice) and a cream tee whose stick was not found (fixed by `--line`). Pants were not scored (no typed truth yet); across 5 new pairs of pants the rise was refused 3 times.
+
+Run of 2026-10-14, against the measurements in the seller's Vendoo descriptions: all 35 pants and 45 random tops among the 331 measured listings that have a two-stick photo (221 measurements, two blind reads each).
+
+| | Tops (102) | Pants (119) |
+|---|---|---|
+| Accepted, within 1/4 in | 65 | 40 |
+| Accepted, within 1/2 in | 69 | 41 |
+| Refused | 32 | 77 |
+| Confidently wrong | 1 | 1 |
+
+Of the 112 accepted values, 110 are within 1/2 inch. The two misses: a waist read flat at 16 in that the listing gives as 32 in around (the same measurement), and a sweater length read at 24 1/4 in against a listed 25 in. Most refusals are measurements that were never photographed: 23 of the 80 listings had no yardstick across the garment in any photo the scan picked (tag and detail shots), and sleeves and rises are rarely shot. On listings with a real measurement photo, 70 of 80 top measurements and 42 of 71 pants measurements were accepted. Rise was accepted once in 17 tries: the crotch seam is almost always under a fold, the pointer or the stick. Inseam and leg opening were accepted 28 times, all within 1/2 inch.
+
