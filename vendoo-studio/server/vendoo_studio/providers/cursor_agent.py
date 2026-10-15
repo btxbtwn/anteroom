@@ -406,14 +406,23 @@ class CursorProvider:
                             api_key=self.api_key,
                             local=LocalAgentOptions(cwd=scratch, setting_sources=[]),
                         ) as agent:
+                            status_notes: list[str] = []
+
                             def drain(run) -> bool:
-                                """Relay thinking and (when streaming) text; True if text went out."""
+                                """Relay thinking and (when streaming) text; True if text went out.
+
+                                Always reads the stream: a failed run's result
+                                carries only its id, and the reason arrives as
+                                a status message.
+                                """
                                 yielded = False
-                                if not stream and on_thinking is None:
-                                    return yielded
                                 for sdk_message in run.stream():
                                     kind = getattr(sdk_message, "type", "")
-                                    if kind == "thinking" and on_thinking is not None:
+                                    if kind == "status":
+                                        note = str(getattr(sdk_message, "message", "") or "").strip()
+                                        if note:
+                                            status_notes.append(note)
+                                    elif kind == "thinking" and on_thinking is not None:
                                         _emit(_Thinking(
                                             text=str(getattr(sdk_message, "text", "") or ""),
                                             finished=getattr(sdk_message, "thinking_duration_ms", None) is not None,
@@ -452,6 +461,9 @@ class CursorProvider:
                                 yielded = drain(run)
                                 result = run.wait()
                             if result.status == "error":
+                                reason = status_notes[-1] if status_notes else (result.result or "").strip()
+                                if reason:
+                                    raise RuntimeError(f"Cursor run failed: {reason[:300]}")
                                 raise RuntimeError(f"Cursor run failed: {result.id}")
                             if stream:
                                 if not yielded and result.result:

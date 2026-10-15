@@ -963,3 +963,18 @@ def delete_vendoo_api_logs():
 
     clear()
     return {"ok": True}
+
+
+@router.get("/error-logs")
+def get_error_logs():
+    from vendoo_studio.services.error_log import list_entries
+
+    return {"entries": list_entries()}
+
+
+@router.delete("/error-logs")
+def delete_error_logs():
+    from vendoo_studio.services.error_log import clear
+
+    clear()
+    return {"ok": True}

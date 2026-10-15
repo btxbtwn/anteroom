@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.267 — 2026-10-15
+
+- Settings → Logs has a new Errors list showing the warnings and errors Studio hit while open, with details you can expand. The log file now stamps each one with the time.
+- When Cursor fails to read photos, the error now gives Cursor's reason instead of just a run ID.
+
 ## 0.1.266 — 2026-10-15
 
 - When photos can't be read, the error now says why — for example an invalid API key or a plan out of usage — instead of only "Photo analysis failed."
