@@ -43,7 +43,11 @@ def ruler() -> ModuleType:
         raise RuntimeError(f"The measure-this skill is missing at {path}.")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module  # dataclasses look their module up while the class is built
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except ImportError as exc:
+        sys.modules.pop(spec.name, None)
+        raise RuntimeError(f"Reading measurements is not available in this build: {exc}") from exc
     return module
 
 
