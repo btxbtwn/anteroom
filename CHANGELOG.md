@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.261 — 2026-10-15
+
+- Mark down several stale listings at once: pick them in Suggestions or the sidebar, review a suggested lower price for each, change or skip any, and apply them together. The new prices stay in Studio until you press Update Vendoo on each listing.
+
 ## 0.1.260 — 2026-10-15
 
 - **Read from photos** works in the installed app. It showed "Internal Server Error" for every listing because the app was missing part of the image library the yardstick reader needs. If it can't load, it now says so in plain words.
