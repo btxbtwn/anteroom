@@ -7,7 +7,7 @@ import { formatMoney } from "./analyticsFormat";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
-import { applyReading } from "../measurementReading";
+import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
 
 interface Props {
   groups: PhotoFolderGroup[];
@@ -29,9 +29,6 @@ type Row = {
   /** What the last photo reading found, in plain words. */
   readNote?: string;
 };
-
-// Items read at once; each reading is several photo-model calls.
-const READ_CONCURRENCY = 2;
 
 /**
  * Everything a bulk upload needs in one window, before anything is created:
@@ -93,9 +90,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const readFromPhotos = async () => {
     const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
     setReading({ done: 0, total: todo.length });
-    const next = async (): Promise<void> => {
-      const index = todo.shift();
-      if (index === undefined) return;
+    await readEach(todo, READ_CONCURRENCY, async (index) => {
       const garment = rows[index]!.garment;
       setRow(index, { readNote: "Reading the yardstick…" });
       try {
@@ -114,9 +109,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
         setRow(index, { readNote: error instanceof Error ? error.message : "Reading failed." });
       }
       setReading((current) => current && { ...current, done: current.done + 1 });
-      await next();
-    };
-    await Promise.all(Array.from({ length: READ_CONCURRENCY }, next));
+    });
     setReading(null);
   };
 

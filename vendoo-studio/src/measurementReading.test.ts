@@ -14,7 +14,7 @@ describe("applyReading", () => {
     });
     expect(outcome.measurements).toEqual({ waist: "15", inseam: "27.25" });
     expect(outcome.suggested).toEqual(["inseam"]);
-    expect(outcome.note).toBe("Read from photos, check before creating. Measure by hand: Rise, Leg Opening.");
+    expect(outcome.note).toBe("Filled from the photos. Check them. Measure by hand: Rise, Leg Opening.");
   });
 
   it("says so when no photo had a yardstick", () => {
