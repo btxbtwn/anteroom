@@ -112,6 +112,30 @@ class ReadMeasurementsRouteTest(unittest.TestCase):
         self.assertEqual(self.post(FakeProvider([]), [_ruler_photo()], garment="hat").status_code, 400)
 
 
+class BundledImportsTest(unittest.TestCase):
+    """The Mac app loads the skill script from disk, so PyInstaller only packs what the spec lists."""
+
+    def test_the_app_bundle_carries_every_module_the_script_imports(self):
+        import ast
+        import sys as _sys
+
+        root = Path(__file__).resolve().parents[3]
+        script = root / "skills" / "measure-this" / "scripts" / "ruler.py"
+        spec = (root / "vendoo-studio" / "desktop" / "ListThisStudio.spec").read_text()
+        needed = set()
+        for node in ast.walk(ast.parse(script.read_text())):
+            if isinstance(node, ast.Import):
+                needed |= {alias.name for alias in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                if node.module == "PIL":
+                    needed |= {f"PIL.{alias.name}" for alias in node.names}
+                else:
+                    needed.add(node.module)
+        third_party = {name for name in needed if name.split(".")[0] not in _sys.stdlib_module_names}
+        missing = sorted(name for name in third_party if f'"{name}"' not in spec)
+        self.assertEqual(missing, [], "add these to hiddenimports in desktop/ListThisStudio.spec")
+
+
 class ReadSavedMeasurementsRouteTest(unittest.TestCase):
     """Regenerate's review window reads a saved listing's photos the same way."""
 

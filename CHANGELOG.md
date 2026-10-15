@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.260 — 2026-10-15
+
+- **Read from photos** works in the installed app. It showed "Internal Server Error" for every listing because the app was missing part of the image library the yardstick reader needs. If it can't load, it now says so in plain words.
+
 ## 0.1.259 — 2026-10-15
 
 - **Read from photos** is now in the Regenerate review window too, so listings you already saved can have their blank measurements filled from their yardstick photos before they're rewritten. Filled fields are outlined until you change them, and anything you typed stays.

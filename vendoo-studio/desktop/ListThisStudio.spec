@@ -75,8 +75,12 @@ hiddenimports = [
     "uvicorn.lifespan.on",
     "keyring.backends.macOS",
     "sqlalchemy.dialects.sqlite",
-    # The measure-this skill script is loaded from disk and needs numpy.
+    # The measure-this skill script is loaded from disk, so PyInstaller never sees
+    # its imports; tests/test_measure_read.py checks this list covers them.
     "numpy",
+    "PIL.Image",
+    "PIL.ImageDraw",
+    "PIL.ImageOps",
 ]
 
 try:
