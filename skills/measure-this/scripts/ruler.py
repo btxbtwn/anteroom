@@ -31,6 +31,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 
 AGREE_WITHIN = 0.25  # inches two reads may differ by and still be accepted
+ROUND_TO = 0.5  # accepted values are given to the nearest half inch, as sellers list them
 DETECT_SIDE = 400  # the photo is searched for sticks at this size
 MIN_STICK_SHARE = 0.3  # a stick must run at least this share of the photo's side
 TILE_INCHES_ACROSS = 4.5  # tile width, in stick widths (a yardstick is about 1.1 in wide)
@@ -333,13 +334,13 @@ def parse_inches(value) -> float | None:
 
 
 def settle_one(first, second) -> dict:
-    """Accept two reads that agree within a quarter inch; flag anything else."""
+    """Accept two reads that agree within a quarter inch, to the nearest half inch; flag anything else."""
     a, b = parse_inches(first), parse_inches(second)
     if a is None or b is None:
         return {"status": "cannot_read", "reads": [first, second]}
     if abs(a - b) > AGREE_WITHIN + 1e-9:
         return {"status": "disagree", "reads": [a, b]}
-    return {"status": "accepted", "value": math.floor((a + b) / 2 * 4 + 0.5) / 4, "reads": [a, b]}
+    return {"status": "accepted", "value": math.floor((a + b) / 2 / ROUND_TO + 0.5) * ROUND_TO, "reads": [a, b]}
 
 
 def format_inches(value: float) -> str:

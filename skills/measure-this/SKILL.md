@@ -64,7 +64,7 @@ Do steps 2-3 a second time without looking at the first read: a fresh agent or s
 ```bash
 python3 skills/measure-this/scripts/ruler.py settle reads.json
 ```
-with `reads.json` as `{"garment": "top", "reads": {"pit_to_pit": [20.5, 20.625], "length": [27, "cannot read"]}}`. Two reads within 1/4 inch are accepted, averaged and rounded to the nearest 1/4 inch. Disagreement or a refusal leaves the measurement out and names it under `needs_seller`.
+with `reads.json` as `{"garment": "top", "reads": {"pit_to_pit": [20.5, 20.625], "length": [27, "cannot read"]}}`. Two reads within 1/4 inch are accepted, averaged and rounded to the nearest 1/2 inch, the way measurements are listed. Disagreement or a refusal leaves the measurement out and names it under `needs_seller`.
 
 ### 5. Report
 Give the seller the `line` from `settle`, e.g. `- Measurements (top): Pit to pit: 20.5"; Length: 27"`, and list every `needs_seller` measurement with the reason (the two reads, or why it could not be read). Do not put measurements that were not accepted into the line.

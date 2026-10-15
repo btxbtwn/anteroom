@@ -9,6 +9,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 ## 0.1.260 — 2026-10-15
 
 - **Read from photos** works in the installed app. It showed "Internal Server Error" for every listing because the app was missing part of the image library the yardstick reader needs. If it can't load, it now says so in plain words.
+- Measurements read from photos are filled to the nearest half inch, the way you list them. Two reads still have to agree within a quarter inch before anything is filled.
 
 ## 0.1.259 — 2026-10-15
 
