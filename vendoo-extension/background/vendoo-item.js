@@ -141,6 +141,8 @@ async function readItemFromPage(tabId, itemId) {
           status: result.status,
           ok: Boolean(result.ok),
           durationMs: Date.now() - started,
+          error: result.error,
+          responseBody: result,
         });
       }
       if (result && typeof result === 'object') {

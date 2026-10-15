@@ -64,6 +64,7 @@ function loadWorker() {
     },
     URL,
     URLSearchParams,
+    Blob,
     TextEncoder,
     crypto: globalThis.crypto,
   };

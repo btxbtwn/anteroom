@@ -239,34 +239,42 @@ async function refreshVendooToken(session) {
   const started = Date.now();
   let status = null;
   let ok = false;
+  let failure = null;
+  let responseHeaders = null;
+  let responseText = null;
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: session.refresh_token });
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), VENDOO_REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: session.refresh_token }),
-    });
+    const res = await fetch(url, { method: 'POST', signal: controller.signal, headers, body });
     status = res.status;
     ok = res.ok;
+    responseHeaders = res.headers;
+    responseText = await res.text().catch(() => '');
+    let data = {};
+    try { data = JSON.parse(responseText); } catch (err) { data = {}; }
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
       const error = new Error(`Vendoo session refresh returned ${res.status}`);
       error.invalidSession = ['TOKEN_EXPIRED', 'USER_DISABLED', 'USER_NOT_FOUND', 'INVALID_REFRESH_TOKEN']
         .includes(data.error?.message);
       throw error;
     }
-    const data = await res.json();
     return {
       ...session,
       access_token: data.id_token,
       refresh_token: data.refresh_token || session.refresh_token,
       expiration_time: Date.now() + Number(data.expires_in || 3600) * 1000,
     };
+  } catch (err) {
+    failure = err.message;
+    throw err;
   } finally {
     clearTimeout(timer);
-    noteVendooApiCall({ method: 'POST', url, status, ok, durationMs: Date.now() - started });
+    noteVendooApiCall({
+      method: 'POST', url, status, ok, durationMs: Date.now() - started, error: failure,
+      requestHeaders: headers, requestBody: body, responseHeaders, responseBody: responseText,
+    });
   }
 }
 
@@ -310,32 +318,83 @@ async function freshVendooSession(rejectedToken = null) {
   return vendooSessionRequest;
 }
 
-// A request line for Settings → Logs. Query strings carry API keys and signed
-// upload URLs, so only the host and path are kept. Bodies and tokens never are.
-function vendooApiLogEntry({ method, url, status, ok, durationMs, at } = {}) {
-  let host = '';
-  let path = '/';
-  try {
-    const parsed = new URL(String(url || ''));
-    host = String(parsed.host || '').slice(0, 120);
-    path = String(parsed.pathname || '/').slice(0, 300) || '/';
-  } catch (err) {
-    host = '';
-    path = '/';
+// A request for Settings → Logs: the full URL, headers, and bodies, the way a
+// browser's network panel shows them. Credentials are masked before the entry
+// leaves the worker — Bearer and Firebase tokens, refresh tokens, API keys,
+// and signed-upload signatures — and each body is capped.
+const VENDOO_API_LOG_BODY_LIMIT = 64 * 1024;
+const VENDOO_LOG_SECRET_KEYS = 'id_?token|refresh_?token|access_?token|api_?key|key|token|password|secret|X-Goog-Signature|X-Goog-Credential|signature|sig';
+const VENDOO_LOG_SECRET_PAIR = new RegExp(
+  `(["']?\\b(?:${VENDOO_LOG_SECRET_KEYS})["']?\\s*[:=]\\s*["']?)([^"'&\\s,}]{4,})`,
+  'gi',
+);
+const VENDOO_LOG_JWT = /\beyJ[\w-]{6,}\.[\w-]+\.[\w-]+/g;
+const VENDOO_LOG_BEARER = /\b(Bearer\s+)[\w.~+/=-]+/gi;
+
+function maskVendooSecret(value) {
+  return `${value.slice(0, 4)}…(masked)`;
+}
+
+function redactVendooLogText(text) {
+  return String(text)
+    .replace(VENDOO_LOG_BEARER, (_, prefix) => `${prefix}…(masked)`)
+    .replace(VENDOO_LOG_JWT, (token) => maskVendooSecret(token))
+    .replace(VENDOO_LOG_SECRET_PAIR, (_, prefix, value) => `${prefix}${maskVendooSecret(value)}`);
+}
+
+function vendooLogBody(body) {
+  if (body == null) return null;
+  let text;
+  if (typeof body === 'string') text = body;
+  else if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) text = body.toString();
+  else if (typeof Blob !== 'undefined' && body instanceof Blob) {
+    return `[binary ${body.type || 'application/octet-stream'}, ${body.size.toLocaleString('en-US')} bytes]`;
+  } else {
+    try { text = JSON.stringify(body); } catch (err) { text = String(body); }
   }
+  if (text.length > VENDOO_API_LOG_BODY_LIMIT) {
+    text = `${text.slice(0, VENDOO_API_LOG_BODY_LIMIT)}\n… truncated (${text.length.toLocaleString('en-US')} characters total)`;
+  }
+  return redactVendooLogText(text);
+}
+
+function vendooLogHeaders(headers) {
+  if (!headers) return {};
+  const pairs = typeof headers.entries === 'function' ? [...headers.entries()] : Object.entries(headers);
+  const out = {};
+  for (const [name, value] of pairs.slice(0, 60)) {
+    const lower = String(name).toLowerCase();
+    const text = String(value ?? '');
+    if (['authorization', 'cookie', 'set-cookie', 'x-goog-api-key'].includes(lower)) {
+      const scheme = text.match(/^(\w+)\s+\S/);
+      out[name] = scheme ? `${scheme[1]} …(masked)` : '…(masked)';
+    } else {
+      out[name] = redactVendooLogText(text).slice(0, 2000);
+    }
+  }
+  return out;
+}
+
+function vendooApiLogEntry({
+  method, url, status, ok, durationMs, at, error,
+  requestHeaders, requestBody, responseHeaders, responseBody,
+} = {}) {
   const verb = String(method || 'GET').toUpperCase().slice(0, 8);
   const code = Number.isFinite(status) ? status : null;
-  let error = null;
-  if (!ok) error = code == null ? 'timed out' : `HTTP ${code}`;
+  let failure = null;
+  if (!ok) failure = error ? String(error) : (code == null ? 'timed out' : `HTTP ${code}`);
   return {
     at: at || new Date().toISOString(),
     method: verb,
-    host,
-    path,
+    url: redactVendooLogText(String(url || '')).slice(0, 4000),
     status: code,
     duration_ms: Math.max(0, Math.round(Number(durationMs) || 0)),
     ok: Boolean(ok),
-    error,
+    error: failure == null ? null : redactVendooLogText(failure).slice(0, 2000),
+    request_headers: vendooLogHeaders(requestHeaders),
+    request_body: vendooLogBody(requestBody),
+    response_headers: vendooLogHeaders(responseHeaders),
+    response_body: vendooLogBody(responseBody),
   };
 }
 
@@ -382,27 +441,35 @@ async function vendooFetchOnce(url, { method = 'GET', token, json, body, headers
   const timer = setTimeout(() => controller.abort(), timeoutMs || VENDOO_REQUEST_TIMEOUT_MS);
   let status = null;
   let ok = false;
+  let failure = null;
+  let responseHeaders = null;
+  let responseBody = null;
+  const requestHeaders = {
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    ...headers,
+  };
+  const requestBody = json !== undefined ? JSON.stringify(json) : body;
   try {
     const res = await fetch(url, {
       method,
       credentials: 'include',
       signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(json !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...headers,
-      },
-      body: json !== undefined ? JSON.stringify(json) : body,
+      headers: requestHeaders,
+      body: requestBody,
     });
     status = res.status;
     ok = res.ok;
+    responseHeaders = res.headers;
     let data = null;
     if (responseType === 'json') {
       const text = await res.text();
+      responseBody = text;
       try { data = JSON.parse(text); } catch (err) { data = text; }
     } else if (responseType === 'blob') {
       data = await res.blob();
+      responseBody = data;
     }
     const retryAfter = res.headers?.get('Retry-After');
     const retryAfterMs = retryAfter == null ? null : (
@@ -410,9 +477,15 @@ async function vendooFetchOnce(url, { method = 'GET', token, json, body, headers
         ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now())
     );
     return { ok: res.ok, status: res.status, data, retryAfterMs: Number.isFinite(retryAfterMs) ? retryAfterMs : null };
+  } catch (err) {
+    failure = err.name === 'AbortError' ? 'timed out' : err.message;
+    throw err;
   } finally {
     clearTimeout(timer);
-    noteVendooApiCall({ method, url, status, ok, durationMs: Date.now() - started });
+    noteVendooApiCall({
+      method, url, status, ok, durationMs: Date.now() - started, error: failure,
+      requestHeaders, requestBody, responseHeaders, responseBody,
+    });
   }
 }
 

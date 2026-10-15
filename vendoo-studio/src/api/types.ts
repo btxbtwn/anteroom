@@ -334,17 +334,26 @@ export interface ProviderTestResult {
   error?: string;
 }
 
-/** One redacted Vendoo HTTP call. Query strings, tokens, and bodies are absent. */
+/** One Vendoo HTTP call as the log list shows it. Credentials in the URL are masked. */
 export interface VendooApiLogEntry {
   id: number;
   at: string;
   method: string;
+  url: string;
   host: string;
   path: string;
   status: number | null;
   duration_ms: number;
   ok: boolean;
   error: string | null;
+}
+
+/** The full call: headers and bodies, with tokens, keys, and cookies masked. */
+export interface VendooApiLogDetail extends VendooApiLogEntry {
+  request_headers: Record<string, string>;
+  request_body: string | null;
+  response_headers: Record<string, string>;
+  response_body: string | null;
 }
 
 export interface FillLogEntry {

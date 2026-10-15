@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.262 — 2026-10-15
+
+- **Settings → Logs → Live requests** now shows everything about each Vendoo call. Click a request to see its full URL with the query string, the request and response headers, and both bodies, pretty-printed. Tokens, API keys, cookies, and upload signatures are still masked.
+
 ## 0.1.261 — 2026-10-15
 
 - Mark down several stale listings at once: pick them in Suggestions or the sidebar, review a suggested lower price for each, change or skip any, and apply them together. The new prices stay in Studio until you press Update Vendoo on each listing.
