@@ -603,13 +603,34 @@
 @media (max-width: 900px) {
   .confirm-dialog {
     padding: 0;
-    grid-template-rows: 1fr auto;
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .confirm-dialog-popup {
     max-width: none;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 16px);
+    overflow-y: auto;
     border-radius: 16px 16px 0 0;
     border-bottom: none;
+  }
+
+  .confirm-dialog-header,
+  .confirm-dialog-footer {
+    flex-shrink: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .confirm-dialog-footer {
+    flex-wrap: wrap;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .confirm-dialog-footer .btn {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    height: auto;
+    min-height: 32px;
   }
 
   .bulk-upload-fields {
