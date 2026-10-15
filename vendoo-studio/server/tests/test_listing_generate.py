@@ -1428,7 +1428,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 body = "".join([chunk async for chunk in resp.aiter_text()])
-        self.assertIn("Error: Photo analysis failed. Retry to analyze the photos again.", body)
+        self.assertIn("Error: Photo analysis failed: TLS connection failed. Retry to analyze the photos again.", body)
         self.assertEqual(self.provider.chat_calls, 0)
         db = self.Session()
         conv = ConversationRepo(db).get(self.conv_id)
@@ -1450,7 +1450,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         # Initial photo chat uses the streaming discovery/generation pipeline.
         self.assertEqual(resp.status_code, 200)
         self.assertIn(
-            "Error: Photo analysis failed. Retry to analyze the photos again.",
+            "Error: Photo analysis failed: TLS connection failed. Retry to analyze the photos again.",
             resp.text,
         )
         self.assertEqual(self.provider.chat_calls, 0)
@@ -1468,7 +1468,21 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.status_code, 502)
         self.assertEqual(
             resp.json()["detail"],
-            "Photo analysis failed. Retry to analyze the photos again.",
+            "Photo analysis failed: TLS connection failed. Retry to analyze the photos again.",
+        )
+
+    async def test_analyze_photos_endpoint_names_a_raised_provider_error(self):
+        async def fail(*_args, **_kwargs):
+            raise RuntimeError("Invalid User API Key")
+
+        self.provider.analyze_photos = fail
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/conversations/{self.conv_id}/analyze-photos")
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(
+            resp.json()["detail"],
+            "Photo analysis failed: Invalid User API Key. Retry to analyze the photos again.",
         )
 
     async def _wait_until_generating(self, timeout: float = 5.0):
