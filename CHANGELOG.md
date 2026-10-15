@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.268 — 2026-10-15
+
+- When the AI answers without describing your photos — for example because its model can't see images — the error now quotes what it said, so you know to pick a different photo model.
+
 ## 0.1.267 — 2026-10-15
 
 - Settings → Logs has a new Errors list showing the warnings and errors Studio hit while open, with details you can expand. The log file now stamps each one with the time.
