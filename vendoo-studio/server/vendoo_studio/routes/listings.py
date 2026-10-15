@@ -13,13 +13,9 @@ from sqlalchemy.orm import Session
 from vendoo_studio.database import get_db
 from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
 from vendoo_studio.repositories.queries import ListingRepo, ConversationRepo
-from vendoo_studio.services.price_drop import (
-    PRICE_DROP_SOURCE,
-    apply_price_to_listing,
-    build_preview,
-    listing_price,
-    whole_dollars,
-)
+from vendoo_studio.services import price_markdown
+from vendoo_studio.services.price_drop import build_preview
+from vendoo_studio.services.price_markdown import PriceDropError, current_listing, listing_busy
 
 router = APIRouter(tags=["listings"])
 
@@ -248,18 +244,6 @@ def get_revision(conv_id: str, revision_id: str, db: Session = Depends(get_db)):
     return {"id": target.id, "listing": target.listing_json}
 
 
-def listing_busy(conv_id: str, db: Session) -> bool:
-    """Whether Studio is generating, answering about, or sending this listing right now."""
-    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
-    from vendoo_studio.repositories.queries import JobRepo
-    from vendoo_studio.services import activity
-    from vendoo_studio.services.streaming import active_generation
-
-    return bool(active_generation(conv_id) or activity.running(conv_id) or any(
-        job.status in ACTIVE_JOB_STATUSES for job in JobRepo(db).list_by_conversation(conv_id)
-    ))
-
-
 class RevisionRestoreRequest(BaseModel):
     expected_revision_id: str
 
@@ -291,17 +275,10 @@ class PriceDropApply(BaseModel):
 
 
 def _current_listing(conv_id: str, db: Session) -> tuple[dict, list]:
-    conv_repo = ConversationRepo(db)
-    if not conv_repo.get(conv_id):
-        raise HTTPException(404, "Conversation not found")
-    listing_repo = ListingRepo(db)
-    revisions = listing_repo.get_revisions(conv_id)
-    if not revisions or not isinstance(revisions[0].listing_json, dict):
-        raise HTTPException(400, "Listing has no price to drop")
-    listing = copy.deepcopy(revisions[0].listing_json)
-    if listing_price(listing) is None:
-        raise HTTPException(400, "Listing has no price to drop")
-    return listing, revisions
+    try:
+        return current_listing(conv_id, db)
+    except PriceDropError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
 
 def _preview_inputs(conv_id: str, db: Session) -> tuple[dict, list, str, list, int | None]:
@@ -400,56 +377,42 @@ def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db)):
 @router.post("/api/conversations/{conv_id}/price-drop")
 def apply_price_drop(conv_id: str, body: PriceDropApply, db: Session = Depends(get_db)):
     """Apply a confirmed whole-dollar price; records a ``price_drop`` revision."""
-    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
-    from vendoo_studio.repositories.queries import JobRepo
-    from vendoo_studio.services.listing_generate import (
-        propagate_general_size,
-        sanitize_listing_sizes,
-    )
-    from vendoo_studio.services.schema_probe import is_schema_probe_job
-
-    listing, _revisions = _current_listing(conv_id, db)
-    current = listing_price(listing)
-    target = whole_dollars(body.price)
-    if current is not None and target >= current:
-        raise HTTPException(400, "New price must be lower than the current price")
-
-    listing_repo = ListingRepo(db)
-    current_row = listing_repo.get_current(conv_id)
-    updated = apply_price_to_listing(listing, target)
-    sanitize_listing_sizes(updated)
-    propagate_general_size(updated)
-    normalize_listing_dropdowns(updated)
-
-    photo_count = len(ConversationRepo(db).get_photos(conv_id))
-    validation = validate_listing(updated, photo_count, require_photos=True)
-    revision = listing_repo.save_revision(
-        conv_id=conv_id,
-        listing_json=updated,
-        source=PRICE_DROP_SOURCE,
-        parent_revision_id=current_row.current_revision_id if current_row else None,
-    )
-    if current_row:
-        current_row.validation_status = "valid" if validation.valid else "error"
-        current_row.validation_errors = validation.errors + validation.warnings
-
-    refresh_statuses = set(ACTIVE_JOB_STATUSES) | {"failed"}
-    for job in JobRepo(db).list_by_conversation(conv_id):
-        if job.status not in refresh_statuses or is_schema_probe_job(job):
-            continue
-        platforms = (job.listing_snapshot or {}).get("platforms") if isinstance(job.listing_snapshot, dict) else None
-        snapshot = dict(updated)
-        if isinstance(platforms, list):
-            snapshot["platforms"] = platforms
-        job.listing_snapshot = snapshot
-
-    db.commit()
+    try:
+        result = price_markdown.apply_price_drop(conv_id, body.price, db)
+    except PriceDropError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
     return {
         "ok": True,
-        "revision_id": revision.id,
-        "price": target,
-        "previous_price": current,
+        "revision_id": result["revision_id"],
+        "price": result["price"],
+        "previous_price": result["previous_price"],
         "percent": body.percent,
         "mode": body.mode,
-        "validation": validation.model_dump(),
+        "validation": result["validation"].model_dump(),
     }
+
+
+class MarkdownPreviewRequest(BaseModel):
+    conversation_ids: list[str] = Field(..., min_length=1)
+
+
+class MarkdownDrop(BaseModel):
+    conversation_id: str
+    price: float = Field(..., gt=0)
+    expected_revision_id: str | None = None
+
+
+class MarkdownApply(BaseModel):
+    drops: list[MarkdownDrop] = Field(..., min_length=1)
+
+
+@router.post("/api/price-drop/batch/preview")
+def preview_markdowns(body: MarkdownPreviewRequest, db: Session = Depends(get_db)):
+    """A suggested markdown for each listing, from the seller's own sales. Changes nothing."""
+    return {"rows": price_markdown.batch_preview(body.conversation_ids, db)}
+
+
+@router.post("/api/price-drop/batch")
+def apply_markdowns(body: MarkdownApply, db: Session = Depends(get_db)):
+    """Save each confirmed price as a ``price_drop`` revision. Never sends to Vendoo."""
+    return price_markdown.batch_apply([drop.model_dump() for drop in body.drops], db)

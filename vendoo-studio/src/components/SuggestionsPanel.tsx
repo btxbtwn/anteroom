@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { IDLE_POLL_MS, pollMs } from "../api/polling";
 import type { Suggestion, SuggestionKind } from "../api/types";
+import { staleSuggestionIds } from "../bulkPriceDrop";
+import { BulkPriceDropDialog } from "./BulkPriceDropDialog";
 
 export const SUGGESTION_KIND_LABELS: Record<SuggestionKind, string> = {
   failed: "Fix failed listing",
@@ -14,6 +16,10 @@ export const SUGGESTION_KIND_LABELS: Record<SuggestionKind, string> = {
 
 export function suggestionKindLabel(kind: string): string {
   return SUGGESTION_KIND_LABELS[kind as SuggestionKind] || kind.replace(/_/g, " ");
+}
+
+export function markDownStaleLabel(count: number): string {
+  return count === 1 ? "Mark down 1 stale listing" : `Mark down ${count} stale listings`;
 }
 
 export function staleAgeLabel(days: number): string {
@@ -57,44 +63,64 @@ export function SuggestionsPanel({
   });
   const suggestions = data?.suggestions || [];
   const [expanded, setExpanded] = useState(true);
+  const [markdownIds, setMarkdownIds] = useState<string[] | null>(null);
+  const staleIds = staleSuggestionIds(suggestions);
+  const markdown = staleIds.length > 0 && !selecting ? (
+    <button
+      type="button"
+      className="btn btn-ghost btn-sm suggestions-markdown-btn"
+      title="Review a lower price for each stale listing. Saves in Studio only; nothing is sent to Vendoo."
+      onClick={() => setMarkdownIds(staleIds)}
+    >
+      {markDownStaleLabel(staleIds.length)}
+    </button>
+  ) : null;
+  // Outside the shelf, so a refetch that empties the feed cannot close the review.
+  const markdownDialog = markdownIds ? (
+    <BulkPriceDropDialog conversationIds={markdownIds} onClose={() => setMarkdownIds(null)} />
+  ) : null;
 
   if (variant === "sidebar") {
-    if (!suggestions.length) return null;
+    if (!suggestions.length) return markdownDialog;
     return (
-      <section className="suggestions-shelf" aria-label="Suggestions">
-        <button
-          type="button"
-          className="sidebar-shelf-header"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          <span className="sidebar-shelf-label">
-            {expanded ? "Suggestions" : `Suggestions (${suggestions.length})`}
-          </span>
-          <span className="sidebar-shelf-rule" aria-hidden="true" />
-          <svg className="sidebar-shelf-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        {expanded ? (
-          <div className="suggestions-shelf-body">
-            {suggestions.map((item) => (
-              <SuggestionRow
-                key={item.conversation_id}
-                suggestion={item}
-                selected={selectedConvId === item.conversation_id}
-                compact
-                selecting={selecting}
-                checked={Boolean(selectedIds?.has(item.conversation_id))}
-                canSelect={canSelect ? canSelect(item) : true}
-                selectLocked={selectLocked}
-                onToggleSelect={onToggleSelect}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
-        ) : null}
-      </section>
+      <>
+        <section className="suggestions-shelf" aria-label="Suggestions">
+          <button
+            type="button"
+            className="sidebar-shelf-header"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <span className="sidebar-shelf-label">
+              {expanded ? "Suggestions" : `Suggestions (${suggestions.length})`}
+            </span>
+            <span className="sidebar-shelf-rule" aria-hidden="true" />
+            <svg className="sidebar-shelf-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {expanded ? (
+            <div className="suggestions-shelf-body">
+              {suggestions.map((item) => (
+                <SuggestionRow
+                  key={item.conversation_id}
+                  suggestion={item}
+                  selected={selectedConvId === item.conversation_id}
+                  compact
+                  selecting={selecting}
+                  checked={Boolean(selectedIds?.has(item.conversation_id))}
+                  canSelect={canSelect ? canSelect(item) : true}
+                  selectLocked={selectLocked}
+                  onToggleSelect={onToggleSelect}
+                  onSelect={onSelect}
+                />
+              ))}
+              {markdown}
+            </div>
+          ) : null}
+        </section>
+        {markdownDialog}
+      </>
     );
   }
 
@@ -113,6 +139,8 @@ export function SuggestionsPanel({
           />
         ))
       )}
+      {markdown}
+      {markdownDialog}
     </section>
   );
 }

@@ -557,3 +557,8 @@
     grid-template-columns: 1fr;
   }
 }
+
+.suggestions-markdown-btn {
+  align-self: flex-start;
+  margin: 4px 8px 2px;
+}
