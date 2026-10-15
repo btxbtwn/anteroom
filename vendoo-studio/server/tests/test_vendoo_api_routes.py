@@ -280,6 +280,10 @@ class CreateRouteTest(_RouteTest):
             status="dispatched", current_step="vendoo_api_fields",
         )
         self._age(stale)
+        # Studio's startup sweep finds the send no process is running.
+        from vendoo_studio.services.job_watchdog import fail_stalled_jobs
+
+        self.assertEqual(fail_stalled_jobs(self.db), [stale.id])
 
         async def fake_create(job, listing, photos, *, provider=None, evidence=""):
             return CREATED
@@ -314,17 +318,6 @@ class CreateRouteTest(_RouteTest):
         res = self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/create")
         self.assertEqual(res.status_code, 409)
         self.assertIn("already queued or sending", res.json()["detail"])
-
-    def test_job_list_drops_a_dead_send_so_the_card_can_clear(self):
-        rev = ListingRepo(self.db).get_revisions(self.conv.id)[0]
-        stale = JobRepo(self.db).create(
-            self.conv.id, rev.id, LISTING, status="dispatched", current_step="vendoo_api_fields",
-        )
-        self._age(stale)
-        res = self.client.get("/api/jobs", params={"conversation_id": self.conv.id})
-        self.assertEqual(res.status_code, 200, res.text)
-        match = next(row for row in res.json() if row["id"] == stale.id)
-        self.assertEqual(match["status"], "failed")
 
     def test_a_cancelled_send_does_not_stay_dispatched(self):
         async def fake_create(job, listing, photos, *, provider=None, evidence=""):
