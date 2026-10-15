@@ -261,6 +261,15 @@
   gap: 6px;
 }
 
+.bulk-measure-field .input.is-suggested {
+  border-color: var(--color-cobalt);
+  border-style: dashed;
+}
+
+.bulk-measure-note {
+  margin: 0;
+}
+
 .bulk-measure-spacer {
   flex: 1 1 auto;
 }

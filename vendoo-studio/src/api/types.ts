@@ -756,6 +756,19 @@ export interface SourceBoxInput {
 export type ScoutVerdict = "buy" | "maybe" | "pass" | "unsure";
 
 /** One "is this worth buying?" check from photos taken while sourcing. */
+/** One measurement read from yardstick photos: a value only when two reads agree within 1/4 in. */
+export interface MeasurementRead {
+  status: "accepted" | "disagree" | "cannot_read";
+  value?: number;
+  reads: (number | string | null)[];
+}
+
+export interface MeasurementReadResult {
+  photos_read: number;
+  /** Keyed like the bulk upload's measurement fields (pitToPit, length, waist, legOpening, ...). */
+  measurements: Record<string, MeasurementRead>;
+}
+
 export interface ScoutCheck {
   id: string;
   status: "checking" | "done" | "failed";
