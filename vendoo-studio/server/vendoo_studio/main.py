@@ -44,6 +44,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        from vendoo_studio.services.job_watchdog import start_job_watchdog
+        start_job_watchdog()
+    except Exception:
+        pass
+    try:
         from vendoo_studio.database import SessionLocal
         from vendoo_studio.services.maintenance import prune_event_bloat
         import logging
@@ -72,6 +77,11 @@ async def lifespan(app: FastAPI):
     try:
         from vendoo_studio.services.box_scout import stop_sourcing_timer
         stop_sourcing_timer()
+    except Exception:
+        pass
+    try:
+        from vendoo_studio.services.job_watchdog import stop_job_watchdog
+        stop_job_watchdog()
     except Exception:
         pass
     # Last thing before the process goes: pruning frees pages inside the file,

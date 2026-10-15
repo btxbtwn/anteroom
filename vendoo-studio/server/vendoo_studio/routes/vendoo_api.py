@@ -102,14 +102,12 @@ def _http_error(exc: Exception) -> HTTPException:
 def _reject_if_chrome_busy(db: Session, conv_id: str) -> None:
     """Block a second send while Chrome is actually in use.
 
-    A dead API send is failed first, so it cannot sit on ``dispatched`` and
-    report Chrome busy when nothing is running. This listing's own live send
-    is not "another job".
+    A send that died or went quiet is failed by the job watchdog, so it does
+    not sit on ``dispatched`` reporting Chrome busy. This listing's own live
+    send is not "another job".
     """
     from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
-    from vendoo_studio.services.api_job_lock import release_orphaned_api_jobs
 
-    release_orphaned_api_jobs(db)
     job_repo = JobRepo(db)
     if any(job.status in ACTIVE_JOB_STATUSES for job in job_repo.list_by_conversation(conv_id)):
         raise HTTPException(409, "This listing is already queued or sending to Vendoo.")
