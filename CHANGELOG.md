@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.264 — 2026-10-15
+
+- Settings has a new Help section with short step-by-step guides for creating listings, uploading a box, sending to Vendoo, regenerating, marking down stale listings, sourcing boxes, Analytics, connecting Chrome and backups.
+
 ## 0.1.263 — 2026-10-15
 
 - A send or fill that stops responding no longer holds up your other listings. After 10 minutes of silence, or right away if Studio was closed mid-send, Studio stops it, marks it failed with a note, and starts the next send in line.
