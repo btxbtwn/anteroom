@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.265 — 2026-10-15
+
+- Studio no longer freezes for several seconds when the next send in line starts while it is busy saving, and a send can no longer be started twice at once.
+
 ## 0.1.264 — 2026-10-15
 
 - Settings has a new Help section with short step-by-step guides for creating listings, uploading a box, sending to Vendoo, regenerating, marking down stale listings, sourcing boxes, Analytics, connecting Chrome and backups.

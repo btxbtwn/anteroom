@@ -320,43 +320,63 @@ def _schedule_saved_item_sync(conv_id: str) -> None:
     task.add_done_callback(_saved_item_syncs.discard)
 
 
-async def dispatch_queued_jobs():
-    from vendoo_studio.services.category_tree import syncing
-    if syncing():
-        return
-    db = SessionLocal()
-    try:
-        from vendoo_studio.repositories.queries import JobRepo
-        from vendoo_studio.services.schema_probe import is_schema_probe_job, listing_for_extension
-        from vendoo_studio.models.job import is_vendoo_api_step
+_dispatch_locks: dict[asyncio.AbstractEventLoop, asyncio.Lock] = {}
+
+
+def _dispatch_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _dispatch_locks.get(loop)
+    if lock is None:
+        _dispatch_locks.clear()
+        lock = _dispatch_locks[loop] = asyncio.Lock()
+    return lock
+
+
+def _set_job_status(job_id: str, status: str, step: str | None = None) -> None:
+    from vendoo_studio.repositories.queries import JobRepo
+    with SessionLocal() as db:
+        if step is None:
+            JobRepo(db).update_status(job_id, status)
+        else:
+            JobRepo(db).update_status(job_id, status, step)
+
+
+def _next_dispatch() -> tuple[str, str, dict | None] | None:
+    """Pick the next queued job and claim or build its start. Runs in a thread.
+
+    Returns ``("api", job_id, None)`` for a Vendoo API send already marked
+    dispatched, ``("start", job_id, message)`` for an extension fill to send,
+    or None when nothing should start.
+    """
+    from vendoo_studio.repositories.queries import JobRepo
+    from vendoo_studio.services.schema_probe import is_schema_probe_job, listing_for_extension
+    from vendoo_studio.models.job import is_vendoo_api_step
+    with SessionLocal() as db:
         repo = JobRepo(db)
         # One Chrome fill at a time; later approvals wait in queued / awaiting_extension.
         if repo.get_running():
-            return
+            return None
         jobs = repo.get_dispatchable()
         if not jobs:
-            return
+            return None
         job = jobs[0]
         if is_vendoo_api_step(job.current_step):
             if not extension_manager.connected:
-                return
+                return None
             from vendoo_studio.routes.vendoo_api import CREATE_STEP, SAVE_STEP
             from vendoo_studio.services.api_job_lock import claim_api_job, start_gate
-            from vendoo_studio.services.send_queue import run_send
-            from vendoo_studio.services.streaming import spawn
 
             with start_gate():
                 if repo.get_running():
-                    return
+                    return None
                 repo.update_status(job.id, "dispatched", SAVE_STEP if job.vendoo_item_id else CREATE_STEP)
                 claim_api_job(job.id)
-            spawn(run_send(job.id))
-            return
+            return ("api", job.id, None)
         if not extension_manager.connected:
             for job in jobs:
                 if job.status != "awaiting_extension":
                     repo.update_status(job.id, "awaiting_extension", "awaiting_extension")
-            return
+            return None
         job = jobs[0]
         photos_list = _build_photo_list(job.conversation_id, db)
         from vendoo_studio.repositories.queries import ConversationRepo
@@ -409,7 +429,7 @@ async def dispatch_queued_jobs():
             options["mode"] = "schema_probe"
             options["skipPhotos"] = True
             options.pop("skipDiscoverSchema", None)
-        sent = await extension_manager.send_message(ProtocolMessage(
+        return ("start", job.id, ProtocolMessage(
             type="job.start",
             job_id=job.id,
             message_id=uuid.uuid4().hex[:12],
@@ -424,12 +444,33 @@ async def dispatch_queued_jobs():
                 "registry_options": registry_options,
             },
         ).model_dump(mode="json"))
+
+
+async def dispatch_queued_jobs():
+    """Start the next queued job, if Chrome is free.
+
+    The database work runs in a thread so a busy SQLite lock cannot stall the
+    event loop, and one dispatch runs at a time so two callers cannot both see
+    the slot free and start the same job.
+    """
+    from vendoo_studio.services.category_tree import syncing
+    if syncing():
+        return
+    async with _dispatch_lock():
+        picked = await asyncio.to_thread(_next_dispatch)
+        if picked is None:
+            return
+        kind, job_id, message = picked
+        if kind == "api":
+            from vendoo_studio.services.send_queue import run_send
+            from vendoo_studio.services.streaming import spawn
+            spawn(run_send(job_id))
+            return
+        sent = await extension_manager.send_message(message)
         if sent:
-            repo.update_status(job.id, "dispatched")
+            await asyncio.to_thread(_set_job_status, job_id, "dispatched")
         else:
-            repo.update_status(job.id, "awaiting_extension", "awaiting_extension")
-    finally:
-        db.close()
+            await asyncio.to_thread(_set_job_status, job_id, "awaiting_extension", "awaiting_extension")
 
 
 async def dispatch_fill_fields(
