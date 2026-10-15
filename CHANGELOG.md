@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.256 — 2026-10-15
+
+- On phones, the listing title and navigation now have room to fit, listing tabs keep their close buttons visible, and chat, settings and dialogs stay within the screen.
+
 ## 0.1.255 — 2026-10-14
 
 - Studio stays quick with a large inventory. Refreshing the listing sidebar used to tie Studio up for over a second each time, so with a few listings open, Send to Vendoo could sit on "Updating…" and listings could hang on "Loading..." while everything waited its turn. The sidebar now refreshes about ten times faster.
