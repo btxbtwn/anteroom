@@ -10,7 +10,8 @@ from vendoo_studio.routes.extension import _build_registry_selectors
 from vendoo_studio.services.completion_gaps import deterministic_gap_patches
 from vendoo_studio.services.listing_generate import propagate_general_size
 from vendoo_studio.services.specifics_fill import fill_listing_specifics, specifics_gaps
-from vendoo_studio.services.vendoo_api import build_vendoo_item, changed_fields
+from vendoo_studio.services.vendoo_item_build import build_vendoo_item
+from vendoo_studio.services.vendoo_item_update import changed_fields
 from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_specific
 
 

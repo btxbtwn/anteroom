@@ -513,7 +513,7 @@ class PrepareListingSnapshotRetryTest(unittest.TestCase):
         import json
 
         from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
-        from vendoo_studio.services.vendoo_api import build_vendoo_item
+        from vendoo_studio.services.vendoo_item_build import build_vendoo_item
 
         self.conv.notes = json.dumps({
             "vendooLabels": "A19, To List",

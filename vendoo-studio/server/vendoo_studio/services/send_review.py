@@ -76,7 +76,8 @@ def _value(item: dict, path: str):
 
 
 async def preview_send(db, conv_id: str) -> dict:
-    from vendoo_studio.services.vendoo_api import apply_update_all, build_vendoo_item, changed_fields
+    from vendoo_studio.services.vendoo_item_build import build_vendoo_item
+    from vendoo_studio.services.vendoo_item_update import apply_update_all, changed_fields
     from vendoo_studio.services.vendoo_create import (
         ITEM_READ_TIMEOUT_SEC, label_display_map, prepare_listing_fields_for_vendoo, run_ops,
     )

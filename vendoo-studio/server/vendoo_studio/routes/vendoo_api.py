@@ -497,10 +497,10 @@ async def _write_claimed_draft(
     db, conv, conv_id, item_id, revisions, snapshot, provider, evidence, job, job_repo,
 ):
     from vendoo_studio.services.job_snapshot import save_prepared_revision
-    from vendoo_studio.services.vendoo_api import (
-        LISTINGS_KEY,
+    from vendoo_studio.services.vendoo_item_build import build_vendoo_item
+    from vendoo_studio.services.vendoo_item_shape import LISTINGS_KEY
+    from vendoo_studio.services.vendoo_item_update import (
         apply_update_all,
-        build_vendoo_item,
         changed_fields,
         diff_updates,
         force_condition_updates,

@@ -33,19 +33,17 @@ from vendoo_studio.services.vendoo_specifics import (
     normalize_specifics,
     specs_to_rows,
 )
-from vendoo_studio.services.vendoo_api import (
-    build_vendoo_item,
+from vendoo_studio.services.vendoo_categories import (
     category_from_hit,
     category_v2,
-    changed_fields,
-    pick_mapped_category,
-    diff_roundtrip,
-    diff_updates,
     hit_display_path,
-    observe_item_schema,
     path_parts,
     pick_category_hit,
+    pick_mapped_category,
 )
+from vendoo_studio.services.vendoo_encodings import observe_item_schema
+from vendoo_studio.services.vendoo_item_build import build_vendoo_item
+from vendoo_studio.services.vendoo_item_update import changed_fields, diff_roundtrip, diff_updates
 
 log = logging.getLogger("vendoo_studio.vendoo_create")
 
@@ -280,7 +278,7 @@ def tree_leaf(marketplace: str, path: str) -> dict[str, Any] | None:
     import sqlite3
 
     from vendoo_studio.config import DATABASE_PATH
-    from vendoo_studio.services.vendoo_api import path_parts
+    from vendoo_studio.services.vendoo_categories import path_parts
 
     parts = path_parts(path)
     wanted = " > ".join(parts)
@@ -1044,7 +1042,7 @@ async def create_item(
         if recovered is not None:
             # A retry may approve newer copy. Reconcile it onto the same draft
             # instead of making another item. Only Studio's form fields change.
-            from vendoo_studio.services.vendoo_api import apply_update_all
+            from vendoo_studio.services.vendoo_item_update import apply_update_all
 
             apply_update_all(stored, item, schema=schema)
             fixes = changed_fields(stored, item)

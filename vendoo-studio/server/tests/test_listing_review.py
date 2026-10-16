@@ -11,7 +11,7 @@ from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import send_review
-from vendoo_studio.services.vendoo_api import build_vendoo_item
+from vendoo_studio.services.vendoo_item_build import build_vendoo_item
 from vendoo_studio.services.vendoo_import import merge_notes
 from vendoo_studio.services.vendoo_send import record_photo_progress
 

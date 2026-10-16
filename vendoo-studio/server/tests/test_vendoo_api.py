@@ -3,23 +3,28 @@ from __future__ import annotations
 import unittest
 
 from vendoo_studio.services.vendoo_specifics import normalize_specifics
-from vendoo_studio.services.vendoo_api import (
-    apply_update_all,
-    changed_fields,
-    force_condition_updates,
-    pick_mapped_category,
-    ALL_MARKETPLACES,
-    CURRENT_ITEM_VERSION,
-    build_vendoo_item,
+from vendoo_studio.services.vendoo_categories import (
     category_from_hit,
-    create_item_payload,
-    default_listing_section,
-    diff_roundtrip,
-    diff_updates,
+    pick_category_hit,
+    pick_mapped_category,
+)
+from vendoo_studio.services.vendoo_encodings import (
     encode_field,
     marketplace_condition,
     observe_item_schema,
-    pick_category_hit,
+)
+from vendoo_studio.services.vendoo_item_build import build_vendoo_item, create_item_payload
+from vendoo_studio.services.vendoo_item_shape import (
+    ALL_MARKETPLACES,
+    CURRENT_ITEM_VERSION,
+    default_listing_section,
+)
+from vendoo_studio.services.vendoo_item_update import (
+    apply_update_all,
+    changed_fields,
+    diff_roundtrip,
+    diff_updates,
+    force_condition_updates,
 )
 from vendoo_studio.services.vendoo_import import listing_from_vendoo
 

@@ -511,7 +511,7 @@ class SaveRouteTest(_RouteTest):
 
         with patch("vendoo_studio.services.vendoo_create.run_ops", ops), \
              patch("vendoo_studio.services.vendoo_create.prepare_listing_for_vendoo", prepare), \
-             patch("vendoo_studio.services.vendoo_api.build_vendoo_item",
+             patch("vendoo_studio.services.vendoo_item_build.build_vendoo_item",
                    return_value=({"generalDetails": {"title": "New"}}, [])):
             res = self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/save")
         self.assertEqual(res.status_code, 502)
@@ -592,7 +592,7 @@ class SaveRouteTest(_RouteTest):
             patch("vendoo_studio.services.vendoo_create.run_ops", persist_writes(fake_run_ops)),
             patch("vendoo_studio.services.vendoo_create.prepare_listing_for_vendoo", fake_prepare),
             patch(
-                "vendoo_studio.services.vendoo_api.build_vendoo_item",
+                "vendoo_studio.services.vendoo_item_build.build_vendoo_item",
                 lambda *a, **k: ({"generalDetails": {"title": "Levi's 501"}}, []),
             ),
         ):
@@ -657,7 +657,7 @@ class SaveRouteTest(_RouteTest):
             patch("vendoo_studio.services.vendoo_create.run_ops", persist_writes(fake_run_ops)),
             patch("vendoo_studio.services.vendoo_create.prepare_listing_for_vendoo", fake_prepare),
             patch(
-                "vendoo_studio.services.vendoo_api.build_vendoo_item",
+                "vendoo_studio.services.vendoo_item_build.build_vendoo_item",
                 lambda *a, **k: ({"generalDetails": {"title": "New"}}, []),
             ),
         ):
@@ -696,7 +696,7 @@ class SaveRouteTest(_RouteTest):
             patch("vendoo_studio.services.vendoo_create.run_ops", persist_writes(fake_run_ops)),
             patch("vendoo_studio.services.vendoo_create.prepare_listing_for_vendoo", fake_prepare),
             patch(
-                "vendoo_studio.services.vendoo_api.build_vendoo_item",
+                "vendoo_studio.services.vendoo_item_build.build_vendoo_item",
                 lambda *a, **k: ({"generalDetails": {"title": "New"}}, []),
             ),
         ):
