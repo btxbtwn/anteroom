@@ -16,6 +16,9 @@ import type {
   ListingRevision,
   ListingUpdateResult,
   ConversationActivity,
+  MarkdownApplyResult,
+  MarkdownDropRequest,
+  MarkdownPreviewRow,
   Message,
   OkResponse,
   Photo,
@@ -25,6 +28,8 @@ import type {
   PriceDropPreview,
   ProviderStatus,
   ProviderTestResult,
+  StudioErrorLogEntry,
+  VendooApiLogDetail,
   VendooApiLogEntry,
   ChatGPTPendingLogin,
   RevisionRestoreResult,
@@ -36,6 +41,7 @@ import type {
   SuggestionsResponse,
   AnalyticsRange,
   InventoryAnalytics,
+  MeasurementReadResult,
   ScoutCheck,
   ScoutState,
   SourceBoxInput,
@@ -45,7 +51,7 @@ import type {
   SourcingState,
 } from "./types";
 import { readSse } from "./sse";
-import type { AdSpendEntry, AdSpendInput } from "./adSpend";
+import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
 import { AssistantRefused, type AssistantMessage, type AssistantStreamHandlers } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 
@@ -208,7 +214,32 @@ export const api = {
     list: () => request<SuggestionsResponse>("/suggestions"),
   },
   analytics: {
-    get: (range: AnalyticsRange) => request<InventoryAnalytics>(`/analytics?range=${range}`),
+    get: (range: AnalyticsRange, custom?: { start: string; end: string }) => {
+      const params = new URLSearchParams({ range });
+      if (custom) {
+        params.set("start", custom.start);
+        params.set("end", custom.end);
+      }
+      return request<InventoryAnalytics>(`/analytics?${params}`);
+    },
+  },
+  measurements: {
+    /** Suggest measurements from an item's yardstick photos. Nothing is saved. */
+    read: async (files: File[], garment: string): Promise<MeasurementReadResult> => {
+      const form = new FormData();
+      files.forEach((file) => form.append("files", file));
+      form.append("garment", garment);
+      const response = await fetch(`${BASE}/measurements/read`, { method: "POST", body: form });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
+      return data as MeasurementReadResult;
+    },
+    /** The same, from a saved listing's photos. */
+    readSaved: (convId: string, garment: string) =>
+      request<MeasurementReadResult>(`/conversations/${convId}/measurements/read`, {
+        method: "POST",
+        body: JSON.stringify({ garment }),
+      }),
   },
   scout: {
     list: () => request<ScoutState>("/scout"),
@@ -244,12 +275,25 @@ export const api = {
       followAssistant("/assistant/messages/resume", undefined, handlers, signal),
     /** Stop the answer in progress; what it had written is kept. */
     stop: () => request<{ ok: boolean }>("/assistant/messages/stop", { method: "POST" }),
+    /** Write the changes an answer proposed. Resolves with the answer and what became of each listing. */
+    applyChanges: (messageId: string) =>
+      request<AssistantMessage>(`/assistant/messages/${messageId}/changes/apply`, { method: "POST" }),
+    dismissChanges: (messageId: string) =>
+      request<AssistantMessage>(`/assistant/messages/${messageId}/changes/dismiss`, { method: "POST" }),
   },
   adSpend: {
     list: () => request<AdSpendEntry[]>("/analytics/ads"),
     create: (entry: AdSpendInput) => request<AdSpendEntry>("/analytics/ads", { method: "POST", body: JSON.stringify(entry) }),
     update: (id: string, entry: AdSpendInput) => request<AdSpendEntry>(`/analytics/ads/${id}`, { method: "PUT", body: JSON.stringify(entry) }),
     remove: (id: string) => request<{ ok: boolean }>(`/analytics/ads/${id}`, { method: "DELETE" }),
+    uploadEtsyCsv: async (file: File): Promise<EtsyAdsImport> => {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(`${BASE}/analytics/ads/etsy-csv`, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `Upload failed: ${response.status}`);
+      return data;
+    },
   },
   saleCalendar: {
     record: (record: SaleRecord) => request<{ id: string }>("/analytics/calendar/records", { method: "POST", body: JSON.stringify(record) }),
@@ -371,6 +415,12 @@ export const api = {
     photos: (id: string) => request<Photo[]>(`/conversations/${id}/photos`),
     deletePhoto: (convId: string, photoId: string) =>
       request<OkResponse>(`/conversations/${convId}/photos/${photoId}`, { method: "DELETE" }),
+    /** Rotate the stored image clockwise by `degrees` (90, -90 or 180). */
+    rotatePhoto: (convId: string, photoId: string, degrees: 90 | -90 | 180) =>
+      request<Photo>(`/conversations/${convId}/photos/${photoId}/rotate`, {
+        method: "POST",
+        body: JSON.stringify({ degrees }),
+      }),
     delete: (id: string) =>
       request<DeleteConversationResult>(`/conversations/${id}`, { method: "DELETE" }),
     reset: (id: string, opts?: { keepInputs?: boolean }) =>
@@ -462,6 +512,18 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }, "Saving the price took too long. Check the listing's price before confirming again; you do not need to restart Studio."),
+    /** A suggested markdown for each listing, from the seller's own sales. Changes nothing. */
+    markdownPreview: (conversationIds: string[]) =>
+      request<{ rows: MarkdownPreviewRow[] }>("/price-drop/batch/preview", {
+        method: "POST",
+        body: JSON.stringify({ conversation_ids: conversationIds }),
+      }),
+    /** Save confirmed prices as Studio revisions. Never sends to Vendoo. */
+    applyMarkdowns: (drops: MarkdownDropRequest[]) =>
+      requestWithTimeout<MarkdownApplyResult>("/price-drop/batch", {
+        method: "POST",
+        body: JSON.stringify({ drops }),
+      }, "Saving the prices took too long. Check the listings' prices before applying again; you do not need to restart Studio."),
   },
 
   jobs: {
@@ -539,6 +601,10 @@ export const api = {
         request<{ sent: boolean }>(`/jobs/${id}/browser/viewport`, {
           method: "POST",
           body: JSON.stringify(viewport),
+        }),
+      navigate: (id: string, direction: "back" | "forward") =>
+        request<{ ok: boolean }>(`/jobs/${id}/browser/navigate`, {
+          method: "POST", body: JSON.stringify({ direction }),
         }),
       pick: (id: string, xRatio: number, yRatio: number) =>
         request<{ ok: boolean; viewport: BrowserViewport; field: BrowserField | null; element: { text: string; danger: boolean } | null }>(
@@ -819,7 +885,10 @@ export const api = {
         funnel: boolean;
       }>("/settings/tailscale/disable", { method: "POST" }),
     vendooApiLogs: () => request<{ entries: VendooApiLogEntry[] }>("/settings/vendoo-api-logs"),
+    vendooApiLog: (id: number) => request<VendooApiLogDetail>(`/settings/vendoo-api-logs/${id}`),
     clearVendooApiLogs: () => request<{ ok: boolean }>("/settings/vendoo-api-logs", { method: "DELETE" }),
+    errorLogs: () => request<{ entries: StudioErrorLogEntry[] }>("/settings/error-logs"),
+    clearErrorLogs: () => request<{ ok: boolean }>("/settings/error-logs", { method: "DELETE" }),
   },
 
   extension: {

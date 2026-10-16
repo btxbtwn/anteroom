@@ -221,6 +221,38 @@ export interface PriceDropApplyResult extends OkResponse {
   validation: ValidationResult;
 }
 
+/** One listing in a batch markdown review. ``skip_reason`` set means it cannot be dropped. */
+export interface MarkdownPreviewRow {
+  conversation_id: string;
+  title: string;
+  cover_photo_url: string | null;
+  revision_id: string | null;
+  current_price: number | null;
+  suggested_price: number | null;
+  suggested_effective_percent: number | null;
+  suggested_mode: string | null;
+  suggested_reason: string;
+  age_days: number | null;
+  skip_reason: string | null;
+}
+
+export interface MarkdownDropRequest {
+  conversation_id: string;
+  price: number;
+  expected_revision_id?: string | null;
+}
+
+export interface MarkdownApplyResult {
+  applied: {
+    conversation_id: string;
+    revision_id: string;
+    price: number;
+    previous_price: number | null;
+    valid: boolean;
+  }[];
+  skipped: { conversation_id: string; reason: string }[];
+}
+
 export interface Job {
   id: string;
   conversation_id: string;
@@ -302,17 +334,35 @@ export interface ProviderTestResult {
   error?: string;
 }
 
-/** One redacted Vendoo HTTP call. Query strings, tokens, and bodies are absent. */
+/** One Vendoo HTTP call as the log list shows it. Credentials in the URL are masked. */
+export interface StudioErrorLogEntry {
+  id: number;
+  at: string;
+  level: "warning" | "error" | "critical";
+  source: string;
+  message: string;
+  detail: string | null;
+}
+
 export interface VendooApiLogEntry {
   id: number;
   at: string;
   method: string;
+  url: string;
   host: string;
   path: string;
   status: number | null;
   duration_ms: number;
   ok: boolean;
   error: string | null;
+}
+
+/** The full call: headers and bodies, with tokens, keys, and cookies masked. */
+export interface VendooApiLogDetail extends VendooApiLogEntry {
+  request_headers: Record<string, string>;
+  request_body: string | null;
+  response_headers: Record<string, string>;
+  response_body: string | null;
 }
 
 export interface FillLogEntry {
@@ -407,7 +457,7 @@ export interface SuggestionsResponse {
   suggestions: Suggestion[];
 }
 
-export type AnalyticsRange = "7d" | "30d" | "90d" | "12m" | "all";
+export type AnalyticsRange = "wtd" | "mtd" | "ytd" | "7d" | "30d" | "90d" | "12m" | "all" | "custom";
 
 export interface AnalyticsInventory {
   active: number;
@@ -631,7 +681,7 @@ export interface SourcingBuyList {
   total: number;
   expected_profit: number;
   carts: SourcingCart[];
-  exclusions: Record<string, "needs_research" | "same_theme" | "theme_stocked" | "cog_cap" | "return_target" | "downside" | "budget" | "alternative">;
+  exclusions: Record<string, "needs_research" | "same_theme" | "theme_stocked" | "return_target" | "downside" | "budget" | "alternative">;
 }
 
 export interface SourcingSeasonality {
@@ -657,7 +707,7 @@ export interface SourcingSeasonality {
 export interface SourcingSnapshot {
   updated_at: string;
   destination_zip: string;
-  preferences: Omit<SourcingPrefs, "recent_zips" | "fees_auto" | "sell_through_auto">;
+  preferences: Omit<SourcingPrefs, "recent_zips" | "fees_auto" | "sell_through_auto" | "cost_per_piece_auto" | "selling_window_auto">;
   stores: Record<string, { name: string; error: string | null; sellout: number | null; zone: number | null; origins: number }>;
   research: boolean;
   priced_themes: number;
@@ -668,7 +718,7 @@ export interface SourcingSnapshot {
     factors: Record<string, number>;
     calibration: Record<string, { factor: number | null; orders: number; needed: number }>;
   };
-  assumptions: { market_haircut?: { factor: number; themes: number } | null; sell_through: number; sell_through_measured: { rate: number; sales: number } | null; fees: number; fees_measured: { rate: number; sales: number } | null; grade_yield: Record<string, number>; cost_per_piece: number };
+  assumptions: { market_haircut?: { factor: number; themes: number } | null; sell_through: number; sell_through_measured: { rate: number; sales: number } | null; fees: number; fees_measured: { rate: number; sales: number } | null; grade_yield: Record<string, number>; cost_per_piece: number; cost_per_piece_measured: { value: number; sales: number } | null; selling_window_measured: { value: number; sales: number } | null };
   buy_list: SourcingBuyList;
   store_buy_lists: Record<string, SourcingBuyList>;
   lots: SourcingLot[];
@@ -689,10 +739,10 @@ export interface SourcingPrefs {
   fees: number;
   fees_auto: boolean;
   cost_per_piece: number;
-  /** Most a usable piece may cost landed; 0 sets no limit. */
-  max_cog_per_piece: number;
+  cost_per_piece_auto: boolean;
   ready_in_weeks: number;
   selling_window_weeks: number;
+  selling_window_auto: boolean;
 }
 
 export interface SourcingState {
@@ -756,6 +806,19 @@ export interface SourceBoxInput {
 export type ScoutVerdict = "buy" | "maybe" | "pass" | "unsure";
 
 /** One "is this worth buying?" check from photos taken while sourcing. */
+/** One measurement read from yardstick photos: a value only when two reads agree within 1/4 in. */
+export interface MeasurementRead {
+  status: "accepted" | "disagree" | "cannot_read";
+  value?: number;
+  reads: (number | string | null)[];
+}
+
+export interface MeasurementReadResult {
+  photos_read: number;
+  /** Keyed like the bulk upload's measurement fields (pitToPit, length, waist, legOpening, ...). */
+  measurements: Record<string, MeasurementRead>;
+}
+
 export interface ScoutCheck {
   id: string;
   status: "checking" | "done" | "failed";

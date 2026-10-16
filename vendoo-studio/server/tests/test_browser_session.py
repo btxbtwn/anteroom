@@ -107,6 +107,15 @@ class BrowserRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("Publish", response.json()["detail"])
 
+    def test_navigation_forwards_direction_and_rejects_invalid_actions(self):
+        connection = self.connect({"ok": True})
+        response = self.client.post(f"/api/jobs/{self.job_id}/browser/navigate", json={"direction": "back"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(connection.sent[0]["type"], "browser.navigate")
+        self.assertEqual(connection.sent[0]["payload"]["direction"], "back")
+        response = self.client.post(f"/api/jobs/{self.job_id}/browser/navigate", json={"direction": "publish"})
+        self.assertEqual(response.status_code, 422)
+
     def test_input_is_bounded(self):
         self.connect({"ok": True})
         too_many = [{"kind": "mouse", "type": "mouseMoved", "x_ratio": 0.5, "y_ratio": 0.5}] * 41

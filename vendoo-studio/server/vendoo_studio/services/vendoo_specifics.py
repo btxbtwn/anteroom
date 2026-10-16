@@ -290,15 +290,62 @@ def encode_scaled(spec: FieldSpec, value: Any) -> tuple[str, str, bool]:
     text = str(value or "").strip()
     if not text:
         return "", "", True
-    wanted = _norm(text)
     for scale_id, scale in spec.scales.items():
-        options = scale.get("options") or {}
-        if text in options:
-            return scale_id, text, True
-        for code, display in options.items():
-            if _norm(display) == wanted or _norm(code) == wanted:
-                return scale_id, code, True
+        code = _labelled_code(scale.get("options") or {}, text)
+        if code is not None:
+            return scale_id, code, True
+    for scale_id, scale in spec.scales.items():
+        code = _coded(scale.get("options") or {}, text)
+        if code is not None:
+            return scale_id, code, True
     return "", "", False
+
+
+def _labelled_code(options: dict[str, str], text: str) -> str | None:
+    """The code of the option the seller sees as ``text``.
+
+    Labels are read before codes because a code can spell another option's
+    label: Depop numbers its sizes, so code ``14`` is the size shown as "12"
+    and size "14" is code ``22``. When several options share the label, the one
+    coded the same way is the plain one (Poshmark's ``32`` beside ``32Plus``).
+    """
+    wanted = _label_key(text)
+    matches = [code for code, display in options.items() if _label_key(display) == wanted]
+    if text in matches:
+        return text
+    return matches[0] if matches else None
+
+
+_INCH_MEASURE = re.compile(r'^\s*(\d+(?:\.\d+)?)\s*(?:"|\u201d|\u2033|in\.?|inch(?:es)?)\s*$', re.IGNORECASE)
+
+
+def _label_key(text: Any) -> str:
+    """A label reduced for comparison, keeping inches apart from plain numbers.
+
+    Depop's jeans offer both ``28`` and ``28"``. A listing that says 28 means
+    the first; only one that says 28 inches means the second, however the
+    inches are written (``28"``, ``28 in.``).
+    """
+    inches = _INCH_MEASURE.match(str(text or ""))
+    if inches:
+        return f"{inches.group(1)} in"
+    return _norm(text)
+
+
+def _coded(options: dict[str, str], text: str) -> str | None:
+    """``text`` as an option code, for a value that is already Vendoo's id.
+
+    A bare number is never taken for one. Numbered ids are the marketplace's
+    own (Depop, Mercari, Etsy) and nothing in a listing is written in them,
+    while a number a seller does write is a size: a juniors 15 that Depop has
+    no label for is reported, not stored as id ``15``, the 24" waist.
+    """
+    if text.isdigit():
+        return None
+    if text in options:
+        return text
+    wanted = _norm(text)
+    return next((code for code in options if _norm(code) == wanted), None)
 
 
 def _parts(value: Any) -> list[str]:
@@ -311,6 +358,7 @@ def _parts(value: Any) -> list[str]:
 
 
 _PARENTHETICAL = re.compile(r"\s*\([^)]*\)")
+_INCHES = re.compile(r"(?<=\d)\s*(?:in\.?|\")$", re.IGNORECASE)
 # What a model says when an attribute does not apply to the item. Only a real
 # answer when the field actually offers it as a choice.
 _DECLINED = frozenset({
@@ -338,18 +386,20 @@ def _encode_one(spec: FieldSpec, text: str) -> str | None:
     """A single human value into the option id Vendoo stores."""
     if not spec.options:
         return text
-    if text in spec.options:
-        return text
+    code = _labelled_code(spec.options, text)
+    if code is None:
+        code = _coded(spec.options, text)
+    if code is not None:
+        return code
     wanted = _norm(text)
-    for code, display in spec.options.items():
-        if _norm(display) == wanted or _norm(code) == wanted:
-            return code
     # Some vocabularies qualify the label — Mercari sizes read "M (8-10)" where
-    # a listing just says "M". Accept that only when one option matches, so a
-    # genuinely ambiguous size is reported instead of guessed.
+    # a listing just says "M", and its waist sizes read "26 in." for a 26.
+    # That is only reached when no option is labelled the plain value, and
+    # accepted only when one option matches, so a genuinely ambiguous size is
+    # reported instead of guessed.
     stripped = [
         code for code, display in spec.options.items()
-        if _norm(_PARENTHETICAL.sub("", display)) == wanted
+        if _norm(_INCHES.sub("", _PARENTHETICAL.sub("", display))) == wanted
     ]
     if len(stripped) == 1:
         return stripped[0]

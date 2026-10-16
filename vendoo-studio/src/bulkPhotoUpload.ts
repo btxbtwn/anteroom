@@ -1,4 +1,4 @@
-import type { PhotoUploadResult } from "./api/types";
+import type { Photo, PhotoUploadResult } from "./api/types";
 import type { PhotoFolderGroup } from "./photoDrop";
 import { listingTitleForFolder } from "./photoDrop";
 import { joinLabels, splitLabels } from "./components/itemLabels";
@@ -11,8 +11,22 @@ export interface BulkUploadDefaults {
   boxId?: string;
 }
 
+/** Clockwise, as the rotate route takes it; -90 turns the photo left. */
+export type PhotoRotation = 90 | -90 | 180;
+
+/** Quarter turns clockwise, as the bulk upload window counts them, to what the server rotates by. */
+export function rotationForTurns(turns: number): PhotoRotation | null {
+  const quarter = ((turns % 4) + 4) % 4;
+  if (quarter === 1) return 90;
+  if (quarter === 2) return 180;
+  if (quarter === 3) return -90;
+  return null;
+}
+
 /** One folder's photos plus what the seller typed for that item alone. */
 export interface BulkUploadItem extends PhotoFolderGroup {
+  /** Photos turned in the bulk upload window; applied once each one is saved. */
+  rotations?: Map<File, PhotoRotation>;
   sku?: string;
   garment?: Garment;
   measurements?: Record<string, string>;
@@ -21,6 +35,7 @@ export interface BulkUploadItem extends PhotoFolderGroup {
 interface BulkUploadApi {
   create: (body: { title: string; notes?: string; box_id?: string }) => Promise<{ id: string }>;
   uploadPhotos: (convId: string, files: File[]) => Promise<PhotoUploadResult>;
+  rotatePhoto: (convId: string, photoId: string, degrees: PhotoRotation) => Promise<Photo>;
 }
 
 export interface BulkListingUploadResult {
@@ -61,11 +76,25 @@ export async function createBulkPhotoListings(
       ...(defaults.boxId ? { box_id: defaults.boxId } : {}),
     });
     const result = await conversations.uploadPhotos(conv.id, item.files);
+    const errors = result.errors || [];
+    // A file that failed to upload is missing from the result, so match by name.
+    const rotations = new Map(
+      Array.from(item.rotations || [], ([file, degrees]) => [file.name, degrees] as const),
+    );
+    for (const photo of result.photos) {
+      const degrees = rotations.get(photo.original_filename);
+      if (!degrees) continue;
+      try {
+        await conversations.rotatePhoto(conv.id, photo.id, degrees);
+      } catch (err) {
+        errors.push(`${photo.original_filename}: ${err instanceof Error ? err.message : "Rotate failed"}`);
+      }
+    }
     listings.push({
       convId: conv.id,
       folder: item.folder,
       count: result.count,
-      errors: result.errors || [],
+      errors,
     });
   }
 

@@ -16,11 +16,11 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.conversation import Photo
 from vendoo_studio.models.listing import Listing
 from vendoo_studio.repositories.queries import BUSY_LISTING_STATUSES, ConversationRepo
+from vendoo_studio.services.photos import cover_thumb_url
 from vendoo_studio.services.vendoo_import import oldest_live_listed_at, parse_notes
 
 MAX_SUGGESTIONS = 20
 STALE_MIN_DAYS = 60
-COVER_THUMB_SIZE = 96
 
 KIND_FAILED = "failed"
 KIND_READY_TO_GENERATE = "ready_to_generate"
@@ -65,7 +65,7 @@ def list_suggestions(
         when = when.replace(tzinfo=UTC)
 
     repo = ConversationRepo(db)
-    covers = repo.cover_photo_ids()
+    covers = repo.cover_photos()
     photo_counts = _photo_counts(db)
     listings = _listing_state(db)
 
@@ -81,7 +81,7 @@ def list_suggestions(
             status=status,
             photo_count=photo_counts.get(conv.id, 0),
             listing=listings.get(conv.id),
-            cover_photo_id=covers.get(conv.id),
+            cover_photo=covers.get(conv.id),
             now=when,
         )
         if card:
@@ -114,7 +114,7 @@ def _card_for(
     status: str,
     photo_count: int,
     listing: dict[str, Any] | None,
-    cover_photo_id: str | None,
+    cover_photo: tuple[str, str | None] | None,
     now: datetime,
 ) -> dict[str, Any] | None:
     notes = parse_notes(conv.notes)
@@ -152,8 +152,8 @@ def _card_for(
         return None
 
     cover = (
-        f"/api/photos/{cover_photo_id}/thumb?size={COVER_THUMB_SIZE}"
-        if cover_photo_id
+        cover_thumb_url(*cover_photo)
+        if cover_photo
         else (str(notes.get("vendooCoverUrl") or "") or None)
     )
     return {

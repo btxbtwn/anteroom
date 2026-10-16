@@ -7,6 +7,7 @@ on:
       - "vendoo-studio/**"
       - "vendoo-extension/**"
       - "skills/list-this/**"
+      - "skills/measure-this/**"
       - ".github/workflows/studio-macos.yml"
   pull_request:
     paths:

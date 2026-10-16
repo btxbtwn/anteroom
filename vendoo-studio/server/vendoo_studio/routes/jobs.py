@@ -107,10 +107,8 @@ async def enqueue_send(body: SendJobRequest, db: Session = Depends(get_db)):
 async def get_queue(db: Session = Depends(get_db)):
     from vendoo_studio.services import activity
     from vendoo_studio.services.streaming import active_generations
-    from vendoo_studio.services.api_job_lock import release_orphaned_api_jobs
     from vendoo_studio.routes.extension import schedule_advance_job_queue
 
-    release_orphaned_api_jobs(db)
     schedule_advance_job_queue()
     from vendoo_studio.models.conversation import Conversation
 
@@ -188,12 +186,6 @@ def ensure_draft_job(body: EnsureDraftJobRequest, db: Session = Depends(get_db))
 
 @router.get("", response_model=list[JobResponse])
 def list_jobs(conversation_id: str | None = None, db: Session = Depends(get_db)):
-    # A send that died still occupies ``dispatched`` until something looks.
-    # The editor polls this, so the stuck "Filling marketplace fields" card
-    # clears without a Chrome reconnect.
-    from vendoo_studio.services.api_job_lock import release_orphaned_api_jobs
-
-    release_orphaned_api_jobs(db)
     repo = JobRepo(db)
     if conversation_id:
         conv = ConversationRepo(db).get(conversation_id)
@@ -736,8 +728,10 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
     job = repo.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
+    # A job that finished while the seller was reaching for Cancel has nothing
+    # left to stop. Answer with the job as it stands instead of an error.
     if job.status in {"completed", "cancelled"}:
-        raise HTTPException(400, f"Job is already {job.status}")
+        return _job_response(job)
 
     job.status = "cancelled"
     job.current_step = None

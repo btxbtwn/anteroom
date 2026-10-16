@@ -12,8 +12,10 @@ listing's description and full field values, are copied into a throwaway
 in-memory SQLite database, and the model may ask for a ``SELECT`` over it
 before it answers. The copy is the only thing a lookup can touch.
 
-It only reads. Nothing here writes a listing, calls Vendoo, or reaches a
-marketplace.
+It reads, and it proposes. A reply may end with changes to listings, which are
+kept with the reply for the seller to apply or dismiss
+(``services/assistant_changes.py``). Nothing here writes a listing, calls
+Vendoo, or reaches a marketplace.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.assistant import AssistantMessage
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
+from vendoo_studio.services import assistant_changes
 from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsItem
 
 # Earlier turns sent back with a question, so a follow-up can lean on them.
@@ -43,6 +46,7 @@ LISTING_ROWS_BUDGET = 300_000
 PRICE_CHANGE_ROWS = 300
 BRAND_GROUPS = 40
 SOURCING_LOTS = 40
+SIZING_ROWS = 200
 # Lookups one question may run, and what one may cost and return.
 MAX_LOOKUPS = 6
 LOOKUP_SECONDS = 5.0
@@ -62,8 +66,9 @@ INSTRUCTIONS = (
     "- Profit is the sold price plus shipping the buyer paid, less fees, shipping the seller paid, and the item's cost.\n"
     "- Give advice when asked — what to source, reprice, discount or drop — and tie each point to the numbers behind it. "
     "Fit it to what the seller says about their business, when they have said anything.\n"
-    "- You only read. You cannot change a listing, a price or a setting, and you cannot list, delist or send anything. "
-    "When the seller wants something changed, tell them where in Studio to do it.\n"
+    "- You can propose changes to listings, described below, and the seller applies them. You cannot change a setting, "
+    "and you cannot list, delist, publish or send anything to Vendoo or a marketplace. "
+    "When the seller wants one of those, tell them where in Studio to do it.\n"
     "- When you name a specific listing, link it so the seller can open it: [its title](#listing-ID), "
     "with the id from its row. Use only ids that appear in the snapshot or in a lookup result.\n"
     "- Other ids only tie rows together. Name a box by its store and title, never by its id.\n"
@@ -78,8 +83,40 @@ LOOKUP_INSTRUCTIONS = (
     "`-- sales by size`. Studio runs it and replies with the rows. You may do this up to {limit} times for one "
     "question, then answer. Never show SQL or mention the database to the seller.\n"
     "Tables:\n{schema}\n"
+    "`listings.form_sizes` is the size each marketplace form holds, `photo_size` the size read from the photos "
+    "and where it was read, and `size_issue` why the sizing needs a look (NULL when nothing stands out).\n"
     "`listings.details` is the listing's full JSON, including each marketplace's fields; read it with "
     "json_extract(details, '$.ebay_specifics'). Dates are YYYY-MM-DD text. Amounts are numbers; NULL means not recorded.\n"
+)
+
+CHANGES_INSTRUCTIONS = (
+    "Changing listings: when the seller asks you to change listings, or agrees to a change you suggested, say in a "
+    "sentence or two what you are proposing, then end the reply with one ```changes block holding a JSON array with "
+    "one entry per listing:\n"
+    "```changes\n"
+    '[{{"listing": "LISTING-ID", "set": {{"asking": 24, "labels": ["Bin 4", "Sale"]}}}}]\n'
+    "```\n"
+    "- `set` may hold: asking (whole dollars), cost (dollars), title, description, brand, size, sku, labels (every "
+    "label the listing should have afterwards, not only the new ones), and box (a box id from the boxes table, or "
+    "null to take the listing out of its box).\n"
+    "- Sizes: a listing has one general size, and saving it makes every marketplace form and the title carry that "
+    "size. To fix sizing, set `size` to the right value, even when the general size already holds it and only a "
+    "form is off. Work out the right size from the photo size (a tag beats a guess), the title, and the "
+    "measurements in the description; men's bottoms are the waist alone (34, never 34x32). When the evidence "
+    "does not settle a listing's size, leave it out and name it for the seller instead of guessing.\n"
+    "- Use listing ids from the snapshot or a lookup, and give final values you worked out yourself, not formulas. "
+    "Up to {limit} listings in one proposal.\n"
+    "- Studio shows the seller each value before and after with Apply and Dismiss buttons, so do not list every "
+    "change in words. Nothing changes until they press Apply: say the changes are ready to review, never that "
+    "they were made.\n"
+    "- Propose only what was asked for. Do not propose changes the seller has not asked for or agreed to; "
+    "suggest them in words first.\n"
+    "- Applied changes are saved in Studio. A listing already on Vendoo keeps its old values there until the "
+    "seller sends it again from the listing.\n"
+    "- Condition, colour, category and other marketplace-specific fields are changed in that listing's own chat; "
+    "link the listing instead.\n"
+    "- A Studio note after one of your earlier replies says what you proposed and whether the seller applied it. "
+    "Never write such a note yourself.\n"
 )
 
 _SALES_KEYS = ("range", "sell_through_rate", "sales", "previous", "periods", "marketplaces", "categories", "ads")
@@ -93,7 +130,12 @@ ROW_COLUMNS = (
     "asking", "cost", "sold_for", "fees", "profit", "sold_on", "listed", "sold", "days", "box",
 )
 # What a lookup can read as well: too long, or too rarely wanted, for every question.
-LISTING_COLUMNS = (*ROW_COLUMNS, "shipping_cost", "shipping_credit", "description", "details")
+LISTING_COLUMNS = (
+    *ROW_COLUMNS, "shipping_cost", "shipping_credit", "form_sizes", "photo_size", "size_issue", "description",
+    "details",
+)
+# A listing whose sizing needs a look, as the brief shows it.
+SIZING_COLUMNS = ("id", "title", "status", "category", "size", "form_sizes", "photo_size", "size_issue")
 CHANGE_COLUMNS = ("listing_id", "changed_on", "old_price", "new_price")
 BOX_COLUMNS = (
     "id", "store", "title", "price", "shipping", "pieces", "cost_per_piece", "bought_at", "spent", "listings",
@@ -113,6 +155,9 @@ TABLES = {
     "sale_events": EVENT_COLUMNS,
 }
 _RANGE_LABELS = {
+    "wtd": "this week so far (Monday to now)",
+    "mtd": "this month so far",
+    "ytd": "this year so far",
     "7d": "last 7 days",
     "30d": "last 30 days",
     "90d": "last 90 days",
@@ -128,8 +173,11 @@ def list_messages(db: Session) -> list[AssistantMessage]:
     return db.query(AssistantMessage).order_by(AssistantMessage.created_at, AssistantMessage.id).all()
 
 
-def add_message(db: Session, role: str, text: str, *, provider: str | None = None, model: str | None = None):
-    row = AssistantMessage(role=role, text=text, provider=provider, model=model)
+def add_message(
+    db: Session, role: str, text: str, *, provider: str | None = None, model: str | None = None,
+    changes: dict[str, Any] | None = None,
+):
+    row = AssistantMessage(role=role, text=text, provider=provider, model=model, changes=changes)
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -150,6 +198,7 @@ def message_view(row: AssistantMessage) -> dict[str, Any]:
         "role": row.role,
         "text": row.text,
         "created_at": created.isoformat() if created else None,
+        "changes": row.changes,
     }
 
 
@@ -203,6 +252,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
             for range_id, payload in ranges.items()
         ),
         _listing_rows(records),
+        _sizing_rows(records),
         _price_change_rows(changes),
         _section("Wholesale boxes bought, and what each has returned", box_results),
         _sourcing(box_scout.read_state()),
@@ -235,7 +285,7 @@ def build_messages(db: Session, question: str, shop: Shop) -> list[dict]:
     The seller's question must already be saved; it is the last turn read back.
     """
     earlier = [
-        {"role": row.role, "content": row.text}
+        {"role": row.role, "content": row.text + assistant_changes.history_note(row.changes)}
         for row in list_messages(db)[-(HISTORY_MESSAGES + 1):]
     ]
     if not earlier or earlier[-1] != {"role": "user", "content": question}:
@@ -243,21 +293,23 @@ def build_messages(db: Session, question: str, shop: Shop) -> list[dict]:
     schema = "\n".join(f"- {name}({', '.join(columns)})" for name, columns in TABLES.items())
     # The instructions lead so a provider's prefix cache still hits when the figures move.
     system = (
-        f"{INSTRUCTIONS}\n{LOOKUP_INSTRUCTIONS.format(limit=MAX_LOOKUPS, schema=schema)}\n{shop.brief}"
+        f"{INSTRUCTIONS}\n{LOOKUP_INSTRUCTIONS.format(limit=MAX_LOOKUPS, schema=schema)}\n"
+        f"{CHANGES_INSTRUCTIONS.format(limit=assistant_changes.MAX_CHANGES)}\n{shop.brief}"
     )
     return [{"role": "system", "content": system}, *earlier]
 
 
 async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tuple[str, str]]:
-    """Stream the answer as ``(kind, text)``: ``text``, ``thinking``, ``status`` or ``error``.
+    """Stream the answer as ``(kind, text)``: ``text``, ``thinking``, ``status``, ``error`` or ``changes``.
 
     A reply that is a lookup is run and fed back instead of shown, until the
-    model answers or runs out of lookups.
+    model answers or runs out of lookups. A changes block the answer ends with
+    is kept out of the text and handed over whole, last, as ``changes``.
     """
     messages = list(messages)
     for used in range(MAX_LOOKUPS + 1):
         reply = ""
-        held = ""
+        shown = 0
         showing = False
         async for item in provider.chat(messages, stream=True):
             kind, text = unpack_stream_item(item)
@@ -267,22 +319,23 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
                 yield "thinking", text
                 continue
             reply += text
-            if showing:
-                yield "text", text
-                continue
-            # Hold the opening until it is clear whether this is a lookup or the answer.
-            held += text
-            opening = held.lstrip().lower()
-            if len(opening) < len(_LOOKUP_FENCE) or opening.startswith(_LOOKUP_FENCE):
-                continue
-            showing = True
-            yield "text", held
-        if showing:
-            return
-        sql = lookup_sql(reply)
+            if not showing:
+                # Hold the opening until it is clear whether this is a lookup or the answer.
+                opening = reply.lstrip().lower()
+                if len(opening) < len(_LOOKUP_FENCE) or opening.startswith(_LOOKUP_FENCE):
+                    continue
+                showing = True
+            visible = assistant_changes.visible_text(reply)
+            if len(visible) > shown:
+                yield "text", visible[shown:]
+                shown = len(visible)
+        sql = None if showing else lookup_sql(reply)
         if sql is None:
-            if held:
-                yield "text", held
+            words, changes = assistant_changes.split_reply(reply)
+            if len(words) > shown:
+                yield "text", words[shown:]
+            if changes is not None:
+                yield "changes", changes
             return
         if used == MAX_LOOKUPS:
             yield "error", "The assistant kept looking things up without answering. Ask again, or ask something narrower."
@@ -372,6 +425,7 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
     """Every listing as one record, newest sales first, then what is still for sale."""
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.listing import Listing, ListingRevision
+    from vendoo_studio.services import size_audit
     from vendoo_studio.services.vendoo_import import parse_notes, split_vendoo_labels
 
     listings = dict(
@@ -380,6 +434,7 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
         .all()
     )
     notes = {conv_id: parse_notes(raw) for conv_id, raw in db.query(Conversation.id, Conversation.notes).all()}
+    photo_sizes = _photo_sizes(db)
     records = []
     for item in _ordered(rows):
         listing = listings.get(item.conversation_id)
@@ -414,10 +469,32 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
             "box": item.box_id,
             "shipping_cost": item.shipping_cost if sold else None,
             "shipping_credit": item.shipping_credit if sold else None,
+            "form_sizes": ", ".join(f"{name}: {size}" for name, size in size_audit.form_sizes(listing).items()) or None,
+            "photo_size": photo_sizes.get(item.conversation_id),
+            "size_issue": size_audit.size_problems(listing, photo_sizes.get(item.conversation_id)),
             "description": _text(listing.get("description")),
             "details": json.dumps(listing, default=str) if listing else None,
         })
     return records
+
+
+def _photo_sizes(db: Session) -> dict[str, str]:
+    """The size each listing's latest photo analysis read, with where it read it."""
+    from vendoo_studio.models.conversation import Message
+    from vendoo_studio.services.size_audit import photo_size
+
+    sizes = {}
+    analyses = (
+        db.query(Message.conversation_id, Message.text)
+        .filter(Message.role == "system", Message.text.like("Photo analysis%"))
+        .order_by(Message.created_at, Message.id)
+        .all()
+    )
+    for conv_id, text in analyses:
+        size = photo_size(text)
+        if size:
+            sizes[conv_id] = size
+    return sizes
 
 
 def _ordered(rows: list[AnalyticsItem]) -> list[AnalyticsItem]:
@@ -467,6 +544,24 @@ def _listing_rows(records: list[dict[str, Any]]) -> str:
             " the totals above still count them, and a lookup can read them."
         )
     return "\n".join([title, note, " | ".join(ROW_COLUMNS), *lines])
+
+
+def _sizing_rows(records: list[dict[str, Any]]) -> str:
+    """Listings still for sale whose sizing needs a look: forms out of step, or at odds with the photos."""
+    flagged = [record for record in records if record["size_issue"] and record["status"] != "sold"]
+    title = f"--- Listings whose sizing needs a look ({len(flagged)}) ---"
+    if not flagged:
+        return f"{title}\nEvery unsold listing has the same size on each marketplace form and in its title."
+    note = (
+        "`size` is the general size, `form_sizes` what each marketplace form holds, and `photo_size` what the "
+        "photos showed and where. A size the photos read differently is not always wrong: M and Medium are the same."
+    )
+    if len(flagged) > SIZING_ROWS:
+        note += f" Only the first {SIZING_ROWS} are shown; a lookup on size_issue can read the rest."
+    return "\n".join([
+        title, note, " | ".join(SIZING_COLUMNS),
+        *(_line(record, SIZING_COLUMNS) for record in flagged[:SIZING_ROWS]),
+    ])
 
 
 def _line(record: dict[str, Any], columns: tuple[str, ...]) -> str:

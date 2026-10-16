@@ -61,11 +61,11 @@ SNAPSHOT_FORMAT = 4
 DEFAULT_PREFS = {
     "budget": 300.0, "min_roi": 1.0, "raghouse_vip": False, "zip": "70115", "recent_zips": ["70115"],
     "sell_through": 0.5, "sell_through_auto": True, "fees": 0.2, "fees_auto": True,
-    "cost_per_piece": 2.0, "max_cog_per_piece": 0.0,
-    "ready_in_weeks": 4, "selling_window_weeks": 4,
+    "cost_per_piece": 2.0, "cost_per_piece_auto": True,
+    "ready_in_weeks": 4, "selling_window_weeks": 4, "selling_window_auto": True,
 }
 PLAN_PREFS = ("budget", "min_roi", "raghouse_vip", "zip", "sell_through", "fees", "cost_per_piece",
-              "max_cog_per_piece", "ready_in_weeks", "selling_window_weeks")
+              "ready_in_weeks", "selling_window_weeks")
 
 TRENDS_PROMPT = (
     "You track what secondhand and vintage clothing sells fastest on eBay, Poshmark, Depop "
@@ -166,16 +166,16 @@ def set_prefs(
     fees: float | None = None,
     fees_auto: bool | None = None,
     cost_per_piece: float | None = None,
-    max_cog_per_piece: float | None = None,
+    cost_per_piece_auto: bool | None = None,
     ready_in_weeks: int | None = None,
     selling_window_weeks: int | None = None,
+    selling_window_auto: bool | None = None,
 ) -> dict:
     with _state_lock:
         state = read_state()
         prefs = state["prefs"]
         for name, value in (("budget", budget), ("min_roi", min_roi), ("sell_through", sell_through),
-                            ("fees", fees), ("cost_per_piece", cost_per_piece),
-                            ("max_cog_per_piece", max_cog_per_piece)):
+                            ("fees", fees), ("cost_per_piece", cost_per_piece)):
             if value is not None and (not math.isfinite(value) or
                                      (value <= 0 if name in {"budget", "sell_through"} else value < 0) or
                                      (name == "sell_through" and value > 1) or (name == "fees" and value >= 1)):
@@ -186,6 +186,10 @@ def set_prefs(
                 if type(value) is not int or not minimum <= value <= 26:
                     raise ValueError(f"Invalid {name.replace('_', ' ')}.")
                 prefs[name] = value
+        if selling_window_weeks is not None:
+            prefs["selling_window_auto"] = False if selling_window_auto is None else bool(selling_window_auto)
+        elif selling_window_auto is not None:
+            prefs["selling_window_auto"] = bool(selling_window_auto)
         if zip is not None:
             if not scout().valid_zip(zip):
                 raise ValueError("A ZIP code is five digits.")
@@ -212,8 +216,9 @@ def set_prefs(
             prefs["fees_auto"] = bool(fees_auto)
         if cost_per_piece is not None:
             prefs["cost_per_piece"] = float(cost_per_piece)
-        if max_cog_per_piece is not None:
-            prefs["max_cog_per_piece"] = float(max_cog_per_piece)
+            prefs["cost_per_piece_auto"] = False if cost_per_piece_auto is None else bool(cost_per_piece_auto)
+        elif cost_per_piece_auto is not None:
+            prefs["cost_per_piece_auto"] = bool(cost_per_piece_auto)
         _write_state(state)
         return prefs
 
@@ -486,13 +491,34 @@ def measured_sell_through(rows: list[AnalyticsItem], now: datetime) -> dict | No
     return {"rate": round(min(1.0, max(0.05, rate / 100)), 3), "sales": sales}
 
 
-def _follow_measured(name: str, measured: dict | None) -> None:
+def measured_cost_per_piece(sales: list[AnalyticsItem], now: datetime) -> dict | None:
+    """What the seller's recent sales cost to ship out per piece, never below the
+    default allowance for supplies and packing."""
+    recent = [item for item in sales if item.sold_at is not None
+              and (item.sold_at if item.sold_at.tzinfo else item.sold_at.replace(tzinfo=UTC)) >= now - MEASURED_WINDOW]
+    if len(recent) < MEASURED_MIN_SALES:
+        return None
+    shipping = sum(item.shipping_cost for item in recent) / len(recent)
+    return {"value": round(max(DEFAULT_PREFS["cost_per_piece"], shipping), 2), "sales": len(recent)}
+
+
+def measured_selling_window(sales: list[AnalyticsItem], now: datetime) -> dict | None:
+    """Weeks the seller's recent sales took to sell, from listing to sale (median)."""
+    recent = [item.days_listed for item in sales if item.days_listed is not None and item.sold_at is not None
+              and (item.sold_at if item.sold_at.tzinfo else item.sold_at.replace(tzinfo=UTC)) >= now - MEASURED_WINDOW]
+    if len(recent) < MEASURED_MIN_SALES:
+        return None
+    weeks = min(26, max(1, math.ceil(statistics.median(recent) / 7)))
+    return {"value": weeks, "sales": len(recent)}
+
+
+def _follow_measured(name: str, measured: dict | None, key: str = "rate", auto: str | None = None) -> None:
     """While a setting is on automatic, its saved value tracks the seller's own."""
     with _state_lock:
         state = read_state()
         prefs = state["prefs"]
-        if measured and prefs[f"{name}_auto"] and prefs[name] != measured["rate"]:
-            prefs[name] = measured["rate"]
+        if measured and prefs[auto or f"{name}_auto"] and prefs[name] != measured[key]:
+            prefs[name] = measured[key]
             _write_state(state)
 
 
@@ -680,6 +706,10 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
     sell_through_measured = measured_sell_through(own_rows, now)
     _follow_measured("fees", fees_measured)
     _follow_measured("sell_through", sell_through_measured)
+    cost_measured = measured_cost_per_piece(sales, now)
+    window_measured = measured_selling_window(sales, now)
+    _follow_measured("cost_per_piece", cost_measured, "value")
+    _follow_measured("selling_window_weeks", window_measured, "value", "selling_window_auto")
     state = read_state()
     prefs = state["prefs"]
     errors: dict[str, str] = {}
@@ -754,7 +784,7 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
 
     planning = {"budget": prefs["budget"], "min_roi": prefs["min_roi"],
                 "sell_through": prefs["sell_through"], "fees": prefs["fees"],
-                "cost_per_piece": prefs["cost_per_piece"], "max_cog_per_piece": prefs["max_cog_per_piece"],
+                "cost_per_piece": prefs["cost_per_piece"],
                 "theme_capacity": capacity}
     plan = s.buy_list(rows, cfg, **planning)
     store_plans = {
@@ -801,6 +831,7 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
         "vip_upside": vip_upside,
         "assumptions": {"sell_through": prefs["sell_through"], "fees": prefs["fees"],
                         "fees_measured": fees_measured, "sell_through_measured": sell_through_measured,
+                        "cost_per_piece_measured": cost_measured, "selling_window_measured": window_measured,
                         "market_haircut": state["market_haircut"],
                         "grade_yield": s.GRADE_YIELD, "cost_per_piece": prefs["cost_per_piece"]},
         "buy_list": plan,

@@ -70,14 +70,16 @@ def image_exceeds(path: str, max_side: int | None) -> bool:
 
 def _encode_image(path: str, max_side: int | None = VISION_MAX_SIDE) -> str:
     """Data URL for a vision request; the stored original is never modified."""
-    if not image_exceeds(path, max_side):
+    raw_ok = path.rsplit(".", 1)[-1].lower() in ("jpg", "jpeg", "png", "webp")
+    if raw_ok and not image_exceeds(path, max_side):
         return _raw_data_url(path)
     try:
         with Image.open(path) as img:
             img = ImageOps.exif_transpose(img)
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
-            img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            if max_side:
+                img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
             buf = BytesIO()
             img.save(buf, format="JPEG", quality=VISION_JPEG_QUALITY, optimize=True)
     except Exception:

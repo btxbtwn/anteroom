@@ -159,19 +159,6 @@ class ScoutScriptTest(unittest.TestCase):
         self.assertLessEqual(plan["total"], 200)
         self.assertEqual(plan["carts"][0]["cart_url"], "https://raghouse.com/cart/1:1,4:1")
 
-    def test_cost_cap_leaves_out_boxes_that_cost_more_per_usable_piece(self):
-        resale = {"cartoon t-shirts": 15, "blank t-shirts": 6, "flannel shirts": 12}
-        rows = self.s.score_lots(CATALOGS, self.cfg, ZONES, self.s.Filters(cost_per_piece=0), resale)[1]
-        open_plan = self.s.buy_list(rows, self.cfg, budget=200, min_roi=0.5, cost_per_piece=0)
-        cost = {f"{r['store']}:{r['variant_id']}": r["cog_per_usable_pc"] for r in rows}
-        picked = [f"{lot['store']}:{lot['variant_id']}" for cart in open_plan["carts"] for lot in cart["lots"]]
-        cap = min(cost[key] for key in picked)
-        capped = self.s.buy_list(rows, self.cfg, budget=200, min_roi=0.5, cost_per_piece=0, max_cog_per_piece=cap)
-        kept = [lot for cart in capped["carts"] for lot in cart["lots"]]
-        self.assertTrue(kept)
-        self.assertTrue(all(lot["cog_per_usable_pc"] <= cap for lot in kept))
-        self.assertIn("cog_cap", capped["exclusions"].values())
-
     def test_window_matches_prioritize_qualifying_boxes_without_changing_profit(self):
         catalogs = {"raghouse": [_raghouse("Flannel Shirts 60 pcs", "60", 12701, vid=10),
                                  _raghouse("Cartoon T-Shirts 60 pcs", "60", 12701, vid=11)]}
@@ -607,6 +594,31 @@ class RefreshTest(unittest.TestCase):
         box_scout.set_prefs(fees=0.1)
         self.assertFalse(box_scout.read_state()["prefs"]["fees_auto"])
         self.assertEqual(box_scout.refresh(recrawl=False, research=False)["assumptions"]["fees"], 0.1)
+
+    def test_cost_and_selling_window_are_measured_from_recent_sales(self):
+        now = datetime(2026, 10, 7, tzinfo=UTC)
+        sales = [AnalyticsItem(
+            conversation_id=str(i), title="Cartoon t-shirt", status="sold", price=10, cost=None, brand="",
+            category="", sold_price=10.0, sold_at=now - timedelta(days=i), listed_at=None,
+            marketplace="eBay", days_listed=20, fees=0.0, shipping_cost=4.0,
+        ) for i in range(box_scout.MEASURED_MIN_SALES)]
+        self.assertIsNone(box_scout.measured_cost_per_piece(sales[:-1], now))
+        self.assertIsNone(box_scout.measured_selling_window(sales[:-1], now))
+        self.assertEqual(box_scout.measured_cost_per_piece(sales, now), {"value": 4.0, "sales": len(sales)})
+        # Free shipping never takes the allowance below the default.
+        free = [AnalyticsItem(**{**s.__dict__, "shipping_cost": 0.0}) for s in sales]
+        self.assertEqual(box_scout.measured_cost_per_piece(free, now)["value"], box_scout.DEFAULT_PREFS["cost_per_piece"])
+        self.assertEqual(box_scout.measured_selling_window(sales, now), {"value": 3, "sales": len(sales)})
+        mock.patch.object(box_scout, "measured_cost_per_piece", return_value={"value": 4.0, "sales": 30}).start()
+        mock.patch.object(box_scout, "measured_selling_window", return_value={"value": 3, "sales": 30}).start()
+        snapshot = box_scout.refresh(recrawl=False, research=False)
+        self.assertEqual(snapshot["assumptions"]["cost_per_piece"], 4.0)
+        self.assertEqual(snapshot["preferences"]["selling_window_weeks"], 3)
+        box_scout.set_prefs(cost_per_piece=1.0, selling_window_weeks=2)
+        prefs = box_scout.read_state()["prefs"]
+        self.assertFalse(prefs["cost_per_piece_auto"])
+        self.assertFalse(prefs["selling_window_auto"])
+        self.assertEqual(box_scout.refresh(recrawl=False, research=False)["assumptions"]["cost_per_piece"], 1.0)
 
     def test_sell_through_follows_analytics_until_the_seller_types_a_rate(self):
         mock.patch.object(box_scout, "measured_sell_through", return_value={"rate": 0.431, "sales": 426}).start()

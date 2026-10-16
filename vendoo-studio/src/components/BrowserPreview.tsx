@@ -96,7 +96,7 @@ const MARKET_LABELS: Record<string, string> = {
   depop: "Depop",
 };
 
-const MOVE_FLUSH_MS = 50;
+const MOVE_FLUSH_MS = 25;
 const SNAPSHOT_REFRESH_MS = 3000;
 const SNAPSHOT_SETTLE_MS = 700;
 const DOUBLE_CLICK_MS = 400;
@@ -183,6 +183,7 @@ export function BrowserPreview({
   const [hovered, setHovered] = useState<string | null>(null);
   const [marks, setMarks] = useState<Mark[]>([]);
   const [drawing, setDrawing] = useState<Mark | null>(null);
+  const [navigating, setNavigating] = useState(false);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
 
@@ -202,6 +203,8 @@ export function BrowserPreview({
   const snapshotInFlight = useRef(false);
   const settleTimer = useRef<number | null>(null);
   const markSeq = useRef(0);
+  const inputBusy = useRef(false);
+  const drainInput = useRef<(() => void) | null>(null);
   // Input must reach Chrome in order; parallel requests reorder keystrokes.
   const inputChain = useRef<Promise<unknown>>(Promise.resolve());
 
@@ -337,7 +340,12 @@ export function BrowserPreview({
   useEffect(() => {
     setMarks([]);
     setFields([]);
-  }, [jobId]);
+    return () => {
+      pendingEvents.current = [];
+      pendingMove.current = null;
+      pendingWheel.current = null;
+    };
+  }, [jobId, controlsEnabled]);
 
   useEffect(() => {
     // Sending the chat message consumes the picks; drop the drawings with them.
@@ -349,6 +357,7 @@ export function BrowserPreview({
       window.clearTimeout(flushTimer.current);
       flushTimer.current = null;
     }
+    if (inputBusy.current) return;
     const events = pendingEvents.current;
     if (pendingMove.current) {
       events.push(pendingMove.current);
@@ -369,13 +378,23 @@ export function BrowserPreview({
     }
     pendingEvents.current = [];
     if (!jobId || !events.length) return;
+    inputBusy.current = true;
     for (let index = 0; index < events.length; index += 40) {
       const batch = events.slice(index, index + 40);
       inputChain.current = inputChain.current
         .then(() => api.jobs.browser.input(jobId, batch))
         .catch(() => {});
     }
+    inputChain.current = inputChain.current.finally(() => {
+      inputBusy.current = false;
+      if (pendingEvents.current.length || pendingMove.current || pendingWheel.current) drainInput.current?.();
+    });
   }, [jobId, settleSnapshot]);
+
+  useEffect(() => {
+    drainInput.current = controlsEnabled ? flushInput : null;
+    return () => { drainInput.current = null; };
+  }, [controlsEnabled, flushInput]);
 
   const queueInput = useCallback((event: BrowserInputEvent, { immediate = false } = {}) => {
     if (event.type === "mouseMoved" || event.type === "touchMove") {
@@ -395,6 +414,24 @@ export function BrowserPreview({
       flushTimer.current = window.setTimeout(flushInput, MOVE_FLUSH_MS);
     }
   }, [flushInput]);
+
+  const navigate = async (direction: "back" | "forward") => {
+    if (!controlsEnabled || !jobId || navigating) return;
+    setNavigating(true);
+    flushInput();
+    try {
+      while (inputBusy.current) await inputChain.current;
+      await inputChain.current;
+      await api.jobs.browser.navigate(jobId, direction);
+      setFields([]);
+      setMarks([]);
+      settleSnapshot();
+    } catch (err) {
+      addToast({ type: "error", title: "Could not navigate", description: (err as Error).message });
+    } finally {
+      setNavigating(false);
+    }
+  };
 
   const ratioOf = useCallback((clientX: number, clientY: number): Point | null => {
     const surface = surfaceRef.current;
@@ -668,6 +705,12 @@ export function BrowserPreview({
     >
       <div className="browser-preview-bar">
         <span className="browser-preview-title">Browser</span>
+        {interactive && (
+          <div className="browser-navigation" aria-label="Browser navigation">
+            <button type="button" className="browser-tool" aria-label="Go back" title="Go back" disabled={!controlsEnabled || navigating} onClick={() => void navigate("back")}>←</button>
+            <button type="button" className="browser-tool" aria-label="Go forward" title="Go forward" disabled={!controlsEnabled || navigating} onClick={() => void navigate("forward")}>→</button>
+          </div>
+        )}
         <span className="browser-preview-url" title={url}>
           {url || "Waiting for Vendoo…"}
         </span>

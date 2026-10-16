@@ -48,17 +48,33 @@ def _provider_for(choice: str):
     return None
 
 
+# Tried after the seller's primary and fallback, when neither is ready.
+PROVIDER_CHOICES = ("chatgpt", "claude", "cursor", "mimo")
+
+
 def get_listing_provider():
     """Return the active listing provider.
 
-    Tries the user's primary choice first, then the configured fallback.
+    Tries the user's primary choice first, then the configured fallback. When
+    neither is ready, any provider the seller has set up is used: adding only a
+    Cursor key left the default ChatGPT primary with nothing to run, and every
+    listing stopped at "Sign in with ChatGPT" even though a key was saved. A
+    fallback of "none" opts out of that.
     """
     primary, fallback = get_listing_provider_order()
     provider = _provider_for(primary)
     if provider is not None:
         return provider
-    if fallback != "none":
-        return _provider_for(fallback)
+    if fallback == "none":
+        return None
+    provider = _provider_for(fallback)
+    if provider is not None:
+        return provider
+    for choice in PROVIDER_CHOICES:
+        if choice not in (primary, fallback):
+            provider = _provider_for(choice)
+            if provider is not None:
+                return provider
     return None
 
 

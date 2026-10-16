@@ -31,10 +31,26 @@ export interface AdMarketplaceTotals {
   /** Every recorded sale on the marketplace in the range, with or without ads. */
   sales_revenue: number;
   spend_percent: number | null;
+  /** Profit on the marketplace's sales with a recorded cost, before this spend. */
+  profit: number | null;
+  profit_after_ads: number | null;
 }
 
 export interface AnalyticsAds {
   spend: number;
+  /** Profit across every marketplace in the range, before any ad spend. */
+  profit: number | null;
   profit_after_ads: number | null;
   marketplaces: AdMarketplaceTotals[];
+}
+
+/** What an Etsy Ads stats CSV upload added. */
+export interface EtsyAdsImport {
+  /** Days with ad activity; idle days are not recorded. */
+  days: number;
+  start: string;
+  end: string;
+  spend: number;
+  /** Typed Etsy entries that cover some of the same days, left as they were. */
+  overlapping_entries: number;
 }

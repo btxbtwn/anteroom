@@ -478,7 +478,7 @@
 }
 
 .settings-api-log {
-  max-height: 28rem;
+  max-height: min(75vh, 48rem);
   margin-top: 12px;
   overflow: auto;
   border-top: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
@@ -519,9 +519,130 @@
   word-break: break-all;
 }
 
+.settings-api-log-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  word-break: break-all;
+  cursor: pointer;
+}
+
+.settings-api-log-toggle:hover,
+.settings-api-log-toggle[aria-expanded="true"] {
+  color: var(--color-cobalt);
+}
+
+.settings-api-log-table .is-open td {
+  background: color-mix(in srgb, var(--color-cobalt) 6%, transparent);
+}
+
+.settings-api-log-table .settings-api-log-detail-row td {
+  padding: 4px 12px 14px;
+  border-top: 0;
+  background: color-mix(in srgb, var(--color-cobalt) 6%, transparent);
+}
+
+.settings-api-log-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-api-log-detail-section h4 {
+  margin: 0 0 4px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.settings-api-log-headers {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.settings-api-log-headers > div {
+  display: grid;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  gap: 12px;
+}
+
+.settings-api-log-headers dt {
+  color: var(--color-text-muted);
+}
+
+.settings-api-log-headers dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.settings-api-log-body {
+  max-height: 20rem;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  border-radius: 6px;
+  background: var(--color-surface);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.settings-api-log-none {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
 .settings-api-log-empty {
   margin: 0;
   padding: 4px 0 2px;
+}
+
+/* Help: one collapsible how-to per row. */
+.settings-help-topic summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-help-topic summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-help-topic summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 12px;
+  color: var(--color-text-muted);
+}
+
+.settings-help-topic[open] summary::before {
+  content: "▾";
+}
+
+.settings-help-topic summary:focus-visible {
+  outline: 2px solid var(--color-cobalt);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.settings-help-topic .chat-markdown {
+  max-width: 40rem;
+  margin-top: 8px;
+  padding-left: 20px;
+  color: color-mix(in srgb, var(--color-text-muted) 80%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.settings-help-topic .chat-markdown strong {
+  color: var(--color-text);
+  font-weight: 500;
 }
 
 @media (max-width: 900px) {

@@ -264,6 +264,13 @@ function Settings({
             <DraftInput value={String(prefs.selling_window_weeks)} label="Length of the target selling window in weeks" suffix="weeks" width="5rem" inputMode="numeric" disabled={saving}
               clean={(text) => text.replace(/\D/g, "")} accept={(text) => Number(text) >= 1 && Number(text) <= 26}
               onCommit={(text) => onSave({ selling_window_weeks: Number(text) })} />
+            <label className="sourcing-check">
+              <input type="checkbox" checked={prefs.selling_window_auto} disabled={saving || !measured?.selling_window_measured}
+                onChange={(event) => onSave({ selling_window_auto: event.target.checked })} />
+              {measured?.selling_window_measured
+                ? `From how long your last ${measured.selling_window_measured.sales} sales took`
+                : "From your sales once you have 30 in a year"}
+            </label>
           </span>
           <span className="sourcing-setting">Pieces that sell
             <DraftInput value={String(Math.round(prefs.sell_through * 100))} label="Percentage of usable pieces you plan to sell" suffix="%" width="5rem" inputMode="decimal" disabled={saving}
@@ -293,11 +300,13 @@ function Settings({
             <DraftInput value={String(prefs.cost_per_piece)} label="Operating allowance per usable piece" prefix="$" width="5rem" inputMode="decimal" disabled={saving}
               clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => text !== "" && Number.isFinite(Number(text)) && Number(text) >= 0}
               onCommit={(text) => onSave({ cost_per_piece: Number(text) })} />
-          </span>
-          <span className="sourcing-setting">Most to pay per piece
-            <DraftInput value={prefs.max_cog_per_piece ? String(prefs.max_cog_per_piece) : ""} label="Most a usable piece may cost landed, including shipping; empty for no limit" prefix="$" width="5rem" inputMode="decimal" disabled={saving}
-              clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => text === "" || (Number.isFinite(Number(text)) && Number(text) >= 0)}
-              onCommit={(text) => onSave({ max_cog_per_piece: Number(text) })} />
+            <label className="sourcing-check">
+              <input type="checkbox" checked={prefs.cost_per_piece_auto} disabled={saving || !measured?.cost_per_piece_measured}
+                onChange={(event) => onSave({ cost_per_piece_auto: event.target.checked })} />
+              {measured?.cost_per_piece_measured
+                ? `From your ${measured.cost_per_piece_measured.sales} recent sales, at least ${formatMoney(2)}`
+                : "From your sales once you have 30 in a year"}
+            </label>
           </span>
           <label className="sourcing-setting sourcing-check">
             <input
@@ -309,7 +318,7 @@ function Settings({
             Raghouse VIP member
           </label>
         </div>
-        <p className="sourcing-hint">Most to pay per piece is a limit: a box is left out when its price plus shipping, divided by the pieces you can sell, is above it. Leave it empty for no limit. Cost per piece is what you spend to prepare, pack and ship each piece that sells. It is charged on the pieces planned to sell, in the plan and in the lower-sales test. Purchase tax is extra.</p>
+        <p className="sourcing-hint">Cost per piece is what you spend to prepare, pack and ship each piece that sells. It is charged on the pieces planned to sell, in the plan and in the lower-sales test. Purchase tax is extra.</p>
       </details>
     </div>
   );

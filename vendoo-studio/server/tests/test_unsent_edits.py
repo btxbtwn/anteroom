@@ -142,6 +142,19 @@ class UnsentEditsTest(unittest.TestCase):
         rows = self.client.get("/api/conversations").json()
         self.assertTrue(next(item for item in rows if item["id"] == conv_id)["unsent_edits"])
 
+    def test_polling_the_inventory_compares_each_revision_pair_once(self):
+        """The sidebar polls the whole inventory; re-normalizing every bound
+        listing on each poll held the GIL long enough to stall Studio."""
+        from vendoo_studio.services import vendoo_watch
+
+        self.mark_synced_on(self.revision.id)
+        ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        with mock.patch.object(vendoo_watch, "listings_match", wraps=vendoo_watch.listings_match) as match:
+            for _ in range(3):
+                rows = self.client.get("/api/conversations").json()
+                self.assertTrue(next(item for item in rows if item["id"] == self.conv.id)["unsent_edits"])
+        self.assertEqual(match.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,12 +11,15 @@ from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
 from vendoo_studio.database import init_db
 from vendoo_studio.static_files import FrontendFiles
 from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports
-from vendoo_studio.routes import ad_spend, analytics, assistant, backups, boxes, browser, catalog, changelog, sale_calendar, scout, sourcing, vendoo_api, suggestions
+from vendoo_studio.routes import ad_spend, analytics, assistant, backups, boxes, browser, catalog, changelog, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from vendoo_studio.services.error_log import install as install_error_log
+
+    install_error_log()
     init_db()
     try:
         from vendoo_studio.services.keychain import warm_keychain
@@ -41,6 +44,11 @@ async def lifespan(app: FastAPI):
     try:
         from vendoo_studio.services.box_scout import start_sourcing_timer
         start_sourcing_timer()
+    except Exception:
+        pass
+    try:
+        from vendoo_studio.services.job_watchdog import start_job_watchdog
+        start_job_watchdog()
     except Exception:
         pass
     try:
@@ -74,6 +82,11 @@ async def lifespan(app: FastAPI):
         stop_sourcing_timer()
     except Exception:
         pass
+    try:
+        from vendoo_studio.services.job_watchdog import stop_job_watchdog
+        stop_job_watchdog()
+    except Exception:
+        pass
     # Last thing before the process goes: pruning frees pages inside the file,
     # and only VACUUM hands them back to the disk. Nobody is waiting on it here.
     try:
@@ -105,6 +118,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(health.router)
 app.include_router(conversations.router)
 app.include_router(photos.router)
+app.include_router(measurements.router)
 app.include_router(listings.router)
 app.include_router(jobs.router)
 app.include_router(imports.router)

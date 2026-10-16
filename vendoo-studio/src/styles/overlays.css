@@ -43,6 +43,39 @@
   padding: 24px;
 }
 
+.confirm-dialog-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.confirm-dialog-close:hover:not(:disabled) {
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.confirm-dialog-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-cobalt);
+}
+
+.confirm-dialog-close + .confirm-dialog-header {
+  padding-right: 52px;
+}
+
 .confirm-dialog-title {
   font-size: 20px;
   font-weight: 600;
@@ -226,6 +259,15 @@
   min-width: 0;
   flex-direction: column;
   gap: 6px;
+}
+
+.bulk-measure-field .input.is-suggested {
+  border-color: var(--color-cobalt);
+  border-style: dashed;
+}
+
+.bulk-measure-note {
+  margin: 0;
 }
 
 .bulk-measure-spacer {
@@ -425,6 +467,90 @@
   font-variant-numeric: tabular-nums;
 }
 
+.price-drop-row-price.is-error {
+  color: var(--color-danger, #c44);
+}
+
+.bulk-markdown-popup {
+  max-width: 44rem;
+}
+
+.bulk-markdown-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bulk-markdown-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.bulk-markdown-row.is-skipped .bulk-markdown-row-body,
+.bulk-markdown-row.is-skipped .bulk-markdown-row-price {
+  opacity: 0.55;
+}
+
+.bulk-markdown-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.bulk-markdown-row-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulk-markdown-row-reason {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.bulk-markdown-row-error {
+  color: var(--color-danger, #c44);
+  font-size: 12px;
+}
+
+.bulk-markdown-row-price {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bulk-markdown-row-current {
+  color: var(--color-text-muted);
+}
+
+.price-drop-custom.bulk-markdown-input {
+  width: 5.5rem;
+  padding: 5px 8px;
+}
+
+.bulk-markdown-row-percent {
+  width: 3.5rem;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.bulk-markdown-skip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
 .price-drop-body .sold-comps-card {
   margin-top: 4px;
 }
@@ -570,13 +696,34 @@
 @media (max-width: 900px) {
   .confirm-dialog {
     padding: 0;
-    grid-template-rows: 1fr auto;
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .confirm-dialog-popup {
     max-width: none;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 16px);
+    overflow-y: auto;
     border-radius: 16px 16px 0 0;
     border-bottom: none;
+  }
+
+  .confirm-dialog-header,
+  .confirm-dialog-footer {
+    flex-shrink: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .confirm-dialog-footer {
+    flex-wrap: wrap;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .confirm-dialog-footer .btn {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+    height: auto;
+    min-height: 32px;
   }
 
   .bulk-upload-fields {

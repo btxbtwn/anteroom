@@ -2,11 +2,14 @@ import type { AnalyticsRange } from "../api/types";
 
 /** The sales periods Analytics and Marketing both total over. */
 export const ANALYTICS_RANGES: { id: AnalyticsRange; label: string; heading: string }[] = [
-  { id: "7d", label: "7 days", heading: "Last 7 days" },
-  { id: "30d", label: "30 days", heading: "Last 30 days" },
-  { id: "90d", label: "90 days", heading: "Last 90 days" },
-  { id: "12m", label: "12 months", heading: "Last 12 months" },
-  { id: "all", label: "All", heading: "All time" },
+  { id: "wtd", label: "This week", heading: "This week" },
+  { id: "mtd", label: "This month", heading: "This month" },
+  { id: "ytd", label: "This year", heading: "This year" },
+  { id: "7d", label: "Last 7 days", heading: "Last 7 days" },
+  { id: "30d", label: "Last 30 days", heading: "Last 30 days" },
+  { id: "90d", label: "Last 90 days", heading: "Last 90 days" },
+  { id: "12m", label: "Last 12 months", heading: "Last 12 months" },
+  { id: "all", label: "All time", heading: "All time" },
 ];
 
 /** Whole dollars stay whole; a cent keeps two places. */

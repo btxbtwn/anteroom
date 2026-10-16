@@ -1,6 +1,6 @@
 /** T3 Code-style settings categories for Vendoo Studio. */
 
-export type SettingsSectionId = "general" | "listings" | "providers" | "connections" | "data" | "logs";
+export type SettingsSectionId = "general" | "listings" | "providers" | "connections" | "data" | "logs" | "help";
 
 export type SettingsNavItem = {
   id: SettingsSectionId;
@@ -24,6 +24,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
   { id: "connections", label: "Connections" },
   { id: "data", label: "Data" },
   { id: "logs", label: "Logs" },
+  { id: "help", label: "Help" },
 ];
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>> = {
@@ -33,6 +34,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
   connections: "Connections",
   data: "Data",
   logs: "Logs",
+  help: "Help",
 };
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
@@ -200,11 +202,25 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["remote access", "mobile", "phone", "remote", "tailnet", "serve", "network"],
   },
   {
+    id: "error-logs",
+    title: "Errors",
+    section: "logs",
+    targetId: "error-logs",
+    searchTerms: ["error", "warning", "failed", "problem", "log", "debug", "crash"],
+  },
+  {
     id: "vendoo-api-logs",
     title: "Vendoo API logs",
     section: "logs",
     targetId: "vendoo-api-logs",
     searchTerms: ["api", "request", "http", "live", "log", "vendoo", "debug"],
+  },
+  {
+    id: "help",
+    title: "How-to guides",
+    section: "help",
+    targetId: "help",
+    searchTerms: ["help", "how to", "guide", "steps", "instructions", "faq"],
   },
 ];
 

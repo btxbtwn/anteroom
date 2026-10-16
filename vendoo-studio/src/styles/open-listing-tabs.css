@@ -37,6 +37,8 @@
 .detail-panel > .listing-session { height: 100%; }
 .listing-session[hidden], .listing-workspace[hidden], .detail-panel[hidden] { display: none; }
 @media (max-width: 900px) {
-  .open-listing-tab { max-width: 180px; }
+  .open-listing-tab { min-width: 0; max-width: min(180px, calc((100vw - 44px) / 2)); }
+  .open-listing-tab-title { flex: 1; }
   .open-listing-tab-close { width: 36px; height: 36px; }
+  .open-listing-tab-new { width: 44px; height: 44px; }
 }

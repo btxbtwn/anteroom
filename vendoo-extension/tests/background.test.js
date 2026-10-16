@@ -270,35 +270,57 @@ test('the inventory listing pages through Firestore and can ask for ids only', a
   assert.doesNotMatch(requests[1], /pageToken/);
 });
 
-test('vendooFetch records the path and drops query secrets', async () => {
+test('vendooFetch records the full request and masks credentials', async () => {
   const vm = require('node:vm');
   worker.AbortController = globalThis.AbortController;
   const previousFetch = worker.fetch;
+  const jwt = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1MSJ9.c2lnbmF0dXJl';
   worker.fetch = async () => ({
     ok: true,
     status: 201,
-    text: async () => '{}',
+    headers: new Map([['content-type', 'application/json'], ['x-request-id', 'r-42']]),
+    text: async () => JSON.stringify({ id: 'abc', idToken: jwt, url: 'https://storage.googleapis.com/b/o?X-Goog-Signature=deadbeefcafe' }),
   });
   vm.runInContext('vendooApiLogQueue.length = 0; paired = false;', worker);
   try {
     const result = await realVendooFetch(
-      'https://api.web.vendoo.co/api/item/abc?userId=SECRET&token=xyz',
-      { method: 'POST', token: 'super-secret-token' },
+      'https://api.web.vendoo.co/api/item/abc?userId=u1&key=AIzaSECRETKEY',
+      { method: 'POST', token: 'super-secret-token', json: { title: 'Levi 501', refresh_token: 'REFRESHSECRET' } },
     );
     const logs = JSON.parse(JSON.stringify(vm.runInContext('vendooApiLogQueue', worker)));
     assert.equal(result.status, 201);
     assert.equal(logs.length, 1);
-    assert.equal(logs[0].method, 'POST');
-    assert.equal(logs[0].host, 'api.web.vendoo.co');
-    assert.equal(logs[0].path, '/api/item/abc');
-    const blob = JSON.stringify(logs[0]);
-    assert.equal(blob.includes('SECRET'), false);
-    assert.equal(blob.includes('super-secret-token'), false);
-    assert.equal(blob.includes('token='), false);
+    const [entry] = logs;
+    assert.equal(entry.method, 'POST');
+    assert.match(entry.url, /^https:\/\/api\.web\.vendoo\.co\/api\/item\/abc\?userId=u1&key=AIza…\(masked\)$/);
+    assert.equal(entry.request_headers.Authorization, 'Bearer …(masked)');
+    assert.equal(entry.request_headers['Content-Type'], 'application/json');
+    assert.match(entry.request_body, /"title":"Levi 501"/);
+    assert.equal(entry.response_headers['x-request-id'], 'r-42');
+    assert.match(entry.response_body, /"id":"abc"/);
+    const blob = JSON.stringify(entry);
+    for (const secret of ['super-secret-token', 'AIzaSECRETKEY', 'REFRESHSECRET', jwt, 'deadbeefcafe']) {
+      assert.equal(blob.includes(secret), false, secret);
+    }
   } finally {
     worker.fetch = previousFetch;
     vm.runInContext('vendooApiLogQueue.length = 0;', worker);
   }
+});
+
+test('api log bodies describe binary uploads and cap long text', () => {
+  const upload = worker.vendooApiLogEntry({
+    method: 'PUT',
+    url: 'https://storage.googleapis.com/bucket/object',
+    status: 200,
+    ok: true,
+    requestBody: new Blob(['x'.repeat(2048)], { type: 'image/jpeg' }),
+  });
+  assert.equal(upload.request_body, '[binary image/jpeg, 2,048 bytes]');
+  const long = worker.vendooApiLogEntry({ url: 'https://api.web.vendoo.co/x', ok: true, status: 200, responseBody: 'a'.repeat(70000) });
+  assert.match(long.response_body, /truncated \(70,000 characters total\)$/);
+  const failed = worker.vendooApiLogEntry({ url: 'https://api.web.vendoo.co/x', ok: false, status: null, error: 'Failed to fetch' });
+  assert.equal(failed.error, 'Failed to fetch');
 });
 
 test('api log lines wait until Studio is paired', () => {
@@ -310,21 +332,24 @@ test('api log lines wait until Studio is paired', () => {
   const previousPaired = worker.paired;
   try {
     vm.runInContext('vendooApiLogQueue.length = 0; paired = false; ws = { readyState: 1 };', worker);
-    worker.recordVendooApiLog(worker.vendooApiLogEntry({
-      method: 'GET',
-      url: 'https://securetoken.googleapis.com/v1/token?key=SECRET',
-      status: 200,
-      ok: true,
-      durationMs: 15,
-    }));
+    for (let i = 0; i < 25; i += 1) {
+      worker.recordVendooApiLog(worker.vendooApiLogEntry({
+        method: 'POST',
+        url: `https://securetoken.googleapis.com/v1/token?key=SECRETKEY${i}`,
+        status: 200,
+        ok: true,
+        durationMs: 15,
+      }));
+    }
     assert.equal(sent.length, 0);
-    assert.equal(vm.runInContext('JSON.stringify(vendooApiLogQueue).includes("SECRET")', worker), false);
+    assert.equal(vm.runInContext('JSON.stringify(vendooApiLogQueue).includes("SECRETKEY")', worker), false);
     vm.runInContext('paired = true;', worker);
     worker.flushVendooApiLogs();
-    assert.equal(sent.length, 1);
+    assert.equal(sent.length, 2);
     assert.equal(sent[0].type, 'vendoo.api_log');
-    assert.equal(sent[0].payload.entries[0].path, '/v1/token');
-    assert.equal(sent[0].payload.entries[0].host, 'securetoken.googleapis.com');
+    assert.equal(sent[0].payload.entries.length, 20);
+    assert.equal(sent[1].payload.entries.length, 5);
+    assert.match(sent[0].payload.entries[0].url, /^https:\/\/securetoken\.googleapis\.com\/v1\/token\?key=SECR…\(masked\)$/);
   } finally {
     worker.send = previousSend;
     worker.ws = previousWs;

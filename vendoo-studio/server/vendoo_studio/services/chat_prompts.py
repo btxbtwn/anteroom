@@ -17,11 +17,10 @@ from vendoo_studio.services.comp_research import research_sold_comps
 from vendoo_studio.services.generation_history import seller_history_prompt
 from vendoo_studio.services.listing_evidence import generation_evidence_prompt
 from vendoo_studio.services.listing_generate import (
-    PHOTO_ANALYSIS_RETRY_MESSAGE,
-    PhotoAnalysisError,
     analysis_with_photo_count,
     analyze_photos_with_tag_retry,
     latest_photo_analysis,
+    photo_analysis_failure,
     photo_analysis_usable,
     require_photo_analysis,
     seller_item_details,
@@ -122,7 +121,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             try:
                 result = await analyze_photos_with_tag_retry(provider, paths, notes="", listing_rules=skill_rules[:8000])
             except Exception as exc:
-                raise PhotoAnalysisError(PHOTO_ANALYSIS_RETRY_MESSAGE) from exc
+                raise photo_analysis_failure(exc) from exc
             evidence, analysis_note = require_photo_analysis(result)
             analysis_note = analysis_note.replace(
                 "Photo analysis:",

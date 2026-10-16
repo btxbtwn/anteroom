@@ -26,7 +26,7 @@ const data: MarketingData = {
       cost: 20, lowest_price: 25, discount_percent: null, sale_price: null,
     },
   ],
-  ads: { spend: 0, profit_after_ads: 50, marketplaces: [] },
+  ads: { spend: 0, profit: 50, profit_after_ads: 50, marketplaces: [] },
 };
 
 const adEntry: AdSpendEntry = {
@@ -35,7 +35,7 @@ const adEntry: AdSpendEntry = {
 };
 
 function render(payload: MarketingData, adEntries: AdSpendEntry[] = []) {
-  useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
+  useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false, isSuccess: false, isError: false });
   useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) =>
     queryKey[0] === "sale-calendar"
       ? { data: { events: [], patterns: [], items: [], timezone: "UTC" }, isError: false }
@@ -46,6 +46,12 @@ function render(payload: MarketingData, adEntries: AdSpendEntry[] = []) {
 }
 
 describe("MarketingPage", () => {
+  it("takes the Etsy Ads CSV from Etsy instead of typed figures", () => {
+    const html = render(data);
+    expect(html).toContain("Upload Etsy Ads CSV");
+    expect(html).toContain('accept=".csv,text/csv"');
+  });
+
   it("holds the sale calendar and lists stale stock with how deep to cut", () => {
     const html = render(data);
     expect(html).toContain("<h1>Marketing</h1>");
@@ -77,19 +83,21 @@ describe("MarketingPage", () => {
       ...data,
       ads: {
         spend: 40,
+        profit: 50,
         profit_after_ads: 10,
         marketplaces: [
           { id: "poshmark", entries: 1, spend: 15, clicks: 60, orders: 1, revenue: 45, roas: 3,
-            cost_per_click: 0.25, sales_revenue: 80, spend_percent: 18.8 },
+            cost_per_click: 0.25, sales_revenue: 80, spend_percent: 18.8, profit: 30, profit_after_ads: 15 },
           { id: "etsy", entries: 1, spend: 25, clicks: null, orders: null, revenue: null, roas: null,
-            cost_per_click: null, sales_revenue: 0, spend_percent: null },
+            cost_per_click: null, sales_revenue: 0, spend_percent: null, profit: null, profit_after_ads: null },
         ],
       },
     }, [adEntry]);
     expect(html).toContain('aria-label="Ad spend period"');
-    expect(html).toContain("Profit after ads");
+    expect(html).toContain("Business profit after ads");
+    expect(html).toContain("$50 profit on every marketplace, less $40 of ads");
     expect(html).toContain("$10");
-    expect(html).toContain("3× return on ad spend · $0.25 a click · 18.8% of $80 Poshmark sales");
+    expect(html).toContain("3× return on ad spend · $0.25 a click · 18.8% of $80 Poshmark sales · $15 Poshmark profit after ads");
     expect(html).toContain("No Etsy sales recorded");
     expect(html).toContain("60 clicks · 1 order · $45 sales · 3× ROAS");
     expect(html).not.toContain("No ad spend recorded yet.");

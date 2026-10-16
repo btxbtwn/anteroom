@@ -1209,6 +1209,45 @@ class PhotoMimeTest(unittest.TestCase):
                     process_bytes(b"not-an-image", "fake.jpg", "image/jpeg")
 
 
+    def test_heic_upload_is_stored_as_an_upright_jpeg(self):
+        from io import BytesIO
+        from pathlib import Path
+
+        from PIL import Image
+
+        from vendoo_studio.services.photos import process_bytes
+
+        buf = BytesIO()
+        exif = Image.Exif()
+        exif[0x0112] = 6  # stored sideways, shown rotated 90°
+        Image.new("RGB", (40, 20), "red").save(buf, format="HEIF", exif=exif.tobytes())
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("vendoo_studio.services.photos.PHOTOS_DIR", tmp):
+                info = process_bytes(buf.getvalue(), "IMG_0001.HEIC", "image/heic")
+                stored = Path(tmp) / info["stored_filename"]
+                self.assertEqual(stored.suffix, ".jpg")
+                self.assertEqual(info["mime_type"], "image/jpeg")
+                self.assertEqual((info["width"], info["height"]), (20, 40))
+                with Image.open(stored) as img:
+                    self.assertEqual(img.format, "JPEG")
+
+    def test_vision_encoder_never_sends_heic_labelled_as_jpeg(self):
+        import base64
+        from io import BytesIO
+
+        from PIL import Image
+
+        from vendoo_studio.providers.xiaomi_mimo import _encode_image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = f"{tmp}/old.heic"
+            Image.new("RGB", (40, 20), "blue").save(path, format="HEIF")
+            url = _encode_image(path)
+        self.assertTrue(url.startswith("data:image/jpeg;base64,"))
+        data = base64.b64decode(url.split(",", 1)[1])
+        with Image.open(BytesIO(data)) as img:
+            self.assertEqual(img.format, "JPEG")
+
 class ExtensionRouteSafetyTest(unittest.TestCase):
     def test_rejects_item_id_new_and_requires_verification(self):
         content = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text(encoding="utf-8")

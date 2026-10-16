@@ -155,8 +155,9 @@
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
-    height: 52px;
-    padding: 0 12px;
+    flex-wrap: wrap;
+    min-height: 52px;
+    padding: 8px 12px;
     background: var(--color-paper);
   }
 
@@ -388,7 +389,22 @@
   }
 
   .chat-column {
-    min-height: 180px;
+    min-height: 0;
+  }
+
+  .chat-composer {
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .chat-panel,
+  .chat-scroll,
+  .msg {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .pr-review-meta {
+    flex-wrap: wrap;
   }
 
   .item-details {
@@ -434,18 +450,26 @@
   }
 }
 
-@media (max-width: 480px) {
-  /* Phones put the pane switcher on its own full-width row under the nav bar */
+@media (max-width: 600px) {
+  /* Give the title, shortcuts and pane switcher their own rows on phones.
+     Seven fixed-size buttons otherwise squeeze the title out of the viewport. */
   .mobile-workspace-bar:has(.mobile-workspace-panes) {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     row-gap: 6px;
-    height: auto;
-    padding: 8px 12px;
+  }
+
+  .mobile-workspace-title {
+    grid-column: 2 / -1;
+  }
+
+  .mobile-workspace-settings {
+    justify-self: center;
   }
 
   .mobile-workspace-panes {
     order: 1;
-    flex: 1 0 100%;
+    grid-column: 1 / -1;
     max-width: none;
     padding: 2px;
     border-radius: var(--radius-md);
@@ -461,6 +485,18 @@
     box-shadow: inset 0 0 0 1px var(--color-chrome-glass-border);
   }
 
+  .settings-row-control {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .settings-model-select {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
   .item-row,
   .item-row-3,
   .item-row-4 {
@@ -500,4 +536,12 @@
 .status-connect:disabled {
   opacity: 0.55;
   cursor: default;
+}
+
+
+@media (max-width: 900px) {
+  .browser-navigation .browser-tool {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

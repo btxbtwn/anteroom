@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Photo } from "../api/types";
 import { moveItem } from "../photoDrop";
+import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
+import { addToast } from "../ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
 import {
   GARMENTS,
@@ -30,29 +32,29 @@ interface Props {
  * Regenerate's version of the bulk upload window: each listing's photos
  * (drag to reorder), SKU, COG, labels and measurements, checked before
  * anything is wiped. Edits are written back to Item Details, which the
- * rewrite keeps and treats as fact.
+ * rewrite keeps and treats as fact. Only the x and Cancel close it.
  */
 export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) {
   const [rows, setRows] = useState<Record<string, ItemDetails> | null>(null);
   const savedRef = useRef<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [zoom, setZoom] = useState<{ photos: Photo[]; index: number } | null>(null);
+  const [zoom, setZoom] = useState<{ convId: string; index: number } | null>(null);
+  // Fields filled from the photos and not yet edited, and what each reading found.
+  const [suggested, setSuggested] = useState<Record<string, string[]>>({});
+  const [readNotes, setReadNotes] = useState<Record<string, string>>({});
+  const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  const rowsRef = useRef(rows);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
   const formRef = useRef<HTMLFormElement>(null);
-  const zoomRef = useRef(zoom);
-  const onCloseRef = useRef(onClose);
   const count = listings.length;
 
   useEffect(() => {
-    zoomRef.current = zoom;
-    onCloseRef.current = onClose;
-  }, [zoom, onClose]);
-
-  useEffect(() => {
+    // Escape only puts an enlarged photo away; it never closes the window.
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      if (zoomRef.current) setZoom(null);
-      else onCloseRef.current();
+      if (event.key === "Escape") setZoom(null);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -82,6 +84,37 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
   const setRow = (id: string, patch: Partial<ItemDetails>) => setRows((current) => (
     current ? { ...current, [id]: { ...current[id]!, ...patch } } : current
   ));
+
+  // Fills blank measurement fields from each listing's yardstick photos; typed values stay.
+  const readFromPhotos = async () => {
+    if (!rows) return;
+    setReading({ done: 0, total: listings.length });
+    await readEach(listings, READ_CONCURRENCY, async (listing) => {
+      const garment = rows[listing.id]!.garment;
+      setReadNotes((current) => ({ ...current, [listing.id]: "Reading the yardstick…" }));
+      try {
+        const result = await api.measurements.readSaved(listing.id, garment);
+        // Fold into what is there now: the seller may have typed while it read.
+        const details = rowsRef.current?.[listing.id];
+        if (details?.garment === garment) {
+          const outcome = applyReading(garment, details.measurements, result);
+          setRow(listing.id, { measurements: outcome.measurements });
+          setSuggested((current) => ({
+            ...current,
+            [listing.id]: [...new Set([...(current[listing.id] || []), ...outcome.suggested])],
+          }));
+          setReadNotes((current) => ({ ...current, [listing.id]: outcome.note }));
+        } else {
+          // The garment changed while it read; the reading was for the old fields.
+          setReadNotes((current) => ({ ...current, [listing.id]: "" }));
+        }
+      } catch (err) {
+        setReadNotes((current) => ({ ...current, [listing.id]: err instanceof Error ? err.message : "Reading failed." }));
+      }
+      setReading((current) => current && { ...current, done: current.done + 1 });
+    });
+    setReading(null);
+  };
 
   const rewrite = async () => {
     if (!rows) return;
@@ -114,7 +147,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
 
   return createPortal(
     <div className="confirm-dialog bulk-upload-dialog" role="presentation">
-      <button type="button" className="confirm-dialog-backdrop" aria-label="Close without rewriting" onClick={onClose} />
+      <div className="confirm-dialog-backdrop" />
       <form
         ref={formRef}
         className="confirm-dialog-popup bulk-upload-popup"
@@ -126,15 +159,24 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
           if (!saving && rows) void rewrite();
         }}
       >
+        <button
+          type="button"
+          className="confirm-dialog-close"
+          disabled={saving}
+          onClick={onClose}
+          aria-label="Close without rewriting"
+        >
+          x
+        </button>
         <div className="confirm-dialog-header">
           <h2 id="regenerate-review-title" className="confirm-dialog-title">
             Review {count} {noun} before rewriting
           </h2>
           <p className="confirm-dialog-description">
-            Drag photos to set their order; the first one is the cover, and a click enlarges one.
+            Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
             Chat and every generated field are discarded, then each listing is written again from its
             photos and these details, one at a time. Flaws and notes are kept. Vendoo stays as it is
-            until you send again.
+            until you send again. Read from photos fills blank measurements from yardstick photos; check them before rewriting.
           </p>
         </div>
         <ul className="bulk-upload-groups" aria-label="Each listing's photos and details">
@@ -144,8 +186,21 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
                 key={listing.id}
                 listing={listing}
                 details={rows[listing.id]!}
-                onChange={(patch) => setRow(listing.id, patch)}
-                onZoom={(photos, index) => setZoom({ photos, index })}
+                suggested={suggested[listing.id] || []}
+                readNote={readNotes[listing.id]}
+                onChange={(patch) => {
+                  setRow(listing.id, patch);
+                  if (patch.measurements) {
+                    const edited = Object.keys(patch.measurements).filter(
+                      (key) => patch.measurements![key] !== rows[listing.id]!.measurements[key],
+                    );
+                    setSuggested((current) => ({
+                      ...current,
+                      [listing.id]: (current[listing.id] || []).filter((key) => !edited.includes(key)),
+                    }));
+                  }
+                }}
+                onZoom={(index) => setZoom({ convId: listing.id, index })}
                 onInputKeyDown={onInputKeyDown}
               />
             ))
@@ -157,14 +212,23 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
             Cancel
           </button>
           <span className="bulk-measure-spacer" />
-          <button type="submit" className="btn btn-primary" disabled={saving || !rows}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={saving || !rows || reading !== null}
+            title="Fill blank measurements from photos with a yardstick on the item"
+            onClick={() => void readFromPhotos()}
+          >
+            {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read from photos"}
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !rows || reading !== null}>
             {saving ? "Saving…" : `Rewrite ${count}`}
           </button>
         </div>
       </form>
       {zoom ? (
-        <PhotoZoom
-          urls={zoom.photos.map((photo) => photo.url)}
+        <ReviewZoom
+          convId={zoom.convId}
           index={zoom.index}
           onStep={(index) => setZoom({ ...zoom, index })}
           onClose={() => setZoom(null)}
@@ -178,14 +242,18 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
 function ReviewRow({
   listing,
   details,
+  suggested,
+  readNote,
   onChange,
   onZoom,
   onInputKeyDown,
 }: {
   listing: RegenerateReviewListing;
   details: ItemDetails;
+  suggested: string[];
+  readNote?: string;
   onChange: (patch: Partial<ItemDetails>) => void;
-  onZoom: (photos: Photo[], index: number) => void;
+  onZoom: (index: number) => void;
   onInputKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
 }) {
   const title = listing.title || "Untitled";
@@ -228,11 +296,12 @@ function ReviewRow({
           <label className="bulk-measure-field" key={`${details.garment}-${field.key}`}>
             <span className="label">{field.label}</span>
             <input
-              className="input"
+              className={`input${suggested.includes(field.key) ? " is-suggested" : ""}`}
               type="number"
               step="0.25"
               min="0"
               inputMode="decimal"
+              title={suggested.includes(field.key) ? "Read from the photos. Check it before rewriting." : undefined}
               value={details.measurements[field.key] || ""}
               onChange={(event) => onChange({
                 measurements: { ...details.measurements, [field.key]: event.target.value },
@@ -242,6 +311,7 @@ function ReviewRow({
           </label>
         ))}
       </div>
+      {readNote ? <p className="bulk-upload-help bulk-measure-note">{readNote}</p> : null}
       <div className="bulk-measure-fields">
         <label className="bulk-measure-field">
           <span className="label">Cost of goods (COG)</span>
@@ -273,8 +343,24 @@ function ReviewRow({
   );
 }
 
-/** The listing's saved photos in order; a drop saves the new order straight away, like the photo tray. */
-function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (photos: Photo[], index: number) => void }) {
+/** Turning a saved photo rewrites its stored file straight away, like the photo tray. */
+function usePhotoRotate(convId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ photoId, degrees }: { photoId: string; degrees: 90 | -90 }) =>
+      api.conversations.rotatePhoto(convId, photoId, degrees),
+    onSuccess: (rotated) => {
+      queryClient.setQueryData<Photo[]>(["photos", convId], (current) =>
+        current?.map((photo) => (photo.id === rotated.id ? rotated : photo)),
+      );
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: Error) => addToast({ type: "error", title: "Could not rotate photo", description: err.message }),
+  });
+}
+
+/** The listing's saved photos in order; a drop, turn or removal is saved straight away, like the photo tray. */
+function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: number) => void }) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["photos", convId],
@@ -308,6 +394,16 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (photos: Pho
     },
   });
 
+  const rotate = usePhotoRotate(convId);
+  const remove = useMutation({
+    mutationFn: (photoId: string) => api.conversations.deletePhoto(convId, photoId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["photos", convId] });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: (err: Error) => addToast({ type: "error", title: "Could not remove photo", description: err.message }),
+  });
+
   const resetDrag = () => {
     setDragId(null);
     setDropId(null);
@@ -338,7 +434,7 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (photos: Pho
           ].filter(Boolean).join(" ")}
           draggable={canReorder}
           title={canReorder ? "Drag to reorder, click to enlarge" : undefined}
-          onClick={() => onZoom(photos, index)}
+          onClick={() => onZoom(index)}
           onDragStart={(event) => {
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", photo.id);
@@ -360,8 +456,72 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (photos: Pho
         >
           <img src={photo.url} alt="" draggable={false} />
           <div className="photo-thumb-num">{String(index + 1).padStart(2, "0")}</div>
+          <button
+            type="button"
+            tabIndex={-1}
+            className="photo-thumb-rotate"
+            aria-label={`Rotate photo ${index + 1} right`}
+            title="Rotate right"
+            disabled={rotate.isPending && rotate.variables.photoId === photo.id}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!rotate.isPending) rotate.mutate({ photoId: photo.id, degrees: 90 });
+            }}
+          >
+            ↻
+          </button>
+          {/* A listing keeps at least one photo; there is nothing to rewrite from otherwise. */}
+          {canReorder ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              className="photo-thumb-delete"
+              aria-label={`Remove photo ${index + 1}`}
+              title="Remove photo"
+              disabled={remove.isPending}
+              onClick={(event) => {
+                event.stopPropagation();
+                remove.mutate(photo.id);
+              }}
+            >
+              x
+            </button>
+          ) : null}
         </div>
       ))}
     </div>
+  );
+}
+
+/** One saved photo enlarged, with the same turn buttons as the photo tray's. */
+function ReviewZoom({
+  convId,
+  index,
+  onStep,
+  onClose,
+}: {
+  convId: string;
+  index: number;
+  onStep: (index: number) => void;
+  onClose: () => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ["photos", convId],
+    queryFn: () => api.conversations.photos(convId),
+  });
+  const photos = data || [];
+  const photo = photos[index];
+  const rotate = usePhotoRotate(convId);
+
+  if (!photo) return null;
+  return (
+    <PhotoZoom
+      urls={photos.map((item) => item.url)}
+      index={index}
+      rotating={rotate.isPending}
+      onRotate={(degrees) => rotate.mutate({ photoId: photo.id, degrees })}
+      onStep={onStep}
+      onClose={onClose}
+    />
   );
 }

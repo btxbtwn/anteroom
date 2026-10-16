@@ -52,6 +52,7 @@ datas = [
     *tree(STUDIO / "server" / "vendoo_studio" / "migrations", "vendoo_studio/migrations"),
     *tree(REPO / "skills" / "list-this", "skills/list-this"),
     *tree(REPO / "skills" / "box-scout", "skills/box-scout"),
+    *tree(REPO / "skills" / "measure-this", "skills/measure-this"),
     *tree(REPO / "vendoo-extension", "vendoo-extension"),
     *collect_data_files("webview"),
 ]
@@ -74,6 +75,13 @@ hiddenimports = [
     "uvicorn.lifespan.on",
     "keyring.backends.macOS",
     "sqlalchemy.dialects.sqlite",
+    # The measure-this skill script is loaded from disk, so PyInstaller never sees
+    # its imports; tests/test_measure_read.py checks this list covers them.
+    "numpy",
+    "PIL.Image",
+    "PIL.ImageDraw",
+    "PIL.ImageOps",
+    "pillow_heif",
 ]
 
 try:

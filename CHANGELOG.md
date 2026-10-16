@@ -6,9 +6,146 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.238 — 2026-10-11
+## 0.1.270 — 2026-10-16
 
 - Open listing no longer sits on "Opening…". It was holding one of Studio's database connections while it waited for Chrome, so it stalled whenever Studio was already busy; it now lets go first.
+
+## 0.1.269 — 2026-10-15
+
+- iPhone HEIC photos dragged in from Finder or the Files app are now saved as JPEGs, so the AI can read them and their thumbnails show. Before, the AI received a file it couldn't open and found no details.
+
+## 0.1.268 — 2026-10-15
+
+- When the AI answers without describing your photos — for example because its model can't see images — the error now quotes what it said, so you know to pick a different photo model.
+
+## 0.1.267 — 2026-10-15
+
+- Settings → Logs has a new Errors list showing the warnings and errors Studio hit while open, with details you can expand. The log file now stamps each one with the time.
+- When Cursor fails to read photos, the error now gives Cursor's reason instead of just a run ID.
+
+## 0.1.266 — 2026-10-15
+
+- When photos can't be read, the error now says why — for example an invalid API key or a plan out of usage — instead of only "Photo analysis failed."
+- Adding just a Cursor (or any one) AI key is enough: Studio uses it for photos and listings even if ChatGPT is still set as Primary and isn't signed in.
+
+## 0.1.265 — 2026-10-15
+
+- Studio no longer freezes for several seconds when the next send in line starts while it is busy saving, and a send can no longer be started twice at once.
+
+## 0.1.264 — 2026-10-15
+
+- Settings has a new Help section with short step-by-step guides for creating listings, uploading a box, sending to Vendoo, regenerating, marking down stale listings, sourcing boxes, Analytics, connecting Chrome and backups.
+
+## 0.1.263 — 2026-10-15
+
+- A send or fill that stops responding no longer holds up your other listings. After 10 minutes of silence, or right away if Studio was closed mid-send, Studio stops it, marks it failed with a note, and starts the next send in line.
+
+## 0.1.262 — 2026-10-15
+
+- **Settings → Logs → Live requests** now shows everything about each Vendoo call. Click a request to see its full URL with the query string, the request and response headers, and both bodies, pretty-printed. Tokens, API keys, cookies, and upload signatures are still masked.
+
+## 0.1.261 — 2026-10-15
+
+- Mark down several stale listings at once: pick them in Suggestions or the sidebar, review a suggested lower price for each, change or skip any, and apply them together. The new prices stay in Studio until you press Update Vendoo on each listing.
+
+## 0.1.260 — 2026-10-15
+
+- **Read from photos** works in the installed app. It showed "Internal Server Error" for every listing because the app was missing part of the image library the yardstick reader needs. If it can't load, it now says so in plain words.
+
+## 0.1.259 — 2026-10-15
+
+- **Read from photos** is now in the Regenerate review window too, so listings you already saved can have their blank measurements filled from their yardstick photos before they're rewritten. Filled fields are outlined until you change them, and anything you typed stays.
+
+## 0.1.258 — 2026-10-15
+
+- Bulk upload has a **Read from photos** button. It reads the yardstick in each item's photos and fills the blank measurement fields, outlined so you can check them before creating the drafts. Measurements the photos can't settle (usually rise and sleeve) stay blank and are named under the item. Anything you typed stays as you typed it.
+
+## 0.1.257 — 2026-10-15
+
+- The browser responds faster to taps, typing and swipes on your phone, and Back and Forward buttons let you retrace your browsing.
+
+## 0.1.256 — 2026-10-15
+
+- On phones, the listing title and navigation now have room to fit, listing tabs keep their close buttons visible, and chat, settings and dialogs stay within the screen.
+
+## 0.1.255 — 2026-10-14
+
+- Studio stays quick with a large inventory. Refreshing the listing sidebar used to tie Studio up for over a second each time, so with a few listings open, Send to Vendoo could sit on "Updating…" and listings could hang on "Loading..." while everything waited its turn. The sidebar now refreshes about ten times faster.
+
+## 0.1.254 — 2026-10-14
+
+- Pressing Cancel on a send that had just finished no longer shows "Job is already completed" as an error on the listing, and no longer offers to send that message to chat as something to fix. The listing simply shows the finished send.
+
+## 0.1.253 — 2026-10-14
+
+- The sidebar's Not listed filter can now be pointed at a marketplace: turn it on, tick eBay, and you see everything that is not on eBay yet. Tick more than one to see what is missing from any of them, and combine it with labels, status and the other filters.
+
+## 0.1.252 — 2026-10-13
+
+- Studio no longer freezes on "Loading..." while it checks your Vendoo inventory in the background. Opening a listing during a sync could leave the chat, photos and every other panel waiting for minutes; they now load straight away.
+
+## 0.1.251 — 2026-10-13
+
+- The Assistant can now change listings for you. Ask it to mark down stale stock, fix costs, relabel a batch, move listings to a box, or reword a title, and it shows every change as before and after under its answer. Nothing is saved until you press Apply, and Dismiss throws the proposal away.
+- Ask it to fix sizing. It now sees which listings have a different size on one marketplace form than another, a title without the size, or a size that disagrees with the tag in your photos. Setting the right size updates every form and the title together, and the proposal shows each form's old and new size.
+- Applied changes are saved in Studio as a new revision of each listing, so you can restore the old one from the listing's history. A listing already on Vendoo keeps its old values there until you send it again; the Assistant still never sends or publishes anything.
+
+## 0.1.250 — 2026-10-13
+
+- The bulk upload window and the review window before a rewrite no longer close when you click outside them or press Escape. They close from the new x in the corner, or Cancel, so a stray click cannot throw away the measurements you typed.
+- You can rotate photos in both windows: hover a photo and use the arrow in its corner, or click it to enlarge and rotate left or right there.
+- You can remove a photo in both windows from the x in its corner. A listing always keeps its last photo.
+
+## 0.1.249 — 2026-10-13
+
+- A plain size like 28 now goes to Depop as 28, not 28". The inches option is only picked when the listing's size says inches (28", 28 in.), or when the marketplace has no plain 28 to pick.
+
+## 0.1.248 — 2026-10-13
+
+- Mercari gets the right waist size on jeans. A size 26 was landing on Mercari as 36 in.; it now lands on 26 in.
+
+## 0.1.247 — 2026-10-13
+
+- Depop no longer gets a made-up size when it does not offer the listing's size. A juniors 15 was landing on Depop as a 24" waist. Studio now leaves Depop's size for you to pick and tells you it could not match it.
+
+## 0.1.246 — 2026-10-13
+
+- Depop gets the size the listing says. A size 14 was landing on Depop as a 12 (and a 12 as a 10, an 8 as a 6, and so on) because Depop numbers its sizes behind the scenes and Studio was reading the listing's size as that number instead of as the size shown in the dropdown.
+
+## 0.1.245 — 2026-10-13
+
+- Send to Vendoo no longer fails with "Read draft version returned 404" when Vendoo takes a moment to save a new draft. Studio now waits for the draft to appear, and if it still has not, says so and picks up the same draft on the next Send instead of making a second one.
+- When a linked Vendoo draft is gone, the error now says that in plain words instead of showing a database path.
+
+## 0.1.244 — 2026-10-13
+
+- A regenerated listing is no longer replaced by the old Vendoo copy the next time Studio checks Vendoo. This was putting back the old condition (Poshmark showed Like New, Depop Used - Excellent), the old brand and description, and dropping fields the regenerate had filled, like Facebook's Shorts Length.
+- Facebook now has Allow Offers turned on, with the Minimum price set to half the price.
+
+## 0.1.243 — 2026-10-13
+
+- Photos can be rotated. Hover a photo and click ↻ to turn it right, or open it and use ↺ / ↻. The saved photo itself turns, so Vendoo, the marketplaces and listing generation all get it the right way up.
+
+## 0.1.242 — 2026-10-12
+
+- Analytics ranges now read as This week, This month, This year, Last 7, 30 and 90 days, Last 12 months and All time, and a new Custom range lets you pick any From and To dates. Ad spend follows the custom dates too.
+
+## 0.1.241 — 2026-10-12
+
+- Marketing's profit-after-ads card now says what it is: your profit across every marketplace, less your ad spend, with both figures shown. Each marketplace's ad card also shows that marketplace's own profit after its ads.
+
+## 0.1.240 — 2026-10-12
+
+- Analytics can now show sales for the week to date (from Monday), month to date and year to date, alongside the rolling 7, 30 and 90 day views.
+
+## 0.1.239 — 2026-10-12
+
+- Marketing → Ads can take Etsy's stats CSV: download it from Etsy Ads and press Upload Etsy Ads CSV instead of typing the figures. Each day with activity becomes an entry, and uploading a newer export replaces those days.
+
+## 0.1.238 — 2026-10-11
+
+- Sourcing now sets itself up from your sales. Your cost per sold piece (what shipping out your pieces really costs you) and how long you sell for (how long your pieces take to sell) follow your own history, next to your sell-through and fees, so you can open Sourcing and see recommended boxes without touching a setting. Type your own number in More options to take one over.
+- The "Most to pay per piece" limit is gone. Sourcing no longer leaves boxes out for costing more per piece than a number you set; the return target and the lower-sales test still decide.
 
 ## 0.1.237 — 2026-10-11
 

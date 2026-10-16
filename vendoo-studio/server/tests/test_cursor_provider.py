@@ -7,7 +7,7 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from vendoo_studio.services import live_trace
 from vendoo_studio.providers.cursor_agent import (
@@ -136,6 +136,38 @@ class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("".join(chunks), "Hello world")
         fake_agent.send.assert_called_once()
 
+    async def test_failed_photo_run_reports_cursors_reason(self):
+        provider = CursorProvider(api_key="cursor_test")
+
+        class FakeRun:
+            id = "run-9be6"
+
+            def stream(self):
+                yield SimpleNamespace(type="status", status="running", message="")
+                yield SimpleNamespace(type="status", status="error", message="Usage limit reached")
+
+            def wait(self):
+                return MagicMock(status="error", result="", id=self.id)
+
+        fake_agent = MagicMock()
+        fake_agent.send = MagicMock(return_value=FakeRun())
+        fake_agent.__enter__ = MagicMock(return_value=fake_agent)
+        fake_agent.__exit__ = MagicMock(return_value=None)
+        fake_client = MagicMock()
+        fake_client.agents.create = MagicMock(return_value=fake_agent)
+        fake_client.__enter__ = MagicMock(return_value=fake_client)
+        fake_client.__exit__ = MagicMock(return_value=None)
+
+        with (
+            patch("cursor_sdk.Client.launch_bridge", return_value=fake_client),
+            patch("vendoo_studio.providers.cursor_agent.listing_scratch_dir") as scratch,
+            patch("vendoo_studio.providers.cursor_agent.encode_images", AsyncMock(return_value=[])),
+        ):
+            scratch.return_value = MagicMock(__str__=lambda self: "/tmp/cursor-scratch")
+            result = await provider.analyze_photos(["/tmp/photo.jpg"])
+
+        self.assertEqual(result["error"], "Cursor run failed: Usage limit reached")
+
     async def test_web_search_allows_only_web_tools_and_streams_its_thinking(self):
         provider = CursorProvider(api_key="cursor_test")
         answer = '{"comps":[{"title":"Nike Tee","price":20,"url":"https://www.ebay.com/itm/1"}]}'
@@ -221,6 +253,9 @@ class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
             id = "run-stalled"
             cancel = MagicMock()
 
+            def stream(self):
+                return iter(())
+
             def wait(self):
                 # Blocks like the SDK does until the bridge goes away.
                 closed.wait(5)
@@ -258,6 +293,9 @@ class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
         class WedgedRun:
             id = "run-wedged"
             cancel = MagicMock()
+
+            def stream(self):
+                return iter(())
 
             def wait(self):
                 # The SDK stays blocked after its answer even once cancelled and closed.
@@ -373,6 +411,34 @@ class ListingProviderCursorTest(unittest.TestCase):
             self.assertIsInstance(provider, CursorProvider)
             self.assertTrue(listing_provider.provider_is_configured())
 
+
+    def _provider_with_only_cursor_key(self, order):
+        from vendoo_studio.services import listing_provider
+
+        with (
+            patch(
+                "vendoo_studio.services.listing_provider.get_listing_provider_order",
+                return_value=order,
+            ),
+            patch("vendoo_studio.services.listing_provider.chatgpt_signed_in", return_value=False),
+            patch("vendoo_studio.services.listing_provider.claude_signed_in", return_value=False),
+            patch("vendoo_studio.services.listing_provider.get_api_key", return_value=None),
+            patch(
+                "vendoo_studio.services.listing_provider.get_cursor_api_key",
+                return_value="cursor_test",
+            ),
+        ):
+            return listing_provider.get_listing_provider()
+
+    def test_uses_cursor_when_it_is_the_only_provider_set_up(self):
+        from vendoo_studio.providers.cursor_agent import CursorProvider
+
+        # The default order, untouched after only a Cursor key was added.
+        provider = self._provider_with_only_cursor_key(("chatgpt", "mimo"))
+        self.assertIsInstance(provider, CursorProvider)
+
+    def test_fallback_none_does_not_reach_for_other_providers(self):
+        self.assertIsNone(self._provider_with_only_cursor_key(("chatgpt", "none")))
 
 class CursorSettingsRouteTest(unittest.TestCase):
     def test_put_and_get_cursor_key(self):

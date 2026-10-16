@@ -16,12 +16,11 @@ from vendoo_studio.repositories.queries import (
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.services import boxes
 from vendoo_studio.services.listing_delete import ListingBusy, delete_listing, wipe_contents
-from vendoo_studio.services.photos import delete_thumbnails
+from vendoo_studio.services.photos import cover_thumb_url, delete_thumbnails, photo_url
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 # Sidebar thumbnails render at 40px, so 96px covers high-DPI screens.
-COVER_THUMB_SIZE = 96
 
 
 class ConversationCreate(BaseModel):
@@ -122,7 +121,7 @@ def create_conversation(body: ConversationCreate, db: Session = Depends(get_db))
 def list_conversations(db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
     repo.reconcile_job_statuses()
-    covers = repo.cover_photo_ids()
+    covers = repo.cover_photos()
     facets = repo.listing_facets()
     revisions = repo.current_revision_ids()
     conversations = repo.list_all()
@@ -546,8 +545,8 @@ def _iso(value) -> str | None:
     return value.isoformat() if value else None
 
 
-def _cover_photo_url(photo_id: str | None) -> str | None:
-    return f"/api/photos/{photo_id}/thumb?size={COVER_THUMB_SIZE}" if photo_id else None
+def _cover_photo_url(cover: tuple[str, str | None] | None) -> str | None:
+    return cover_thumb_url(*cover) if cover else None
 
 
 def _extras(
@@ -572,11 +571,20 @@ def _extras_for(db: Session, conv_id: str) -> dict:
     revision_id = repo.current_revision_id(conv_id)
     unsent = _unsent_edits(db, [conv] if conv else [], {conv_id: revision_id} if revision_id else {})
     return _extras(
-        _cover_photo_url(repo.cover_photo_id(conv_id)),
+        _cover_photo_url(repo.cover_photo(conv_id)),
         repo.listing_facet(conv_id),
         revision_id,
         conv_id in unsent,
     )
+
+
+# Revisions are never rewritten, so whether two of them hold the same listing
+# is settled the first time it is asked. Normalizing both sides costs about a
+# millisecond per listing, and the sidebar polls the whole inventory: answered
+# fresh every time, it held the GIL for over a second per poll and stalled
+# every other request behind it.
+_REVISIONS_MATCH: dict[tuple[str, str], bool] = {}
+_REVISIONS_MATCH_MAX = 20_000
 
 
 def _unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -> set[str]:
@@ -598,11 +606,14 @@ def _unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -
         synced = str(parse_notes(conv.notes).get(SYNCED_REVISION) or "")
         if current and synced and current != synced:
             pairs[conv.id] = (current, synced)
-    bodies = ListingRepo(db).revision_bodies({rev for pair in pairs.values() for rev in pair})
-    return {
-        conv_id for conv_id, (current, synced) in pairs.items()
-        if not listings_match(bodies.get(current), bodies.get(synced))
-    }
+    unknown = {pair for pair in pairs.values() if pair not in _REVISIONS_MATCH}
+    if unknown:
+        bodies = ListingRepo(db).revision_bodies({rev for pair in unknown for rev in pair})
+        if len(_REVISIONS_MATCH) + len(unknown) > _REVISIONS_MATCH_MAX:
+            _REVISIONS_MATCH.clear()
+        for current, synced in unknown:
+            _REVISIONS_MATCH[(current, synced)] = listings_match(bodies.get(current), bodies.get(synced))
+    return {conv_id for conv_id, pair in pairs.items() if not _REVISIONS_MATCH[pair]}
 
 
 def _relist_pending(notes: dict) -> list[str]:
@@ -697,5 +708,5 @@ def _photo_response(photo) -> PhotoResponse:
         width=photo.width,
         height=photo.height,
         created_at=photo.created_at.isoformat() if photo.created_at else "",
-        url=f"/api/photos/{photo.id}",
+        url=photo_url(photo.id, photo.checksum),
     )

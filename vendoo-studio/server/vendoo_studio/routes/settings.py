@@ -947,9 +947,34 @@ def get_vendoo_api_logs():
     return {"entries": list_entries()}
 
 
+@router.get("/vendoo-api-logs/{entry_id}")
+def get_vendoo_api_log(entry_id: int):
+    from vendoo_studio.services.vendoo_api_log import get_entry
+
+    entry = get_entry(entry_id)
+    if entry is None:
+        raise HTTPException(404, "That request is no longer in the log")
+    return entry
+
+
 @router.delete("/vendoo-api-logs")
 def delete_vendoo_api_logs():
     from vendoo_studio.services.vendoo_api_log import clear
+
+    clear()
+    return {"ok": True}
+
+
+@router.get("/error-logs")
+def get_error_logs():
+    from vendoo_studio.services.error_log import list_entries
+
+    return {"entries": list_entries()}
+
+
+@router.delete("/error-logs")
+def delete_error_logs():
+    from vendoo_studio.services.error_log import clear
 
     clear()
     return {"ok": True}

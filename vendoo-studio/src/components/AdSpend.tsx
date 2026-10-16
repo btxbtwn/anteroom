@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { AdMarketplace, AdMarketplaceTotals, AdSpendEntry, AdSpendInput } from "../api/adSpend";
@@ -34,6 +34,8 @@ export function AdSpend() {
   ]);
   const remove = useMutation({ mutationFn: api.adSpend.remove, onSuccess: refresh });
   const [editing, setEditing] = useState<AdSpendEntry | "new" | null>(null);
+  const csvInput = useRef<HTMLInputElement>(null);
+  const uploadCsv = useMutation({ mutationFn: api.adSpend.uploadEtsyCsv, onSuccess: refresh });
 
   const onRemove = async (entry: AdSpendEntry) => {
     const ok = await confirmDialog(
@@ -47,12 +49,44 @@ export function AdSpend() {
     <section className="analytics-section ad-spend" aria-label="Ads">
       <div className="analytics-title-row">
         <h2 className="analytics-section-title">Ads</h2>
-        {editing == null ? <button type="button" className="pr-pill" onClick={() => setEditing("new")}>Add ad spend</button> : null}
+        {editing == null ? (
+          <span className="ad-spend-actions">
+            <button type="button" className="pr-pill" disabled={uploadCsv.isPending} onClick={() => csvInput.current?.click()}>
+              {uploadCsv.isPending ? "Importing…" : "Upload Etsy Ads CSV"}
+            </button>
+            <button type="button" className="pr-pill" onClick={() => setEditing("new")}>Add ad spend</button>
+          </span>
+        ) : null}
+        <input
+          ref={csvInput}
+          type="file"
+          accept=".csv,text/csv"
+          hidden
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) uploadCsv.mutate(file);
+          }}
+        />
       </div>
       <p className="analytics-note">
         Poshmark Promoted Closet and Etsy Ads don't share their numbers with Vendoo. Copy what each dashboard shows
         for a week or a month: the spend, and if you like the clicks, orders, and sales it credits to the ads.
       </p>
+      <p className="analytics-note">
+        For Etsy Ads, download the stats CSV from Etsy and upload it instead of typing it in. Each day with activity
+        becomes an entry, and uploading a newer export replaces those days.
+      </p>
+      {uploadCsv.isSuccess ? (
+        <p className="analytics-note" role="status">
+          Imported {uploadCsv.data.days} {uploadCsv.data.days === 1 ? "day" : "days"} of Etsy Ads,{" "}
+          {formatMoney(uploadCsv.data.spend)} spent, {formatDay(uploadCsv.data.start)}–{formatDay(uploadCsv.data.end)}.
+          {uploadCsv.data.overlapping_entries > 0
+            ? ` ${uploadCsv.data.overlapping_entries === 1 ? "An Etsy entry you typed covers" : `${uploadCsv.data.overlapping_entries} Etsy entries you typed cover`} some of these days; remove ${uploadCsv.data.overlapping_entries === 1 ? "it" : "them"} so the spend is not counted twice.`
+            : ""}
+        </p>
+      ) : null}
+      {uploadCsv.isError ? <p className="ad-spend-error" role="alert">{uploadCsv.error.message}</p> : null}
       {editing != null ? (
         <AdSpendForm
           key={editing === "new" ? "new" : editing.id}
@@ -82,10 +116,12 @@ export function AdSpend() {
         <div className="analytics-stats">
           <Stat label="Ad spend" value={formatMoney(ads.spend)} hint="Spread evenly over the days each entry covers" />
           <Stat
-            label="Profit after ads"
+            label="Business profit after ads"
             value={ads.profit_after_ads == null ? "—" : formatMoney(ads.profit_after_ads)}
             negative={ads.profit_after_ads != null && ads.profit_after_ads < 0}
-            hint={ads.profit_after_ads == null ? "Record sale prices and costs to see profit" : "Profit on sales with recorded cost, less all ad spend"}
+            hint={ads.profit == null || ads.profit_after_ads == null
+              ? "Record sale prices and costs to see profit"
+              : `${formatMoney(ads.profit)} profit on every marketplace, less ${formatMoney(ads.spend)} of ads`}
           />
           {ads.marketplaces.map((market) => <MarketStat key={market.id} market={market} />)}
         </div>
@@ -125,6 +161,9 @@ function MarketStat({ market }: { market: AdMarketplaceTotals }) {
     market.spend_percent != null
       ? `${market.spend_percent}% of ${formatMoney(market.sales_revenue)} ${marketplaceName(market.id)} sales`
       : `No ${marketplaceName(market.id)} sales recorded`,
+    market.profit_after_ads != null
+      ? `${formatMoney(market.profit_after_ads)} ${marketplaceName(market.id)} profit after ads`
+      : null,
   ];
   return (
     <Stat
@@ -209,9 +248,14 @@ function entryFigures(entry: AdSpendEntry): string {
   ].filter(Boolean).join(" · ");
 }
 
+function formatDay(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
 function formatRange(entry: Pick<AdSpendEntry, "start_date" | "end_date">): string {
-  const day = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-  return entry.start_date === entry.end_date ? day(entry.start_date) : `${day(entry.start_date)} – ${day(entry.end_date)}`;
+  return entry.start_date === entry.end_date
+    ? formatDay(entry.start_date)
+    : `${formatDay(entry.start_date)} – ${formatDay(entry.end_date)}`;
 }
 
 function optional(value: number | null | undefined): string {

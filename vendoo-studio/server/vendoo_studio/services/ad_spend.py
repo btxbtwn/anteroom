@@ -75,19 +75,26 @@ def summarize_ads(
     entries: list[AdSpend],
     *,
     start: datetime | None,
+    end: datetime | None = None,
     marketplace_revenue: dict[str, float],
+    marketplace_profit: dict[str, float | None],
     profit: float | None,
 ) -> dict[str, Any]:
     """Ad totals for the range beginning ``start`` (None for all time).
 
+    ``end`` closes a custom range; otherwise the range runs to the present.
+
     ``marketplace_revenue`` is each marketplace's recorded sales revenue in the
     same range, so spend can be read as a share of everything that sold there,
-    not only the sales the dashboard credits to the ads.
+    not only the sales the dashboard credits to the ads. ``marketplace_profit``
+    is the same per marketplace (None where no sale there has a cost recorded),
+    and ``profit`` the total across every marketplace, ads or not.
     """
     first = start.date() if start is not None else None
+    last = end.date() if end is not None else None
     totals = {market: _empty() for market in AD_MARKETPLACES}
     for row in entries:
-        share = _share(row.start_date, row.end_date, first)
+        share = _share(row.start_date, row.end_date, first, last)
         if share <= 0:
             continue
         bucket = totals.setdefault(row.marketplace, _empty())
@@ -98,33 +105,38 @@ def summarize_ads(
             if value is not None:
                 bucket[key] = (bucket[key] or 0.0) + value * share
     markets = [
-        _market_view(market, bucket, marketplace_revenue.get(market, 0.0))
+        _market_view(
+            market, bucket, marketplace_revenue.get(market, 0.0), marketplace_profit.get(market),
+        )
         for market, bucket in totals.items()
         if bucket["entries"]
     ]
     spend = sum(market["spend"] for market in markets)
     return {
         "spend": _money(spend),
+        "profit": _money(profit) if profit is not None else None,
         "profit_after_ads": _money(profit - spend) if profit is not None else None,
         "marketplaces": markets,
     }
 
 
-def _share(first_day: date, last_day: date, window_start: date | None) -> float:
-    """The part of an entry's days that fall on or after ``window_start``."""
+def _share(
+    first_day: date, last_day: date, window_start: date | None, window_end: date | None = None,
+) -> float:
+    """The part of an entry's days that fall inside the window."""
     days = (last_day - first_day).days + 1
-    if window_start is None or first_day >= window_start:
-        return 1.0
-    if last_day < window_start:
-        return 0.0
-    return ((last_day - window_start).days + 1) / days
+    inside_start = max(first_day, window_start) if window_start is not None else first_day
+    inside_end = min(last_day, window_end) if window_end is not None else last_day
+    return max((inside_end - inside_start).days + 1, 0) / days
 
 
 def _empty() -> dict[str, Any]:
     return {"entries": 0, "spend": 0.0, "clicks": None, "orders": None, "revenue": None}
 
 
-def _market_view(market: str, bucket: dict[str, Any], sales_revenue: float) -> dict[str, Any]:
+def _market_view(
+    market: str, bucket: dict[str, Any], sales_revenue: float, profit: float | None,
+) -> dict[str, Any]:
     spend = bucket["spend"]
     return {
         "id": market,
@@ -137,6 +149,8 @@ def _market_view(market: str, bucket: dict[str, Any], sales_revenue: float) -> d
         "cost_per_click": _ratio(spend, bucket["clicks"]),
         "sales_revenue": _money(sales_revenue),
         "spend_percent": round(spend / sales_revenue * 100, 1) if sales_revenue else None,
+        "profit": _money(profit) if profit is not None else None,
+        "profit_after_ads": _money(profit - spend) if profit is not None else None,
     }
 
 

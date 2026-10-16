@@ -88,7 +88,33 @@
 }
 
 .analytics-header .pr-pills {
+  flex-wrap: wrap;
   margin-top: 14px;
+}
+
+.analytics-custom-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.analytics-custom-range label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.analytics-custom-range input {
+  padding: 4px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
 }
 
 .analytics-section-title {

@@ -29,6 +29,7 @@ import { marketplacesNeedingRelist, relistStage } from "./relistStatus";
 import { marketplaceName } from "./marketplaceNames";
 import type { BulkRegenerate, BulkRegenerateRun } from "./useBulkRegenerate";
 import { BulkRegeneratePriceDialog } from "./BulkRegeneratePriceDialog";
+import { BulkPriceDropDialog } from "./BulkPriceDropDialog";
 import { RegenerateReviewDialog } from "./RegenerateReviewDialog";
 import { stopTitlebarDrag } from "./WorkspaceTopbar";
 import type { WorkspaceView } from "./workspaceCrumbs";
@@ -43,6 +44,7 @@ import {
   marketplaceCounts,
   marketplaceOptions,
   notListedCount,
+  notListedOnCounts,
   needsRelistCount,
   unsentCount,
   staleCounts,
@@ -343,6 +345,15 @@ function SettingsSectionIcon({ section }: { section: SettingsSectionId }) {
       </svg>
     );
   }
+  if (section === "help") {
+    return (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.75" />
+        <path d="M9.6 9.3a2.5 2.5 0 0 1 4.85.85c0 1.65-2.45 2.2-2.45 3.6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="12" cy="17" r="1" fill="currentColor" />
+      </svg>
+    );
+  }
   if (section === "logs") {
     return (
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -394,6 +405,7 @@ export function ListingSidebar({
     { rows: BulkRegenerateListing[]; drops?: ReadonlyMap<string, BulkPriceDrop> } | null
   >(null);
   const [pickedIds, setPickedIds] = useState<Set<string>>(() => new Set());
+  const [markdownIds, setMarkdownIds] = useState<string[] | null>(null);
   const settingsSearchRef = useRef<HTMLInputElement>(null);
   const selectionAnchor = useRef<string | null>(null);
   const migratedSettledRef = useRef(false);
@@ -504,14 +516,14 @@ export function ListingSidebar({
   useEffect(() => {
     if (!selecting || bulk.running) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt) return;
+      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds) return;
       setSelecting(false);
       setPickedIds(new Set());
       selectionAnchor.current = null;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, bulk.running, pricePrompt, reviewPrompt]);
+  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds]);
 
   const exitSelecting = useCallback(() => {
     setSelecting(false);
@@ -613,17 +625,21 @@ export function ListingSidebar({
     () => searched.filter((listing) => inStatusTab(listing, filters.status)),
     [searched, filters.status],
   );
-  const filterMarketplaceCounts = useMemo(() => marketplaceCounts(facetSource), [facetSource]);
+  const filterMarketplaces = useMemo(
+    () => marketplaceOptions(conversations || [], marketplaceSettings?.selected || [], filters.notListed),
+    [conversations, marketplaceSettings, filters.notListed],
+  );
+  // Under "Not listed" a marketplace row keeps what is missing from it.
+  const filterMarketplaceCounts = useMemo(
+    () => (filters.notListed ? notListedOnCounts(facetSource, filterMarketplaces) : marketplaceCounts(facetSource)),
+    [facetSource, filterMarketplaces, filters.notListed],
+  );
   const filterLabelCounts = useMemo(() => labelCounts(facetSource), [facetSource]);
   const filterNotListedCount = useMemo(() => notListedCount(facetSource), [facetSource]);
   const filterStaleCounts = useMemo(() => staleCounts(facetSource), [facetSource]);
   const filterRelistCount = useMemo(() => needsRelistCount(facetSource), [facetSource]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
   const labels = useMemo(() => labelOptions(conversations || []), [conversations]);
-  const filterMarketplaces = useMemo(
-    () => marketplaceOptions(conversations || [], marketplaceSettings?.selected || []),
-    [conversations, marketplaceSettings],
-  );
   // Cached Vendoo statuses for every rendered thread, so rows can badge where
   // they're listed without hovering. Reads the server cache only.
   const renderedJobIds = useMemo(
@@ -1028,6 +1044,15 @@ export function ListingSidebar({
             </button>
             <button
               type="button"
+              className="btn btn-outline btn-sm"
+              title="Review a lower price for each selected listing. Saves in Studio only; nothing is sent to Vendoo."
+              disabled={bulk.running || selectedIds.size === 0}
+              onClick={() => setMarkdownIds(eligibleIds.filter((id) => selectedIds.has(id)))}
+            >
+              Mark down
+            </button>
+            <button
+              type="button"
               className="btn btn-ghost btn-sm"
               disabled={Boolean(bulk.run?.cancelRequested)}
               onClick={() => {
@@ -1131,6 +1156,15 @@ export function ListingSidebar({
             const rows = pricePrompt;
             setPricePrompt(null);
             setReviewPrompt({ rows, drops });
+          }}
+        />
+      ) : null}
+      {markdownIds ? (
+        <BulkPriceDropDialog
+          conversationIds={markdownIds}
+          onClose={() => {
+            setMarkdownIds(null);
+            exitSelecting();
           }}
         />
       ) : null}

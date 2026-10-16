@@ -100,6 +100,17 @@ class SyncStateTest(unittest.TestCase):
         state = sync_state(self.db, self.conv.id, self.item(2000, title="Old", listed=True))
         self.assertEqual(state["action"], "label")
 
+    def test_regenerate_survives_a_stamp_with_nothing_left_to_compare(self):
+        """An imported listing synced before fingerprints, then regenerated.
+
+        Regenerate wipes the synced revision; Vendoo's stamp moved since only
+        because the item was listed somewhere.
+        """
+        self.note(**{SYNCED_AT: "1000", SYNCED_REVISION: "wiped-by-regenerate"})
+        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Regenerated"}, source="model")
+        state = sync_state(self.db, self.conv.id, self.item(2000, title="Old", listed=True))
+        self.assertEqual(state["action"], "label")
+
     def test_studio_moving_alone_does_not_pull(self):
         self.level_with(2000)
         ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
