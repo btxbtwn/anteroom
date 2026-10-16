@@ -676,6 +676,11 @@ export interface SourcingCart {
   lots: SourcingLot[];
 }
 
+/** One of a supplier's best boxes judged on its own: whether it passes every check, or the first it fails. */
+export interface SourcingPick extends SourcingLot {
+  check: "qualifies" | "return_target" | "downside" | "needs_research" | "budget";
+}
+
 export interface SourcingBuyList {
   budget: number;
   total: number;
@@ -721,6 +726,8 @@ export interface SourcingSnapshot {
   assumptions: { market_haircut?: { factor: number; themes: number } | null; sell_through: number; sell_through_measured: { rate: number; sales: number } | null; fees: number; fees_measured: { rate: number; sales: number } | null; grade_yield: Record<string, number>; cost_per_piece: number; cost_per_piece_measured: { value: number; sales: number } | null; selling_window_measured: { value: number; sales: number } | null };
   buy_list: SourcingBuyList;
   store_buy_lists: Record<string, SourcingBuyList>;
+  /** Each supplier's five best boxes on every check, however few qualify. */
+  store_picks: Record<string, SourcingPick[]>;
   lots: SourcingLot[];
   calibration: Record<string, { factor: number | null; sales: number; needed: number }>;
   seasonality: SourcingSeasonality;

@@ -1,7 +1,8 @@
 """Keep a buy list of wholesale clothing boxes ready without anyone asking for it.
 
-Every few hours Studio crawls Raghouse and Thrift Vintage Fashion and picks
-qualifying boxes within the seller's budget. Once a week it refreshes the trending
+Every few hours Studio crawls Raghouse, Thrift Vintage Fashion and PaperCrane,
+picks qualifying boxes within the seller's budget and keeps each supplier's five
+best boxes. Once a week it refreshes the trending
 words with the listing model's web search, and the comparable sales from the
 seller's own sales first, then eBay's and Poshmark's sold listings. The crawl, scoring and buy list live in the box-scout
 skill's script, loaded from the skills directory, so Studio and the skill agree.
@@ -56,7 +57,8 @@ HAIRCUT_RANGE = (0.25, 1.0)
 # Bump when the snapshot's shape changes: a snapshot written by another build is
 # a stale cache, dropped and rebuilt rather than served to a page that cannot
 # read it.
-SNAPSHOT_FORMAT = 4
+SNAPSHOT_FORMAT = 5
+TOP_PICKS = 5  # boxes shown per supplier on every check, however few qualify
 
 DEFAULT_PREFS = {
     "budget": 300.0, "min_roi": 1.0, "raghouse_vip": False, "zip": "70115", "recent_zips": ["70115"],
@@ -492,13 +494,13 @@ def measured_sell_through(rows: list[AnalyticsItem], now: datetime) -> dict | No
 
 
 def measured_cost_per_piece(sales: list[AnalyticsItem], now: datetime) -> dict | None:
-    """What the seller's recent sales cost to ship out per piece, never below the
-    default allowance for supplies and packing."""
+    """What the seller's recent sales cost to ship out per piece, after what buyers
+    paid toward shipping, never below the default allowance for supplies and packing."""
     recent = [item for item in sales if item.sold_at is not None
               and (item.sold_at if item.sold_at.tzinfo else item.sold_at.replace(tzinfo=UTC)) >= now - MEASURED_WINDOW]
     if len(recent) < MEASURED_MIN_SALES:
         return None
-    shipping = sum(item.shipping_cost for item in recent) / len(recent)
+    shipping = sum(max(0.0, item.shipping_cost - item.shipping_credit) for item in recent) / len(recent)
     return {"value": round(max(DEFAULT_PREFS["cost_per_piece"], shipping), 2), "sales": len(recent)}
 
 
@@ -565,15 +567,16 @@ def theme_sell_through(inventory: dict[str, dict[str, int]], overall: float) -> 
     return rates
 
 
-def theme_capacity(rows: list[AnalyticsItem], inventory: dict[str, dict[str, int]], now: datetime) -> dict[str, float] | None:
-    """Planned sales a theme can take on: the seller's monthly pace over the last
-    90 days, less the pieces of that kind they already hold. None without enough
-    history to know a pace."""
+def theme_capacity(rows: list[AnalyticsItem], inventory: dict[str, dict[str, int]], now: datetime,
+                   weeks: int) -> dict[str, float] | None:
+    """Planned sales a theme can take on: what the seller sells over a selling
+    window of `weeks` at their pace of the last 90 days, less the pieces of that
+    kind they already hold. None without enough history to know a pace."""
     recent = [item for item in rows if item.status == "sold" and item.sold_at is not None
               and (item.sold_at if item.sold_at.tzinfo else item.sold_at.replace(tzinfo=UTC)) >= now - timedelta(days=90)]
     if len(recent) < MEASURED_MIN_SALES // 2:
         return None
-    pace = max(CAPACITY_MIN, round(len(recent) / 3))
+    pace = max(CAPACITY_MIN, round(len(recent) / 90 * 7 * weeks))
     return {name: max(0, pace - counts["active"]) for name, counts in inventory.items()}
 
 
@@ -752,7 +755,7 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
     own = own_evidence(sales, themes)
     inventory = theme_inventory(own_rows, themes, now)
     own_rates = theme_sell_through(inventory, prefs["sell_through"]) if prefs["sell_through_auto"] else {}
-    capacity = theme_capacity(own_rows, inventory, now)
+    capacity = theme_capacity(own_rows, inventory, now, prefs["selling_window_weeks"])
     state["all_sales_price"] = all_sales_price(sales, now)
 
     def price_boxes():
@@ -791,6 +794,7 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
         store: s.buy_list([r for r in rows if r["store"] == store], cfg, **planning)
         for store in s.STORES
     }
+    store_picks = s.top_picks(rows, budget=prefs["budget"], min_roi=prefs["min_roi"], count=TOP_PICKS)
     vip_upside = None
     if not prefs["raghouse_vip"]:
         # What the members-only Raghouse boxes would add to this same list.
@@ -800,8 +804,8 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
             "extra_profit": round(vip_plan["expected_profit"] - plan["expected_profit"], 2),
             "monthly_fee": RAGHOUSE_VIP_MONTHLY,
         }
-    for lot in [*rows, *(p for choice in [plan, *store_plans.values()]
-                          for c in choice["carts"] for p in c["lots"])]:
+    for lot in [*rows, *(p for choice in [plan, *store_plans.values()] for c in choice["carts"] for p in c["lots"]),
+                *(p for picks in store_picks.values() for p in picks)]:
         # The examples themselves are served by `evidence` when the seller opens them.
         entry = fresh.get(lot["theme"], {})
         lot["comps_count"] = len(entry.get("comps", []))
@@ -836,6 +840,7 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
                         "grade_yield": s.GRADE_YIELD, "cost_per_piece": prefs["cost_per_piece"]},
         "buy_list": plan,
         "store_buy_lists": store_plans,
+        "store_picks": store_picks,
         "lots": rows,
         "calibration": calibration,
         "seasonality": context,

@@ -74,6 +74,11 @@ class SourcingLot(BaseModel):
     downside_profit: float | None
 
 
+class SourcingPick(SourcingLot):
+    # "qualifies", or the first check the box fails when bought on its own.
+    check: str
+
+
 class SourcingEvidence(BaseModel):
     theme: str
     per_piece: float
@@ -222,6 +227,7 @@ class SourcingSnapshot(BaseModel):
     assumptions: SourcingAssumptions
     buy_list: SourcingBuyList
     store_buy_lists: dict[str, SourcingBuyList]
+    store_picks: dict[str, list[SourcingPick]]
     lots: list[SourcingLot]
     calibration: dict[str, SourcingCalibration] = {}
     seasonality: SourcingSeasonality

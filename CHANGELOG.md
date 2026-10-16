@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.273 — 2026-10-16
+
+- Sourcing now shows each supplier's five best boxes on every check, even when few pass. Boxes that pass every check come first, then the closest misses, and each one says what it falls short on.
+- Thrift Vintage Fashion boxes that earn free shipping keep the sell-through they were picked with. Before, the buy list could show them below your return target.
+- Your measured cost per piece no longer counts shipping your buyers paid for, and more than one box of a kind is allowed when your selling window is long enough to sell them.
+
 ## 0.1.272 — 2026-10-16
 
 - Behind the scenes, the part of Studio that builds your Vendoo drafts is reorganized so it is easier to fix and extend. Drafts are saved exactly as before.

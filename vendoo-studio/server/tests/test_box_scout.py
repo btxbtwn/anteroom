@@ -232,6 +232,47 @@ class ScoutScriptTest(unittest.TestCase):
         self.assertEqual(rows[0]["ship_est"], 45)  # source rows stay unchanged
 
 
+    def test_free_shipping_keeps_each_boxs_own_sell_through(self):
+        # Two $110 TVF boxes clear the $200 free-shipping line together. Each was
+        # picked on its theme's 90% sell-through; the cart must not reprice them at
+        # the 30% overall rate, which would put them under the return target.
+        rows = [self.s.price_lot({"store": "tvf", "variant_id": i, "theme": f"theme-{i}", "price": 110, "pcs": 40,
+                                  "usable_pcs": 36.0, "demand": 1, "trend_hits": [], "vip": False, "resale_low": 20,
+                                  "theme_sell_through": 0.9}, 30, 20, sell_through=0.9) for i in range(2)]
+        plan = self.s.buy_list(rows, self.cfg, budget=400, min_roi=0.5, sell_through=0.3)
+        cart = plan["carts"][0]
+        self.assertTrue(cart["free_shipping"])
+        self.assertEqual([lot["sell_through"] for lot in cart["lots"]], [0.9, 0.9])
+        self.assertTrue(all(lot["roi"] >= 0.5 and lot["ship_est"] == 0 for lot in cart["lots"]))
+        self.assertEqual(plan["expected_profit"], round(sum(lot["expected_profit"] for lot in cart["lots"]), 2))
+
+    def test_top_picks_give_each_store_its_best_boxes_whether_or_not_they_qualify(self):
+        def box(vid, theme, price, resale, store="raghouse"):
+            row = {"store": store, "variant_id": vid, "theme": theme, "price": price, "pcs": 40, "usable_pcs": 36.0,
+                   "demand": 1, "trend_hits": [], "vip": False, "resale_low": resale}
+            return self.s.price_lot(row, 20, resale)
+
+        rows = [
+            box(1, "dresses", 60, 20), box(2, "dresses", 50, 20), box(3, "t-shirts", 60, 20),
+            box(4, "jackets", 60, 6),  # priced, but under the return target
+            box(5, "skirts", 60, None),  # no sold evidence
+            box(6, "hoodies", 900, 40),  # over the budget
+            box(7, "tops", 60, 20, store="tvf"),
+        ]
+        rows.sort(key=lambda r: (r["roi"] is None, -(r["roi"] or 0)))
+        picks = self.s.top_picks(rows, budget=300, min_roi=1.0)
+        self.assertEqual(set(picks), set(self.s.STORES))
+        raghouse = picks["raghouse"]
+        self.assertEqual(len(raghouse), 5)
+        # Passing boxes first, one per kind before a kind repeats, then the closest misses.
+        self.assertEqual([(p["variant_id"], p["check"]) for p in raghouse],
+                         [(2, "qualifies"), (3, "qualifies"), (1, "qualifies"), (4, "return_target"),
+                          (5, "needs_research")])
+        self.assertEqual([p["variant_id"] for p in picks["tvf"]], [7])
+        self.assertEqual(picks["papercrane"], [])
+        self.assertNotIn("check", rows[0])  # the ranked rows are left as they were
+        self.assertEqual(len(self.s.top_picks(rows, budget=1000, min_roi=1.0, count=6)["raghouse"]), 6)
+
     def test_wholesale_demand_cannot_inflate_resale_sales(self):
         base = next(r for r in self._lots() if r["store"] == "raghouse")
         slow = self.s.price_lot({**base, "demand": 0.1}, 30, 30)
@@ -515,6 +556,13 @@ class RefreshTest(unittest.TestCase):
         with self._models(_search("ChatGPT", ['{"terms": ["cartoon"]}'])):
             snapshot = box_scout.refresh()
         self.assertEqual(set(snapshot["store_buy_lists"]), {"raghouse", "tvf", "papercrane"})
+        self.assertEqual(set(snapshot["store_picks"]), {"raghouse", "tvf", "papercrane"})
+        for store, picks in snapshot["store_picks"].items():
+            in_stock = [lot for lot in snapshot["lots"] if lot["store"] == store]
+            self.assertEqual(len(picks), min(box_scout.TOP_PICKS, len(in_stock)))
+            self.assertEqual({p["store"] for p in picks}, {store})
+            self.assertEqual(picks[0]["check"], "qualifies")
+            self.assertTrue(picks[0]["comps_count"])
         for store, plan in snapshot["store_buy_lists"].items():
             self.assertEqual(plan["budget"], 300)
             self.assertLessEqual(plan["total"], 300)
@@ -605,6 +653,9 @@ class RefreshTest(unittest.TestCase):
         self.assertIsNone(box_scout.measured_cost_per_piece(sales[:-1], now))
         self.assertIsNone(box_scout.measured_selling_window(sales[:-1], now))
         self.assertEqual(box_scout.measured_cost_per_piece(sales, now), {"value": 4.0, "sales": len(sales)})
+        # What buyers paid toward the label is not the seller's cost.
+        credited = [AnalyticsItem(**{**s.__dict__, "shipping_cost": 7.0, "shipping_credit": 4.5}) for s in sales]
+        self.assertEqual(box_scout.measured_cost_per_piece(credited, now)["value"], 2.5)
         # Free shipping never takes the allowance below the default.
         free = [AnalyticsItem(**{**s.__dict__, "shipping_cost": 0.0}) for s in sales]
         self.assertEqual(box_scout.measured_cost_per_piece(free, now)["value"], box_scout.DEFAULT_PREFS["cost_per_piece"])
@@ -647,10 +698,12 @@ class RefreshTest(unittest.TestCase):
         # (8 sold + 10 x 0.5) / (20 + 10); a theme with under 10 pieces has no rate of its own.
         self.assertEqual(rates["dresses"], round(13 / 30, 3))
         self.assertNotIn("kimonos", rates)
-        capacity = box_scout.theme_capacity(rows, inventory, now)
-        self.assertEqual(capacity["dresses"], max(0, round(38 / 3) - 12) if round(38 / 3) > 15 else 15 - 12)
-        self.assertEqual(capacity["kimonos"], max(15, round(38 / 3)))
-        self.assertIsNone(box_scout.theme_capacity(rows[:3], inventory, now))
+        # 38 sales in 90 days is about 27 over a 9-week selling window, less the 12 dresses held.
+        capacity = box_scout.theme_capacity(rows, inventory, now, 9)
+        self.assertEqual(capacity, {"dresses": 15, "t-shirts": 27, "kimonos": 27})
+        # A short window still leaves room for a box of a kind the seller does not hold.
+        self.assertEqual(box_scout.theme_capacity(rows, inventory, now, 1)["kimonos"], box_scout.CAPACITY_MIN)
+        self.assertIsNone(box_scout.theme_capacity(rows[:3], inventory, now, 4))
 
     def test_marketplace_prices_are_scaled_to_the_sellers_own_and_mixed_boxes_use_all_sales(self):
         now = datetime(2026, 10, 7, tzinfo=UTC)

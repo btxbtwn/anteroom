@@ -9,6 +9,7 @@ import {
   lotReason,
   nextUpdate,
   otherLots,
+  pickNote,
   planMetrics,
   planNeedsUpdate,
   piecesLabel,
@@ -114,7 +115,7 @@ function state(): SourcingState {
       shipping: { residential_surcharge: 6, fuel_surcharge_pct: 0.2, fuel_surcharge_as_of: "2026-10-01", factors: { raghouse: 0.5147, tvf: 1 }, calibration: {} },
       vip_upside: null,
       assumptions: { sell_through: 0.5, sell_through_measured: null, fees: 0.2, fees_measured: null, cost_per_piece: 2, cost_per_piece_measured: null, selling_window_measured: null, grade_yield: { good: 0.9 } },
-      buy_list: plan, store_buy_lists: { raghouse: plan, tvf: plan }, lots: [lot()],
+      buy_list: plan, store_buy_lists: { raghouse: plan, tvf: plan }, store_picks: { raghouse: [], tvf: [] }, lots: [lot()],
     },
   };
 }
@@ -160,6 +161,16 @@ describe("planning settings", () => {
     expect(otherLots(snapshot).map((row) => row.store)).toEqual(["tvf"]);
 
   });
+
+  it("leaves a supplier's top picks out of the other boxes and says how each fares", () => {
+    const snapshot = state().snapshot!;
+    snapshot.lots.push(lot({ store: "tvf", variant_id: 2 }), lot({ store: "tvf", variant_id: 3 }));
+    snapshot.store_picks.tvf = [{ ...lot({ store: "tvf", variant_id: 2 }), check: "needs_research" }];
+    expect(otherLots(snapshot).map((row) => row.variant_id)).toEqual([3]);
+    expect(pickNote(snapshot.store_picks.tvf[0])).toBe("Needs recent sold evidence");
+    expect(pickNote({ ...lot(), check: "qualifies" })).toBe("Passes every check on its own");
+    expect(pickNote({ ...lot(), check: "budget" })).toBe("Costs more than your budget");
+  });
 });
 
 describe("box wording", () => {
@@ -204,6 +215,7 @@ describe("otherLots", () => {
     const picked = lot({ variant_id: 1, theme: "cartoon t-shirts" });
     const snapshot = {
       buy_list: { budget: 300, total: 132, expected_profit: 388, carts: [cart({ lots: [picked] })] },
+      store_picks: {},
       lots: [
         picked,
         lot({ variant_id: 2, theme: "cartoon t-shirts" }),

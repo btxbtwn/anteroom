@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { SourceBoxes, SourcingCart, SourcingLot, SourcingPrefs, SourcingSnapshot, SourcingState } from "../api/types";
+import type { SourceBoxes, SourcingCart, SourcingLot, SourcingPick, SourcingPrefs, SourcingSnapshot, SourcingState } from "../api/types";
 import { addToast } from "../ui/toast";
 import { BoughtBoxes } from "./BoughtBoxes";
 import { BOXES_QUERY_KEY, boxFromLot, calibrationNote, recentlyBought, shippingNote } from "./boxPurchases";
@@ -19,6 +19,7 @@ import {
   lotReason,
   nextUpdate,
   otherLots,
+  pickNote,
   planMetrics,
   planNeedsUpdate,
   saleDate,
@@ -102,6 +103,7 @@ function BoxSourcing({ onOpenListing }: Props) {
   const selectedSnapshot = snapshot ? {
     ...snapshot,
     buy_list: choice === "all" ? snapshot.buy_list : snapshot.store_buy_lists[choice],
+    store_picks: choice === "all" ? snapshot.store_picks : { [choice]: snapshot.store_picks[choice] ?? [] },
     lots: snapshot.lots.filter((lot) => choice === "all" || lot.store === choice),
   } : null;
   const updating = !!data && (data.refreshing || refresh.isPending || savePrefs.isPending
@@ -137,7 +139,7 @@ function BoxSourcing({ onOpenListing }: Props) {
         {data && !snapshot ? (
           <div className="sourcing-empty">
             <div className="sourcing-empty-title">Getting your first list ready…</div>
-            <p>Studio is reading both stores and collecting dated sold listings. Only boxes with enough recent evidence can qualify. This takes a few minutes.</p>
+            <p>Studio is reading the suppliers and collecting dated sold listings. Only boxes with enough recent evidence can qualify. This takes a few minutes.</p>
           </div>
         ) : null}
         {data && !snapshot ? <BoughtBoxes /> : null}
@@ -151,6 +153,7 @@ function BoxSourcing({ onOpenListing }: Props) {
             {updating ? <p className="sourcing-hint" role="status">Updating your options. Cart links will be ready when the check finishes.</p> : null}
             {selectedSnapshot ? <>
               <BuyList snapshot={selectedSnapshot} choice={choice} updating={updating} onOpenListing={onOpenListing} />
+              <SupplierPicks snapshot={selectedSnapshot} onOpenListing={onOpenListing} />
               <AvailableBoxes snapshot={selectedSnapshot} onOpenListing={onOpenListing} />
             </> : null}
             <BoughtBoxes />
@@ -484,7 +487,9 @@ function Cart({ cart, step, of, updating, onOpenListing }: {
   );
 }
 
-function Item({ lot, storeName, onOpenListing }: { lot: SourcingLot; storeName: string; onOpenListing: (convId: string) => void }) {
+function Item({ lot, storeName, note, onOpenListing }: {
+  lot: SourcingLot; storeName: string; note?: string; onOpenListing: (convId: string) => void;
+}) {
   const queryClient = useQueryClient();
   const boxes = useQuery({ queryKey: BOXES_QUERY_KEY, queryFn: api.boxes.list });
   const record = useMutation({
@@ -527,6 +532,7 @@ function Item({ lot, storeName, onOpenListing }: { lot: SourcingLot; storeName: 
           </div>
         ) : null}
         {lot.downside_profit != null ? <div className="sourcing-item-why">Lower-sales test {formatMoney(Math.round(lot.downside_profit))}</div> : null}
+        {note ? <div className="sourcing-item-why">{note}</div> : null}
         <button
           type="button"
           className="sourcing-link sourcing-bought"
@@ -540,13 +546,33 @@ function Item({ lot, storeName, onOpenListing }: { lot: SourcingLot; storeName: 
   );
 }
 
+function SupplierPicks({ snapshot, onOpenListing }: { snapshot: SourcingSnapshot; onOpenListing: (convId: string) => void }) {
+  const stores = Object.entries(snapshot.store_picks).filter(([, picks]) => picks.length > 0);
+  if (stores.length === 0) return null;
+  return (
+    <>
+      {stores.map(([store, picks]: [string, SourcingPick[]]) => (
+        <section key={store} className="sourcing-section" aria-label={`Top boxes at ${storeName(store)}`}>
+          <h2 className="sourcing-section-title">Top {picks.length} at {storeName(store)}</h2>
+          <p className="sourcing-hint">The supplier’s best boxes, each judged as if bought on its own: those that pass every check first, then the closest misses. They don’t share the budget the way a buy list does.</p>
+          <ol className="sourcing-items">
+            {picks.map((pick) => (
+              <Item key={`${pick.store}:${pick.variant_id}`} lot={pick} storeName={storeName(store)} note={pickNote(pick)} onOpenListing={onOpenListing} />
+            ))}
+          </ol>
+        </section>
+      ))}
+    </>
+  );
+}
+
 function AvailableBoxes({ snapshot, onOpenListing }: { snapshot: SourcingSnapshot; onOpenListing: (convId: string) => void }) {
   const lots = otherLots(snapshot);
   if (lots.length === 0) return null;
   return (
     <section className="sourcing-section" aria-label="Available boxes">
       <h2 className="sourcing-section-title">{snapshot.buy_list.carts.length ? "Other available boxes" : "Available boxes"} · {boxCount(lots.length)}</h2>
-      <p className="sourcing-hint">Every box both stores have in stock, best first. Each row shows why it isn’t in the recommended buy list; you can still open the supplier’s listing.</p>
+      <p className="sourcing-hint">Every other box the suppliers have in stock, best first. Each row shows why it isn’t in the recommended buy list; you can still open the supplier’s listing.</p>
       <ol className="sourcing-items">
         {lots.map((lot) => (
           <li key={`${lot.store}:${lot.variant_id}`} className="sourcing-item">
@@ -656,15 +682,15 @@ function HowItWorks({ snapshot }: { snapshot: SourcingSnapshot }) {
       <ul className="sourcing-how">
         <li>Every {REFRESH_HOURS} hours it reads every box Raghouse, Thrift Vintage Fashion and PaperCrane list. Raghouse Recycle boxes, Thrift Vintage Fashion A/B, B, B/C and C grades and PaperCrane Mixed/As-Is (C) lots are never considered; PaperCrane Cream (A) and Standard (B) lots are covered by its Buyer Protection beyond a 5% or 10% tolerance for unsellable pieces.</li>
         <li>
-          It groups boxes by the kind of piece inside (“vintage graphic t-shirts”, “hawaiian shirts”) and prices each kind from your own recorded sales of that kind
-          plus what your AI finds sold on eBay, Poshmark, Depop and Mercari, rechecked weekly. It requires dated sold examples and computes their median, capped by comparable asking prices when enough are available.
+          It groups boxes by the kind of piece inside (“vintage graphic t-shirts”, “hawaiian shirts”) and prices each kind from your own recorded sales of that kind,
+          then eBay sold listings read through your Chrome, then Poshmark’s, rechecked weekly. A mixed box is priced from all your recent sales. It requires dated sold examples and computes their median, capped by comparable asking prices when enough are available.
         </li>
         <li>
           Profit uses your {Math.round(a.sell_through * 100)}% sales assumption, {Math.round(a.fees * 100)}% effective fees,
           {" "}{formatMoney(a.cost_per_piece)} operating allowance per usable piece, and purchase cost with shipping. Usable-piece shares are planning estimates based on grade, not inspected counts.
         </li>
         <li>Each recommended box must meet your ROI target and avoid a loss when only half your planned pieces sell, at the lower of its lowest retained sold price and resale estimate, after operating costs on those pieces.</li>
-        <li>It prefers researched selling-window matches among qualifying boxes, then incremental return, one box per theme, and checks the whole cart’s shipping. It also tests pairs that unlock free shipping. This is a greedy selection; it doesn’t guarantee the best possible combination.</li>
+        <li>It prefers researched selling-window matches among qualifying boxes, then incremental return, and takes another box of a kind only while what you sell of it over the selling window can absorb it. It checks the whole cart’s shipping. It also tests pairs that unlock free shipping. This is a greedy selection; it doesn’t guarantee the best possible combination.</li>
         <li>
           Raghouse shipping is FedEx Ground from Phoenix to {snapshot.destination_zip}, Thrift Vintage Fashion is UPS Ground from Hialeah, and PaperCrane is UPS Ground from each seller’s state
           ({snapshot.stores.papercrane?.origins ?? 0} states this check) plus card processing at Stripe’s standard rate, which PaperCrane does not publish; each store is
@@ -672,6 +698,7 @@ function HowItWorks({ snapshot }: { snapshot: SourcingSnapshot }) {
           {" "}{Object.keys(snapshot.shipping.factors).map((store) => shippingNote(storeName(store), snapshot.shipping.calibration[store])).filter(Boolean).join(" ")}
           {" "}Correct a box’s shipping under Boxes you bought once the store charges it, and the estimates follow.
         </li>
+        <li>Each supplier also gets its five best boxes judged one at a time, so there are always options to compare even when few boxes pass every check.</li>
         <li>Studio never buys. The cart buttons only fill a cart for you to check and pay.</li>
         <li>Inspect supplier photos and grade notes before buying. Check sale sources against the likely brand, era, condition and garment mix. Confirm final shipping and tax at checkout; a wholesale box is not an inspected set of identical products.</li>
       </ul>
