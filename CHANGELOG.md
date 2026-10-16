@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.278 — 2026-10-16
+
+- Behind the scenes, the chat panel is split into smaller parts so it is easier to fix and extend. Chat works exactly as before.
+
 ## 0.1.277 — 2026-10-16
 
 - Behind the scenes, the listings sidebar is split into smaller parts so it is easier to fix and extend. It works exactly as before.
