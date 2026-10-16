@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.270 — 2026-10-16
+
+- Open listing no longer sits on "Opening…". It was holding one of Studio's database connections while it waited for Chrome, so it stalled whenever Studio was already busy; it now lets go first.
+
 ## 0.1.269 — 2026-10-15
 
 - iPhone HEIC photos dragged in from Finder or the Files app are now saved as JPEGs, so the AI can read them and their thumbnails show. Before, the AI received a file it couldn't open and found no details.
