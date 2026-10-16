@@ -9,7 +9,7 @@ import {
   queueChatGenerate,
   resetChatLive,
   useChatBusy,
-} from "./ChatPanel";
+} from "./chat/liveChatStore";
 import { RegeneratePriceDialog } from "./RegeneratePriceDialog";
 
 const CLEAR_WARNING = [
