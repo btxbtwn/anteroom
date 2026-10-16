@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.277 — 2026-10-16
+
+- Fixed a test that sometimes failed at random because Sourcing kept checking suppliers in the background while the tests ran. Nothing changes in the app itself.
+
 ## 0.1.276 — 2026-10-16
 
 - Sourcing now shows each supplier's five best boxes on every check, even when few pass. Boxes that pass every check come first, then the closest misses, and each one says what it falls short on.
