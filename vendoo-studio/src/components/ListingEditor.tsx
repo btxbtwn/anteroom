@@ -37,18 +37,18 @@ import {
   jobErrorPrompt,
   validationErrorsPrompt,
 } from "./CopyableLlmError";
+import { askChatGapsPrompt } from "./fillLog/chatPrompts";
+import { mergeDraftItem } from "./fillLog/draftForms";
+import { normalizeFieldName } from "./fillLog/fieldKeys";
+import { askChatTargetCount } from "./fillLog/fieldSync";
+import { fillFailureEntries } from "./fillLog/fillStatus";
 import {
-  askChatGapsPrompt,
-  askChatTargetCount,
   emptyHiddenFields,
-  fillFailureEntries,
   hiddenFieldKey,
   hiddenKeySet,
-  mergeDraftItem,
-  normalizeFieldName,
-  sourceFormsForJob,
   withoutHiddenFields,
-} from "./fillLogForms";
+} from "./fillLog/formFilters";
+import { sourceFormsForJob } from "./fillLog/sourceForms";
 import { ListingBrowserButton, ListingReviewActions } from "./ListingReviewActions";
 import { ListingReviewTabs, type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";

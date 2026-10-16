@@ -1,6 +1,6 @@
 /** Vendoo's time tracking for one item, as the details panel reads it. */
 
-import { marketplaceLabel } from "./fillLogForms";
+import { marketplaceLabel } from "./fillLog/marketplaces";
 
 export type VendooTimeline = {
   vendoo_created_at?: string | null;
