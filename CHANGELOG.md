@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.273 — 2026-10-16
+
+- Behind the scenes, the chat panel's code is reorganized so it is easier to fix and extend. Chat works exactly as before.
+
 ## 0.1.272 — 2026-10-16
 
 - Behind the scenes, the part of Studio that builds your Vendoo drafts is reorganized so it is easier to fix and extend. Drafts are saved exactly as before.

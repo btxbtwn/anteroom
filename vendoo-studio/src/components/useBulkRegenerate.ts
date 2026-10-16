@@ -18,7 +18,7 @@ import {
   markChatGenerating,
   markChatResetting,
   resetChatLive,
-} from "./ChatPanel";
+} from "./chat/liveChatStore";
 
 export type BulkRegenerateRun = BulkRegenerateProgress & {
   cancelRequested: boolean;

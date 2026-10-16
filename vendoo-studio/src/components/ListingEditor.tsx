@@ -30,7 +30,7 @@ import { withDropdownOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { addToast } from "../ui/toast";
 import { confirmDialog } from "../ui/confirmDialog";
-import { useChatBusy } from "./ChatPanel";
+import { useChatBusy } from "./chat/liveChatStore";
 import { fetchVendooItemLive, VENDOO_ITEM_STALE_MS, vendooItemQueryKey } from "../api/vendooItemQuery";
 import {
   CopyableLlmError,
