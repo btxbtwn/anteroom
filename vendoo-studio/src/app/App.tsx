@@ -9,7 +9,8 @@ import { ProviderStatus } from "../components/ProviderStatus";
 import { ChatPanel } from "../components/ChatPanel";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { BrowserPreview } from "../components/BrowserPreview";
-import { AnalyticsIcon, AssistantIcon, BackIcon, SourcingIcon, ComposeIcon, HamburgerIcon, ListingSidebar, MarketingIcon, QueueIcon, SearchIcon, SettingsIcon } from "../components/ListingSidebar";
+import { ListingSidebar } from "../components/ListingSidebar";
+import { AnalyticsIcon, AssistantIcon, BackIcon, SourcingIcon, ComposeIcon, HamburgerIcon, MarketingIcon, QueueIcon, SearchIcon, SettingsIcon } from "../components/sidebar/SidebarIcons";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTION_LABELS,

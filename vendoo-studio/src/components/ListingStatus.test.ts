@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listedFromImport, statusHint } from "./ListingSidebar";
+import { listedFromImport, statusHint } from "./sidebar/listingStatus";
 
 describe("statusHint", () => {
   it("says where each Vendoo label comes from", () => {
