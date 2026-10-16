@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from vendoo_studio.models.etsy_fields import sanitize_etsy_tag, sanitize_etsy_tags
-from vendoo_studio.services.vendoo_api import build_vendoo_item
+from vendoo_studio.services.vendoo_item_build import build_vendoo_item
 
 
 class EtsyTagSanitizeTests(unittest.TestCase):

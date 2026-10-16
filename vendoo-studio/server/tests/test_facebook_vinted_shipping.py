@@ -4,13 +4,10 @@ import unittest
 from unittest import mock
 
 from vendoo_studio.models.facebook_shipping import package_weight_label
-from vendoo_studio.services.vendoo_api import (
-    apply_update_all,
-    build_vendoo_item,
-    changed_fields,
-    observe_item_schema,
-    vinted_measurements,
-)
+from vendoo_studio.services.vendoo_encodings import observe_item_schema
+from vendoo_studio.services.vendoo_item_build import build_vendoo_item
+from vendoo_studio.services.vendoo_item_update import apply_update_all, changed_fields
+from vendoo_studio.services.vendoo_marketplace_fields import vinted_measurements
 from vendoo_studio.services.vendoo_specifics import normalize_specifics
 
 CARRIER = "USPS_GA:USPS Ground Advantage"

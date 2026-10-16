@@ -157,7 +157,7 @@ class MercariSpecificsTest(unittest.TestCase):
         self.assertEqual(mercari_specifics(self.MASTER, "99"), {})
 
     def test_size_lands_on_the_flat_key_vendoo_reads(self):
-        from vendoo_studio.services.vendoo_api import build_vendoo_item
+        from vendoo_studio.services.vendoo_item_build import build_vendoo_item
         from vendoo_studio.services.vendoo_specifics import mercari_specifics
 
         item, unresolved = build_vendoo_item(

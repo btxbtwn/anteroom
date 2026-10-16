@@ -61,7 +61,7 @@ async def mapped_marketplace_paths(general_path: str, platforms: list[str]) -> d
     """
     from types import SimpleNamespace
 
-    from vendoo_studio.services.vendoo_api import category_from_hit
+    from vendoo_studio.services.vendoo_categories import category_from_hit
     from vendoo_studio.services.vendoo_create import _hits_by_mapping, tree_leaf
 
     if not general_path or not platforms:

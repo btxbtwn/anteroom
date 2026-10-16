@@ -141,7 +141,7 @@ follows `getInitGeneralDetails()` (numbers stored as strings) and every
 `listings.<marketplace>` is `{marketplaceID, type: "listing",
 status: {notListed: true}, overrides, categorySpecifics, marketplaceSpecifics,
 listingAttemptMessages, sales}` with per-marketplace `marketplaceSpecifics`
-defaults from `getInit<Marketplace>Form()`. `vendoo_api.py` mirrors all of
+defaults from `getInit<Marketplace>Form()`. `vendoo_item_shape.py` mirrors all of
 these, so an item Studio creates is indistinguishable from a form save.
 
 This resolves the `origin: "vendoo"` question: the form path is where that
@@ -313,10 +313,15 @@ technical one.
 Both paths now have a first layer in the tree.
 
 **Plan A — Vendoo API** (branch `t3code/vendoo-api-listing`)
-- `services/vendoo_api.py`: Vendoo's form defaults (`default_general_details`,
-  `default_listing_section` per marketplace), `observe_item_schema`,
-  `build_vendoo_item` (complete form-shaped item with every marketplace
-  section), `create_item_payload`, `diff_roundtrip`.
+- `services/vendoo_item_shape.py`: Vendoo's form defaults
+  (`default_general_details`, `default_listing_section` per marketplace).
+  `services/vendoo_encodings.py`: `observe_item_schema` and the condition
+  vocabularies. `services/vendoo_categories.py`: `categoryV2` objects.
+  `services/vendoo_marketplace_fields.py`: per-marketplace form pieces.
+  `services/vendoo_item_build.py`: `build_vendoo_item` (complete form-shaped
+  item with every marketplace section), `create_item_payload`.
+  `services/vendoo_item_update.py`: `apply_update_all`, `changed_fields`,
+  `diff_updates`, `diff_roundtrip`.
 - `services/vendoo_create.py`: the sequence — session → photo uploads → id →
   `createItem` → read back → diff. `probe_schema` learns encodings from the
   user's own items into `<data>/vendoo-item-schema.json`, merging across runs.
