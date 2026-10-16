@@ -6,9 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.277 — 2026-10-16
+## 0.1.279 — 2026-10-16
 
 - Fixed a test that sometimes failed at random because Sourcing kept checking suppliers in the background while the tests ran. Nothing changes in the app itself.
+
+## 0.1.278 — 2026-10-16
+
+- Behind the scenes, the chat panel is split into smaller parts so it is easier to fix and extend. Chat works exactly as before.
+
+## 0.1.277 — 2026-10-16
+
+- Behind the scenes, the listings sidebar is split into smaller parts so it is easier to fix and extend. It works exactly as before.
 
 ## 0.1.276 — 2026-10-16
 

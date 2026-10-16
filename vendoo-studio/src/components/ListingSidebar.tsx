@@ -1,32 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import {
-  bulkRegenerateToast,
-  listingCanRegenerate,
-  mergeRegenerateIds,
-  toggleListingSelection,
-  type BulkPriceDrop,
-  type BulkRegenerateListing,
-} from "../bulkRegenerate";
-import { isConfirmDialogOpen } from "../ui/confirmDialog";
-import { addToast } from "../ui/toast";
+import { listingCanRegenerate, mergeRegenerateIds } from "../bulkRegenerate";
 import { jobsPollMs } from "../api/polling";
-import { UpdateButton } from "./UpdateButton";
-import { VendooImportButton } from "./VendooImportButton";
-import {
-  SETTINGS_NAV_ITEMS,
-  SETTINGS_SECTION_LABELS,
-  searchSettings,
-  type SettingsSearchItem,
-  type SettingsSectionId,
-} from "./settingsNav";
+import type { SettingsSearchItem, SettingsSectionId } from "./settingsNav";
 import { ListingFilters } from "./ListingFilters";
 import { SuggestionsPanel } from "./SuggestionsPanel";
-import type { BulkRegenerate, BulkRegenerateRun } from "./useBulkRegenerate";
-import { BulkRegeneratePriceDialog } from "./BulkRegeneratePriceDialog";
-import { BulkPriceDropDialog } from "./BulkPriceDropDialog";
-import { RegenerateReviewDialog } from "./RegenerateReviewDialog";
+import type { BulkRegenerate } from "./useBulkRegenerate";
 import { stopTitlebarDrag } from "./WorkspaceTopbar";
 import type { WorkspaceView } from "./workspaceCrumbs";
 import type { Suggestion } from "../api/types";
@@ -48,25 +28,15 @@ import {
   statusCounts,
   type ListingFilters as Filters,
 } from "./inventoryFilters";
-import {
-  AnalyticsIcon,
-  AssistantIcon,
-  BackIcon,
-  MarketingIcon,
-  QueueIcon,
-  SearchIcon,
-  SettingsIcon,
-  SettingsSectionIcon,
-  SourcingIcon,
-} from "./sidebar/SidebarIcons";
+import { BackIcon, SearchIcon } from "./sidebar/SidebarIcons";
 import { ListingRow } from "./sidebar/ListingRow";
-import {
-  activeAnchorMs,
-  clearLegacySettledExpanded,
-  readLegacySettledExpanded,
-  settledAnchorMs,
-  type Listing,
-} from "./sidebar/listingShelves";
+import { activeAnchorMs, settledAnchorMs, type Listing } from "./sidebar/listingShelves";
+import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
+import { SettingsSidebarNav } from "./sidebar/SettingsSidebarNav";
+import { SidebarFooter } from "./sidebar/SidebarFooter";
+import { useListingSelection } from "./sidebar/useListingSelection";
+import { useSettledShelf } from "./sidebar/useSettledShelf";
+import { useSettingsSearch } from "./sidebar/useSettingsSearch";
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
@@ -120,23 +90,8 @@ export function ListingSidebar({
   bulk,
 }: Props) {
   const queryClient = useQueryClient();
-  const legacySettled = readLegacySettledExpanded();
-  const [settledExpanded, setSettledExpanded] = useState(legacySettled ?? true);
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const [settingsQuery, setSettingsQuery] = useState("");
   const [filters, setFilters] = useState<Filters>(DEFAULT_LISTING_FILTERS);
-  const [activeResultIndex, setActiveResultIndex] = useState(0);
-  const [selecting, setSelecting] = useState(false);
-  const [pricePrompt, setPricePrompt] = useState<BulkRegenerateListing[] | null>(null);
-  // Photos, labels and measurements are checked before anything is wiped.
-  const [reviewPrompt, setReviewPrompt] = useState<
-    { rows: BulkRegenerateListing[]; drops?: ReadonlyMap<string, BulkPriceDrop> } | null
-  >(null);
-  const [pickedIds, setPickedIds] = useState<Set<string>>(() => new Set());
-  const [markdownIds, setMarkdownIds] = useState<string[] | null>(null);
-  const settingsSearchRef = useRef<HTMLInputElement>(null);
-  const selectionAnchor = useRef<string | null>(null);
-  const migratedSettledRef = useRef(false);
   const settingsMode = activeView === "settings";
 
   const { data: uiPrefs } = useQuery({
@@ -144,30 +99,7 @@ export function ListingSidebar({
     queryFn: api.settings.ui,
   });
   const nameBySku = uiPrefs?.listing_names === "sku";
-
-  useEffect(() => {
-    if (!uiPrefs) return;
-    if (!migratedSettledRef.current) {
-      migratedSettledRef.current = true;
-      const legacy = readLegacySettledExpanded();
-      if (legacy !== null) {
-        clearLegacySettledExpanded();
-        if (legacy !== uiPrefs.settled_shelf_expanded) {
-          setSettledExpanded(legacy);
-          void api.settings
-            .setUi({ settled_shelf_expanded: legacy })
-            .then(() => {
-              queryClient.invalidateQueries({ queryKey: ["settings-ui"] });
-            })
-            .catch(() => {
-              migratedSettledRef.current = false;
-            });
-          return;
-        }
-      }
-    }
-    setSettledExpanded(uiPrefs.settled_shelf_expanded);
-  }, [uiPrefs, queryClient]);
+  const { settledExpanded, toggleSettledShelf } = useSettledShelf(uiPrefs);
 
   const settleListing = useMutation({
     mutationFn: (id: string) => api.conversations.settle(id),
@@ -229,96 +161,8 @@ export function ListingSidebar({
     () => mergeRegenerateIds(suggestionEligibleIds, listingEligibleIds),
     [listingEligibleIds, suggestionEligibleIds],
   );
-  const selectedIds = useMemo(() => {
-    if (pickedIds.size === 0) return pickedIds;
-    const eligible = new Set(eligibleIds);
-    let changed = false;
-    const next = new Set<string>();
-    for (const id of pickedIds) {
-      if (eligible.has(id)) next.add(id);
-      else changed = true;
-    }
-    return changed ? next : pickedIds;
-  }, [eligibleIds, pickedIds]);
-
-  useEffect(() => {
-    if (!selecting || bulk.running) return;
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds) return;
-      setSelecting(false);
-      setPickedIds(new Set());
-      selectionAnchor.current = null;
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds]);
-
-  const exitSelecting = useCallback(() => {
-    setSelecting(false);
-    setPickedIds(new Set());
-    selectionAnchor.current = null;
-  }, []);
-
-  const toggleSelect = useCallback((id: string, shift: boolean, orderedIds: readonly string[]) => {
-    setPickedIds((prev) => {
-      const eligible = new Set(eligibleIds);
-      const visible = new Set<string>();
-      for (const picked of prev) {
-        if (eligible.has(picked)) visible.add(picked);
-      }
-      const next = toggleListingSelection(visible, id, orderedIds, shift, selectionAnchor.current);
-      selectionAnchor.current = next.anchorId;
-      return next.selected;
-    });
-  }, [eligibleIds]);
-
-  const toggleSelectAll = useCallback(() => {
-    setPickedIds((prev) => {
-      const allSelected = eligibleIds.length > 0 && eligibleIds.every((id) => prev.has(id));
-      selectionAnchor.current = null;
-      return allSelected ? new Set() : new Set(eligibleIds);
-    });
-  }, [eligibleIds]);
-
-  const finishRegenerate = useCallback(async (
-    ids: string[],
-    drops?: ReadonlyMap<string, BulkPriceDrop>,
-  ) => {
-    const titles = new Map(ids.map((id) => {
-      const listing = listingsById.get(id);
-      const suggestion = suggestions.find((item) => item.conversation_id === id);
-      return [id, listing?.title || suggestion?.title || "Untitled"];
-    }));
-    // The bulk bar tracks the run on its own; checkboxes would only sit locked.
-    exitSelecting();
-    const result = await bulk.start(ids, titles, "rewrite", drops);
-    if (!result) return;
-    if (result.failed.length > 0) {
-      setPickedIds(new Set(result.failed.map((item) => item.id)));
-      setSelecting(true);
-    }
-    addToast(bulkRegenerateToast(result));
-  }, [bulk, exitSelecting, listingsById, suggestions]);
-
-  const regenerateSelected = useCallback(async () => {
-    const ids = eligibleIds.filter((id) => selectedIds.has(id));
-    if (!ids.length || bulk.running) return;
-    const rows: BulkRegenerateListing[] = ids.map((id) => {
-      const listing = listingsById.get(id);
-      const suggestion = suggestions.find((item) => item.conversation_id === id);
-      const price = listing?.price;
-      return {
-        id,
-        title: listing?.title || suggestion?.title || "Untitled",
-        price: price != null && price > 0 ? price : null,
-      };
-    });
-    if (!rows.some((row) => row.price != null)) {
-      setReviewPrompt({ rows });
-      return;
-    }
-    setPricePrompt(rows);
-  }, [bulk.running, eligibleIds, listingsById, selectedIds, suggestions]);
+  const selection = useListingSelection({ eligibleIds, listingsById, suggestions, bulk });
+  const { selecting, setSelecting, selectedIds, exitSelecting, toggleSelect } = selection;
 
   const visibleSettled = useMemo(() => {
     const visible = settledListings.slice(0, settledVisibleCount);
@@ -389,56 +233,18 @@ export function ListingSidebar({
     const jobId = jobIdByConversation.get(conversationId);
     return jobId ? statusDrafts?.[jobId] : undefined;
   };
-  const settingsResults = useMemo(() => searchSettings(settingsQuery), [settingsQuery]);
-  const isSettingsSearching = settingsQuery.trim().length > 0;
-
-  useEffect(() => {
-    if (!settingsMode) {
-      setSettingsQuery("");
-      setActiveResultIndex(0);
-    }
-  }, [settingsMode]);
-
-  useEffect(() => {
-    setActiveResultIndex((index) => Math.min(index, Math.max(settingsResults.length - 1, 0)));
-  }, [settingsResults.length]);
-
-  useEffect(() => {
-    if (!settingsMode) return;
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable ||
-          target.closest('[role="dialog"], [aria-modal="true"]') !== null)
-      ) {
-        return;
-      }
-      event.preventDefault();
-      settingsSearchRef.current?.focus();
-      settingsSearchRef.current?.select();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [settingsMode]);
-
-  const toggleSettledShelf = useCallback(() => {
-    setSettledExpanded((value) => {
-      const next = !value;
-      void api.settings
-        .setUi({ settled_shelf_expanded: next })
-        .then(() => {
-          queryClient.invalidateQueries({ queryKey: ["settings-ui"] });
-        })
-        .catch(() => {
-          /* keep in-memory toggle if disk write fails */
-        });
-      return next;
-    });
-  }, [queryClient]);
+  const settingsSearch = useSettingsSearch(settingsMode, onSettingsSearchResult);
+  const {
+    settingsSearchRef,
+    settingsQuery,
+    setSettingsQuery,
+    activeResultIndex,
+    setActiveResultIndex,
+    settingsResults,
+    isSettingsSearching,
+    clearSettingsSearch,
+    handleSettingsSearchKeyDown,
+  } = settingsSearch;
 
   const handleSearchChange = (value: string) => {
     onSearchQueryChange(value);
@@ -449,47 +255,6 @@ export function ListingSidebar({
     setFilters(next);
     setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
   };
-
-  const clearSettingsSearch = useCallback(() => {
-    setSettingsQuery("");
-    setActiveResultIndex(0);
-  }, []);
-
-  const handleSettingsResult = useCallback(
-    (item: SettingsSearchItem) => {
-      clearSettingsSearch();
-      onSettingsSearchResult(item);
-    },
-    [clearSettingsSearch, onSettingsSearchResult],
-  );
-
-  const handleSettingsSearchKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Escape" && isSettingsSearching) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearSettingsSearch();
-        return;
-      }
-      if (settingsResults.length === 0) return;
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveResultIndex((index) => (index + 1) % settingsResults.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveResultIndex((index) => (index - 1 + settingsResults.length) % settingsResults.length);
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const result = settingsResults[activeResultIndex];
-        if (result) handleSettingsResult(result);
-      }
-    },
-    [activeResultIndex, clearSettingsSearch, handleSettingsResult, isSettingsSearching, settingsResults],
-  );
 
   return (
     <aside
@@ -534,88 +299,55 @@ export function ListingSidebar({
 
       {settingsMode ? (
         <>
-          <div className="sidebar-toolbar">
-            <label className="sidebar-search settings-sidebar-search">
-              <SearchIcon />
-              <input
-                ref={settingsSearchRef}
-                type="search"
-                value={settingsQuery}
-                onChange={(e) => {
-                  setSettingsQuery(e.target.value);
-                  setActiveResultIndex(0);
-                }}
-                onKeyDown={handleSettingsSearchKeyDown}
-                placeholder="Search"
-                aria-label="Search settings"
-                role="combobox"
-                aria-autocomplete="list"
-                aria-expanded={isSettingsSearching && settingsResults.length > 0}
-                aria-controls={isSettingsSearching && settingsResults.length > 0 ? "settings-search-results" : undefined}
-                aria-activedescendant={
-                  isSettingsSearching && settingsResults[activeResultIndex]
-                    ? `settings-search-result-${settingsResults[activeResultIndex].id}`
-                    : undefined
-                }
-              />
-              {isSettingsSearching ? (
-                <button
-                  type="button"
-                  className="settings-search-clear"
-                  aria-label="Clear search"
-                  onClick={() => {
-                    clearSettingsSearch();
-                    settingsSearchRef.current?.focus();
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                  </svg>
-                </button>
-              ) : (
-                <kbd className="settings-search-kbd">/</kbd>
-              )}
-            </label>
-          </div>
-
-          <div className="sidebar-list settings-sidebar-nav">
-            {isSettingsSearching && settingsResults.length === 0 ? (
-              <div className="sidebar-empty">No settings found</div>
-            ) : null}
+        <div className="sidebar-toolbar">
+          <label className="sidebar-search settings-sidebar-search">
+            <SearchIcon />
+            <input
+              ref={settingsSearchRef}
+              type="search"
+              value={settingsQuery}
+              onChange={(e) => {
+                setSettingsQuery(e.target.value);
+                setActiveResultIndex(0);
+              }}
+              onKeyDown={handleSettingsSearchKeyDown}
+              placeholder="Search"
+              aria-label="Search settings"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={isSettingsSearching && settingsResults.length > 0}
+              aria-controls={isSettingsSearching && settingsResults.length > 0 ? "settings-search-results" : undefined}
+              aria-activedescendant={
+                isSettingsSearching && settingsResults[activeResultIndex]
+                  ? `settings-search-result-${settingsResults[activeResultIndex].id}`
+                  : undefined
+              }
+            />
             {isSettingsSearching ? (
-              <div id="settings-search-results" role="listbox" aria-label="Settings search results">
-                {settingsResults.map((item, index) => (
-                  <button
-                    key={item.id}
-                    id={`settings-search-result-${item.id}`}
-                    type="button"
-                    role="option"
-                    aria-selected={index === activeResultIndex}
-                    className={`settings-nav-result${index === activeResultIndex ? " selected" : ""}`}
-                    onMouseEnter={() => setActiveResultIndex(index)}
-                    onClick={() => handleSettingsResult(item)}
-                  >
-                    <span className="settings-nav-result-title">{item.title}</span>
-                    <span className="settings-nav-result-section">{SETTINGS_SECTION_LABELS[item.section]}</span>
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                className="settings-search-clear"
+                aria-label="Clear search"
+                onClick={() => {
+                  clearSettingsSearch();
+                  settingsSearchRef.current?.focus();
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              </button>
             ) : (
-              <nav aria-label="Settings sections">
-                {SETTINGS_NAV_ITEMS.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`settings-nav-item${settingsSection === item.id ? " selected" : ""}`}
-                    onClick={() => onSettingsSectionChange(item.id)}
-                  >
-                    <SettingsSectionIcon section={item.id} />
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </nav>
+              <kbd className="settings-search-kbd">/</kbd>
             )}
-          </div>
+          </label>
+        </div>
+
+          <SettingsSidebarNav
+            search={settingsSearch}
+            settingsSection={settingsSection}
+            onSettingsSectionChange={onSettingsSectionChange}
+          />
         </>
       ) : (
         <>
@@ -751,183 +483,22 @@ export function ListingSidebar({
       )}
 
       {!settingsMode && (selecting || bulk.running) && (
-        <div className="sidebar-bulk-bar" role="region" aria-label="Regenerate listings">
-          <p className="sidebar-bulk-count">{bulkStatusLabel(bulk.run, selectedIds.size, eligibleIds.length)}</p>
-          <div className="sidebar-bulk-actions">
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={bulk.running || eligibleIds.length === 0}
-              onClick={toggleSelectAll}
-            >
-              {eligibleIds.length > 0 && eligibleIds.every((id) => selectedIds.has(id)) ? "None" : "All"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger btn-sm"
-              disabled={bulk.running || selectedIds.size === 0}
-              onClick={() => { void regenerateSelected(); }}
-            >
-              Regenerate
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              title="Review a lower price for each selected listing. Saves in Studio only; nothing is sent to Vendoo."
-              disabled={bulk.running || selectedIds.size === 0}
-              onClick={() => setMarkdownIds(eligibleIds.filter((id) => selectedIds.has(id)))}
-            >
-              Mark down
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={Boolean(bulk.run?.cancelRequested)}
-              onClick={() => {
-                if (bulk.running) bulk.cancel();
-                else exitSelecting();
-              }}
-            >
-              {bulk.running ? (bulk.run?.cancelRequested ? "Finishing…" : "Stop batch") : "Cancel"}
-            </button>
-          </div>
-        </div>
+        <BulkActionBar bulk={bulk} selection={selection} eligibleIds={eligibleIds} />
       )}
 
-      <div className="sidebar-footer">
-        <div className="sidebar-footer-actions">
-          {settingsMode ? (
-            <button
-              type="button"
-              className="sidebar-back-btn"
-              aria-label="Back"
-              onClick={onCloseSettings}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span>Back</span>
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className={`sidebar-icon-btn queue-nav${activeView === "queue" ? " selected" : ""}`}
-                title={queueCount ? `Queue (${queueCount})` : "Queue"}
-                aria-label={`Queue${queueCount ? ` (${queueCount})` : ""}`}
-                aria-pressed={activeView === "queue"}
-                onClick={onOpenQueue}
-              >
-                <QueueIcon />
-                {queueCount ? <span className="queue-nav-dot" aria-hidden="true" /> : null}
-              </button>
-              <VendooImportButton />
-              <button
-                type="button"
-                className={`sidebar-icon-btn${activeView === "sourcing" ? " selected" : ""}`}
-                title="Sourcing"
-                aria-label="Sourcing"
-                aria-pressed={activeView === "sourcing"}
-                onClick={onOpenSourcing}
-              >
-                <SourcingIcon />
-              </button>
-              <button
-                type="button"
-                className={`sidebar-icon-btn${activeView === "analytics" ? " selected" : ""}`}
-                title="Analytics"
-                aria-label="Analytics"
-                aria-pressed={activeView === "analytics"}
-                onClick={onOpenAnalytics}
-              >
-                <AnalyticsIcon />
-              </button>
-              <button
-                type="button"
-                className={`sidebar-icon-btn${activeView === "marketing" ? " selected" : ""}`}
-                title="Marketing"
-                aria-label="Marketing"
-                aria-pressed={activeView === "marketing"}
-                onClick={onOpenMarketing}
-              >
-                <MarketingIcon />
-              </button>
-              <button
-                type="button"
-                className={`sidebar-icon-btn${activeView === "assistant" ? " selected" : ""}`}
-                title="Assistant"
-                aria-label="Assistant"
-                aria-pressed={activeView === "assistant"}
-                onClick={onOpenAssistant}
-              >
-                <AssistantIcon />
-              </button>
-              <button
-                type="button"
-                className="sidebar-icon-btn"
-                title="Settings"
-                aria-label="Settings"
-                onClick={onOpenSettings}
-              >
-                <SettingsIcon />
-              </button>
-            </>
-          )}
-          <UpdateButton />
-        </div>
-      </div>
-      {pricePrompt ? (
-        <BulkRegeneratePriceDialog
-          listings={pricePrompt}
-          onClose={() => setPricePrompt(null)}
-          onConfirm={(drops) => {
-            const rows = pricePrompt;
-            setPricePrompt(null);
-            setReviewPrompt({ rows, drops });
-          }}
-        />
-      ) : null}
-      {markdownIds ? (
-        <BulkPriceDropDialog
-          conversationIds={markdownIds}
-          onClose={() => {
-            setMarkdownIds(null);
-            exitSelecting();
-          }}
-        />
-      ) : null}
-      {reviewPrompt ? (
-        <RegenerateReviewDialog
-          listings={reviewPrompt.rows.map((row) => ({ id: row.id, title: row.title }))}
-          onClose={() => setReviewPrompt(null)}
-          onRewrite={() => {
-            const { rows, drops } = reviewPrompt;
-            setReviewPrompt(null);
-            void finishRegenerate(rows.map((row) => row.id), drops);
-          }}
-        />
-      ) : null}
+      <SidebarFooter
+        settingsMode={settingsMode}
+        activeView={activeView}
+        queueCount={queueCount}
+        onCloseSettings={onCloseSettings}
+        onOpenQueue={onOpenQueue}
+        onOpenSourcing={onOpenSourcing}
+        onOpenAnalytics={onOpenAnalytics}
+        onOpenMarketing={onOpenMarketing}
+        onOpenAssistant={onOpenAssistant}
+        onOpenSettings={onOpenSettings}
+      />
+      <BulkSelectionDialogs selection={selection} />
     </aside>
   );
-}
-
-function bulkStatusLabel(
-  run: BulkRegenerateRun | null,
-  selectedCount: number,
-  eligibleCount: number,
-): string {
-  if (run) {
-    if (run.mode === "generate") {
-      if (run.cancelRequested) return `Finishing ${run.active.size} active listings…`;
-      return `Generating ${run.active.size} listings · ${run.finished} of ${run.total} finished`;
-    }
-    const { title } = run;
-    const place = `${run.index + 1} of ${run.total}`;
-    if (run.cancelRequested) return `Finishing ${title}…`;
-    if (run.phase === "dropping") return `Dropping the price on ${title} (${place})`;
-    if (run.phase === "finishing") return `Finishing fields on ${title} (${place})`;
-    return `Rewriting ${title} (${place})`;
-  }
-  if (eligibleCount === 0) return "No listings with photos to rewrite";
-  return `${selectedCount} selected`;
 }
