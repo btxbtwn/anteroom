@@ -63,6 +63,7 @@ class AnalyticsItem:
     shipping_cost: float = 0.0
     shipping_credit: float = 0.0
     box_id: str | None = None
+    missing_sale_details: tuple[str, ...] = ()
 
     @property
     def has_cost(self) -> bool:
@@ -196,6 +197,7 @@ def load_rows(db) -> list[AnalyticsItem]:
             shipping_cost=_amount(sale.get("shippingCost")) or 0.0,
             shipping_credit=_amount(sale.get("shippingCredit")) or 0.0,
             box_id=box_id,
+            missing_sale_details=tuple(str(gap) for gap in sale.get("missing") or ()),
         ))
     return rows
 
@@ -270,26 +272,20 @@ def summarize(
 
 
 def _incomplete_sales(items: list[AnalyticsItem]) -> list[dict[str, Any]]:
-    """Sold listings needing attention, including sales outside the selected period."""
-    rows = []
-    for item in items:
-        if item.status != "sold":
-            continue
-        missing = [
-            label for label, absent in (
-                ("sale date", item.sold_at is None),
-                ("sale price", item.sold_price is None),
-                ("cost", item.cost is None),
-                ("fees", item.fees is None),
-                ("marketplace", item.marketplace == "unknown"),
-            ) if absent
-        ]
-        if missing:
-            rows.append({
-                "conversation_id": item.conversation_id,
-                "title": item.title,
-                "missing": missing,
-            })
+    """What Vendoo's Missing Sale Details filter lists, across all time.
+
+    The seller fixes these in Vendoo, so Studio holds a sale to Vendoo's rule
+    rather than its own: a gap Vendoo does not flag is one the seller cannot clear.
+    """
+    rows = [
+        {
+            "conversation_id": item.conversation_id,
+            "title": item.title,
+            "missing": list(item.missing_sale_details),
+        }
+        for item in items
+        if item.missing_sale_details
+    ]
     return sorted(rows, key=lambda row: (row["title"].casefold(), row["conversation_id"]))
 
 

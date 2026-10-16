@@ -739,8 +739,9 @@ def vendoo_sale(item: dict | None, form: dict | None = None) -> dict[str, Any]:
                     break
             if price:
                 break
+    missing = vendoo_missing_sale_details(merged)
     if not price:
-        return {}
+        return {"missing": missing} if missing else {}
     result: dict[str, Any] = {
         "price": price,
         "marketplace": VENDOO_MARKETPLACE_ALIASES.get(marketplace, marketplace),
@@ -757,7 +758,51 @@ def vendoo_sale(item: dict | None, form: dict | None = None) -> dict[str, Any]:
         amount = _sale_amount(sale, key)
         if amount is not None:
             result[name] = amount
+    if missing:
+        result["missing"] = missing
     return result
+
+
+# Vendoo's ``getMissingSaleDetails``: the sale fields its Missing Sale Details
+# filter needs, in its order, with the label Studio shows for each.
+_SALE_DETAILS = (
+    ("price_sold", "sale price"),
+    ("product_cost", "cost"),
+    ("marketplace_fees", "fees"),
+    ("shipping_cost", "shipping cost"),
+)
+
+
+def vendoo_missing_sale_details(merged: dict[str, Any]) -> list[str]:
+    """What Vendoo's Missing Sale Details filter holds against the item.
+
+    Vendoo checks each dated sale -- the item's sale record and every sale on
+    its listings -- and counts a figure as recorded when it is set at all, so a
+    zero fee is complete. A sale with no date never matches the filter.
+    """
+    sales: list[dict] = []
+    sale_record = merged.get("saleRecord")
+    if isinstance(sale_record, dict):
+        name = sale_record.get("marketplace")
+        sold = sale_record.get("date_sold") or next(
+            (listing.get("dateSold") for market, listing in _listing_entries(merged) if market == name),
+            None,
+        )
+        sales.append({**sale_record, "date_sold": sold, "quantity": 1})
+    for _name, listing in _listing_entries(merged):
+        for entry in listing.get("sales") or []:
+            if isinstance(entry, dict):
+                sales.append({**entry, "marketplace": listing.get("marketplaceID") or entry.get("marketplace")})
+    missing: list[str] = []
+    for sale in sales:
+        if not sale.get("date_sold"):
+            continue
+        gaps = [] if sale.get("marketplace") else ["marketplace"]
+        gaps += [label for key, label in _SALE_DETAILS if sale.get(key) is None]
+        if not sale.get("quantity"):
+            gaps.append("quantity")
+        missing += [gap for gap in gaps if gap not in missing]
+    return missing
 
 
 def _sale_amount(entry: dict, key: str) -> float | None:

@@ -396,6 +396,24 @@ class VendooSaleTest(unittest.TestCase):
         self.assertNotIn("fees", sale)
         self.assertNotIn("shippingCost", sale)
 
+    def test_it_flags_what_vendoo_calls_missing_sale_details(self):
+        complete = {"date_sold": "2026-09-01T00:00:00Z", "marketplace": "ebay", "price_sold": 40,
+                    "product_cost": 0, "marketplace_fees": 0, "shipping_cost": 0}
+        self.assertNotIn("missing", vendoo_sale({"saleRecord": complete}))
+        sale = vendoo_sale({"saleRecord": {**complete, "product_cost": None, "marketplace_fees": None}})
+        self.assertEqual(sale["missing"], ["cost", "fees"])
+        # The record takes its date from the listing that closed it, as Vendoo does.
+        dated = {"saleRecord": {**complete, "date_sold": None, "shipping_cost": None},
+                 "listings": {"ebay": {"dateSold": "2026-09-01T00:00:00Z"}}}
+        self.assertEqual(vendoo_sale(dated)["missing"], ["shipping cost"])
+        # Vendoo never lists an undated sale, whatever it lacks.
+        self.assertNotIn("missing", vendoo_sale({"saleRecord": {"marketplace": "ebay", "price_sold": 40}}))
+        listing_sale = {"listings": {"depop": {"marketplaceID": "depop", "sales": [
+            {"date_sold": "2026-09-01T00:00:00Z", "product_cost": 3, "marketplace_fees": 1,
+             "shipping_cost": 0, "quantity": 1},
+        ]}}}
+        self.assertEqual(vendoo_sale(listing_sale), {"missing": ["sale price"]})
+
     def test_an_unsold_item_has_no_sale(self):
         self.assertEqual(vendoo_sale({"listings": {"ebay": {"status": {"listed": True}}}}), {})
 

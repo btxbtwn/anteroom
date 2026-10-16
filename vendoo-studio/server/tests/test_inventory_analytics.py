@@ -55,22 +55,20 @@ class SummarizeAnalyticsTest(unittest.TestCase):
         self.assertEqual(year["sales"]["count"], 5)
         self.assertEqual(len(year["periods"]), 9)
 
-    def test_missing_sales_data_includes_undated_and_old_sales_in_every_range(self):
+    def test_missing_sales_data_lists_what_vendoo_flags_in_every_range(self):
         items = [
+            _item(conversation_id="old", title="B boots", sold_at=NOW - timedelta(days=500),
+                  missing_sale_details=("cost", "fees")),
             _item(conversation_id="undated", title="A jacket", sold_at=None, sold_price=None,
                   cost=None, fees=None, marketplace="unknown"),
-            _item(conversation_id="old", title="B boots", sold_at=NOW - timedelta(days=500),
-                  cost=None, fees=0),
-            _item(conversation_id="free", title="C tee", sold_price=0, cost=0, fees=0),
-            _item(conversation_id="active", status="active", sold_price=None, sold_at=None),
+            _item(conversation_id="draft", title="C tee", status="draft", missing_sale_details=("shipping cost",)),
         ]
         for range_id in ("7d", "30d", "all"):
             with self.subTest(range_id=range_id):
                 rows = summarize(items, range_id=range_id, now=NOW)["incomplete_sales"]
                 self.assertEqual(rows, [
-                    {"conversation_id": "undated", "title": "A jacket",
-                     "missing": ["sale date", "sale price", "cost", "fees", "marketplace"]},
-                    {"conversation_id": "old", "title": "B boots", "missing": ["cost"]},
+                    {"conversation_id": "old", "title": "B boots", "missing": ["cost", "fees"]},
+                    {"conversation_id": "draft", "title": "C tee", "missing": ["shipping cost"]},
                 ])
 
     def test_custom_range_covers_whole_days_and_compares_with_the_span_before(self):
