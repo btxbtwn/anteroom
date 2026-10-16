@@ -856,11 +856,8 @@ def buy_list(
             continue
         subtotal = sum(p["price"] for p in mine)
         threshold = cfg["stores"][store]["free_shipping_over"]
+        # The picks were priced by `evaluate` with this cart's free shipping already in them.
         free = threshold is not None and subtotal >= threshold
-        if free:
-            for p in mine:
-                price_lot(p, 0.0, p["resale_per_pc"], sell_through=sell_through, fees=fees,
-                          cost_per_piece=cost_per_piece)
         fills = STORES[store]["cart"] == "shopify"
         carts.append({
             "store": store,
@@ -904,6 +901,46 @@ def buy_list(
             "carts": carts, "exclusions": exclusions}
 
 
+# How close a box comes to qualifying on its own: passing every check, missing the
+# return or lower-sales test, lacking sold evidence, then costing more than the budget.
+PICK_ORDER = {"qualifies": 0, "return_target": 1, "downside": 1, "needs_research": 2, "budget": 3}
+
+
+def standalone_check(row: dict, *, budget: float, min_roi: float) -> str:
+    """Whether a box bought on its own passes every buy-list check, or the first it fails."""
+    if row["landed"] > budget:
+        return "budget"
+    if row["roi"] is None:
+        return "needs_research"
+    if row["roi"] < min_roi:
+        return "return_target"
+    if row["downside_profit"] < 0:
+        return "downside"
+    return "qualifies"
+
+
+def top_picks(rows: list[dict], *, budget: float, min_roi: float, count: int = 5) -> dict[str, list[dict]]:
+    """Per store, the `count` best boxes judged one at a time, so every supplier has
+    options however few pass. Boxes that pass every check come first, then the
+    closest misses; within each group `rows`' ranking holds, and a kind of piece
+    repeats only once every kind in the group has a box."""
+    picks: dict[str, list[dict]] = {}
+    for store in STORES:
+        checked = [(row, standalone_check(row, budget=budget, min_roi=min_roi)) for row in rows if row["store"] == store]
+        chosen: list[dict] = []
+        for rank in sorted(set(PICK_ORDER.values())):
+            group = [(row, check) for row, check in checked if PICK_ORDER[check] == rank]
+            themes: set[str] = set()
+            first = [entry for entry in group if not (entry[0]["theme"] in themes or themes.add(entry[0]["theme"]))]
+            leading = {id(row) for row, _ in first}
+            repeats = [entry for entry in group if id(entry[0]) not in leading]
+            chosen += [{**row, "check": check} for row, check in [*first, *repeats]]
+            if len(chosen) >= count:
+                break
+        picks[store] = chosen[:count]
+    return picks
+
+
 # --- CLI ------------------------------------------------------------------------------
 
 
@@ -936,6 +973,16 @@ def print_buy_list(plan):
         for p in cart["lots"]:
             print(f"- [{p['title']}]({p['url']}): ${p['landed']:.0f} landed, ~${p['expected_profit']:.0f} profit ({p['roi']:.0%})")
     print(f"\nTotal ${plan['total']:.0f}, expected profit ${plan['expected_profit']:.0f}.")
+
+
+def print_top_picks(picks):
+    for store, lots in picks.items():
+        if not lots:
+            continue
+        print(f"\n## Top {len(lots)} at {STORES[store]['name']}\n")
+        for p in lots:
+            profit = f"~${p['expected_profit']:.0f} profit ({p['roi']:.0%})" if p["roi"] is not None else "no resale price"
+            print(f"- [{p['title']}]({p['url']}): ${p['landed']:.0f} landed, {profit}, {p['check'].replace('_', ' ')}")
 
 
 def main() -> int:
@@ -996,13 +1043,15 @@ def main() -> int:
         return 0
     plan = buy_list(rows, cfg, budget=args.budget, min_roi=args.min_roi,
                     sell_through=args.sell_through, fees=args.fees, cost_per_piece=args.cost_per_piece) if resale else None
+    picks = top_picks(rows, budget=args.budget, min_roi=args.min_roi)
     if args.json:
-        json.dump({"baselines": baselines, "lots": rows, "buy_list": plan}, sys.stdout, indent=2)
+        json.dump({"baselines": baselines, "lots": rows, "buy_list": plan, "top_picks": picks}, sys.stdout, indent=2)
         print()
         return 0
     print_table(rows, baselines, args.zip, args.top)
     if plan:
         print_buy_list(plan)
+    print_top_picks(picks)
     return 0
 
 

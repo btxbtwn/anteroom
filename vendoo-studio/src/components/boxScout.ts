@@ -1,4 +1,4 @@
-import type { SourcingBuyList, SourcingCart, SourcingLot, SourcingSnapshot, SourcingState } from "../api/types";
+import type { SourcingBuyList, SourcingCart, SourcingLot, SourcingPick, SourcingSnapshot, SourcingState } from "../api/types";
 
 /**
  * Each store's own name for a box's grade. Raghouse lots are all plain (its "Recycle"
@@ -62,9 +62,12 @@ export function storeName(store: string): string {
   return STORE_NAMES[store] ?? store;
 }
 
-/** All available variants outside the selected buy list, in their ranked order. */
+/** All available variants outside the selected buy list and the suppliers' top picks, in their ranked order. */
 export function otherLots(snapshot: SourcingSnapshot): SourcingLot[] {
-  const picked = new Set(snapshot.buy_list.carts.flatMap((cart) => cart.lots.map((lot) => `${lot.store}:${lot.variant_id}`)));
+  const picked = new Set([
+    ...snapshot.buy_list.carts.flatMap((cart) => cart.lots),
+    ...Object.values(snapshot.store_picks).flat(),
+  ].map((lot) => `${lot.store}:${lot.variant_id}`));
   return snapshot.lots.filter((lot) => !picked.has(`${lot.store}:${lot.variant_id}`));
 }
 
@@ -115,6 +118,13 @@ const EXCLUSION_LABELS = {
 
 export function whyNotPicked(lot: SourcingLot, plan: SourcingBuyList): string {
   return EXCLUSION_LABELS[plan.exclusions[`${lot.store}:${lot.variant_id}`]];
+}
+
+/** How a supplier's top box fares bought on its own. */
+export function pickNote(pick: SourcingPick): string {
+  if (pick.check === "qualifies") return "Passes every check on its own";
+  if (pick.check === "budget") return "Costs more than your budget";
+  return EXCLUSION_LABELS[pick.check];
 }
 
 /** "412 need recent sold evidence · 88 below your return target": what ruled the boxes out, most first. */
