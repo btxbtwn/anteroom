@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.271 — 2026-10-16
+
+- Analytics no longer says sales are missing details when Vendoo's Missing Sale Details filter is empty. Studio now flags the same sales Vendoo does, so every sale it lists has something you can fill in on Vendoo.
+
 ## 0.1.270 — 2026-10-16
 
 - Open listing no longer sits on "Opening…". It was holding one of Studio's database connections while it waited for Chrome, so it stalled whenever Studio was already busy; it now lets go first.

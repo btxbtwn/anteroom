@@ -242,7 +242,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
                 {key: bucket[key] for key in ("label", "count", "asking_value")} for bucket in everything["aging"]
             ],
             "sold_listings_missing_a_sale_date": everything["undated_sales"],
-            "sold_listings_missing_some_figure": len(everything["incomplete_sales"]),
+            "sales_missing_details_in_vendoo": len(everything["incomplete_sales"]),
         }),
         *(
             _section(f"Sales, {_RANGE_LABELS[range_id]}", {
