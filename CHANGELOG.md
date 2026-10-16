@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.275 — 2026-10-16
+
+- Behind the scenes, the code behind the Fields panel is reorganized so it is easier to fix and extend. Fields work exactly as before.
+
 ## 0.1.274 — 2026-10-16
 
 - Behind the scenes, the listings sidebar's code is reorganized so it is easier to fix and extend. The sidebar works exactly as before.
