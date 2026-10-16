@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.274 — 2026-10-16
+
+- Behind the scenes, the listings sidebar's code is reorganized so it is easier to fix and extend. The sidebar works exactly as before.
+
 ## 0.1.273 — 2026-10-16
 
 - Behind the scenes, the chat panel's code is reorganized so it is easier to fix and extend. Chat works exactly as before.
