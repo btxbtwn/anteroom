@@ -39,6 +39,24 @@ def _isolate_studio_settings(tmp_path_factory):
         os.environ["VENDOO_STUDIO_DATA_DIR"] = previous
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_sourcing_timer():
+    """Keep app startup from refreshing Sourcing in the background.
+
+    A test that enters the app's lifespan (``with TestClient(app)``) would start
+    the timer, which crawls the live supplier sites at once. Shutdown cannot
+    interrupt a refresh underway, so it went on writing ``sourcing.json`` into
+    whichever test's data directory was current, and that test's cleanup failed
+    with "Directory not empty". Sourcing tests call ``refresh`` themselves.
+    """
+    from unittest import mock
+
+    from vendoo_studio.services import box_scout
+
+    with mock.patch.object(box_scout, "start_sourcing_timer", return_value=None):
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _claude_signed_out(monkeypatch):
     """Keep the machine's own Claude Code login out of tests unless one opts in."""
