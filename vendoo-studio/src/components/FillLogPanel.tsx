@@ -10,33 +10,35 @@ import {
 import { addToast } from "../ui/toast";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import {
-  EMPTY_CELL,
-  FILL_FAILURE_STATUSES,
-  UNREAD_CELL,
   emptyFieldsPrompt,
-  emptyHiddenFields,
-  fieldMatchKey,
-  filterForms,
-  formSyncCounts,
-  groupFields,
-  isProtectedEbayField,
+  leftoverFieldPrompt,
+  leftoverGeneratedValue,
+} from "./fillLog/chatPrompts";
+import { mergeDraftItem } from "./fillLog/draftForms";
+import { fieldMatchKey, isProtectedEbayField } from "./fillLog/fieldKeys";
+import { formSyncCounts, vendooTextForField, type FormSyncCounts } from "./fillLog/fieldSync";
+import {
+  EMPTY_CELL,
+  UNREAD_CELL,
+  listingFieldEmpty,
+  listingTextForField,
+} from "./fillLog/fieldValues";
+import {
+  FILL_FAILURE_STATUSES,
   issueKind,
   issueLabel,
   leftoverEntries,
-  leftoverFieldPrompt,
-  leftoverGeneratedValue,
-  listingFieldEmpty,
-  listingTextForField,
-  liveStatusClass,
-  marketplaceLabel,
-  mergeDraftItem,
-  sourceFormsForJob,
-  vendooTextForField,
+} from "./fillLog/fillStatus";
+import {
+  emptyHiddenFields,
+  filterForms,
   withoutHiddenFields,
-  type DraftField,
-  type FormSyncCounts,
   type OpenMenu,
-} from "./fillLogForms";
+} from "./fillLog/formFilters";
+import { groupFields } from "./fillLog/formLayout";
+import type { DraftField } from "./fillLog/formModel";
+import { liveStatusClass, marketplaceLabel } from "./fillLog/marketplaces";
+import { sourceFormsForJob } from "./fillLog/sourceForms";
 
 function useVendooDraft(jobId: string, enabled: boolean) {
   return useQuery({

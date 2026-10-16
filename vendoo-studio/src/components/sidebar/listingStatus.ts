@@ -1,4 +1,4 @@
-import { statusFromListingStatus } from "../fillLogForms";
+import { statusFromListingStatus } from "../fillLog/marketplaces";
 import { marketplaceName } from "../marketplaceNames";
 
 // Vendoo's Inventory labels, plus the states that are Studio's own doing.
