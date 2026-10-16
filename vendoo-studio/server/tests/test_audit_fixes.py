@@ -978,7 +978,7 @@ const CONFIG = {SLEEP_LONG: 0};
     def test_invalid_dropdown_has_a_distinct_fill_status(self):
         source = (EXTENSION_DIR / "content-scripts" / "vendoo.js").read_text()
         self.assertIn("status: 'invalid'", source)
-        frontend = (REPO / "vendoo-studio" / "src" / "components" / "fillLogForms.ts").read_text()
+        frontend = (REPO / "vendoo-studio" / "src" / "components" / "fillLog" / "chatPrompts.ts").read_text()
         self.assertIn('if (entry.status === "invalid") return "invalid-dropdown";', frontend)
 
 
@@ -1484,9 +1484,11 @@ console.log(JSON.stringify({ blouse, tee }));
 
     def test_ask_chat_prompt_includes_field_context(self):
         components = Path(__file__).resolve().parents[2] / "src" / "components"
+        fill_log = sorted(p for p in (components / "fillLog").glob("*.ts") if not p.name.endswith(".test.ts"))
         panel = "\n".join(
-            (components / name).read_text(encoding="utf-8")
-            for name in ("FillLogPanel.tsx", "fillLogForms.ts", "ListingEditor.tsx", "CopyableLlmError.tsx")
+            path.read_text(encoding="utf-8")
+            for path in [components / "FillLogPanel.tsx", *fill_log,
+                         components / "ListingEditor.tsx", components / "CopyableLlmError.tsx"]
         )
         self.assertIn("function leftoverFieldPrompt", panel)
         self.assertIn("function askChatGapsPrompt", panel)

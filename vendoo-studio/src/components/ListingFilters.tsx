@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { MarketplaceLogo } from "./MarketplaceLogo";
-import { marketplaceLabel } from "./fillLogForms";
+import { marketplaceLabel } from "./fillLog/marketplaces";
 import {
   DEFAULT_LISTING_FILTERS,
   LISTING_SORTS,
