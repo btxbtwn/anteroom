@@ -12,10 +12,8 @@ import threading
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.job import is_vendoo_api_step
+from vendoo_studio.models.job import ABANDONED_SEND, is_vendoo_api_step
 from vendoo_studio.repositories.queries import JobRepo
-
-ABANDONED_SEND = "Send to Vendoo stopped before it finished. Click Send to Vendoo again."
 
 _live_api_job_ids: set[str] = set()
 # Check-and-claim for a new send. Held only across the busy check and the

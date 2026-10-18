@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.280 — 2026-10-18
+
+- Opening, refreshing or updating a listing you already sent no longer hangs for 45 seconds before showing Vendoo's copy. Studio was throwing away Vendoo's answer for listings whose send had finished.
+- If a Send to Vendoo is cut off partway (Chrome reconnects, or Studio restarts or closes the window), Studio now starts it again once by itself and picks up the same draft. You only need to click Send again if it is cut off a second time.
+
 ## 0.1.279 — 2026-10-16
 
 - Fixed a test that sometimes failed at random because Sourcing kept checking suppliers in the background while the tests ran. Nothing changes in the app itself.

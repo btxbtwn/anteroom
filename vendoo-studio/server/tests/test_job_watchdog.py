@@ -1,4 +1,4 @@
-"""The job watchdog fails dead and silent jobs, frees the slot, and never retries."""
+"""The job watchdog fails dead and silent jobs, frees the slot, and resumes a dead send once."""
 
 import asyncio
 import threading
@@ -11,11 +11,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.database import Base
-from vendoo_studio.models.job import Job, JobEvent
+from vendoo_studio.models.job import ABANDONED_SEND, AUTO_RETRY_EVENT, Job, JobEvent
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.routes.extension import ExtensionManager, dispatch_queued_jobs
 from vendoo_studio.services import job_watchdog
-from vendoo_studio.services.api_job_lock import ABANDONED_SEND, claim_api_job, release_api_job
+from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
 from vendoo_studio.services.browser_bridge import BrowserBridgeError
 from vendoo_studio.services.job_watchdog import STALL_AFTER, STALLED_JOB, fail_stalled_jobs
 
@@ -88,13 +88,22 @@ class FailStalledJobsTest(unittest.TestCase):
         self.assertEqual(fail_stalled_jobs(self.db, now=self.later(STALL_AFTER - timedelta(seconds=30))), [])
         self.assertEqual(self.status(job).status, "dispatched")
 
-    def test_a_send_no_process_is_running_is_failed_after_the_grace(self):
+    def test_a_send_no_process_is_running_is_resumed_once_after_the_grace(self):
         job = self.job()
         self.assertEqual(fail_stalled_jobs(self.db, now=self.later(timedelta(seconds=1))), [])
         self.assertEqual(fail_stalled_jobs(self.db, now=self.later(timedelta(seconds=30))), [job.id])
         row = self.status(job)
-        self.assertEqual((row.status, row.last_error), ("failed", ABANDONED_SEND))
+        self.assertEqual((row.status, row.current_step, row.last_error), ("queued", "vendoo_api_queued", None))
         self.assertEqual(JobRepo(self.db).latest_event(job.id, "watchdog_failed").payload["reason"], "dead")
+        self.assertEqual(JobRepo(self.db).latest_event(job.id, AUTO_RETRY_EVENT).payload["reason"], ABANDONED_SEND)
+
+    def test_a_resumed_send_that_dies_again_stays_failed(self):
+        job = self.job()
+        fail_stalled_jobs(self.db, now=self.later(timedelta(seconds=30)))
+        JobRepo(self.db).update_status(job.id, "dispatched", "vendoo_api_photos")
+        self.assertEqual(fail_stalled_jobs(self.db, now=self.later(timedelta(seconds=30))), [job.id])
+        row = self.status(job)
+        self.assertEqual((row.status, row.last_error), ("failed", ABANDONED_SEND))
 
     def test_an_extension_fill_is_failed_only_once_it_goes_silent(self):
         # Form fills are driven by Chrome, not a worker here; only silence counts.
