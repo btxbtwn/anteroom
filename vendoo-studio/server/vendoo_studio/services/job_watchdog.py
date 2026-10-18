@@ -16,7 +16,9 @@ that frees the slot, on startup and every ``SWEEP_INTERVAL_SEC``:
   5-minute idle limit, so ten minutes of silence is a stuck job.
 
 The watchdog only marks a job failed and stops what is still waiting on it. It
-never retries, sends, publishes or delists. The listing's label follows from
+never sends, publishes or delists. The one thing it starts again is a dead send:
+that send is queued once more (``JobRepo.requeue_interrupted_send``), and the
+resumed run picks up its checkpointed draft instead of creating a second one. The listing's label follows from
 the failed job in ``ConversationRepo.reconcile_job_statuses``; the next queued
 Send starts because a failed job frees the slot, as the queue already does.
 """
@@ -30,9 +32,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.job import JobEvent, is_vendoo_api_step
+from vendoo_studio.models.job import ABANDONED_SEND, JobEvent, is_vendoo_api_step
 from vendoo_studio.repositories.queries import JobRepo
-from vendoo_studio.services.api_job_lock import ABANDONED_SEND, api_job_is_live
+from vendoo_studio.services.api_job_lock import api_job_is_live
 
 log = logging.getLogger("vendoo_studio.job_watchdog")
 
@@ -111,6 +113,9 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
         if updated is None or updated.status != "failed" or updated.last_error != error:
             continue
         repo.add_event(job.id, "watchdog_failed", step, {"reason": reason, "quiet_sec": int(quiet.total_seconds())})
+        if reason == "dead":
+            # Nothing in this process runs it, so resuming cannot double up.
+            repo.requeue_interrupted_send(job.id)
         failed.append(job.id)
         log.warning("Failed %s job %s at %s after %ds", reason, job.id, step, int(quiet.total_seconds()))
     return failed

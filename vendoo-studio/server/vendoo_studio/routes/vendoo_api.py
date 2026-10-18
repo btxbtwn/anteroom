@@ -135,6 +135,9 @@ def _finish_api_send(db: Session, job_id: str) -> None:
         abandon_api_job_if_still_running(db, job_id)
     finally:
         release_api_job(job_id)
+        # The worker has stopped, so a send it was cut off from can safely
+        # start again. Covers a closed request and a Chrome reconnect alike.
+        JobRepo(db).requeue_interrupted_send(job_id)
         from vendoo_studio.routes.extension import schedule_advance_job_queue
 
         schedule_advance_job_queue()

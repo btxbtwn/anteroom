@@ -51,7 +51,9 @@ async def run_send(job_id: str) -> None:
         db.rollback()
         repo = JobRepo(db)
         job = repo.get(job_id)
-        if job and job.status not in {"cancelled", "failed", "completed"}:
+        # Only a send still running is failed here; one already ended or put
+        # back in the queue after an interruption keeps its state.
+        if job and job.status == "dispatched":
             error = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
             repo.update_status(job_id, "failed", job.current_step, error=error)
         log.info("Queued Vendoo send ended for %s: %s", job_id, type(exc).__name__)

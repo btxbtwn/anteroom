@@ -103,6 +103,10 @@ class ExtensionManager:
         if fut and not fut.done():
             fut.set_result(payload)
 
+    def is_waiting(self, request_id: str) -> bool:
+        fut = self._waits.get(request_id)
+        return bool(fut and not fut.done())
+
     def cancel_wait(self, request_id: str) -> None:
         self._wait_jobs.pop(request_id, None)
         fut = self._waits.pop(request_id, None)
@@ -446,6 +450,25 @@ def _next_dispatch() -> tuple[str, str, dict | None] | None:
         ).model_dump(mode="json"))
 
 
+def _resume_interrupted_sends(repo, jobs) -> None:
+    """Start sends cut off by a Chrome reconnect again, once their worker stops.
+
+    A worker still running here waits on replies the old connection will never
+    deliver, so its waits are cancelled; it ends now and its own exit queues the
+    send again. A send with no worker (Studio restarted) is queued straight away.
+    """
+    from vendoo_studio.models.job import RECONNECTED_SEND
+    from vendoo_studio.services.api_job_lock import api_job_is_live
+
+    for job in jobs:
+        if job.status != "failed" or job.last_error != RECONNECTED_SEND:
+            continue
+        if api_job_is_live(job.id):
+            extension_manager.cancel_waits_for_job(job.id)
+        else:
+            repo.requeue_interrupted_send(job.id)
+
+
 async def dispatch_queued_jobs():
     """Start the next queued job, if Chrome is free.
 
@@ -766,7 +789,7 @@ async def extension_websocket(ws: WebSocket):
                 if accepted:
                     extension_manager.paired = True
                     from vendoo_studio.repositories.queries import JobRepo
-                    JobRepo(db).requeue_interrupted()
+                    _resume_interrupted_sends(JobRepo(db), JobRepo(db).requeue_interrupted())
                     await dispatch_queued_jobs()
                     # Warm label names in the background so Item Details can rename
                     # opaque chips without blocking the handshake.
@@ -792,8 +815,17 @@ async def extension_websocket(ws: WebSocket):
             ):
                 from vendoo_studio.models.job import is_terminal_job_status
                 from vendoo_studio.repositories.queries import JobRepo
+                payload = message.get("payload") or {}
+                request_id = str(payload.get("request_id") or message.get("message_id") or "")
                 current_job = JobRepo(db).get(job_id)
-                if current_job and is_terminal_job_status(current_job.status):
+                # A finished job is still read and updated (opening, reviewing or
+                # updating a sent listing). A reply someone is waiting for is not
+                # late; only drop the ones nobody asked for any more.
+                if (
+                    current_job
+                    and is_terminal_job_status(current_job.status)
+                    and not extension_manager.is_waiting(request_id)
+                ):
                     JobRepo(db).add_event(job_id, "ignored_late_result", None, {"type": msg_type})
                     continue
 

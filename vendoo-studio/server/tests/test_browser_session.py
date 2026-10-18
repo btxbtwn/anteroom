@@ -243,6 +243,60 @@ class PreviewFrameForFinishedDraftTest(unittest.TestCase):
         self.assertNotIn("ignored_late_result", events)
 
 
+class FinishedJobRepliesTest(unittest.TestCase):
+    """Sent listings are still read and updated through their finished job."""
+
+    def _run(self, status: str, wait: bool):
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        conv = ConversationRepo(db).create(title="Tee")
+        revision = ListingRepo(db).save_revision(conv.id, {"title": "Tee"}, source="user")
+        job = JobRepo(db).create(conv_id=conv.id, approved_revision_id=revision.id, listing_snapshot={"title": "Tee"},
+                                 vendoo_item_id="draft-1", status=status)
+        job_id = job.id
+        db.close()
+        manager = ExtensionManager()
+        resolved = {}
+
+        async def handshake(ws, *_):
+            if wait:
+                future = manager.register_wait("req-1", job_id)
+                future.add_done_callback(lambda f: resolved.setdefault("req-1", f.result()))
+            return True
+
+        with patch("vendoo_studio.routes.extension.SessionLocal", Session), \
+             patch("vendoo_studio.routes.extension.extension_manager", manager), \
+             patch.object(manager, "verify_token", return_value=True), \
+             patch("vendoo_studio.routes.extension._websocket_allowed", return_value=True), \
+             patch("vendoo_studio.routes.extension.handshake_extension", side_effect=handshake), \
+             patch("vendoo_studio.routes.extension.dispatch_queued_jobs", AsyncMock()):
+            client = TestClient(app)
+            with client.websocket_connect("/api/extension/ws") as ws:
+                ws.send_json({"type": "extension.ready", "payload": {"token": "test"}})
+                ws.send_json({"type": "job.vendoo_api_result", "job_id": job_id, "message_id": "req-1", "payload": {
+                    "request_id": "req-1", "ok": True, "results": [{"op": "get_item", "ok": True, "item": {"itemID": "draft-1"}}],
+                }})
+                ws.send_json({"type": "pong"})
+                for _ in range(50):
+                    if resolved:
+                        break
+                    client.get("/api/health")
+        events = [event.event_type for event in JobRepo(Session()).get_events(job_id)]
+        return resolved, events
+
+    def test_reply_reaches_waiter_for_completed_job(self):
+        resolved, events = self._run("completed", wait=True)
+        self.assertEqual(resolved["req-1"]["results"][0]["item"]["itemID"], "draft-1")
+        self.assertNotIn("ignored_late_result", events)
+
+    def test_unrequested_reply_for_completed_job_is_dropped(self):
+        resolved, events = self._run("completed", wait=False)
+        self.assertEqual(resolved, {})
+        self.assertIn("ignored_late_result", events)
+
+
 class FrameViewportTest(unittest.TestCase):
     def test_viewport_dimensions_pass_through_when_sane(self):
         frame = sanitize_frame({"mime": "image/jpeg", "data": "abc", "viewport_width": 1280, "viewport_height": 800})

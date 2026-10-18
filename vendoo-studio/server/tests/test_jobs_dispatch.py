@@ -10,11 +10,13 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
-from vendoo_studio.models.job import Job
+from vendoo_studio.models.job import ABANDONED_SEND, AUTO_RETRY_EVENT, RECONNECTED_SEND, Job
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.repositories.queries import JobRepo
+from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job
 from vendoo_studio.routes.extension import (
     ExtensionManager,
+    _resume_interrupted_sends,
     dispatch_queued_jobs,
     dispatch_search_categories,
     extension_status,
@@ -143,6 +145,74 @@ class JobRepoActiveTest(unittest.TestCase):
         self.assertEqual(recovered[0].status, "failed")
         self.assertEqual(recovered[0].current_step, "filling_fields")
         self.assertIn("Retry the leftover fill", recovered[0].last_error)
+
+    def _interrupted(self, error: str = RECONNECTED_SEND, step: str = "vendoo_api_photos") -> Job:
+        job = self._job("failed")
+        job.current_step = step
+        job.last_error = error
+        self.db.commit()
+        return job
+
+    def test_interrupted_send_is_queued_again_once(self):
+        job = self._interrupted()
+        repo = JobRepo(self.db)
+        self.assertTrue(repo.requeue_interrupted_send(job.id))
+        self.db.refresh(job)
+        self.assertEqual((job.status, job.current_step, job.last_error), ("queued", "vendoo_api_queued", None))
+        self.assertEqual(repo.latest_event(job.id, AUTO_RETRY_EVENT).step, "vendoo_api_photos")
+        # Cut off again: it stays failed and the seller decides.
+        repo.update_status(job.id, "failed", "vendoo_api_photos", error=ABANDONED_SEND)
+        self.assertFalse(repo.requeue_interrupted_send(job.id))
+        self.db.refresh(job)
+        self.assertEqual(job.status, "failed")
+
+    def test_refused_or_form_fill_jobs_are_not_queued_again(self):
+        repo = JobRepo(self.db)
+        refused = self._interrupted(error="Vendoo rejected the item")
+        form_fill = self._interrupted(step="filling_general")
+        running = self._job("dispatched")
+        running.current_step = "vendoo_api_photos"
+        self.db.commit()
+        for job in (refused, form_fill, running):
+            self.assertFalse(repo.requeue_interrupted_send(job.id))
+
+    def test_reconnect_resumes_a_send_with_no_worker(self):
+        job = self._job("dispatched")
+        job.current_step = "vendoo_api_photos"
+        self.db.commit()
+        repo = JobRepo(self.db)
+        _resume_interrupted_sends(repo, repo.requeue_interrupted())
+        self.db.refresh(job)
+        self.assertEqual(job.status, "queued")
+
+    def test_reconnect_stops_a_live_worker_and_leaves_the_resume_to_its_exit(self):
+        job = self._job("dispatched")
+        job.current_step = "vendoo_api_photos"
+        self.db.commit()
+        manager = ExtensionManager()
+        repo = JobRepo(self.db)
+        claim_api_job(job.id)
+        self.addCleanup(release_api_job, job.id)
+        with patch("vendoo_studio.routes.extension.extension_manager", manager), \
+             patch.object(manager, "cancel_waits_for_job") as cancel:
+            _resume_interrupted_sends(repo, repo.requeue_interrupted())
+        cancel.assert_called_once_with(job.id)
+        self.db.refresh(job)
+        self.assertEqual((job.status, job.last_error), ("failed", RECONNECTED_SEND))
+
+    def test_worker_exit_resumes_a_send_whose_request_closed(self):
+        from vendoo_studio.routes.vendoo_api import _finish_api_send
+
+        job = self._job("dispatched")
+        job.current_step = "vendoo_api_photos"
+        self.db.commit()
+        claim_api_job(job.id)
+        with patch("vendoo_studio.routes.extension.schedule_advance_job_queue"):
+            _finish_api_send(self.db, job.id)
+        self.db.refresh(job)
+        self.assertEqual(job.status, "queued")
+        self.assertFalse(api_job_is_live(job.id))
+        self.assertEqual(JobRepo(self.db).latest_event(job.id, AUTO_RETRY_EVENT).payload["reason"], ABANDONED_SEND)
 
     def test_add_event_persists_without_refresh(self):
         job = self._job("dispatched")
@@ -610,6 +680,48 @@ class ResumeStepForRetryTest(unittest.TestCase):
         )
         self.assertEqual(resume_step_for_retry(depop), "auditing_depop")
 
+
+
+class QueuedSendInterruptedTest(unittest.IsolatedAsyncioTestCase):
+    """A queued send cut off by a reconnect goes back in the queue, not to failed."""
+
+    async def test_run_send_leaves_a_resumed_send_queued(self):
+        from fastapi import HTTPException
+
+        from vendoo_studio.routes.vendoo_api import _finish_api_send
+        from vendoo_studio.services.send_queue import run_send
+
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        db = Session()
+        conv = Conversation(title="Nike tee")
+        db.add(conv)
+        db.commit()
+        job = Job(conversation_id=conv.id, approved_revision_id="rev1", listing_snapshot={"title": "Nike tee"},
+                  status="dispatched", current_step="vendoo_api_create")
+        db.add(job)
+        db.commit()
+        job_id = job.id
+        db.close()
+        claim_api_job(job_id)
+
+        async def cut_off(db, conv, conv_id, revisions, snapshot, photos, provider, evidence, job, repo):
+            # What a Chrome reconnect does to a live send, then its own exit.
+            repo.update_status(job.id, "failed", job.current_step, error=RECONNECTED_SEND)
+            _finish_api_send(db, job.id)
+            raise HTTPException(409, "Send was cancelled.")
+
+        with patch("vendoo_studio.services.send_queue.SessionLocal", Session), \
+             patch("vendoo_studio.routes.vendoo_api._create_claimed_draft", cut_off), \
+             patch("vendoo_studio.services.listing_provider.provider_is_configured", return_value=False), \
+             patch("vendoo_studio.routes.extension.schedule_advance_job_queue"):
+            await run_send(job_id)
+
+        check = Session()
+        row = check.query(Job).filter(Job.id == job_id).one()
+        self.assertEqual((row.status, row.current_step, row.last_error), ("queued", "vendoo_api_queued", None))
+        check.close()
 
 if __name__ == "__main__":
     unittest.main()

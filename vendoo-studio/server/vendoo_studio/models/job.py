@@ -11,6 +11,14 @@ RUNNING_JOB_STATUSES = ("dispatched",)
 TERMINAL_JOB_STATUSES = ("completed", "cancelled", "failed", "imported")
 
 
+# A send that was interrupted rather than refused. It resumes once on its own;
+# the resumed run picks up its checkpointed draft instead of making a second.
+ABANDONED_SEND = "Send to Vendoo stopped before it finished. Click Send to Vendoo again."
+RECONNECTED_SEND = "Chrome reconnected during Send to Vendoo. Click Send to Vendoo again."
+INTERRUPTED_SEND_ERRORS = frozenset({ABANDONED_SEND, RECONNECTED_SEND})
+AUTO_RETRY_EVENT = "vendoo_api_auto_retry"
+
+
 def is_terminal_job_status(status: str | None) -> bool:
     return str(status or "") in TERMINAL_JOB_STATUSES
 

@@ -577,18 +577,16 @@ class JobRepo:
         )
 
     def requeue_interrupted(self) -> list[Job]:
-        from vendoo_studio.models.job import is_vendoo_api_step
+        from vendoo_studio.models.job import RECONNECTED_SEND, is_vendoo_api_step
 
         jobs = self.db.query(Job).filter(Job.status == "dispatched").all()
         for job in jobs:
             if is_vendoo_api_step(job.current_step):
                 # Must not become a form-filler queue entry — that path opens a
                 # Vendoo tab and fills the SPA instead of calling createItem.
+                # The caller resumes it once its worker has stopped.
                 job.status = "failed"
-                job.last_error = (
-                    "Chrome reconnected during Send to Vendoo. "
-                    "Click Send to Vendoo again."
-                )
+                job.last_error = RECONNECTED_SEND
             elif job.current_step in {"filling_fields", "resolving_fields", "verifying_draft"}:
                 job.status = "failed"
                 job.last_error = (
@@ -604,6 +602,31 @@ class JobRepo:
             for job in jobs:
                 self.db.refresh(job)
         return jobs
+
+    def requeue_interrupted_send(self, job_id: str) -> bool:
+        """Put an interrupted Vendoo API send back in the queue, once.
+
+        Only a send that failed because it was cut off qualifies, and only the
+        first time. Returns True when the job is queued again.
+        """
+        from vendoo_studio.models.job import AUTO_RETRY_EVENT, INTERRUPTED_SEND_ERRORS, is_vendoo_api_step
+
+        job = self.db.query(Job).filter(Job.id == job_id).first()
+        if (
+            not job
+            or job.status != "failed"
+            or job.last_error not in INTERRUPTED_SEND_ERRORS
+            or not is_vendoo_api_step(job.current_step)
+            or self.latest_event(job.id, AUTO_RETRY_EVENT)
+        ):
+            return False
+        interrupted_at, reason = job.current_step, job.last_error
+        job.status = "queued"
+        job.current_step = "vendoo_api_queued"
+        job.last_error = None
+        self.db.commit()
+        self.add_event(job.id, AUTO_RETRY_EVENT, interrupted_at, {"reason": reason})
+        return True
 
     def list_all(self) -> list[Job]:
         return self.db.query(Job).order_by(Job.created_at.desc()).limit(50).all()
