@@ -292,7 +292,8 @@ class CreateRouteTest(_RouteTest):
             res = self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/create")
         self.assertEqual(res.status_code, 200, res.text)
         self.db.expire_all()
-        self.assertEqual(JobRepo(self.db).get(stale.id).status, "failed")
+        # The dead send waits in the queue to resume; it does not hold Chrome.
+        self.assertEqual(JobRepo(self.db).get(stale.id).status, "queued")
 
     def test_this_listings_live_send_is_not_reported_as_another_job(self):
         from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
@@ -319,7 +320,7 @@ class CreateRouteTest(_RouteTest):
         self.assertEqual(res.status_code, 409)
         self.assertIn("already queued or sending", res.json()["detail"])
 
-    def test_a_cancelled_send_does_not_stay_dispatched(self):
+    def test_a_send_cut_off_mid_request_is_queued_to_resume_not_left_dispatched(self):
         async def fake_create(job, listing, photos, *, provider=None, evidence=""):
             raise asyncio.CancelledError()
 
@@ -328,7 +329,19 @@ class CreateRouteTest(_RouteTest):
                 self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/create")
         self.db.expire_all()
         jobs = JobRepo(self.db).list_by_conversation(self.conv.id)
-        self.assertEqual([job.status for job in jobs], ["failed"])
+        self.assertEqual([(job.status, job.current_step) for job in jobs], [("queued", "vendoo_api_queued")])
+
+    def test_a_send_the_seller_cancelled_is_not_resumed(self):
+        async def fake_create(job, listing, photos, *, provider=None, evidence=""):
+            JobRepo(self.db).update_status(job.id, "cancelled", job.current_step)
+            raise VendooCreateError("Send was cancelled")
+
+        with patch("vendoo_studio.services.vendoo_create.create_item", fake_create):
+            res = self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/create")
+        self.assertEqual(res.status_code, 409)
+        self.db.expire_all()
+        jobs = JobRepo(self.db).list_by_conversation(self.conv.id)
+        self.assertEqual([job.status for job in jobs], ["cancelled"])
 
 
 class PullRouteTest(_RouteTest):
