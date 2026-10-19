@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.281 — 2026-10-19
+
+- Fewer "Python wants to use your confidential information" Keychain password prompts. Studio's own checks were reading your Keychain every time they ran; they now use a throwaway one and leave yours alone.
+
 ## 0.1.280 — 2026-10-18
 
 - Opening, refreshing or updating a listing you already sent no longer hangs for 45 seconds before showing Vendoo's copy. Studio was throwing away Vendoo's answer for listings whose send had finished.
