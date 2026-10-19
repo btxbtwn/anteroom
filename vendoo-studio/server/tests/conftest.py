@@ -69,6 +69,39 @@ def _claude_signed_out(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_keychain():
+    """Give every test an empty in-memory keyring instead of the login Keychain.
+
+    The real Keychain does not trust the test interpreter, so each read pops a
+    "Python wants to use vendoo-studio" password dialog — one per read, per
+    xdist worker, every time the suite runs.
+    """
+    import keyring
+    from keyring.backend import KeyringBackend
+
+    class MemoryKeyring(KeyringBackend):
+        priority = 1
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.items: dict[tuple[str, str], str] = {}
+
+        def get_password(self, service, username):
+            return self.items.get((service, username))
+
+        def set_password(self, service, username, password):
+            self.items[(service, username)] = password
+
+        def delete_password(self, service, username):
+            self.items.pop((service, username), None)
+
+    original = keyring.get_keyring()
+    keyring.set_keyring(MemoryKeyring())
+    yield
+    keyring.set_keyring(original)
+
+
+@pytest.fixture(autouse=True)
 def _keychain_memory_is_pristine():
     """Leave the keychain module's in-memory state as a fresh process has it.
 
