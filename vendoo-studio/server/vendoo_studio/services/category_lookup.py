@@ -301,7 +301,9 @@ def pick_category_path(
     want_gender = category_department(query) or category_department(_listing_department(listing))
     ranked: list[str] = []
     for path in candidates:
-        if not path or path in ranked:
+        # A path with no separators is a leaf or a breadcrumb whose separators
+        # were lost reading the page; saving it fails validation every time.
+        if not path or path in ranked or ">" not in path:
             continue
         if _wrong_garment(path, query, listing):
             continue
@@ -309,7 +311,10 @@ def pick_category_path(
         if want_gender and path_gender and path_gender != want_gender:
             continue
         ranked.append(path)
-    return ranked[0] if ranked else str(selected or "").strip() or _match_path((matches or [None])[0])
+    if ranked:
+        return ranked[0]
+    fallback = [path for path in candidates if ">" in path]
+    return fallback[0] if fallback else ""
 
 
 def _job_for_conversation(db: Session, conv_id: str):

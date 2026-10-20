@@ -102,6 +102,26 @@ class PickCategoryPathTest(unittest.TestCase):
         )
 
 
+    def test_skips_path_whose_separators_were_lost(self):
+        glued = "Clothing, Shoes & AccessoriesMenMen's ClothingShirtsT-Shirts"
+        self.assertEqual(
+            pick_category_path(
+                [{"path": glued, "score": 5}, {"path": MEN_TSHIRT_PATH, "score": 4}],
+                {"title": "Harley-Davidson XL Tank Top", "department": "Men"},
+                "Men T-Shirt",
+                glued,
+            ),
+            MEN_TSHIRT_PATH,
+        )
+
+    def test_returns_nothing_when_no_match_is_a_breadcrumb(self):
+        glued = "Clothing, Shoes & AccessoriesMenMen's ClothingShirtsT-Shirts"
+        self.assertEqual(
+            pick_category_path([{"path": glued}], {"department": "Men"}, "Men T-Shirt", glued),
+            "",
+        )
+
+
 class ApplyResolvedCategoryTest(unittest.TestCase):
     def setUp(self):
         from sqlalchemy import create_engine
