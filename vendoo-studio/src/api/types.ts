@@ -444,6 +444,10 @@ export interface Suggestion {
   score: number;
   cover_photo_url?: string | null;
   age_days?: number | null;
+  /** Stale only: items sharing this one's brand or category that sold in the last 60 days. */
+  similar_sold?: number;
+  /** Stale only: whether buyers are shopping this item's season now; null for all-year or unknown. */
+  season_fit?: "in" | "off" | null;
 }
 
 export type SuggestionKind =

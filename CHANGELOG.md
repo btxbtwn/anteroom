@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.282 — 2026-10-19
+
+- Suggestions now put the 60+ day listings worth relisting first: ones like what sold in your shop in the last 60 days (same brand or category), then ones in the season buyers are shopping for now, then the oldest. Out-of-season items sink to the bottom. Each card says why, for example "8 like it sold · In season".
+
 ## 0.1.281 — 2026-10-19
 
 - Fewer "Python wants to use your confidential information" Keychain password prompts. Studio's own checks were reading your Keychain every time they ran; they now use a throwaway one and leave yours alone.

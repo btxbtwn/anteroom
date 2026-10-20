@@ -19,6 +19,8 @@ class SuggestionCard(BaseModel):
     score: int
     cover_photo_url: str | None = None
     age_days: int | None = None
+    similar_sold: int = 0
+    season_fit: str | None = None
 
 
 class SuggestionsResponse(BaseModel):

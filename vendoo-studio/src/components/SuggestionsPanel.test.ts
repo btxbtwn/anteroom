@@ -39,6 +39,15 @@ describe("suggestionCaption", () => {
     );
   });
 
+  it("shows why a compact stale row ranks high in place of the action", () => {
+    expect(
+      suggestionCaption({ kind: "stale_active", age_days: 75, similar_sold: 3, season_fit: "in" }, true),
+    ).toBe("75 days · 3 like it sold · In season");
+    expect(suggestionCaption({ kind: "stale_active", age_days: 75, season_fit: "off" }, true)).toBe(
+      "75 days · Refresh or consider price drop",
+    );
+  });
+
   it("leaves other compact kinds unchanged", () => {
     expect(suggestionCaption({ kind: "fix_validation", age_days: null }, true)).toBe(
       "Fix listing fields",
