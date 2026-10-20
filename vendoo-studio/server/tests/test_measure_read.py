@@ -98,6 +98,16 @@ class ReadMeasurementsRouteTest(unittest.TestCase):
         self.assertEqual(body["measurements"]["length"]["value"], 27.0)
         self.assertEqual(len(provider.calls), 6)
 
+    def test_accepted_values_round_to_the_nearest_half_inch(self):
+        provider = FakeProvider([
+            {"pit_to_pit": 20.25, "length": 27.75, "sleeve": 8.125},
+            {"pit_to_pit": 20.25, "length": 27.75, "sleeve": 8.375},
+        ])
+        body = self.post(provider, [_ruler_photo()]).json()
+        self.assertEqual(body["measurements"]["pitToPit"]["value"], 20.5)
+        self.assertEqual(body["measurements"]["length"]["value"], 28.0)
+        self.assertEqual(body["measurements"]["sleeve"]["value"], 8.5)
+
     def test_no_yardstick_photo_reads_nothing(self):
         provider = FakeProvider([])
         body = self.post(provider, [_plain_photo()]).json()
