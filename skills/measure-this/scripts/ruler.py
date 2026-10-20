@@ -339,7 +339,8 @@ def settle_one(first, second) -> dict:
         return {"status": "cannot_read", "reads": [first, second]}
     if abs(a - b) > AGREE_WITHIN + 1e-9:
         return {"status": "disagree", "reads": [a, b]}
-    return {"status": "accepted", "value": math.floor((a + b) / 2 * 4 + 0.5) / 4, "reads": [a, b]}
+    # Sellers list to the nearest half inch, so the agreed value is rounded the same way.
+    return {"status": "accepted", "value": math.floor((a + b) / 2 * 2 + 0.5) / 2, "reads": [a, b]}
 
 
 def format_inches(value: float) -> str:

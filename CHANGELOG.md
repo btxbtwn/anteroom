@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.282 — 2026-10-19
+
+- Measurements read from photos now round to the nearest half inch, so you get whole numbers or .5 instead of .25 or .75.
+
 ## 0.1.281 — 2026-10-19
 
 - Fewer "Python wants to use your confidential information" Keychain password prompts. Studio's own checks were reading your Keychain every time they ran; they now use a throwaway one and leave yours alone.
