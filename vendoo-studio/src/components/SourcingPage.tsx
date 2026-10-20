@@ -594,6 +594,8 @@ function AvailableBoxes({ snapshot, onOpenListing }: { snapshot: SourcingSnapsho
   );
 }
 
+const ALL_SALES_SOURCE = "Your sales (all items)";
+
 function ResearchEvidence({ lot, onOpenListing }: { lot: SourcingLot; onOpenListing: (convId: string) => void }) {
   const [open, setOpen] = useState(false);
   // The examples are fetched when the seller opens them, so the page itself stays light.
@@ -605,12 +607,16 @@ function ResearchEvidence({ lot, onOpenListing }: { lot: SourcingLot; onOpenList
   });
   if (!lot.comps_count) return <div className="sourcing-item-why">Not enough recent sold evidence to estimate resale.</div>;
   const data = evidence.data;
+  // A mixed box is priced from everything the seller sold, not a search for one kind of piece.
+  const allItems = lot.research_source === ALL_SALES_SOURCE;
   return <details className="sourcing-evidence" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>{lot.comps_count} sales · {lot.research_source} · {lot.research_at ? clockTime(lot.research_at) : ""}</summary>
+    <summary>{allItems ? "Your recent sales of any kind" : `${lot.comps_count} sales · ${lot.research_source}`} · {lot.research_at ? clockTime(lot.research_at) : ""}</summary>
     {evidence.isLoading ? <p className="sourcing-hint">Loading the sales…</p> : null}
     {evidence.isError ? <p className="sourcing-hint">{(evidence.error as Error).message}</p> : null}
     {data ? <>
-      <p className="sourcing-hint">{data.source === "Your sales"
+      <p className="sourcing-hint">{allItems
+        ? `A mixed box can't be priced by searching for one kind of piece, so this uses the median of everything you sold in the last 90 days. These are your ${data.comps.length} most recent sales.`
+        : data.source === "Your sales"
         ? "These are your own recorded sales of this kind of piece."
         : "Studio read these sold listings from the marketplaces by searching for this kind of piece, leaving out any whose title shows a different garment, a bundle or new with tags. It cannot check brand, era or condition. Review the links before buying."}</p>
       <ul className="sourcing-comps">
@@ -622,7 +628,7 @@ function ResearchEvidence({ lot, onOpenListing }: { lot: SourcingLot; onOpenList
           {comp.conversation_id ? null : <q>{comp.snippet}</q>}
         </li>)}
       </ul>
-      {data.active_median != null ? <p className="sourcing-hint">Current asking-price median {formatMoney(data.active_median)}; the resale estimate is capped at this price.</p>
+      {allItems ? null : data.active_median != null ? <p className="sourcing-hint">Current asking-price median {formatMoney(data.active_median)}; the resale estimate is capped at this price.</p>
         : <p className="sourcing-hint">Current competition sample is too small to cap the price. Market sell-through and time to sell are unknown.</p>}
       {data.active.length ? <ul className="sourcing-comps">
         {data.active.map((comp) => <li key={comp.url}>

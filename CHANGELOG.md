@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.284 — 2026-10-20
+
+- A mixed box (sold by the pound) now explains its sales list correctly: it is priced from the median of everything you sold in the last 90 days, and the list shows your most recent sales of any kind. Before, it said those sales came from a marketplace search for that kind of piece.
+
 ## 0.1.283 — 2026-10-19
 
 - Suggestions now put the 60+ day listings worth relisting first: ones like what sold in your shop in the last 60 days (same brand or category), then ones in the season buyers are shopping for now, then the oldest. Out-of-season items sink to the bottom. Each card says why, for example "8 like it sold · In season".
