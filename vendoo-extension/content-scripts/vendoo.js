@@ -3221,10 +3221,8 @@
           }
       }
 
-      const shown = normalizeCategoryDisplay(
-          displayedFieldValue(catBtn) || catBtn.innerText || catBtn.textContent || '',
-      ).split('\n')[0].trim();
-      if (!shown || /click to select|select category/i.test(shown)) {
+      const shown = readCategoryDisplay(catBtn).split('\n')[0].trim();
+      if (!shown) {
           const fallback = matches.find((item) => item.path.includes('>')) || matches[0];
           return {
               ok: Boolean(fallback?.path),
