@@ -26,15 +26,24 @@ export function staleAgeLabel(days: number): string {
   return days === 1 ? "1 day" : `${days} days`;
 }
 
+/** Why a stale row ranks where it does: like items selling now, and its season. */
+export function staleSignals(suggestion: Pick<Suggestion, "similar_sold" | "season_fit">): string[] {
+  const signals: string[] = [];
+  if (suggestion.similar_sold) signals.push(`${suggestion.similar_sold} like it sold`);
+  if (suggestion.season_fit === "in") signals.push("In season");
+  return signals;
+}
+
 export function suggestionCaption(
-  suggestion: Pick<Suggestion, "kind" | "age_days">,
+  suggestion: Pick<Suggestion, "kind" | "age_days" | "similar_sold" | "season_fit">,
   compact: boolean,
 ): string {
   const label = suggestionKindLabel(suggestion.kind);
   if (!compact || suggestion.kind !== "stale_active" || suggestion.age_days == null) {
     return label;
   }
-  return `${staleAgeLabel(suggestion.age_days)} · ${label}`;
+  const signals = staleSignals(suggestion);
+  return [staleAgeLabel(suggestion.age_days), ...(signals.length ? signals : [label])].join(" · ");
 }
 
 export function SuggestionsPanel({

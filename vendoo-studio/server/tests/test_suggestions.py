@@ -161,7 +161,74 @@ class SuggestionsTest(unittest.TestCase):
         self.assertEqual([card["age_days"] for card in cards], [90, 60])
         self.assertIn("60 days", cards[-1]["reason"])
         self.assertIn("eBay", cards[-1]["reason"])
-        self.assertTrue(cards[0]["score"] > cards[1]["score"])
+        # Nothing else to tell them apart: age alone breaks the tie.
+        self.assertEqual(cards[0]["score"], cards[1]["score"])
+
+    def _stale(self, title: str, listed: str, listing: dict | None = None):
+        conv = self.convs.create(title=title)
+        conv.notes = json.dumps({"vendooMarketplaces": ["ebay"], "vendooDates": {"listed": listed}})
+        self.db.commit()
+        self.convs.update_status(conv.id, "active")
+        if listing is not None:
+            self.listings.save_revision(conv.id, {"title": title, "price": 20, **listing}, "test")
+        return conv
+
+    def _sold(self, title: str, sold: str, listing: dict):
+        conv = self.convs.create(title=title)
+        conv.notes = json.dumps({"vendooDates": {"listed": "2026-05-01T00:00:00Z", "sold": sold}})
+        self.db.commit()
+        self.convs.update_status(conv.id, "sold")
+        self.listings.save_revision(conv.id, {"title": title, "price": 20, **listing}, "test")
+
+    def _stale_titles(self) -> list[str]:
+        return [card["title"] for card in list_suggestions(self.db, now=NOW) if card["kind"] == "stale_active"]
+
+    def test_stale_like_recent_sales_ranks_above_older(self):
+        tops = "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops"
+        self._stale("Old jeans", "2026-03-01T00:00:00Z", {"brand": "Levi's", "category_path": "Jeans"})
+        self._stale("Madewell top", "2026-07-01T00:00:00Z", {"brand": "Madewell", "category_path": tops})
+        self._stale("Other top", "2026-06-01T00:00:00Z", {"brand": "J.Crew", "category_path": tops})
+        self._sold("Sold Madewell", "2026-09-10T00:00:00Z", {"brand": "Madewell", "category_path": tops})
+        self._sold("Sold top", "2026-09-01T00:00:00Z", {"brand": "Gap", "category_path": tops})
+        # Too long ago to say what is selling now.
+        self._sold("Sold jeans", "2026-05-01T00:00:00Z", {"brand": "Levi's", "category_path": "Jeans"})
+        self.assertEqual(self._stale_titles(), ["Madewell top", "Other top", "Old jeans"])
+        card = self._by_title("Madewell top")
+        self.assertEqual(card["similar_sold"], 2)
+        self.assertIn("2 like it sold in the last 60 days", card["reason"])
+        self.assertEqual(self._by_title("Old jeans")["similar_sold"], 0)
+
+    def test_in_season_ranks_first_and_off_season_last(self):
+        # NOW is September: Fall and the Winter ahead are in demand.
+        self._stale("Plain mug", "2026-03-01T00:00:00Z", {})
+        self._stale("Linen shorts", "2026-02-01T00:00:00Z", {"category_path": "Shorts"})
+        self._stale("Wool sweater", "2026-07-01T00:00:00Z", {})
+        self._stale("Tagged jacket", "2026-07-10T00:00:00Z", {"ebay_specifics": {"season": ["Fall", "Winter"]}})
+        self._stale("Any time tee", "2026-01-01T00:00:00Z", {
+            "ebay_specifics": {"season": ["Spring", "Summer", "Fall", "Winter"]},
+        })
+        self.assertEqual(
+            self._stale_titles(),
+            ["Wool sweater", "Tagged jacket", "Any time tee", "Plain mug", "Linen shorts"],
+        )
+        self.assertEqual(self._by_title("Wool sweater")["season_fit"], "in")
+        self.assertIn("In season now", self._by_title("Wool sweater")["reason"])
+        self.assertEqual(self._by_title("Linen shorts")["season_fit"], "off")
+        self.assertIsNone(self._by_title("Any time tee")["season_fit"])
+
+    def test_stale_score_stays_below_fix_validation(self):
+        tops = "Women > Tops"
+        self._stale("Hot top", "2025-01-01T00:00:00Z", {
+            "brand": "Madewell", "category_path": tops, "ebay_specifics": {"season": "Fall"},
+        })
+        for index in range(8):
+            self._sold(f"Sold {index}", "2026-09-10T00:00:00Z", {"brand": "Madewell", "category_path": tops})
+        broken = self.convs.create(title="Broken draft")
+        self.listings.save_revision(broken.id, {"title": "Broken draft", "price": 18}, "user_form")
+        self.listings.get_current(broken.id).validation_status = "error"
+        self.db.commit()
+        self.assertEqual(self._kinds()[:2], ["fix_validation", "stale_active"])
+        self.assertLess(self._by_title("Hot top")["score"], 300)
 
     def test_draft_with_revision_is_ready_to_review(self):
         conv = self.convs.create(title="Ready draft")
