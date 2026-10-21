@@ -304,7 +304,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const modelJumpModelKeys = visibleModels
     .slice(0, MODEL_PICKER_JUMP_COUNT)
     .map((model) => modelPickerModelKey(model.instanceId, model.slug));
-  const allItemKeys = flatModels.map((model) => modelPickerModelKey(model.instanceId, model.slug));
   const filteredItemKeys = visibleModels.map((model) =>
     modelPickerModelKey(model.instanceId, model.slug),
   );
@@ -370,7 +369,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
         <Combobox<string>
           inline
-          items={allItemKeys}
+          // The rendered list is not virtualized, so Base UI indexes the shown rows
+          // (T3 hands it every model and virtualizes).
+          items={filteredItemKeys}
           filteredItems={filteredItemKeys}
           filter={null}
           autoHighlight

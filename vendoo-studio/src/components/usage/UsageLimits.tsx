@@ -286,7 +286,7 @@ function PoolSegment({
             type="button"
             style={paceMark?.gappedTrack}
             aria-label={`${limits.label} ${window.label}: ${remaining}% left${resetsIn ? `, ${resetsIn}` : ""}${timeLeft === null ? "" : `, ${timeLeft}% of the window left`}`}
-            className="relative h-8 min-w-0 cursor-default rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            className="relative block h-8 w-full min-w-0 cursor-default rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           />
         }
       >
