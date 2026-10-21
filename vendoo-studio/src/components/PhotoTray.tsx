@@ -111,6 +111,8 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   }, [photos, previewId]);
 
   const canReorder = (photos?.length || 0) > 1;
+  // A phone cannot drag thumbnails or drop files; it reorders from the photo viewer.
+  const touchScreen = typeof window !== "undefined" && Boolean(window.matchMedia?.("(hover: none)").matches);
 
   const resetDrag = () => {
     dragIdRef.current = null;
@@ -231,7 +233,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     <InspectorSection
       data-photo-tray=""
       title="Photos"
-      meta={`${photos?.length || 0} photos${canReorder ? " · drag to reorder" : " · or drop them anywhere"}`}
+      meta={`${photos?.length || 0} photos${canReorder ? (touchScreen ? " · tap one to reorder" : " · drag to reorder") : touchScreen ? "" : " · or drop them anywhere"}`}
       actions={
         <>
           <Button variant="outline" size="xs" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
@@ -283,6 +285,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
               onRotate={() => rotate(p.id, 90)}
               rotating={rotatingId === p.id}
               onRemove={() => deleteMutation.mutate(p.id)}
+              controlsInViewerOnTouch
             />
           ))}
         </PhotoStrip>
@@ -294,6 +297,17 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           rotating={rotateMutation.isPending}
           onRotate={(degrees) => rotate(previewPhoto.id, degrees)}
           onStep={(next) => setPreviewId(photos[next].id)}
+          onMove={(delta) => {
+            const next = moveItem(photos, previewIndex, previewIndex + delta);
+            if (next === photos) return;
+            setUploadError(null);
+            reorderMutation.mutate(next.map((photo) => photo.id));
+          }}
+          onRemove={() => {
+            const rest = photos.filter((photo) => photo.id !== previewPhoto.id);
+            deleteMutation.mutate(previewPhoto.id);
+            setPreviewId(rest.length ? rest[Math.min(previewIndex, rest.length - 1)].id : null);
+          }}
           onClose={() => setPreviewId(null)}
         />
       ) : null}

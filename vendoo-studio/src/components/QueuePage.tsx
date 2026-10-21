@@ -64,11 +64,12 @@ function QueueRow({ title, detail, error, status, progress, action, onOpen }: {
 }) {
   return (
     <li className="flex min-w-0 flex-col gap-2 px-4 py-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      {/* On a phone the status and its action drop under the title instead of squeezing it. */}
+      <div className="flex min-w-0 items-center gap-3 max-[600px]:flex-wrap max-[600px]:gap-y-2">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 max-[600px]:basis-full">
           <button
             type="button"
-            className="w-fit max-w-full cursor-pointer truncate text-left text-sm text-foreground outline-none hover:underline focus-visible:underline"
+            className="w-fit max-w-full cursor-pointer truncate text-left text-sm text-foreground outline-none hover:underline focus-visible:underline max-[900px]:-my-3 max-[900px]:w-full max-[900px]:py-3"
             onClick={onOpen}
           >
             {title}

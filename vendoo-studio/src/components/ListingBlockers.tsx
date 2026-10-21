@@ -19,7 +19,7 @@ export function ListingBlockers({ issues, onSelect }: {
     <div className="mt-2 flex w-full flex-col gap-0.5 text-left" aria-label="Fields to fix before sending">
       {[...groups].map(([group, entries]) => (
         <details key={group} className="group rounded-lg">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1.5 py-1 font-medium text-foreground text-xs hover:bg-accent [&::-webkit-details-marker]:hidden">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md px-1.5 py-1 font-medium text-foreground text-xs hover:bg-accent max-[900px]:min-h-11 max-[900px]:text-sm [&::-webkit-details-marker]:hidden">
             <ChevronRightIcon className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
             {group} · {entries.length} {entries.length === 1 ? "issue" : "issues"}
           </summary>

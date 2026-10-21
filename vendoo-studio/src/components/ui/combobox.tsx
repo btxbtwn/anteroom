@@ -116,7 +116,7 @@ function ComboboxSearchInput(props: React.ComponentProps<typeof ComboboxInput>) 
         />
         <ComboboxInput
           {...props}
-          className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
+          className="[&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5 pointer-coarse:[&_input]:text-[16px]"
           showTrigger={false}
           size="sm"
           unstyled

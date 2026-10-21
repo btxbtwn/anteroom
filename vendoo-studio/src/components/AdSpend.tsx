@@ -136,14 +136,15 @@ export function AdSpend() {
         <RowList>
           {query.data.map((entry) => (
             <li key={entry.id} className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+              {/* basis-56 lets the figures wrap under the name on a phone instead of crushing it. */}
+              <span className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
                 <span className="text-foreground">{PROGRAMS[entry.marketplace]}</span>
                 <span className="text-xs text-muted-foreground">
                   {formatRange(entry)}{entry.notes ? ` · ${entry.notes}` : ""}
                 </span>
               </span>
               <span className="text-xs text-muted-foreground">{entryFigures(entry)}</span>
-              <span className="w-20 text-right text-foreground tabular-nums">{formatMoney(entry.spend)}</span>
+              <span className="w-20 text-right text-foreground tabular-nums max-[600px]:ms-auto">{formatMoney(entry.spend)}</span>
               <span className="flex items-center gap-1">
                 <Button variant="ghost-muted" size="xs" onClick={() => setEditing(entry)}>Edit</Button>
                 <Button variant="ghost-destructive" size="xs" disabled={remove.isPending} onClick={() => void onRemove(entry)}>Remove</Button>

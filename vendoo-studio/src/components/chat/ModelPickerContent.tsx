@@ -202,12 +202,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const handleSelectInstance = (instanceId: ProviderInstanceId | "favorites") => {
     setSelectedInstanceId(instanceId);
+    if (window.matchMedia?.("(hover: none)").matches) return;
     window.requestAnimationFrame(() => {
       focusSearchInput();
     });
   };
 
   useLayoutEffect(() => {
+    // On a phone, focusing search would raise the keyboard over the list the seller came to tap.
+    if (window.matchMedia?.("(hover: none)").matches) return;
     searchInputRef.current?.focus({ preventScroll: true });
     const frame = window.requestAnimationFrame(() => {
       searchInputRef.current?.focus({ preventScroll: true });

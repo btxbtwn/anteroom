@@ -11,10 +11,10 @@ import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const SEND_CLASS =
-  "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover motion-reduce:transition-none motion-reduce:hover:scale-100";
+  "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 pointer-coarse:size-11 sm:pointer-coarse:size-11 [&_svg]:pointer-events-none bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover motion-reduce:transition-none motion-reduce:hover:scale-100";
 
 const STOP_CLASS =
-  "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 sm:h-8 sm:w-8 [&_svg]:pointer-events-none";
+  "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:opacity-64 sm:h-8 sm:w-8 pointer-coarse:size-11 sm:pointer-coarse:size-11 [&_svg]:pointer-events-none";
 
 /** Keeps focus in the editor when a button is pressed with the pointer. */
 const keepFocus = { onPointerDown: (event: { preventDefault: () => void }) => event.preventDefault() };
