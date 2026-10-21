@@ -357,7 +357,7 @@ export function ListingEditor({
             />
           </ListingReviewActions>
         </div>
-        <div className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs max-[900px]:flex-wrap">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
           <Button variant="ghost-muted" size="xs" disabled={!data?.current_revision_id} onClick={() => { setFieldTarget(null); setHistoryOpen(true); }}>
             <HistoryIcon />
             History
