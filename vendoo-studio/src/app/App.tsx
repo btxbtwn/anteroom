@@ -5,7 +5,6 @@ import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, jobsPollMs, pollMs } from "../a
 import type { BrowserField } from "../api/client";
 import { BuildVersion } from "../components/BuildVersion";
 import { ExtensionStatus } from "../components/ExtensionStatus";
-import { ProviderStatus } from "../components/ProviderStatus";
 import { ChatPanel } from "../components/ChatPanel";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { BrowserPreview } from "../components/BrowserPreview";
@@ -1027,7 +1026,6 @@ export function App() {
       <footer className="relative flex shrink-0 items-center justify-between border-t border-sidebar-border bg-sidebar px-3.5 pt-1 pb-[max(--spacing(1),env(safe-area-inset-bottom,0px),var(--visual-bottom-inset,0px))] text-2xs text-sidebar-muted-foreground max-[900px]:hidden">
         <div className="flex items-center gap-3">
           <ExtensionStatus />
-          <ProviderStatus />
         </div>
         <div className="flex items-center gap-3">
           <BuildVersion backendVersion={status?.version} />

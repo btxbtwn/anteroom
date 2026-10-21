@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.295 — 2026-10-20
+
+- The listing list no longer has a Settled section or a settle button. Sold listings stay under the Sold filter.
+- The status bar no longer repeats the model. The model is chosen in the chat.
+
 ## 0.1.294 — 2026-10-20
 
 - The listing panel no longer has a Fields tab. Input and Forms sit next to Open listing and Regenerate, and marketplace fields are edited on Forms. Hidden fields are still restored in Settings.
