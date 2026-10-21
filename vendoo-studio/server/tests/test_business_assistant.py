@@ -259,6 +259,61 @@ def test_lookups_are_capped(workspace, monkeypatch):
     assert [row["text"] for row in client.get("/api/assistant/messages").json()] == ["Loop forever"]
 
 
+FENCE = "`" * 3
+
+
+def ask_through(client, monkeypatch, *turns):
+    provider = Provider(*turns)
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: provider)
+    return provider, client.post("/api/assistant/messages", json={"text": "Which sizes sell?"}).text
+
+
+@pytest.mark.parametrize(("lookup", "told"), [
+    (f"{FENCE}sql\n{FENCE}", "Lookup sql failed: the sql block was empty. Put one SELECT in it."),
+    (f"{FENCE}sql\n-- just a comment\n{FENCE}", "Lookup sql failed: the sql block was empty."),
+    (f"{FENCE}sql\nSELECT * FROM sourcing_box\n{FENCE}",
+     "Lookup sourcing_box failed: no such table: sourcing_box. The tables are: listings, price_changes"),
+    (f"{FENCE}sql\nSELECT title FROM listings WHERE size = '99'\n{FENCE}",
+     "Lookup result: 0 rows matched WHERE size = '99'.\ntitle"),
+    (f"{FENCE}sql\nSELECT nope FROM listings\n{FENCE}", "Lookup listings failed: no such column: nope."),
+    (f"{FENCE}sql\nDELETE FROM listings\n{FENCE}", "Lookup listings failed: not authorized."),
+    (f"{FENCE}sql\nSELECT title FROM listings WHERE title = 'x\x00'\n{FENCE}", "Lookup listings failed: the query contains a null character."),
+])
+def test_every_lookup_answers_the_model_with_rows_or_a_reason(workspace, monkeypatch, lookup, told):
+    db, client = workspace
+    seed(db)
+    provider, response = ask_through(client, monkeypatch, (lookup,), ("Nothing matched.",))
+    assert provider.calls[1][-1]["content"].startswith(told), provider.calls[1][-1]["content"]
+    assert "SELECT" not in response and "Nothing matched." in response
+
+
+def test_a_lookup_that_raises_still_answers_the_model(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+
+    def broken(*_args):
+        raise MemoryError("out of room")
+    monkeypatch.setattr(business_assistant, "run_lookup", broken)
+    provider, _ = ask_through(client, monkeypatch, (f"{FENCE}sql\nSELECT 1 FROM listings\n{FENCE}",), ("Sorry.",))
+    assert provider.calls[1][-1]["content"] == "Lookup listings failed: MemoryError: out of room"
+
+
+def test_a_lookup_after_words_or_on_the_fence_line_runs_and_is_never_shown(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    provider, response = ask_through(
+        client, monkeypatch,
+        ("Let me check that. ", f"{FENCE}sql SELECT size FROM listings WHERE status = 'sold'{FENCE}",
+         " It is 34, probably."),
+        ("Size 34 sold.",),
+    )
+    assert provider.calls[1][-1]["content"] == "Lookup result (1 rows):\nsize\n34"
+    # The words before the block stay; the guess after it is dropped with the block.
+    assert "data: Let me check that. \n\n" in response and "probably" not in response and "SELECT" not in response
+    assert [row["text"] for row in client.get("/api/assistant/messages").json()][-1] == (
+        "Let me check that. \n\nSize 34 sold.")
+
+
 def test_a_short_answer_is_not_held_back(workspace, monkeypatch):
     _db, client = workspace
     monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(("No.",)))
