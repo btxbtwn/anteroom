@@ -164,6 +164,8 @@ export function AnalyticsPage({ onOpenListing }: Props) {
               <PerformanceList title="Brands" rows={data.brands} />
             </div>
 
+            <PriceTiers tiers={data.price_tiers} />
+
             <section className="analytics-section" aria-label="Inventory today">
               <h2 className="analytics-section-title">Inventory today</h2>
               <p className="analytics-note">Current active listings, across all sales periods.</p>
@@ -419,6 +421,39 @@ function PerformanceList({ title, rows, marketplace = false }: {
               <span className="analytics-rank-value">
                 {metric === "count" ? row.count : row[metric] == null ? "—" : formatMoney(row[metric])}
                 {metric === "profit" ? <small>{row.profit_known === 0 ? "Cost missing" : `Cost on ${row.profit_known}/${row.count} · fees on ${row.fees_known}/${row.profit_known}`}</small> : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+/** How this period's sales split across price bands, low to high. */
+function PriceTiers({ tiers }: { tiers: AnalyticsGroup[] }) {
+  const total = tiers.reduce((sum, tier) => sum + tier.count, 0);
+  return (
+    <section className="analytics-section" aria-label="Sales by price">
+      <h2 className="analytics-section-title">Sales by price</h2>
+      <p className="analytics-note">
+        This period's sales with a recorded price, by what they sold for. A higher average sale means more of them in the
+        top two bands, without them taking longer to sell.
+      </p>
+      {total === 0 ? <p className="analytics-note">No priced sales in this period.</p> : (
+        <ol className="analytics-ranks">
+          {tiers.map((tier) => (
+            <li key={tier.id} className="analytics-rank">
+              <span className="analytics-rank-label">
+                {tier.label}
+                <small>
+                  {saleCount(tier.count)} · {Math.round((tier.count / total) * 100)}% of sales
+                  {tier.median_days != null ? ` · ${formatDays(tier.median_days)} median` : ""}
+                </small>
+              </span>
+              <span className="analytics-rank-value">
+                {formatMoney(tier.revenue)}
+                <small>{tier.profit == null ? "Profit unavailable" : `${formatMoney(tier.profit)} profit`}</small>
               </span>
             </li>
           ))}

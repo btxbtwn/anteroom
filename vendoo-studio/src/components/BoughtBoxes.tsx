@@ -5,7 +5,15 @@ import type { SourceBox, SourceBoxInput, SourceBoxes, SourceStoreResults } from 
 import { confirmDialog } from "../ui/confirmDialog";
 import { addToast } from "../ui/toast";
 import { formatDays, formatMoney } from "./analyticsFormat";
-import { BOXES_QUERY_KEY, boxProgress, boxStoreKey, boxStoreName, formatPercent } from "./boxPurchases";
+import {
+  BOXES_QUERY_KEY,
+  boxProgress,
+  boxScorecard,
+  boxStoreKey,
+  boxStoreName,
+  formatPercent,
+  profitPerHundred,
+} from "./boxPurchases";
 import { DraftInput } from "./DraftInput";
 
 /**
@@ -47,7 +55,8 @@ export function BoughtBoxes() {
       </div>
       <p className="sourcing-hint">
         What each box cost with shipping, and what its sales have brought back after fees. Choose the box when you
-        bulk upload its photos, or in a listing's Item Details.
+        bulk upload its photos, or in a listing's Item Details. Record the pieces that weren't worth listing, so
+        their cost lands on the pieces that sell.
       </p>
       {adding ? (
         <AddBoxForm
@@ -96,6 +105,8 @@ function StoreCard({ store }: { store: SourceStoreResults }) {
         </span>
       </span>
       <span>{formatPercent(store.sell_through)} sold{store.median_days != null ? ` · ${formatDays(store.median_days)} to sell` : ""}</span>
+      {profitPerHundred(store.roi) ? <span>{profitPerHundred(store.roi)}</span> : null}
+      {boxScorecard(store).map((part) => <span key={part}>{part}</span>)}
     </div>
   );
 }
@@ -125,6 +136,9 @@ function BoxRow({
           {[boxStoreName(box.store), bought ? `bought ${bought}` : null, boxProgress(box)].filter(Boolean).join(" · ")}
           {box.median_days != null ? ` · ${formatDays(box.median_days)} to sell` : ""}
         </div>
+        {boxScorecard(box).length ? (
+          <div className="sourcing-item-reason">{boxScorecard(box).join(" · ")}</div>
+        ) : null}
         <div className="bought-fields">
           <span className="sourcing-setting">
             Box
@@ -167,8 +181,23 @@ function BoxRow({
               onCommit={(text) => onChange({ pieces: text ? Number(text) : null })}
             />
           </span>
+          <span className="sourcing-setting">
+            Unsellable
+            <DraftInput
+              value={box.unsellable != null ? String(box.unsellable) : ""}
+              label={`Pieces in ${box.title} not worth listing`}
+              width="3.5rem"
+              inputMode="numeric"
+              disabled={saving}
+              clean={(text) => text.replace(/\D/g, "")}
+              accept={(text) => text === "" || !box.pieces || Number(text) <= box.pieces}
+              onCommit={(text) => onChange({ unsellable: text ? Number(text) : null })}
+            />
+          </span>
           {box.cost_per_piece != null ? (
-            <span className="sourcing-hint">{formatMoney(box.cost_per_piece)} a piece</span>
+            <span className="sourcing-hint">
+              {formatMoney(box.cost_per_piece)} {box.unsellable ? "a sellable piece" : "a piece"}
+            </span>
           ) : null}
           <button type="button" className="sourcing-link bought-remove" onClick={onRemove}>Remove</button>
         </div>

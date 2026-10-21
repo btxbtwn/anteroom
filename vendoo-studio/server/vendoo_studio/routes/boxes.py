@@ -12,6 +12,13 @@ from vendoo_studio.services import boxes
 router = APIRouter(prefix="/api/boxes", tags=["boxes"])
 
 
+class AgeSellThrough(BaseModel):
+    days: int
+    sold: int
+    of: int
+    rate: float | None
+
+
 class BoxTotals(BaseModel):
     spent: float
     listings: int
@@ -21,8 +28,13 @@ class BoxTotals(BaseModel):
     profit: float
     roi: float | None
     sell_through: float | None
+    sell_through_by_age: list[AgeSellThrough]
     unsold_asking: float
     median_days: int | None
+    asp: float | None
+    sold_premium: int
+    unsellable: int | None
+    unsellable_rate: float | None
 
 
 class BoxRow(BoxTotals):
@@ -33,6 +45,7 @@ class BoxRow(BoxTotals):
     price: float
     shipping: float
     pieces: int | None
+    sellable: int | None
     estimate_per_piece: float | None
     list_shipping: float | None
     bought_at: str | None
@@ -55,6 +68,7 @@ class BoxCreate(BaseModel):
     price: float = Field(ge=0)
     shipping: float = Field(0, ge=0)
     pieces: int | None = Field(None, ge=0)
+    unsellable: int | None = Field(None, ge=0)
     url: str | None = None
     bought_at: datetime | None = None
     estimate_per_piece: float | None = Field(None, ge=0)
@@ -67,6 +81,7 @@ class BoxUpdate(BaseModel):
     price: float | None = Field(None, ge=0)
     shipping: float | None = Field(None, ge=0)
     pieces: int | None = Field(None, ge=0)
+    unsellable: int | None = Field(None, ge=0)
     url: str | None = None
     bought_at: datetime | None = None
 
@@ -78,7 +93,10 @@ def list_boxes(db: Session = Depends(get_db)):
 
 @router.post("", response_model=BoxesResponse)
 def create_box(body: BoxCreate, db: Session = Depends(get_db)):
-    boxes.create_box(db, **body.model_dump())
+    try:
+        boxes.create_box(db, **body.model_dump())
+    except boxes.BoxCountError as error:
+        raise HTTPException(422, str(error)) from error
     return BoxesResponse.model_validate(boxes.results(db))
 
 
@@ -87,7 +105,10 @@ def update_box(box_id: str, body: BoxUpdate, db: Session = Depends(get_db)):
     box = boxes.get_box(db, box_id)
     if box is None:
         raise HTTPException(404, "Box not found")
-    boxes.update_box(db, box, body.model_dump(exclude_unset=True))
+    try:
+        boxes.update_box(db, box, body.model_dump(exclude_unset=True))
+    except boxes.BoxCountError as error:
+        raise HTTPException(422, str(error)) from error
     return BoxesResponse.model_validate(boxes.results(db))
 
 

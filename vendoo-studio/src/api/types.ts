@@ -553,6 +553,8 @@ export interface InventoryAnalytics {
   marketplaces: AnalyticsGroup[];
   categories: AnalyticsGroup[];
   brands: AnalyticsGroup[];
+  /** Every sale-price band, low to high: budget, standard, premium, high. */
+  price_tiers: AnalyticsGroup[];
   aging: AnalyticsAging[];
   stale: AnalyticsStaleListing[];
   recent: AnalyticsSale[];
@@ -773,9 +775,19 @@ export interface BoxTotals {
   returned: number;
   profit: number;
   roi: number | null;
+  /** Of the sellable pieces when the counts are known, else of the listings made. */
   sell_through: number | null;
+  /** Sold within 30, 60 and 90 days of buying; only windows the boxes are old enough for. */
+  sell_through_by_age: { days: number; sold: number; of: number; rate: number | null }[];
   unsold_asking: number;
   median_days: number | null;
+  /** Average sale price. */
+  asp: number | null;
+  /** Sales at the premium price or above. */
+  sold_premium: number;
+  /** Null until the seller records how many pieces were not worth listing. */
+  unsellable: number | null;
+  unsellable_rate: number | null;
 }
 
 export interface SourceBox extends BoxTotals {
@@ -787,9 +799,12 @@ export interface SourceBox extends BoxTotals {
   price: number;
   shipping: number;
   pieces: number | null;
+  /** Pieces less the unsellable ones, once the piece count is known. */
+  sellable: number | null;
   estimate_per_piece: number | null;
   list_shipping: number | null;
   bought_at: string | null;
+  /** The box's delivered cost spread over its sellable pieces. */
   cost_per_piece: number | null;
 }
 
@@ -809,6 +824,7 @@ export interface SourceBoxInput {
   price: number;
   shipping: number;
   pieces: number | null;
+  unsellable?: number | null;
   url?: string | null;
   estimate_per_piece?: number | null;
   list_shipping?: number | null;

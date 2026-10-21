@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -79,6 +80,53 @@ class BoxResultsTest(unittest.TestCase):
         self.db.commit()
         snapshot = prepare_listing_snapshot(self.db, self.active, {"title": "Pants", "price": 40})
         self.assertEqual(snapshot["cost"], 4)
+
+    def test_unsellable_pieces_raise_the_cost_of_the_rest(self):
+        boxes.update_box(self.db, self.box, {"unsellable": 4})
+        row = self._row(boxes.results(self.db), self.box.id)
+        self.assertEqual(row["sellable"], 16)
+        # 214 over 16 sellable pieces, not 20
+        self.assertEqual(row["cost_per_piece"], 13.38)
+        self.assertEqual(row["unsellable"], 4)
+        self.assertEqual(row["unsellable_rate"], 0.2)
+        self.assertEqual(row["sell_through"], 0.125)
+        rows = {item.conversation_id: item for item in load_rows(self.db)}
+        self.assertEqual(rows[self.active.id].cost, 13.38)
+
+    def test_zero_unsellable_counts_toward_the_rate(self):
+        boxes.update_box(self.db, self.box, {"unsellable": 0})
+        row = self._row(boxes.results(self.db), self.box.id)
+        self.assertEqual((row["unsellable"], row["unsellable_rate"]), (0, 0))
+
+    def test_more_unsellable_than_pieces_is_refused(self):
+        with self.assertRaises(boxes.BoxCountError):
+            boxes.update_box(self.db, self.box, {"unsellable": 21})
+        self.db.refresh(self.box)
+        self.assertIsNone(self.box.unsellable)
+
+    def test_a_box_reports_its_average_sale_and_premium_sales(self):
+        row = self._row(boxes.results(self.db), self.box.id)
+        self.assertEqual(row["asp"], 65)
+        self.assertEqual(row["sold_premium"], 2)
+        self.assertIsNone(row["unsellable_rate"])
+
+    def test_sell_through_by_age_waits_until_the_box_is_that_old(self):
+        bought = datetime(2026, 8, 25, tzinfo=UTC)
+        boxes.update_box(self.db, self.box, {"bought_at": bought})
+        # The jacket sold 2026-09-07 (13 days in), the vest 2026-09-21 (27 days in).
+        row = self._row(boxes.results(self.db, now=bought + timedelta(days=45)), self.box.id)
+        self.assertEqual(row["sell_through_by_age"], [{"days": 30, "sold": 2, "of": 20, "rate": 0.1}])
+        late = self._row(boxes.results(self.db, now=bought + timedelta(days=95)), self.box.id)
+        self.assertEqual([entry["days"] for entry in late["sell_through_by_age"]], [30, 60, 90])
+        early = self._row(boxes.results(self.db, now=bought + timedelta(days=10)), self.box.id)
+        self.assertEqual(early["sell_through_by_age"], [])
+
+    def test_sales_after_the_window_do_not_count_toward_it(self):
+        # The jacket sold 2026-09-07, inside 30 days; the vest 2026-09-21, after it.
+        boxes.update_box(self.db, self.box, {"bought_at": datetime(2026, 8, 15, tzinfo=UTC)})
+        row = self._row(boxes.results(self.db, now=datetime(2026, 10, 20, tzinfo=UTC)), self.box.id)
+        thirty = row["sell_through_by_age"][0]
+        self.assertEqual((thirty["days"], thirty["sold"]), (30, 1))
 
     def test_deleting_a_box_keeps_its_listings(self):
         boxes.delete_box(self.db, self.box)
@@ -176,6 +224,20 @@ class BoxRoutesTest(unittest.TestCase):
 
         gone = self.client.delete(f"/api/boxes/{box['id']}").json()
         self.assertFalse(any(row["id"] == box["id"] for row in gone["boxes"]))
+
+    def test_unsellable_count_is_saved_and_checked(self):
+        store = f"PaperCrane {uuid.uuid4().hex[:6]}"
+        created = self.client.post("/api/boxes", json={
+            "store": store, "title": "Denim 20", "price": 100, "pieces": 20, "unsellable": 2,
+        }).json()
+        box = next(row for row in created["boxes"] if row["store"] == store)
+        self.assertEqual((box["sellable"], box["cost_per_piece"]), (18, 5.56))
+        refused = self.client.patch(f"/api/boxes/{box['id']}", json={"unsellable": 30})
+        self.assertEqual(refused.status_code, 422)
+        too_many = self.client.post("/api/boxes", json={
+            "store": store, "title": "Denim 5", "price": 10, "pieces": 5, "unsellable": 6,
+        })
+        self.assertEqual(too_many.status_code, 422)
 
     def test_unknown_box_on_create_is_refused(self):
         response = self.client.post("/api/conversations", json={"title": "Tee", "box_id": "nope"})
