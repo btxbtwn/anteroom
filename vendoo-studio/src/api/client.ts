@@ -12,6 +12,8 @@ import type {
   ListingNames,
   ChatAttachmentUpload,
   ListingProviderId,
+  ModelFavorite,
+  ProviderUsageLimits,
   PhotoProviderChoice,
   ListingResponse,
   ListingRevision,
@@ -698,6 +700,11 @@ export const api = {
       const scheme = window.location.protocol === "https:" ? "wss" : "ws";
       return `${scheme}://${window.location.host}${BASE}/settings/claude/terminal?cols=${cols}&rows=${rows}`;
     },
+    /** Each provider's subscription usage. `refresh` skips the server's short cache. */
+    usageLimits: (refresh = false) =>
+      request<{ ok: boolean; providers: ProviderUsageLimits[] }>(
+        `/settings/usage-limits${refresh ? "?refresh=1" : ""}`,
+      ),
     claudeModels: () =>
       request<{
         models: { value: string; label: string; efforts: string[] }[];
@@ -732,6 +739,8 @@ export const api = {
     cursorModels: () =>
       request<{
         models: string[];
+        /** Cursor's display name for each model id, where the catalog gives one. */
+        labels?: Record<string, string>;
         vision_model: string;
         listing_model: string;
         reasoning: { param: string; options: { value: string; label: string }[]; value: string } | null;
@@ -835,6 +844,7 @@ export const api = {
         hidden_vendoo_labels: string[];
         theme: "dark" | "light" | "system";
         listing_names: ListingNames;
+        model_favorites: ModelFavorite[];
       }>("/settings/ui"),
     setUi: (body: {
       recent_vendoo_labels?: string[];
@@ -844,6 +854,7 @@ export const api = {
       remember_labels?: string | string[];
       restore_labels?: string[];
       forget_label?: string;
+      model_favorites?: ModelFavorite[];
     }) =>
       request<{
         ok: boolean;
@@ -852,6 +863,7 @@ export const api = {
         hidden_vendoo_labels: string[];
         theme: "dark" | "light" | "system";
         listing_names: ListingNames;
+        model_favorites: ModelFavorite[];
       }>("/settings/ui", { method: "PUT", body: JSON.stringify(body) }),
     formulas: () =>
       request<{

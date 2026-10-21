@@ -1,6 +1,6 @@
 /** T3 Code-style settings categories for Vendoo Studio. */
 
-export type SettingsSectionId = "general" | "listings" | "providers" | "connections" | "data" | "logs" | "help";
+export type SettingsSectionId = "general" | "listings" | "providers" | "usage" | "connections" | "data" | "logs" | "help";
 
 export type SettingsNavItem = {
   id: SettingsSectionId;
@@ -21,6 +21,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
   { id: "general", label: "General" },
   { id: "listings", label: "Listings" },
   { id: "providers", label: "Providers" },
+  { id: "usage", label: "Usage" },
   { id: "connections", label: "Connections" },
   { id: "data", label: "Data" },
   { id: "logs", label: "Logs" },
@@ -31,6 +32,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
   general: "General",
   listings: "Listings",
   providers: "Providers",
+  usage: "Usage",
   connections: "Connections",
   data: "Data",
   logs: "Logs",
@@ -130,6 +132,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "general",
     targetId: "about",
     searchTerms: ["changelog", "release notes", "history", "changes", "what changed"],
+  },
+  {
+    id: "usage-limits",
+    title: "Usage limits",
+    section: "usage",
+    targetId: "usage-limits",
+    searchTerms: ["usage", "rate limit", "quota", "percentage", "reset", "subscription", "plan"],
   },
   {
     id: "listing-ai",

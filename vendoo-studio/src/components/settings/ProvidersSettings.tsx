@@ -10,7 +10,7 @@ import { api } from "../../api/client";
 import type { ListingProviderId, PhotoProviderChoice, ProviderStatus } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { ClaudeLoginTerminal } from "../ClaudeLoginTerminal";
-import { ProviderLogo, resolveProviderLogoId } from "../ProviderLogo";
+import { ProviderInstanceIcon, resolveProviderId } from "../chat/ProviderInstanceIcon";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -69,15 +69,23 @@ function providerOption<T extends string>(value: T, id: ListingProviderId, full 
     value,
     label: (
       <>
-        <ProviderLogo id={id} label={label} size={16} />
+        <ProviderInstanceIcon driverKind={id} displayName={label} className="size-4" iconClassName="size-4" />
         <span className="truncate">{label}</span>
       </>
     ),
   };
 }
 
-function ProviderIcon({ id, size = 20 }: { id: ListingProviderId; size?: number }) {
-  return <ProviderLogo id={id} label={PROVIDER_LABELS[id].full} size={size} />;
+/** T3's provider card title icon (ProviderInstanceCard.tsx). */
+function ProviderIcon({ id }: { id: ListingProviderId }) {
+  return (
+    <ProviderInstanceIcon
+      driverKind={id}
+      displayName={PROVIDER_LABELS[id].full}
+      className="size-5"
+      iconClassName="size-4 text-foreground/80"
+    />
+  );
 }
 
 function TestResult({ result }: { result: string | null }) {
@@ -552,7 +560,7 @@ export function ProvidersSettings() {
       : primary === "chatgpt"
         ? "mimo"
         : "chatgpt";
-  const activeChoice = resolveProviderLogoId(provider?.provider);
+  const activeChoice = resolveProviderId(provider?.provider);
   const choiceReady = (choice: ListingFallbackId) =>
     choice === "chatgpt"
       ? chatgptSignedIn
@@ -594,17 +602,17 @@ export function ProvidersSettings() {
   const inUse: ReactNode =
     provider?.configured && activeChoice ? (
       <>
-        <ProviderLogo id={activeChoice} label={providerLabel(activeChoice)} size={16} />
+        <ProviderInstanceIcon driverKind={activeChoice} displayName={providerLabel(activeChoice)} className="size-4" iconClassName="size-4" />
         {providerLabel(activeChoice)} is active {activeChoice === primary ? "(primary)" : "(fallback)"}.
       </>
     ) : primaryReady ? (
       <>
-        <ProviderLogo id={primary} label={providerLabel(primary)} size={16} />
+        <ProviderInstanceIcon driverKind={primary} displayName={providerLabel(primary)} className="size-4" iconClassName="size-4" />
         {providerLabel(primary)} is ready.
       </>
     ) : fallback !== "none" && fallbackReady ? (
       <>
-        <ProviderLogo id={fallback} label={providerLabel(fallback)} size={16} />
+        <ProviderInstanceIcon driverKind={fallback} displayName={providerLabel(fallback)} className="size-4" iconClassName="size-4" />
         {providerLabel(primary)} is not ready — {providerLabel(fallback)} will be used.
       </>
     ) : (

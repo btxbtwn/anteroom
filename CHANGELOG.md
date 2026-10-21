@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.303 — 2026-10-21
+
+- The model picker in the chat box now works like T3 Code's: providers down the left with a Favorites star at the top, a "Search models..." box, each model with its provider underneath, and ⌘1–⌘9 to pick one. Star a model to keep it under Favorites on every Studio you use. Effort moved behind the "…" button and only lists what the chosen model supports.
+- ChatGPT, Claude and Cursor now show T3 Code's logos everywhere, and Xiaomi MiMo's M is drawn to match.
+- New Settings → Usage shows how much of each subscription is left and when it resets: ChatGPT's session and weekly limits, Claude's session, weekly and per-model limits, and Cursor's monthly pools. Xiaomi MiMo doesn't report usage, so it says so. Type /usage-limits in the chat box to see the current provider's.
+
 ## 0.1.302 — 2026-10-21
 
 - The assistant now sees every box on the Sourcing tab, not only the buy list: each box's store, title, link, price, shipping, piece count, what's in it, resale estimate, projected profit and return, and how far it misses your minimum return when it does.

@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { BotIcon, CircleHelpIcon, DatabaseIcon, Link2Icon, ScrollTextIcon, Settings2Icon, TagIcon } from "lucide-react";
+import { BotIcon, CircleHelpIcon, DatabaseIcon, GaugeIcon, Link2Icon, ScrollTextIcon, Settings2Icon, TagIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { SETTINGS_NAV_ITEMS, SETTINGS_SECTION_LABELS, type SettingsSectionId } from "../settingsNav";
 import { SIDEBAR_ROW } from "./sidebarStyles";
@@ -11,6 +11,7 @@ const SECTION_ICONS: Record<SettingsSectionId, ComponentType<{ className?: strin
   general: Settings2Icon,
   listings: TagIcon,
   providers: BotIcon,
+  usage: GaugeIcon,
   connections: Link2Icon,
   data: DatabaseIcon,
   logs: ScrollTextIcon,

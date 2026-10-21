@@ -8,10 +8,46 @@ import { useState, type ReactNode, type RefObject } from "react";
 import { cn } from "../../lib/utils";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
 import { ComposerAttachButton, ComposerImageChips, type useComposerImages } from "./ComposerAttachments";
-import { ComposerModelControls } from "./ComposerModelControls";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerSurface } from "./ComposerSurface";
 import { composerImageMimeType } from "./composerImages";
+import { ComposerUsageLimits, isUsageLimitsCommand } from "./ComposerUsageLimits";
+import { ProviderModelPicker } from "./ProviderModelPicker";
+import { CompactComposerControlsMenu } from "./TraitsPicker";
+import { useComposerModel, useModelFavorites } from "./useComposerModel";
+
+/**
+ * The model picker and the "…" effort menu, saving the same settings
+ * Settings → Providers edits.
+ */
+function ComposerModelControls({ disabled }: { disabled: boolean }) {
+  const model = useComposerModel();
+  const { favorites, toggle } = useModelFavorites();
+  if (model.loading || !model.active) return null;
+  return (
+    <>
+      <ProviderModelPicker
+        activeInstanceId={model.active}
+        model={model.model}
+        instanceEntries={model.entries}
+        modelOptionsByInstance={model.modelOptionsByInstance}
+        favorites={favorites}
+        onToggleFavorite={toggle}
+        disabled={disabled || model.pending}
+        triggerClassName="-ms-2.5"
+        onInstanceModelChange={model.selectModel}
+      />
+      {model.effort ? (
+        <CompactComposerControlsMenu
+          effort={model.effort}
+          onEffortChange={model.selectEffort}
+          disabled={disabled || model.pending}
+        />
+      ) : null}
+      {model.error ? <span className="truncate text-destructive-foreground text-xs" role="alert">{model.error}</span> : null}
+    </>
+  );
+}
 
 function dragHasFiles(transfer: DataTransfer | null): boolean {
   return Boolean(transfer && Array.from(transfer.types).includes("Files"));
@@ -54,6 +90,17 @@ export function ChatComposer({
   className,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  // `/usage-limits` is answered here and never sent, as in T3 Code.
+  const submit = () => {
+    if (isUsageLimitsCommand(input)) {
+      onInputChange("");
+      setUsageOpen(true);
+      return;
+    }
+    setUsageOpen(false);
+    onSend();
+  };
   const canSubmit = Boolean(input.trim() || images.images.length || hasOtherContent);
   const addImages = (files: File[]) => {
     if (images.addFiles(files)) composerRef.current?.focus();
@@ -87,13 +134,14 @@ export function ChatComposer({
               }}
             >
               <div data-chat-composer-body="true" className="relative px-3 pb-2 pt-3.5 sm:px-4 sm:pt-4">
+                {usageOpen ? <ComposerUsageLimits onDismiss={() => setUsageOpen(false)} /> : null}
                 {header}
                 <ComposerImageChips images={images.images} onRemove={images.remove} />
                 <ComposerPromptEditor
                   handleRef={composerRef}
                   value={input}
                   onChange={onInputChange}
-                  onSubmit={onSend}
+                  onSubmit={submit}
                   placeholder={placeholder}
                   onPasteFiles={(files) => {
                     const pasted = files.filter((file) => composerImageMimeType(file));
@@ -122,7 +170,7 @@ export function ChatComposer({
                     busy={busy}
                     stopping={stopping}
                     canSubmit={canSubmit}
-                    onSend={onSend}
+                    onSend={submit}
                     onStop={onStop}
                     stopLabel={stopLabel}
                     queueLabel={queueLabel}
