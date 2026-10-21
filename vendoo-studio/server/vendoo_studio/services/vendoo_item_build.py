@@ -497,7 +497,7 @@ def _listing_section(
         _apply_etsy_listing_codes(known, listing)
         _apply_etsy_tags(known, general)
     elif marketplace == "poshmark":
-        _apply_poshmark_smart_sell(known)
+        _apply_poshmark_smart_sell(known, general, listing)
     elif marketplace == "mercari":
         _apply_mercari_shipping(known, section["overrides"].get("weight"), section["overrides"])
         _apply_mercari_smart_pricing(known)

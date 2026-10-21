@@ -21,7 +21,6 @@ from vendoo_studio.models.mercari_shipping import (
 )
 from vendoo_studio.models.schema import DEPOP_OPTION_CODES
 from vendoo_studio.services.vendoo_item_shape import (
-    POSHMARK_SMART_SELL_MIN,
     SPECIFICS_SOURCES,
     _bucket,
     _clean,
@@ -67,15 +66,31 @@ def _listing_brand(listing: dict[str, Any], marketplace: str) -> str:
     return _clean(listing.get("brand")) or ""
 
 
-def _ebay_auto_accept_minimum(price: Any) -> str:
-    """Auto-accept floor for Fixed Price + Best Offer (~40% of list, min $5)."""
+# Offer floors from the list-this PRICING formula (skills/list-this/SKILL.md):
+# auto-accept offers at list - $2, turn down anything under list - $4. Offers in
+# between wait for the seller.
+AUTO_ACCEPT_BELOW_LIST = 2
+MINIMUM_BELOW_LIST = 4
+
+
+def offer_floors(price: Any) -> tuple[str, str] | None:
+    """(auto-accept, minimum) offer in whole dollars, or None without a usable price.
+
+    Below $5 the minimum would reach $0, so there is no floor and every offer
+    waits for the seller.
+    """
     try:
         amount = float(str(price or "").replace("$", "").replace(",", "").strip() or 0)
     except (TypeError, ValueError):
-        amount = 0.0
-    if amount <= 0:
-        return "5"
-    return str(max(5, int(round(amount * 0.4))))
+        return None
+    whole = int(round(amount))
+    if whole - MINIMUM_BELOW_LIST < 1:
+        return None
+    return str(whole - AUTO_ACCEPT_BELOW_LIST), str(whole - MINIMUM_BELOW_LIST)
+
+
+def _listing_price(listing: dict[str, Any], general: dict[str, Any]) -> str:
+    return _num_str(listing.get("price") or general.get("price"))
 
 
 def _apply_ebay_pricing(
@@ -93,17 +108,14 @@ def _apply_ebay_pricing(
     if not isinstance(fixed, dict):
         fixed = {}
         details["fixedPrice"] = fixed
-    price = _num_str(listing.get("price") or general.get("price"))
+    price = _listing_price(listing, general)
     if price:
         fixed["buyItNowPrice"] = price
     fixed["duration"] = _clean(fixed.get("duration")) or "GTC"
     fixed["allowBestOffer"] = True
-    minimum = _ebay_auto_accept_minimum(price or fixed.get("buyItNowPrice"))
-    fixed["acceptOffersOfAtLeast"] = minimum
-    try:
-        fixed["declineOffersLowerThan"] = str(max(1, int(minimum) - 1))
-    except (TypeError, ValueError):
-        fixed["declineOffersLowerThan"] = "4"
+    accept, minimum = offer_floors(price or fixed.get("buyItNowPrice")) or ("", "")
+    fixed["acceptOffersOfAtLeast"] = accept
+    fixed["declineOffersLowerThan"] = minimum
 
 
 def _etsy_who_code(raw: Any) -> str:
@@ -178,14 +190,14 @@ def _apply_etsy_tags(known: dict[str, Any], general: dict[str, Any]) -> None:
         known["tags"] = tags
 
 
-def _apply_poshmark_smart_sell(known: dict[str, Any]) -> None:
-    smart = known.get("smartSell")
-    if not isinstance(smart, dict):
-        smart = {}
-        known["smartSell"] = smart
-    smart["enabled"] = True
-    if not _clean(smart.get("minPrice")):
-        smart["minPrice"] = POSHMARK_SMART_SELL_MIN
+def _apply_poshmark_smart_sell(
+    known: dict[str, Any],
+    general: dict[str, Any],
+    listing: dict[str, Any],
+) -> None:
+    """Smart Sell accepts offers down to the same minimum as eBay, or stays off."""
+    floors = offer_floors(_listing_price(listing, general))
+    known["smartSell"] = {"enabled": floors is not None, "minPrice": floors[1] if floors else ""}
 
 
 def _apply_mercari_smart_pricing(known: dict[str, Any]) -> None:

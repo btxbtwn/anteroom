@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.286 — 2026-10-20
+
+- eBay and Poshmark no longer take lowball offers on their own. eBay accepts offers at $2 under your price, turns down anything more than $4 under, and sends the rest to you; Poshmark Smart Sell uses the same $4-under floor. Before, eBay auto-accepted 40% of the price and Poshmark went as low as $5.
+
 ## 0.1.285 — 2026-10-20
 
 - Fixing a listing's category from chat now sticks. Studio was saving the Vendoo category with the arrows between levels missing, so "Category must be a terminal Vendoo path" kept coming back.

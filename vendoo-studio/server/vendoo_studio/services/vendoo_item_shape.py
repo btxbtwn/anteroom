@@ -59,9 +59,6 @@ MERCARI_GROUND_ADVANTAGE_LABEL = DEFAULT_SHIPPING_LABEL
 # Grailed ships per region; US is the one Vendoo turns on by default.
 GRAILED_SHIPPING_REGIONS = ("ca", "uk", "eu", "au", "asia", "other")
 
-# Poshmark Smart Sell floor used on this seller's working drafts.
-POSHMARK_SMART_SELL_MIN = "5"
-
 SPECIFICS_SOURCES = {
     mp: f"{mp}_specifics"
     for mp in ("ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild")
@@ -140,7 +137,9 @@ def _marketplace_specific_defaults(marketplace: str) -> dict[str, Any]:
     if marketplace == "poshmark":
         return {
             "originalPrice": "",
-            "smartSell": {"enabled": True, "minPrice": POSHMARK_SMART_SELL_MIN},
+            # Turned on with a floor once the listing has a price — see
+            # ``vendoo_marketplace_fields.offer_floors``.
+            "smartSell": {"enabled": False, "minPrice": ""},
         }
     if marketplace == "mercari":
         return {
