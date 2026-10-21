@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { confirmDialog } from "../ui/confirmDialog";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import {
   isChatResetting,
   markChatResetting,
@@ -48,10 +48,10 @@ export function useClearListing(convId: string, onCleared?: () => void) {
       resetChatLive(convId);
       void refreshAfterReset(queryClient, convId);
       onCleared?.();
-      addToast({ type: "success", title: "Listing cleared", description: "Upload photos to start again." });
+      toastManager.add({ type: "success", title: "Listing cleared", description: "Upload photos to start again." });
     },
     onError: (err: Error) => {
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not clear listing",
         description: err.message || "The listing could not be cleared.",
@@ -134,7 +134,7 @@ export function RegenerateListingButton({
     },
     onError: (err: Error) => {
       markChatResetting(convId, false);
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not regenerate listing",
         description: err.message || "The listing could not be reset.",

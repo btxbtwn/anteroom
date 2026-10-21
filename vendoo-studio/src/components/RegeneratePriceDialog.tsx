@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { PriceDropCompsSource, PriceDropPreview } from "../api/types";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { SoldCompsCard } from "./SoldCompsCard";
 
 /** "14.3" but "21" — a trailing .0 is noise on a chip. */
@@ -205,7 +205,7 @@ export function RegeneratePriceDialog({
       void queryClient.invalidateQueries({ queryKey: ["price-drop-preview", convId] });
       onDropped?.();
       if (result) {
-        addToast({
+        toastManager.add({
           type: "success",
           title: "Price dropped",
           description: `${money(result.previous_price)} → ${money(result.price)}. Rewriting the listing at the new price.`,
@@ -215,7 +215,7 @@ export function RegeneratePriceDialog({
       onRewrite();
     },
     onError: (err: Error) => {
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not drop price",
         description: err.message || "The price could not be updated.",

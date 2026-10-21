@@ -1,7 +1,7 @@
 import type { MouseEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 
 function stopWindowDrag(event: MouseEvent) {
   event.stopPropagation();
@@ -21,7 +21,7 @@ export function OpenListingButton({
   const open = useMutation({
     mutationFn: () => api.jobs.open(jobId),
     onError: (err: Error) => {
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not open listing",
         description: err.message || "Could not open the listing in Vendoo.",

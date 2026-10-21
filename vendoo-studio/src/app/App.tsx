@@ -22,14 +22,13 @@ import { PhotoDropOverlay } from "../components/PhotoDropOverlay";
 import { BulkUploadDialog } from "../components/BulkUploadDialog";
 import { useBulkRegenerate } from "../components/useBulkRegenerate";
 import { bulkRegenerateToast } from "../bulkRegenerate";
-import { ToastHost } from "../components/ToastHost";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "../components/PanelResizeHandle";
 import { WorkspaceTopbar } from "../components/WorkspaceTopbar";
 import { workspaceCrumbs, type WorkspaceView } from "../components/workspaceCrumbs";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
-import { addToast } from "../ui/toast";
+import { toastManager } from "../components/ui/toast";
 import {
   groupImageFilesByFolder,
   listingTitleForFolder,
@@ -178,7 +177,7 @@ export function App() {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
       if (job.status === "completed" || job.status === "failed") {
-        addToast({
+        toastManager.add({
           type: job.status === "failed" ? "error" : "success",
           title: job.status === "failed" ? "Vendoo send failed" : "Vendoo draft saved",
           description: job.last_error || job.listing_title,
@@ -343,12 +342,12 @@ export function App() {
     },
     onSuccess: (result) => {
       if (result.warning) {
-        addToast({ type: "error", title: "Browser is view-only", description: result.warning });
+        toastManager.add({ type: "error", title: "Browser is view-only", description: result.warning });
       }
     },
     onError: (err: Error, jobId: string) => {
       setBrowserJobId((current) => (current === jobId ? null : current));
-      addToast({ type: "error", title: "Could not open the Vendoo draft", description: err.message });
+      toastManager.add({ type: "error", title: "Could not open the Vendoo draft", description: err.message });
     },
   });
 
@@ -449,7 +448,7 @@ export function App() {
       .map((listing) => ({ convId: listing.convId, title: listingTitleForFolder(listing.folder) }));
     if (!listings.length) return;
     if (bulk.running) {
-      addToast({
+      toastManager.add({
         type: "warning",
         title: "Studio is already working through a batch",
         description: "Generate these from the sidebar's Regenerate button when it finishes.",
@@ -459,7 +458,7 @@ export function App() {
     const ids = listings.map((listing) => listing.convId);
     const titles = new Map(listings.map((listing) => [listing.convId, listing.title]));
     const result = await bulk.start(ids, titles, "generate");
-    if (result) addToast(bulkRegenerateToast(result, "generate"));
+    if (result) toastManager.add(bulkRegenerateToast(result, "generate"));
   };
 
   // Photos dropped anywhere in the window land on the open listing; with no
@@ -514,10 +513,10 @@ export function App() {
         const description = `Added ${totalPhotos} photo${totalPhotos === 1 ? "" : "s"} from separate folders.`;
         if (result.generate) void generateBatch(result.listings);
         if (errors.length) {
-          addToast({ type: "error", title, description: errors.join("; ") });
+          toastManager.add({ type: "error", title, description: errors.join("; ") });
           return;
         }
-        addToast({ type: "success", title, description });
+        toastManager.add({ type: "success", title, description });
         return;
       }
 
@@ -533,13 +532,13 @@ export function App() {
       }
       const title = `Added ${count} photo${count === 1 ? "" : "s"}`;
       if (errors.length) {
-        addToast({ type: "error", title, description: errors.join("; ") });
+        toastManager.add({ type: "error", title, description: errors.join("; ") });
         return;
       }
-      addToast({ type: "success", title, description: created ? "Started a new listing for them." : undefined });
+      toastManager.add({ type: "success", title, description: created ? "Started a new listing for them." : undefined });
     },
     onError: (err: Error) => {
-      addToast({ type: "error", title: "Could not add photos", description: err.message });
+      toastManager.add({ type: "error", title: "Could not add photos", description: err.message });
     },
   });
 
@@ -979,7 +978,6 @@ export function App() {
         />
       ) : null}
       <ThemeSync />
-      <ToastHost />
       <ConfirmDialogHost />
       {setupGuideOpen ? (
         <Suspense fallback={null}>

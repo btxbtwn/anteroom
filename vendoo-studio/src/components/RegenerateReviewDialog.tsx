@@ -5,7 +5,7 @@ import { api } from "../api/client";
 import type { Photo } from "../api/types";
 import { moveItem } from "../photoDrop";
 import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
 import {
   GARMENTS,
@@ -355,7 +355,7 @@ function usePhotoRotate(convId: string) {
       );
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
-    onError: (err: Error) => addToast({ type: "error", title: "Could not rotate photo", description: err.message }),
+    onError: (err: Error) => toastManager.add({ type: "error", title: "Could not rotate photo", description: err.message }),
   });
 }
 
@@ -401,7 +401,7 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: numb
       void queryClient.invalidateQueries({ queryKey: ["photos", convId] });
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
-    onError: (err: Error) => addToast({ type: "error", title: "Could not remove photo", description: err.message }),
+    onError: (err: Error) => toastManager.add({ type: "error", title: "Could not remove photo", description: err.message }),
   });
 
   const resetDrag = () => {

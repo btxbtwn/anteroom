@@ -28,7 +28,7 @@ import {
 } from "../marketplaceFields";
 import { withDropdownOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
 import { fetchVendooItemLive, VENDOO_ITEM_STALE_MS, vendooItemQueryKey } from "../api/vendooItemQuery";
@@ -119,10 +119,10 @@ export function ListingEditor({
       queryClient.invalidateQueries({ queryKey: ["vendoo-item"] });
       queryClient.invalidateQueries({ queryKey: ["vendoo-item-peek"] });
       queryClient.invalidateQueries({ queryKey: ["vendoo-sync", convId] });
-      addToast({ type: "success", title: "Back to the Vendoo listing" });
+      toastManager.add({ type: "success", title: "Back to the Vendoo listing" });
     },
     onError: (err: Error) => {
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not pull from Vendoo",
         description: err.message || "Is Chrome connected?",
@@ -162,14 +162,14 @@ export function ListingEditor({
       queryClient.invalidateQueries({ queryKey: ["fill-log"] });
       if (imported) {
         queryClient.invalidateQueries({ queryKey: ["photos", convId] });
-        addToast({
+        toastManager.add({
           type: imported.photo_warnings.length ? "error" : "success",
           title: `Imported Vendoo draft with ${imported.photo_count} photo${imported.photo_count === 1 ? "" : "s"}`,
           description: imported.photo_warnings.join(" ") || imported.listing_title,
         });
       }
       if (fresh?.error || fresh?.api_error) {
-        addToast({
+        toastManager.add({
           type: "error",
           title: "Could not fully refresh Vendoo draft",
           description: String(fresh.error || fresh.api_error),
@@ -181,7 +181,7 @@ export function ListingEditor({
       const name = err?.name || "";
       if (name === "AbortError" || name === "CancelledError") return;
       setEnsureError(err.message || "Could not load the Vendoo draft fields.");
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not refresh fields",
         description: err.message || "Could not attach this listing to its Vendoo draft.",
@@ -891,14 +891,14 @@ function VendooLinkControl({
     onSuccess: (linked) => {
       setEditing(false);
       onLinked?.(linked.vendoo_item_id);
-      addToast({
+      toastManager.add({
         type: "success",
         title: "Vendoo draft linked",
         description: "Importing its fields and photos through Chrome…",
       });
     },
     onError: (err: Error) => {
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not link Vendoo draft",
         description: err.message || "Check the link and try again.",
@@ -1145,7 +1145,7 @@ function SendToVendooButton({
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["queue"] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      addToast({
+      toastManager.add({
         type: "success",
         title: "Added to queue",
         description: "You can move on. The Vendoo draft will be saved in the background.",

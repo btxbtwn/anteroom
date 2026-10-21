@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { dragHasFiles, groupImageFilesByFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import type { Photo } from "../api/types";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { BulkUploadDialog } from "./BulkUploadDialog";
 import {
   createBulkPhotoListings,
@@ -217,9 +217,9 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
       const description = `Added ${totalPhotos} photo${totalPhotos === 1 ? "" : "s"} from separate folders.`;
       if (errors.length) {
         setUploadError(errors.join("; "));
-        addToast({ type: "error", title, description: errors.join("; ") });
+        toastManager.add({ type: "error", title, description: errors.join("; ") });
       } else {
-        addToast({ type: "success", title, description });
+        toastManager.add({ type: "success", title, description });
       }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");

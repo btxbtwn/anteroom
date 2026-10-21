@@ -7,7 +7,7 @@ import {
   VENDOO_ITEM_STALE_MS,
   vendooItemQueryKey,
 } from "../api/vendooItemQuery";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import {
   emptyFieldsPrompt,
@@ -234,13 +234,13 @@ export function FillLogPanel({
     onSuccess: (payload, body) => {
       queryClient.setQueryData(hiddenQueryKey, { always: payload.always, listing: payload.listing });
       setOpenMenu(null);
-      addToast({
+      toastManager.add({
         type: "success",
         title: body.scope === "always" ? "Hidden on every listing" : "Hidden on this listing",
       });
     },
     onError: (error) => {
-      addToast({ type: "error", title: (error as Error).message || "Could not hide field" });
+      toastManager.add({ type: "error", title: (error as Error).message || "Could not hide field" });
     },
   });
 
@@ -256,7 +256,7 @@ export function FillLogPanel({
       if (payload.always.length + payload.listing.length === 0) setOpenMenu(null);
     },
     onError: (error) => {
-      addToast({ type: "error", title: (error as Error).message || "Could not show field" });
+      toastManager.add({ type: "error", title: (error as Error).message || "Could not show field" });
     },
   });
 
@@ -265,17 +265,17 @@ export function FillLogPanel({
     onSuccess: (payload) => {
       queryClient.setQueryData(hiddenQueryKey, { always: payload.always, listing: payload.listing });
       setOpenMenu(null);
-      addToast({ type: "success", title: "Restored all hidden fields" });
+      toastManager.add({ type: "success", title: "Restored all hidden fields" });
     },
     onError: (error) => {
-      addToast({ type: "error", title: (error as Error).message || "Could not restore fields" });
+      toastManager.add({ type: "error", title: (error as Error).message || "Could not restore fields" });
     },
   });
 
   const hideField = (formId: string, field: DraftField, scope: "always" | "listing") => {
     if (scope === "listing" && !conversationId) return;
     if (isProtectedEbayField(formId, field)) {
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Keep this field visible",
         description: `${field.label} is required for eBay category specifics to load on Vendoo.`,

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Job } from "../api/types";
 import type { BulkRegenerate } from "./useBulkRegenerate";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 
 export type QueueData = Awaited<ReturnType<typeof api.jobs.queue>>;
 const ACTIVE = new Set(["queued", "awaiting_extension", "dispatched"]);
@@ -22,7 +22,7 @@ export function QueuePage({ data, loading, error, bulk, titles, onOpenListing }:
       client.invalidateQueries({ queryKey: ["queue"] });
       client.invalidateQueries({ queryKey: ["jobs"] });
     },
-    onError: (err: Error) => addToast({ type: "error", title: "Could not cancel send", description: err.message }),
+    onError: (err: Error) => toastManager.add({ type: "error", title: "Could not cancel send", description: err.message }),
   });
   const active = (data?.jobs ?? []).filter((j) => ACTIVE.has(j.status)).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const recent = (data?.jobs ?? []).filter((j) => !ACTIVE.has(j.status));

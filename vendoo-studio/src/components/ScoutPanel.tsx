@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ScoutCheck, ScoutState } from "../api/types";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { formatMoney } from "./analyticsFormat";
 import { DraftInput } from "./DraftInput";
 import { SCOUT_QUERY_KEY, isChecking, trackRecordLine, verdictLabel, verdictReason } from "./scoutCheck";
@@ -95,7 +95,7 @@ function NewCheck({ onCreated }: { onCreated: (check: ScoutCheck) => void }) {
       setAsking("");
       onCreated(check);
     },
-    onError: (error: Error) => addToast({ type: "error", title: "Could not start the check", description: error.message }),
+    onError: (error: Error) => toastManager.add({ type: "error", title: "Could not start the check", description: error.message }),
   });
 
   return (
@@ -174,7 +174,7 @@ function CheckCard({
   onChanged: (check: ScoutCheck) => void;
   onOpenListing: (convId: string) => void;
 }) {
-  const onError = (error: Error) => addToast({ type: "error", title: "Could not save", description: error.message });
+  const onError = (error: Error) => toastManager.add({ type: "error", title: "Could not save", description: error.message });
   const price = useMutation({
     mutationFn: (value: number | null) => api.scout.setAskingPrice(check.id, value),
     onSuccess: onChanged,
@@ -185,7 +185,7 @@ function CheckCard({
     onSuccess: (updated) => {
       onChanged(updated);
       if (updated.decision === "bought") {
-        addToast({ type: "success", title: "Draft started", description: "Its photos and analysis are ready to generate." });
+        toastManager.add({ type: "success", title: "Draft started", description: "Its photos and analysis are ready to generate." });
       }
     },
     onError,

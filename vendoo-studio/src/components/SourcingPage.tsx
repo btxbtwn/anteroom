@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { SourceBoxes, SourcingCart, SourcingLot, SourcingPick, SourcingPrefs, SourcingSnapshot, SourcingState } from "../api/types";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { BoughtBoxes } from "./BoughtBoxes";
 import { BOXES_QUERY_KEY, boxFromLot, calibrationNote, recentlyBought, shippingNote } from "./boxPurchases";
 import { DraftInput } from "./DraftInput";
@@ -91,7 +91,7 @@ function BoxSourcing({ onOpenListing }: Props) {
   });
   const onSaved = (state: SourcingState) => queryClient.setQueryData(QUERY_KEY, state);
   const onError = (error: Error) =>
-    addToast({ type: "error", title: "Could not update your buy list", description: error.message });
+    toastManager.add({ type: "error", title: "Could not update your buy list", description: error.message });
   const refresh = useMutation({ mutationFn: api.sourcing.refresh, onSuccess: onSaved, onError });
   const savePrefs = useMutation({
     mutationFn: (prefs: Partial<SourcingPrefs>) => api.sourcing.savePrefs(prefs),
@@ -496,14 +496,14 @@ function Item({ lot, storeName, note, onOpenListing }: {
     mutationFn: () => api.boxes.create(boxFromLot(lot)),
     onSuccess: (data: SourceBoxes) => {
       queryClient.setQueryData(BOXES_QUERY_KEY, data);
-      addToast({
+      toastManager.add({
         type: "success",
         title: "Added to your boxes",
         description: `Correct the shipping under Boxes you bought once ${storeName} charges it.`,
       });
     },
     onError: (error: Error) =>
-      addToast({ type: "error", title: "Could not record the box", description: error.message }),
+      toastManager.add({ type: "error", title: "Could not record the box", description: error.message }),
   });
   const bought = recentlyBought(lot, boxes.data?.boxes ?? []);
   return (

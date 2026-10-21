@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { api } from "../api/client";
 import type { BrowserField, BrowserInputEvent, BrowserRect, BrowserViewport } from "../api/client";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { KEYBOARD_REST, typedEvents } from "./browserKeyboard";
 import { OpenListingButton } from "./OpenListingButton";
 
@@ -427,7 +427,7 @@ export function BrowserPreview({
       setMarks([]);
       settleSnapshot();
     } catch (err) {
-      addToast({ type: "error", title: "Could not navigate", description: (err as Error).message });
+      toastManager.add({ type: "error", title: "Could not navigate", description: (err as Error).message });
     } finally {
       setNavigating(false);
     }
@@ -498,7 +498,7 @@ export function BrowserPreview({
       if (result.field) {
         toggleField(result.field);
       } else {
-        addToast({
+        toastManager.add({
           type: "error",
           title: "No field there",
           description: result.element?.text
@@ -507,7 +507,7 @@ export function BrowserPreview({
         });
       }
     } catch (err) {
-      addToast({ type: "error", title: "Could not pick that field", description: (err as Error).message });
+      toastManager.add({ type: "error", title: "Could not pick that field", description: (err as Error).message });
     }
   }, [jobId, toggleField]);
 
@@ -518,7 +518,7 @@ export function BrowserPreview({
     const inside = fieldBoxes.filter(({ box }) => intersects(bounds, box)).map(({ field }) => field);
     const added = addFields(inside);
     if (!added) {
-      addToast({
+      toastManager.add({
         type: "error",
         title: "No fields inside that mark",
         description: "Scroll the fields into view, then draw around them again.",

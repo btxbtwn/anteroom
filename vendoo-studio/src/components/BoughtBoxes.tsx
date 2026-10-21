@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { SourceBox, SourceBoxInput, SourceBoxes, SourceStoreResults } from "../api/types";
 import { confirmDialog } from "../ui/confirmDialog";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { formatDays, formatMoney } from "./analyticsFormat";
 import {
   BOXES_QUERY_KEY,
@@ -26,7 +26,7 @@ export function BoughtBoxes() {
   const query = useQuery({ queryKey: BOXES_QUERY_KEY, queryFn: api.boxes.list });
   const onSaved = (data: SourceBoxes) => queryClient.setQueryData(BOXES_QUERY_KEY, data);
   const onError = (error: Error) =>
-    addToast({ type: "error", title: "Could not save the box", description: error.message });
+    toastManager.add({ type: "error", title: "Could not save the box", description: error.message });
   const update = useMutation({
     mutationFn: ({ id, changes }: { id: string; changes: Partial<SourceBoxInput> }) => api.boxes.update(id, changes),
     onSuccess: onSaved,

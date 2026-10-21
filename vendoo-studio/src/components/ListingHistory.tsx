@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ListingData } from "../api/types";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { ListingChangeList } from "./ListingChangeList";
 import { listingChanges } from "./listingChanges";
 import { ListingReviewDialog } from "./ListingReviewDialog";
@@ -34,7 +34,7 @@ export function ListingHistory({ convId, listing, revisionId, busy, onClose }: {
       for (const key of ["listing", "conversation", "conversations", "listing-fields", "revisions"]) {
         void queryClient.invalidateQueries({ queryKey: key === "conversations" ? [key] : [key, convId] });
       }
-      addToast({ type: "success", title: "Earlier listing restored", description: "Your previous version is still in history. Review the restored listing before sending." });
+      toastManager.add({ type: "success", title: "Earlier listing restored", description: "Your previous version is still in history. Review the restored listing before sending." });
       onClose();
     },
   });

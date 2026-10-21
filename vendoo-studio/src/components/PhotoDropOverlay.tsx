@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { dragHasFiles, imageFilesFromTransfer } from "../photoDrop";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 
 interface Props {
   title: string;
@@ -58,7 +58,7 @@ export function PhotoDropOverlay({ title, hint, busy, busyLabel, onFiles }: Prop
           onFilesRef.current(files);
           return;
         }
-        addToast({
+        toastManager.add({
           type: "error",
           title: "No photos in that drop",
           description: "Drop image files, or folders that contain JPG, PNG, WEBP, or HEIC photos.",
