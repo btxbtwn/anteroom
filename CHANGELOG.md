@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.302 — 2026-10-21
+
+- The assistant now sees every box on the Sourcing tab, not only the buy list: each box's store, title, link, price, shipping, piece count, what's in it, resale estimate, projected profit and return, and how far it misses your minimum return when it does.
+- When the buy list is empty, the assistant says why, for example how many boxes reach your minimum return and which check stopped the rest, and warns you when the box data is old or your settings changed since the last check.
+- Ask the assistant to rank the boxes against what you sell: it sets each box beside your own sales of that kind of piece over the last year (how many, average price, margin, days to sell) and your sales by category.
+
 ## 0.1.301 — 2026-10-21
 
 - Your listings stay on the left while you talk to the assistant. Its chats moved to a panel on the right, which you can hide from the top bar or resize. On a phone, the chats button at the top opens them.

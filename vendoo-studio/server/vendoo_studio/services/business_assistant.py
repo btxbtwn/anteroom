@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.assistant import NEW_THREAD_TITLE, AssistantMessage, AssistantThread
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
-from vendoo_studio.services import assistant_changes, assistant_memory
+from vendoo_studio.services import assistant_changes, assistant_memory, sourcing_boxes
 from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsItem
 
 # Earlier turns sent back with a question, so a follow-up can lean on them.
@@ -46,7 +46,8 @@ HISTORY_MESSAGES = 20
 LISTING_ROWS_BUDGET = 300_000
 PRICE_CHANGE_ROWS = 300
 BRAND_GROUPS = 40
-SOURCING_LOTS = 40
+# Room for the Sourcing tab's boxes, in characters; a lookup reads every one.
+SOURCING_ROWS_BUDGET = 30_000
 SIZING_ROWS = 200
 # Lookups one question may run, and what one may cost and return.
 MAX_LOOKUPS = 6
@@ -73,6 +74,14 @@ INSTRUCTIONS = (
     "- When you name a specific listing, link it so the seller can open it: [its title](#listing-ID), "
     "with the id from its row. Use only ids that appear in the snapshot or in a lookup result.\n"
     "- Other ids only tie rows together. Name a box by its store and title, never by its id.\n"
+    "- Sourcing: every box on the Sourcing tab is in the snapshot's box table, best first, and all of them, with "
+    "the url and every figure, are in the `sourcing_boxes` lookup table. `recommended_lots` is the buy list Studio "
+    "recommends; when it is empty, `empty_reason` says why. To rank boxes against what the seller sells, set each "
+    "box's projected profit and ROI beside its `kind_*` figures (the seller's own sales of that kind of piece in the "
+    "last 12 months: count, average price, margin, median days to sell) and the `categories` in the Sales sections "
+    "or the `sales_by_category` table. A box whose kind the seller has sold often, at a good margin and quickly, "
+    "beats one with a higher ROI resting on few or no sales of its kind. A box missing the min ROI says by how "
+    "many points (`roi_gap_points`) and dollars (`profit_shortfall`). Empty figures are unknown, never zero.\n"
     "- Write plain English and lead with the answer. Use a table when comparing several things. Amounts are US dollars.\n"
 )
 
@@ -88,6 +97,12 @@ LOOKUP_INSTRUCTIONS = (
     "and where it was read, and `size_issue` why the sizing needs a look (NULL when nothing stands out).\n"
     "`listings.details` is the listing's full JSON, including each marketplace's fields; read it with "
     "json_extract(details, '$.ebay_specifics'). Dates are YYYY-MM-DD text. Amounts are numbers; NULL means not recorded.\n"
+    "`sourcing_boxes` is every box on the Sourcing tab from its last check: `contents` the kind of piece, `landed` "
+    "price plus shipping and checkout fee, `projected_profit` and `roi_percent` at the settings that check used, "
+    "`on_its_own` how the box fares bought on its own (qualifies, return_target, downside, needs_research, budget), "
+    "`buy_list` recommended or what kept it off the list, and `kind_*` the seller's own sales of its kind.\n"
+    "`sales_by_category` is the Analytics category breakdown for each `period` (30d, 90d, 12m, all); `margin` is "
+    "profit as a percent of revenue over the sales with a cost recorded (`profit_known`).\n"
 )
 
 CHANGES_INSTRUCTIONS = (
@@ -121,9 +136,16 @@ CHANGES_INSTRUCTIONS = (
 )
 
 _SALES_KEYS = ("range", "sell_through_rate", "sales", "previous", "periods", "marketplaces", "categories", "price_tiers", "ads")
-_LOT_KEYS = (
-    "store", "title", "price", "pcs", "grade", "theme", "landed", "cog_per_pc", "resale_per_pc",
-    "sell_through", "expected_revenue", "expected_profit", "roi", "downside_profit", "comps_count",
+# One Sourcing-tab box, as the brief's table shows it.
+SOURCING_COLUMNS = (
+    "id", "store", "title", "contents", "price", "shipping", "pieces", "resale_per_piece", "projected_profit",
+    "roi_percent", "roi_gap_points", "profit_shortfall", "on_its_own", "buy_list", "kind_sold_12m", "kind_average_price",
+    "kind_margin", "kind_median_days",
+)
+CATEGORY_RANGES = ("30d", "90d", "12m", "all")
+CATEGORY_COLUMNS = (
+    "period", "category", "count", "revenue", "average_price", "profit", "profit_known", "margin", "median_days",
+    "days_known",
 )
 # One listing, as the brief's table shows it.
 ROW_COLUMNS = (
@@ -155,6 +177,8 @@ TABLES = {
     "boxes": BOX_COLUMNS,
     "ad_spend": AD_COLUMNS,
     "sale_events": EVENT_COLUMNS,
+    "sourcing_boxes": sourcing_boxes.BOX_COLUMNS,
+    "sales_by_category": CATEGORY_COLUMNS,
 }
 _RANGE_LABELS = {
     "wtd": "this week so far (Monday to now)",
@@ -342,6 +366,12 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
     events = _sale_events(db)
     scout_sales = scout.outcomes(db)
     note = get_business_note()
+    sourcing_state = box_scout.read_state()
+    tab_boxes = sourcing_boxes.box_rows(sourcing_state, rows, clock)
+    categories = [
+        {"period": range_id, "category": group["label"], **{key: group[key] for key in CATEGORY_COLUMNS[2:]}}
+        for range_id in CATEGORY_RANGES for group in ranges[range_id]["categories"]
+    ]
     sections = [
         f"Today is {clock.date().isoformat()} (UTC). "
         f"Sales and statuses were last synced from Vendoo at {everything['last_updated_at'] or 'an unknown time'}.",
@@ -366,7 +396,8 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
         _sizing_rows(records),
         _price_change_rows(changes),
         _section("Wholesale boxes bought, and what each has returned", box_results),
-        _sourcing(box_scout.read_state()),
+        _sourcing(sourcing_state, tab_boxes, clock),
+        _sourcing_box_rows(tab_boxes),
         _section("Ad spend the seller recorded", ads),
         _section("Sale events", events),
         _section("Sourcing checks (is this worth buying?)", {
@@ -386,6 +417,8 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
             "boxes": box_results["boxes"],
             "ad_spend": ads,
             "sale_events": events,
+            "sourcing_boxes": tab_boxes,
+            "sales_by_category": categories,
         }),
     )
 
@@ -741,24 +774,39 @@ def _price_change_rows(changes: list[dict[str, Any]]) -> str:
     ])
 
 
-def _sourcing(state: dict) -> str:
-    """The current buy list: what the seller told Sourcing, and what it would buy."""
-    snapshot = state.get("snapshot")
-    if not snapshot:
-        return _section("Sourcing buy list", None)
-    plan = snapshot.get("buy_list") or {}
+def _sourcing(state: dict, tab_boxes: list[dict[str, Any]], now: datetime) -> str:
+    """The current buy list: what the seller told Sourcing, what it would buy, and why when nothing."""
     return _section("Sourcing buy list", {
-        "updated_at": snapshot.get("updated_at"),
-        "preferences": state.get("prefs"),
+        "current_settings": state.get("prefs"),
         "trending_terms": (state.get("trend") or {}).get("terms"),
-        "budget": plan.get("budget"),
-        "total": plan.get("total"),
-        "expected_profit": plan.get("expected_profit"),
-        "recommended_lots": [
-            {key: lot.get(key) for key in _LOT_KEYS}
-            for cart in plan.get("carts") or [] for lot in cart.get("lots") or []
-        ][:SOURCING_LOTS],
+        **sourcing_boxes.buy_list_summary(state, tab_boxes, now),
     })
+
+
+def _sourcing_box_rows(tab_boxes: list[dict[str, Any]]) -> str:
+    """One line per box on the Sourcing tab, best first, as many as fit."""
+    title = f"--- Boxes on the Sourcing tab ({len(tab_boxes)}) ---"
+    if not tab_boxes:
+        return f"{title}\nNo boxes in the last sourcing check."
+    lines: list[str] = []
+    used = 0
+    for box in tab_boxes:
+        line = _line(box, SOURCING_COLUMNS)
+        if used + len(line) > SOURCING_ROWS_BUDGET:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    note = (
+        "Recommended boxes first, then each supplier's top picks, then the rest by ROI. `contents` is the kind of "
+        "piece, `shipping` the estimate to the seller's ZIP, `roi_percent` and `projected_profit` at the settings the "
+        "check used; `roi_gap_points` and `profit_shortfall` are how far a box misses the min ROI. `on_its_own` is how it "
+        "fares bought on its own and `buy_list` what kept it off the list. `kind_*` is the seller's own sales of that "
+        "kind in the last 12 months. Empty means unknown."
+    )
+    left_out = len(tab_boxes) - len(lines)
+    if left_out:
+        note += f" {left_out} more boxes did not fit; the sourcing_boxes lookup has every box, with its url."
+    return "\n".join([title, note, " | ".join(SOURCING_COLUMNS), *lines])
 
 
 def _sale_events(db: Session) -> list[dict[str, Any]]:
