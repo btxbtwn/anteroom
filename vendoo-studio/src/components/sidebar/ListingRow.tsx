@@ -4,7 +4,7 @@ import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { marketplacesNeedingRelist, relistStage } from "../relistStatus";
 import { marketplaceName } from "../marketplaceNames";
-import { CheckIcon, PencilIcon, Undo2Icon, XIcon } from "lucide-react";
+import { PencilIcon, XIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
@@ -18,8 +18,6 @@ export function ListingRow({
   listing,
   selected,
   settled,
-  busy,
-  settling,
   jobId,
   statusDraft,
   visibleMarketplaces,
@@ -31,14 +29,10 @@ export function ListingRow({
   onToggleSelect,
   onSelect,
   onDelete,
-  onSettle,
-  onUnsettle,
 }: {
   listing: Listing;
   selected: boolean;
   settled: boolean;
-  busy: boolean;
-  settling: boolean;
   jobId?: string;
   statusDraft?: Record<string, unknown>;
   visibleMarketplaces?: Set<string>;
@@ -50,8 +44,6 @@ export function ListingRow({
   onToggleSelect?: (id: string, shift: boolean) => void;
   onSelect: (id: string) => void;
   onDelete: (id: string, title: string) => void;
-  onSettle?: (id: string) => void;
-  onUnsettle?: (id: string) => void;
 }) {
   const title = listing.title || "Untitled";
   // Named by SKU, a listing without one still shows its title.
@@ -349,36 +341,6 @@ export function ListingRow({
           >
             <PencilIcon className="size-3" />
           </button>
-          {!busy && onSettle && (
-            <button
-              type="button"
-              className={actionClass}
-              title="Settle listing"
-              aria-label={`Settle ${title}`}
-              disabled={settling}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSettle(listing.id);
-              }}
-            >
-              <CheckIcon className="size-3" />
-            </button>
-          )}
-          {onUnsettle && (
-            <button
-              type="button"
-              className={actionClass}
-              title="Un-settle listing"
-              aria-label={`Un-settle ${title}`}
-              disabled={settling}
-              onClick={(e) => {
-                e.stopPropagation();
-                onUnsettle(listing.id);
-              }}
-            >
-              <Undo2Icon className="size-3" />
-            </button>
-          )}
           <button
             type="button"
             className={actionClass}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { listingCanRegenerate, mergeRegenerateIds } from "../bulkRegenerate";
 import { jobsPollMs } from "../api/polling";
@@ -31,7 +31,6 @@ import {
 import { ArrowLeftIcon, EllipsisIcon, SearchIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Kbd } from "./ui/kbd";
-import { ShelfHeader } from "./sidebar/ListingBits";
 import { SIDEBAR_ROW } from "./sidebar/sidebarStyles";
 import { ListingRow } from "./sidebar/ListingRow";
 import { activeAnchorMs, settledAnchorMs, type Listing } from "./sidebar/listingShelves";
@@ -40,7 +39,6 @@ import { SettingsSidebarNav } from "./sidebar/SettingsSidebarNav";
 import { AssistantThreadSection } from "./sidebar/AssistantThreadSection";
 import { SidebarFooter } from "./sidebar/SidebarFooter";
 import { useListingSelection } from "./sidebar/useListingSelection";
-import { useSettledShelf } from "./sidebar/useSettledShelf";
 import { useSettingsSearch } from "./sidebar/useSettingsSearch";
 
 /* T3 Code's sidebar search row (MIT, (c) 2026 T3 Tools Inc.): a flush row that
@@ -50,9 +48,6 @@ const SEARCH_CLASS =
 const SEARCH_INPUT_CLASS =
   "min-w-0 flex-1 bg-transparent text-sm font-medium text-sidebar-foreground outline-none placeholder:text-sidebar-muted-foreground max-[900px]:text-base";
 
-const SETTLED_TAIL_INITIAL_COUNT = 10;
-const SETTLED_TAIL_PAGE_COUNT = 25;
-const BUSY_STATUSES = new Set(["in_progress", "listing"]);
 const NO_SUGGESTIONS: Suggestion[] = [];
 
 interface Props {
@@ -107,8 +102,6 @@ export function ListingSidebar({
   onSettingsSearchResult,
   bulk,
 }: Props) {
-  const queryClient = useQueryClient();
-  const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
   const [filters, setFilters] = useState<Filters>(DEFAULT_LISTING_FILTERS);
   const settingsMode = activeView === "settings";
 
@@ -117,16 +110,7 @@ export function ListingSidebar({
     queryFn: api.settings.ui,
   });
   const nameBySku = uiPrefs?.listing_names === "sku";
-  const { settledExpanded, toggleSettledShelf } = useSettledShelf(uiPrefs);
 
-  const settleListing = useMutation({
-    mutationFn: (id: string) => api.conversations.settle(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-  });
-  const unsettleListing = useMutation({
-    mutationFn: (id: string) => api.conversations.unsettle(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-  });
   const { data: jobs } = useQuery({
     queryKey: ["jobs"],
     queryFn: () => api.jobs.list(),
@@ -182,17 +166,16 @@ export function ListingSidebar({
   const selection = useListingSelection({ eligibleIds, listingsById, suggestions, bulk });
   const { selecting, setSelecting, selectedIds, exitSelecting, toggleSelect } = selection;
 
-  const visibleSettled = useMemo(() => {
-    const visible = settledListings.slice(0, settledVisibleCount);
-    const selected = settledListings.find((listing) => listing.id === selectedConvId && activeView === "listings");
-    if (selected && !visible.some((listing) => listing.id === selected.id)) visible.push(selected);
-    return visible;
-  }, [activeView, selectedConvId, settledListings, settledVisibleCount]);
-
-  const renderedSettled = settledExpanded
-    ? visibleSettled
-    : visibleSettled.filter((listing) => listing.id === selectedConvId && activeView === "listings");
-  const hiddenSettledCount = Math.max(0, settledListings.length - visibleSettled.length);
+  // Finished listings stay out of the working list. Search and the Sold tab still find them.
+  const shownListings = useMemo(() => {
+    const includeFinished = Boolean(needle) || filters.status === "sold";
+    const rows = includeFinished ? [...activeListings, ...settledListings] : [...activeListings];
+    if (activeView === "listings" && selectedConvId && !rows.some((listing) => listing.id === selectedConvId)) {
+      const open = settledListings.find((listing) => listing.id === selectedConvId);
+      if (open) rows.unshift(open);
+    }
+    return rows;
+  }, [activeListings, activeView, filters.status, needle, selectedConvId, settledListings]);
 
   const { data: marketplaceSettings } = useQuery({
     queryKey: ["settings-marketplaces"],
@@ -234,11 +217,11 @@ export function ListingSidebar({
   // they're listed without hovering. Reads the server cache only.
   const renderedJobIds = useMemo(
     () =>
-      [...activeListings, ...renderedSettled]
+      shownListings
         .map((listing) => jobIdByConversation.get(listing.id))
         .filter((id): id is string => Boolean(id))
         .sort(),
-    [activeListings, renderedSettled, jobIdByConversation],
+    [shownListings, jobIdByConversation],
   );
   const { data: statusDrafts } = useQuery({
     queryKey: ["marketplace-statuses", renderedJobIds.join(",")],
@@ -266,12 +249,10 @@ export function ListingSidebar({
 
   const handleSearchChange = (value: string) => {
     onSearchQueryChange(value);
-    setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
   };
 
   const handleFiltersChange = (next: Filters) => {
     setFilters(next);
-    setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
   };
 
   return (
@@ -427,14 +408,12 @@ export function ListingSidebar({
               "max-[900px]:touch-pan-y max-[900px]:pb-[calc(72px+env(safe-area-inset-bottom,0px))]",
             )}
           >
-            {activeListings.map((listing) => (
+            {shownListings.map((listing) => (
               <ListingRow
                 key={listing.id}
                 listing={listing}
                 selected={selectedConvId === listing.id && activeView === "listings"}
                 settled={false}
-                busy={BUSY_STATUSES.has(String(listing.status || "draft"))}
-                settling={settleListing.isPending}
                 jobId={jobIdByConversation.get(listing.id)}
                 statusDraft={statusDraftFor(listing.id)}
                 visibleMarketplaces={visibleMarketplaces}
@@ -446,45 +425,8 @@ export function ListingSidebar({
                 onToggleSelect={(id, shift) => toggleSelect(id, shift, listingEligibleIds)}
                 onSelect={onSelect}
                 onDelete={onDelete}
-                onSettle={(id) => settleListing.mutate(id)}
               />
             ))}
-
-            {settledListings.length > 0 && (
-              <>
-                <ShelfHeader
-                  label={settledExpanded ? "Settled" : `Settled (${settledListings.length})`}
-                  expanded={settledExpanded}
-                  onToggle={toggleSettledShelf}
-                />
-                {renderedSettled.map((listing) => (
-                  <ListingRow
-                    key={listing.id}
-                    listing={listing}
-                    selected={selectedConvId === listing.id && activeView === "listings"}
-                    settled
-                    busy={false}
-                    settling={unsettleListing.isPending}
-                    jobId={jobIdByConversation.get(listing.id)}
-                    statusDraft={statusDraftFor(listing.id)}
-                    visibleMarketplaces={visibleMarketplaces}
-                    nameBySku={nameBySku}
-                    onSelect={onSelect}
-                    onDelete={onDelete}
-                    onUnsettle={(id) => unsettleListing.mutate(id)}
-                  />
-                ))}
-                {settledExpanded && hiddenSettledCount > 0 && (
-                  <button
-                    type="button"
-                    className={cn(SIDEBAR_ROW, "mt-0.5 text-xs")}
-                    onClick={() => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT)}
-                  >
-                    Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                  </button>
-                )}
-              </>
-            )}
 
             {(!conversations || conversations.length === 0) && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
