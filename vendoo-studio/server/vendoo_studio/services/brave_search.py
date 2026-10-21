@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import time
+from datetime import UTC, datetime
 
 import httpx
 
 from vendoo_studio.services import live_trace
 from vendoo_studio.services.keychain import get_brave_api_key
+from vendoo_studio.services.user_settings import read_settings, update_settings
 from vendoo_studio.services.sold_comps import SoldCompsReport, listings_from_web_results
 
 log = logging.getLogger("vendoo_studio.brave_search")
@@ -23,12 +24,12 @@ BRAVE_RESULT_COUNT = 20
 # rather than firing every query at once.
 BRAVE_QUERY_STAGGER_SEC = 0.6
 BRAVE_RETRY_SEC = 1.5
-# A 402 means the plan's quota is spent, and it stays spent until the billing
-# period rolls over. Every research run retried it anyway, so skip Brave for a
-# while after one instead of failing the same way on each listing.
-BRAVE_QUOTA_BACKOFF_SEC = 3600
-_quota_error: str | None = None
-_quota_until = 0.0
+# A 402 (USAGE_LIMIT_EXCEEDED) means the plan's monthly quota is spent, and it
+# stays spent until the month rolls over. Retrying hourly still cost a request
+# on every listing, so the month it ran out is remembered in settings.json —
+# across restarts — and Brave is skipped until the next calendar month (UTC),
+# or until the seller saves a key or a connection test succeeds.
+QUOTA_SETTING = "brave_quota_exhausted"
 _ANALYSIS_FIELD_RE = re.compile(
     r"^-\s*(brand|category|style|graphic|size|color|material|pattern|department):\s*(.+?)(?:\s+\(source:.*\))?$",
     re.I | re.M,
@@ -217,7 +218,7 @@ async def search_web(query: str, api_key: str, *, count: int = 8) -> list[dict]:
         )
         if resp.status_code >= 400:
             error = _brave_error(resp)
-            if resp.status_code == 402:
+            if resp.status_code == 402 or "USAGE_LIMIT" in error.upper():
                 _note_quota_exhausted(error)
             raise RuntimeError(error)
         payload = resp.json()
@@ -228,16 +229,36 @@ async def search_web(query: str, api_key: str, *, count: int = 8) -> list[dict]:
     return [item for item in results if isinstance(item, dict)]
 
 
-def _note_quota_exhausted(error: str) -> None:
-    global _quota_error, _quota_until
-    _quota_error = error
-    _quota_until = time.monotonic() + BRAVE_QUOTA_BACKOFF_SEC
+def _month(now: datetime | None = None) -> str:
+    return (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m")
+
+
+def _note_quota_exhausted(error: str, now: datetime | None = None) -> None:
+    month = _month(now)
+
+    def mutator(payload: dict) -> None:
+        payload[QUOTA_SETTING] = {"month": month, "error": error}
+
+    try:
+        update_settings(mutator)
+    except OSError:
+        log.warning("could not remember the spent Brave quota", exc_info=True)
+
+
+def quota_exhausted(now: datetime | None = None) -> str | None:
+    """The quota error while this calendar month's quota is spent, else None."""
+    state = read_settings().get(QUOTA_SETTING)
+    if not isinstance(state, dict) or state.get("month") != _month(now):
+        return None
+    return str(state.get("error") or "Brave HTTP 402: USAGE_LIMIT_EXCEEDED")
 
 
 def reset_quota_backoff() -> None:
-    global _quota_error, _quota_until
-    _quota_error = None
-    _quota_until = 0.0
+    def mutator(payload: dict) -> None:
+        payload.pop(QUOTA_SETTING, None)
+
+    if QUOTA_SETTING in read_settings():
+        update_settings(mutator)
 
 
 async def test_brave_connection(api_key: str | None = None) -> tuple[bool, str | None]:
@@ -256,6 +277,9 @@ async def _search_one(query: str, api_key: str, *, delay: float) -> list[dict]:
     """One staggered query; a 429 from the per-second cap gets a single retry."""
     if delay:
         await asyncio.sleep(delay)
+    # An earlier query in this fan-out may have just spent the quota.
+    if spent := quota_exhausted():
+        raise RuntimeError(spent)
     try:
         results = await search_web(query, api_key, count=BRAVE_RESULT_COUNT)
     except Exception as exc:
@@ -294,8 +318,8 @@ async def research_brave_report(
     api_key = get_brave_api_key()
     if not api_key:
         raise RuntimeError("Add a Brave Search API key in Settings.")
-    if _quota_error and time.monotonic() < _quota_until:
-        raise RuntimeError(_quota_error)
+    if spent := quota_exhausted():
+        raise RuntimeError(spent)
     query_list = [queries] if isinstance(queries, str) else list(queries)
     query_list = [query for query in query_list if query]
     if not query_list:

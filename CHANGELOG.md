@@ -11,6 +11,12 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 - The rest of Studio matches the new look: sidebar, settings, providers, queue, analytics, marketing, sourcing, and the listing editor.
 - Toasts, confirmations, empty screens, and loading placeholders use that same look.
 
+## 0.1.290 — 2026-10-21
+
+- Listings generate faster: sold comps, active listings, categories and each marketplace's fields now run side by side, and comp research starts from a quick first look at the photos instead of waiting for the full read.
+- Studio keeps how long each step of a listing took, so slow steps are easy to spot.
+- Brave search stops trying for the rest of the month once its quota runs out, runs alongside the other comp searches, and uses at most 4 searches per listing.
+
 ## 0.1.289 — 2026-10-21
 
 - Fields for marketplaces you turned off in Settings, like Grailed and Shopify, no longer show up after you send to Vendoo.

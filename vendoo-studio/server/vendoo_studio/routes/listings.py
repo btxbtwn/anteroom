@@ -333,9 +333,19 @@ def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db)):
     async def events():
         queue: asyncio.Queue[str | None] = asyncio.Queue()
 
+        forwarded: dict[str, str] = {}
+
         def trace(kind: str, text: str) -> None:
             if kind == "step":
                 queue.put_nowait(sse_event("step", text))
+            elif kind == "agent":
+                # Searches run as parallel agents; their progress and result
+                # lines ("Found 8 sold comps") are this dialog's steps.
+                state = json.loads(text)
+                detail = state.get("detail")
+                if detail and forwarded.get(state.get("id")) != detail:
+                    forwarded[state.get("id")] = detail
+                    queue.put_nowait(sse_event("step", detail))
 
         async def research() -> None:
             live_trace.bind(trace)

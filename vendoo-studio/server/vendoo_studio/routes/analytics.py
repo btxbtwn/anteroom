@@ -159,3 +159,11 @@ def get_analytics(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Unknown analytics range, or a custom range without a start on or before its end.") from exc
     return AnalyticsResponse.model_validate(payload)
+
+
+@router.get("/generation-timings")
+def get_generation_timings(limit: int = Query(50, ge=1, le=500), db: Session = Depends(get_db)):
+    """Recent listing generations: seconds per stage, and the median of each stage."""
+    from vendoo_studio.services.generation_timing import recent_summary
+
+    return recent_summary(db, limit=limit)

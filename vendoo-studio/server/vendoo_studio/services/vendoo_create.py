@@ -18,6 +18,7 @@ import copy
 import hashlib
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -832,6 +833,65 @@ def _field_signature(listing: dict[str, Any], specifics: dict[str, dict[str, Fie
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
+@dataclass(frozen=True)
+class ResolvedFields:
+    """Vendoo leaf ids and field schemas for one set of category breadcrumbs."""
+
+    paths: dict[str, str]
+    listing: dict[str, Any]
+    specifics: dict[str, dict[str, FieldSpec]]
+    unresolved: list[dict[str, str]]
+
+
+async def resolve_listing_fields(
+    job, listing: dict[str, Any], *, mark=None, timeout: float = REQUEST_TIMEOUT_SEC,
+) -> ResolvedFields:
+    """Resolve the listing's leaves and fetch their schemas — Vendoo reads, no model.
+
+    Generation runs this beside the discovered-field gap fill, which only
+    writes field values, and hands the result to
+    ``prepare_listing_fields_for_vendoo`` once that fill is done.
+    """
+    listing = copy.deepcopy(listing)
+    _invalidate_changed_categories(listing)
+    paths = _category_paths(listing)
+    if mark:
+        mark("vendoo_api_categories")
+    listing, unresolved = await resolve_listing_categories(job, listing, timeout=timeout)
+    if mark:
+        mark("vendoo_api_specifics")
+    specifics = await fetch_listing_specifics(job, listing, timeout=timeout)
+    return ResolvedFields(paths, listing, specifics, unresolved)
+
+
+_RESOLVED_KEYS = ("category_id", "category_path", "marketplace_category_ids", "marketplace_category_objects")
+
+
+def apply_resolved_fields(listing: dict[str, Any], resolved: ResolvedFields) -> dict[str, Any] | None:
+    """``listing`` with the leaf ids ``resolved`` found for it.
+
+    None when the listing's categories are no longer the ones that were
+    resolved, so the caller resolves again rather than send stale leaves.
+    """
+    listing = copy.deepcopy(listing)
+    _invalidate_changed_categories(listing)
+    if _category_paths(listing) != resolved.paths:
+        return None
+    for key in _RESOLVED_KEYS:
+        if key in resolved.listing:
+            listing[key] = copy.deepcopy(resolved.listing[key])
+    for key in CATEGORY_MARKETPLACES:
+        block = resolved.listing.get(f"{key}_specifics")
+        if not isinstance(block, dict) or "categoryId" not in block:
+            continue
+        current = listing.get(f"{key}_specifics")
+        target = dict(current) if isinstance(current, dict) else {}
+        target["categoryPath"] = copy.deepcopy(block.get("categoryPath"))
+        target["categoryId"] = block["categoryId"]
+        listing[f"{key}_specifics"] = target
+    return listing
+
+
 async def prepare_listing_fields_for_vendoo(
     job,
     listing: dict[str, Any],
@@ -840,6 +900,7 @@ async def prepare_listing_fields_for_vendoo(
     evidence: str = "",
     mark=None,
     timeout: float = REQUEST_TIMEOUT_SEC,
+    resolved: ResolvedFields | None = None,
 ) -> tuple[dict[str, Any], dict[str, dict[str, FieldSpec]], dict[str, Any] | None, list[dict[str, str]], list[dict[str, Any]]]:
     """Prepare listing data with reads only; safe to run before seller approval.
 
@@ -847,16 +908,18 @@ async def prepare_listing_fields_for_vendoo(
     its leaf ids and completed fill pass, including fields the evidence could
     not answer. Price/copy edits do not repeat that pass; clearing a field or
     changing its category/schema does.
+
+    ``resolved`` (from ``resolve_listing_fields``, started earlier) skips the
+    Vendoo reads when the listing's categories still match it.
     """
-    listing = copy.deepcopy(listing)
-    _invalidate_changed_categories(listing)
     schema = load_schema()
-    if mark:
-        mark("vendoo_api_categories")
-    listing, category_unresolved = await resolve_listing_categories(job, listing, timeout=timeout)
-    if mark:
-        mark("vendoo_api_specifics")
-    specifics = await fetch_listing_specifics(job, listing, timeout=timeout)
+    applied = apply_resolved_fields(listing, resolved) if resolved is not None else None
+    if applied is None:
+        resolved = await resolve_listing_fields(job, listing, mark=mark, timeout=timeout)
+        listing = copy.deepcopy(resolved.listing)
+    else:
+        listing = applied
+    specifics, category_unresolved = resolved.specifics, list(resolved.unresolved)
     from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
 
     normalize_ebay_sizes(listing)

@@ -1199,6 +1199,74 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("event: status", body)
         self.assertIn("Analyzing photos", body)
         self.assertIn(LISTING_JSON["title"], body)
+        # Category selection runs as an agent and its events reach the stream.
+        agents = [
+            json.loads(line[len("data: "):])
+            for block in body.split("\n\n") if block.startswith("event: agent\n")
+            for line in block.splitlines() if line.startswith("data: ")
+        ]
+        self.assertEqual({agent["label"] for agent in agents}, {"Categories"})
+        self.assertEqual(agents[-1]["status"], "done")
+        # Every run's stage timings are saved.
+        from vendoo_studio.database import SessionLocal as AppSession
+        from vendoo_studio.services.generation_timing import for_conversation
+
+        db = AppSession()
+        try:
+            [timing] = for_conversation(db, self.conv_id)
+        finally:
+            db.close()
+        self.assertEqual(timing["outcome"], "done")
+        self.assertTrue({"photo_analysis", "categories", "listing_stream"} <= set(timing["stages"]))
+
+    async def test_a_failure_after_the_run_finished_records_one_timing(self):
+        from vendoo_studio.database import SessionLocal as AppSession
+        from vendoo_studio.services import listing_generation
+        from vendoo_studio.services.generation_timing import for_conversation
+
+        def broken_spawn(coro):
+            coro.close()
+            raise RuntimeError("could not start the field fill")
+
+        with patch.object(listing_generation, "spawn", new=broken_spawn):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+        db = AppSession()
+        try:
+            timings = for_conversation(db, self.conv_id)
+        finally:
+            db.close()
+        self.assertEqual([timing["outcome"] for timing in timings], ["done"])
+
+    async def test_quick_identity_starts_comps_before_the_photo_analysis_ends(self):
+        from vendoo_studio.services import listing_generation
+
+        started: list[float] = []
+
+        async def early_comps(fields):
+            started.append(asyncio.get_running_loop().time())
+            return "Sold comps:\nQuery: M&O Gold tee sold comps\n- Similar tees sold $12-$18"
+
+        self.patches[4].stop()
+        self.patches[4] = patch("vendoo_studio.services.listing_generation.comps_search_available", return_value=True)
+        self.patches[4].start()
+        identity = {"brand": "M&O Gold", "category": "T-Shirt"}
+        with patch.object(listing_generation, "quick_identity_read", new=AsyncMock(return_value=identity)), \
+                patch.object(listing_generation, "research_comps_for_fields", new=early_comps):
+            began = asyncio.get_running_loop().time()
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    body = "".join([chunk async for chunk in resp.aiter_text()])
+        self.assertEqual(len(started), 1)
+        # The fake photo analysis takes 0.25s; comps did not wait for it.
+        self.assertLess(started[0] - began, 0.2)
+        listing_generation.research_sold_comps.assert_not_awaited()
+        self.assertIn('"label": "Identify item"', body)
+        self.assertIn("Similar tees sold $12-$18", _first_generate_prompt(self.provider))
 
     async def test_generation_pulse_repeats_status_without_bloating_history(self):
         run = streaming.GenerationRun()
