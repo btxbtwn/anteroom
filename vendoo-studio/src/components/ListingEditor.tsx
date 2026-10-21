@@ -52,6 +52,16 @@ import { sourceFormsForJob } from "./fillLog/sourceForms";
 import { ListingBrowserButton, ListingReviewActions } from "./ListingReviewActions";
 import { ListingReviewTabs, type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
+import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
+import { cn } from "../lib/utils";
+import { FieldLabel, NativeSelect } from "./ListingFormControls";
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Badge } from "./ui/badge";
+import { Button, InlineButton } from "./ui/button";
+import { Empty, EmptyDescription, EmptyHeader } from "./ui/empty";
+import { Input } from "./ui/input";
+import { Spinner } from "./ui/spinner";
+import { Textarea } from "./ui/textarea";
 
 interface Props {
   convId: string;
@@ -248,7 +258,7 @@ export function ListingEditor({
   };
   React.useEffect(() => {
     if (fieldTarget?.field === "photos" && reviewTab === "input") {
-      const target = editorRef.current?.querySelector<HTMLElement>(".photo-tray button");
+      const target = editorRef.current?.querySelector<HTMLElement>("[data-photo-tray] button");
       target?.scrollIntoView({ block: "center" });
       target?.focus();
     }
@@ -340,13 +350,18 @@ export function ListingEditor({
 
   return (
     <div className="listing-editor" ref={editorRef}>
-      <div className="pr-review-header">
+      <div className="flex shrink-0 flex-col gap-2 px-3 pt-2.5">
         {/* The tabs, actions and browser toggle belong to this listing, so they
             sit together in its own header. Desktop: the tab and the titlebar
             breadcrumb already name the listing, so only mobile, which has no
             titlebar, shows the title here. */}
-        <div className="pr-review-title-row">
-          <h2 className="pr-review-title pywebview-drag-region" title={listingTitle}>{listingTitle}</h2>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <h2
+            className="pywebview-drag-region hidden min-w-0 flex-1 basis-full truncate font-semibold text-[15px] text-foreground max-[900px]:block"
+            title={listingTitle}
+          >
+            {listingTitle}
+          </h2>
           <ListingReviewTabs value={reviewTab} onChange={onReviewTabChange} />
           <ListingReviewActions
             convId={convId}
@@ -359,8 +374,11 @@ export function ListingEditor({
             />
           </ListingReviewActions>
         </div>
-        <div className="pr-review-meta">
-          <button type="button" className="btn btn-ghost btn-sm" disabled={!data?.current_revision_id} onClick={() => { setFieldTarget(null); setHistoryOpen(true); }}>History</button>
+        <div className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs max-[900px]:flex-wrap">
+          <Button variant="ghost-muted" size="xs" disabled={!data?.current_revision_id} onClick={() => { setFieldTarget(null); setHistoryOpen(true); }}>
+            <HistoryIcon />
+            History
+          </Button>
           <VendooLinkControl
             convId={convId}
             itemId={importedItemId}
@@ -381,41 +399,44 @@ export function ListingEditor({
           />
           {conversation?.unsent_edits ? (
             <>
-              <span
-                className="editor-unsent"
+              <Badge
+                variant="info"
                 title="This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
               >
                 Unsent edits
-              </span>
+              </Badge>
               {listingJob?.vendoo_item_id || importedItemId ? (
-                <button
-                  type="button"
-                  className="editor-unsent-discard"
+                <InlineButton
+                  tone="muted"
+                  className="text-xs"
                   disabled={discardUnsent.isPending || generating}
                   title="Replace this listing with the copy Vendoo has"
                   onClick={() => void confirmDiscardUnsent()}
                 >
                   {discardUnsent.isPending ? "Pulling…" : "Discard"}
-                </button>
+                </InlineButton>
               ) : null}
             </>
           ) : null}
-          {data?.can_send && !generating && <span className="editor-ready">Ready</span>}
+          {data?.can_send && !generating && <Badge variant="success">Ready</Badge>}
         </div>
       </div>
 
       {relistMarketplaces.length > 0 && (
-        <div
-          className="pr-notice is-relist"
+        <Alert
+          variant="warning"
           role="status"
+          controlAlignment="first-line"
+          className="mx-3 mt-2.5 shrink-0"
           title={`Waiting on a relist: ${relistMarketplaces.join(", ")}`}
         >
-          <div className="pr-notice-body">
-            <h3 className="pr-relist-title">
-              {stage === "list" ? "Finish relisting in Vendoo" : "Relist to show your updates"}
-            </h3>
-            <p className="pr-relist-summary">{relistCallout(relistMarketplaces, stage)}</p>
-            <ol className="pr-relist-steps">
+          <RotateCcwIcon />
+          <AlertTitle>
+            {stage === "list" ? "Finish relisting in Vendoo" : "Relist to show your updates"}
+          </AlertTitle>
+          <AlertDescription className="gap-2">
+            <p>{relistCallout(relistMarketplaces, stage)}</p>
+            <ol className="list-decimal space-y-1 ps-4">
               <li>Open this listing in Vendoo.</li>
               {stage !== "list" && (
                 <li>
@@ -425,40 +446,47 @@ export function ListingEditor({
               )}
               <li>List the item again on: <strong>{relistMarketplaces.join(", ")}</strong>.</li>
             </ol>
-            <p className="pr-relist-hint">
+            <p className="text-xs">
               Already relisted? Choose <strong>I've relisted</strong> to clear this reminder.
               {" "}This button only clears the reminder.
             </p>
-          </div>
-          <div className="pr-notice-actions">
-            {listingJob ? (
-              <OpenListingButton
-                className="btn btn-secondary btn-sm pr-notice-action"
-                jobId={listingJob.id}
-                vendooItemId={importedItemId}
-                vendooUrl={importedUrl}
-              />
-            ) : null}
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm pr-notice-action"
-              disabled={relistDone.isPending}
-              title="Clear this reminder after you have relisted in Vendoo"
-              onClick={() => relistDone.mutate()}
-            >
-              {relistDone.isPending ? "Clearing…" : "I've relisted"}
-            </button>
-          </div>
-        </div>
+            <div className="flex flex-wrap gap-2">
+              {listingJob ? (
+                <OpenListingButton
+                  jobId={listingJob.id}
+                  vendooItemId={importedItemId}
+                  vendooUrl={importedUrl}
+                />
+              ) : null}
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={relistDone.isPending}
+                title="Clear this reminder after you have relisted in Vendoo"
+                onClick={() => relistDone.mutate()}
+              >
+                {relistDone.isPending ? "Clearing…" : "I've relisted"}
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       {schemaProbeActive && (
-        <div className="pr-notice" role="status">
-          Discovering Vendoo marketplace fields for this category… Empty keys will appear on Forms as they arrive.
-        </div>
+        <Alert variant="info" role="status" className="mx-3 mt-2.5 shrink-0">
+          <Spinner />
+          <AlertDescription>
+            Discovering Vendoo marketplace fields for this category… Empty keys will appear on Forms as they arrive.
+          </AlertDescription>
+        </Alert>
       )}
 
-      <div className={`editor-body${reviewTab === "fields" ? " is-files" : reviewTab === "input" ? " is-input" : ""}`}>
+      <div
+        className={cn(
+          "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pt-3 pb-3",
+          reviewTab === "fields" && "flex flex-col",
+        )}
+      >
         {reviewTab === "input" ? (
           <>
             <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
@@ -478,20 +506,22 @@ export function ListingEditor({
               onFilled={() => queryClient.invalidateQueries({ queryKey: ["listing", convId] })}
             />
           ) : (
-            <div className="pr-empty">
-              <p>
-                {jobsLoading || ensureDraftMutation.isPending
-                  ? "Loading fields…"
-                  : importedItemId
-                    ? "This listing already has a Vendoo draft, but its job isn’t loaded yet."
-                    : "Send this listing to Vendoo, then open Fields to review each marketplace."}
-              </p>
-              {ensureError && <p className="text-xs text-error" style={{ marginTop: 8 }}>{ensureError}</p>}
+            <Empty size="compact" className="min-h-48">
+              <EmptyHeader>
+                {jobsLoading || ensureDraftMutation.isPending ? <Spinner className="mb-3 size-5 text-muted-foreground" /> : null}
+                <EmptyDescription>
+                  {jobsLoading || ensureDraftMutation.isPending
+                    ? "Loading fields…"
+                    : importedItemId
+                      ? "This listing already has a Vendoo draft, but its job isn’t loaded yet."
+                      : "Send this listing to Vendoo, then open Fields to review each marketplace."}
+                </EmptyDescription>
+                {ensureError && <p className="mt-2 text-destructive-foreground text-xs">{ensureError}</p>}
+              </EmptyHeader>
               {importedItemId && !jobsLoading && ensureError && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  style={{ marginTop: 12 }}
+                <Button
+                  variant="outline"
+                  size="sm"
                   disabled={jobsQuery.isFetching || ensureDraftMutation.isPending}
                   onClick={() => {
                     setEnsureError(null);
@@ -501,31 +531,44 @@ export function ListingEditor({
                   }}
                 >
                   {ensureDraftMutation.isPending || jobsQuery.isFetching ? "Retrying…" : "Retry"}
-                </button>
+                </Button>
               )}
-            </div>
+            </Empty>
           )
         ) : (
           <>
-            <div className="tab-group">
+            <div
+              role="tablist"
+              aria-label="Listing form"
+              className="mb-3 flex w-full min-w-0 shrink-0 overflow-x-auto overscroll-x-contain border-b"
+            >
               {tabs.map((tab) => (
-                <button key={tab} className={`tab-btn${editTab === tab ? " active" : ""}`} onClick={() => { setFieldTarget(null); setEditTab(tab); }}>
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={editTab === tab}
+                  className={cn(
+                    "-mb-px shrink-0 whitespace-nowrap border-transparent border-b-2 px-2.5 py-2 font-medium text-muted-foreground text-xs transition-colors hover:text-foreground",
+                    editTab === tab && "border-primary text-foreground",
+                  )}
+                  onClick={() => { setFieldTarget(null); setEditTab(tab); }}
+                >
                   {tab === "json" ? "JSON" : tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </button>
               ))}
             </div>
             {editTab === "json" ? (
-              <div>
-                <textarea
-                  className="input"
+              <div className="flex flex-col gap-2">
+                <Textarea
                   aria-label="Listing JSON"
                   value={jsonText}
                   onChange={(e) => setJsonText(e.target.value)}
-                  style={{ height: 340, fontFamily: "var(--font-mono)", fontSize: 11.5 }}
+                  className="[&_textarea]:field-sizing-fixed [&_textarea]:h-85 [&_textarea]:max-h-none [&_textarea]:font-mono [&_textarea]:text-[11.5px]"
                 />
-                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: "100%" }} onClick={applyJsonEdit}>
+                <Button size="sm" className="w-full" onClick={applyJsonEdit}>
                   Apply JSON
-                </button>
+                </Button>
               </div>
             ) : (
               <StructuredEditor
@@ -542,7 +585,7 @@ export function ListingEditor({
         )}
       </div>
 
-      <div className="editor-footer">
+      <div className="flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(38vh,280px)]">
         <SendToVendooButton
           convId={convId}
           canSend={data?.can_send ?? false}
@@ -647,27 +690,26 @@ function StructuredEditor({
   const gridFields = fields.filter((f) => !["title", "description", "category_path"].includes(f.key));
 
   return (
-    <div ref={formRef}>
+    <div ref={formRef} className="flex flex-col gap-3">
       {generalFields.map((f) => (
-        <div key={f.key} className="field-row">
-          <label className="label" htmlFor={`listing-field-${f.key}`}>{f.label}</label>
+        <div key={f.key} className="min-w-0">
+          <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
           {f.key === "description" ? (
-            <textarea id={`listing-field-${f.key}`} data-listing-field={f.key} className="input" style={{ height: 100 }} value={local[f.key] || ""} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />
+            <Textarea id={`listing-field-${f.key}`} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={local[f.key] || ""} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />
           ) : (
-            <input id={`listing-field-${f.key}`} data-listing-field={f.key} className="input" type={f.type || "text"} value={local[f.key] || ""} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />
+            <Input nativeInput id={`listing-field-${f.key}`} data-listing-field={f.key} type={f.type || "text"} value={local[f.key] || ""} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />
           )}
         </div>
       ))}
 
-      <div className="field-grid">
+      <div className="grid min-w-0 grid-cols-2 gap-3 max-[900px]:grid-cols-1">
         {gridFields.map((f) => (
-          <div key={f.key} className={f.label === "Category" ? "field-row field-full" : "field-row"}>
-            <label className="label" htmlFor={`listing-field-${f.key}`}>{f.label}</label>
+          <div key={f.key} className={cn("min-w-0", f.label === "Category" && "col-span-full")}>
+            <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
             {f.options?.length ? (
-              <select
+              <NativeSelect
                 id={`listing-field-${f.key}`}
                 data-listing-field={f.key}
-                className="input"
                 value={local[f.key] || ""}
                 onChange={(e) => commitField(f.key, e.target.value)}
               >
@@ -679,12 +721,12 @@ function StructuredEditor({
                 {f.options.map((option) => (
                   <option key={option} value={option}>{option}</option>
                 ))}
-              </select>
+              </NativeSelect>
             ) : (
-              <input
+              <Input
+                nativeInput
                 id={`listing-field-${f.key}`}
                 data-listing-field={f.key}
-                className="input"
                 type={f.type || "text"}
                 value={local[f.key] || ""}
                 onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })}
@@ -909,7 +951,7 @@ function VendooLinkControl({
   if (editing) {
     return (
       <form
-        className="pr-vendoo-link-form"
+        className="flex min-w-0 flex-1 items-center gap-1.5 [-webkit-app-region:no-drag]"
         onSubmit={(e) => {
           e.preventDefault();
           const next = draft.trim();
@@ -917,9 +959,12 @@ function VendooLinkControl({
           linkMutation.mutate(next);
         }}
       >
-        <input
+        <Input
+          nativeInput
+          size="compact"
+          font="mono"
+          className="flex-1"
           ref={inputRef}
-          className="pr-vendoo-link-input"
           value={draft}
           placeholder="Paste Vendoo draft link or item ID"
           aria-label="Vendoo draft link or item ID"
@@ -932,34 +977,37 @@ function VendooLinkControl({
             }
           }}
         />
-        <button
+        <Button
           type="submit"
-          className="btn btn-secondary btn-sm"
+          variant="outline"
+          size="xs"
           disabled={linkMutation.isPending || !draft.trim()}
         >
           {linkMutation.isPending ? "Linking…" : "Link"}
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           disabled={linkMutation.isPending}
           onClick={() => setEditing(false)}
         >
           Cancel
-        </button>
+        </Button>
       </form>
     );
   }
 
   return (
-    <button
-      type="button"
-      className={`pr-review-branch pr-vendoo-link-btn${itemId ? "" : " is-empty"}`}
+    <Button
+      variant="ghost-muted"
+      size="xs"
+      className={cn("max-w-full", itemId && "font-mono text-[11px]")}
       title={itemId ? (url || itemId) : "Link an existing Vendoo draft"}
       onClick={() => setEditing(true)}
     >
-      {itemId ? `vendoo ← ${String(itemId).slice(0, 8)}` : "Link Vendoo draft"}
-    </button>
+      <Link2Icon />
+      <span className="truncate">{itemId ? `vendoo ← ${String(itemId).slice(0, 8)}` : "Link Vendoo draft"}</span>
+    </Button>
   );
 }
 
@@ -968,11 +1016,11 @@ function MarketplaceLinks({ urls }: { urls?: Record<string, string> }) {
   const entries = Object.entries(urls || {}).sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) return null;
   return (
-    <span className="pr-marketplace-links">
+    <span className="flex shrink-0 items-center gap-1">
       {entries.map(([id, url]) => (
         <a
           key={id}
-          className="pr-marketplace-link"
+          className="inline-flex rounded-sm opacity-80 hover:opacity-100 focus-visible:opacity-100"
           href={url}
           target="_blank"
           rel="noopener noreferrer"
@@ -1252,36 +1300,35 @@ function SendToVendooButton({
         ? sendProgressLabel(stepKey, existingJob.send_progress)
         : `${existingJob.status}: ${existingJob.current_step || "queued"}`;
     return (
-      <div className="job-card">
-        <div className="job-card-header">
-          <div className="job-card-copy">
-            <div className="job-card-label">{label}</div>
-            <div className="job-card-status">
+      <div className="flex flex-col gap-2 rounded-xl border bg-card p-3 text-sm">
+        <div className="flex items-start justify-between gap-3 max-[900px]:flex-col max-[900px]:items-stretch">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-foreground">{label}</div>
+            <div className="mt-1 text-muted-foreground text-xs">
               {apiCreateActive ? (
                 <SendProgress label={statusText} startedAt={existingJob.started_at || existingJob.created_at}
                   photos={stepKey === "vendoo_api_photos" ? existingJob.send_progress : undefined} />
               ) : statusText}
               {probeActive && (
-                <div className="mt-4 text-xs text-muted">
+                <div className="mt-1 text-muted-foreground text-xs">
                   Matching the Vendoo category and reading marketplace fields into this listing.
                 </div>
               )}
             </div>
           </div>
-          <div className="job-card-actions">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm job-card-action"
-              disabled={cancelMutation.isPending}
-              onClick={() => { setError(null); cancelMutation.mutate(existingJob.id); }}
-            >
-              {cancelMutation.isPending ? "Cancelling..." : "Cancel"}
-            </button>
-          </div>
+          <Button
+            variant="outline"
+            size="xs"
+            className="shrink-0 max-[900px]:w-full"
+            disabled={cancelMutation.isPending}
+            onClick={() => { setError(null); cancelMutation.mutate(existingJob.id); }}
+          >
+            {cancelMutation.isPending ? "Cancelling…" : "Cancel"}
+          </Button>
         </div>
         {existingJob.last_error && (
           <CopyableLlmError
-            className="job-card-detail"
+            className="max-h-40 overflow-y-auto max-[900px]:max-h-22"
             text={existingJob.last_error}
             prompt={jobErrorPrompt(existingJob.last_error, listingTitle, null, dropdownOptions?.forms)}
             onAskChat={onAskChat}
@@ -1291,7 +1338,7 @@ function SendToVendooButton({
         )}
         {shownSendError && (
           <CopyableLlmError
-            className="job-card-detail"
+            className="max-h-40 overflow-y-auto max-[900px]:max-h-22"
             text={shownSendError}
             prompt={jobErrorPrompt(shownSendError, listingTitle, null, dropdownOptions?.forms)}
             onAskChat={onAskChat}
@@ -1302,7 +1349,7 @@ function SendToVendooButton({
         {!existingJob.last_error && !shownSendError && (
           // No error to show, but empty fields still deserve their fill button.
           <CopyableLlmError
-            className="job-card-detail"
+            className="max-h-40 overflow-y-auto max-[900px]:max-h-22"
             text=""
             prompt=""
             onAskChat={onAskChat}
@@ -1316,8 +1363,8 @@ function SendToVendooButton({
 
   if (!extensionConnected) {
     return (
-      <div style={{ display: "grid", gap: 8, justifyItems: "center", textAlign: "center" }}>
-        <div className="text-xs text-muted">Chrome is not connected yet.</div>
+      <div className="grid justify-items-center gap-2 text-center">
+        <div className="text-muted-foreground text-xs">Chrome is not connected yet.</div>
         <ConnectChromeButton />
         {!generating && <ListingBlockers issues={uniqueBlockers} onSelect={onSelectBlocker} />}
       </div>
@@ -1333,7 +1380,7 @@ function SendToVendooButton({
   // Rendered even without an error so the fill button stays while fields are empty.
   const errorCard = (
     <CopyableLlmError
-      className="mt-8"
+      className="mt-2"
       text={displayError}
       prompt={uniqueBlockers.length
         ? blockerPrompt
@@ -1345,11 +1392,13 @@ function SendToVendooButton({
   );
 
   return (
-    <div>
-      <button
-        type="button"
-        className={`${bound ? "btn btn-primary" : "btn btn-success"}${sendMutation.isPending ? " is-busy" : ""}`}
-        style={{ width: "100%" }}
+    <div className="flex flex-col">
+      <Button
+        className={cn(
+          "w-full",
+          // Unbound sends create the Vendoo draft, so they carry Vendoo's green.
+          !bound && "border-(--color-vendoo) bg-(--color-vendoo) text-white shadow-none [:hover,[data-pressed]]:bg-(--color-vendoo)/90",
+        )}
         disabled={!sendEnabled}
         aria-busy={sendMutation.isPending}
         title={generating
@@ -1360,13 +1409,13 @@ function SendToVendooButton({
         onClick={startSend}
       >
         {sendMutation.isPending ? (
-          <span className="send-btn-busy">
-            <span className="send-spinner" aria-hidden="true" />
+          <>
+            <Spinner aria-hidden="true" role={undefined} />
             {bound ? "Updating…" : "Sending…"}
-          </span>
+          </>
         ) : sendLabel}
-      </button>
-      {!sendMutation.isPending && <div className="send-hint">{sendHint}</div>}
+      </Button>
+      {!sendMutation.isPending && <div className="mt-1.5 text-center text-muted-foreground text-xs">{sendHint}</div>}
       {sendMutation.isPending && (
         <SendProgress label={bound ? "Writing marketplace forms to Vendoo…" : "Starting the send…"} />
       )}

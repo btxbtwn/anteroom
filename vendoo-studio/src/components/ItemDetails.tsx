@@ -5,6 +5,15 @@ import { addLabel, removeLabel, splitLabels } from "./itemLabels";
 import { historyRows } from "./vendooHistory";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, type Garment, type Measurements } from "./garmentMeasurements";
+import { XIcon } from "lucide-react";
+import { cn } from "../lib/utils";
+import { FieldLabel, InspectorSection, NativeSelect } from "./ListingFormControls";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Spinner } from "./ui/spinner";
+import { Textarea } from "./ui/textarea";
+import { toggleVariants } from "./ui/toggle";
 
 interface Props {
   convId: string;
@@ -272,7 +281,6 @@ export function ItemDetails({ convId }: Props) {
   }, [save]);
 
   const f = (key: TextKey, type = "text") => ({
-    className: "input",
     type,
     value: details[key],
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => scheduleSave({ ...details, [key]: e.target.value }),
@@ -353,64 +361,66 @@ export function ItemDetails({ convId }: Props) {
   };
 
   return (
-    <div className="item-details">
-      <section className="item-section" aria-labelledby="item-section-listing">
-        <h3 className="item-section-title" id="item-section-listing">Notes &amp; Labels</h3>
-        <div className="item-field">
-          <label className="label">SKU</label>
-          <input {...f("sku")} autoComplete="off" spellCheck={false} placeholder="Optional" />
+    <div className="@container relative flex min-w-0 flex-col">
+      <InspectorSection title="Notes & Labels" titleId={`item-section-listing-${convId}`}>
+        <div>
+          <FieldLabel htmlFor={`item-sku-${convId}`}>SKU</FieldLabel>
+          <Input nativeInput id={`item-sku-${convId}`} {...f("sku")} autoComplete="off" spellCheck={false} placeholder="Optional" />
         </div>
-        <div className="item-field item-field-notes">
-          <label className="label">Notes</label>
-          <textarea
-            className="input"
+        <div>
+          <FieldLabel htmlFor={`item-notes-${convId}`}>Notes</FieldLabel>
+          <Textarea
+            id={`item-notes-${convId}`}
             value={details.sellerNotes}
             placeholder="Flaws, provenance, sizing quirks, or other seller notes"
             rows={3}
             onChange={(e) => scheduleSave({ ...details, sellerNotes: e.target.value })}
           />
         </div>
-        <div className="item-field item-field-notes">
-          <label className="label">Flaws</label>
-          <textarea
-            className="input"
+        <div>
+          <FieldLabel htmlFor={`item-flaws-${convId}`}>Flaws</FieldLabel>
+          <Textarea
+            id={`item-flaws-${convId}`}
+            size="sm"
             value={details.knownFlaws}
             placeholder="Flaws to keep in the description, e.g. small stain near hem"
             rows={2}
             onChange={(e) => scheduleSave({ ...details, knownFlaws: e.target.value })}
           />
         </div>
-        <div className="item-field">
-          <label className="label">Labels</label>
+        <div>
+          <FieldLabel htmlFor={`item-labels-${convId}`}>Labels</FieldLabel>
           <div
-            className="label-input"
+            className="relative flex min-h-8.5 w-full cursor-text flex-wrap items-center gap-1 rounded-lg border border-input bg-background px-1.5 py-1 not-dark:bg-clip-padding text-base shadow-xs/5 ring-ring/24 transition-shadow has-focus-visible:border-ring has-focus-visible:ring-[3px] has-focus-visible:ring-inset sm:min-h-7.5 sm:text-sm dark:bg-input/32"
             onClick={() => labelInputRef.current?.focus()}
           >
             {currentLabels.map((label) => (
-              <span key={label} className="label-chip">
-                <span className="label-chip-text">{label}</span>
+              <Badge key={label} variant="outline" size="lg" className="max-w-full gap-0.5 pe-0.5">
+                <span className="truncate">{label}</span>
                 <button
                   type="button"
+                  className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
                   aria-label={`Remove ${label}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     removeCommittedLabel(label);
                   }}
                 >
-                  ×
+                  <XIcon className="size-3" />
                 </button>
-              </span>
+              </Badge>
             ))}
             <input
+              id={`item-labels-${convId}`}
               ref={labelInputRef}
-              className="input label-input-field"
+              className="h-6 min-w-18 flex-[1_1_4.5rem] bg-transparent px-1 outline-none placeholder:text-placeholder"
               type="text"
               value={labelDraft}
               placeholder={currentLabels.length ? "Add another" : "Add labels"}
               autoComplete="off"
               role="combobox"
               aria-expanded={labelMenuOpen && labelSuggestions.length > 0}
-              aria-controls="label-history"
+              aria-controls={`label-history-${convId}`}
               aria-autocomplete="list"
               onChange={(e) => {
                 labelDraftRef.current = e.target.value;
@@ -467,92 +477,97 @@ export function ItemDetails({ convId }: Props) {
             />
           </div>
           {labelMenuOpen && labelSuggestions.length > 0 && (
-            <div className="label-history" id="label-history" role="listbox">
+            <div
+              className="mt-1.5 flex max-h-42 flex-col gap-0.5 overflow-y-auto rounded-lg border bg-popover p-1 shadow-xs/5"
+              id={`label-history-${convId}`}
+              role="listbox"
+            >
               {labelSuggestions.map((label, i) => (
                 <div
                   key={label}
-                  className={`label-history-row${i === activeSuggestion ? " active" : ""}`}
+                  className={cn("group/label flex items-center rounded-sm", i === activeSuggestion && "bg-accent")}
                   onMouseEnter={() => setActiveSuggestion(i)}
                 >
                   <button
                     type="button"
                     role="option"
                     aria-selected={i === activeSuggestion}
-                    className="label-history-item"
+                    className="min-w-0 flex-1 cursor-pointer truncate px-2 py-1 text-left text-sm"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => chooseLabel(label)}
                   >
                     {label}
                   </button>
-                  <button
-                    type="button"
-                    className="label-history-remove"
+                  <Button
+                    variant="ghost-muted"
+                    size="icon-micro"
+                    className={cn("me-0.5 opacity-0 focus-visible:opacity-100", i === activeSuggestion && "opacity-100")}
                     aria-label={`Remove "${label}" from label history`}
                     title="Remove from history"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => forgetLabel(label)}
                   >
-                    ×
-                  </button>
+                    <XIcon />
+                  </Button>
                 </div>
               ))}
             </div>
           )}
         </div>
-      </section>
+      </InspectorSection>
 
-      <section className="item-section" aria-labelledby="item-section-pricing">
-        <h3 className="item-section-title" id="item-section-pricing">Pricing &amp; Shipping</h3>
-        <div className="item-row item-row-3">
-          <div className="item-field">
-            <label className="label">COG ($)</label>
-            <input
+      <InspectorSection title="Pricing & Shipping" titleId={`item-section-pricing-${convId}`}>
+        <div className="grid grid-cols-3 gap-2 @max-[320px]:grid-cols-2">
+          <div className="min-w-0">
+            <FieldLabel htmlFor={`item-cog-${convId}`}>COG ($)</FieldLabel>
+            <Input
+              nativeInput
+              id={`item-cog-${convId}`}
               {...f("cog", "number")}
               step="0.01"
               placeholder={box?.cost_per_piece != null ? box.cost_per_piece.toFixed(2) : "0.00"}
               title={box?.cost_per_piece != null ? "Blank uses the box's cost per piece" : undefined}
             />
           </div>
-          <div className="item-field">
-            <label className="label">Posh Orig ($)</label>
-            <input {...f("poshmarkOriginalPrice", "number")} step="1" placeholder="0" />
+          <div className="min-w-0">
+            <FieldLabel htmlFor={`item-posh-${convId}`}>Posh Orig ($)</FieldLabel>
+            <Input nativeInput id={`item-posh-${convId}`} {...f("poshmarkOriginalPrice", "number")} step="1" placeholder="0" />
           </div>
-          <div className="item-field">
-            <label className="label">Package L×W×H</label>
-            <input {...f("packageDimensions")} placeholder={defaultPackageDimensions} />
+          <div className="min-w-0">
+            <FieldLabel htmlFor={`item-package-${convId}`}>Package L×W×H</FieldLabel>
+            <Input nativeInput id={`item-package-${convId}`} {...f("packageDimensions")} placeholder={defaultPackageDimensions} />
           </div>
         </div>
         {boxes.length ? (
-          <div className="item-row">
-            <div className="item-field">
-              <label className="label" htmlFor={`item-box-${convId}`}>Box</label>
-              <select
-                id={`item-box-${convId}`}
-                className="input"
-                value={conv?.box_id || ""}
-                onChange={(event) => void chooseBox(event.target.value)}
-              >
-                <option value="">Not from a box</option>
-                {boxes.map((row) => (
-                  <option key={row.id} value={row.id}>{boxStoreName(row.store)} · {row.title}</option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <FieldLabel htmlFor={`item-box-${convId}`}>Box</FieldLabel>
+            <NativeSelect
+              id={`item-box-${convId}`}
+              value={conv?.box_id || ""}
+              onChange={(event) => void chooseBox(event.target.value)}
+            >
+              <option value="">Not from a box</option>
+              {boxes.map((row) => (
+                <option key={row.id} value={row.id}>{boxStoreName(row.store)} · {row.title}</option>
+              ))}
+            </NativeSelect>
           </div>
         ) : null}
-      </section>
+      </InspectorSection>
 
-      <section className="item-section" aria-labelledby="item-section-measurements">
-        <div className="item-section-header">
-          <h3 className="item-section-title" id="item-section-measurements">Measurements (in)</h3>
-          <div className="pr-pills item-garment-pills" role="radiogroup" aria-label="Garment type">
+      <InspectorSection
+        title="Measurements (in)"
+        titleId={`item-section-measurements-${convId}`}
+        actions={
+          <div className="flex w-fit gap-0.5 rounded-lg bg-input/40 p-0.5" role="radiogroup" aria-label="Garment type">
             {GARMENTS.map((g) => (
               <button
                 key={g.id}
                 type="button"
                 role="radio"
                 aria-checked={g.id === garment.id}
-                className={`pr-pill${g.id === garment.id ? " is-active" : ""}`}
+                data-pressed={g.id === garment.id ? "" : undefined}
+                className={cn(toggleVariants({ variant: "segmented", size: "segmented" }))}
                 onClick={() => {
                   if (g.id === garment.id) return;
                   if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -563,13 +578,20 @@ export function ItemDetails({ convId }: Props) {
               </button>
             ))}
           </div>
-        </div>
-        <div className={`item-row item-row-${garment.fields.length}`}>
+        }
+      >
+        <div
+          className={cn(
+            "grid gap-2 @max-[460px]:grid-cols-2 @max-[240px]:grid-cols-1",
+            garment.fields.length >= 4 ? "grid-cols-4" : garment.fields.length === 3 ? "grid-cols-3" : "grid-cols-2",
+          )}
+        >
           {garment.fields.map((field) => (
-            <div className="item-field" key={`${garment.id}-${field.key}`}>
-              <label className="label">{field.label}</label>
-              <input
-                className="input"
+            <div className="min-w-0" key={`${garment.id}-${field.key}`}>
+              <FieldLabel htmlFor={`item-measure-${convId}-${field.key}`}>{field.label}</FieldLabel>
+              <Input
+                nativeInput
+                id={`item-measure-${convId}-${field.key}`}
                 type="number"
                 step="0.25"
                 placeholder={field.placeholder}
@@ -579,38 +601,44 @@ export function ItemDetails({ convId }: Props) {
             </div>
           ))}
         </div>
-        <div className="item-field">
-          <label className="label">Other measurements</label>
-          <input
+        <div>
+          <FieldLabel htmlFor={`item-other-measure-${convId}`}>Other measurements</FieldLabel>
+          <Input
+            nativeInput
+            id={`item-other-measure-${convId}`}
             {...f("descriptionMeasurements")}
             placeholder={'Anything the fields above miss, e.g. Hem 21"'}
           />
         </div>
-      </section>
+      </InspectorSection>
 
       {history.length > 0 && (
-        <section className="item-section" aria-labelledby="item-section-history">
-          <h3 className="item-section-title" id="item-section-history">Vendoo History</h3>
-          <dl className="item-history">
+        <InspectorSection title="Vendoo History" titleId={`item-section-history-${convId}`}>
+          <dl className="flex flex-col gap-0.5">
             {history.map((row) => (
-              <div className={`item-history-row${row.nested ? " is-nested" : ""}`} key={row.key}>
-                <dt>{row.label}</dt>
-                <dd title={row.iso}>
-                  <span className="item-history-age">{row.age}</span>
-                  <span className="item-history-date">{row.when}</span>
+              <div className="flex items-baseline justify-between gap-2 py-0.5 text-xs" key={row.key}>
+                <dt className={cn("text-muted-foreground", row.nested && "ps-2.5 opacity-80")}>{row.label}</dt>
+                <dd className="flex min-w-0 items-baseline gap-1.5" title={row.iso}>
+                  <span className="whitespace-nowrap text-foreground tabular-nums">{row.age}</span>
+                  <span className="whitespace-nowrap text-2xs text-muted-foreground">{row.when}</span>
                 </dd>
               </div>
             ))}
           </dl>
-        </section>
+        </InspectorSection>
       )}
-      {saving && <span className="item-saving">SAVING…</span>}
+      {saving && (
+        <span className="absolute right-0 bottom-0 flex items-center gap-1 text-2xs text-muted-foreground" role="status">
+          <Spinner aria-hidden="true" role={undefined} className="size-3" />
+          Saving…
+        </span>
+      )}
       {saveError && (
-        <span className="item-saving text-error">
-          {saveError}{" "}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void save(details)}>
+        <span className="flex items-center gap-2 text-destructive-foreground text-xs" role="alert">
+          {saveError}
+          <Button variant="ghost" size="xs" onClick={() => void save(details)}>
             Retry
-          </button>
+          </Button>
         </span>
       )}
     </div>

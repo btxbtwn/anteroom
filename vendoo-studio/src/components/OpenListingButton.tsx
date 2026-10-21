@@ -1,6 +1,8 @@
 import type { MouseEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { ExternalLinkIcon } from "lucide-react";
 import { api } from "../api/client";
+import { Button, type ButtonSize, type ButtonVariant } from "./ui/button";
 import { toastManager } from "./ui/toast";
 
 function stopWindowDrag(event: MouseEvent) {
@@ -11,11 +13,15 @@ export function OpenListingButton({
   jobId,
   vendooItemId,
   vendooUrl,
+  variant = "outline",
+  size = "xs",
   className,
 }: {
   jobId: string;
   vendooItemId?: string | null;
   vendooUrl?: string | null;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
   className?: string;
 }) {
   const open = useMutation({
@@ -32,9 +38,10 @@ export function OpenListingButton({
   if (!vendooItemId && !vendooUrl) return null;
 
   return (
-    <button
-      type="button"
-      className={className || "btn btn-secondary btn-sm"}
+    <Button
+      variant={variant}
+      size={size}
+      className={className}
       disabled={open.isPending}
       title="Open this listing in Vendoo"
       aria-label="Open listing in Vendoo"
@@ -45,7 +52,8 @@ export function OpenListingButton({
         open.mutate();
       }}
     >
+      <ExternalLinkIcon />
       {open.isPending ? "Opening…" : "Open listing"}
-    </button>
+    </Button>
   );
 }
