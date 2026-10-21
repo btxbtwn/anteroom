@@ -65,6 +65,7 @@ class SetupGuideSettingsTest(unittest.TestCase):
                 "hidden_vendoo_labels": [],
                 "theme": "dark",
                 "listing_names": "title",
+                "model_favorites": [],
             },
         )
         self.assertEqual(
@@ -75,6 +76,7 @@ class SetupGuideSettingsTest(unittest.TestCase):
                 "hidden_vendoo_labels": [],
                 "theme": "light",
                 "listing_names": "title",
+                "model_favorites": [],
             },
         )
         self.assertEqual(

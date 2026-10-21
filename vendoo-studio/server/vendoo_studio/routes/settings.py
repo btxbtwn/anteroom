@@ -394,8 +394,15 @@ async def cursor_models():
     for slug in [item.id for item in catalog] + [vision_model, listing_model]:
         if slug and slug not in slugs:
             slugs.append(slug)
+    # Cursor's own names for its models ("Grok 4.7", "Claude Opus 5.5"), for the picker.
+    labels = {AUTO_CURSOR_MODEL: "Auto"}
+    for item in catalog:
+        name = getattr(item, "display_name", None)
+        if item.id and isinstance(name, str) and name.strip():
+            labels[item.id] = name.strip()
     return {
         "models": slugs,
+        "labels": labels,
         "vision_model": vision_model,
         "listing_model": listing_model,
         "reasoning": _cursor_reasoning_payload(catalog, listing_model),
@@ -439,6 +446,14 @@ async def set_cursor_models(config: CursorModelsConfig):
             raise HTTPException(400, f"{listing_model} does not support reasoning level {reasoning}.")
         set_cursor_reasoning(model=listing_model, param=choices["param"], value=reasoning)
     return {"ok": True, "vision_model": vision_model, "listing_model": listing_model}
+
+
+@router.get("/usage-limits")
+async def usage_limits(refresh: bool = False):
+    """Each provider's subscription usage, as percentages and reset times."""
+    from vendoo_studio.services.usage_limits import all_usage_limits
+
+    return {"ok": True, "providers": await all_usage_limits(force=refresh)}
 
 
 @router.get("/claude/models")
@@ -850,6 +865,7 @@ class UiPrefsConfig(BaseModel):
     remember_labels: str | list[str] | None = None
     restore_labels: list[str] | None = None
     forget_label: str | None = None
+    model_favorites: list[dict] | None = None
 
 
 @router.get("/ui")
@@ -873,6 +889,7 @@ def put_ui_prefs(config: UiPrefsConfig):
             settled_shelf_expanded=config.settled_shelf_expanded,
             theme=config.theme,
             listing_names=config.listing_names,
+            model_favorites=config.model_favorites,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

@@ -18,6 +18,9 @@ SETTLED_SHELF_KEY = "settled_shelf_expanded"
 HIDDEN_LABELS_KEY = "hidden_vendoo_labels"
 THEME_KEY = "theme"
 LISTING_NAMES_KEY = "listing_names"
+MODEL_FAVORITES_KEY = "model_favorites"
+MAX_MODEL_FAVORITES = 100
+MAX_MODEL_SLUG_LENGTH = 200
 LISTING_NAME_CHOICES = frozenset({"title", "sku"})
 MAX_RECENT_LABELS = 12
 MAX_HIDDEN_LABELS = 200
@@ -410,6 +413,44 @@ def _clean_hidden_labels(value: object) -> list[str]:
     return _clean_recent_labels(value, MAX_HIDDEN_LABELS)
 
 
+def _model_favorite(item: object) -> dict[str, str] | None:
+    if not isinstance(item, dict):
+        return None
+    provider = item.get("provider")
+    model = item.get("model")
+    if provider not in LISTING_PROVIDER_CHOICES or not isinstance(model, str):
+        return None
+    model = model.strip()
+    if not model or len(model) > MAX_MODEL_SLUG_LENGTH:
+        return None
+    return {"provider": provider, "model": model}
+
+
+def _clean_model_favorites(value: object, *, strict: bool = False) -> list[dict[str, str]]:
+    """The composer model picker's starred models, in the order they were starred."""
+    if not isinstance(value, list):
+        if strict:
+            raise ValueError("model_favorites must be a list")
+        return []
+    seen: set[tuple[str, str]] = set()
+    favorites: list[dict[str, str]] = []
+    for item in value:
+        favorite = _model_favorite(item)
+        if favorite is None:
+            if strict:
+                raise ValueError(
+                    "model_favorites entries need a provider (chatgpt, claude, cursor or mimo) "
+                    f"and a model of 1-{MAX_MODEL_SLUG_LENGTH} characters"
+                )
+            continue
+        key = (favorite["provider"], favorite["model"])
+        if key in seen:
+            continue
+        seen.add(key)
+        favorites.append(favorite)
+    return favorites[:MAX_MODEL_FAVORITES]
+
+
 def normalize_theme(value: object) -> ThemeChoice:
     if isinstance(value, str):
         choice = value.strip().lower()
@@ -429,6 +470,7 @@ def get_ui_prefs() -> dict:
         THEME_KEY: normalize_theme(ui.get(THEME_KEY)),
         # The sidebar names each listing by its title, or by its SKU where it has one.
         LISTING_NAMES_KEY: names if names in LISTING_NAME_CHOICES else "title",
+        MODEL_FAVORITES_KEY: _clean_model_favorites(ui.get(MODEL_FAVORITES_KEY)),
     }
 
 
@@ -438,9 +480,17 @@ def set_ui_prefs(
     settled_shelf_expanded: object | None = None,
     theme: object | None = None,
     listing_names: object | None = None,
+    model_favorites: object | None = None,
 ) -> dict:
-    if recent_vendoo_labels is None and settled_shelf_expanded is None and theme is None and listing_names is None:
+    if (
+        recent_vendoo_labels is None
+        and settled_shelf_expanded is None
+        and theme is None
+        and listing_names is None
+        and model_favorites is None
+    ):
         return get_ui_prefs()
+    favorites = _clean_model_favorites(model_favorites, strict=True) if model_favorites is not None else None
 
     def mutator(payload: dict) -> None:
         ui = dict(_ui_prefs(payload))
@@ -458,6 +508,8 @@ def set_ui_prefs(
             if listing_names not in LISTING_NAME_CHOICES:
                 raise ValueError("listing_names must be title or sku")
             ui[LISTING_NAMES_KEY] = listing_names
+        if favorites is not None:
+            ui[MODEL_FAVORITES_KEY] = favorites
         payload[UI_PREFS_KEY] = ui
 
     update_settings(mutator)
