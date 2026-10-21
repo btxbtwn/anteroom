@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.301 — 2026-10-21
+
+- Your listings stay on the left while you talk to the assistant. Its chats moved to a panel on the right, which you can hide from the top bar or resize. On a phone, the chats button at the top opens them.
+- The left sidebar opens wide enough to show every button along the bottom. If you dragged it wider, it keeps your width.
+- The buttons along the bottom follow your day: Assistant and Inventory first, then Vendoo sync, Sourcing and the Queue, then Analytics and Marketing, with Settings and updates last. Each one shows its name when you point at it.
+
 ## 0.1.300 — 2026-10-20
 
 - MiMo’s icon is the M from Xiaomi’s logo, so you can tell it apart next to ChatGPT, Claude, and Cursor.

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { confirmDialog } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import type { VendooBulkImport } from "../api/types";
 
 const RUNNING_POLL_MS = 1500;
@@ -127,17 +128,28 @@ export function VendooImportButton({ variant = "sidebar" }: { variant?: "sidebar
     );
   }
 
+  if (variant === "analytics") {
+    return (
+      <button type="button" className="pr-pill" aria-busy={start.isPending || undefined} disabled={start.isPending} onClick={onClick}>
+        {start.isPending ? "Starting sync…" : "Resync Vendoo data"}
+      </button>
+    );
+  }
+
   return (
-    <button
-      type="button"
-      className={variant === "analytics" ? "pr-pill" : `sidebar-icon-btn sidebar-vendoo-sync-btn${start.isPending ? " is-busy" : ""}`}
-      title={variant === "analytics" ? "Resync Vendoo data" : "Sync Vendoo data"}
-      aria-label={variant === "analytics" ? "Resync Vendoo data" : "Sync Vendoo data"}
-      aria-busy={start.isPending || undefined}
-      disabled={start.isPending}
-      onClick={onClick}
-    >
-      {variant === "analytics" ? (start.isPending ? "Starting sync…" : "Resync Vendoo data") : (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className={`sidebar-icon-btn sidebar-vendoo-sync-btn${start.isPending ? " is-busy" : ""}`}
+            aria-label="Sync Vendoo data"
+            aria-busy={start.isPending || undefined}
+            disabled={start.isPending}
+            onClick={onClick}
+          />
+        }
+      >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
             d="M4 14.9A7 7 0 1115.71 8h1.79a4.5 4.5 0 012.5 8.242"
@@ -149,7 +161,8 @@ export function VendooImportButton({ variant = "sidebar" }: { variant?: "sidebar
           <path d="M12 12v9" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
           <path d="M8 17l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-      )}
-    </button>
+      </TooltipTrigger>
+      <TooltipPopup side="top">Sync Vendoo data</TooltipPopup>
+    </Tooltip>
   );
 }

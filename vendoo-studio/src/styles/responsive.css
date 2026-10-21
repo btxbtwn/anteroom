@@ -271,6 +271,31 @@
     padding-left: 8px;
   }
 
+  /* The chats panel is a sheet from the right on mobile. */
+  .thread-sidebar {
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    width: 100%;
+    max-width: 100%;
+    border: none;
+    padding-top: env(safe-area-inset-top, 0px);
+    transform: translateX(110%);
+    pointer-events: none;
+    transition: transform 0.2s ease;
+  }
+
+  .thread-sidebar.is-mobile-open {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .thread-sidebar {
+      transition: none;
+    }
+  }
+
   .app-content.mobile-sidebar-open .sidebar {
     transform: translateX(0);
     pointer-events: auto;

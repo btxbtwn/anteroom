@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { confirmDialog } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const POLL_MS = 60 * 1000;
 
@@ -352,26 +353,32 @@ export function UpdateButton() {
   const showAvailable = available && !busy && !checking && !downloaded;
 
   return (
-    <button
-      type="button"
-      // Keep the control enabled while busy so the webview does not wash it out —
-      // onClick already no-ops when busy, and aria-disabled carries the state.
-      className={`sidebar-update-btn${showAvailable || busy || downloaded ? " is-active" : ""}${busy ? " is-busy" : ""}`}
-      onClick={onClick}
-      aria-disabled={busy || undefined}
-      aria-busy={busy || undefined}
-      aria-label={iconTooltip}
-      title={iconTooltip}
-    >
-      {downloading ? (
-        <DownloadProgressIcon percent={downloadPercent} />
-      ) : downloaded ? (
-        <RestartIcon />
-      ) : showAvailable ? (
-        <DownloadIcon />
-      ) : (
-        <RefreshIcon spinning={checking || busy} />
-      )}
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            // Keep the control enabled while busy so the webview does not wash it out —
+            // onClick already no-ops when busy, and aria-disabled carries the state.
+            className={`sidebar-update-btn${showAvailable || busy || downloaded ? " is-active" : ""}${busy ? " is-busy" : ""}`}
+            onClick={onClick}
+            aria-disabled={busy || undefined}
+            aria-busy={busy || undefined}
+            aria-label={iconTooltip}
+          />
+        }
+      >
+        {downloading ? (
+          <DownloadProgressIcon percent={downloadPercent} />
+        ) : downloaded ? (
+          <RestartIcon />
+        ) : showAvailable ? (
+          <DownloadIcon />
+        ) : (
+          <RefreshIcon spinning={checking || busy} />
+        )}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{iconTooltip}</TooltipPopup>
+    </Tooltip>
   );
 }
