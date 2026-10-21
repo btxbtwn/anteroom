@@ -97,7 +97,8 @@ def test_the_brief_carries_every_listing_and_the_figures_behind_it(workspace):
                     "Ad spend the seller recorded", "Sale events", "Sourcing checks"):
         assert f"--- {heading}" in brief
     assert '"store":"Raghouse"' in brief and '"spend":31.0' in brief
-    assert "--- Sourcing buy list ---\nNothing recorded." in brief
+    assert "No sourcing check has finished yet" in brief.split("--- Sourcing buy list ---")[1]
+    assert "--- Boxes on the Sourcing tab (0) ---\nNo boxes in the last sourcing check." in brief
     assert "What the seller says" not in brief
 
 
