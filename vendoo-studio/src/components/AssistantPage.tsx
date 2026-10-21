@@ -1,12 +1,28 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type MouseEvent } from "react";
+import { CircleAlertIcon } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { AssistantRefused, type AssistantMessage } from "../api/assistant";
+import type { ChatAttachment, ChatAttachmentUpload } from "../api/types";
 import { confirmDialog } from "../ui/confirmDialog";
 import { addToast } from "../ui/toast";
 import { AssistantChangesCard } from "./AssistantChangesCard";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
+import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { stableStreamingText } from "./streamingText";
+import { settleAgents } from "./liveTrace";
+import { useComposerImages } from "./chat/ComposerAttachments";
+import { ChatComposer } from "./chat/ChatComposer";
+import { foldSseEvent } from "./chat/chatStream";
+import { ChatTranscript } from "./chat/ChatTranscript";
+import { FoldedTurnRow, LiveWork } from "./chat/LiveWork";
+import { AssistantMessageRow, UserMessageRow } from "./chat/TimelineRows";
+import { useChatScroll } from "./chat/useChatScroll";
+import { placeTurnFolds, turnHasWork, type FoldedTurn } from "./chat/workLogModel";
+import { Alert, AlertAction, AlertTitle } from "./ui/alert";
+import { Button } from "./ui/button";
+import { Spinner } from "./ui/spinner";
+import { Textarea } from "./ui/textarea";
 
 /** Questions that show what the assistant can see, offered before the first one is asked. */
 export const ASSISTANT_STARTERS = [
@@ -18,8 +34,6 @@ export const ASSISTANT_STARTERS = [
   "Find listings whose size differs between forms and fix them.",
 ];
 
-/** Streamed text reaches the page at most this often, so a long answer does not re-render per token. */
-const PAINT_MS = 50;
 const MESSAGES_KEY = ["assistant", "messages"];
 const NOTE_KEY = ["assistant", "note"];
 const NOTE_MAX = 4000;
@@ -41,7 +55,7 @@ export function linkedListingId(href: string | null | undefined): string | null 
  * can refresh mid-answer and bring the question, or the finished answer, with
  * it; drawing the live copy as well would show it twice.
  */
-export function liveParts(live: LiveTurn, turns: AssistantMessage[]): { question: boolean; answer: boolean } {
+export function liveParts(live: Pick<LiveTurn, "question" | "asked">, turns: AssistantMessage[]): { question: boolean; answer: boolean } {
   if (live.question === null) return { question: false, answer: turns[turns.length - 1]?.role !== "assistant" };
   return { question: turns.length <= live.asked, answer: turns.length < live.asked + 2 };
 }
@@ -54,11 +68,18 @@ interface Props {
 export interface LiveTurn {
   /** Null when an answer already under way was picked back up; its question is among the saved turns. */
   question: string | null;
+  /** Images sent with the question, shown on the live copy until it is saved. */
+  questionImages: ChatAttachment[];
   /** How many turns were saved when the question was asked. */
   asked: number;
-  answer: string;
-  status: string;
+  /** The stream so far: the answer text, the work log and any subagents. */
+  parts: SseParts;
+  startedAtMs: number;
 }
+
+/** Finished turns of this session keep their "Worked for" rows while the app is open. */
+let sessionFolds: FoldedTurn[] = [];
+let foldSeq = 0;
 
 /**
  * A chat about the business as a whole, apart from any listing's chat. Every
@@ -70,64 +91,73 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
   const messages = useQuery({ queryKey: MESSAGES_KEY, queryFn: api.assistant.messages });
   const [input, setInput] = useState("");
   const [live, setLive] = useState<LiveTurn | null>(null);
+  const [folds, setFolds] = useState<FoldedTurn[]>(sessionFolds);
   const [error, setError] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const controller = useRef<AbortController | null>(null);
-  const scroller = useRef<HTMLDivElement | null>(null);
-  const pinned = useRef(true);
+  const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
+  const images = useComposerImages();
+  const scroll = useChatScroll("assistant");
 
   const turns = messages.data ?? [];
-  useEffect(() => {
-    const el = scroller.current;
-    if (el && pinned.current) el.scrollTop = el.scrollHeight;
-  }, [turns.length, live?.answer, live?.status, error]);
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
+
+  const keepFold = (fold: FoldedTurn) => {
+    sessionFolds = [...sessionFolds, fold];
+    setFolds(sessionFolds);
+  };
 
   /**
    * Follow an answer to its end: a new one when there is a question, otherwise
    * whichever is already being written. Studio keeps writing when this
    * connection drops, so a drop is retried, not reported.
    */
-  const follow = async (question: string | null) => {
+  const follow = async (question: string | null, uploads: ChatAttachmentUpload[] = [], shownImages: ChatAttachment[] = []) => {
     if (controller.current) return;
     const abort = new AbortController();
     controller.current = abort;
     let asking = question !== null;
-    const asked = turns.length;
+    const asked = turnsRef.current.length;
+    const baseIds = turnsRef.current.map((turn) => turn.id);
+    const startedAtMs = Date.now();
     let dropped = false;
-    let answer = "";
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const show = (change: Partial<LiveTurn>) =>
-      setLive((turn) => ({ question, asked, answer, status: "", ...turn, ...change }));
-    const handlers = {
-      onText: (piece: string) => {
-        answer += piece;
-        if (timer === null) {
-          timer = setTimeout(() => {
-            timer = null;
-            show({ answer });
-          }, PAINT_MS);
-        }
-      },
-      onStatus: (status: string) => show({ status }),
-    };
+    let parts = emptySseParts();
+    let stopped = false;
+    const show = () =>
+      setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts } });
     if (question !== null) {
-      pinned.current = true;
+      scroll.pinChatToBottom();
       setError("");
       setInput("");
-      show({ status: "Reading your shop…" });
+      parts.status = "Reading your shop…";
+      show();
     }
     try {
       for (let tries = 0; ; tries += 1) {
         // A resumed answer is replayed from its first word.
-        answer = "";
+        parts = emptySseParts();
+        // Paint at most every 50ms; every event still folds into `parts` first.
+        const paint = coalesceSseEvents(() => show());
+        const handlers = {
+          onEvent: (event: string, data: string) => {
+            foldSseEvent(parts, event, data);
+            paint.push(event, parts);
+          },
+        };
         try {
           const result = asking && question !== null
-            ? await api.assistant.ask(question, handlers, abort.signal)
+            ? await api.assistant.ask(question, handlers, abort.signal, uploads)
             : await api.assistant.resume(handlers, abort.signal);
+          paint.flush();
           if (result.error) setError(result.error);
           break;
         } catch (failure) {
-          if (abort.signal.aborted) break;
+          paint.flush();
+          if (abort.signal.aborted) {
+            stopped = true;
+            break;
+          }
           if (failure instanceof AssistantRefused) {
             setError(failure.message);
             if (asking && question !== null) setInput((current) => current || question);
@@ -139,13 +169,31 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
             setError(LOST_CONNECTION);
             break;
           }
-          if (question !== null) show({ status: "Reconnecting…" });
+          if (question !== null) {
+            parts.status = "Reconnecting…";
+            show();
+          }
           await new Promise((resolve) => setTimeout(resolve, RECONNECT_MS));
-          if (abort.signal.aborted) break;
+          if (abort.signal.aborted) {
+            stopped = true;
+            break;
+          }
         }
       }
     } finally {
-      if (timer !== null) clearTimeout(timer);
+      const endedAtMs = Date.now();
+      if (turnHasWork(parts.trace)) {
+        foldSeq += 1;
+        keepFold({
+          id: `assistant-turn-${foldSeq}`,
+          trace: parts.trace,
+          agents: settleAgents(parts.agents, endedAtMs),
+          startedAtMs,
+          endedAtMs,
+          cancelled: stopped,
+          baseIds,
+        });
+      }
       // Show the saved turns before dropping the live one, so the answer does not blink.
       await queryClient.invalidateQueries({ queryKey: MESSAGES_KEY });
       if (question !== null && dropped && !abort.signal.aborted) {
@@ -184,9 +232,16 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
     };
   }, []);
 
-  const ask = (raw: string) => {
+  const ask = async (raw: string) => {
     const question = raw.trim();
-    if (question && !live) void follow(question);
+    const attached = images.images;
+    if ((!question && !attached.length) || live) return;
+    const uploads = attached.length ? await images.prepare(attached) : [];
+    if (uploads === null) return;
+    // The live bubble shows the images by name until the saved turn brings them back.
+    const shown = attached.map((image, index) => ({ id: "", name: uploads[index]?.name ?? image.file.name, mime_type: image.file.type }));
+    images.clear();
+    void follow(question, uploads, shown);
   };
 
   const stop = async () => {
@@ -201,6 +256,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
     });
     if (!confirmed) return;
     await api.assistant.clear();
+    sessionFolds = [];
+    setFolds([]);
     setError("");
     await queryClient.invalidateQueries({ queryKey: MESSAGES_KEY });
   };
@@ -227,34 +284,36 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
   };
 
   const drawn = live ? liveParts(live, turns) : { question: false, answer: false };
-  const visible = live && drawn.answer ? stableStreamingText(live.answer) : "";
+  const visible = live && drawn.answer ? stableStreamingText(live.parts.content) : "";
   const empty = !turns.length && !live && !messages.isLoading;
   const needsProvider = /sign in with chatgpt/i.test(error);
+  const foldPositions = placeTurnFolds(turns, folds);
+  const foldsAt = (index: number) => folds.filter((_, k) => foldPositions[k] === index);
+  const liveTail = live && drawn.answer && !live.parts.trace.some((entry) => entry.kind === "phase")
+    ? live.parts.status || "Answering…"
+    : "";
 
   return (
-    <div className="assistant-page">
-      <div
-        className="assistant-scroll"
-        ref={scroller}
-        onScroll={(event) => {
-          const el = event.currentTarget;
-          pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-        }}
-      >
-        <div className="assistant-inner" onClick={openLinkedListing}>
+    <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col">
+      <ChatTranscript scroll={scroll} laneClassName="max-w-208 px-4 pt-8 sm:px-8">
+        <div className="contents" onClick={openLinkedListing}>
           {empty ? (
-            <div className="assistant-welcome">
-              <h1>Ask about your business</h1>
-              <p className="analytics-lead">
+            <div className="pb-6">
+              <h1 className="mb-2 font-semibold text-2xl text-foreground">Ask about your business</h1>
+              <p className="text-muted-foreground text-sm leading-relaxed">
                 The assistant reads every listing, sale, box, ad and sale event in Studio each time you ask. It
                 answers questions, gives advice, and can fix listings for you: prices, costs, labels, titles, and
                 sizes that differ between marketplace forms. You review every change before it is saved, and it
                 never sends or publishes anything.
               </p>
-              <ul className="assistant-starters">
+              <ul className="mt-5 grid list-none grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-2 p-0">
                 {ASSISTANT_STARTERS.map((starter) => (
                   <li key={starter}>
-                    <button type="button" className="assistant-starter" onClick={() => ask(starter)}>
+                    <button
+                      type="button"
+                      className="h-full w-full cursor-pointer rounded-xl border border-border/70 bg-card px-3.5 py-3 text-left text-secondary-label text-sm leading-snug transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+                      onClick={() => { void ask(starter); }}
+                    >
                       {starter}
                     </button>
                   </li>
@@ -262,104 +321,100 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
               </ul>
             </div>
           ) : null}
-          {messages.isError ? (
-            <p className="analytics-status">{(messages.error as Error).message || "Could not load the conversation."}</p>
+          {messages.isLoading && !turns.length ? (
+            <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
           ) : null}
-          {turns.map((turn) => (
-            <div key={turn.id} className={`msg ${turn.role === "user" ? "msg-user" : "msg-assistant"}`}>
-              <ChatMarkdown text={turn.text} lineBreaks={turn.role === "user"} />
-              {turn.changes ? (
-                <AssistantChangesCard message={turn} changes={turn.changes} onSettled={changesSettled} />
-              ) : null}
-            </div>
+          {messages.isError ? (
+            <p className="text-muted-foreground text-sm">{(messages.error as Error).message || "Could not load the conversation."}</p>
+          ) : null}
+          {turns.map((turn, index) => (
+            <Fragment key={turn.id}>
+              {foldsAt(index).map((fold) => <FoldedTurnRow key={fold.id} turn={fold} />)}
+              <div className="pb-4">
+                {turn.role === "user" ? (
+                  <UserMessageRow text={turn.text} createdAt={turn.created_at} attachments={turn.attachments} />
+                ) : (
+                  <AssistantMessageRow text={turn.text} createdAt={turn.created_at}>
+                    {turn.changes ? (
+                      <AssistantChangesCard message={turn} changes={turn.changes} onSettled={changesSettled} />
+                    ) : null}
+                  </AssistantMessageRow>
+                )}
+              </div>
+            </Fragment>
           ))}
+          {foldsAt(turns.length).map((fold) => <FoldedTurnRow key={fold.id} turn={fold} />)}
           {live ? (
             <>
               {drawn.question && live.question !== null ? (
-                <div className="msg msg-user">
-                  <ChatMarkdown text={live.question} lineBreaks />
-                </div>
-              ) : null}
-              {visible ? (
-                <div className="msg msg-assistant">
-                  <ChatMarkdown text={visible} isStreaming />
+                <div className="pb-4">
+                  <UserMessageRow
+                    text={live.question}
+                    footer={live.questionImages.length ? (
+                      <p className="mt-1 text-muted-foreground text-xs">
+                        {live.questionImages.map((image) => image.name).join(", ")}
+                      </p>
+                    ) : null}
+                  />
                 </div>
               ) : null}
               {drawn.answer ? (
-                <div className="chat-activity is-busy" role="status">
-                  <span className="chat-activity-dot" aria-hidden="true" />
-                  <span className="chat-activity-text">{live.answer ? "Answering…" : live.status}</span>
+                <LiveWork
+                  busy
+                  stopping={false}
+                  workStartedAtMs={live.startedAtMs}
+                  streamTrace={live.parts.trace}
+                  streamAgents={live.parts.agents}
+                  localLive
+                  tailLabel={visible ? "" : liveTail}
+                />
+              ) : null}
+              {visible ? (
+                <div className="pb-4">
+                  <AssistantMessageRow text={visible} streaming />
                 </div>
               ) : null}
             </>
           ) : null}
           {error ? (
-            <div className="chat-error" role="alert">
-              <div className="chat-error-text">{error}</div>
+            <Alert variant="error" className="my-2">
+              <CircleAlertIcon />
+              <AlertTitle className="whitespace-pre-wrap">{error}</AlertTitle>
               {needsProvider ? (
-                <div className="chat-error-actions">
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenProviders}>
+                <AlertAction>
+                  <Button type="button" size="xs" variant="outline" onClick={onOpenProviders}>
                     Open provider settings
-                  </button>
-                </div>
+                  </Button>
+                </AlertAction>
               ) : null}
-            </div>
+            </Alert>
           ) : null}
         </div>
-      </div>
-      <div className="chat-composer assistant-composer">
-        <div className="assistant-inner">
-          <div className="chat-composer-pill">
-            <textarea
-              className="chat-composer-input"
-              rows={1}
-              value={input}
-              placeholder="Ask a question, or ask for a change…"
-              aria-label="Ask the business assistant"
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-                event.preventDefault();
-                ask(input);
-              }}
-            />
-            {live ? (
-              <button
-                type="button"
-                className="chat-send chat-send-cancel"
-                onClick={() => { void stop(); }}
-                aria-label="Stop"
-                title="Stop answering"
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true">
-                  <rect x="1" y="1" width="8" height="8" rx="1" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="chat-send"
-                onClick={() => ask(input)}
-                disabled={!input.trim()}
-                aria-label="Send"
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M8 12.5V3.5M8 3.5L3.5 8M8 3.5L12.5 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            )}
-          </div>
-          {noteOpen ? <BusinessNote onClose={() => setNoteOpen(false)} /> : null}
-          <div className="assistant-actions">
-            <button type="button" className="assistant-action" aria-expanded={noteOpen} onClick={() => setNoteOpen((open) => !open)}>
-              About your business
-            </button>
-            {turns.length && !live ? (
-              <button type="button" className="assistant-action" onClick={() => { void startOver(); }}>
-                Clear conversation
-              </button>
-            ) : null}
-          </div>
+      </ChatTranscript>
+      <div className="mx-auto w-full max-w-208 sm:px-4">
+        <ChatComposer
+          composerRef={composerRef}
+          input={input}
+          onInputChange={setInput}
+          placeholder="Ask a question, or ask for a change…"
+          images={images}
+          busy={Boolean(live)}
+          onSend={() => { void ask(input); }}
+          onStop={() => { void stop(); }}
+          stopLabel="Stop answering"
+          queueLabel={null}
+          className="pb-2 sm:pb-2"
+        />
+        {noteOpen ? <BusinessNote onClose={() => setNoteOpen(false)} /> : null}
+        <div className="flex justify-between gap-3 px-5 pb-3 sm:px-6">
+          <Button type="button" size="xs" variant="ghost-muted" aria-expanded={noteOpen} onClick={() => setNoteOpen((open) => !open)}>
+            About your business
+          </Button>
+          {turns.length && !live ? (
+            <Button type="button" size="xs" variant="ghost-muted" onClick={() => { void startOver(); }}>
+              Clear conversation
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -385,20 +440,19 @@ function BusinessNote({ onClose }: { onClose: () => void }) {
 
   return (
     <form
-      className="assistant-note"
+      className="mx-3 mb-2 flex flex-col gap-2 rounded-xl border border-border/70 bg-card p-3.5 sm:mx-4"
       onSubmit={(event) => {
         event.preventDefault();
         save.mutate(note);
       }}
     >
-      <label htmlFor="assistant-note-text">About your business</label>
-      <p className="analytics-note">
+      <label htmlFor="assistant-note-text" className="font-medium text-foreground text-sm">About your business</label>
+      <p className="text-muted-foreground text-xs leading-relaxed">
         Anything the assistant should keep in mind on every question: your goals, the margin you want, how much time
         you have, what you will not source, where you ship from.
       </p>
-      <textarea
+      <Textarea
         id="assistant-note-text"
-        className="input"
         rows={5}
         maxLength={NOTE_MAX}
         value={note}
@@ -406,10 +460,10 @@ function BusinessNote({ onClose }: { onClose: () => void }) {
         placeholder="I want at least $15 profit per item and sell mostly vintage menswear. I list about 20 items a week."
         onChange={(event) => setDraft(event.target.value)}
       />
-      {save.isError ? <p className="chat-error-text">{(save.error as Error).message || "Could not save."}</p> : null}
-      <div className="assistant-note-actions">
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
-        <button type="submit" className="btn btn-primary btn-sm" disabled={save.isPending || saved.isLoading}>Save</button>
+      {save.isError ? <p className="text-destructive-foreground text-sm">{(save.error as Error).message || "Could not save."}</p> : null}
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="submit" size="sm" disabled={save.isPending || saved.isLoading}>Save</Button>
       </div>
     </form>
   );

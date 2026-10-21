@@ -39,10 +39,9 @@ export interface AssistantChanges {
 }
 
 export interface AssistantStreamHandlers {
-  /** The next piece of the answer. */
-  onText: (piece: string) => void;
-  /** What the assistant is doing before the answer starts. */
-  onStatus: (status: string) => void;
+  /** One stream event as it arrives: `message` (the next piece of the answer),
+   *  `status`, `thinking`, `step`, `agent`; `error` is returned instead. */
+  onEvent: (event: string, data: string) => void;
 }
 
 /** Studio answered the request and refused it; a dropped connection is any other error. */

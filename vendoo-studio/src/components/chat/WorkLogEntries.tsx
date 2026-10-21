@@ -24,7 +24,7 @@ import {
 
 import { cn } from "../../lib/utils";
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
-import { ChatMarkdown } from "../ChatMarkdown";
+import { CHAT_PROSE_CLASS, ChatMarkdown } from "../ChatMarkdown";
 import { settledPhaseText, thoughtPreview, type LiveAgent, type LiveAgents, type LiveTraceEntry } from "../liveTrace";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { WorkLogBlock, WorkLogButton, WorkLogDetails, WorkLogList, WorkLogRow } from "./WorkLog";
@@ -176,7 +176,7 @@ function ThoughtRow({ text, live }: { text: string; live: boolean }) {
     >
       {expanded ? (
         <WorkLogDetails followLive={live}>
-          <ChatMarkdown text={text} isStreaming={live} lineBreaks />
+          <ChatMarkdown text={text} isStreaming={live} lineBreaks className={cn(CHAT_PROSE_CLASS, "text-foreground")} />
         </WorkLogDetails>
       ) : null}
     </WorkLogRow>
@@ -189,6 +189,7 @@ function ThoughtRow({ text, live }: { text: string; live: boolean }) {
 export function AgentElapsed({ startedAt, endedAt }: { startedAt: number; endedAt: number | null }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const live = endedAt === null;
+  const [mountedAt] = useState(() => Date.now());
   useEffect(() => {
     const update = () => {
       const text = formatAgentElapsed(agentElapsedMs({ startedAt, endedAt }, Date.now()) / 1000);
@@ -201,7 +202,7 @@ export function AgentElapsed({ startedAt, endedAt }: { startedAt: number; endedA
   }, [live, startedAt, endedAt]);
   return (
     <span ref={textRef} className="tabular-nums">
-      {formatAgentElapsed(agentElapsedMs({ startedAt, endedAt }, Date.now()) / 1000)}
+      {formatAgentElapsed(agentElapsedMs({ startedAt, endedAt }, mountedAt) / 1000)}
     </span>
   );
 }

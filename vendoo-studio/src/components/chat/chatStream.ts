@@ -82,6 +82,26 @@ export const TRACE_ONLY_EVENTS = new Set(["step", "posted", "agent"]);
 
 type SseParseState = { eventType: string; parts: SseParts; dataLines: number; agentData: string };
 
+/**
+ * Fold one whole event (its data lines already joined with newlines) into the
+ * parts, as the line parser below does. The business assistant's stream comes
+ * through `readSse` whole-event, and shares the listing chat's work log this way.
+ */
+export function foldSseEvent(parts: SseParts, event: string, data: string): void {
+  if (event === "agent") {
+    const agent = parseAgentEvent(data);
+    if (!agent) return;
+    const next = applyAgentEvent(parts.trace, parts.agents, agent);
+    parts.trace = next.trace;
+    parts.agents = next.agents;
+    return;
+  }
+  parts.trace = appendLiveTrace(parts.trace, event, data);
+  if (event === "thinking") parts.thinking += data;
+  else if (event === "status") parts.status = data;
+  else if (!TRACE_ONLY_EVENTS.has(event)) parts.content += data;
+}
+
 function newParseState(): SseParseState {
   return { eventType: "message", parts: emptySseParts(), dataLines: 0, agentData: "" };
 }

@@ -29,7 +29,7 @@ export function ChatTranscript({
       >
         <div
           ref={scroll.setContentEl}
-          className={cn("chat-content-lane mx-auto flex w-full min-w-0 max-w-(--chat-content-max-width) flex-col px-4 pt-4 pb-2", laneClassName)}
+          className={cn("chat-content-lane @container/chat-lane mx-auto flex w-full min-w-0 max-w-(--chat-content-max-width) flex-col px-4 pt-4 pb-2", laneClassName)}
         >
           {children}
         </div>

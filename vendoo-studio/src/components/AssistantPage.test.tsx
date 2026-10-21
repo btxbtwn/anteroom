@@ -11,7 +11,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryData: vi.fn(), setQueryData: vi.fn() }),
 }));
 // The markdown bundle is lazy; render the text itself so the page can be read synchronously.
-vi.mock("./ChatMarkdown", () => ({ ChatMarkdown: ({ text }: { text: string }) => <p>{text}</p> }));
+vi.mock("./ChatMarkdown", () => ({ CHAT_PROSE_CLASS: "", ChatMarkdown: ({ text }: { text: string }) => <p>{text}</p> }));
 
 function render(turns: AssistantMessage[] | undefined, state: { isLoading?: boolean; error?: Error } = {}) {
   useQuery.mockReturnValue({
@@ -23,7 +23,7 @@ function render(turns: AssistantMessage[] | undefined, state: { isLoading?: bool
 describe("AssistantPage", () => {
   it("opens with what it reads and questions to start from", () => {
     const html = render([]);
-    expect(html).toContain("<h1>Ask about your business</h1>");
+    expect(html).toContain(">Ask about your business</h1>");
     expect(html).toContain("You review every change before it is saved");
     for (const starter of ASSISTANT_STARTERS) expect(html).toContain(starter);
     expect(html).toContain("About your business");
@@ -35,8 +35,8 @@ describe("AssistantPage", () => {
       { id: "q", role: "user", text: "What sold last week?", created_at: null },
       { id: "a", role: "assistant", text: "Three items for $96.", created_at: null },
     ]);
-    expect(html).toContain('<div class="msg msg-user"><p>What sold last week?</p></div>');
-    expect(html).toContain('<div class="msg msg-assistant"><p>Three items for $96.</p></div>');
+    expect(html).toMatch(/data-message-role="user".*<p>What sold last week\?<\/p>/);
+    expect(html).toMatch(/data-message-role="assistant".*<p>Three items for \$96\.<\/p>/);
     expect(html).toContain("Clear conversation");
     expect(html).not.toContain("Ask about your business");
   });

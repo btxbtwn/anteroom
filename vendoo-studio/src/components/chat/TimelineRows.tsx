@@ -12,7 +12,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
-import { ChatMarkdown } from "../ChatMarkdown";
+import { CHAT_PROSE_CLASS, ChatMarkdown } from "../ChatMarkdown";
 import { WorkingDuration } from "../WorkingDuration";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup } from "../ui/dialog";
@@ -147,7 +147,7 @@ function CollapsibleUserMessageBody({ text }: { text: string }) {
         data-user-message-collapsed={collapsed ? "true" : "false"}
         style={collapsed ? { WebkitMaskImage: COLLAPSED_USER_MESSAGE_FADE_MASK, maskImage: COLLAPSED_USER_MESSAGE_FADE_MASK } : undefined}
       >
-        <ChatMarkdown text={text} lineBreaks />
+        <ChatMarkdown text={text} lineBreaks className={cn(CHAT_PROSE_CLASS, "text-foreground")} />
       </div>
       {canCollapse ? (
         <div className="mt-1.5 flex items-center justify-end gap-2">
@@ -260,7 +260,7 @@ export function AssistantMessageRow({
       <div className="relative min-w-0 px-1 py-0.5">
         <h3 className="sr-only select-none">Studio</h3>
         <div data-citation-source={messageId}>
-          <ChatMarkdown text={text} isStreaming={streaming} />
+          <ChatMarkdown text={text} isStreaming={streaming} className={CHAT_PROSE_CLASS} />
         </div>
         {children}
         {!streaming ? (

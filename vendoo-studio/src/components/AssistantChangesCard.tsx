@@ -100,7 +100,7 @@ export function AssistantChangesCard({ message, changes, onSettled }: Props) {
             Applying saves these in Studio. A listing already on Vendoo keeps its old values there until you send it
             again.
           </p>
-          {failure ? <p className="chat-error-text">{failure.message || "Could not save the changes."}</p> : null}
+          {failure ? <p className="text-destructive-foreground text-sm">{failure.message || "Could not save the changes."}</p> : null}
           <div className="assistant-changes-actions">
             <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => dismiss.mutate()}>
               Dismiss

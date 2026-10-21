@@ -10,6 +10,7 @@ import type {
   Job,
   ListingData,
   ListingNames,
+  ChatAttachmentUpload,
   ListingProviderId,
   PhotoProviderChoice,
   ListingResponse,
@@ -184,10 +185,8 @@ async function followAssistant(
   }
   let error = "";
   await readSse(res, (event, data) => {
-    if (event === "message") handlers.onText(data);
-    else if (event === "status") handlers.onStatus(data);
-    else if (event === "thinking") handlers.onStatus("Thinking…");
-    else if (event === "error") error = data;
+    if (event === "error") error = data;
+    else handlers.onEvent(event, data);
   });
   return { error };
 }
@@ -268,8 +267,13 @@ export const api = {
      * drops; `resume` picks it back up. Resolves with the assistant's own
      * error, if it reported one.
      */
-    ask: (text: string, handlers: AssistantStreamHandlers, signal?: AbortSignal) =>
-      followAssistant("/assistant/messages", JSON.stringify({ text }), handlers, signal),
+    ask: (text: string, handlers: AssistantStreamHandlers, signal?: AbortSignal, attachments: ChatAttachmentUpload[] = []) =>
+      followAssistant(
+        "/assistant/messages",
+        JSON.stringify(attachments.length ? { text, attachments } : { text }),
+        handlers,
+        signal,
+      ),
     /** Follow the answer in progress from its start; ends at once when there is none. */
     resume: (handlers: AssistantStreamHandlers, signal?: AbortSignal) =>
       followAssistant("/assistant/messages/resume", undefined, handlers, signal),
