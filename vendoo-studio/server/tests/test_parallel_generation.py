@@ -141,16 +141,40 @@ class AgentActivityTest(unittest.TestCase):
         activity.clear_agents("conv-a")
 
     def test_keeps_the_latest_state_per_agent(self):
-        activity.record_agent("conv-a", json.dumps({"id": "a-1", "status": "running", "started_at": 2}))
-        activity.record_agent("conv-a", json.dumps({"id": "b-2", "status": "running", "started_at": 1}))
-        activity.record_agent("conv-a", json.dumps({"id": "a-1", "status": "done", "started_at": 2}))
-        activity.record_agent("conv-a", "not json")
+        run = activity.begin_agents("conv-a")
+        activity.record_agent("conv-a", run, json.dumps({"id": "a-1", "status": "running", "started_at": 2}))
+        activity.record_agent("conv-a", run, json.dumps({"id": "b-2", "status": "running", "started_at": 1}))
+        activity.record_agent("conv-a", run, json.dumps({"id": "a-1", "status": "done", "started_at": 2}))
+        activity.record_agent("conv-a", run, "not json")
         self.assertEqual(
             [(state["id"], state["status"]) for state in activity.agents("conv-a")],
             [("b-2", "running"), ("a-1", "done")],
         )
         activity.clear_agents("conv-a")
         self.assertEqual(activity.agents("conv-a"), [])
+
+    def test_a_stale_run_cannot_write_into_the_new_one(self):
+        old = activity.begin_agents("conv-a")
+        new = activity.begin_agents("conv-a")
+        # The old run's agents are cancelled while it unwinds, after the new one began.
+        activity.record_agent("conv-a", old, json.dumps({"id": "old-1", "status": "cancelled"}))
+        activity.record_agent("conv-a", new, json.dumps({"id": "new-1", "status": "running"}))
+        self.assertEqual([state["id"] for state in activity.agents("conv-a")], ["new-1"])
+
+    def test_deleting_the_listing_drops_its_agents(self):
+        from vendoo_studio.database import SessionLocal
+        from vendoo_studio.repositories.queries import ConversationRepo
+        from vendoo_studio.services.listing_delete import delete_listing
+
+        db = SessionLocal()
+        try:
+            conv = ConversationRepo(db).create(title="Delete me")
+            run = activity.begin_agents(conv.id)
+            activity.record_agent(conv.id, run, json.dumps({"id": "x-1", "status": "done"}))
+            delete_listing(db, conv.id)
+            self.assertEqual(activity.agents(conv.id), [])
+        finally:
+            db.close()
 
 
 class ModelSlotsTest(unittest.TestCase):

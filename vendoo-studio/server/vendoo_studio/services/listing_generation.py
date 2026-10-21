@@ -94,11 +94,11 @@ async def run_listing_generation(
     photo_count: int,
 ) -> None:
     """Analyze photos, pick categories, stream the listing, and save it."""
-    activity.clear_agents(conv_id)
+    agents_run = activity.begin_agents(conv_id)
 
     def trace(kind: str, text: str) -> None:
         if kind == "agent":
-            activity.record_agent(conv_id, text)
+            activity.record_agent(conv_id, agents_run, text)
         run.publish(sse_event(kind, text))
 
     # Photo analysis and comps research report their reasoning and searches
@@ -128,7 +128,14 @@ async def run_listing_generation(
         timings[stage] = round(now - stage_started, 2)
         stage_started = now
 
+    timing_saved = False
+
     def save_timings(outcome: str) -> str | None:
+        """Record the run once: a failure after it was saved as done is not a second run."""
+        nonlocal timing_saved
+        if timing_saved:
+            return None
+        timing_saved = True
         return generation_timing.record_run(
             conv_id, timings, total_sec=time.monotonic() - run_started, outcome=outcome,
         )
@@ -337,6 +344,7 @@ async def run_listing_generation(
                 repaired=needed_repair,
                 timing_id=timing_id,
                 run_started=run_started,
+                agents_run=agents_run,
             )))
     except asyncio.CancelledError:
         log.warning("listing generation cancelled for %s; saving any completed text", conv_id)
@@ -422,6 +430,7 @@ async def _finish_generation_background(
     repaired: bool = False,
     timing_id: str | None = None,
     run_started: float | None = None,
+    agents_run: int = 0,
 ) -> None:
     """Fill remaining discovered fields after the generate stream ends.
 
@@ -431,7 +440,9 @@ async def _finish_generation_background(
     The stream has closed by now, so agents here reach the chat through
     activity polling (``GET /activity`` → ``agents``) instead of SSE.
     """
-    live_trace.bind(lambda kind, text: activity.record_agent(conv_id, text) if kind == "agent" else None)
+    live_trace.bind(
+        lambda kind, text: activity.record_agent(conv_id, agents_run, text) if kind == "agent" else None
+    )
     model_slots.bind()
     finish_started = time.monotonic()
     stages: dict[str, float] = {}

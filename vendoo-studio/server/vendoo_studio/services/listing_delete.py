@@ -81,6 +81,9 @@ def delete_listing(db: Session, conv_id: str) -> tuple[int, int]:
         raise ListingBusy("Cannot delete a listing with an active automation job")
 
     deleted_jobs, deleted_photos = wipe_contents(db, conv_id)
+    from vendoo_studio.services import activity
+
+    activity.clear_agents(conv_id)
     db.expire_all()
     conv = repo.get(conv_id)
     if conv is None:

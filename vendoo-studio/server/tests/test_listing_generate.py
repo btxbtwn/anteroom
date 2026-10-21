@@ -1219,6 +1219,28 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(timing["outcome"], "done")
         self.assertTrue({"photo_analysis", "categories", "listing_stream"} <= set(timing["stages"]))
 
+    async def test_a_failure_after_the_run_finished_records_one_timing(self):
+        from vendoo_studio.database import SessionLocal as AppSession
+        from vendoo_studio.services import listing_generation
+        from vendoo_studio.services.generation_timing import for_conversation
+
+        def broken_spawn(coro):
+            coro.close()
+            raise RuntimeError("could not start the field fill")
+
+        with patch.object(listing_generation, "spawn", new=broken_spawn):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+        db = AppSession()
+        try:
+            timings = for_conversation(db, self.conv_id)
+        finally:
+            db.close()
+        self.assertEqual([timing["outcome"] for timing in timings], ["done"])
+
     async def test_quick_identity_starts_comps_before_the_photo_analysis_ends(self):
         from vendoo_studio.services import listing_generation
 
