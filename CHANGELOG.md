@@ -10,6 +10,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 - The listing list no longer has a Settled section or a settle button. Sold listings stay under the Sold filter.
 - The status bar no longer repeats the model. The model is chosen in the chat.
+- The thread list on the left is black, the same surface T3 Code uses.
 
 ## 0.1.294 — 2026-10-20
 
