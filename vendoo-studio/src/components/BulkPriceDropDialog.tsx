@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import {
@@ -14,11 +13,13 @@ import {
   type MarkdownDraft,
   type MarkdownOutcome,
 } from "../bulkPriceDrop";
-
-function money(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
-}
+import { cn } from "../lib/utils";
+import { LazyImage } from "./PhotoThumbs";
+import { money, PriceDialog, PriceRow, PriceRows, PriceStatus } from "./PriceDropParts";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import { Input } from "./ui/input";
 
 /**
  * Review a markdown for several listings and save the confirmed prices as
@@ -67,121 +68,78 @@ export function BulkPriceDropDialog({
     },
   });
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || apply.isPending) return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [apply.isPending, onClose]);
-
   const dropCount = useMemo(() => markdownDrops(drafts || []).length, [drafts]);
   const ready = drafts !== null && canApplyMarkdowns(drafts);
 
   const update = (id: string, patch: Partial<MarkdownDraft>) =>
     setEdits((prev) => new Map(prev).set(id, { ...prev.get(id), ...patch }));
 
-  return createPortal(
-    <div className="confirm-dialog price-drop-dialog" role="presentation">
-      <button
-        type="button"
-        className="confirm-dialog-backdrop"
-        aria-label="Cancel"
-        onClick={() => {
-          if (!apply.isPending) onClose();
-        }}
-      />
-      <div
-        className="confirm-dialog-popup price-drop-popup bulk-markdown-popup"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bulk-markdown-title"
-      >
-        <div className="confirm-dialog-header">
-          <h2 id="bulk-markdown-title" className="confirm-dialog-title">
-            {outcomes ? markdownSummary(outcomes) : "Mark down listings"}
-          </h2>
-          <p className="confirm-dialog-description">
-            {outcomes
-              ? "Nothing was sent to Vendoo. Each listing now has unsent edits: open it and press Update Vendoo to send the new price to the marketplaces."
-              : "Each price starts on the listing's suggestion from your own sales and prior drops. Edit any price or skip a listing. Applying saves the prices in Studio only."}
-          </p>
-        </div>
-
-        <div className="price-drop-body">
-          {outcomes ? (
-            <ul className="price-drop-rows">
-              {outcomes.map((outcome) => (
-                <li key={outcome.id} className="price-drop-row">
-                  <span className="price-drop-row-title">{outcome.title}</span>
-                  {outcome.reason === null ? (
-                    <span className="price-drop-row-price">
-                      {money(outcome.from)} → {money(outcome.to)}{" "}
-                      <span
-                        className="nav-status nav-status-unsent"
-                        title="Edited in Studio since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
-                      >
-                        unsent
-                      </span>
-                    </span>
-                  ) : (
-                    <span className="price-drop-row-price is-error">{outcome.reason}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : preview.isError ? (
-            <p className="price-drop-status is-error">
-              {(preview.error as Error)?.message || "Could not load the suggestions."}
-            </p>
-          ) : drafts === null ? (
-            <p className="price-drop-status">Loading a suggestion for each listing…</p>
-          ) : (
-            <ul className="bulk-markdown-rows">
-              {drafts.map((draft) => (
-                <MarkdownRow
-                  key={draft.id}
-                  draft={draft}
-                  disabled={apply.isPending}
-                  onChange={(patch) => update(draft.id, patch)}
-                />
-              ))}
-            </ul>
-          )}
-          {apply.isError ? (
-            <p className="price-drop-status is-error">
-              {(apply.error as Error)?.message || "The prices could not be saved."}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="confirm-dialog-footer">
-          {outcomes ? (
-            <button type="button" className="btn btn-primary" onClick={onClose}>
-              Done
-            </button>
-          ) : (
-            <>
-              <button type="button" className="btn btn-outline" disabled={apply.isPending} onClick={onClose}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!ready || apply.isPending}
-                onClick={() => apply.mutate()}
-              >
-                {apply.isPending ? "Saving…" : applyMarkdownsLabel(dropCount)}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <PriceDialog
+      className="max-w-2xl"
+      title={outcomes ? markdownSummary(outcomes) : "Mark down listings"}
+      description={outcomes
+        ? "Nothing was sent to Vendoo. Each listing now has unsent edits: open it and press Update Vendoo to send the new price to the marketplaces."
+        : "Each price starts on the listing's suggestion from your own sales and prior drops. Edit any price or skip a listing. Applying saves the prices in Studio only."}
+      busy={apply.isPending}
+      onClose={onClose}
+      footer={outcomes ? (
+        <Button onClick={onClose}>Done</Button>
+      ) : (
+        <>
+          <Button variant="outline" disabled={apply.isPending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!ready || apply.isPending} onClick={() => apply.mutate()}>
+            {apply.isPending ? "Saving…" : applyMarkdownsLabel(dropCount)}
+          </Button>
+        </>
+      )}
+    >
+      {outcomes ? (
+        <PriceRows>
+          {outcomes.map((outcome) => (
+            <PriceRow key={outcome.id} title={outcome.title} error={outcome.reason !== null}>
+              {outcome.reason === null ? (
+                <span className="inline-flex items-center gap-1.5">
+                  {money(outcome.from)} → {money(outcome.to)}
+                  <Badge
+                    variant="info"
+                    title="Edited in Studio since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
+                  >
+                    unsent
+                  </Badge>
+                </span>
+              ) : (
+                outcome.reason
+              )}
+            </PriceRow>
+          ))}
+        </PriceRows>
+      ) : preview.isError ? (
+        <PriceStatus error>
+          {(preview.error as Error)?.message || "Could not load the suggestions."}
+        </PriceStatus>
+      ) : drafts === null ? (
+        <PriceStatus>Loading a suggestion for each listing…</PriceStatus>
+      ) : (
+        <ul className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
+          {drafts.map((draft) => (
+            <MarkdownRow
+              key={draft.id}
+              draft={draft}
+              disabled={apply.isPending}
+              onChange={(patch) => update(draft.id, patch)}
+            />
+          ))}
+        </ul>
+      )}
+      {apply.isError ? (
+        <PriceStatus error>
+          {(apply.error as Error)?.message || "The prices could not be saved."}
+        </PriceStatus>
+      ) : null}
+    </PriceDialog>
   );
 }
 
@@ -198,24 +156,24 @@ function MarkdownRow({
   const inputId = `bulk-markdown-${draft.id}`;
   const percent = draft.skip ? "" : dropPercentLabel(draft.current, draft.priceText);
   return (
-    <li className={`bulk-markdown-row${draft.skip ? " is-skipped" : ""}`}>
-      <div className="nav-thumb" aria-hidden="true">
-        {draft.coverUrl ? (
-          <img className="nav-thumb-img" src={draft.coverUrl} alt="" loading="lazy" draggable={false} />
-        ) : null}
-      </div>
-      <div className="bulk-markdown-row-body">
-        <label className="bulk-markdown-row-title" htmlFor={inputId}>{draft.title}</label>
-        <div className="bulk-markdown-row-reason">
+    <li className={cn("flex items-center gap-3 px-3 py-2", draft.skip && "opacity-64")}>
+      <span className="size-9 shrink-0 overflow-hidden rounded-md border bg-muted" aria-hidden="true">
+        {draft.coverUrl ? <LazyImage src={draft.coverUrl} className="size-full" /> : null}
+      </span>
+      <div className="min-w-0 flex-1">
+        <label className="block truncate font-medium" htmlFor={inputId}>{draft.title}</label>
+        <div className="truncate text-muted-foreground text-xs">
           {draft.unavailable || draft.reason}
         </div>
-        {error ? <div className="bulk-markdown-row-error">{error}</div> : null}
+        {error ? <div className="text-destructive-foreground text-xs">{error}</div> : null}
       </div>
-      <div className="bulk-markdown-row-price">
-        <span className="bulk-markdown-row-current">{money(draft.current)} →</span>
-        <input
+      <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs tabular-nums">
+        <span>{money(draft.current)} →</span>
+        <Input
+          nativeInput
+          size="sm"
           id={inputId}
-          className="price-drop-custom bulk-markdown-input"
+          className="w-20"
           type="number"
           min={1}
           step={1}
@@ -227,14 +185,13 @@ function MarkdownRow({
           disabled={disabled || draft.skip || Boolean(draft.unavailable)}
           onChange={(event) => onChange({ priceText: event.target.value })}
         />
-        <span className="bulk-markdown-row-percent">{percent}</span>
+        <span className="w-10">{percent}</span>
       </div>
-      <label className="bulk-markdown-skip">
-        <input
-          type="checkbox"
+      <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs">
+        <Checkbox
           checked={draft.skip}
           disabled={disabled || Boolean(draft.unavailable)}
-          onChange={(event) => onChange({ skip: event.target.checked })}
+          onCheckedChange={(checked) => onChange({ skip: checked === true })}
         />
         Skip
       </label>

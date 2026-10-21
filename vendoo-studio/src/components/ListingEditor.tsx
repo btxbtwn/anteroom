@@ -1328,7 +1328,6 @@ function SendToVendooButton({
         </div>
         {existingJob.last_error && (
           <CopyableLlmError
-            className="max-h-40 overflow-y-auto max-[900px]:max-h-22"
             text={existingJob.last_error}
             prompt={jobErrorPrompt(existingJob.last_error, listingTitle, null, dropdownOptions?.forms)}
             onAskChat={onAskChat}
@@ -1338,7 +1337,6 @@ function SendToVendooButton({
         )}
         {shownSendError && (
           <CopyableLlmError
-            className="max-h-40 overflow-y-auto max-[900px]:max-h-22"
             text={shownSendError}
             prompt={jobErrorPrompt(shownSendError, listingTitle, null, dropdownOptions?.forms)}
             onAskChat={onAskChat}
@@ -1349,7 +1347,6 @@ function SendToVendooButton({
         {!existingJob.last_error && !shownSendError && (
           // No error to show, but empty fields still deserve their fill button.
           <CopyableLlmError
-            className="max-h-40 overflow-y-auto max-[900px]:max-h-22"
             text=""
             prompt=""
             onAskChat={onAskChat}

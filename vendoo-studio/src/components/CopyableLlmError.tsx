@@ -1,3 +1,6 @@
+import { ChevronDownIcon, CircleAlertIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 import { OPTIONS_RULE, optionsForField, type DropdownForms } from "../dropdownOptions";
 
 type Blocker = { field?: string; message?: string };
@@ -318,23 +321,24 @@ export function CopyableLlmError({
   if (!body && !canFillEmpty) return null;
 
   return (
-    <div className={`llm-error-card${className ? ` ${className}` : ""}`}>
+    <div className={cn("flex min-w-0 flex-col gap-2", className)}>
       {onAskChat && (
-        <div className="llm-error-ask">
-          <div className="llm-error-actions">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex flex-wrap gap-1.5 max-[900px]:[&>*]:w-full">
             {body && (
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
+              <Button
+                variant="outline"
+                size="xs"
                 title="Send these errors to chat so it can fix them"
                 onClick={() => onAskChat(prompt)}
               >
+                <WrenchIcon />
                 Fix errors
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
+            <Button
+              variant="outline"
+              size="xs"
               disabled={!canFillEmpty}
               title={canFillEmpty
                 ? "Send empty listing fields to chat. Does not change Vendoo yet."
@@ -344,18 +348,25 @@ export function CopyableLlmError({
                 onAskChat(emptyFieldsPrompt);
               }}
             >
+              <MessageSquareIcon />
               {emptyFieldsButtonLabel(emptyCount)}
-            </button>
+            </Button>
           </div>
-          <p className="llm-error-ask-hint">
+          <p className="text-muted-foreground text-xs">
             Saves changes to this listing. Send to Vendoo when ready.
           </p>
         </div>
       )}
       {body && (
-        <details className="llm-error-details">
-          <summary className="text-xs text-error">Errors need attention · View details</summary>
-          <div className="llm-error-text text-xs text-error">{body}</div>
+        <details className="group rounded-lg border border-error/32 bg-error-surface">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-error-foreground text-xs [&::-webkit-details-marker]:hidden">
+            <CircleAlertIcon className="size-3.5 shrink-0 text-error" aria-hidden="true" />
+            Errors need attention · View details
+            <ChevronDownIcon className="ms-auto size-3.5 shrink-0 opacity-70 transition-transform group-open:rotate-180" aria-hidden="true" />
+          </summary>
+          <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words border-error/20 border-t px-2.5 py-2 text-error-foreground/90 text-xs max-[900px]:max-h-22">
+            {body}
+          </div>
         </details>
       )}
     </div>

@@ -1,19 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { PriceDropCompsSource, PriceDropPreview } from "../api/types";
 import { toastManager } from "./ui/toast";
 import { SoldCompsCard } from "./SoldCompsCard";
+import { SearchIcon } from "lucide-react";
+import { cn } from "../lib/utils";
+import { money, PriceChip, PriceDialog, PriceSection, PriceStatus } from "./PriceDropParts";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 
 /** "14.3" but "21" — a trailing .0 is noise on a chip. */
 function percentLabel(percent: number): string {
   return Number.isInteger(percent) ? String(percent) : percent.toFixed(1);
-}
-
-function money(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 }
 
 function formatDropWhen(iso: string): string {
@@ -134,18 +133,6 @@ export function RegeneratePriceDialog({
   };
 
   useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [open, onClose]);
-
-  useEffect(() => {
     if (!open) {
       setCompsRequested(false);
       setSelection(null);
@@ -230,229 +217,194 @@ export function RegeneratePriceDialog({
     selectedPrice != null &&
     selectedPrice < preview.comps.target_price;
 
-  // Inspector overflow clips position:fixed; mount on body so the card is visible.
-  return createPortal(
-    <div className="confirm-dialog price-drop-dialog" role="presentation">
-      <button
-        type="button"
-        className="confirm-dialog-backdrop"
-        aria-label="Cancel"
-        onClick={onClose}
-      />
-      <div
-        className="confirm-dialog-popup price-drop-popup"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="price-drop-title"
-      >
-        <div className="confirm-dialog-header">
-          <h2 id="price-drop-title" className="confirm-dialog-title">
-            Regenerate
-          </h2>
-          <p className="confirm-dialog-description">
-            Confirm drops the price and rewrites the listing from scratch at the new price. Chat and
-            generated fields are discarded; measurements, flaws, COG, labels and notes are kept.
-            Nothing changes on Vendoo until you Send.
-          </p>
-        </div>
-
-        <div className="price-drop-body">
-          {previewQuery.isLoading ? (
-            <p className="price-drop-status">Loading price history…</p>
-          ) : previewQuery.isError ? (
-            <p className="price-drop-status is-error">
-              {(previewQuery.error as Error).message || "Could not load a price suggestion."}
-            </p>
-          ) : preview ? (
-            <>
-              <div className="price-drop-summary">
-                <div>
-                  <span className="price-drop-label">Current</span>
-                  <strong>{money(preview.current_price)}</strong>
-                </div>
-                <div>
-                  <span className="price-drop-label">First listed</span>
-                  <strong>{money(preview.first_price)}</strong>
-                </div>
-                <div>
-                  <span className="price-drop-label">Selected</span>
-                  <strong>{money(selectedPrice)}</strong>
-                </div>
-              </div>
-
-              <div className="price-drop-section">
-                <div className="price-drop-section-title">
-                  Suggested
-                  {preview.suggested_mode === "sell_through" ? " · from your sales" : ""}
-                </div>
-                <button
-                  type="button"
-                  className={`price-drop-chip price-drop-chip-wide${selection?.kind === "suggested" ? " is-active" : ""}`}
-                  onClick={() => choose({ kind: "suggested", price: preview.suggested_price })}
-                >
-                  {money(preview.suggested_price)} · −{percentLabel(preview.suggested_effective_percent)}%
-                  <span className="price-drop-chip-note">{preview.suggested_reason}</span>
-                </button>
-              </div>
-
-              {/* The suggested chip already tells this story when it is the source. */}
-              {preview.sell_through && preview.suggested_mode !== "sell_through" ? (
-                <p className="price-drop-reason">
-                  {preview.sell_through.scope === "category"
-                    ? `Your ${preview.sell_through.label}`
-                    : preview.sell_through.scope === "brand"
-                      ? `Your ${preview.sell_through.label} items`
-                      : "Your sold items"}
-                  : {preview.sell_through.count} sold
-                  {preview.sell_through.median_discount_percent != null
-                    ? ` at a median ${percentLabel(preview.sell_through.median_discount_percent)}% off`
-                    : ""}
-                  {preview.sell_through.median_days != null
-                    ? `, typically in ${preview.sell_through.median_days} days`
-                    : ""}
-                  {preview.age_days != null ? ` · this one: ${preview.age_days} days listed` : ""}
-                </p>
-              ) : null}
-
-              {otherCuts.length ? (
-                <div className="price-drop-section">
-                  <div className="price-drop-section-title">Other cuts</div>
-                  <div className="price-drop-chips" role="group" aria-label="Price drop options">
-                    {otherCuts.map((option) => {
-                      const active =
-                        selection?.kind === "percent" && selection.price === option.price;
-                      return (
-                        <button
-                          key={option.price}
-                          type="button"
-                          className={`price-drop-chip${active ? " is-active" : ""}`}
-                          onClick={() =>
-                            choose({
-                              kind: "percent",
-                              percent: option.effective_percent,
-                              price: option.price,
-                            })
-                          }
-                        >
-                          {money(option.price)} · −{percentLabel(option.effective_percent)}%
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {preview.comps.target_price != null && preview.comps.target_price < preview.current_price ? (
-                <div className="price-drop-section">
-                  <div className="price-drop-section-title">Live comps</div>
-                  <button
-                    type="button"
-                    className={`price-drop-chip price-drop-chip-wide${selection?.kind === "comps" ? " is-active" : ""}`}
-                    onClick={() => choose({ kind: "comps", price: preview.comps.target_price! })}
-                  >
-                    Comps target {money(preview.comps.target_price)} · −
-                    {percentLabel(
-                      Math.round(
-                        (1 - preview.comps.target_price / preview.current_price) * 1000,
-                      ) / 10,
-                    )}
-                    %{preview.comps.market ? ` · market ${preview.comps.market}` : ""}
-                  </button>
-                </div>
-              ) : !preview.comps.available ? (
-                <p className="price-drop-status">
-                  Sold comps need ChatGPT, Cursor or MiMo connected, or a Brave Search API key in Settings.
-                </p>
-              ) : comps.running ? (
-                <p className="price-drop-status">
-                  Researching sold comps… You can confirm now, or wait for the live comps target.
-                </p>
-              ) : comps.error ? (
-                <p className="price-drop-status is-error">{comps.error}</p>
-              ) : !compsRequested ? (
-                <div className="price-drop-section">
-                  <div className="price-drop-section-title">Live comps</div>
-                  <button
-                    type="button"
-                    className="btn btn-outline btn-sm"
-                    onClick={() => setCompsRequested(true)}
-                  >
-                    Search sold comps
-                  </button>
-                </div>
-              ) : null}
-
-              {comps.sources.length ? (
-                <ul className="price-drop-sources" aria-live="polite">
-                  {comps.sources.map((source) => (
-                    <li key={source.source} className={`price-drop-source is-${source.state}`}>
-                      <span className="price-drop-source-name">{source.source}</span>
-                      <span className="price-drop-source-state">{sourceStatus(source)}</span>
-                    </li>
-                  ))}
-                  {comps.step ? <li className="price-drop-source-step">{comps.step}</li> : null}
-                </ul>
-              ) : null}
-
-              <div className="price-drop-section">
-                <label className="price-drop-section-title" htmlFor="price-drop-custom">
-                  Custom price
-                </label>
-                <input
-                  id="price-drop-custom"
-                  className="price-drop-custom"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={customText}
-                  onChange={(event) =>
-                    choose(
-                      { kind: "custom", price: Number(event.target.value) || 0 },
-                      event.target.value,
-                    )
-                  }
-                />
-                {belowComps ? (
-                  <p className="price-drop-status">
-                    Below the comps formula floor ({money(preview.comps.target_price)}). You can still apply it.
-                  </p>
-                ) : null}
-              </div>
-
-              {preview.history.length ? (
-                <div className="price-drop-section">
-                  <div className="price-drop-section-title">Prior drops</div>
-                  <ul className="price-drop-history">
-                    {preview.history.map((event) => (
-                      <li key={event.revision_id}>
-                        {money(event.from_price)} → {money(event.to_price)} (−{event.percent}%)
-                        {event.created_at ? ` · ${formatDropWhen(event.created_at)}` : ""}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {preview.comps.text ? <SoldCompsCard text={preview.comps.text} /> : null}
-            </>
-          ) : null}
-        </div>
-
-        <div className="confirm-dialog-footer">
-          <button type="button" className="btn btn-outline" onClick={onClose}>
+  return (
+    <PriceDialog
+      title="Regenerate"
+      description="Confirm drops the price and rewrites the listing from scratch at the new price. Chat and generated fields are discarded; measurements, flaws, COG, labels and notes are kept. Nothing changes on Vendoo until you Send."
+      onClose={onClose}
+      busy={apply.isPending}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-danger"
+          </Button>
+          <Button
+            variant="destructive"
             disabled={apply.isPending || !preview || selectedPrice == null}
             onClick={() => apply.mutate()}
           >
             {apply.isPending ? "Saving…" : "Confirm"}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+          </Button>
+        </>
+      }
+    >
+      {previewQuery.isLoading ? (
+        <PriceStatus>Loading price history…</PriceStatus>
+      ) : previewQuery.isError ? (
+        <PriceStatus error>
+          {(previewQuery.error as Error).message || "Could not load a price suggestion."}
+        </PriceStatus>
+      ) : preview ? (
+        <>
+          <div className="grid grid-cols-3 divide-x overflow-hidden rounded-xl border bg-card">
+            {([
+              ["Current", preview.current_price],
+              ["First listed", preview.first_price],
+              ["Selected", selectedPrice],
+            ] as const).map(([label, value]) => (
+              <div key={label} className="flex flex-col gap-0.5 px-3 py-2">
+                <span className="text-muted-foreground text-xs">{label}</span>
+                <strong className="font-semibold text-base tabular-nums">{money(value)}</strong>
+              </div>
+            ))}
+          </div>
+
+          <PriceSection title={`Suggested${preview.suggested_mode === "sell_through" ? " · from your sales" : ""}`}>
+            <PriceChip
+              wide
+              active={selection?.kind === "suggested"}
+              note={preview.suggested_reason}
+              onClick={() => choose({ kind: "suggested", price: preview.suggested_price })}
+            >
+              {money(preview.suggested_price)} · −{percentLabel(preview.suggested_effective_percent)}%
+            </PriceChip>
+          </PriceSection>
+
+          {/* The suggested chip already tells this story when it is the source. */}
+          {preview.sell_through && preview.suggested_mode !== "sell_through" ? (
+            <p className="text-muted-foreground text-xs">
+              {preview.sell_through.scope === "category"
+                ? `Your ${preview.sell_through.label}`
+                : preview.sell_through.scope === "brand"
+                  ? `Your ${preview.sell_through.label} items`
+                  : "Your sold items"}
+              : {preview.sell_through.count} sold
+              {preview.sell_through.median_discount_percent != null
+                ? ` at a median ${percentLabel(preview.sell_through.median_discount_percent)}% off`
+                : ""}
+              {preview.sell_through.median_days != null
+                ? `, typically in ${preview.sell_through.median_days} days`
+                : ""}
+              {preview.age_days != null ? ` · this one: ${preview.age_days} days listed` : ""}
+            </p>
+          ) : null}
+
+          {otherCuts.length ? (
+            <PriceSection title="Other cuts">
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Price drop options">
+                {otherCuts.map((option) => (
+                  <PriceChip
+                    key={option.price}
+                    active={selection?.kind === "percent" && selection.price === option.price}
+                    onClick={() =>
+                      choose({
+                        kind: "percent",
+                        percent: option.effective_percent,
+                        price: option.price,
+                      })
+                    }
+                  >
+                    {money(option.price)} · −{percentLabel(option.effective_percent)}%
+                  </PriceChip>
+                ))}
+              </div>
+            </PriceSection>
+          ) : null}
+
+          {preview.comps.target_price != null && preview.comps.target_price < preview.current_price ? (
+            <PriceSection title="Live comps">
+              <PriceChip
+                wide
+                active={selection?.kind === "comps"}
+                onClick={() => choose({ kind: "comps", price: preview.comps.target_price! })}
+              >
+                Comps target {money(preview.comps.target_price)} · −
+                {percentLabel(
+                  Math.round(
+                    (1 - preview.comps.target_price / preview.current_price) * 1000,
+                  ) / 10,
+                )}
+                %{preview.comps.market ? ` · market ${preview.comps.market}` : ""}
+              </PriceChip>
+            </PriceSection>
+          ) : !preview.comps.available ? (
+            <PriceStatus>
+              Sold comps need ChatGPT, Cursor or MiMo connected, or a Brave Search API key in Settings.
+            </PriceStatus>
+          ) : comps.running ? (
+            <PriceStatus>
+              Researching sold comps… You can confirm now, or wait for the live comps target.
+            </PriceStatus>
+          ) : comps.error ? (
+            <PriceStatus error>{comps.error}</PriceStatus>
+          ) : !compsRequested ? (
+            <PriceSection title="Live comps">
+              <Button variant="outline" size="sm" className="w-fit" onClick={() => setCompsRequested(true)}>
+                <SearchIcon />
+                Search sold comps
+              </Button>
+            </PriceSection>
+          ) : null}
+
+          {comps.sources.length ? (
+            <ul className="flex flex-col gap-1 rounded-lg border bg-card px-3 py-2 text-xs" aria-live="polite">
+              {comps.sources.map((source) => (
+                <li key={source.source} className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{source.source}</span>
+                  <span
+                    className={cn(
+                      "text-muted-foreground",
+                      source.state === "done" && "text-success-foreground",
+                      (source.state === "failed" || source.state === "timeout") && "text-destructive-foreground",
+                    )}
+                  >
+                    {sourceStatus(source)}
+                  </span>
+                </li>
+              ))}
+              {comps.step ? <li className="text-muted-foreground">{comps.step}</li> : null}
+            </ul>
+          ) : null}
+
+          <PriceSection title="Custom price" htmlFor="price-drop-custom">
+            <Input
+              nativeInput
+              id="price-drop-custom"
+              className="max-w-40"
+              type="number"
+              min={1}
+              step={1}
+              value={customText}
+              onChange={(event) =>
+                choose(
+                  { kind: "custom", price: Number(event.target.value) || 0 },
+                  event.target.value,
+                )
+              }
+            />
+            {belowComps ? (
+              <PriceStatus>
+                Below the comps formula floor ({money(preview.comps.target_price)}). You can still apply it.
+              </PriceStatus>
+            ) : null}
+          </PriceSection>
+
+          {preview.history.length ? (
+            <PriceSection title="Prior drops">
+              <ul className="flex flex-col gap-0.5 text-muted-foreground text-xs tabular-nums">
+                {preview.history.map((event) => (
+                  <li key={event.revision_id}>
+                    {money(event.from_price)} → {money(event.to_price)} (−{event.percent}%)
+                    {event.created_at ? ` · ${formatDropWhen(event.created_at)}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </PriceSection>
+          ) : null}
+
+          {preview.comps.text ? <SoldCompsCard text={preview.comps.text} /> : null}
+        </>
+      ) : null}
+    </PriceDialog>
   );
 }
