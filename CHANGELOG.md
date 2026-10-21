@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.307 — 2026-10-21
+
+- On your phone, every page has one header with a menu button at the top left that opens all of Studio's pages. A listing now shows Chat and Listing as two tabs under its title, so the chat gets most of the screen.
+- Inventory on your phone scrolls as one list. Select sits at the top, and in Select mode tapping a listing ticks it. Each listing's Rename and Delete are behind its ••• button.
+- Typing on your iPhone no longer pushes the page away: the header stays put and the message box sits just above the keyboard. Return adds a new line; the send button sends.
+- To reorder or delete a photo on your phone, tap it and use Earlier, Later or Delete in the photo viewer.
+- Buttons, menus and rows on your phone are big enough to tap, text boxes no longer zoom the page, and the Queue, ad spend, Logs, Usage and setup guide fit the screen.
+
 ## 0.1.306 — 2026-10-21
 
 - Ask the assistant whether a Sourcing box is worth buying and it now looks at the box's own photos, and frames from its video, on the store's page right then, before it answers. You get Buy, Maybe or Skip for each box, with the reasons: brands it could see on tags, condition, sizes, season and weight, how much of the box the photos actually show, and any red flags such as stock photos or a single photo for a big lot. It says which boxes it really saw photos for. A box whose photos would not load counts as not viewed, never as "looks fine". Nothing is downloaded to your Mac.
