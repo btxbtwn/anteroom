@@ -22,7 +22,8 @@ describe("ProviderLogo", () => {
     expect(PROVIDER_LOGOS.chatgpt.paths[0].d).toContain("M101.228");
     expect(PROVIDER_LOGOS.chatgpt.viewBox).toBe("0 0 180 180");
     expect(PROVIDER_LOGOS.cursor.viewBox).toBe("0 0 466.73 532.09");
-    expect(PROVIDER_LOGOS.mimo.paths.length).toBeGreaterThan(1);
+    expect(PROVIDER_LOGOS.mimo.viewBox).toBe("0 0 120 120");
+    expect(PROVIDER_LOGOS.mimo.paths).toHaveLength(1);
   });
 
   it("maps API provider names to logo ids", () => {
