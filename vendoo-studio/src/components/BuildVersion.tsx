@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { frontendBuildState, reloadForBackend } from "./buildStamp";
+import { StatusDot } from "./StatusDot";
 
 export function BuildVersion({ backendVersion }: { backendVersion: string | null | undefined }) {
   const state = frontendBuildState(__STUDIO_BUILD__, backendVersion);
@@ -12,9 +13,9 @@ export function BuildVersion({ backendVersion }: { backendVersion: string | null
     }
   }, [state.outdated, backendVersion]);
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      {state.outdated && <span className="status-dot outdated" />}
-      <span className={state.outdated ? "status-outdated" : undefined} title={state.title}>
+    <span className="flex items-center gap-1.5">
+      {state.outdated && <StatusDot tone="warning" />}
+      <span className={state.outdated ? "text-warning-foreground" : undefined} title={state.title}>
         {state.label}
       </span>
     </span>

@@ -1,9 +1,7 @@
 /* ── Responsive ── */
 
 @media (max-width: 900px) {
-  .status-bar {
-    display: none;
-  }
+  
 
   .app-content {
     flex-direction: column;
@@ -302,11 +300,6 @@
     overflow: hidden;
   }
 
-  /* The mobile bar replaces the desktop titlebar band. */
-  .workspace-topbar {
-    display: none;
-  }
-
   /* The title takes its own line; tabs and actions share the row below. */
   .pr-review-title-row > .pr-review-title {
     display: block;
@@ -515,29 +508,6 @@
     padding-right: 12px;
   }
 }
-
-.status-connect {
-  background: none;
-  border: 1px solid var(--color-border-bright);
-  color: var(--color-text-secondary);
-  font: inherit;
-  font-size: var(--text-2xs);
-  letter-spacing: 0.02em;
-  padding: 2px 8px;
-  border-radius: var(--radius-xs);
-  cursor: pointer;
-}
-
-.status-connect:hover:not(:disabled) {
-  color: var(--color-text);
-  border-color: var(--color-text-muted);
-}
-
-.status-connect:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
 
 @media (max-width: 900px) {
   .browser-navigation .browser-tool {

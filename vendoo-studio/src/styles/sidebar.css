@@ -39,13 +39,6 @@ html.desktop-app .sidebar {
   padding-left: 0;
 }
 
-html.desktop-app .workspace-topbar {
-  height: var(--titlebar-height);
-  /* Traffic lights, then the same 10px gap T3 leaves before the first control. */
-  padding-left: var(--traffic-light-inset);
-  padding-right: 10px;
-}
-
 html.desktop-app .editor-header {
   height: var(--titlebar-height);
 }

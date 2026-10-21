@@ -1,6 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import { Button } from "./ui/button";
+import { Spinner } from "./ui/spinner";
+import { toastManager } from "./ui/toast";
 
 const WAIT_FOR_EXTENSION_MS = 25_000;
 const WAIT_POLL_MS = 500;
@@ -27,7 +30,15 @@ async function waitForExtensionConnected(
   return Boolean(finalStatus?.connected);
 }
 
-export function ConnectChromeButton({ compact = false, className }: { compact?: boolean; className?: string }) {
+export function ConnectChromeButton({
+  compact = false,
+  variant = "outline",
+  className,
+}: {
+  compact?: boolean;
+  variant?: "default" | "outline";
+  className?: string;
+}) {
   const queryClient = useQueryClient();
   const [waiting, setWaiting] = useState(false);
   const connect = useMutation({
@@ -47,7 +58,7 @@ export function ConnectChromeButton({ compact = false, className }: { compact?: 
     },
     onError: (err: Error) => {
       setWaiting(false);
-      window.alert(err.message || "Could not open Chrome.");
+      toastManager.add({ type: "error", title: "Could not open Chrome", description: err.message });
     },
   });
 
@@ -57,13 +68,16 @@ export function ConnectChromeButton({ compact = false, className }: { compact?: 
   else if (waiting) label = "Waiting for extension…";
 
   return (
-    <button
+    <Button
       type="button"
-      className={compact ? "status-connect" : className || "btn btn-secondary btn-sm"}
+      variant={variant}
+      size={compact ? "micro" : "sm"}
+      className={className}
       disabled={busy}
       onClick={() => connect.mutate()}
     >
+      {busy ? <Spinner /> : null}
       {label}
-    </button>
+    </Button>
   );
 }
