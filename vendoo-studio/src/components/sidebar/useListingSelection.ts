@@ -6,7 +6,7 @@ import {
   type BulkRegenerateListing,
 } from "../../bulkRegenerate";
 import { isConfirmDialogOpen } from "../../ui/confirmDialog";
-import { addToast } from "../../ui/toast";
+import { toastManager } from "../ui/toast";
 import type { Suggestion } from "../../api/types";
 import type { BulkRegenerate } from "../useBulkRegenerate";
 import type { Listing } from "./listingShelves";
@@ -106,7 +106,7 @@ export function useListingSelection({
       setPickedIds(new Set(result.failed.map((item) => item.id)));
       setSelecting(true);
     }
-    addToast(bulkRegenerateToast(result));
+    toastManager.add(bulkRegenerateToast(result));
   }, [bulk, exitSelecting, listingsById, suggestions]);
 
   const regenerateSelected = useCallback(async () => {

@@ -5,9 +5,14 @@ import type { AdMarketplace, AdMarketplaceTotals, AdSpendEntry, AdSpendInput } f
 import type { AnalyticsRange } from "../api/types";
 import { confirmDialog } from "../ui/confirmDialog";
 import { ANALYTICS_RANGES, formatMoney } from "./analyticsFormat";
-import { Stat } from "./AnalyticsStat";
+import { Stat, StatGrid } from "./AnalyticsStat";
 import { marketplaceName } from "./marketplaceNames";
-import "../styles/ad-spend.css";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { Textarea } from "./ui/textarea";
+import { Toggle, ToggleGroup } from "./ui/toggle-group";
+import { EmptyRow, FormError, FormField, PageNote, PageSection, Panel, RowList } from "./WorkspacePage";
 
 const MARKETS: AdMarketplace[] = ["poshmark", "etsy"];
 const PROGRAMS: Record<AdMarketplace, string> = { poshmark: "Promoted Closet", etsy: "Etsy Ads" };
@@ -46,47 +51,45 @@ export function AdSpend() {
   };
 
   return (
-    <section className="analytics-section ad-spend" aria-label="Ads">
-      <div className="analytics-title-row">
-        <h2 className="analytics-section-title">Ads</h2>
-        {editing == null ? (
-          <span className="ad-spend-actions">
-            <button type="button" className="pr-pill" disabled={uploadCsv.isPending} onClick={() => csvInput.current?.click()}>
-              {uploadCsv.isPending ? "Importing…" : "Upload Etsy Ads CSV"}
-            </button>
-            <button type="button" className="pr-pill" onClick={() => setEditing("new")}>Add ad spend</button>
-          </span>
-        ) : null}
-        <input
-          ref={csvInput}
-          type="file"
-          accept=".csv,text/csv"
-          hidden
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) uploadCsv.mutate(file);
-          }}
-        />
-      </div>
-      <p className="analytics-note">
+    <PageSection
+      aria-label="Ads"
+      title="Ads"
+      actions={editing == null ? <>
+        <Button variant="outline" size="xs" disabled={uploadCsv.isPending} onClick={() => csvInput.current?.click()}>
+          {uploadCsv.isPending ? "Importing…" : "Upload Etsy Ads CSV"}
+        </Button>
+        <Button variant="outline" size="xs" onClick={() => setEditing("new")}>Add ad spend</Button>
+      </> : null}
+    >
+      <input
+        ref={csvInput}
+        type="file"
+        accept=".csv,text/csv"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) uploadCsv.mutate(file);
+        }}
+      />
+      <PageNote>
         Poshmark Promoted Closet and Etsy Ads don't share their numbers with Vendoo. Copy what each dashboard shows
         for a week or a month: the spend, and if you like the clicks, orders, and sales it credits to the ads.
-      </p>
-      <p className="analytics-note">
+      </PageNote>
+      <PageNote>
         For Etsy Ads, download the stats CSV from Etsy and upload it instead of typing it in. Each day with activity
         becomes an entry, and uploading a newer export replaces those days.
-      </p>
+      </PageNote>
       {uploadCsv.isSuccess ? (
-        <p className="analytics-note" role="status">
+        <PageNote role="status" className="text-foreground">
           Imported {uploadCsv.data.days} {uploadCsv.data.days === 1 ? "day" : "days"} of Etsy Ads,{" "}
           {formatMoney(uploadCsv.data.spend)} spent, {formatDay(uploadCsv.data.start)}–{formatDay(uploadCsv.data.end)}.
           {uploadCsv.data.overlapping_entries > 0
             ? ` ${uploadCsv.data.overlapping_entries === 1 ? "An Etsy entry you typed covers" : `${uploadCsv.data.overlapping_entries} Etsy entries you typed cover`} some of these days; remove ${uploadCsv.data.overlapping_entries === 1 ? "it" : "them"} so the spend is not counted twice.`
             : ""}
-        </p>
+        </PageNote>
       ) : null}
-      {uploadCsv.isError ? <p className="ad-spend-error" role="alert">{uploadCsv.error.message}</p> : null}
+      {uploadCsv.isError ? <FormError>{uploadCsv.error.message}</FormError> : null}
       {editing != null ? (
         <AdSpendForm
           key={editing === "new" ? "new" : editing.id}
@@ -97,23 +100,20 @@ export function AdSpend() {
       ) : null}
 
       {query.data?.length ? (
-        <div className="pr-pills ad-spend-heading" role="tablist" aria-label="Ad spend period">
-          {ANALYTICS_RANGES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={range === item.id}
-              className={`pr-pill${range === item.id ? " is-active" : ""}`}
-              onClick={() => setRange(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <ToggleGroup
+          aria-label="Ad spend period"
+          className="flex-wrap"
+          value={[range]}
+          onValueChange={(next) => {
+            const value = next[0] as AnalyticsRange | undefined;
+            if (value) setRange(value);
+          }}
+        >
+          {ANALYTICS_RANGES.map((item) => <Toggle key={item.id} value={item.id}>{item.label}</Toggle>)}
+        </ToggleGroup>
       ) : null}
       {ads && ads.marketplaces.length > 0 ? (
-        <div className="analytics-stats">
+        <StatGrid>
           <Stat label="Ad spend" value={formatMoney(ads.spend)} hint="Spread evenly over the days each entry covers" />
           <Stat
             label="Business profit after ads"
@@ -124,33 +124,35 @@ export function AdSpend() {
               : `${formatMoney(ads.profit)} profit on every marketplace, less ${formatMoney(ads.spend)} of ads`}
           />
           {ads.marketplaces.map((market) => <MarketStat key={market.id} market={market} />)}
-        </div>
+        </StatGrid>
       ) : null}
 
-      {query.isError ? <p className="analytics-note">{(query.error as Error).message}</p> : null}
-      {totals.isError ? <p className="analytics-note">{(totals.error as Error).message}</p> : null}
-      {remove.isError ? <p className="ad-spend-error" role="alert">{remove.error.message}</p> : null}
-      {query.data?.length === 0 && editing == null ? <p className="analytics-note">No ad spend recorded yet.</p> : null}
-      {query.data?.length && ads?.marketplaces.length === 0 ? <p className="analytics-note">No ad spend in this period.</p> : null}
+      {query.isError ? <FormError>{(query.error as Error).message}</FormError> : null}
+      {totals.isError ? <FormError>{(totals.error as Error).message}</FormError> : null}
+      {remove.isError ? <FormError>{remove.error.message}</FormError> : null}
+      {query.data?.length === 0 && editing == null ? <EmptyRow>No ad spend recorded yet.</EmptyRow> : null}
+      {query.data?.length && ads?.marketplaces.length === 0 ? <EmptyRow>No ad spend in this period.</EmptyRow> : null}
       {query.data?.length ? (
-        <ul className="analytics-recent ad-spend-entries">
+        <RowList>
           {query.data.map((entry) => (
-            <li key={entry.id} className="ad-spend-entry">
-              <span className="analytics-recent-title">
-                {PROGRAMS[entry.marketplace]}
-                <small>{formatRange(entry)}{entry.notes ? ` · ${entry.notes}` : ""}</small>
+            <li key={entry.id} className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-foreground">{PROGRAMS[entry.marketplace]}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatRange(entry)}{entry.notes ? ` · ${entry.notes}` : ""}
+                </span>
               </span>
-              <span className="analytics-recent-meta">{entryFigures(entry)}</span>
-              <span className="analytics-recent-price">{formatMoney(entry.spend)}</span>
-              <span className="ad-spend-actions">
-                <button type="button" className="pr-pill" onClick={() => setEditing(entry)}>Edit</button>
-                <button type="button" className="pr-pill" disabled={remove.isPending} onClick={() => void onRemove(entry)}>Remove</button>
+              <span className="text-xs text-muted-foreground">{entryFigures(entry)}</span>
+              <span className="w-20 text-right text-foreground tabular-nums">{formatMoney(entry.spend)}</span>
+              <span className="flex items-center gap-1">
+                <Button variant="ghost-muted" size="xs" onClick={() => setEditing(entry)}>Edit</Button>
+                <Button variant="ghost-destructive" size="xs" disabled={remove.isPending} onClick={() => void onRemove(entry)}>Remove</Button>
               </span>
             </li>
           ))}
-        </ul>
+        </RowList>
       ) : null}
-    </section>
+    </PageSection>
   );
 }
 
@@ -214,28 +216,39 @@ function AdSpendForm({
   }
 
   return (
-    <form className="ad-spend-form" onSubmit={submit} aria-label={entry ? "Edit ad spend" : "Add ad spend"}>
-      <div className="analytics-title-row">
-        <h3>{entry ? "Edit ad spend" : "Add ad spend"}</h3>
-        <button type="button" className="pr-pill" disabled={save.isPending} onClick={onClose}>Close</button>
-      </div>
-      <fieldset disabled={save.isPending}>
-        <div className="ad-spend-fields">
-          <label>Ads<select autoFocus value={market} onChange={(e) => setMarket(e.target.value as AdMarketplace)}>
-            {MARKETS.map((value) => <option key={value} value={value}>{marketplaceName(value)} {PROGRAMS[value]}</option>)}
-          </select></label>
-          <label>Start date<input type="date" required value={start} onChange={(e) => setStart(e.target.value)} /></label>
-          <label>End date (inclusive)<input type="date" required min={start} value={end} onChange={(e) => setEnd(e.target.value)} /></label>
-          <label>Spend ($)<input type="number" required min={0} step="0.01" value={spend} onChange={(e) => setSpend(e.target.value)} /></label>
-          <label>Clicks<input type="number" min={0} step="1" placeholder="Optional" value={clicks} onChange={(e) => setClicks(e.target.value)} /></label>
-          <label>Orders from ads<input type="number" min={0} step="1" placeholder="Optional" value={orders} onChange={(e) => setOrders(e.target.value)} /></label>
-          <label>Sales from ads ($)<input type="number" min={0} step="0.01" placeholder="Optional" value={revenue} onChange={(e) => setRevenue(e.target.value)} /></label>
+    <Panel divided={false} className="p-4">
+      <form className="flex flex-col gap-4" onSubmit={submit} aria-label={entry ? "Edit ad spend" : "Add ad spend"}>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-medium text-foreground">{entry ? "Edit ad spend" : "Add ad spend"}</h3>
+          <Button variant="ghost-muted" size="xs" disabled={save.isPending} onClick={onClose}>Close</Button>
         </div>
-        <label className="ad-spend-notes">Notes<textarea maxLength={2000} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
-        {error || save.isError ? <p className="ad-spend-error" role="alert">{error || save.error?.message}</p> : null}
-        <button type="submit" className="pr-pill" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</button>
-      </fieldset>
-    </form>
+        <fieldset className="flex min-w-0 flex-col gap-4" disabled={save.isPending}>
+          <div className="grid grid-cols-1 gap-3 @lg/page:grid-cols-2 @3xl/page:grid-cols-4">
+            <FormField label="Ads">
+              <Select value={market} onValueChange={(value) => setMarket(value as AdMarketplace)}>
+                <SelectTrigger autoFocus>
+                  <SelectValue>{marketplaceName(market)} {PROGRAMS[market]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup>
+                  {MARKETS.map((value) => <SelectItem key={value} value={value}>{marketplaceName(value)} {PROGRAMS[value]}</SelectItem>)}
+                </SelectPopup>
+              </Select>
+            </FormField>
+            <FormField label="Start date"><Input nativeInput type="date" required value={start} onChange={(e) => setStart(e.target.value)} /></FormField>
+            <FormField label="End date (inclusive)"><Input nativeInput type="date" required min={start} value={end} onChange={(e) => setEnd(e.target.value)} /></FormField>
+            <FormField label="Spend ($)"><Input nativeInput type="number" required min={0} step="0.01" value={spend} onChange={(e) => setSpend(e.target.value)} /></FormField>
+            <FormField label="Clicks"><Input nativeInput type="number" min={0} step="1" placeholder="Optional" value={clicks} onChange={(e) => setClicks(e.target.value)} /></FormField>
+            <FormField label="Orders from ads"><Input nativeInput type="number" min={0} step="1" placeholder="Optional" value={orders} onChange={(e) => setOrders(e.target.value)} /></FormField>
+            <FormField label="Sales from ads ($)"><Input nativeInput type="number" min={0} step="0.01" placeholder="Optional" value={revenue} onChange={(e) => setRevenue(e.target.value)} /></FormField>
+          </div>
+          <FormField label="Notes"><Textarea maxLength={2000} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} /></FormField>
+          {error || save.isError ? <FormError>{error || save.error?.message}</FormError> : null}
+          <div className="flex justify-end">
+            <Button type="submit" size="sm" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
+          </div>
+        </fieldset>
+      </form>
+    </Panel>
   );
 }
 

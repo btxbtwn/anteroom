@@ -3,7 +3,8 @@
 ``fetch_listing_specifics`` already knows, for each marketplace leaf, exactly
 which fields Vendoo's form would show and which values each one accepts. This
 turns that into work for the model: every field the listing has not answered is
-put to it with its allowed values, in rounds, until nothing is left to ask.
+put to it with its allowed values, in rounds, until nothing is left to ask —
+one concurrent fill per marketplace.
 
 The request is built by ``listing_field_gaps`` — the same prompt the Apply/Send
 filler uses — so a field asked here reads identically to one asked there. What
@@ -18,6 +19,7 @@ import logging
 import time
 from typing import Any
 
+from vendoo_studio.services import live_trace, model_slots
 from vendoo_studio.services.fill_log import listing_value_for_field, write_values_into_listing
 from vendoo_studio.services.vendoo_specifics import (
     FieldSpec, encode_scaled, encode_specific, is_not_applicable,
@@ -32,8 +34,23 @@ MAX_ROUNDS = 6
 # send on "Filling marketplace fields" with no end. Past it, the listing goes
 # to Vendoo with what landed and the rest is reported as still empty.
 FILL_DEADLINE_SEC = 120.0
+# Marketplaces filled at once. Each is a model call; a generate run's own cap
+# (``model_slots``) applies on top of this.
+MAX_CONCURRENT_FILLS = 3
+MARKETPLACE_LABELS = {
+    "general": "General",
+    "ebay": "eBay",
+    "poshmark": "Poshmark",
+    "mercari": "Mercari",
+    "depop": "Depop",
+    "etsy": "Etsy",
+    "facebook": "Facebook",
+    "grailed": "Grailed",
+}
 
-__all__ = ["specifics_gaps", "fill_listing_specifics", "MAX_ROUNDS", "FILL_DEADLINE_SEC"]
+__all__ = [
+    "specifics_gaps", "fill_listing_specifics", "MAX_ROUNDS", "FILL_DEADLINE_SEC", "MAX_CONCURRENT_FILLS",
+]
 
 
 def specifics_gaps(
@@ -78,6 +95,78 @@ def specifics_gaps(
     return gaps
 
 
+async def _fill_marketplace(
+    marketplace: str,
+    listing: dict[str, Any],
+    fields: dict[str, FieldSpec],
+    provider,
+    *,
+    evidence: str,
+    deadline: float,
+    limit: asyncio.Semaphore,
+) -> list[dict[str, Any]]:
+    """Rounds over one marketplace's gaps; returns the patches that landed.
+
+    Works on its own copy of the listing, so marketplaces filling side by side
+    never see each other's half-written state. Only patches for this
+    marketplace count: a model that answers fields it was not asked about does
+    not get to write them.
+    """
+    from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
+    from vendoo_studio.services.fill_log import MAX_PATCH_FIELDS
+    from vendoo_studio.services.listing_field_gaps import (
+        MAX_GAPS_PER_ROUND,
+        _request_missing_field_values,
+    )
+
+    current = dict(listing)
+    landed: list[dict[str, Any]] = []
+    stalled: set[str] = set()
+    only = {marketplace: fields}
+    label = MARKETPLACE_LABELS.get(marketplace, marketplace.title())
+    async with live_trace.agent(f"specifics-{marketplace}", f"{label} fields") as agent:
+        for _ in range(MAX_ROUNDS):
+            gaps = [gap for gap in specifics_gaps(current, only) if gap["field"] not in stalled]
+            if not gaps or deadline <= time.monotonic():
+                break
+            batch = gaps[:MAX_GAPS_PER_ROUND]
+            agent.update(f"Filling {len(batch)} {label} fields")
+            async with limit, model_slots.slot():
+                request = asyncio.ensure_future(_request_missing_field_values(
+                    provider,
+                    listing=current,
+                    gaps=batch,
+                    evidence=evidence,
+                ))
+                # Not wait_for: that waits out the cancelled call's cleanup, and a
+                # stalled provider's cleanup can itself block on its worker thread.
+                done, _pending = await asyncio.wait(
+                    {request}, timeout=max(deadline - time.monotonic(), 0),
+                )
+            if not done:
+                request.cancel()
+                log.warning("%s category field fill stopped after %.0fs", marketplace, FILL_DEADLINE_SEC)
+                break
+            # Cap what lands, not just what was asked.
+            patches = [
+                patch for patch in (request.result() or [])[:MAX_PATCH_FIELDS]
+                if str(patch.get("marketplace") or "").strip().casefold() == marketplace.casefold()
+            ]
+            if not patches:
+                stalled.update(gap["field"] for gap in batch)
+                continue
+            updated = write_values_into_listing(current, patches)
+            normalize_ebay_sizes(updated)
+            if updated == current:
+                # Move past this batch so unresolved fields do not hide later ones.
+                stalled.update(gap["field"] for gap in batch)
+                continue
+            current = updated
+            landed.extend(patches)
+        agent.result(f"Filled {len(landed)} {label} fields")
+    return landed
+
+
 async def fill_listing_specifics(
     listing: dict[str, Any],
     specifics: dict[str, dict[str, FieldSpec]],
@@ -87,63 +176,45 @@ async def fill_listing_specifics(
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Fill every empty category field. Returns ``(listing, still_empty)``.
 
-    Rounds stop early when the model returns nothing, so a field it cannot
-    support from the evidence is reported rather than invented, and stop at
-    ``FILL_DEADLINE_SEC`` so a stalled model cannot hold the send.
+    Each marketplace is its own concurrent fill (at most
+    ``MAX_CONCURRENT_FILLS`` at once), so a big eBay category no longer holds
+    Poshmark's few fields behind it. Rounds stop early when the model returns
+    nothing, so a field it cannot support from the evidence is reported rather
+    than invented, and everything stops at ``FILL_DEADLINE_SEC`` so a stalled
+    model cannot hold the send. What landed is merged once, in marketplace
+    order, into the listing that came in.
     """
-    from vendoo_studio.services.fill_log import MAX_PATCH_FIELDS
-    from vendoo_studio.services.listing_field_gaps import (
-        MAX_GAPS_PER_ROUND,
-        _request_missing_field_values,
-    )
-
-    current = dict(listing) if isinstance(listing, dict) else {}
     from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
 
+    current = dict(listing) if isinstance(listing, dict) else {}
     normalize_ebay_sizes(current)
     if provider is None or not specifics:
         return current, specifics_gaps(current, specifics)
 
-    filled = 0
-    stalled: set[tuple[str, str]] = set()
     deadline = time.monotonic() + FILL_DEADLINE_SEC
-    for _ in range(MAX_ROUNDS):
-        gaps = [
-            gap for gap in specifics_gaps(current, specifics)
-            if (gap["marketplace"], gap["field"]) not in stalled
-        ]
-        if not gaps:
-            break
-        batch = gaps[:MAX_GAPS_PER_ROUND]
-        request = asyncio.ensure_future(_request_missing_field_values(
-            provider,
-            listing=current,
-            gaps=batch,
-            evidence=evidence,
-        ))
-        # Not wait_for: that waits out the cancelled call's cleanup, and a
-        # stalled provider's cleanup can itself block on its worker thread.
-        done, _pending = await asyncio.wait({request}, timeout=max(deadline - time.monotonic(), 0))
-        if not done:
-            request.cancel()
-            log.warning("category field fill stopped after %.0fs", FILL_DEADLINE_SEC)
-            break
-        patches = request.result()
-        if not patches:
-            stalled.update((gap["marketplace"], gap["field"]) for gap in batch)
+    limit = asyncio.Semaphore(MAX_CONCURRENT_FILLS)
+    order = [mp for mp in sorted(specifics) if specifics_gaps(current, {mp: specifics[mp]})]
+    results = await asyncio.gather(*(
+        _fill_marketplace(
+            marketplace, current, specifics[marketplace], provider,
+            evidence=evidence, deadline=deadline, limit=limit,
+        )
+        for marketplace in order
+    ), return_exceptions=True)
+
+    patches: list[dict[str, Any]] = []
+    for marketplace, result in zip(order, results, strict=True):
+        if isinstance(result, asyncio.CancelledError):
+            raise result
+        if isinstance(result, BaseException):
+            log.warning("%s category field fill failed: %s", marketplace, result)
             continue
-        # Cap what lands, not just what was asked: a model that answers more
-        # fields than it was given should not get to write them.
-        updated = write_values_into_listing(current, patches[:MAX_PATCH_FIELDS])
-        normalize_ebay_sizes(updated)
-        if updated == current:
-            # Move past this batch so unresolved fields do not hide later ones.
-            stalled.update((gap["marketplace"], gap["field"]) for gap in batch)
-            continue
-        current = updated
-        filled += len(patches[:MAX_PATCH_FIELDS])
+        patches.extend(result)
+    if patches:
+        current = write_values_into_listing(current, patches)
+        normalize_ebay_sizes(current)
 
     remaining = specifics_gaps(current, specifics)
-    if filled or remaining:
-        log.info("category fields: filled %s, %s still empty", filled, len(remaining))
+    if patches or remaining:
+        log.info("category fields: filled %s, %s still empty", len(patches), len(remaining))
     return current, remaining

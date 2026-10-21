@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -217,6 +218,59 @@ async def analyze_photos_with_tag_retry(provider, paths: list[str], **kwargs) ->
         if not (isinstance(item, dict) and str(item.get("field") or "").casefold() in resolved)
     ]
     return {**result, "evidence": merged}
+
+
+IDENTITY_FIELDS = ("brand", "graphic", "style", "category", "department", "size", "color")
+IDENTITY_PHOTOS = 3
+IDENTITY_MAX_SIDE = 768
+IDENTITY_TIMEOUT_SEC = 45
+_IDENTITY_SYSTEM = (
+    "Identify this secondhand item for a marketplace price search. Return ONLY JSON "
+    '{"brand": "", "graphic": "", "style": "", "category": "", "department": "", '
+    '"size": "", "color": ""}. Short values, empty when not visible. '
+    "brand: the maker on the label or logo — never guess one. "
+    "graphic: a named character, franchise, band, team or logo printed on it. "
+    "style: the item style in at most three words. category: the item type, e.g. T-Shirt. "
+    "department: Women, Men, Girls, Boys, Baby or Unisex. size: from the tag only."
+)
+
+
+async def quick_identity_read(provider, paths: list[str], notes: str = "") -> dict[str, str]:
+    """Brand, item type and size from a few small photos — enough to search comps.
+
+    The full photo analysis reads every photo at full detail; comps only need
+    to know what the item is, so this runs beside it and lets comps start
+    early. Empty when the provider has no vision chat or the read fails.
+    """
+    from vendoo_studio.providers.xiaomi_mimo import encode_images, unpack_stream_item
+
+    vision_chat = getattr(provider, "vision_chat", None)
+    if vision_chat is None or not paths:
+        return {}
+    parts: list[dict] = [{"type": "text", "text": "Identify this item."}]
+    if notes:
+        parts[0]["text"] += f"\nSeller notes: {notes[:1000]}"
+    for url in await encode_images(paths[:IDENTITY_PHOTOS], IDENTITY_MAX_SIDE):
+        parts.append({"type": "image_url", "image_url": {"url": url}})
+    messages = [{"role": "system", "content": _IDENTITY_SYSTEM}, {"role": "user", "content": parts}]
+    text = ""
+    async with asyncio.timeout(IDENTITY_TIMEOUT_SEC):
+        async for item in vision_chat(messages):
+            kind, piece = unpack_stream_item(item)
+            if kind == "content" and piece:
+                text += piece
+    match = re.search(r"\{[\s\S]*\}", text)
+    try:
+        payload = json.loads(match.group()) if match else {}
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        key: value
+        for key in IDENTITY_FIELDS
+        if (value := " ".join(str(payload.get(key) or "").split()))
+    }
 
 
 def analysis_with_photo_count(photo_count: int, analysis_text: str | None = None) -> str:

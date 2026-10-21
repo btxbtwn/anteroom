@@ -77,7 +77,10 @@ export function formatClientStreamError(
   return `Error: ${raw}`;
 }
 
-/** Events that only feed the live trace and never belong in the reply text. */
+/**
+ * Events that only feed the live trace and never belong in the reply text.
+ * `agent` is parallel generation work. The timeline renders it.
+ */
 export const TRACE_ONLY_EVENTS = new Set(["step", "posted", "agent"]);
 
 type SseParseState = { eventType: string; parts: SseParts; dataLines: number; agentData: string };

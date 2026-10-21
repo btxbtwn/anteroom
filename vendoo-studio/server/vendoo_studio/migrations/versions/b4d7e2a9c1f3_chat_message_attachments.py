@@ -1,7 +1,7 @@
 """images attached to listing chat and assistant messages
 
 Revision ID: b4d7e2a9c1f3
-Revises: a3c9e1f4b682
+Revises: e0520d48a61e
 Create Date: 2026-10-20 12:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = 'b4d7e2a9c1f3'
-down_revision = 'a3c9e1f4b682'
+down_revision = 'e0520d48a61e'
 branch_labels = None
 depends_on = None
 

@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import { api } from "../api/client";
 import type { PriceDropPreview } from "../api/types";
 import {
@@ -11,11 +10,8 @@ import {
   type BulkPriceSuggestion,
   type BulkRegenerateListing,
 } from "../bulkRegenerate";
-
-function money(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) return "—";
-  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
-}
+import { money, PriceChip, PriceDialog, PriceRow, PriceRows, PriceSection, PriceStatus } from "./PriceDropParts";
+import { Button } from "./ui/button";
 
 function suggestionFromPreview(preview: PriceDropPreview): BulkPriceSuggestion {
   const mode =
@@ -53,17 +49,6 @@ export function BulkRegeneratePriceDialog({
     () => listings.filter((listing) => listing.price != null && listing.price > 0).map((listing) => listing.id),
     [listings],
   );
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [onClose]);
 
   useEffect(() => {
     if (choice.kind !== "suggested" || pricedIds.length === 0) return;
@@ -106,96 +91,69 @@ export function BulkRegeneratePriceDialog({
   const [title, description] = warning.split("\n");
   const dropping = drops.size > 0;
 
-  return createPortal(
-    <div className="confirm-dialog price-drop-dialog" role="presentation">
-      <button type="button" className="confirm-dialog-backdrop" aria-label="Cancel" onClick={onClose} />
-      <div
-        className="confirm-dialog-popup price-drop-popup"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="bulk-price-drop-title"
-      >
-        <div className="confirm-dialog-header">
-          <h2 id="bulk-price-drop-title" className="confirm-dialog-title">{title}</h2>
-          <p className="confirm-dialog-description">
-            {description}
-            {" "}
-            Choose a markdown to drop every priced listing before the rewrite, or keep prices.
-          </p>
-        </div>
-
-        <div className="price-drop-body">
-          <div className="price-drop-section">
-            <div className="price-drop-section-title">Price</div>
-            <div className="price-drop-chips" role="group" aria-label="Price drop">
-              <button
-                type="button"
-                className={`price-drop-chip${choice.kind === "keep" ? " is-active" : ""}`}
-                onClick={() => setChoice({ kind: "keep" })}
-              >
-                Keep prices
-              </button>
-              {BULK_DROP_PERCENTS.map((percent) => (
-                <button
-                  key={percent}
-                  type="button"
-                  className={`price-drop-chip${choice.kind === "percent" && choice.percent === percent ? " is-active" : ""}`}
-                  onClick={() => setChoice({ kind: "percent", percent })}
-                >
-                  −{percent}% each
-                </button>
-              ))}
-              <button
-                type="button"
-                className={`price-drop-chip price-drop-chip-wide${choice.kind === "suggested" ? " is-active" : ""}`}
-                onClick={() => {
-                  if (choice.kind === "suggested") return;
-                  setChoice({ kind: "suggested" });
-                  setLoadError("");
-                  setLoading(pricedIds.length > 0);
-                }}
-              >
-                Each listing's suggestion
-                <span className="price-drop-chip-note">
-                  The same suggestion Regenerate offers on one listing, from its own sales and prior drops.
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {choice.kind === "suggested" && loadError ? (
-            <p className="price-drop-status is-error">{loadError}</p>
-          ) : null}
-          {choice.kind === "suggested" && loading ? (
-            <p className="price-drop-status">Loading a suggestion for each priced listing…</p>
-          ) : null}
-
-          <ul className="price-drop-rows">
-            {listings.map((listing) => (
-              <li key={listing.id} className="price-drop-row">
-                <span className="price-drop-row-title">{listing.title}</span>
-                <span className="price-drop-row-price">{rowPrice(listing, choice, drops, loading)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="confirm-dialog-footer">
-          <button type="button" className="btn btn-outline" onClick={onClose}>
+  return (
+    <PriceDialog
+      title={title}
+      description={`${description} Choose a markdown to drop every priced listing before the rewrite, or keep prices.`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-danger"
+          </Button>
+          <Button
+            variant="destructive"
             disabled={choice.kind === "suggested" && loading}
             onClick={() => onConfirm(drops)}
           >
             {dropping ? "Drop and rewrite" : "Rewrite"}
-          </button>
+          </Button>
+        </>
+      }
+    >
+      <PriceSection title="Price">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Price drop">
+          <PriceChip active={choice.kind === "keep"} onClick={() => setChoice({ kind: "keep" })}>
+            Keep prices
+          </PriceChip>
+          {BULK_DROP_PERCENTS.map((percent) => (
+            <PriceChip
+              key={percent}
+              active={choice.kind === "percent" && choice.percent === percent}
+              onClick={() => setChoice({ kind: "percent", percent })}
+            >
+              −{percent}% each
+            </PriceChip>
+          ))}
+          <PriceChip
+            wide
+            active={choice.kind === "suggested"}
+            note="The same suggestion Regenerate offers on one listing, from its own sales and prior drops."
+            onClick={() => {
+              if (choice.kind === "suggested") return;
+              setChoice({ kind: "suggested" });
+              setLoadError("");
+              setLoading(pricedIds.length > 0);
+            }}
+          >
+            Each listing's suggestion
+          </PriceChip>
         </div>
-      </div>
-    </div>,
-    document.body,
+      </PriceSection>
+
+      {choice.kind === "suggested" && loadError ? <PriceStatus error>{loadError}</PriceStatus> : null}
+      {choice.kind === "suggested" && loading ? (
+        <PriceStatus>Loading a suggestion for each priced listing…</PriceStatus>
+      ) : null}
+
+      <PriceRows>
+        {listings.map((listing) => (
+          <PriceRow key={listing.id} title={listing.title}>
+            {rowPrice(listing, choice, drops, loading)}
+          </PriceRow>
+        ))}
+      </PriceRows>
+    </PriceDialog>
   );
 }
 

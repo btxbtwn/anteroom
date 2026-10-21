@@ -1,11 +1,29 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { ChevronRightIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { AnalyticsGroup, AnalyticsRange, AnalyticsSales, InventoryAnalytics } from "../api/types";
+import { cn } from "../lib/utils";
 import { ANALYTICS_RANGES, formatChange, formatDays, formatMoney } from "./analyticsFormat";
 import { marketplaceName } from "./marketplaceNames";
-import { Stat } from "./AnalyticsStat";
+import { Stat, StatGrid } from "./AnalyticsStat";
 import { VendooImportButton } from "./VendooImportButton";
+import { Input } from "./ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { Spinner } from "./ui/spinner";
+import { Toggle, ToggleGroup } from "./ui/toggle-group";
+import {
+  EmptyRow,
+  ListRow,
+  PageError,
+  PageHeader,
+  PageNote,
+  PageSection,
+  PageSkeleton,
+  Panel,
+  RowList,
+  WorkspacePage,
+} from "./WorkspacePage";
 
 const PERIODS: { id: AnalyticsRange; label: string }[] = [
   ...ANALYTICS_RANGES,
@@ -34,235 +52,246 @@ export function AnalyticsPage({ onOpenListing }: Props) {
     : ANALYTICS_RANGES.find((item) => item.id === (data?.range ?? range))?.heading ?? "Sales";
 
   return (
-    <div className="analytics-page">
-      <div className="analytics-inner">
-        <header className="analytics-header">
-          <div className="analytics-title-row">
-            <h1>Analytics</h1>
-            <VendooImportButton variant="analytics" />
-          </div>
-          <p className="analytics-lead">
-            Sales and inventory from the listings imported from Vendoo.
-          </p>
-          {data ? (
-            <p className="analytics-note analytics-updated">
+    <WorkspacePage width="expanded">
+      <PageHeader
+        title="Analytics"
+        description="Sales and inventory from the listings imported from Vendoo."
+        actions={<VendooImportButton variant="analytics" />}
+      >
+        {data ? (
+          <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <p>
               {data.last_updated_at ? <>
                 {"Last updated on "}
                 <time dateTime={data.last_updated_at}>{new Date(data.last_updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>
                 {" from Vendoo."}
               </> : "Last updated on: not recorded yet. Resync Vendoo data to record an update."}
             </p>
-          ) : null}
-          {data ? <InventoryStrip inventory={data.inventory} /> : null}
-          <div className="pr-pills" role="tablist" aria-label="Sales period">
-            {PERIODS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                role="tab"
-                aria-selected={range === item.id}
-                className={`pr-pill${range === item.id ? " is-active" : ""}`}
-                onClick={() => setRange(item.id)}
-              >
-                {item.label}
-              </button>
-            ))}
+            <InventoryStrip inventory={data.inventory} />
           </div>
-          {custom ? (
-            <div className="analytics-custom-range">
-              <label>
-                From
-                <input
-                  type="date"
-                  value={customStart}
-                  max={customEnd || undefined}
-                  onChange={(event) => setCustomStart(event.target.value)}
-                />
-              </label>
-              <label>
-                To
-                <input
-                  type="date"
-                  value={customEnd}
-                  min={customStart || undefined}
-                  onChange={(event) => setCustomEnd(event.target.value)}
-                />
-              </label>
-              {!customValid ? (
-                <span className="analytics-note">Pick a start date on or before the end date.</span>
-              ) : null}
-            </div>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          <ToggleGroup
+            aria-label="Sales period"
+            className="flex-wrap"
+            value={[range]}
+            onValueChange={(next) => {
+              const value = next[0] as AnalyticsRange | undefined;
+              if (value) setRange(value);
+            }}
+          >
+            {PERIODS.map((item) => (
+              <Toggle key={item.id} value={item.id}>{item.label}</Toggle>
+            ))}
+          </ToggleGroup>
+          {query.isFetching && data ? (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
+              <Spinner size="xs" aria-hidden role={undefined} />
+              Updating analytics…
+            </span>
           ) : null}
-        </header>
-
-        {query.isLoading && !data ? <p className="analytics-status">Loading analytics…</p> : null}
-        {query.isFetching && data ? <p className="analytics-status" role="status">Updating analytics…</p> : null}
-        {query.isError ? (
-          <p className="analytics-status">
-            {(query.error as Error).message || "Could not load analytics."}
-          </p>
+        </div>
+        {custom ? (
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            <label className="flex items-center gap-2">
+              From
+              <Input
+                nativeInput
+                size="compact"
+                type="date"
+                className="w-auto"
+                value={customStart}
+                max={customEnd || undefined}
+                onChange={(event) => setCustomStart(event.target.value)}
+              />
+            </label>
+            <label className="flex items-center gap-2">
+              To
+              <Input
+                nativeInput
+                size="compact"
+                type="date"
+                className="w-auto"
+                value={customEnd}
+                min={customStart || undefined}
+                onChange={(event) => setCustomEnd(event.target.value)}
+              />
+            </label>
+            {!customValid ? <span>Pick a start date on or before the end date.</span> : null}
+          </div>
         ) : null}
+      </PageHeader>
 
-        {data && (!custom || customValid) ? (
-          <>
-            {data.incomplete_sales.length > 0 ? (
-              <section className="analytics-section analytics-reminder" aria-label="Missing sales data">
-                <h2 className="analytics-section-title">
-                  {data.incomplete_sales.length} {data.incomplete_sales.length === 1 ? "sale needs" : "sales need"} sales data
-                </h2>
-                <p className="analytics-note">
-                  Across all time. Add the missing details in Vendoo, then resync to update your analytics.
-                  Missing prices, costs, or fees leave revenue and profit incomplete.
-                </p>
-                <details className="analytics-missing-sales">
-                  <summary>Review sales with missing data</summary>
-                  <ul className="analytics-recent">
+      {query.isLoading && !data ? <PageSkeleton label="Loading analytics…" /> : null}
+      {query.isError ? <PageError message={(query.error as Error).message || "Could not load analytics."} /> : null}
+
+      {data && (!custom || customValid) ? (
+        <>
+          {data.incomplete_sales.length > 0 ? (
+            <PageSection
+              aria-label="Missing sales data"
+              className="rounded-xl border border-warning/32 bg-warning-surface p-4"
+              title={`${data.incomplete_sales.length} ${data.incomplete_sales.length === 1 ? "sale needs" : "sales need"} sales data`}
+              description={<>
+                Across all time. Add the missing details in Vendoo, then resync to update your analytics.
+                Missing prices, costs, or fees leave revenue and profit incomplete.
+              </>}
+            >
+              <Disclosure summary="Review sales with missing data">
+                <RowList className="max-h-80 overflow-y-auto">
                     {data.incomplete_sales.map((sale) => (
-                      <li key={sale.conversation_id}>
-                        <button type="button" className="analytics-recent-row" onClick={() => onOpenListing(sale.conversation_id)}>
-                          <span className="analytics-recent-title">{sale.title}</span>
-                          <span className="analytics-missing-fields">Missing {sale.missing.join(", ")}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              </section>
-            ) : null}
-            <section className="analytics-section" aria-label={heading}>
-              <h2 className="analytics-section-title">{heading}</h2>
-              <SalesStats data={data} />
-              {data.previous ? (
-                <p className="analytics-note analytics-comparison-period">
-                  Compared with {formatSold(data.previous.start)} – {formatSold(data.previous.end)}
-                  {" (previous period, same length)."}
-                </p>
-              ) : null}
-              {data.sales.revenue_known < data.sales.count ? (
-                <p className="analytics-note">
-                  {data.sales.count - data.sales.revenue_known} {data.sales.count - data.sales.revenue_known === 1 ? "sale has" : "sales have"} no recorded price.
-                  Revenue, averages, and breakdowns include recorded amounts only.
-                </p>
-              ) : null}
-              {data.undated_sales > 0 ? (
-                <p className="analytics-note">
-                  {data.undated_sales} {data.undated_sales === 1 ? "sale has" : "sales have"} no date.
-                  {data.range === "all"
-                    ? " Included in totals, but excluded from the chart."
-                    : " Excluded from this period; included in All time."}
-                </p>
-              ) : null}
-              {data.periods_truncated ? (
-                <p className="analytics-note">The chart shows the latest 18 months.</p>
-              ) : null}
-              <SalesChart periods={data.periods} />
-            </section>
-
-            <div className="analytics-split">
-              <PerformanceList title="Marketplaces" rows={data.marketplaces} marketplace />
-              <PerformanceList title="Categories" rows={data.categories} />
-              <PerformanceList title="Brands" rows={data.brands} />
-            </div>
-
-            <PriceTiers tiers={data.price_tiers} />
-
-            <section className="analytics-section" aria-label="Inventory today">
-              <h2 className="analytics-section-title">Inventory today</h2>
-              <p className="analytics-note">Current active listings, across all sales periods.</p>
-              <div className="analytics-stats">
-                <Stat label="Active listings" value={String(data.inventory.active)} />
-                <Stat label="Asking value" value={formatMoney(data.inventory.asking_value)} hint="Total asking prices; potential revenue" />
-                <Stat label="Recorded inventory cost" value={data.inventory.cost_known ? formatMoney(data.inventory.cost_value) : "—"} hint={`Cost recorded on ${data.inventory.cost_known} of ${data.inventory.active} active listings`} />
-                <Stat label="Listed 90+ days" value={String(data.inventory.stale_count)} hint={`${formatMoney(data.inventory.stale_value)} at asking prices`} />
-              </div>
-              {data.inventory.undated_count > 0 ? <p className="analytics-note">{data.inventory.undated_count} active {data.inventory.undated_count === 1 ? "listing has" : "listings have"} no list date and cannot be aged.</p> : null}
-            </section>
-
-            <section className="analytics-section" aria-label="Active listings">
-              <h2 className="analytics-section-title">Current inventory by age</h2>
-              <p className="analytics-note">All active listings, regardless of the sales period. Open an age group to review its listings.</p>
-              {data.aging.length === 0 ? (
-                <p className="analytics-note">No active listings.</p>
-              ) : (
-                <div className="analytics-aging">
-                  {data.aging.map((row) => (
-                    <details key={row.label} className="analytics-age-group">
-                      <summary className="analytics-rank">
-                        <span className="analytics-rank-label">{row.label}</span>
-                        <span className="analytics-age-count">{row.count} listings</span>
-                        <span className="analytics-rank-value">{formatMoney(row.asking_value)} asking</span>
-                      </summary>
-                      <ul className="analytics-recent analytics-age-listings">
-                        {row.listings.map((listing) => (
-                          <li key={listing.conversation_id}>
-                            <button type="button" className="analytics-recent-row" onClick={() => onOpenListing(listing.conversation_id)}>
-                              <span className="analytics-recent-title">{listing.title}</span>
-                              <span className="analytics-recent-meta">
-                                {listing.days_listed == null ? "No list date" : formatDays(listing.days_listed)}
-                              </span>
-                              <span className="analytics-recent-price">{formatMoney(listing.price)}</span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="analytics-section" aria-label="Oldest active listings">
-              <h2 className="analytics-section-title">Review your oldest listings</h2>
-              <p className="analytics-note">Up to 8 listings that have been active for 90+ days. Open one to review its price, photos, or details.</p>
-              {data.oldest.length === 0 ? <p className="analytics-note">No active listings with a recorded list date are 90+ days old.</p> : (
-                <ul className="analytics-recent">
-                  {data.oldest.map((item) => (
-                    <li key={item.conversation_id}>
-                      <button type="button" className="analytics-recent-row" onClick={() => onOpenListing(item.conversation_id)}>
-                        <span className="analytics-recent-title">{item.title}</span>
-                        <span className="analytics-recent-meta">{formatDays(item.days_listed)} listed</span>
-                        <span className="analytics-recent-price">{formatMoney(item.price)}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            <section className="analytics-section" aria-label="Recent sales">
-              <h2 className="analytics-section-title">Recent sales</h2>
-              {data.recent.length === 0 ? (
-                <p className="analytics-note">No sales in this period.</p>
-              ) : (
-                <ul className="analytics-recent">
-                  {data.recent.map((sale) => (
-                    <li key={sale.conversation_id}>
-                      <button
-                        type="button"
-                        className="analytics-recent-row"
+                      <ListRow
+                        key={sale.conversation_id}
+                        title={sale.title}
+                        meta={`Missing ${sale.missing.join(", ")}`}
                         onClick={() => onOpenListing(sale.conversation_id)}
-                      >
-                        <span className="analytics-recent-title">{sale.title}</span>
-                        <span className="analytics-recent-meta">
-                          {marketplaceName(sale.marketplace)}
-                          {sale.sold_at ? ` · ${formatSold(sale.sold_at)}` : ""}
-                          {sale.days_listed != null ? ` · ${formatDays(sale.days_listed)}` : ""}
-                          {sale.event ? ` · ${sale.event}` : ""}
-                        </span>
-                        <span className="analytics-recent-price">
-                          {sale.price == null ? "Price unknown" : formatMoney(sale.price)}
-                          <small>{sale.profit == null ? "Profit unavailable" : `${formatMoney(sale.profit)} profit`}</small>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </>
-        ) : null}
-      </div>
-    </div>
+                      />
+                    ))}
+                </RowList>
+              </Disclosure>
+            </PageSection>
+          ) : null}
+
+          <PageSection aria-label={heading} title={heading}>
+            <SalesStats data={data} />
+            {data.previous ? (
+              <PageNote>
+                Compared with {formatSold(data.previous.start)} – {formatSold(data.previous.end)}
+                {" (previous period, same length)."}
+              </PageNote>
+            ) : null}
+            {data.sales.revenue_known < data.sales.count ? (
+              <PageNote>
+                {data.sales.count - data.sales.revenue_known} {data.sales.count - data.sales.revenue_known === 1 ? "sale has" : "sales have"} no recorded price.
+                Revenue, averages, and breakdowns include recorded amounts only.
+              </PageNote>
+            ) : null}
+            {data.undated_sales > 0 ? (
+              <PageNote>
+                {data.undated_sales} {data.undated_sales === 1 ? "sale has" : "sales have"} no date.
+                {data.range === "all"
+                  ? " Included in totals, but excluded from the chart."
+                  : " Excluded from this period; included in All time."}
+              </PageNote>
+            ) : null}
+            {data.periods_truncated ? <PageNote>The chart shows the latest 18 months.</PageNote> : null}
+            <SalesChart periods={data.periods} />
+          </PageSection>
+
+          <div className="grid gap-8 @3xl/page:grid-cols-3 @3xl/page:gap-6">
+            <PerformanceList title="Marketplaces" rows={data.marketplaces} marketplace />
+            <PerformanceList title="Categories" rows={data.categories} />
+            <PerformanceList title="Brands" rows={data.brands} />
+          </div>
+
+          <PriceTiers tiers={data.price_tiers} />
+
+          <PageSection
+            aria-label="Inventory today"
+            title="Inventory today"
+            description="Current active listings, across all sales periods."
+          >
+            <StatGrid>
+              <Stat label="Active listings" value={String(data.inventory.active)} />
+              <Stat label="Asking value" value={formatMoney(data.inventory.asking_value)} hint="Total asking prices; potential revenue" />
+              <Stat label="Recorded inventory cost" value={data.inventory.cost_known ? formatMoney(data.inventory.cost_value) : "—"} hint={`Cost recorded on ${data.inventory.cost_known} of ${data.inventory.active} active listings`} />
+              <Stat label="Listed 90+ days" value={String(data.inventory.stale_count)} hint={`${formatMoney(data.inventory.stale_value)} at asking prices`} />
+            </StatGrid>
+            {data.inventory.undated_count > 0 ? <PageNote>{data.inventory.undated_count} active {data.inventory.undated_count === 1 ? "listing has" : "listings have"} no list date and cannot be aged.</PageNote> : null}
+          </PageSection>
+
+          <PageSection
+            aria-label="Active listings"
+            title="Current inventory by age"
+            description="All active listings, regardless of the sales period. Open an age group to review its listings."
+          >
+            {data.aging.length === 0 ? (
+              <EmptyRow>No active listings.</EmptyRow>
+            ) : (
+              <Panel>
+                {data.aging.map((row) => (
+                  <details key={row.label} className="group/age">
+                    <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-2.5 text-sm outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                      <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open/age:rotate-90" />
+                      <span className="min-w-0 flex-1 truncate text-foreground">{row.label}</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">{row.count} listings</span>
+                      <span className="w-28 text-right text-foreground tabular-nums">{formatMoney(row.asking_value)} asking</span>
+                    </summary>
+                    <ul className="divide-y divide-border/50 border-t border-border/50 bg-background/40">
+                      {row.listings.map((listing) => (
+                        <ListRow
+                          key={listing.conversation_id}
+                          title={listing.title}
+                          meta={listing.days_listed == null ? "No list date" : formatDays(listing.days_listed)}
+                          value={formatMoney(listing.price)}
+                          onClick={() => onOpenListing(listing.conversation_id)}
+                        />
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </Panel>
+            )}
+          </PageSection>
+
+          <PageSection
+            aria-label="Oldest active listings"
+            title="Review your oldest listings"
+            description="Up to 8 listings that have been active for 90+ days. Open one to review its price, photos, or details."
+          >
+            {data.oldest.length === 0 ? <EmptyRow>No active listings with a recorded list date are 90+ days old.</EmptyRow> : (
+              <RowList>
+                {data.oldest.map((item) => (
+                  <ListRow
+                    key={item.conversation_id}
+                    title={item.title}
+                    meta={`${formatDays(item.days_listed)} listed`}
+                    value={formatMoney(item.price)}
+                    onClick={() => onOpenListing(item.conversation_id)}
+                  />
+                ))}
+              </RowList>
+            )}
+          </PageSection>
+
+          <PageSection aria-label="Recent sales" title="Recent sales">
+            {data.recent.length === 0 ? (
+              <EmptyRow>No sales in this period.</EmptyRow>
+            ) : (
+              <RowList>
+                {data.recent.map((sale) => (
+                  <ListRow
+                    key={sale.conversation_id}
+                    title={sale.title}
+                    meta={<>
+                      {marketplaceName(sale.marketplace)}
+                      {sale.sold_at ? ` · ${formatSold(sale.sold_at)}` : ""}
+                      {sale.days_listed != null ? ` · ${formatDays(sale.days_listed)}` : ""}
+                      {sale.event ? ` · ${sale.event}` : ""}
+                    </>}
+                    value={sale.price == null ? "Price unknown" : formatMoney(sale.price)}
+                    valueHint={sale.profit == null ? "Profit unavailable" : `${formatMoney(sale.profit)} profit`}
+                    onClick={() => onOpenListing(sale.conversation_id)}
+                  />
+                ))}
+              </RowList>
+            )}
+          </PageSection>
+        </>
+      ) : null}
+    </WorkspacePage>
+  );
+}
+
+function Disclosure({ summary, children }: { summary: string; children: ReactNode }) {
+  return (
+    <details className="group/disclosure flex flex-col">
+      <summary className="inline-flex w-fit cursor-pointer list-none items-center gap-1 rounded-md text-xs font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRightIcon aria-hidden className="size-3.5 transition-transform group-open/disclosure:rotate-90" />
+        {summary}
+      </summary>
+      <div className="mt-3">{children}</div>
+    </details>
   );
 }
 
@@ -275,7 +304,7 @@ function InventoryStrip({ inventory }: { inventory: InventoryAnalytics["inventor
   if (inventory.sold) parts.push(`${inventory.sold} sold`);
   if (inventory.failed) parts.push(`${inventory.failed} failed`);
   if (inventory.working) parts.push(`${inventory.working} in progress`);
-  return <p className="analytics-inventory">Current inventory: {parts.join(" · ")}</p>;
+  return <p className="text-foreground tabular-nums">Current inventory: {parts.join(" · ")}</p>;
 }
 
 function profitHint(sales: AnalyticsSales): string {
@@ -295,7 +324,7 @@ function SalesStats({ data }: { data: InventoryAnalytics }) {
   const profitComplete = previous && sales.profit_known === sales.count && previous.profit_known === previous.count
     && sales.fees_known === sales.count && previous.fees_known === previous.count;
   return (
-    <div className="analytics-stats">
+    <StatGrid>
       <Stat label="Revenue" value={formatMoney(sales.revenue)}
         hint={`${sales.revenue_known} of ${sales.count} sales with recorded prices`}
         change={previous ? (revenueComplete ? formatChange(sales.revenue, previous.revenue, formatMoney) : "Comparison unavailable: missing prices") : undefined}
@@ -325,12 +354,14 @@ function SalesStats({ data }: { data: InventoryAnalytics }) {
         hint={`Based on ${sales.days_known} of ${sales.count} sales`}
         change={previous ? formatChange(sales.median_days, previous.median_days, formatDays) : undefined}
       />
-    </div>
+    </StatGrid>
   );
 }
 
+type ChartMetric = "revenue" | "count" | "profit";
+
 function SalesChart({ periods }: { periods: InventoryAnalytics["periods"] }) {
-  const [metric, setMetric] = useState<"revenue" | "count" | "profit">("revenue");
+  const [metric, setMetric] = useState<ChartMetric>("revenue");
   const peak = Math.max(...periods.map((period) => Math.abs(period[metric] ?? 0)), 0);
   const hasLoss = periods.some((period) => (period[metric] ?? 0) < 0);
   const baseline = hasLoss ? 110 : 0;
@@ -338,61 +369,79 @@ function SalesChart({ periods }: { periods: InventoryAnalytics["periods"] }) {
   const metricName = metric === "count" ? "Sales" : metric === "profit" ? "Profit" : "Revenue";
   const peakCount = Math.max(...periods.map((period) => period.count), 0);
   if (periods.length === 0 || peakCount === 0) {
-    return <p className="analytics-note">No dated sales in this period.</p>;
+    return <EmptyRow>No dated sales in this period.</EmptyRow>;
   }
   return (
-    <>
-      <div className="pr-pills analytics-chart-controls" role="group" aria-label="Chart metric">
-        {(["revenue", "count", "profit"] as const).map((value) => (
-          <button
-            key={value}
-            type="button"
-            className={`pr-pill${metric === value ? " is-active" : ""}`}
-            aria-pressed={metric === value}
-            onClick={() => setMetric(value)}
-          >
-            {value === "revenue" ? "Revenue" : value === "profit" ? "Profit" : "Sales"}
-          </button>
-        ))}
+    <Panel divided={false} className="flex flex-col gap-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs text-muted-foreground">{metricName} over time</span>
+        <ToggleGroup
+          aria-label="Chart metric"
+          value={[metric]}
+          onValueChange={(next) => {
+            const value = next[0] as ChartMetric | undefined;
+            if (value) setMetric(value);
+          }}
+        >
+          {(["revenue", "count", "profit"] as const).map((value) => (
+            <Toggle key={value} value={value}>
+              {value === "revenue" ? "Revenue" : value === "profit" ? "Profit" : "Sales"}
+            </Toggle>
+          ))}
+        </ToggleGroup>
       </div>
-      {metric === "profit" ? <p className="analytics-note">Profit uses sales with recorded cost and deducts recorded fees and shipping. Missing costs appear as —; loss bars extend below zero.</p> : null}
-      <div className="analytics-chart" role="list" aria-label={`${metricName} over time`}>
+      {metric === "profit" ? <PageNote>Profit uses sales with recorded cost and deducts recorded fees and shipping. Missing costs appear as —; loss bars extend below zero.</PageNote> : null}
+      <div className="flex items-end gap-1 overflow-x-auto pb-1" role="list" aria-label={`${metricName} over time`}>
         {periods.map((period, index) => {
           const value = period[metric];
           const share = peak > 0 ? Math.abs(value ?? 0) / peak : 0;
           const height = share > 0 ? Math.max(Math.round(share * available), 2) : 0;
+          const negative = (value ?? 0) < 0;
           const detail = `${period.label}: ${formatMoney(period.revenue)}, ${saleCount(period.count)}, ${period.profit == null ? "profit unavailable" : `${formatMoney(period.profit)} profit`}. Cost on ${period.profit_known} of ${period.count}; fees on ${period.fees_known} of ${period.profit_known}.`;
           return (
             <div
               key={`${period.label}-${index}`}
-              className="analytics-bar-col"
+              className="group/bar flex min-w-9 flex-1 flex-col items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
               role="listitem"
               tabIndex={0}
               aria-label={detail}
               title={detail}
             >
-              <span className="analytics-bar-value" aria-hidden="true">
+              <span className="text-2xs text-muted-foreground tabular-nums" aria-hidden="true">
                 {value == null ? "—" : metric === "count" ? value : formatMoney(value)}
               </span>
-              <div className="analytics-plot" aria-hidden="true">
-                <div className="analytics-zero" style={{ bottom: `${baseline}px` }} />
-                <div className={`analytics-bar${(value ?? 0) < 0 ? " is-negative" : ""}`} style={{ height: `${height}px`, bottom: `${(value ?? 0) < 0 ? baseline - height : baseline}px` }} />
+              <div className="relative h-[220px] w-full" aria-hidden="true">
+                <div className="absolute inset-x-0 border-t border-border" style={{ bottom: baseline }} />
+                <div
+                  className={cn(
+                    "absolute inset-x-1 rounded-sm transition-colors",
+                    negative ? "bg-destructive/70 group-hover/bar:bg-destructive" : "bg-primary/70 group-hover/bar:bg-primary",
+                  )}
+                  style={{ height, bottom: negative ? baseline - height : baseline }}
+                />
               </div>
-              <span className="analytics-bar-label">{period.label}</span>
+              <span className="text-2xs text-muted-foreground">{period.label}</span>
             </div>
           );
         })}
       </div>
-    </>
+    </Panel>
   );
 }
+
+type RankMetric = "revenue" | "profit" | "count";
+const RANK_METRICS: { value: RankMetric; label: string }[] = [
+  { value: "revenue", label: "Revenue" },
+  { value: "profit", label: "Profit" },
+  { value: "count", label: "Sales" },
+];
 
 function PerformanceList({ title, rows, marketplace = false }: {
   title: string;
   rows: AnalyticsGroup[];
   marketplace?: boolean;
 }) {
-  const [metric, setMetric] = useState<"revenue" | "profit" | "count">("revenue");
+  const [metric, setMetric] = useState<RankMetric>("revenue");
   const ranked = [...rows].sort((a, b) => {
     const first = a[metric];
     const second = b[metric];
@@ -401,32 +450,34 @@ function PerformanceList({ title, rows, marketplace = false }: {
     return second - first || a.label.localeCompare(b.label);
   }).slice(0, 6);
   return (
-    <section className="analytics-section" aria-label={title}>
-      <div className="analytics-title-row">
-        <h2 className="analytics-section-title">{title}</h2>
-        <select aria-label={`Rank ${title.toLowerCase()} by`} value={metric} onChange={(event) => setMetric(event.target.value as typeof metric)}>
-          <option value="revenue">Revenue</option>
-          <option value="profit">Profit</option>
-          <option value="count">Sales</option>
-        </select>
-      </div>
-      {ranked.length === 0 ? <p className="analytics-note">No {title.toLowerCase()} recorded on sales in this period.</p> : (
-        <ol className="analytics-ranks">
+    <PageSection
+      aria-label={title}
+      title={title}
+      actions={
+        <Select value={metric} onValueChange={(value) => setMetric(value as RankMetric)}>
+          <SelectTrigger aria-label={`Rank ${title.toLowerCase()} by`} size="compact" variant="ghost" className="w-auto min-w-0">
+            <SelectValue>{RANK_METRICS.find((item) => item.value === metric)?.label}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {RANK_METRICS.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+          </SelectPopup>
+        </Select>
+      }
+    >
+      {ranked.length === 0 ? <EmptyRow>No {title.toLowerCase()} recorded on sales in this period.</EmptyRow> : (
+        <RowList>
           {ranked.map((row) => (
-            <li key={row.id} className="analytics-rank">
-              <span className="analytics-rank-label">
-                {marketplace ? marketplaceName(row.id) : row.label}
-                <small>{saleCount(row.count)}{row.median_days != null ? ` · ${formatDays(row.median_days)} median` : ""}</small>
-              </span>
-              <span className="analytics-rank-value">
-                {metric === "count" ? row.count : row[metric] == null ? "—" : formatMoney(row[metric])}
-                {metric === "profit" ? <small>{row.profit_known === 0 ? "Cost missing" : `Cost on ${row.profit_known}/${row.count} · fees on ${row.fees_known}/${row.profit_known}`}</small> : null}
-              </span>
-            </li>
+            <ListRow
+              key={row.id}
+              title={marketplace ? marketplaceName(row.id) : row.label}
+              meta={`${saleCount(row.count)}${row.median_days != null ? ` · ${formatDays(row.median_days)} median` : ""}`}
+              value={metric === "count" ? row.count : row[metric] == null ? "—" : formatMoney(row[metric])}
+              valueHint={metric === "profit" ? (row.profit_known === 0 ? "Cost missing" : `Cost on ${row.profit_known}/${row.count} · fees on ${row.fees_known}/${row.profit_known}`) : undefined}
+            />
           ))}
-        </ol>
+        </RowList>
       )}
-    </section>
+    </PageSection>
   );
 }
 
@@ -434,32 +485,39 @@ function PerformanceList({ title, rows, marketplace = false }: {
 function PriceTiers({ tiers }: { tiers: AnalyticsGroup[] }) {
   const total = tiers.reduce((sum, tier) => sum + tier.count, 0);
   return (
-    <section className="analytics-section" aria-label="Sales by price">
-      <h2 className="analytics-section-title">Sales by price</h2>
-      <p className="analytics-note">
+    <PageSection
+      aria-label="Sales by price"
+      title="Sales by price"
+      description={<>
         This period's sales with a recorded price, by what they sold for. A higher average sale means more of them in the
         top two bands, without them taking longer to sell.
-      </p>
-      {total === 0 ? <p className="analytics-note">No priced sales in this period.</p> : (
-        <ol className="analytics-ranks">
+      </>}
+    >
+      {total === 0 ? <EmptyRow>No priced sales in this period.</EmptyRow> : (
+        <RowList>
           {tiers.map((tier) => (
-            <li key={tier.id} className="analytics-rank">
-              <span className="analytics-rank-label">
-                {tier.label}
-                <small>
-                  {saleCount(tier.count)} · {Math.round((tier.count / total) * 100)}% of sales
-                  {tier.median_days != null ? ` · ${formatDays(tier.median_days)} median` : ""}
-                </small>
-              </span>
-              <span className="analytics-rank-value">
-                {formatMoney(tier.revenue)}
-                <small>{tier.profit == null ? "Profit unavailable" : `${formatMoney(tier.profit)} profit`}</small>
-              </span>
+            <li key={tier.id} className="flex min-w-0 flex-col gap-2 px-4 py-2.5 text-sm">
+              <div className="flex min-w-0 items-center gap-4">
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate text-foreground">{tier.label}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {saleCount(tier.count)} · {Math.round((tier.count / total) * 100)}% of sales
+                    {tier.median_days != null ? ` · ${formatDays(tier.median_days)} median` : ""}
+                  </span>
+                </span>
+                <span className="flex shrink-0 flex-col items-end gap-0.5 text-right">
+                  <span className="text-foreground tabular-nums">{formatMoney(tier.revenue)}</span>
+                  <span className="text-xs text-muted-foreground">{tier.profit == null ? "Profit unavailable" : `${formatMoney(tier.profit)} profit`}</span>
+                </span>
+              </div>
+              <div aria-hidden="true" className="h-1 overflow-hidden rounded-full bg-muted-foreground/12">
+                <div className="h-full rounded-full bg-primary/70" style={{ width: `${(tier.count / total) * 100}%` }} />
+              </div>
             </li>
           ))}
-        </ol>
+        </RowList>
       )}
-    </section>
+    </PageSection>
   );
 }
 

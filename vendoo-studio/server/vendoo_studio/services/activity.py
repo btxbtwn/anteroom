@@ -9,6 +9,8 @@ listing registers here so chat can show it and Stop can cancel it.
 from __future__ import annotations
 
 import asyncio
+import itertools
+import json
 from dataclasses import dataclass
 
 
@@ -26,6 +28,13 @@ class Work:
 
 
 _work: dict[str, list[Work]] = {}
+# The latest state of each ``live_trace.agent`` in a listing's current
+# generation, by agent id. The generate stream carries these as ``agent``
+# events, but the stream has ended by the time marketplace fields are filled,
+# so activity polling exposes them too. Each generation gets a run token;
+# events carrying an older token (a cancelled run still unwinding) are dropped.
+_agents: dict[str, tuple[int, dict[str, dict]]] = {}
+_runs = itertools.count(1)
 
 
 def begin(conv_id: str, label: str) -> Work:
@@ -69,8 +78,44 @@ def cancel(conv_id: str) -> int:
     return len(items)
 
 
+def begin_agents(conv_id: str) -> int:
+    """Start a new generation's agent list; returns its run token."""
+    token = next(_runs)
+    _agents[conv_id] = (token, {})
+    return token
+
+
+def record_agent(conv_id: str, token: int, event: str | dict) -> None:
+    """Keep the newest state of one agent (a ``live_trace`` ``agent`` event).
+
+    Ignored unless ``token`` is the conversation's current run.
+    """
+    current = _agents.get(conv_id)
+    if current is None or current[0] != token:
+        return
+    try:
+        state = json.loads(event) if isinstance(event, str) else dict(event)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(state, dict) or not state.get("id"):
+        return
+    current[1][str(state["id"])] = state
+
+
+def agents(conv_id: str) -> list[dict]:
+    """Every agent of the listing's latest generation, in start order."""
+    current = _agents.get(conv_id)
+    states = current[1].values() if current else []
+    return sorted(states, key=lambda state: state.get("started_at") or 0)
+
+
+def clear_agents(conv_id: str) -> None:
+    _agents.pop(conv_id, None)
+
+
 def reset() -> None:
     for items in list(_work.values()):
         for work in items:
             work.cancel()
     _work.clear()
+    _agents.clear()

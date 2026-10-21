@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { confirmDialog } from "../ui/confirmDialog";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import type { VendooBulkImport } from "../api/types";
 
 const RUNNING_POLL_MS = 1500;
@@ -41,7 +41,7 @@ export function VendooImportButton({ variant = "sidebar" }: { variant?: "sidebar
     mutationFn: api.imports.startBulk,
     onSuccess: (data) => queryClient.setQueryData(["vendoo-bulk-import"], data),
     onError: (err: Error) =>
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not start the Vendoo sync",
         description: err.message || "An unexpected error occurred.",
@@ -79,9 +79,9 @@ export function VendooImportButton({ variant = "sidebar" }: { variant?: "sidebar
     // The sidebar is also mounted on Analytics and owns completion notifications.
     if (variant === "analytics") return;
     if (run.error) {
-      addToast({ type: "error", title: "Vendoo sync stopped", description: run.error });
+      toastManager.add({ type: "error", title: "Vendoo sync stopped", description: run.error });
     } else {
-      addToast({
+      toastManager.add({
         type: run.failed ? "error" : "success",
         title: run.cancelled ? "Vendoo sync cancelled" : "Vendoo sync finished",
         description: importSummary(run),

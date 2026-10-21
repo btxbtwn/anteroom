@@ -310,6 +310,11 @@ class ActivityResponse(BaseModel):
     items: list[str]
     message_count: int
     last_message_id: str | None
+    # The latest state of each parallel agent in this listing's current
+    # generation, in the same shape as the generate stream's ``agent`` events.
+    # Marketplace fields are filled after that stream ends; this is how the
+    # client still sees those agents.
+    agents: list[dict] = []
 
 
 def _job_activity_label(job) -> str:
@@ -348,7 +353,18 @@ def get_activity(conv_id: str, db: Session = Depends(get_db)):
         items=items,
         message_count=messages.count(),
         last_message_id=last.id if last else None,
+        agents=activity.agents(conv_id),
     )
+
+
+@router.get("/{conv_id}/generation-timings")
+def get_generation_timings(conv_id: str, limit: int = 20, db: Session = Depends(get_db)):
+    """Seconds per stage of this listing's recent generations, newest first."""
+    from vendoo_studio.services.generation_timing import for_conversation
+
+    if not ConversationRepo(db).get(conv_id):
+        raise HTTPException(404, "Conversation not found")
+    return for_conversation(db, conv_id, limit=max(1, min(limit, 100)))
 
 
 async def cancel_conversation_jobs(db: Session, conv_id: str) -> int:

@@ -1,28 +1,35 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "./ui/dialog";
 
-export function ListingReviewDialog({ title, onClose, children, actions, busy = false }: {
+/** A listing review modal (history, regenerate, price drop) on T3's dialog. */
+export function ListingReviewDialog({ title, onClose, children, actions, busy = false, className }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   actions?: ReactNode;
   busy?: boolean;
+  className?: string;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
-  useEffect(() => {
-    const dialog = ref.current!;
-    dialog.showModal();
-    return () => dialog.close();
-  }, []);
   return (
-    <dialog ref={ref} className="confirm-dialog-popup listing-review-dialog" aria-labelledby={titleId}
-      onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
-      <div className="confirm-dialog-header"><h2 id={titleId} className="confirm-dialog-title">{title}</h2></div>
-      <div className="listing-review-content">{children}</div>
-      <div className="confirm-dialog-footer">
-        <button type="button" className="btn btn-outline" disabled={busy} onClick={onClose}>Close</button>
-        {actions}
-      </div>
-    </dialog>
+    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
+      <DialogPopup className={className ?? "max-w-2xl"} showCloseButton={!busy}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <DialogPanel className="text-sm">{children}</DialogPanel>
+        <DialogFooter>
+          <Button variant="outline" disabled={busy} onClick={onClose}>Close</Button>
+          {actions}
+        </DialogFooter>
+      </DialogPopup>
+    </Dialog>
   );
 }

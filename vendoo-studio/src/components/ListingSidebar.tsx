@@ -28,7 +28,11 @@ import {
   statusCounts,
   type ListingFilters as Filters,
 } from "./inventoryFilters";
-import { BackIcon, SearchIcon } from "./sidebar/SidebarIcons";
+import { ArrowLeftIcon, EllipsisIcon, SearchIcon, XIcon } from "lucide-react";
+import { cn } from "../lib/utils";
+import { Kbd } from "./ui/kbd";
+import { ShelfHeader } from "./sidebar/ListingBits";
+import { SIDEBAR_ROW } from "./sidebar/sidebarStyles";
 import { ListingRow } from "./sidebar/ListingRow";
 import { activeAnchorMs, settledAnchorMs, type Listing } from "./sidebar/listingShelves";
 import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
@@ -37,6 +41,13 @@ import { SidebarFooter } from "./sidebar/SidebarFooter";
 import { useListingSelection } from "./sidebar/useListingSelection";
 import { useSettledShelf } from "./sidebar/useSettledShelf";
 import { useSettingsSearch } from "./sidebar/useSettingsSearch";
+
+/* T3 Code's sidebar search row (MIT, (c) 2026 T3 Tools Inc.): a flush row that
+   lights up on hover and focus, with an unstyled input inside. */
+const SEARCH_CLASS =
+  "flex h-8 min-w-0 flex-1 cursor-text items-center gap-2 rounded-[var(--control-radius)] px-2 text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover focus-within:bg-sidebar-row-hover";
+const SEARCH_INPUT_CLASS =
+  "min-w-0 flex-1 bg-transparent text-sm font-medium text-sidebar-foreground outline-none placeholder:text-sidebar-muted-foreground max-[900px]:text-base";
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
@@ -259,6 +270,7 @@ export function ListingSidebar({
   return (
     <aside
       id="listings-sidebar"
+      data-app-sidebar
       className={`panel sidebar${settingsMode ? " sidebar-settings" : ""}`}
       aria-label={settingsMode ? "Settings" : "Listings"}
       aria-hidden={mobileOpen === false ? true : undefined}
@@ -277,11 +289,7 @@ export function ListingSidebar({
             onMouseDown={stopTitlebarDrag}
             onClick={onOpenSettings}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="3.5" cy="8" r="1.15" fill="currentColor" />
-              <circle cx="8" cy="8" r="1.15" fill="currentColor" />
-              <circle cx="12.5" cy="8" r="1.15" fill="currentColor" />
-            </svg>
+            <EllipsisIcon className="size-4" />
           </button>
         ) : (
           <button
@@ -292,16 +300,16 @@ export function ListingSidebar({
             onMouseDown={stopTitlebarDrag}
             onClick={onCloseSettings}
           >
-            <BackIcon />
+            <ArrowLeftIcon className="size-4" />
           </button>
         )}
       </div>
 
       {settingsMode ? (
         <>
-        <div className="sidebar-toolbar">
-          <label className="sidebar-search settings-sidebar-search">
-            <SearchIcon />
+        <div className="flex shrink-0 items-center gap-1 px-(--sidebar-content-inset) py-2">
+          <label className={SEARCH_CLASS}>
+            <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
             <input
               ref={settingsSearchRef}
               type="search"
@@ -312,6 +320,7 @@ export function ListingSidebar({
               }}
               onKeyDown={handleSettingsSearchKeyDown}
               placeholder="Search"
+              className={SEARCH_INPUT_CLASS}
               aria-label="Search settings"
               role="combobox"
               aria-autocomplete="list"
@@ -326,19 +335,17 @@ export function ListingSidebar({
             {isSettingsSearching ? (
               <button
                 type="button"
-                className="settings-search-clear"
+                className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-sidebar-muted-foreground hover:text-sidebar-foreground"
                 aria-label="Clear search"
                 onClick={() => {
                   clearSettingsSearch();
                   settingsSearchRef.current?.focus();
                 }}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                  <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                </svg>
+                <XIcon className="size-3.5" />
               </button>
             ) : (
-              <kbd className="settings-search-kbd">/</kbd>
+              <Kbd>/</Kbd>
             )}
           </label>
         </div>
@@ -351,20 +358,22 @@ export function ListingSidebar({
         </>
       ) : (
         <>
-          <div className="sidebar-toolbar">
-            <label className="sidebar-search">
-              <SearchIcon />
+          <div className="flex shrink-0 items-center gap-1 px-(--sidebar-content-inset) py-2 max-[900px]:hidden">
+            <label className={SEARCH_CLASS}>
+              <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
               <input
                 type="search"
                 value={listingQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
+                className={SEARCH_INPUT_CLASS}
                 placeholder="Search by title, SKU or label"
                 aria-label="Search listings by title, SKU or label"
               />
             </label>
             <button
               type="button"
-              className={`sidebar-select-btn${selecting ? " selected" : ""}`}
+              data-active={selecting}
+              className={cn(SIDEBAR_ROW, "w-auto shrink-0 px-2 text-xs font-semibold")}
               title={selecting ? "Stop selecting" : "Select listings to regenerate"}
               aria-label={selecting ? "Stop selecting" : "Select listings to regenerate"}
               aria-pressed={selecting}
@@ -403,7 +412,12 @@ export function ListingSidebar({
             onChange={handleFiltersChange}
           />
 
-          <div className="sidebar-list">
+          <div
+            className={cn(
+              "min-h-0 flex-1 overflow-y-auto overscroll-contain px-(--sidebar-content-inset) pb-2",
+              "max-[900px]:touch-pan-y max-[900px]:pb-[calc(72px+env(safe-area-inset-bottom,0px))]",
+            )}
+          >
             {activeListings.map((listing) => (
               <ListingRow
                 key={listing.id}
@@ -429,20 +443,11 @@ export function ListingSidebar({
 
             {settledListings.length > 0 && (
               <>
-                <button
-                  type="button"
-                  className="sidebar-shelf-header"
-                  aria-expanded={settledExpanded}
-                  onClick={toggleSettledShelf}
-                >
-                  <span className="sidebar-shelf-label">
-                    {settledExpanded ? "Settled" : `Settled (${settledListings.length})`}
-                  </span>
-                  <span className="sidebar-shelf-rule" aria-hidden="true" />
-                  <svg className="sidebar-shelf-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
+                <ShelfHeader
+                  label={settledExpanded ? "Settled" : `Settled (${settledListings.length})`}
+                  expanded={settledExpanded}
+                  onToggle={toggleSettledShelf}
+                />
                 {renderedSettled.map((listing) => (
                   <ListingRow
                     key={listing.id}
@@ -463,7 +468,7 @@ export function ListingSidebar({
                 {settledExpanded && hiddenSettledCount > 0 && (
                   <button
                     type="button"
-                    className="sidebar-show-more"
+                    className={cn(SIDEBAR_ROW, "mt-0.5 text-xs")}
                     onClick={() => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT)}
                   >
                     Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
@@ -473,10 +478,10 @@ export function ListingSidebar({
             )}
 
             {(!conversations || conversations.length === 0) && (
-              <div className="sidebar-empty">No listings yet</div>
+              <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
             )}
             {conversations && conversations.length > 0 && activeListings.length === 0 && settledListings.length === 0 && (
-              <div className="sidebar-empty">No matching listings</div>
+              <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No matching listings</p>
             )}
           </div>
         </>
