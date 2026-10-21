@@ -56,6 +56,24 @@ export interface Message {
   provider: string | null;
   model: string | null;
   created_at: string;
+  /** Images the seller attached; served from /api/chat-attachments/{id}. */
+  attachments?: ChatAttachment[];
+}
+
+/** An image attached to a chat message; the file lives in Studio's data folder. */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mime_type: string;
+  size_bytes?: number;
+  width?: number | null;
+  height?: number | null;
+}
+
+/** An image the composer is about to send, as a data URL. */
+export interface ChatAttachmentUpload {
+  name: string;
+  data_url: string;
 }
 
 /** Everything still running for a listing; chat is only done when ``busy`` is false. */

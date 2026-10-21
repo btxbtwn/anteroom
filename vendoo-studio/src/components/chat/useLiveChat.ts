@@ -1,32 +1,34 @@
 import { useEffect, useState } from "react";
 import { getLive } from "./liveChatStore";
 
+function snapshot(convId: string) {
+  const live = getLive(convId);
+  return {
+    streaming: live.streaming,
+    generating: live.generating,
+    streamText: live.streamDisplayText,
+    streamTrace: live.streamTrace,
+    streamAgents: live.streamAgents,
+    foldedTurns: live.foldedTurns,
+    streamStatus: live.streamStatus,
+    resetting: live.resetting,
+    workStartedAtMs: live.workStartedAtMs,
+    failedAction: live.failedAction,
+    lastSendText: live.lastSendText,
+  };
+}
+
 /** This listing's live stream, mirrored into state so the panel re-renders as it moves. */
 export function useLiveChat(convId: string) {
-  const live = getLive(convId);
-  const [streaming, setStreaming] = useState(live.streaming);
-  const [generating, setGenerating] = useState(live.generating);
-  const [streamText, setStreamText] = useState(live.streamDisplayText);
-  const [streamTrace, setStreamTrace] = useState(live.streamTrace);
-  const [streamStatus, setStreamStatus] = useState(live.streamStatus);
-  const [resetting, setResetting] = useState(live.resetting);
-  const [workStartedAtMs, setWorkStartedAtMs] = useState(live.workStartedAtMs);
-  const [failedAction, setFailedAction] = useState<"generate" | "send" | null>(live.failedAction);
-  const [lastSendText, setLastSendText] = useState(live.lastSendText);
+  const [state, setState] = useState(() => snapshot(convId));
 
   useEffect(() => {
-    const sync = () => {
-      const next = getLive(convId);
-      setStreaming(next.streaming);
-      setGenerating(next.generating);
-      setStreamText(next.streamDisplayText);
-      setStreamTrace(next.streamTrace);
-      setStreamStatus(next.streamStatus);
-      setResetting(next.resetting);
-      setWorkStartedAtMs(next.workStartedAtMs);
-      setFailedAction(next.failedAction);
-      setLastSendText(next.lastSendText);
-    };
+    const sync = () => setState((current) => {
+      const next = snapshot(convId);
+      // Bail out when nothing the panel reads changed.
+      const same = (Object.keys(next) as (keyof typeof next)[]).every((key) => Object.is(next[key], current[key]));
+      return same ? current : next;
+    });
     sync();
     getLive(convId).listeners.add(sync);
     return () => {
@@ -34,15 +36,5 @@ export function useLiveChat(convId: string) {
     };
   }, [convId]);
 
-  return {
-    streaming,
-    generating,
-    streamText,
-    streamTrace,
-    streamStatus,
-    resetting,
-    workStartedAtMs,
-    failedAction,
-    lastSendText,
-  };
+  return state;
 }

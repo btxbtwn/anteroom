@@ -10,7 +10,7 @@ import {
   stepAction,
   summarizeSteps,
   turnFoldLabel,
-} from "./workLog";
+} from "./workLogModel";
 
 const agentEvent = (fields: Record<string, unknown>) =>
   `event: agent\ndata: ${JSON.stringify({ detail: null, started_at: 1_000, ended_at: null, ...fields })}\n\n`;

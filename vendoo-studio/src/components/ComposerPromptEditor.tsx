@@ -130,6 +130,8 @@ interface Props {
   onSubmit: () => void;
   placeholder: string;
   handleRef: RefObject<ComposerPromptEditorHandle | null>;
+  /** Files pasted into the box (images). Returning true keeps them out of the text. */
+  onPasteFiles?: (files: File[]) => boolean;
 }
 
 /**
@@ -137,9 +139,11 @@ interface Props {
  * inline as chips exactly where the seller dropped them, serialized back to a
  * markdown prompt whose quotes are links.
  */
-export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, handleRef }: Props) {
+export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, handleRef, onPasteFiles }: Props) {
   const submitRef = useRef(onSubmit);
   submitRef.current = onSubmit;
+  const pasteFilesRef = useRef(onPasteFiles);
+  pasteFilesRef.current = onPasteFiles;
   const placeholderRef = useRef(placeholder);
 
   const extensions = useMemo(
@@ -180,7 +184,20 @@ export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, h
     {
       extensions,
       content: asContent(promptToDoc(value)),
-      editorProps: { attributes: { class: "chat-composer-input", "aria-label": "Message" } },
+      editorProps: {
+        // T3 Code's composer editor classes.
+        attributes: {
+          class: "composer-tiptap -m-1 block max-h-52 min-h-19.5 overflow-y-auto p-1 whitespace-pre-wrap wrap-break-word bg-transparent leading-relaxed text-foreground focus:outline-none",
+          role: "textbox",
+          "aria-multiline": "true",
+          "aria-label": "Message",
+        },
+        handlePaste: (_view, event) => {
+          const files = Array.from(event.clipboardData?.files ?? []);
+          if (!files.length || !pasteFilesRef.current) return false;
+          return pasteFilesRef.current(files);
+        },
+      },
       onUpdate: ({ editor: instance }) => onChange(docToPrompt(instance.getJSON() as ComposerNode)),
     },
     [extensions],
@@ -225,7 +242,9 @@ export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, h
 
   return (
     <ComposerSubmitContext value={onSubmit}>
-      <EditorContent editor={editor} className="chat-composer-editor" />
+      <div className="relative flow-root font-(family-name:--font-composer,var(--font-sans)) text-(length:--font-size-prompt,var(--text-sm)) max-sm:pointer-coarse:text-(length:--font-size-prompt-touch)">
+        <EditorContent editor={editor} />
+      </div>
     </ComposerSubmitContext>
   );
 }

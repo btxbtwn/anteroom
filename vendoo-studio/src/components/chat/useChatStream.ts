@@ -16,7 +16,7 @@ import {
   type StreamRequestError,
 } from "./chatStream";
 import { applySseToLive, foldLiveTurn, getLive, patchLive, refreshListingQueries } from "./liveChatStore";
-import type { Message } from "../../api/types";
+import type { ChatAttachmentUpload, Message } from "../../api/types";
 
 interface Options {
   convId: string;
@@ -244,6 +244,7 @@ export function useChatStream({
     opts?: {
       browserJobId?: string;
       browserFields?: QueuedChatMessage["browserFields"];
+      attachments?: ChatAttachmentUpload[];
     },
   ) => {
     const browserContext = browserRef.current;
@@ -253,7 +254,8 @@ export function useChatStream({
       || getLive(convId).generating
       || getLive(convId).resetting
       || Boolean(queryClient.getQueryData<ConversationActivity>(["activity", convId])?.busy);
-    if ((!text && !pointedAt.length) || running) return false;
+    const attachments = opts?.attachments ?? [];
+    if ((!text && !pointedAt.length && !attachments.length) || running) return false;
     pinChatToBottom();
     const liveState = getLive(convId);
     liveState.controller?.abort();
@@ -284,6 +286,7 @@ export function useChatStream({
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify({
           text,
+          ...(attachments.length ? { attachments } : {}),
           ...(pointedAt.length && jobId
             ? {
                 browser: {

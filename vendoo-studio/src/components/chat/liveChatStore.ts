@@ -3,7 +3,7 @@ import { type QueryClient } from "@tanstack/react-query";
 import { type SseParts } from "../sseCoalesce";
 import { stableStreamingText } from "../streamingText";
 import { settleAgents, type LiveAgents, type LiveTraceEntry } from "../liveTrace";
-import { turnHasWork, type FoldedTurn } from "./workLog";
+import { turnHasWork, type FoldedTurn } from "./workLogModel";
 import { isStreamError } from "./assistantDisplay";
 import { TRACE_ONLY_EVENTS } from "./chatStream";
 

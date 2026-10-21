@@ -1,3 +1,5 @@
+import type { ChatAttachment } from "./types";
+
 /** One turn of the seller's conversation with the business assistant. */
 export interface AssistantMessage {
   id: string;
@@ -6,6 +8,8 @@ export interface AssistantMessage {
   created_at: string | null;
   /** Changes this answer proposed, and what the seller did with them. */
   changes?: AssistantChanges | null;
+  /** Images attached to a question. */
+  attachments?: ChatAttachment[];
 }
 
 /**

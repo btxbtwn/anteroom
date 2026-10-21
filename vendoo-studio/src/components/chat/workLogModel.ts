@@ -140,6 +140,33 @@ export function deriveAgentSpawnSummary(agents: readonly Pick<LiveAgent, "status
   return { live, lead, status, tone };
 }
 
+/** "2 working · 1 done · 1 failed", like T3's summarizeSubagentStatuses. */
+export function summarizeAgentStatuses(agents: readonly Pick<LiveAgent, "status">[]): string {
+  const counts = { working: 0, done: 0, failed: 0, stopped: 0 };
+  for (const { status } of agents) {
+    if (status === "running") counts.working += 1;
+    else if (status === "done") counts.done += 1;
+    else if (status === "failed") counts.failed += 1;
+    else counts.stopped += 1;
+  }
+  return (Object.keys(counts) as (keyof typeof counts)[])
+    .filter((key) => counts[key] > 0)
+    .map((key) => `${counts[key]} ${key}`)
+    .join(" · ");
+}
+
+/** The group's span: first start to last end, open while any agent runs. */
+export function agentGroupTiming(agents: readonly Pick<LiveAgent, "status" | "startedAt" | "endedAt">[]): {
+  startedAt: number;
+  endedAt: number | null;
+} | null {
+  if (!agents.length) return null;
+  const startedAt = Math.min(...agents.map((agent) => agent.startedAt));
+  const live = agents.some((agent) => agent.status === "running");
+  const ends = agents.map((agent) => agent.endedAt ?? startedAt);
+  return { startedAt, endedAt: live ? null : Math.max(...ends) };
+}
+
 export function agentsFor(ids: readonly string[], agents: LiveAgents): LiveAgent[] {
   return ids.flatMap((id) => (agents[id] ? [agents[id]] : []));
 }
