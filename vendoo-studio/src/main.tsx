@@ -4,6 +4,7 @@ import { focusManager, QueryClientProvider } from "@tanstack/react-query";
 import { createStudioQueryClient } from "./api/queryClient";
 import { App } from "./app/App";
 import { AnchoredToastProvider, ToastProvider } from "./components/ui/toast";
+import { installSoftwareKeyboard } from "./lib/softwareKeyboard";
 import { applyTheme } from "./theme";
 import "./styles/app.css";
 
@@ -18,6 +19,7 @@ function markDesktopApp() {
 }
 
 markDesktopApp();
+installSoftwareKeyboard(window);
 
 // Polls slow down while Studio sits behind another window (see pollMs), and the
 // desktop webview never reports itself hidden, so also refetch on window focus.

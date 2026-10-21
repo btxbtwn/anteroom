@@ -19,6 +19,7 @@ import {
   type RefObject,
 } from "react";
 import { CitationChip } from "./CitationChip";
+import { softwareKeyboardOpen } from "../lib/softwareKeyboard";
 import { ChatCitationRevealContext } from "./chatCitationContext";
 import { serializeChatCitation, type ChatCitation } from "./chatCitations";
 import {
@@ -171,6 +172,8 @@ export function ComposerPromptEditor({ value, onChange, onSubmit, placeholder, h
         name: "composer-submit",
         addKeyboardShortcuts: () => ({
           Enter: () => {
+            // On a phone keyboard Return starts a new line and the send button sends, as in T3 Code.
+            if (softwareKeyboardOpen()) return false;
             submitRef.current();
             return true;
           },
