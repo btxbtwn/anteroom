@@ -7,8 +7,15 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
-const LOG_SCROLL = "max-h-[min(75vh,48rem)] overflow-auto rounded-lg border border-border/60";
-const LOG_TABLE = "w-full min-w-[36rem] border-collapse text-left text-xs [&_td]:px-3 [&_td]:py-1.5 [&_td]:align-top [&_th]:px-3 [&_th]:py-2";
+// Phones get one scroll for the page and each log row as a card: time, level and
+// source on a line, the message (the tap target) under them.
+const LOG_SCROLL =
+  "max-h-[min(75vh,48rem)] overflow-auto rounded-lg border border-border/60 max-[900px]:max-h-none max-[900px]:overflow-visible";
+const LOG_TABLE =
+  "w-full min-w-[36rem] border-collapse text-left text-xs [&_td]:px-3 [&_td]:py-1.5 [&_td]:align-top [&_th]:px-3 [&_th]:py-2 "
+  + "max-[900px]:block max-[900px]:min-w-0 max-[900px]:[&_thead]:hidden max-[900px]:[&_tbody]:block max-[900px]:[&_tr]:flex "
+  + "max-[900px]:[&_tr]:flex-wrap max-[900px]:[&_tr]:items-baseline max-[900px]:[&_td]:py-1 max-[900px]:[&_td.w-full]:basis-full "
+  + "max-[900px]:[&_td[colspan]]:basis-full max-[900px]:[&_tr]:py-1";
 const LOG_HEAD =
   "sticky top-0 z-10 bg-background/95 text-3xs font-medium uppercase tracking-wider text-muted-foreground backdrop-blur-sm [&_th]:border-b [&_th]:border-border/60 [&_th]:font-medium";
 const LOG_ROW = "border-b border-border/40 tabular-nums text-muted-foreground last:border-b-0";
@@ -21,7 +28,7 @@ function LogToggle({ open, onClick, children }: { open: boolean; onClick: () => 
       type="button"
       aria-expanded={open}
       onClick={onClick}
-      className="group flex w-full min-w-0 cursor-pointer items-start gap-1 rounded-sm text-left text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+      className="group flex w-full min-w-0 cursor-pointer items-start gap-1 rounded-sm text-left text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring max-[900px]:min-h-11 max-[900px]:items-center max-[900px]:text-sm"
     >
       <ChevronRightIcon className={cn("mt-px size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
       <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>

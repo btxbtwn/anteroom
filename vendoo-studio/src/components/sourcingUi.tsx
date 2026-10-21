@@ -64,7 +64,7 @@ export function SourcingItem({ main, money }: { main: ReactNode; money: ReactNod
   );
 }
 
-export const sourcingTitleClassName = "w-fit max-w-full text-left text-sm font-medium text-foreground hover:underline";
+export const sourcingTitleClassName = "w-fit max-w-full text-left text-sm font-medium text-foreground hover:underline max-[900px]:-my-3 max-[900px]:py-3";
 export const sourcingReasonClassName = "text-xs leading-relaxed text-muted-foreground";
 
 export function Profit({ value, suffix = "" }: { value: number; suffix?: string }) {

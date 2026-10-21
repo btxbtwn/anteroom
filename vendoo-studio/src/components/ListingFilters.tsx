@@ -142,7 +142,7 @@ export function ListingFilters({
               role="tab"
               aria-selected={selected}
               data-active={selected}
-              className="group/tab flex h-6 min-w-0 flex-1 cursor-pointer items-center justify-center overflow-hidden rounded-md px-1 text-xs font-medium text-sidebar-muted-foreground outline-none transition-colors hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground data-[active=true]:shadow-xs/5"
+              className="group/tab relative flex h-6 max-[900px]:h-9 max-[900px]:after:absolute max-[900px]:after:inset-x-0 max-[900px]:after:-inset-y-1 min-w-0 flex-1 cursor-pointer items-center justify-center overflow-hidden rounded-md px-1 text-xs font-medium text-sidebar-muted-foreground outline-none transition-colors hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground data-[active=true]:shadow-xs/5"
               // A narrow sidebar drops the counts, so the tab itself carries one.
               title={`${STATUS_LABELS[status]} · ${counts[status] || 0}`}
               onClick={() => onChange({ ...filters, status })}
@@ -162,7 +162,7 @@ export function ListingFilters({
         <Menu>
           <MenuTrigger
             data-active={chosen > 0}
-            className={cn(SIDEBAR_ROW, "h-7 w-auto gap-1.5 px-2 text-xs data-[popup-open]:bg-sidebar-row-hover [&>svg]:size-3.5")}
+            className={cn(SIDEBAR_ROW, "h-7 max-[900px]:h-11 w-auto gap-1.5 px-2 text-xs data-[popup-open]:bg-sidebar-row-hover [&>svg]:size-3.5")}
           >
             <ListFilterIcon />
             <span>Filters</span>
@@ -276,7 +276,7 @@ export function ListingFilters({
         <Menu>
           <MenuTrigger
             aria-label="Sort listings"
-            className={cn(SIDEBAR_ROW, "ml-auto h-7 w-auto gap-1 px-2 text-xs data-[popup-open]:bg-sidebar-row-hover [&>svg]:size-3")}
+            className={cn(SIDEBAR_ROW, "ml-auto h-7 max-[900px]:h-11 w-auto gap-1 px-2 text-xs data-[popup-open]:bg-sidebar-row-hover [&>svg]:size-3")}
           >
             <span className="truncate">{sortLabel}</span>
             <ChevronDownIcon />

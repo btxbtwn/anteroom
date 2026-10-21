@@ -106,7 +106,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
         {props.showSelection && props.isSelected ? (
           <CheckIcon className="size-3.5" aria-hidden="true" />
         ) : null}
-        {props.jumpLabel ? <Kbd>{props.jumpLabel}</Kbd> : null}
+        {/* Keyboard shortcuts mean nothing on a touch screen. */}
+        {props.jumpLabel ? <Kbd className="pointer-coarse:hidden">{props.jumpLabel}</Kbd> : null}
         <Tooltip>
           <TooltipTrigger
             render={

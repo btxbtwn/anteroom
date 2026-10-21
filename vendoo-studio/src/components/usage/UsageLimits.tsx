@@ -10,6 +10,7 @@ import { AlertTriangleIcon, GaugeIcon, TrendingDownIcon, TrendingUpIcon } from "
 import type { ListingProviderId, ProviderUsageLimits, ProviderUsageWindow } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   formatResetsIn,
@@ -262,6 +263,10 @@ function SegmentDetails({
   );
 }
 
+function isTouchScreen(): boolean {
+  return typeof matchMedia === "function" && matchMedia("(hover: none)").matches;
+}
+
 function PoolSegment({
   limits,
   window,
@@ -277,19 +282,11 @@ function PoolSegment({
   const timeLeft = paceRemainingPercent(window, now);
   const [segmentRef, paceMark] = usePaceMark(timeLeft);
   const resetsIn = formatResetsIn(window, now);
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            ref={segmentRef}
-            type="button"
-            style={paceMark?.gappedTrack}
-            aria-label={`${limits.label} ${window.label}: ${remaining}% left${resetsIn ? `, ${resetsIn}` : ""}${timeLeft === null ? "" : `, ${timeLeft}% of the window left`}`}
-            className="relative block h-8 w-full min-w-0 cursor-default rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          />
-        }
-      >
+  const label = `${limits.label} ${window.label}: ${remaining}% left${resetsIn ? `, ${resetsIn}` : ""}${timeLeft === null ? "" : `, ${timeLeft}% of the window left`}`;
+  const barClass =
+    "relative block h-8 w-full min-w-0 cursor-default rounded-md bg-muted text-start outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background pointer-coarse:h-11";
+  const bar = (
+    <>
         <div aria-hidden className="absolute inset-0 overflow-hidden rounded-md">
           <div className="absolute inset-0" style={paceMark?.gap}>
             <div
@@ -314,6 +311,29 @@ function PoolSegment({
             </span>
           ) : null}
         </div>
+    </>
+  );
+  // A phone cannot hover, so the same details open on a tap there.
+  if (isTouchScreen()) {
+    return (
+      <Popover>
+        <PopoverTrigger
+          render={<button ref={segmentRef} type="button" style={paceMark?.gappedTrack} aria-label={label} className={barClass} />}
+        >
+          {bar}
+        </PopoverTrigger>
+        <PopoverPopup side="top" sideOffset={6}>
+          <SegmentDetails limits={limits} window={window} now={now} />
+        </PopoverPopup>
+      </Popover>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<button ref={segmentRef} type="button" style={paceMark?.gappedTrack} aria-label={label} className={barClass} />}
+      >
+        {bar}
       </TooltipTrigger>
       <TooltipPopup side="top" sideOffset={6}>
         <SegmentDetails limits={limits} window={window} now={now} />

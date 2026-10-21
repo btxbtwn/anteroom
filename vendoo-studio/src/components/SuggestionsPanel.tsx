@@ -99,7 +99,7 @@ export function SuggestionsPanel({
     return (
       <>
         <section
-          className="flex max-h-[42%] min-h-0 flex-[0_1_auto] flex-col px-(--sidebar-content-inset) pb-1"
+          className="flex max-h-[42%] min-h-0 flex-[0_1_auto] flex-col px-(--sidebar-content-inset) pb-1 max-[900px]:max-h-none max-[900px]:flex-none"
           aria-label="Suggestions"
         >
           <ShelfHeader
@@ -108,7 +108,7 @@ export function SuggestionsPanel({
             onToggle={() => setExpanded((value) => !value)}
           />
           {expanded ? (
-            <div className="flex min-h-0 flex-col gap-px overflow-y-auto overscroll-contain">
+            <div className="flex min-h-0 flex-col gap-px overflow-y-auto overscroll-contain max-[900px]:overflow-visible">
               {suggestions.map((item) => (
                 <SuggestionRow
                   key={item.conversation_id}

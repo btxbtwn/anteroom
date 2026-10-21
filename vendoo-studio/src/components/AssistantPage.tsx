@@ -410,7 +410,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
               <li key={starter}>
                 <button
                   type="button"
-                  className="cursor-pointer rounded-full border border-border/70 bg-card px-3 py-1.5 text-left text-secondary-label text-sm leading-snug transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+                  className="cursor-pointer rounded-full border border-border/70 bg-card px-3 py-1.5 text-left text-secondary-label text-sm leading-snug max-[900px]:min-h-11 transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
                   onClick={() => { void ask(starter); }}
                 >
                   {starter}

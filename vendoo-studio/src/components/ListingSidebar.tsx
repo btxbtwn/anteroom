@@ -7,7 +7,7 @@ import type { SettingsSearchItem, SettingsSectionId } from "./settingsNav";
 import { ListingFilters } from "./ListingFilters";
 import { SuggestionsPanel } from "./SuggestionsPanel";
 import type { BulkRegenerate } from "./useBulkRegenerate";
-import { stopTitlebarDrag } from "./WorkspaceTopbar";
+import { MobileNavButton } from "./MobileNav";
 import type { WorkspaceView } from "./workspaceCrumbs";
 import type { Suggestion } from "../api/types";
 import {
@@ -28,7 +28,7 @@ import {
   statusCounts,
   type ListingFilters as Filters,
 } from "./inventoryFilters";
-import { ArrowLeftIcon, EllipsisIcon, SearchIcon, XIcon } from "lucide-react";
+import { SearchIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Kbd } from "./ui/kbd";
 import { SIDEBAR_ROW } from "./sidebar/sidebarStyles";
@@ -65,6 +65,8 @@ interface Props {
   onOpenAssistant: () => void;
   onOpenInventory: () => void;
   onOpenSourcing: () => void;
+  /** Phones: opens the page drawer from the sidebar header. */
+  onOpenMobileNav?: () => void;
   onOpenQueue: () => void;
   queueCount: number;
   onCloseSettings: () => void;
@@ -90,6 +92,7 @@ export function ListingSidebar({
   onOpenAssistant,
   onOpenInventory,
   onOpenSourcing,
+  onOpenMobileNav,
   onOpenQueue,
   queueCount,
   onCloseSettings,
@@ -258,34 +261,26 @@ export function ListingSidebar({
       aria-label={settingsMode ? "Settings" : "Listings"}
       aria-hidden={mobileOpen === false ? true : undefined}
     >
+      {/* Phones only: the desktop sidebar has no header of its own. */}
       <div className="sidebar-header pywebview-drag-region">
-        <div className="sidebar-brand">
-          <span className="sidebar-wordmark">Vendoo</span>
-          <span className="sidebar-product">Studio</span>
-        </div>
+        {onOpenMobileNav ? <MobileNavButton onClick={onOpenMobileNav} /> : null}
+        <h1 className="sidebar-mobile-title">{settingsMode ? "Settings" : "Inventory"}</h1>
         {!settingsMode ? (
           <button
             type="button"
-            className="sidebar-icon-btn sidebar-header-settings"
-            title="Settings"
-            aria-label="Settings"
-            onMouseDown={stopTitlebarDrag}
-            onClick={onOpenSettings}
+            className="sidebar-select-btn"
+            data-active={selecting}
+            aria-pressed={selecting}
+            aria-label={selecting ? "Stop selecting" : "Select listings to regenerate"}
+            disabled={bulk.running}
+            onClick={() => {
+              if (selecting) exitSelecting();
+              else setSelecting(true);
+            }}
           >
-            <EllipsisIcon className="size-4" />
+            {selecting ? "Done" : "Select"}
           </button>
-        ) : (
-          <button
-            type="button"
-            className="sidebar-icon-btn sidebar-header-settings"
-            title="Back"
-            aria-label="Back"
-            onMouseDown={stopTitlebarDrag}
-            onClick={onCloseSettings}
-          >
-            <ArrowLeftIcon className="size-4" />
-          </button>
-        )}
+        ) : null}
       </div>
 
       {settingsMode ? (
@@ -398,7 +393,7 @@ export function ListingSidebar({
           <div
             className={cn(
               "min-h-0 flex-1 overflow-y-auto overscroll-contain px-(--sidebar-content-inset) pb-2",
-              "max-[900px]:touch-pan-y max-[900px]:pb-[calc(72px+env(safe-area-inset-bottom,0px))]",
+              "max-[900px]:flex-none max-[900px]:overflow-visible max-[900px]:pb-[calc(72px+env(safe-area-inset-bottom,0px))]",
             )}
           >
             {shownListings.map((listing) => (

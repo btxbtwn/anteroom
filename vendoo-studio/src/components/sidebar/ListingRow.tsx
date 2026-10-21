@@ -4,7 +4,8 @@ import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { marketplacesNeedingRelist, relistStage } from "../relistStatus";
 import { marketplaceName } from "../marketplaceNames";
-import { PencilIcon, XIcon } from "lucide-react";
+import { EllipsisIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
@@ -12,6 +13,10 @@ import { listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, status
 import { compactRelativeTime, type Listing } from "./listingShelves";
 
 const HOVER_STATUS_DELAY_MS = 280;
+
+function canHover() {
+  return typeof window === "undefined" || !window.matchMedia || window.matchMedia("(hover: hover)").matches;
+}
 const LISTED_LIVE_STATUSES = new Set(["LISTED", "SOLD"]);
 
 export function ListingRow({
@@ -145,7 +150,8 @@ export function ListingRow({
   }, []);
 
   const openHover = () => {
-    if (!jobId || renaming) return;
+    // A tap focuses the row too; without a hovering pointer the peek only covers the list.
+    if (!jobId || renaming || !canHover()) return;
     clearHoverTimer();
     hoverTimer.current = window.setTimeout(() => {
       updatePopupPos();
@@ -156,6 +162,15 @@ export function ListingRow({
   const closeHover = () => {
     clearHoverTimer();
     setHoverOpen(false);
+  };
+
+  const activate = () => {
+    // While selecting on a phone the whole row is the checkbox, as in Mail's edit mode.
+    if (selecting && !canHover()) {
+      if (canSelect && !selectLocked) onToggleSelect?.(listing.id, false);
+      return;
+    }
+    onSelect(listing.id);
   };
 
   const startRename = () => {
@@ -223,12 +238,12 @@ export function ListingRow({
       <div
         data-active={selected}
         className={cn(
-          "flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 py-1.5 text-left text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover",
+          "flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 py-1.5 max-[900px]:py-2 max-[900px]:pr-11 text-left text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover",
           "data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground",
           settled && "text-sidebar-muted-foreground group-hover/row:text-sidebar-foreground group-focus-within/row:text-sidebar-foreground data-[active=true]:text-sidebar-foreground",
         )}
         onClick={() => {
-          if (!renaming) onSelect(listing.id);
+          if (!renaming) activate();
         }}
       >
         {selecting ? (
@@ -277,7 +292,7 @@ export function ListingRow({
               title={name === title ? title : `${name} · ${title}`}
               onClick={(e) => {
                 e.stopPropagation();
-                onSelect(listing.id);
+                activate();
               }}
               onDoubleClick={(e) => {
                 e.preventDefault();
@@ -327,7 +342,7 @@ export function ListingRow({
         </div>
       </div>
       {!renaming && !selecting && (
-        <div className="pointer-events-none absolute top-1.5 right-1.5 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:pointer-events-auto max-[900px]:opacity-100">
+        <div className="pointer-events-none absolute top-1.5 right-1.5 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:hidden">
           <button
             type="button"
             className={actionClass}
@@ -355,6 +370,33 @@ export function ListingRow({
             <XIcon className="size-3" />
           </button>
         </div>
+      )}
+      {/* Phones have no hover: the row's actions live behind one full-size button. */}
+      {!renaming && !selecting && (
+        <Menu>
+          <MenuTrigger
+            className="absolute top-1/2 right-0 hidden size-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg text-sidebar-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover max-[900px]:inline-flex"
+            aria-label={`Actions for ${title}`}
+          >
+            <EllipsisIcon className="size-4.5" />
+          </MenuTrigger>
+          <MenuPopup align="end" width="content">
+            <MenuItem disabled={renameListing.isPending} onClick={startRename}>
+              <PencilIcon />
+              Rename
+            </MenuItem>
+            <MenuItem
+              variant="destructive"
+              onClick={async () => {
+                const ok = await confirmDialog(`Delete "${title}"?`, { variant: "destructive", confirmLabel: "Delete" });
+                if (ok) onDelete(listing.id, title);
+              }}
+            >
+              <Trash2Icon />
+              Delete
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
       )}
       {hoverOpen && jobId && popupPos ? (
         <div

@@ -51,7 +51,7 @@ export function SelectCheckbox({
       title={title}
       disabled={disabled}
       className={cn(
-        "inline-flex size-4 flex-none cursor-pointer items-center justify-center rounded-[4px] border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
+        "relative inline-flex size-4 max-[900px]:size-5.5 flex-none cursor-pointer items-center justify-center rounded-[4px] pointer-coarse:after:absolute pointer-coarse:after:-inset-3 border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40",
         checked ? "border-primary bg-primary text-primary-foreground" : "border-input bg-transparent",
       )}
       onClick={(event) => {
@@ -96,7 +96,7 @@ export function ShelfHeader({ label, expanded, onToggle }: { label: string; expa
       type="button"
       aria-expanded={expanded}
       onClick={onToggle}
-      className="mt-1.5 mb-0.5 flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-[var(--control-radius)] px-2 text-left text-xs font-medium text-sidebar-muted-foreground/70 outline-none hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      className="mt-1.5 mb-0.5 flex h-8 max-[900px]:h-11 max-[900px]:my-0 w-full shrink-0 cursor-pointer items-center gap-2 rounded-[var(--control-radius)] px-2 text-left text-xs font-medium text-sidebar-muted-foreground/70 outline-none hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
       <span className="shrink-0">{label}</span>
       <span className="h-px min-w-2 flex-1 bg-sidebar-border" aria-hidden="true" />

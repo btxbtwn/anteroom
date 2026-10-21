@@ -1,7 +1,7 @@
 /* ── Sidebar ── */
 
-/* Desktop: the window titlebar owns panel collapse. Settings stays in the
-   sidebar footer. Mobile keeps this brand band because the desktop topbar is
+/* Desktop: the window titlebar owns panel collapse and settings stay in the
+   sidebar footer. Phones show this header instead, since the desktop topbar is
    hidden below 900px. */
 .sidebar-header {
   display: none;
@@ -17,7 +17,6 @@
 }
 
 .mobile-workspace-bar,
-.mobile-sidebar-backdrop,
 .mobile-mail-toolbar {
   display: none;
 }
@@ -45,29 +44,6 @@ html.desktop-app .editor-header {
 
 .sidebar-collapse {
   color: var(--color-ink-muted);
-}
-
-.sidebar-brand {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  min-width: 0;
-}
-
-.sidebar-wordmark {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  color: var(--color-text);
-  line-height: 1;
-}
-
-.sidebar-product {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  color: var(--color-text-muted);
-  line-height: 1;
 }
 
 .sidebar-icon-btn {
@@ -99,11 +75,6 @@ html.desktop-app .editor-header {
 
 .sidebar-icon-btn:focus-visible {
   box-shadow: 0 0 0 2px var(--color-cobalt);
-}
-
-.sidebar-icon-btn.sidebar-header-settings {
-  display: none;
-  margin-left: auto;
 }
 
 .nav-thumb {

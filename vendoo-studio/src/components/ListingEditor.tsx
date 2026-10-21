@@ -484,7 +484,7 @@ export function ListingEditor({
                   role="tab"
                   aria-selected={editTab === tab}
                   className={cn(
-                    "-mb-px shrink-0 whitespace-nowrap border-transparent border-b-2 px-2.5 py-2 font-medium text-muted-foreground text-xs transition-colors hover:text-foreground",
+                    "-mb-px shrink-0 whitespace-nowrap border-transparent border-b-2 px-2.5 py-2 font-medium text-muted-foreground text-xs transition-colors hover:text-foreground max-[900px]:min-h-11 max-[900px]:px-3 max-[900px]:text-sm",
                     editTab === tab && "border-primary text-foreground",
                   )}
                   onClick={() => { setFieldTarget(null); setEditTab(tab); }}
@@ -520,7 +520,7 @@ export function ListingEditor({
         )}
       </div>
 
-      <div className="flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(38vh,280px)]">
+      <div className="listing-send-footer flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(28vh,220px)] max-[900px]:pb-[max(10px,env(safe-area-inset-bottom,0px))]">
         <SendToVendooButton
           convId={convId}
           canSend={data?.can_send ?? false}

@@ -91,6 +91,8 @@ function useRowClassName(interactive: boolean) {
     "group/timeline-row relative w-full min-w-0 rounded-md px-0.5 text-left transition-colors",
     grouped ? "py-0" : "py-0.5",
     interactive && interactionClassName,
+    // A finger needs the full 44px to open a work log row.
+    interactive && "pointer-coarse:min-h-11",
   );
 }
 

@@ -4,7 +4,7 @@
  * (MIT, (c) 2026 T3 Tools Inc.): a media dialog with corner close, side
  * navigation and a caption line under the image.
  */
-import { ChevronLeftIcon, ChevronRightIcon, RotateCcwIcon, RotateCwIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -57,6 +57,7 @@ export function PhotoThumb({
   removeLabel,
   removing,
   controlsTabbable = true,
+  controlsInViewerOnTouch = false,
   className,
   ...props
 }: Omit<ComponentProps<"div">, "onClick"> & {
@@ -72,8 +73,11 @@ export function PhotoThumb({
   removeLabel?: string;
   removing?: boolean;
   controlsTabbable?: boolean;
+  /** On a touch screen, leave rotate and delete to the viewer a tap opens, where a stray tap cannot hit them. */
+  controlsInViewerOnTouch?: boolean;
 }) {
   const number = index + 1;
+  const overlayTouch = controlsInViewerOnTouch ? "pointer-coarse:hidden" : "pointer-coarse:opacity-100";
   return (
     <div
       className={cn(
@@ -108,7 +112,7 @@ export function PhotoThumb({
           variant="overlay"
           size="icon-micro"
           tabIndex={controlsTabbable ? undefined : -1}
-          className="absolute top-0.5 left-0.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/thumb:opacity-100 pointer-coarse:opacity-100"
+          className={cn("absolute top-0.5 left-0.5 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/thumb:opacity-100", overlayTouch)}
           aria-label={`Rotate photo ${number} right`}
           title="Rotate right"
           disabled={rotating}
@@ -125,7 +129,7 @@ export function PhotoThumb({
           variant="overlay"
           size="icon-micro"
           tabIndex={controlsTabbable ? undefined : -1}
-          className="absolute top-0.5 right-0.5 opacity-0 transition-opacity hover:text-white focus-visible:opacity-100 group-hover/thumb:opacity-100 pointer-coarse:opacity-100"
+          className={cn("absolute top-0.5 right-0.5 opacity-0 transition-opacity hover:text-white focus-visible:opacity-100 group-hover/thumb:opacity-100", overlayTouch)}
           aria-label={removeLabel ?? `Delete photo ${number}`}
           title={removeLabel ? "Remove photo" : "Delete photo"}
           disabled={removing}
@@ -154,6 +158,8 @@ export function PhotoLightbox({
   rotating = false,
   onRotate,
   onStep,
+  onMove,
+  onRemove,
   onClose,
 }: {
   urls: string[];
@@ -163,6 +169,9 @@ export function PhotoLightbox({
   rotating?: boolean;
   onRotate: (degrees: 90 | -90) => void;
   onStep: (index: number) => void;
+  /** Touch screens cannot drag thumbnails, so the viewer moves the photo instead. */
+  onMove?: (delta: -1 | 1) => void;
+  onRemove?: () => void;
   onClose: () => void;
 }) {
   const step = (delta: number) => onStep((index + delta + urls.length) % urls.length);
@@ -235,6 +244,29 @@ export function PhotoLightbox({
               <RotateCwIcon />
             </Button>
           </div>
+          {onMove || onRemove ? (
+            // Touch only: the desktop drags thumbnails and uses their delete button.
+            <div className="mt-3 hidden items-center gap-2 pointer-coarse:flex">
+              {onMove && urls.length > 1 ? (
+                <>
+                  <Button variant="outline" size="sm" disabled={index === 0} onClick={() => onMove(-1)}>
+                    <ArrowLeftIcon />
+                    Earlier
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={index === urls.length - 1} onClick={() => onMove(1)}>
+                    Later
+                    <ArrowRightIcon />
+                  </Button>
+                </>
+              ) : null}
+              {onRemove ? (
+                <Button variant="destructive-outline" size="sm" onClick={onRemove}>
+                  <Trash2Icon />
+                  Delete
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         {urls.length > 1 && (
           <Button

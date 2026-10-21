@@ -27,7 +27,7 @@ export function UsageSettings() {
         <div className="min-w-0">
           <h2 className="text-sm font-medium text-foreground">Limits</h2>
           <p className="text-xs text-muted-foreground">
-            How much of each subscription is left, and when it resets. Hover a bar for details.
+            How much of each subscription is left, and when it resets. Hover or tap a bar for details.
           </p>
         </div>
         <Button
