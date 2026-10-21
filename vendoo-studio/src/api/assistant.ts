@@ -1,5 +1,12 @@
 import type { ChatAttachment } from "./types";
 
+/** One fact the assistant keeps about the shop, across every conversation. */
+export interface AssistantMemory {
+  id: string;
+  text: string;
+  updated_at: string | null;
+}
+
 /** One conversation with the business assistant, apart from any listing's chat. */
 export interface AssistantThread {
   id: string;

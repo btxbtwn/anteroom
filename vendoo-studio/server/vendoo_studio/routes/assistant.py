@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.database import SessionLocal, get_db
 from vendoo_studio.models.assistant import AssistantMessage, AssistantThread
 from vendoo_studio.routes.attachments import AttachmentUpload, store_uploads
-from vendoo_studio.services import assistant_changes, business_assistant
+from vendoo_studio.services import assistant_changes, assistant_memory, business_assistant
 from vendoo_studio.services.chat_attachments import attach_to_last_user_turn
 from vendoo_studio.services.listing_provider import get_listing_provider
 from vendoo_studio.services.streaming import (
@@ -112,6 +112,20 @@ def save_note(body: BusinessNote):
     return {"note": set_business_note(body.note)}
 
 
+@router.get("/memory")
+def get_memory(db: Session = Depends(get_db)):
+    """Facts the assistant keeps across conversations."""
+    return {"memories": assistant_memory.list_memories(db)}
+
+
+@router.delete("/memory/{memory_id}")
+def forget_memory(memory_id: str, db: Session = Depends(get_db)):
+    """Drop one fact the seller says is wrong."""
+    if not assistant_memory.forget(db, memory_id):
+        raise HTTPException(404, "That memory is no longer kept.")
+    return {"memories": assistant_memory.list_memories(db)}
+
+
 def _propose(block: str) -> dict | None:
     db = SessionLocal()
     try:
@@ -142,6 +156,7 @@ async def _answer(
     """
     answer = ""
     changes = None
+    memory_block = None
     shop = None
     try:
         run.publish(sse_event("status", "Reading your shop…"))
@@ -157,6 +172,8 @@ async def _answer(
             if kind == "text":
                 answer += text
                 run.publish(sse_data(text))
+            elif kind == "memory":
+                memory_block = text
             elif kind == "changes":
                 changes = _propose(text)
                 if changes is None:
@@ -182,6 +199,12 @@ async def _answer(
         if answer.strip():
             save_db = SessionLocal()
             try:
+                if memory_block:
+                    try:
+                        assistant_memory.apply(save_db, memory_block)
+                    except Exception:
+                        log.exception("could not update assistant memory")
+                        save_db.rollback()
                 business_assistant.add_message(
                     save_db, "assistant", answer,
                     provider=getattr(provider, "name", None),

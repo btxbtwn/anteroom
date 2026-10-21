@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.299 — 2026-10-20
+
+- The business chat remembers facts about how you run the shop. They stay when you start a new chat, and it updates one when you correct it. About your business shows them, and you can remove one that is wrong.
+
 ## 0.1.298 — 2026-10-20
 
 - The sync time on a listing stays on screen. When the header is full, it wraps onto the next line instead of being cut off.

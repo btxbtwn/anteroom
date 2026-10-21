@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.assistant import NEW_THREAD_TITLE, AssistantMessage, AssistantThread
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
-from vendoo_studio.services import assistant_changes
+from vendoo_studio.services import assistant_changes, assistant_memory
 from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsItem
 
 # Earlier turns sent back with a question, so a follow-up can lean on them.
@@ -66,7 +66,7 @@ INSTRUCTIONS = (
     "Never invent a sale, a price, a cost or a date.\n"
     "- Profit is the sold price plus shipping the buyer paid, less fees, shipping the seller paid, and the item's cost.\n"
     "- Give advice when asked — what to source, reprice, discount or drop — and tie each point to the numbers behind it. "
-    "Fit it to what the seller says about their business, when they have said anything.\n"
+    "Fit it to what the seller says about their business and to what you remember about them.\n"
     "- You can propose changes to listings, described below, and the seller applies them. You cannot change a setting, "
     "and you cannot list, delist, publish or send anything to Vendoo or a marketplace. "
     "When the seller wants one of those, tell them where in Studio to do it.\n"
@@ -346,6 +346,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
         f"Today is {clock.date().isoformat()} (UTC). "
         f"Sales and statuses were last synced from Vendoo at {everything['last_updated_at'] or 'an unknown time'}.",
         f"--- What the seller says about their business ---\n{note}" if note else "",
+        assistant_memory.section(db),
         _section("Inventory now", {
             **everything["inventory"],
             "aging_of_active_listings": [
@@ -405,7 +406,8 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     # The instructions lead so a provider's prefix cache still hits when the figures move.
     system = (
         f"{INSTRUCTIONS}\n{LOOKUP_INSTRUCTIONS.format(limit=MAX_LOOKUPS, schema=schema)}\n"
-        f"{CHANGES_INSTRUCTIONS.format(limit=assistant_changes.MAX_CHANGES)}\n{shop.brief}"
+        f"{CHANGES_INSTRUCTIONS.format(limit=assistant_changes.MAX_CHANGES)}\n"
+        f"{assistant_memory.INSTRUCTIONS}\n{shop.brief}"
     )
     return [{"role": "system", "content": system}, *earlier]
 
@@ -414,8 +416,8 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
     """Stream the answer as ``(kind, text)``: ``text``, ``thinking``, ``status``, ``error`` or ``changes``.
 
     A reply that is a lookup is run and fed back instead of shown, until the
-    model answers or runs out of lookups. A changes block the answer ends with
-    is kept out of the text and handed over whole, last, as ``changes``.
+    model answers or runs out of lookups. A memory block and a changes block
+    the answer ends with are kept out of the text and handed over whole, last.
     """
     messages = list(messages)
     for used in range(MAX_LOOKUPS + 1):
@@ -436,15 +438,19 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
                 if len(opening) < len(_LOOKUP_FENCE) or opening.startswith(_LOOKUP_FENCE):
                     continue
                 showing = True
-            visible = assistant_changes.visible_text(reply)
+            visible = assistant_memory.visible_text(reply)
             if len(visible) > shown:
                 yield "text", visible[shown:]
                 shown = len(visible)
         sql = None if showing else lookup_sql(reply)
         if sql is None:
-            words, changes = assistant_changes.split_reply(reply)
+            words, memory, changes = assistant_memory.peel(reply)
+            if memory is not None and not words.strip():
+                words = "I'll remember that."
             if len(words) > shown:
                 yield "text", words[shown:]
+            if memory is not None:
+                yield "memory", memory
             if changes is not None:
                 yield "changes", changes
             return

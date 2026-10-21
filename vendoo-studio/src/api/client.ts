@@ -53,7 +53,7 @@ import type {
 } from "./types";
 import { readSse } from "./sse";
 import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
-import { AssistantRefused, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
+import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 
 const BASE = "/api";
@@ -267,6 +267,10 @@ export const api = {
     /** What the seller told the assistant about how they run the shop. */
     note: () => request<{ note: string }>("/assistant/note"),
     saveNote: (note: string) => request<{ note: string }>("/assistant/note", { method: "PUT", body: JSON.stringify({ note }) }),
+    /** Facts the assistant learned in chat and keeps after a conversation is cleared. */
+    memory: () => request<{ memories: AssistantMemory[] }>("/assistant/memory"),
+    forget: (id: string) =>
+      request<{ memories: AssistantMemory[] }>(`/assistant/memory/${encodeURIComponent(id)}`, { method: "DELETE" }),
     /**
      * Ask, and follow the answer. Studio keeps writing it if this connection
      * drops; `resume` picks it back up. Resolves with the assistant's own

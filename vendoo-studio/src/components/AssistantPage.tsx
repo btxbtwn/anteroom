@@ -35,6 +35,7 @@ export const ASSISTANT_STARTERS = [
 ];
 
 const NOTE_KEY = ["assistant", "note"];
+const MEMORY_KEY = ["assistant", "memory"];
 const THREADS_KEY = ["assistant", "threads"];
 
 function messagesKey(threadId: string) {
@@ -234,6 +235,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       // Show the saved turns before dropping the live one, so the answer does not blink.
       await queryClient.invalidateQueries({ queryKey: threadKey });
       await queryClient.invalidateQueries({ queryKey: THREADS_KEY });
+      await queryClient.invalidateQueries({ queryKey: MEMORY_KEY });
       if (question !== null && dropped && !abort.signal.aborted) {
         // The connection may have dropped before Studio ever received the question.
         const saved = queryClient.getQueryData<AssistantMessage[]>(threadKey);
@@ -481,12 +483,13 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 }
 
 /**
- * What the seller wants the assistant to keep in mind — goals, margins, what
- * they will not source — sent along with every question.
+ * What the seller wants the assistant to keep in mind, plus the facts the
+ * chat has learned and can rewrite.
  */
 function BusinessNote({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const saved = useQuery({ queryKey: NOTE_KEY, queryFn: api.assistant.note });
+  const remembered = useQuery({ queryKey: MEMORY_KEY, queryFn: api.assistant.memory });
   const [draft, setDraft] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (note: string) => api.assistant.saveNote(note),
@@ -495,35 +498,74 @@ function BusinessNote({ onClose }: { onClose: () => void }) {
       onClose();
     },
   });
+  const forget = useMutation({
+    mutationFn: (id: string) => api.assistant.forget(id),
+    onSuccess: (result) => queryClient.setQueryData(MEMORY_KEY, result),
+  });
   const note = draft ?? saved.data?.note ?? "";
+  const memories = remembered.data?.memories ?? [];
 
   return (
-    <form
-      className="mx-3 mb-2 flex flex-col gap-2 rounded-xl border border-border/70 bg-card p-3.5 sm:mx-4"
-      onSubmit={(event) => {
-        event.preventDefault();
-        save.mutate(note);
-      }}
-    >
-      <label htmlFor="assistant-note-text" className="font-medium text-foreground text-sm">About your business</label>
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        Anything the assistant should keep in mind on every question: your goals, the margin you want, how much time
-        you have, what you will not source, where you ship from.
-      </p>
-      <Textarea
-        id="assistant-note-text"
-        rows={5}
-        maxLength={NOTE_MAX}
-        value={note}
-        disabled={saved.isLoading}
-        placeholder="I want at least $15 profit per item and sell mostly vintage menswear. I list about 20 items a week."
-        onChange={(event) => setDraft(event.target.value)}
-      />
-      {save.isError ? <p className="text-destructive-foreground text-sm">{(save.error as Error).message || "Could not save."}</p> : null}
-      <div className="flex justify-end gap-2">
-        <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" size="sm" disabled={save.isPending || saved.isLoading}>Save</Button>
+    <div className="mx-3 mb-2 flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-3.5 sm:mx-4">
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          save.mutate(note);
+        }}
+      >
+        <label htmlFor="assistant-note-text" className="font-medium text-foreground text-sm">About your business</label>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          Anything the assistant should keep in mind on every question: your goals, the margin you want, how much time
+          you have, what you will not source, where you ship from.
+        </p>
+        <Textarea
+          id="assistant-note-text"
+          rows={5}
+          maxLength={NOTE_MAX}
+          value={note}
+          disabled={saved.isLoading}
+          placeholder="I want at least $15 profit per item and sell mostly vintage menswear. I list about 20 items a week."
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        {save.isError ? <p className="text-destructive-foreground text-sm">{(save.error as Error).message || "Could not save."}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" size="sm" disabled={save.isPending || saved.isLoading}>Save</Button>
+        </div>
+      </form>
+      <div className="flex flex-col gap-2 border-t border-border/70 pt-3">
+        <h3 className="font-medium text-foreground text-sm">What it remembers</h3>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          Facts it picked up from your chats. They stay when you start a new chat, and it rewrites one when you
+          correct it. Remove a fact if it is wrong.
+        </p>
+        {remembered.isError ? (
+          <p className="text-destructive-foreground text-sm">Could not load what it remembers.</p>
+        ) : memories.length ? (
+          <ul className="flex flex-col gap-1.5">
+            {memories.map((fact) => (
+              <li key={fact.id} className="flex items-start justify-between gap-3 text-sm">
+                <span className="min-w-0 text-foreground">{fact.text}</span>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost-muted"
+                  disabled={forget.isPending}
+                  onClick={() => forget.mutate(fact.id)}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground text-xs">
+            {remembered.isLoading ? "Loading…" : "Nothing yet. Mention how you like to run the shop and it will keep it."}
+          </p>
+        )}
+        {forget.isError ? <p className="text-destructive-foreground text-sm">{(forget.error as Error).message || "Could not remove that."}</p> : null}
       </div>
-    </form>
+    </div>
   );
 }
