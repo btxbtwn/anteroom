@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { confirmDialog } from "../ui/confirmDialog";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 
 const POLL_MS = 60 * 1000;
 
@@ -121,7 +121,7 @@ export function useStudioUpdate() {
         sha: result.sha || null,
         error: null,
       });
-      addToast({
+      toastManager.add({
         type: "success",
         title: "Update downloaded",
         description: "Restart the app from the update button to install it.",
@@ -129,7 +129,7 @@ export function useStudioUpdate() {
     },
     onError: (err: Error) => {
       void queryClient.invalidateQueries({ queryKey: ["update-progress"] });
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not download update",
         description: err.message || "An unexpected error occurred.",
@@ -152,7 +152,7 @@ export function useStudioUpdate() {
     onError: (err: Error) => {
       setWaiting(false);
       void queryClient.invalidateQueries({ queryKey: ["update-progress"] });
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not install update",
         description: err.message || "An unexpected error occurred.",
@@ -213,7 +213,7 @@ export function useStudioUpdate() {
     const latest = data?.available ? data : (await refetch()).data;
     if (!latest) return;
     if (latest.error && !latest.available) {
-      addToast({
+      toastManager.add({
         type: "error",
         title: "Could not check for updates",
         description: latest.error,

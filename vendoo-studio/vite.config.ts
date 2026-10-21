@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const ROOT = import.meta.dirname;
 
@@ -26,6 +27,7 @@ export default defineConfig({
   define: { __STUDIO_BUILD__: JSON.stringify(stamp) },
   plugins: [
     react(),
+    tailwindcss(),
     {
       // Written beside index.html so the Python launcher can compare the built
       // bundle against the checkout before it opens a window.
@@ -44,7 +46,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:4318",
+        // Same variable the backend reads, so a second Studio can run beside the
+        // installed one without the dev server talking to the wrong backend.
+        target: `http://127.0.0.1:${process.env.VENDOO_STUDIO_PORT || "4318"}`,
         changeOrigin: true,
         // The Claude sign-in terminal is a WebSocket.
         ws: true,

@@ -1,45 +1,168 @@
+// Providers settings laid out like T3 Code's Providers page
+// (components/settings/ProviderSettingsPanel.tsx and ProviderInstanceCard.tsx,
+// https://github.com/pingdotgg/t3code, MIT License, (c) 2026 T3 Tools Inc.):
+// a provider list beside the selected provider's editor, with Studio's own
+// sign-in flows, API keys, listing order and per-provider models mapped onto it.
 import { type ReactNode, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { CheckIcon, ExternalLinkIcon, KeyRoundIcon, LogInIcon, PlugZapIcon, TerminalIcon, Trash2Icon } from "lucide-react";
 import { api } from "../../api/client";
-import type { ListingProviderId, PhotoProviderChoice } from "../../api/types";
+import type { ListingProviderId, PhotoProviderChoice, ProviderStatus } from "../../api/types";
+import { cn } from "../../lib/utils";
 import { ClaudeLoginTerminal } from "../ClaudeLoginTerminal";
 import { ProviderLogo, resolveProviderLogoId } from "../ProviderLogo";
-import { SettingsRow, SettingsSection } from "./SettingsLayout";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { ScrollArea } from "../ui/scroll-area";
+import { Spinner } from "../ui/spinner";
+import {
+  SettingsCode,
+  SettingsGroup,
+  SettingsNote,
+  SettingsRow,
+  SettingsSection,
+  SettingsSelect,
+  type SettingsSelectOption,
+} from "./SettingsLayout";
 
 type ListingFallbackId = ListingProviderId | "none";
+type ModelOption = { value: string; label: string };
+type StatusTone = "ready" | "idle" | "warning" | "error";
+
+const PROVIDER_IDS: readonly ListingProviderId[] = ["chatgpt", "claude", "mimo", "cursor"];
+
+const PROVIDER_LABELS: Record<ListingProviderId, { short: string; full: string }> = {
+  chatgpt: { short: "ChatGPT", full: "ChatGPT" },
+  claude: { short: "Claude", full: "Claude" },
+  mimo: { short: "MiMo", full: "Xiaomi MiMo" },
+  cursor: { short: "Cursor", full: "Cursor" },
+};
+
+const REASONING_LABELS: Record<string, string> = {
+  none: "Off",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+};
+
+const STATUS_DOT: Record<StatusTone, string> = {
+  ready: "bg-success",
+  idle: "bg-muted-foreground/40",
+  warning: "bg-warning",
+  error: "bg-destructive",
+};
+
+// T3's provider card height: tall enough for the editor, inside the viewport.
+const PROVIDER_CARD_HEIGHT =
+  "@min-[48rem]/providers:h-[min(44rem,calc(100dvh-11rem))] @min-[48rem]/providers:min-h-[32rem]";
 
 function providerLabel(choice: ListingFallbackId): string {
-  if (choice === "chatgpt") return "ChatGPT";
-  if (choice === "claude") return "Claude";
-  if (choice === "mimo") return "MiMo";
-  if (choice === "cursor") return "Cursor";
-  return "None";
+  return choice === "none" ? "None" : PROVIDER_LABELS[choice].short;
 }
 
-function providerTitle(choice: ListingProviderId, full = false): ReactNode {
-  const label =
-    choice === "chatgpt"
-      ? "ChatGPT"
-      : choice === "claude"
-        ? "Claude"
-        : choice === "mimo"
-          ? (full ? "Xiaomi MiMo" : "MiMo")
-          : "Cursor";
+function providerOption<T extends string>(value: T, id: ListingProviderId, full = true): SettingsSelectOption<T> {
+  const label = full ? PROVIDER_LABELS[id].full : PROVIDER_LABELS[id].short;
+  return {
+    value,
+    label: (
+      <>
+        <ProviderLogo id={id} label={label} size={16} />
+        <span className="truncate">{label}</span>
+      </>
+    ),
+  };
+}
+
+function ProviderIcon({ id, size = 20 }: { id: ListingProviderId; size?: number }) {
+  return <ProviderLogo id={id} label={PROVIDER_LABELS[id].full} size={size} />;
+}
+
+function TestResult({ result }: { result: string | null }) {
+  if (!result) return null;
+  const ok = result.includes("successful");
   return (
-    <>
-      <ProviderLogo id={choice} label={label} size={18} />
-      <span>{label}</span>
-    </>
+    <span className={cn("inline-flex items-center gap-1", ok ? "text-success-foreground" : "text-destructive-foreground")}>
+      {ok ? <CheckIcon className="size-3" /> : null}
+      {result}
+    </span>
   );
 }
 
-function activeProviderChoice(providerName: string | undefined): ListingProviderId | null {
-  return resolveProviderLogoId(providerName);
+function useConnectionTest(run: () => Promise<{ ok: boolean; error?: string | null }>) {
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const test = async () => {
+    setTesting(true);
+    setResult(null);
+    try {
+      const outcome = await run();
+      setResult(outcome.ok ? "Connection successful" : outcome.error || "Connection failed");
+    } catch (err) {
+      setResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    setTesting(false);
+  };
+  return { testing, result, test, clear: () => setResult(null) };
 }
 
-type ModelOption = { value: string; label: string };
+function TestButton({ testing, onClick }: { testing: boolean; onClick: () => void }) {
+  return (
+    <Button size="xs" variant="outline" onClick={onClick} disabled={testing}>
+      {testing ? <Spinner /> : <PlugZapIcon />}
+      {testing ? "Testing" : "Test"}
+    </Button>
+  );
+}
 
-/** A provider's photo model, listing model and reasoning, kept in its own section. */
+/** Secret entry for a provider key. Keys go straight to the Keychain via the API; only a masked form comes back. */
+function ApiKeyField({
+  placeholder,
+  saving,
+  onSave,
+  label,
+}: {
+  placeholder: string;
+  saving: boolean;
+  onSave: (key: string) => void;
+  label: string;
+}) {
+  const [value, setValue] = useState("");
+  const save = () => {
+    if (!value.trim()) return;
+    onSave(value);
+    setValue("");
+  };
+  return (
+    <form
+      className="flex min-w-0 items-center gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        save();
+      }}
+    >
+      <Input
+        size="sm"
+        font="mono"
+        type="password"
+        aria-label={label}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        placeholder={placeholder}
+        autoComplete="off"
+        spellCheck={false}
+      />
+      <Button type="submit" size="xs" variant="outline" disabled={!value.trim() || saving}>
+        {saving ? <Spinner /> : <KeyRoundIcon />}
+        {saving ? "Saving" : "Save"}
+      </Button>
+    </form>
+  );
+}
+
+/** A provider's photo model, listing model and reasoning. */
 function ProviderModelRows({
   provider,
   models,
@@ -67,60 +190,53 @@ function ProviderModelRows({
     if (value && !options.some((option) => option.value === value)) options.push({ value, label: value });
   }
   const listingLabel = options.find((option) => option.value === listingModel)?.label ?? listingModel;
-  const modelSelect = (role: "vision_model" | "listing_model", value: string, ariaLabel: string) => (
-    <select
-      className="input settings-model-select"
-      aria-label={`${label} ${ariaLabel}`}
-      value={value}
-      disabled={pending || options.length === 0}
-      onChange={(event) =>
-        onModel(
-          role === "vision_model"
-            ? { vision_model: event.target.value }
-            : { listing_model: event.target.value },
-        )
-      }
-    >
-      {options.map((option) => (
-        <option key={`${role}-${option.value}`} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
+  const modelOptions = options.map((option) => ({ value: option.value, label: option.label }));
   return (
     <>
       <SettingsRow
         title="Photo model"
         description={`Reads product photos when ${label} does photo analysis.`}
-        status={error ? <span className="text-error">{error}</span> : null}
-        control={modelSelect("vision_model", visionModel, "photo model")}
+        status={error ? <span className="text-destructive-foreground">{error}</span> : null}
+        control={
+          <SettingsSelect
+            aria-label={`${label} photo model`}
+            className="sm:w-56"
+            value={visionModel}
+            options={modelOptions}
+            disabled={pending || options.length === 0}
+            onChange={(value) => onModel({ vision_model: value })}
+          />
+        }
       />
       <SettingsRow
         title="Listing model"
         description={`Writes marketplace copy when ${label} is the listing AI.`}
-        control={modelSelect("listing_model", listingModel, "listing model")}
+        control={
+          <SettingsSelect
+            aria-label={`${label} listing model`}
+            className="sm:w-56"
+            value={listingModel}
+            options={modelOptions}
+            disabled={pending || options.length === 0}
+            onChange={(value) => onModel({ listing_model: value })}
+          />
+        }
       />
       <SettingsRow
         title="Reasoning"
         description={reasoningDescription}
         control={
           reasoning ? (
-            <select
-              className="input settings-model-select"
+            <SettingsSelect
               aria-label={`${label} reasoning`}
+              className="sm:w-56"
               value={reasoning.value}
+              options={reasoning.options}
               disabled={pending}
-              onChange={(event) => reasoning.onChange(event.target.value)}
-            >
-              {reasoning.options.map((option) => (
-                <option key={`reasoning-${option.value}`} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              onChange={reasoning.onChange}
+            />
           ) : (
-            <span className="settings-row-value">Not adjustable for {listingLabel}</span>
+            <span className="text-xs text-muted-foreground">Not adjustable for {listingLabel}</span>
           )
         }
       />
@@ -128,20 +244,9 @@ function ProviderModelRows({
   );
 }
 
-const REASONING_LABELS: Record<string, string> = {
-  none: "Off",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "Extra high",
-  max: "Max",
-};
-
 function BraveSearchSection({ chatgptSignedIn }: { chatgptSignedIn: boolean }) {
   const queryClient = useQueryClient();
-  const [apiKey, setApiKey] = useState("");
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const connection = useConnectionTest(api.settings.testBrave);
   const { data: brave } = useQuery({
     queryKey: ["settings-brave"],
     queryFn: api.settings.brave,
@@ -150,33 +255,17 @@ function BraveSearchSection({ chatgptSignedIn }: { chatgptSignedIn: boolean }) {
     mutationFn: (key: string) => api.settings.setBrave(key),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings-brave"] });
-      setApiKey("");
-      setTestResult(null);
+      connection.clear();
     },
   });
   const deleteKeyMutation = useMutation({
     mutationFn: () => api.settings.deleteBrave(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings-brave"] });
-      setTestResult(null);
+      connection.clear();
     },
   });
   const configured = Boolean(brave?.configured);
-  const saveKey = () => {
-    if (!apiKey.trim()) return;
-    setKeyMutation.mutate(apiKey);
-  };
-  const handleTest = async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const result = await api.settings.testBrave();
-      setTestResult(result.ok ? "Connection successful" : result.error || "Connection failed");
-    } catch (err) {
-      setTestResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    setTesting(false);
-  };
 
   return (
     <SettingsSection id="brave" title="Brave Search">
@@ -185,76 +274,161 @@ function BraveSearchSection({ chatgptSignedIn }: { chatgptSignedIn: boolean }) {
         title="API key"
         description={
           <>
-            Used to look up sold comps when your listing model's web search fails, times out or finds no sales. Get a key at{" "}
-            <a href="https://api.search.brave.com" target="_blank" rel="noreferrer">
+            Used to look up sold comps when your listing model's web search fails, times out or finds no sales. Get a
+            key at{" "}
+            <a className="text-foreground underline-offset-4 hover:underline" href="https://api.search.brave.com" target="_blank" rel="noreferrer">
               api.search.brave.com
             </a>
             . Stored in macOS Keychain and never sent to the browser.
           </>
         }
-      >
-        <div className="settings-row-field">
-          <input
-            className="input font-mono"
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") saveKey();
-            }}
-            placeholder="BSA..."
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <button type="button" className="btn btn-sm btn-outline" onClick={saveKey} disabled={!apiKey.trim() || setKeyMutation.isPending}>
-            {setKeyMutation.isPending ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </SettingsRow>
-      <SettingsRow
-        title="Status"
-        description={
-          configured
-            ? `Fallback · ${brave?.masked_key}`
-            : chatgptSignedIn
-              ? "Fallback when your listing model's web search does not work"
-              : "Not configured — sold comps use your listing model's web search only"
-        }
         status={
-          testResult ? (
-            <span className={testResult.includes("successful") ? "text-success" : "text-error"}>{testResult}</span>
+          connection.result ? (
+            <TestResult result={connection.result} />
           ) : setKeyMutation.isError ? (
-            <span className="text-error">{(setKeyMutation.error as Error).message}</span>
-          ) : null
+            <span className="text-destructive-foreground">{(setKeyMutation.error as Error).message}</span>
+          ) : configured ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="size-1.5 rounded-full bg-success" aria-hidden />
+              Fallback · <SettingsCode>{brave?.masked_key}</SettingsCode>
+            </span>
+          ) : chatgptSignedIn ? (
+            "Fallback when your listing model's web search does not work"
+          ) : (
+            "Not configured — sold comps use your listing model's web search only"
+          )
         }
         control={
           configured ? (
             <>
-              <button type="button" className="btn btn-sm btn-outline" onClick={handleTest} disabled={testing}>
-                {testing ? "Testing…" : "Test"}
-              </button>
-              <button type="button" className="btn btn-sm btn-ghost settings-danger" onClick={() => deleteKeyMutation.mutate()}>
+              <TestButton testing={connection.testing} onClick={connection.test} />
+              <Button size="xs" variant="ghost-destructive" onClick={() => deleteKeyMutation.mutate()}>
+                <Trash2Icon />
                 Remove
-              </button>
+              </Button>
             </>
           ) : null
         }
-      />
+      >
+        <ApiKeyField
+          label="Brave Search API key"
+          placeholder="BSA..."
+          saving={setKeyMutation.isPending}
+          onSave={(key) => setKeyMutation.mutate(key)}
+        />
+      </SettingsRow>
     </SettingsSection>
+  );
+}
+
+type ProviderSummary = { tone: StatusTone; headline: string; detail?: string };
+
+function summarizeProvider(id: ListingProviderId, provider: ProviderStatus | undefined): ProviderSummary {
+  if (!provider) return { tone: "idle", headline: "Checking" };
+  if (id === "chatgpt") {
+    const chatgpt = provider.chatgpt;
+    if (chatgpt?.signed_in) return { tone: "ready", headline: "Signed in", detail: chatgpt.email ?? undefined };
+    if (chatgpt?.pending) return { tone: "warning", headline: "Waiting for sign-in" };
+    if (chatgpt?.error) return { tone: "error", headline: "Sign-in failed", detail: chatgpt.error };
+    return { tone: "idle", headline: "Not signed in" };
+  }
+  if (id === "claude") {
+    const claude = provider.claude;
+    if (claude?.signed_in) return { tone: "ready", headline: "Signed in", detail: claude.email ?? undefined };
+    if (claude && !claude.installed) return { tone: "warning", headline: "Needs Claude Code" };
+    return { tone: "idle", headline: "Not signed in" };
+  }
+  const masked = id === "mimo" ? provider.masked_key : provider.masked_cursor_key;
+  return masked ? { tone: "ready", headline: "API key saved", detail: masked } : { tone: "idle", headline: "No API key" };
+}
+
+function RoleBadges({
+  id,
+  primary,
+  fallback,
+  photoProvider,
+}: {
+  id: ListingProviderId;
+  primary: ListingProviderId;
+  fallback: ListingFallbackId;
+  photoProvider: PhotoProviderChoice;
+}) {
+  return (
+    <>
+      {primary === id ? (
+        <Badge variant="info" size="sm">
+          Primary
+        </Badge>
+      ) : fallback === id ? (
+        <Badge variant="outline" size="sm">
+          Fallback
+        </Badge>
+      ) : null}
+      {photoProvider === id ? (
+        <Badge variant="outline" size="sm">
+          Photos
+        </Badge>
+      ) : null}
+    </>
+  );
+}
+
+/** One row of the provider list, after T3's ProviderInstanceCard list mode. */
+function ProviderListRow({
+  id,
+  summary,
+  selected,
+  onSelect,
+  badges,
+}: {
+  id: ListingProviderId;
+  summary: ProviderSummary;
+  selected: boolean;
+  onSelect: () => void;
+  badges: ReactNode;
+}) {
+  const label = PROVIDER_LABELS[id].full;
+  return (
+    <div
+      data-slot="settings-row"
+      className={cn(
+        "group relative flex min-h-16 items-center gap-3 px-3 py-3 transition-colors sm:px-4",
+        selected ? "bg-muted/45" : "hover:bg-muted/25",
+      )}
+    >
+      <button
+        type="button"
+        id={id}
+        className="absolute inset-0 z-10 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={onSelect}
+        onFocus={onSelect}
+        aria-label={`Select ${label}`}
+        aria-pressed={selected}
+      />
+      <div className={cn("flex min-w-0 flex-1 items-start gap-3", summary.tone === "idle" && !selected && "opacity-70 group-hover:opacity-100")}>
+        <ProviderIcon id={id} />
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium text-foreground">{label}</span>
+          </span>
+          <span className="mt-0.5 flex items-center gap-1.5 text-xs leading-normal text-muted-foreground/80">
+            <span className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[summary.tone])} aria-hidden />
+            <span className="truncate">{summary.headline}</span>
+          </span>
+        </span>
+      </div>
+      <span className="flex shrink-0 items-center gap-1">{badges}</span>
+    </div>
   );
 }
 
 export function ProvidersSettings() {
   const queryClient = useQueryClient();
-  const [apiKey, setApiKey] = useState("");
-  const [cursorKey, setCursorKey] = useState("");
+  const [selectedId, setSelectedId] = useState<ListingProviderId | null>(null);
   const [claudeTerminalOpen, setClaudeTerminalOpen] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<string | null>(null);
-  const [mimoTesting, setMimoTesting] = useState(false);
-  const [mimoTestResult, setMimoTestResult] = useState<string | null>(null);
-  const [cursorTesting, setCursorTesting] = useState(false);
-  const [cursorTestResult, setCursorTestResult] = useState<string | null>(null);
+  const activeTest = useConnectionTest(api.settings.testConnection);
+  const mimoTest = useConnectionTest(api.settings.testMimo);
+  const cursorTest = useConnectionTest(api.settings.testCursor);
 
   const { data: provider } = useQuery({
     queryKey: ["settings-provider"],
@@ -263,6 +437,7 @@ export function ProvidersSettings() {
   const chatgptSignedIn = Boolean(provider?.chatgpt?.signed_in);
   const claudeSignedIn = Boolean(provider?.claude?.signed_in);
   const cursorConfigured = Boolean(provider?.masked_cursor_key);
+  const mimoConfigured = Boolean(provider?.masked_key);
   const { data: chatgptModels } = useQuery({
     queryKey: ["chatgpt-models"],
     queryFn: api.settings.chatgptModels,
@@ -288,37 +463,40 @@ export function ProvidersSettings() {
     queryClient.invalidateQueries({ queryKey: ["cursor-models"] });
     queryClient.invalidateQueries({ queryKey: ["status"] });
   };
+  const refreshModels = (key: string) => () => {
+    queryClient.invalidateQueries({ queryKey: ["settings-provider"] });
+    queryClient.invalidateQueries({ queryKey: [key] });
+    queryClient.invalidateQueries({ queryKey: ["status"] });
+  };
 
   const setKeyMutation = useMutation({
     mutationFn: (key: string) => api.settings.setProvider(key),
     onSuccess: () => {
       refreshProvider();
-      setApiKey("");
-      setMimoTestResult(null);
+      mimoTest.clear();
     },
   });
-
   const deleteKeyMutation = useMutation({
     mutationFn: () => api.settings.deleteKey(),
     onSuccess: () => {
       refreshProvider();
-      setMimoTestResult(null);
+      mimoTest.clear();
     },
   });
-
   const setCursorMutation = useMutation({
     mutationFn: (key: string) => api.settings.setCursor(key),
     onSuccess: () => {
       refreshProvider();
-      setCursorKey("");
+      cursorTest.clear();
     },
   });
-
   const deleteCursorMutation = useMutation({
     mutationFn: () => api.settings.deleteCursor(),
-    onSuccess: refreshProvider,
+    onSuccess: () => {
+      refreshProvider();
+      cursorTest.clear();
+    },
   });
-
   const chatgptLoginMutation = useMutation({
     mutationFn: () => api.settings.chatgptLogin(),
     onSuccess: refreshProvider,
@@ -334,29 +512,17 @@ export function ProvidersSettings() {
   const setChatGPTModelsMutation = useMutation({
     mutationFn: (models: { vision_model?: string; listing_model?: string; reasoning_effort?: string }) =>
       api.settings.setChatGPTModels(models),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings-provider"] });
-      queryClient.invalidateQueries({ queryKey: ["chatgpt-models"] });
-      queryClient.invalidateQueries({ queryKey: ["status"] });
-    },
+    onSuccess: refreshModels("chatgpt-models"),
   });
   const setCursorModelsMutation = useMutation({
     mutationFn: (models: { vision_model?: string; listing_model?: string; reasoning_effort?: string }) =>
       api.settings.setCursorModels(models),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings-provider"] });
-      queryClient.invalidateQueries({ queryKey: ["cursor-models"] });
-      queryClient.invalidateQueries({ queryKey: ["status"] });
-    },
+    onSuccess: refreshModels("cursor-models"),
   });
   const setClaudeModelsMutation = useMutation({
     mutationFn: (models: { vision_model?: string; listing_model?: string; effort?: string }) =>
       api.settings.setClaudeModels(models),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings-provider"] });
-      queryClient.invalidateQueries({ queryKey: ["claude-models"] });
-      queryClient.invalidateQueries({ queryKey: ["status"] });
-    },
+    onSuccess: refreshModels("claude-models"),
   });
   const setPhotoProviderMutation = useMutation({
     mutationFn: (choice: PhotoProviderChoice) => api.settings.setPhotoProvider(choice),
@@ -372,7 +538,6 @@ export function ProvidersSettings() {
   const chatgptPending = chatgpt?.pending;
   const pendingCode = chatgptPending?.user_code;
   const claude = provider?.claude;
-  const mimoConfigured = Boolean(provider?.masked_key);
   const primary: ListingProviderId =
     provider?.primary === "claude" || provider?.primary === "mimo" || provider?.primary === "cursor"
       ? provider.primary
@@ -387,27 +552,27 @@ export function ProvidersSettings() {
       : primary === "chatgpt"
         ? "mimo"
         : "chatgpt";
-  const activeChoice = activeProviderChoice(provider?.provider);
+  const activeChoice = resolveProviderLogoId(provider?.provider);
   const choiceReady = (choice: ListingFallbackId) =>
     choice === "chatgpt"
       ? chatgptSignedIn
       : choice === "claude"
         ? claudeSignedIn
         : choice === "mimo"
-        ? mimoConfigured
-        : choice === "cursor"
-          ? cursorConfigured
-          : false;
+          ? mimoConfigured
+          : choice === "cursor"
+            ? cursorConfigured
+            : false;
   const photoProvider: PhotoProviderChoice = provider?.photo_provider ?? "same";
   const primaryReady = choiceReady(primary);
   const fallbackReady = choiceReady(fallback);
+  const selected = selectedId ?? primary;
 
   const saveOrder = (nextPrimary: ListingProviderId, nextFallback: ListingFallbackId) => {
-    let fallbackValue = nextFallback;
-    if (fallbackValue === nextPrimary) {
-      fallbackValue = "none";
-    }
-    setPreferredMutation.mutate({ primary: nextPrimary, fallback: fallbackValue });
+    setPreferredMutation.mutate({
+      primary: nextPrimary,
+      fallback: nextFallback === nextPrimary ? "none" : nextFallback,
+    });
   };
 
   const chatgptReasoning = chatgptModels?.reasoning_efforts?.length
@@ -423,507 +588,461 @@ export function ProvidersSettings() {
     return () => window.clearInterval(id);
   }, [pendingCode, queryClient]);
 
-  const handleTest = async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const result = await api.settings.testConnection();
-      setTestResult(result.ok ? "Connection successful" : (result.error || "Connection failed"));
-    } catch (err) {
-      setTestResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    setTesting(false);
+  const roleSentence = (id: ListingProviderId) =>
+    primary === id ? "Primary for listings." : fallback === id ? "Fallback for listings." : "Not in the listing order.";
+
+  const inUse: ReactNode =
+    provider?.configured && activeChoice ? (
+      <>
+        <ProviderLogo id={activeChoice} label={providerLabel(activeChoice)} size={16} />
+        {providerLabel(activeChoice)} is active {activeChoice === primary ? "(primary)" : "(fallback)"}.
+      </>
+    ) : primaryReady ? (
+      <>
+        <ProviderLogo id={primary} label={providerLabel(primary)} size={16} />
+        {providerLabel(primary)} is ready.
+      </>
+    ) : fallback !== "none" && fallbackReady ? (
+      <>
+        <ProviderLogo id={fallback} label={providerLabel(fallback)} size={16} />
+        {providerLabel(primary)} is not ready — {providerLabel(fallback)} will be used.
+      </>
+    ) : (
+      <>
+        <span className="size-1.5 rounded-full bg-warning" aria-hidden />
+        Set up {providerLabel(primary)}
+        {fallback !== "none" ? ` or ${providerLabel(fallback)}` : ""} below.
+      </>
+    );
+
+  const activeTestStatus = (id: ListingProviderId) =>
+    activeTest.result && provider?.provider === id ? <TestResult result={activeTest.result} /> : null;
+
+  const editors: Record<ListingProviderId, ReactNode> = {
+    chatgpt: (
+      <>
+        <SettingsSection title="Account">
+          <SettingsRow
+            title="Sign in with ChatGPT"
+            description={
+              chatgptSignedIn ? (
+                <>
+                  Signed in{chatgpt?.email ? ` as ${chatgpt.email}` : ""}
+                  {chatgpt?.plan ? ` · ${chatgpt.plan}` : ""}. {roleSentence("chatgpt")}
+                </>
+              ) : (
+                "Uses your ChatGPT subscription to generate listings and look up sold comps. Usage counts against Codex quota, not a Platform API key."
+              )
+            }
+            status={
+              activeTestStatus("chatgpt") ??
+              (chatgpt?.error ? <span className="text-destructive-foreground">{chatgpt.error}</span> : null)
+            }
+            control={
+              chatgptSignedIn ? (
+                <>
+                  {provider?.provider === "chatgpt" ? (
+                    <TestButton testing={activeTest.testing} onClick={activeTest.test} />
+                  ) : null}
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => chatgptLogoutMutation.mutate()}
+                    disabled={chatgptLogoutMutation.isPending}
+                  >
+                    Sign out
+                  </Button>
+                </>
+              ) : chatgptPending ? (
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  onClick={() => chatgptCancelMutation.mutate()}
+                  disabled={chatgptCancelMutation.isPending}
+                >
+                  Cancel
+                </Button>
+              ) : (
+                <Button size="xs" variant="outline" onClick={() => chatgptLoginMutation.mutate()} disabled={chatgptLoginMutation.isPending}>
+                  {chatgptLoginMutation.isPending ? <Spinner /> : <LogInIcon />}
+                  {chatgptLoginMutation.isPending ? "Starting" : chatgpt?.error ? "Retry sign-in" : "Sign in"}
+                </Button>
+              )
+            }
+          >
+            {chatgptPending ? (
+              <div className="grid max-w-xl gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm">
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <Spinner size="sm" tone="muted" />
+                  Waiting for you to finish signing in.
+                </p>
+                <p className="text-muted-foreground">
+                  Enter code{" "}
+                  <code className="select-all rounded-sm bg-background px-1.5 py-0.5 font-mono text-base tracking-widest text-foreground">
+                    {chatgptPending.user_code}
+                  </code>{" "}
+                  in your browser.
+                </p>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="w-fit"
+                  render={<a href={chatgptPending.verification_url} target="_blank" rel="noreferrer" />}
+                >
+                  <ExternalLinkIcon />
+                  Open {chatgptPending.verification_url.replace(/^https?:\/\//, "")}
+                </Button>
+              </div>
+            ) : chatgptLoginMutation.isError ? (
+              <SettingsNote tone="error">{(chatgptLoginMutation.error as Error).message}</SettingsNote>
+            ) : null}
+          </SettingsRow>
+        </SettingsSection>
+        {chatgptSignedIn ? (
+          <SettingsSection title="Models">
+            <ProviderModelRows
+              provider="chatgpt"
+              models={(chatgptModels?.models ?? []).map((slug) => ({ value: slug, label: slug }))}
+              visionModel={chatgptModels?.vision_model ?? ""}
+              listingModel={chatgptModels?.listing_model ?? ""}
+              onModel={(model) => setChatGPTModelsMutation.mutate(model)}
+              reasoning={
+                chatgptModels
+                  ? {
+                      value: chatgptReasoning.includes(chatgptModels.reasoning_effort)
+                        ? chatgptModels.reasoning_effort
+                        : chatgptReasoning[0],
+                      options: chatgptReasoning.map((effort) => ({
+                        value: effort,
+                        label: REASONING_LABELS[effort] || effort,
+                      })),
+                      onChange: (value) => setChatGPTModelsMutation.mutate({ reasoning_effort: value }),
+                    }
+                  : null
+              }
+              reasoningDescription="Higher uses more Codex quota and takes longer. Default is Low. Applies to both models."
+              pending={setChatGPTModelsMutation.isPending}
+              error={chatgptModels?.error || setChatGPTModelsMutation.error?.message}
+            />
+          </SettingsSection>
+        ) : null}
+      </>
+    ),
+    claude: (
+      <>
+        <SettingsSection title="Account">
+          <SettingsRow
+            title="Sign in with Claude"
+            description={
+              claudeSignedIn ? (
+                <>
+                  Signed in{claude?.email ? ` as ${claude.email}` : ""}
+                  {claude?.plan ? ` · ${claude.plan.charAt(0).toUpperCase()}${claude.plan.slice(1)}` : ""}.{" "}
+                  {roleSentence("claude")} Signing out of Claude Code (<SettingsCode>claude auth logout</SettingsCode> in
+                  Terminal) signs Studio out too; Sign in here brings it back.
+                </>
+              ) : (
+                "Uses your Claude Pro or Max subscription through Claude Code. Usage counts against your Claude plan, not an API key."
+              )
+            }
+            status={activeTestStatus("claude")}
+            control={
+              claudeSignedIn ? (
+                provider?.provider === "claude" ? (
+                  <TestButton testing={activeTest.testing} onClick={activeTest.test} />
+                ) : null
+              ) : claudeTerminalOpen ? null : (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setClaudeTerminalOpen(true)}
+                  disabled={claude ? !claude.installed : true}
+                >
+                  <TerminalIcon />
+                  Sign in
+                </Button>
+              )
+            }
+          >
+            {!claudeSignedIn && claudeTerminalOpen ? (
+              <ClaudeLoginTerminal
+                onClose={() => {
+                  setClaudeTerminalOpen(false);
+                  refreshProvider();
+                }}
+              />
+            ) : !claudeSignedIn && claude && !claude.installed ? (
+              <div className="grid max-w-xl gap-1.5 rounded-lg border border-warning/32 bg-warning-surface p-3 text-xs">
+                <p className="font-medium text-warning-foreground">Claude Code is not installed</p>
+                <p className="text-muted-foreground">Install it in Terminal, then sign in:</p>
+                <SettingsCode className="w-fit select-all">{claude.install_command}</SettingsCode>
+              </div>
+            ) : null}
+          </SettingsRow>
+        </SettingsSection>
+        {claudeSignedIn ? (
+          <SettingsSection title="Models">
+            <ProviderModelRows
+              provider="claude"
+              models={claudeModels?.models ?? []}
+              visionModel={claudeModels?.vision_model ?? ""}
+              listingModel={claudeModels?.listing_model ?? ""}
+              onModel={(model) => setClaudeModelsMutation.mutate(model)}
+              reasoning={
+                claudeModels?.efforts.length
+                  ? {
+                      value: claudeModels.effort ?? "default",
+                      options: [
+                        { value: "default", label: "Default" },
+                        ...claudeModels.efforts.map((effort) => ({
+                          value: effort,
+                          label: REASONING_LABELS[effort] || effort,
+                        })),
+                      ],
+                      onChange: (value) => setClaudeModelsMutation.mutate({ effort: value }),
+                    }
+                  : null
+              }
+              reasoningDescription="Higher uses more of your Claude plan and takes longer. Options come from the listing model, and apply to both models."
+              pending={setClaudeModelsMutation.isPending}
+              error={claudeModels?.error || setClaudeModelsMutation.error?.message}
+            />
+          </SettingsSection>
+        ) : null}
+      </>
+    ),
+    mimo: (
+      <>
+        <SettingsSection title="Setup">
+          <SettingsRow
+            title="API key"
+            description="Stored in macOS Keychain and never sent to the browser. When MiMo is your listing model, sold comps use its web search, which needs the Web Search plugin turned on in the MiMo console (Plugin Management)."
+            status={
+              mimoTest.result ? (
+                <TestResult result={mimoTest.result} />
+              ) : setKeyMutation.isError ? (
+                <span className="text-destructive-foreground">{(setKeyMutation.error as Error).message}</span>
+              ) : mimoConfigured ? (
+                <span className="inline-flex items-center gap-1.5">
+                  Saved · <SettingsCode>{provider?.masked_key}</SettingsCode> · {roleSentence("mimo")}
+                </span>
+              ) : primary === "mimo" ? (
+                "Primary — add a key to use MiMo"
+              ) : fallback === "mimo" ? (
+                "Fallback — add a key if ChatGPT is unavailable"
+              ) : (
+                "Not configured"
+              )
+            }
+            control={
+              mimoConfigured ? (
+                <>
+                  <TestButton testing={mimoTest.testing} onClick={mimoTest.test} />
+                  <Button size="xs" variant="ghost-destructive" onClick={() => deleteKeyMutation.mutate()}>
+                    <Trash2Icon />
+                    Remove
+                  </Button>
+                </>
+              ) : null
+            }
+          >
+            <ApiKeyField
+              label="MiMo API key"
+              placeholder="sk-..."
+              saving={setKeyMutation.isPending}
+              onSave={(key) => setKeyMutation.mutate(key)}
+            />
+          </SettingsRow>
+        </SettingsSection>
+        <SettingsSection title="Models">
+          <SettingsRow
+            title="Photo and listing models"
+            description="MiMo reads photos with mimo-v2.5 and writes listings with mimo-v2.5-pro. These are fixed."
+            control={
+              <span className="flex items-center gap-1.5">
+                <SettingsCode>mimo-v2.5</SettingsCode>
+                <SettingsCode>mimo-v2.5-pro</SettingsCode>
+              </span>
+            }
+          />
+        </SettingsSection>
+      </>
+    ),
+    cursor: (
+      <>
+        <SettingsSection title="Setup">
+          <SettingsRow
+            title="API key"
+            description="From Cursor Dashboard → Integrations. Stored in Keychain; listing runs use the local Cursor SDK against an empty scratch folder. When Cursor is your listing model it also searches the web for sold comps."
+            status={
+              cursorTest.result ? (
+                <TestResult result={cursorTest.result} />
+              ) : setCursorMutation.isError ? (
+                <span className="text-destructive-foreground">{(setCursorMutation.error as Error).message}</span>
+              ) : cursorConfigured ? (
+                <span className="inline-flex items-center gap-1.5">
+                  Saved · <SettingsCode>{provider?.masked_cursor_key}</SettingsCode> · {roleSentence("cursor")}
+                </span>
+              ) : primary === "cursor" ? (
+                "Primary — add a Cursor API key"
+              ) : fallback === "cursor" ? (
+                "Fallback — add a key if other providers are unavailable"
+              ) : (
+                "Not configured"
+              )
+            }
+            control={
+              cursorConfigured ? (
+                <>
+                  <TestButton testing={cursorTest.testing} onClick={cursorTest.test} />
+                  <Button size="xs" variant="ghost-destructive" onClick={() => deleteCursorMutation.mutate()}>
+                    <Trash2Icon />
+                    Remove
+                  </Button>
+                </>
+              ) : null
+            }
+          >
+            <ApiKeyField
+              label="Cursor API key"
+              placeholder="cursor_..."
+              saving={setCursorMutation.isPending}
+              onSave={(key) => setCursorMutation.mutate(key)}
+            />
+          </SettingsRow>
+        </SettingsSection>
+        {cursorConfigured ? (
+          <SettingsSection title="Models">
+            <ProviderModelRows
+              provider="cursor"
+              models={(cursorModels?.models ?? []).map((slug) => ({
+                value: slug,
+                label: slug === "auto" ? "Auto" : slug,
+              }))}
+              visionModel={cursorModels?.vision_model ?? ""}
+              listingModel={cursorModels?.listing_model ?? ""}
+              onModel={(model) => setCursorModelsMutation.mutate(model)}
+              reasoning={
+                cursorModels?.reasoning
+                  ? {
+                      value: cursorModels.reasoning.value,
+                      options: cursorModels.reasoning.options,
+                      onChange: (value) => setCursorModelsMutation.mutate({ reasoning_effort: value }),
+                    }
+                  : null
+              }
+              reasoningDescription="Higher uses more Cursor usage and takes longer. Options come from the listing model, and apply wherever that model is used. Auto lets Cursor pick the model."
+              pending={setCursorModelsMutation.isPending}
+              error={cursorModels?.error || setCursorModelsMutation.error?.message}
+            />
+          </SettingsSection>
+        ) : null}
+      </>
+    ),
   };
 
-  const handleMimoTest = async () => {
-    setMimoTesting(true);
-    setMimoTestResult(null);
-    try {
-      const result = await api.settings.testMimo();
-      setMimoTestResult(result.ok ? "Connection successful" : (result.error || "Connection failed"));
-    } catch (err) {
-      setMimoTestResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    setMimoTesting(false);
-  };
-
-  const handleCursorTest = async () => {
-    setCursorTesting(true);
-    setCursorTestResult(null);
-    try {
-      const result = await api.settings.testCursor();
-      setCursorTestResult(result.ok ? "Connection successful" : (result.error || "Connection failed"));
-    } catch (err) {
-      setCursorTestResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    setCursorTesting(false);
-  };
-
-  const saveKey = () => {
-    if (!apiKey.trim()) return;
-    setKeyMutation.mutate(apiKey);
-  };
-
-  const saveCursorKey = () => {
-    if (!cursorKey.trim()) return;
-    setCursorMutation.mutate(cursorKey);
-  };
+  const fallbackOptions: SettingsSelectOption<ListingFallbackId>[] = [
+    { value: "none", label: "None" },
+    ...PROVIDER_IDS.filter((id) => id !== primary).map((id) => providerOption<ListingFallbackId>(id, id)),
+  ];
 
   return (
     <>
       <SettingsSection id="listing-ai" title="Listing AI">
-        <SettingsRow title="In use">
-          <p className="settings-row-desc settings-provider-in-use">
-            {provider?.configured && activeChoice ? (
-              <>
-                <ProviderLogo id={activeChoice} label={providerLabel(activeChoice)} size={16} />
-                <span>
-                  {providerLabel(activeChoice)} is active
-                  {activeChoice === primary ? " (primary)" : " (fallback)"}.
-                </span>
-              </>
-            ) : primaryReady ? (
-              <>
-                <ProviderLogo id={primary} label={providerLabel(primary)} size={16} />
-                <span>{providerLabel(primary)} is ready.</span>
-              </>
-            ) : fallback !== "none" && fallbackReady ? (
-              <>
-                <ProviderLogo id={fallback} label={providerLabel(fallback)} size={16} />
-                <span>
-                  {providerLabel(primary)} is not ready — {providerLabel(fallback)} will be used.
-                </span>
-              </>
-            ) : (
-              <span>
-                Configure {providerLabel(primary)}
-                {fallback !== "none" ? ` or ${providerLabel(fallback)}` : ""} below.
-              </span>
-            )}
-          </p>
-        </SettingsRow>
+        <SettingsRow
+          title="In use"
+          description={<span className="inline-flex flex-wrap items-center gap-2">{inUse}</span>}
+        />
         <SettingsRow
           title="Primary"
-          description="Writes listings, and reads photos unless Photo analysis names another. Each provider's models are set in its section below."
+          description="Writes listings, and reads photos unless Photo analysis names another. Each provider's models are set in its editor below."
           control={
-            <div className="settings-provider-select">
-              <ProviderLogo id={primary} label={providerLabel(primary)} size={16} />
-              <select
-                className="input settings-model-select"
-                aria-label="Primary listing AI"
-                value={primary}
-                disabled={setPreferredMutation.isPending}
-                onChange={(event) => saveOrder(event.target.value as ListingProviderId, fallback)}
-              >
-                <option value="chatgpt">ChatGPT</option>
-                <option value="claude">Claude</option>
-                <option value="mimo">Xiaomi MiMo</option>
-                <option value="cursor">Cursor</option>
-              </select>
-            </div>
+            <SettingsSelect<ListingProviderId>
+              aria-label="Primary listing AI"
+              value={primary}
+              disabled={setPreferredMutation.isPending}
+              onChange={(value) => saveOrder(value, fallback)}
+              options={PROVIDER_IDS.map((id) => providerOption(id, id))}
+            />
           }
         />
         <SettingsRow
           title="Fallback"
           description="Used only when the primary provider is not ready."
           control={
-            <div className="settings-provider-select">
-              {fallback !== "none" && fallback !== primary ? (
-                <ProviderLogo id={fallback} label={providerLabel(fallback)} size={16} />
-              ) : null}
-              <select
-                className="input settings-model-select"
-                aria-label="Fallback listing AI"
-                value={fallback === primary ? "none" : fallback}
-                disabled={setPreferredMutation.isPending}
-                onChange={(event) =>
-                  saveOrder(primary, event.target.value as ListingFallbackId)
-                }
-              >
-                <option value="none">None</option>
-                {primary !== "chatgpt" ? <option value="chatgpt">ChatGPT</option> : null}
-                {primary !== "claude" ? <option value="claude">Claude</option> : null}
-                {primary !== "mimo" ? <option value="mimo">Xiaomi MiMo</option> : null}
-                {primary !== "cursor" ? <option value="cursor">Cursor</option> : null}
-              </select>
-            </div>
+            <SettingsSelect<ListingFallbackId>
+              aria-label="Fallback listing AI"
+              value={fallback === primary ? "none" : fallback}
+              disabled={setPreferredMutation.isPending}
+              onChange={(value) => saveOrder(primary, value)}
+              options={fallbackOptions}
+            />
           }
         />
         <SettingsRow
           title="Photo analysis"
           description="Reads product photos before the listing is written, with that provider's photo model. A provider that is not ready falls back to the listing AI."
-          control={
-            <div className="settings-provider-select">
-              {photoProvider !== "same" ? (
-                <ProviderLogo id={photoProvider} label={providerLabel(photoProvider)} size={16} />
-              ) : null}
-              <select
-                className="input settings-model-select"
-                aria-label="Photo analysis AI"
-                value={photoProvider}
-                disabled={setPhotoProviderMutation.isPending}
-                onChange={(event) =>
-                  setPhotoProviderMutation.mutate(event.target.value as PhotoProviderChoice)
-                }
-              >
-                <option value="same">Same as listing AI</option>
-                <option value="chatgpt">ChatGPT</option>
-                <option value="claude">Claude</option>
-                <option value="mimo">Xiaomi MiMo</option>
-                <option value="cursor">Cursor</option>
-              </select>
-            </div>
-          }
-        />
-        {photoProvider !== "same" && !choiceReady(photoProvider) ? (
-          <SettingsRow title="Photo analysis status">
-            <p className="settings-row-desc">
-              {providerLabel(photoProvider)} is not ready, so the listing AI reads photos. Configure it below.
-            </p>
-          </SettingsRow>
-        ) : null}
-      </SettingsSection>
-
-      <SettingsSection id="chatgpt" title={providerTitle("chatgpt")}>
-        <SettingsRow
-          title="Sign in with ChatGPT"
-          description="Uses your ChatGPT subscription to generate listings and look up sold comps. Usage counts against Codex quota, not a Platform API key."
           status={
-            chatgptSignedIn && testResult && provider?.provider === "chatgpt" ? (
-              <span className={testResult.includes("successful") ? "text-success" : "text-error"}>{testResult}</span>
-            ) : chatgpt?.error ? (
-              <span className="text-error">{chatgpt.error}</span>
-            ) : null
-          }
-          control={
-            chatgptSignedIn ? (
-              <>
-                {provider?.provider === "chatgpt" ? (
-                  <button type="button" className="btn btn-sm btn-outline" onClick={handleTest} disabled={testing}>
-                    {testing ? "Testing…" : "Test"}
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost settings-danger"
-                  onClick={() => chatgptLogoutMutation.mutate()}
-                  disabled={chatgptLogoutMutation.isPending}
-                >
-                  Sign out
-                </button>
-              </>
-            ) : chatgptPending ? (
-              <button
-                type="button"
-                className="btn btn-sm btn-outline"
-                onClick={() => chatgptCancelMutation.mutate()}
-                disabled={chatgptCancelMutation.isPending}
-              >
-                Cancel
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                onClick={() => chatgptLoginMutation.mutate()}
-                disabled={chatgptLoginMutation.isPending}
-              >
-                {chatgptLoginMutation.isPending ? "Starting…" : "Sign in"}
-              </button>
-            )
-          }
-        >
-          {chatgptSignedIn ? (
-            <p className="settings-row-desc">
-              Signed in{chatgpt?.email ? ` as ${chatgpt.email}` : ""}
-              {chatgpt?.plan ? ` · ${chatgpt.plan}` : ""}.
-              {primary === "chatgpt"
-                ? " Primary for listings."
-                : fallback === "chatgpt"
-                  ? " Fallback for listings."
-                  : " Not in the listing order."}
-            </p>
-          ) : chatgptPending ? (
-            <p className="settings-row-desc">
-              Open{" "}
-              <a href={chatgptPending.verification_url} target="_blank" rel="noreferrer">
-                {chatgptPending.verification_url}
-              </a>{" "}
-              and enter code <code className="settings-row-code">{chatgptPending.user_code}</code>
-            </p>
-          ) : chatgptLoginMutation.isError ? (
-            <p className="settings-row-desc text-error">{(chatgptLoginMutation.error as Error).message}</p>
-          ) : null}
-        </SettingsRow>
-        {chatgptSignedIn ? (
-          <ProviderModelRows
-            provider="chatgpt"
-            models={(chatgptModels?.models ?? []).map((slug) => ({ value: slug, label: slug }))}
-            visionModel={chatgptModels?.vision_model ?? ""}
-            listingModel={chatgptModels?.listing_model ?? ""}
-            onModel={(model) => setChatGPTModelsMutation.mutate(model)}
-            reasoning={
-              chatgptModels
-                ? {
-                    value: chatgptReasoning.includes(chatgptModels.reasoning_effort)
-                      ? chatgptModels.reasoning_effort
-                      : chatgptReasoning[0],
-                    options: chatgptReasoning.map((effort) => ({
-                      value: effort,
-                      label: REASONING_LABELS[effort] || effort,
-                    })),
-                    onChange: (value) => setChatGPTModelsMutation.mutate({ reasoning_effort: value }),
-                  }
-                : null
-            }
-            reasoningDescription="Higher uses more Codex quota and takes longer. Default is Low. Applies to both models."
-            pending={setChatGPTModelsMutation.isPending}
-            error={chatgptModels?.error || setChatGPTModelsMutation.error?.message}
-          />
-        ) : null}
-      </SettingsSection>
-
-      <SettingsSection id="claude" title={providerTitle("claude")}>
-        <SettingsRow
-          title="Sign in with Claude"
-          description="Uses your Claude Pro or Max subscription through Claude Code. Usage counts against your Claude plan, not an API key."
-          status={
-            claudeSignedIn && testResult && provider?.provider === "claude" ? (
-              <span className={testResult.includes("successful") ? "text-success" : "text-error"}>{testResult}</span>
-            ) : null
-          }
-          control={
-            claudeSignedIn ? (
-              provider?.provider === "claude" ? (
-                <button type="button" className="btn btn-sm btn-outline" onClick={handleTest} disabled={testing}>
-                  {testing ? "Testing…" : "Test"}
-                </button>
-              ) : null
-            ) : claudeTerminalOpen ? null : (
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                onClick={() => setClaudeTerminalOpen(true)}
-                disabled={claude ? !claude.installed : true}
-              >
-                Sign in
-              </button>
-            )
-          }
-        >
-          {claudeSignedIn ? (
-            <p className="settings-row-desc">
-              Signed in{claude?.email ? ` as ${claude.email}` : ""}
-              {claude?.plan ? ` · ${claude.plan.charAt(0).toUpperCase()}${claude.plan.slice(1)}` : ""}.
-              {primary === "claude"
-                ? " Primary for listings."
-                : fallback === "claude"
-                  ? " Fallback for listings."
-                  : " Not in the listing order."}
-              {" "}Signing out of Claude Code (<code className="settings-row-code">claude auth logout</code> in
-              Terminal) signs Studio out too; Sign in here brings it back.
-            </p>
-          ) : claudeTerminalOpen ? (
-            <ClaudeLoginTerminal
-              onClose={() => {
-                setClaudeTerminalOpen(false);
-                refreshProvider();
-              }}
-            />
-          ) : claude && !claude.installed ? (
-            <p className="settings-row-desc">
-              Needs Claude Code. Install it in Terminal with{" "}
-              <code className="settings-row-code">{claude.install_command}</code>, then sign in.
-            </p>
-          ) : null}
-        </SettingsRow>
-        {claudeSignedIn ? (
-          <ProviderModelRows
-            provider="claude"
-            models={claudeModels?.models ?? []}
-            visionModel={claudeModels?.vision_model ?? ""}
-            listingModel={claudeModels?.listing_model ?? ""}
-            onModel={(model) => setClaudeModelsMutation.mutate(model)}
-            reasoning={
-              claudeModels?.efforts.length
-                ? {
-                    value: claudeModels.effort ?? "default",
-                    options: [
-                      { value: "default", label: "Default" },
-                      ...claudeModels.efforts.map((effort) => ({
-                        value: effort,
-                        label: REASONING_LABELS[effort] || effort,
-                      })),
-                    ],
-                    onChange: (value) => setClaudeModelsMutation.mutate({ effort: value }),
-                  }
-                : null
-            }
-            reasoningDescription="Higher uses more of your Claude plan and takes longer. Options come from the listing model, and apply to both models."
-            pending={setClaudeModelsMutation.isPending}
-            error={claudeModels?.error || setClaudeModelsMutation.error?.message}
-          />
-        ) : null}
-      </SettingsSection>
-
-      <SettingsSection id="mimo" title={providerTitle("mimo", true)}>
-        <SettingsRow
-          title="API key"
-          description="Stored in macOS Keychain and never sent to the browser. When MiMo is your listing model, sold comps use its web search, which needs the Web Search plugin turned on in the MiMo console (Plugin Management)."
-        >
-          <div className="settings-row-field">
-            <input
-              className="input font-mono"
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveKey();
-              }}
-              placeholder="sk-..."
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button type="button" className="btn btn-sm btn-outline" onClick={saveKey} disabled={!apiKey.trim() || setKeyMutation.isPending}>
-              {setKeyMutation.isPending ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </SettingsRow>
-        <SettingsRow
-          title="Status"
-          description={
-            mimoConfigured
-              ? primary === "mimo"
-                ? `Primary · ${provider?.masked_key}`
-                : fallback === "mimo"
-                  ? `Fallback · ${provider?.masked_key}`
-                  : `Saved · ${provider?.masked_key}`
-              : primary === "mimo"
-                ? "Primary — add a key to use MiMo"
-                : fallback === "mimo"
-                  ? "Fallback — add a key if ChatGPT is unavailable"
-                  : "Not configured"
-          }
-          status={
-            mimoTestResult ? (
-              <span className={mimoTestResult.includes("successful") ? "text-success" : "text-error"}>{mimoTestResult}</span>
-            ) : null
-          }
-          control={
-            mimoConfigured ? (
-              <>
-                <button type="button" className="btn btn-sm btn-outline" onClick={handleMimoTest} disabled={mimoTesting}>
-                  {mimoTesting ? "Testing…" : "Test"}
-                </button>
-                <button type="button" className="btn btn-sm btn-ghost settings-danger" onClick={() => deleteKeyMutation.mutate()}>
-                  Remove
-                </button>
-              </>
-            ) : null
-          }
-        />
-        <SettingsRow
-          title="Models"
-          description="MiMo reads photos with mimo-v2.5 and writes listings with mimo-v2.5-pro. These are fixed."
-        />
-      </SettingsSection>
-
-      <SettingsSection id="cursor" title={providerTitle("cursor")}>
-        <SettingsRow
-          title="API key"
-          description="From Cursor Dashboard → Integrations. Stored in Keychain; listing runs use the local Cursor SDK against an empty scratch folder. When Cursor is your listing model it also searches the web for sold comps."
-        >
-          <div className="settings-row-field">
-            <input
-              className="input font-mono"
-              type="password"
-              value={cursorKey}
-              onChange={(e) => setCursorKey(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveCursorKey();
-              }}
-              placeholder="cursor_..."
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              className="btn btn-sm btn-outline"
-              onClick={saveCursorKey}
-              disabled={!cursorKey.trim() || setCursorMutation.isPending}
-            >
-              {setCursorMutation.isPending ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </SettingsRow>
-        <SettingsRow
-          title="Status"
-          description={
-            cursorConfigured
-              ? primary === "cursor"
-                ? `Primary · ${provider?.masked_cursor_key}`
-                : fallback === "cursor"
-                  ? `Fallback · ${provider?.masked_cursor_key}`
-                  : `Saved · ${provider?.masked_cursor_key}`
-              : primary === "cursor"
-                ? "Primary — add a Cursor API key"
-                : fallback === "cursor"
-                  ? "Fallback — add a key if other providers are unavailable"
-                  : "Not configured"
-          }
-          status={
-            cursorTestResult ? (
-              <span className={cursorTestResult.includes("successful") ? "text-success" : "text-error"}>
-                {cursorTestResult}
+            photoProvider !== "same" && !choiceReady(photoProvider) ? (
+              <span className="inline-flex items-center gap-1.5 text-warning-foreground">
+                <span className="size-1.5 rounded-full bg-warning" aria-hidden />
+                {providerLabel(photoProvider)} is not ready, so the listing AI reads photos. Set it up below.
               </span>
             ) : null
           }
           control={
-            cursorConfigured ? (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-outline"
-                  onClick={handleCursorTest}
-                  disabled={cursorTesting}
-                >
-                  {cursorTesting ? "Testing…" : "Test"}
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost settings-danger"
-                  onClick={() => deleteCursorMutation.mutate()}
-                >
-                  Remove
-                </button>
-              </>
-            ) : null
+            <SettingsSelect<PhotoProviderChoice>
+              aria-label="Photo analysis AI"
+              value={photoProvider}
+              disabled={setPhotoProviderMutation.isPending}
+              onChange={(value) => setPhotoProviderMutation.mutate(value)}
+              options={[{ value: "same", label: "Same as listing AI" }, ...PROVIDER_IDS.map((id) => providerOption(id, id))]}
+            />
           }
         />
-        {cursorConfigured ? (
-          <ProviderModelRows
-            provider="cursor"
-            models={(cursorModels?.models ?? []).map((slug) => ({
-              value: slug,
-              label: slug === "auto" ? "Auto" : slug,
-            }))}
-            visionModel={cursorModels?.vision_model ?? ""}
-            listingModel={cursorModels?.listing_model ?? ""}
-            onModel={(model) => setCursorModelsMutation.mutate(model)}
-            reasoning={
-              cursorModels?.reasoning
-                ? {
-                    value: cursorModels.reasoning.value,
-                    options: cursorModels.reasoning.options,
-                    onChange: (value) => setCursorModelsMutation.mutate({ reasoning_effort: value }),
-                  }
-                : null
-            }
-            reasoningDescription="Higher uses more Cursor usage and takes longer. Options come from the listing model, and apply wherever that model is used. Auto lets Cursor pick the model."
-            pending={setCursorModelsMutation.isPending}
-            error={cursorModels?.error || setCursorModelsMutation.error?.message}
-          />
-        ) : null}
+      </SettingsSection>
+
+      <SettingsSection id="providers" title="Providers" variant="plain">
+        <SettingsGroup
+          divided={false}
+          className={cn(
+            PROVIDER_CARD_HEIGHT,
+            "overflow-hidden @min-[48rem]/providers:grid @min-[48rem]/providers:grid-cols-[17rem_minmax(0,1fr)]",
+          )}
+        >
+          <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
+            <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-1">
+              <div className="divide-y divide-border/50" role="group" aria-label="Providers">
+                {PROVIDER_IDS.map((id) => (
+                  <ProviderListRow
+                    key={id}
+                    id={id}
+                    summary={summarizeProvider(id, provider)}
+                    selected={selected === id}
+                    onSelect={() => setSelectedId(id)}
+                    badges={<RoleBadges id={id} primary={primary} fallback={fallback} photoProvider={photoProvider} />}
+                  />
+                ))}
+              </div>
+            </ScrollArea>
+          </div>
+          <div className="min-w-0 @min-[48rem]/providers:min-h-0">
+            <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/providers:h-full">
+              <div className="space-y-6 p-4" key={selected}>
+                <div className="flex min-h-7 items-center justify-between gap-4 px-3 sm:px-4">
+                  <h3 className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+                    <ProviderIcon id={selected} />
+                    {PROVIDER_LABELS[selected].full}
+                  </h3>
+                  <span className="flex items-center gap-1">
+                    <RoleBadges id={selected} primary={primary} fallback={fallback} photoProvider={photoProvider} />
+                  </span>
+                </div>
+                {editors[selected]}
+              </div>
+            </ScrollArea>
+          </div>
+        </SettingsGroup>
       </SettingsSection>
 
       <BraveSearchSection chatgptSignedIn={chatgptSignedIn} />

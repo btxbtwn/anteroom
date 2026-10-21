@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { dragHasFiles, groupImageFilesByFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import type { Photo } from "../api/types";
-import { addToast } from "../ui/toast";
+import { toastManager } from "./ui/toast";
 import { BulkUploadDialog } from "./BulkUploadDialog";
+import { InspectorSection } from "./ListingFormControls";
+import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
+import { Button } from "./ui/button";
+import { FolderPlusIcon, ImagePlusIcon } from "lucide-react";
 import {
   createBulkPhotoListings,
   type BulkListingUploadResult,
@@ -25,7 +28,6 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const lightboxRef = useRef<HTMLDivElement>(null);
   const suppressClickRef = useRef(false);
   const dragIdRef = useRef<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -108,38 +110,6 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     }
   }, [photos, previewId]);
 
-  useEffect(() => {
-    if (!previewPhoto) return;
-    lightboxRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPreviewId(null);
-    };
-    document.addEventListener("keydown", onKey);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [previewPhoto]);
-
-  const stepPreview = (delta: number) => {
-    if (!photos || photos.length < 2 || previewIndex < 0) return;
-    const next = (previewIndex + delta + photos.length) % photos.length;
-    setPreviewId(photos[next].id);
-  };
-
-  const onLightboxKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      stepPreview(-1);
-    }
-    if (e.key === "ArrowRight") {
-      e.preventDefault();
-      stepPreview(1);
-    }
-  };
-
   const canReorder = (photos?.length || 0) > 1;
 
   const resetDrag = () => {
@@ -217,9 +187,9 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
       const description = `Added ${totalPhotos} photo${totalPhotos === 1 ? "" : "s"} from separate folders.`;
       if (errors.length) {
         setUploadError(errors.join("; "));
-        addToast({ type: "error", title, description: errors.join("; ") });
+        toastManager.add({ type: "error", title, description: errors.join("; ") });
       } else {
-        addToast({ type: "success", title, description });
+        toastManager.add({ type: "success", title, description });
       }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
@@ -258,154 +228,75 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   };
 
   return (
-    <div className="photo-tray">
-      {/* Same caps heading as the Notes / Pricing / Measurements sections below. */}
-      <div className="item-section-header">
-        <h3 className="item-section-title">Photos</h3>
-        <span className="photo-tray-meta">
-          {photos?.length || 0} photos{canReorder ? " · drag to reorder" : " · or drop them anywhere"}
-        </span>
-        <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-          {uploading ? "Uploading..." : "Add Photos"}
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={() => folderInputRef.current?.click()}
-          disabled={uploading}
-          title="Choose a folder of photos, or a parent folder of item folders for bulk drafts"
-        >
-          Add Folder
-        </button>
-        <input ref={fileInputRef} type="file" multiple accept="image/*" style={{ display: "none" }} onChange={(e) => { if (e.target.files) void doUpload(e.target.files); }} />
-        <input
-          ref={folderInputRef}
-          type="file"
-          multiple
-          accept="image/*"
-          style={{ display: "none" }}
-          // Chromium/WebKit folder pick; React has no typed prop for these.
-          {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
-          onChange={(e) => { if (e.target.files) void doUpload(e.target.files); }}
-        />
-      </div>
-      {uploadError && <div className="photo-tray-error text-2xs text-error">{uploadError}</div>}
+    <InspectorSection
+      data-photo-tray=""
+      title="Photos"
+      meta={`${photos?.length || 0} photos${canReorder ? " · drag to reorder" : " · or drop them anywhere"}`}
+      actions={
+        <>
+          <Button variant="outline" size="xs" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <ImagePlusIcon />
+            {uploading ? "Uploading…" : "Add Photos"}
+          </Button>
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => folderInputRef.current?.click()}
+            disabled={uploading}
+            title="Choose a folder of photos, or a parent folder of item folders for bulk drafts"
+          >
+            <FolderPlusIcon />
+            Add Folder
+          </Button>
+          <input ref={fileInputRef} type="file" multiple accept="image/*" hidden onChange={(e) => { if (e.target.files) void doUpload(e.target.files); }} />
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            accept="image/*"
+            hidden
+            // Chromium/WebKit folder pick; React has no typed prop for these.
+            {...({ webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+            onChange={(e) => { if (e.target.files) void doUpload(e.target.files); }}
+          />
+        </>
+      }
+    >
+      {uploadError && <div className="text-destructive-foreground text-xs">{uploadError}</div>}
       {photos && photos.length > 0 && (
-        <div className="photo-strip">
+        <PhotoStrip>
           {photos.map((p, i) => (
-            <div
+            <PhotoThumb
               key={p.id}
-              className={[
-                "photo-thumb",
-                canReorder ? "photo-thumb-reorderable" : "",
-                dragId === p.id ? "is-dragging" : "",
-                dropId === p.id ? "is-drop-target" : "",
-              ].filter(Boolean).join(" ")}
+              url={p.url}
+              index={i}
+              reorderable={canReorder}
+              dragging={dragId === p.id}
+              dropTarget={dropId === p.id}
               draggable={canReorder}
               onDragStart={(event) => onThumbDragStart(event, p.id)}
               onDragOver={(event) => onThumbDragOver(event, p.id)}
               onDrop={(event) => onThumbDrop(event, p.id)}
               onDragEnd={resetDrag}
               title={canReorder ? "Drag to set upload order" : undefined}
-            >
-              <div
-                className="photo-thumb-open"
-                role="button"
-                tabIndex={0}
-                onClick={() => openPreview(p.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    openPreview(p.id);
-                  }
-                }}
-                aria-label={`View photo ${i + 1} enlarged`}
-              >
-                <img src={p.url} alt="" draggable={false} />
-              </div>
-              <div className="photo-thumb-num">{String(i + 1).padStart(2, "0")}</div>
-              <button
-                type="button"
-                className="photo-thumb-rotate"
-                aria-label={`Rotate photo ${i + 1} right`}
-                title="Rotate right"
-                disabled={rotatingId === p.id}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  rotate(p.id, 90);
-                }}
-              >
-                ↻
-              </button>
-              <button
-                type="button"
-                className="photo-thumb-delete"
-                aria-label={`Delete photo ${i + 1}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  deleteMutation.mutate(p.id);
-                }}
-              >
-                x
-              </button>
-            </div>
+              onOpen={() => openPreview(p.id)}
+              onRotate={() => rotate(p.id, 90)}
+              rotating={rotatingId === p.id}
+              onRemove={() => deleteMutation.mutate(p.id)}
+            />
           ))}
-        </div>
+        </PhotoStrip>
       )}
-      {previewPhoto && photos && createPortal(
-        <div
-          ref={lightboxRef}
-          className="photo-lightbox"
-          role="dialog"
-          aria-modal="true"
-          tabIndex={-1}
-          aria-label={`Photo ${previewIndex + 1} of ${photos.length}`}
-          onKeyDown={onLightboxKeyDown}
-          onClick={(e) => { if (e.target === e.currentTarget) setPreviewId(null); }}
-        >
-          <button type="button" className="photo-lightbox-close" onClick={() => setPreviewId(null)} aria-label="Close">
-            x
-          </button>
-          <div className="photo-lightbox-rotate">
-            <button
-              type="button"
-              onClick={() => rotate(previewPhoto.id, -90)}
-              disabled={rotateMutation.isPending}
-              aria-label="Rotate left"
-              title="Rotate left"
-            >
-              ↺
-            </button>
-            <button
-              type="button"
-              onClick={() => rotate(previewPhoto.id, 90)}
-              disabled={rotateMutation.isPending}
-              aria-label="Rotate right"
-              title="Rotate right"
-            >
-              ↻
-            </button>
-          </div>
-          {photos.length > 1 && (
-            <button type="button" className="photo-lightbox-nav photo-lightbox-prev" onClick={() => stepPreview(-1)} aria-label="Previous photo">
-              ‹
-            </button>
-          )}
-          <img
-            className="photo-lightbox-image"
-            src={previewPhoto.url}
-            alt={`Photo ${previewIndex + 1}`}
-            onClick={() => setPreviewId(null)}
-          />
-          {photos.length > 1 && (
-            <button type="button" className="photo-lightbox-nav photo-lightbox-next" onClick={() => stepPreview(1)} aria-label="Next photo">
-              ›
-            </button>
-          )}
-          <div className="photo-lightbox-meta">{String(previewIndex + 1).padStart(2, "0")} / {String(photos.length).padStart(2, "0")}</div>
-        </div>,
-        document.body
-      )}
+      {previewPhoto && photos ? (
+        <PhotoLightbox
+          urls={photos.map((photo) => photo.url)}
+          index={previewIndex}
+          rotating={rotateMutation.isPending}
+          onRotate={(degrees) => rotate(previewPhoto.id, degrees)}
+          onStep={(next) => setPreviewId(photos[next].id)}
+          onClose={() => setPreviewId(null)}
+        />
+      ) : null}
       {pendingBulkGroups ? (
         <BulkUploadDialog
           groups={pendingBulkGroups}
@@ -416,6 +307,6 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           }}
         />
       ) : null}
-    </div>
+    </InspectorSection>
   );
 }

@@ -4,7 +4,10 @@ import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { marketplacesNeedingRelist, relistStage } from "../relistStatus";
 import { marketplaceName } from "../marketplaceNames";
-import { SelectCheck } from "./SidebarIcons";
+import { CheckIcon, PencilIcon, Undo2Icon, XIcon } from "lucide-react";
+import { cn } from "../../lib/utils";
+import { confirmDialog } from "../../ui/confirmDialog";
+import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, statusHint } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 
@@ -56,7 +59,6 @@ export function ListingRow({
   // A bulk-imported listing has no local photos yet; Vendoo's own image stands in.
   const coverUrl = listing.cover_photo_url || listing.vendoo_cover_url || null;
   const status = String(listing.status || "draft");
-  const statusClass = status.replace(/_/g, "-");
   const settledAt = settled ? compactRelativeTime(listing.settled_at || listing.updated_at) : "";
   const queryClient = useQueryClient();
   const itemRef = useRef<HTMLDivElement>(null);
@@ -211,9 +213,12 @@ export function ListingRow({
     };
   }, [hoverOpen, updatePopupPos]);
 
+  const actionClass =
+    "inline-flex size-5.5 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40";
+
   return (
     <div
-      className={`nav-item${selecting ? " is-selecting" : ""}`}
+      className="group/row relative mb-px"
       ref={itemRef}
       onMouseEnter={openHover}
       onMouseLeave={closeHover}
@@ -222,46 +227,37 @@ export function ListingRow({
         if (!itemRef.current?.contains(event.relatedTarget as Node | null)) closeHover();
       }}
     >
+      {/* Row look follows T3 Code's sidebar thread rows (MIT, (c) 2026 T3 Tools Inc.). */}
       <div
-        className={`nav-link${selected ? " selected" : ""}${settled ? " settled" : ""}`}
+        data-active={selected}
+        className={cn(
+          "flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 py-1.5 text-left text-sidebar-foreground/90 transition-colors hover:bg-sidebar-row-hover",
+          "data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground",
+          settled && "text-sidebar-muted-foreground group-hover/row:text-sidebar-foreground group-focus-within/row:text-sidebar-foreground data-[active=true]:text-sidebar-foreground",
+        )}
         onClick={() => {
           if (!renaming) onSelect(listing.id);
         }}
       >
         {selecting ? (
-          <button
-            type="button"
-            role="checkbox"
-            className={`nav-select${checked ? " is-checked" : ""}`}
-            aria-checked={checked}
-            aria-label={`${checked ? "Deselect" : "Select"} ${title}`}
-            disabled={!canSelect || selectLocked}
+          <SelectCheckbox
+            checked={checked}
+            label={`${checked ? "Deselect" : "Select"} ${title}`}
             title={canSelect ? "Include in regenerate" : "Add photos before regenerating"}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!canSelect || selectLocked) return;
-              onToggleSelect?.(listing.id, event.shiftKey);
-            }}
-          >
-            {checked ? <SelectCheck /> : null}
-          </button>
+            disabled={!canSelect || selectLocked}
+            onToggle={(shift) => onToggleSelect?.(listing.id, shift)}
+          />
         ) : null}
-        <div className="nav-thumb" aria-hidden="true">
-          {coverUrl ? (
-            <img className="nav-thumb-img" src={coverUrl} alt="" loading="lazy" draggable={false} />
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.2" />
-              <path d="M2 11l3.2-3.2a1.2 1.2 0 011.7 0L10 10.9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-              <circle cx="10.4" cy="6" r="1.1" fill="currentColor" />
-            </svg>
-          )}
-        </div>
-        <div className="nav-link-body">
+        <ListingThumb
+          src={coverUrl}
+          dimmed={settled && !selected}
+          className={settled ? "group-hover/row:[&_img]:opacity-100 group-focus-within/row:[&_img]:opacity-100" : undefined}
+        />
+        <div className="min-w-0 flex-1">
           {renaming ? (
             <input
               ref={renameInputRef}
-              className="nav-rename-input"
+              className="w-full bg-transparent p-0 text-sm font-medium leading-snug text-sidebar-foreground outline-none"
               value={draftTitle}
               aria-label={`Rename ${title}`}
               disabled={renameListing.isPending}
@@ -280,7 +276,12 @@ export function ListingRow({
           ) : (
             <button
               type="button"
-              className="nav-link-title"
+              className={cn(
+                "block w-full cursor-pointer truncate text-left text-sm font-medium leading-snug text-inherit outline-none",
+                // Hover actions float over the title; fade it under them.
+                !selecting &&
+                  "group-hover/row:[mask-image:linear-gradient(to_right,#000_calc(100%-76px),transparent_calc(100%-56px))] group-focus-within/row:[mask-image:linear-gradient(to_right,#000_calc(100%-76px),transparent_calc(100%-56px))]",
+              )}
               title={name === title ? title : `${name} · ${title}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -295,21 +296,19 @@ export function ListingRow({
               {name}
             </button>
           )}
-          <div className="nav-link-meta">
-            <span className={`nav-status nav-status-${statusClass}`} title={statusHint(status)}>
-              {status.replace(/_/g, " ")}
-            </span>
+          <div className="mt-0.5 flex items-center gap-2">
+            <ListingStatusLabel status={status} title={statusHint(status)} />
             {listing.unsent_edits ? (
-              <span
-                className="nav-status nav-status-unsent"
+              <ListingTag
+                tone="info"
                 title="Edited in Studio since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
               >
                 unsent
-              </span>
+              </ListingTag>
             ) : null}
             {relistMarketplaces.length ? (
-              <span
-                className="nav-status nav-status-relist"
+              <ListingTag
+                tone="warning"
                 title={relistStageNow === "list"
                   ? "Delisted in Vendoo and not listed again yet, so it is live nowhere."
                     + ` List it again to finish: ${relistMarketplaces.map(marketplaceName).join(", ")}.`
@@ -317,17 +316,17 @@ export function ListingRow({
                     + " Delist and relist in Vendoo to publish the new version."}
               >
                 relist
-              </span>
+              </ListingTag>
             ) : null}
-            {settledAt ? <span className="nav-time">{settledAt}</span> : null}
+            {settledAt ? <span className="text-2xs font-medium text-sidebar-muted-foreground">{settledAt}</span> : null}
           </div>
           {listedMarketplaces.length ? (
             <div
-              className="nav-listed-logos"
+              className="mt-1 flex flex-wrap gap-0.75"
               aria-label={`Listed on ${listedMarketplaces.map((row) => row.label).join(", ")}`}
             >
               {listedMarketplaces.map((row) => (
-                <span key={row.id} className={row.status === "SOLD" ? "nav-listed-logo is-sold" : "nav-listed-logo"}>
+                <span key={row.id} className={cn("inline-flex", row.status === "SOLD" && "opacity-55")}>
                   <MarketplaceLogo id={row.id} label={`${row.label} · ${row.status.toLowerCase()}`} size={14} />
                 </span>
               ))}
@@ -335,10 +334,11 @@ export function ListingRow({
           ) : null}
         </div>
       </div>
-      {!renaming && (
-        <div className="nav-actions">
+      {!renaming && !selecting && (
+        <div className="pointer-events-none absolute top-1.5 right-1.5 flex items-center opacity-0 transition-opacity group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-focus-within/row:pointer-events-auto group-focus-within/row:opacity-100 max-[900px]:pointer-events-auto max-[900px]:opacity-100">
           <button
-            className="nav-action"
+            type="button"
+            className={actionClass}
             title="Rename listing"
             aria-label={`Rename ${title}`}
             disabled={renameListing.isPending}
@@ -347,19 +347,12 @@ export function ListingRow({
               startRename();
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path
-                d="M11.5 2.5l2 2L5.5 12.5H3.5v-2L11.5 2.5z"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <PencilIcon className="size-3" />
           </button>
           {!busy && onSettle && (
             <button
-              className="nav-action"
+              type="button"
+              className={actionClass}
               title="Settle listing"
               aria-label={`Settle ${title}`}
               disabled={settling}
@@ -368,14 +361,13 @@ export function ListingRow({
                 onSettle(listing.id);
               }}
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M3.5 8.5l3 3 6-7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <CheckIcon className="size-3" />
             </button>
           )}
           {onUnsettle && (
             <button
-              className="nav-action"
+              type="button"
+              className={actionClass}
               title="Un-settle listing"
               aria-label={`Un-settle ${title}`}
               disabled={settling}
@@ -384,48 +376,45 @@ export function ListingRow({
                 onUnsettle(listing.id);
               }}
             >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4.5 7.5H12a3 3 0 010 6H9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                <path d="M7 4.5L4.5 7.5 7 10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <Undo2Icon className="size-3" />
             </button>
           )}
           <button
-            className="nav-action"
+            type="button"
+            className={actionClass}
             title="Delete"
             aria-label={`Delete ${title}`}
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
-              if (confirm(`Delete "${title}"?`)) onDelete(listing.id, title);
+              const ok = await confirmDialog(`Delete "${title}"?`, { variant: "destructive", confirmLabel: "Delete" });
+              if (ok) onDelete(listing.id, title);
             }}
           >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
+            <XIcon className="size-3" />
           </button>
         </div>
       )}
       {hoverOpen && jobId && popupPos ? (
         <div
-          className="nav-vendoo-status-popup"
+          className="dropdown-glass pointer-events-none fixed z-80 w-55 rounded-lg p-2 text-popover-foreground shadow-lg/10"
           style={{ top: popupPos.top, left: popupPos.left }}
           role="tooltip"
         >
-          <div className="nav-vendoo-status-title">Vendoo status</div>
+          <div className="mb-1.5 px-0.5 text-3xs font-semibold tracking-wider text-muted-foreground uppercase">Vendoo status</div>
           {loadingStatus ? (
-            <div className="nav-vendoo-status-empty">Reading…</div>
+            <div className="px-0.5 py-1 text-2xs text-muted-foreground">Reading…</div>
           ) : popupStatuses.length ? (
-            <ul className="nav-vendoo-status-list">
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
               {popupStatuses.map((row) => (
-                <li key={row.id} className="nav-vendoo-status-row">
+                <li key={row.id} className="flex min-h-5.5 items-center gap-2 px-0.5">
                   <MarketplaceLogo id={row.id} label={row.label} size={16} />
-                  <span className="nav-vendoo-status-market">{row.label}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs text-foreground/90">{row.label}</span>
                   <span className={`pr-live-status ${liveStatusClass(row.status)}`}>{row.status}</span>
                 </li>
               ))}
             </ul>
           ) : (
-            <div className="nav-vendoo-status-empty">
+            <div className="px-0.5 py-1 text-2xs leading-snug text-muted-foreground">
               {missingStatus
                 ? "Pull from Vendoo to load live status."
                 : "No marketplace status yet."}

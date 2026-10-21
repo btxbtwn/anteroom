@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.291 — 2026-10-21
+
+- The rest of Studio matches the new look: sidebar, settings, providers, queue, analytics, marketing, sourcing, and the listing editor.
+- Toasts, confirmations, empty screens, and loading placeholders use that same look.
+
 ## 0.1.290 — 2026-10-21
 
 - Listings generate faster: sold comps, active listings, categories and each marketplace's fields now run side by side, and comp research starts from a quick first look at the photos instead of waiting for the full read.

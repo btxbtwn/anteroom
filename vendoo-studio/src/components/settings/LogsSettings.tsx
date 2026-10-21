@@ -1,7 +1,33 @@
 import { Fragment, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import { SettingsRow, SettingsSection } from "./SettingsLayout";
+import { ChevronRightIcon, Trash2Icon } from "lucide-react";
+import { cn } from "../../lib/utils";
+import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
+import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+
+const LOG_SCROLL = "max-h-[min(75vh,48rem)] overflow-auto rounded-lg border border-border/60";
+const LOG_TABLE = "w-full min-w-[36rem] border-collapse text-left text-xs [&_td]:px-3 [&_td]:py-1.5 [&_td]:align-top [&_th]:px-3 [&_th]:py-2";
+const LOG_HEAD =
+  "sticky top-0 z-10 bg-background/95 text-3xs font-medium uppercase tracking-wider text-muted-foreground backdrop-blur-sm [&_th]:border-b [&_th]:border-border/60 [&_th]:font-medium";
+const LOG_ROW = "border-b border-border/40 tabular-nums text-muted-foreground last:border-b-0";
+const LOG_PRE =
+  "max-h-80 overflow-auto rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-2xs leading-relaxed whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]";
+
+function LogToggle({ open, onClick, children }: { open: boolean; onClick: () => void; children: string }) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onClick}
+      className="group flex w-full min-w-0 cursor-pointer items-start gap-1 rounded-sm text-left text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <ChevronRightIcon className={cn("mt-px size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+      <span className="min-w-0 [overflow-wrap:anywhere]">{children}</span>
+    </button>
+  );
+}
 
 function formatLogTime(iso: string): string {
   const date = new Date(iso);
@@ -20,19 +46,19 @@ function prettyLogBody(body: string): string {
 function LogHeaders({ title, headers }: { title: string; headers: Record<string, string> }) {
   const names = Object.keys(headers);
   return (
-    <section className="settings-api-log-detail-section">
-      <h4>{title}</h4>
+    <section className="space-y-1.5">
+      <h4 className="text-3xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h4>
       {names.length ? (
-        <dl className="settings-api-log-headers">
+        <dl className="grid grid-cols-[minmax(8rem,max-content)_minmax(0,1fr)] gap-x-4 gap-y-1 font-mono text-2xs">
           {names.map((name) => (
-            <div key={name}>
-              <dt>{name}</dt>
-              <dd>{headers[name]}</dd>
+            <div key={name} className="contents">
+              <dt className="text-muted-foreground">{name}</dt>
+              <dd className="text-foreground [overflow-wrap:anywhere]">{headers[name]}</dd>
             </div>
           ))}
         </dl>
       ) : (
-        <p className="settings-api-log-none">None</p>
+        <p className="text-xs text-muted-foreground">None</p>
       )}
     </section>
   );
@@ -40,9 +66,9 @@ function LogHeaders({ title, headers }: { title: string; headers: Record<string,
 
 function LogBody({ title, body }: { title: string; body: string | null }) {
   return (
-    <section className="settings-api-log-detail-section">
-      <h4>{title}</h4>
-      {body ? <pre className="settings-api-log-body">{prettyLogBody(body)}</pre> : <p className="settings-api-log-none">None</p>}
+    <section className="space-y-1.5">
+      <h4 className="text-3xs font-medium uppercase tracking-wider text-muted-foreground">{title}</h4>
+      {body ? <pre className={LOG_PRE}>{prettyLogBody(body)}</pre> : <p className="text-xs text-muted-foreground">None</p>}
     </section>
   );
 }
@@ -53,21 +79,28 @@ function LogDetail({ id }: { id: number }) {
     queryFn: () => api.settings.vendooApiLog(id),
     staleTime: Infinity,
   });
-  if (isPending) return <p className="settings-api-log-none">Loading…</p>;
-  if (error) return <p className="settings-api-log-none text-error" role="alert">{error.message}</p>;
+  if (isPending) {
+    return (
+      <p className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground">
+        <Spinner size="xs" tone="muted" />
+        Loading
+      </p>
+    );
+  }
+  if (error) return <SettingsNote tone="error">{error.message}</SettingsNote>;
   return (
-    <div className="settings-api-log-detail">
-      <section className="settings-api-log-detail-section">
-        <h4>General</h4>
-        <dl className="settings-api-log-headers">
-          <div><dt>URL</dt><dd>{data.url}</dd></div>
-          <div><dt>Method</dt><dd>{data.method}</dd></div>
-          <div><dt>Status</dt><dd>{data.status ?? "No response"}</dd></div>
-          <div><dt>Time</dt><dd>{new Date(data.at).toLocaleString()}</dd></div>
-          <div><dt>Duration</dt><dd>{data.duration_ms} ms</dd></div>
-          {data.error ? <div><dt>Error</dt><dd>{data.error}</dd></div> : null}
-        </dl>
-      </section>
+    <div className="grid gap-4 py-2">
+      <LogHeaders
+        title="General"
+        headers={{
+          URL: data.url,
+          Method: data.method,
+          Status: String(data.status ?? "No response"),
+          Time: new Date(data.at).toLocaleString(),
+          Duration: `${data.duration_ms} ms`,
+          ...(data.error ? { Error: data.error } : {}),
+        }}
+      />
       <LogHeaders title="Request headers" headers={data.request_headers} />
       <LogBody title="Request body" body={data.request_body} />
       <LogHeaders title="Response headers" headers={data.response_headers} />
@@ -97,26 +130,27 @@ function ErrorLogSection() {
         description="Problems Studio ran into while it was open, such as an AI provider rejecting its key or photos it could not read. Click one with details to see them. Keys and tokens are masked. The list clears when Studio restarts; the log file keeps them."
         status={entries.length ? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}` : undefined}
         control={
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost"
+          <Button
+            size="xs"
+            variant="ghost-muted"
             disabled={!entries.length || clear.isPending}
             onClick={() => {
               setOpenId(null);
               clear.mutate();
             }}
           >
+            <Trash2Icon />
             Clear
-          </button>
+          </Button>
         }
       >
-        {error ? <p className="settings-row-desc text-error" role="alert">{error.message}</p> : null}
+        {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
         {entries.length === 0 ? (
-          <p className="settings-row-desc settings-api-log-empty">No warnings or errors since Studio started.</p>
+          <SettingsNote>No warnings or errors since Studio started.</SettingsNote>
         ) : (
-          <div className="settings-api-log">
-            <table className="settings-api-log-table" aria-label="Studio warnings and errors">
-              <thead>
+          <div className={LOG_SCROLL}>
+            <table className={LOG_TABLE} aria-label="Studio warnings and errors">
+              <thead className={LOG_HEAD}>
                 <tr>
                   <th scope="col">Time</th>
                   <th scope="col">Level</th>
@@ -129,29 +163,26 @@ function ErrorLogSection() {
                   const open = openId === entry.id;
                   return (
                     <Fragment key={entry.id}>
-                      <tr className={[entry.level === "warning" ? "" : "is-failed", open ? "is-open" : ""].filter(Boolean).join(" ") || undefined}>
-                        <td>{formatLogTime(entry.at)}</td>
-                        <td>{entry.level}</td>
-                        <td>{entry.source}</td>
-                        <td className="settings-api-log-path">
+                      <tr className={cn(LOG_ROW, open && "bg-muted/30")}>
+                        <td className="whitespace-nowrap">{formatLogTime(entry.at)}</td>
+                        <td className={entry.level === "warning" ? "text-warning-foreground" : "text-destructive-foreground"}>
+                          {entry.level}
+                        </td>
+                        <td className="whitespace-nowrap">{entry.source}</td>
+                        <td className="w-full">
                           {entry.detail ? (
-                            <button
-                              type="button"
-                              className="settings-api-log-toggle"
-                              aria-expanded={open}
-                              onClick={() => setOpenId(open ? null : entry.id)}
-                            >
+                            <LogToggle open={open} onClick={() => setOpenId(open ? null : entry.id)}>
                               {entry.message}
-                            </button>
+                            </LogToggle>
                           ) : (
-                            entry.message
+                            <span className="pl-4 text-foreground [overflow-wrap:anywhere]">{entry.message}</span>
                           )}
                         </td>
                       </tr>
                       {open && entry.detail ? (
-                        <tr className="settings-api-log-detail-row">
-                          <td colSpan={4}>
-                            <pre className="settings-api-log-body">{entry.detail}</pre>
+                        <tr className="border-b border-border/40 bg-muted/30 last:border-b-0">
+                          <td colSpan={4} className="!pb-3">
+                            <pre className={LOG_PRE}>{entry.detail}</pre>
                           </td>
                         </tr>
                       ) : null}
@@ -188,28 +219,27 @@ function VendooApiLogSection() {
         description="Calls the extension makes to Vendoo while Studio is open. Click a request to see its full URL, headers, and bodies. Tokens, API keys, and cookies are masked. The list clears when Studio restarts."
         status={entries.length ? `${entries.length} ${entries.length === 1 ? "call" : "calls"}` : undefined}
         control={
-          <button
-            type="button"
-            className="btn btn-sm btn-ghost"
+          <Button
+            size="xs"
+            variant="ghost-muted"
             disabled={!entries.length || clear.isPending}
             onClick={() => {
               setOpenId(null);
               clear.mutate();
             }}
           >
+            <Trash2Icon />
             Clear
-          </button>
+          </Button>
         }
       >
-        {error ? <p className="settings-row-desc text-error" role="alert">{error.message}</p> : null}
+        {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
         {entries.length === 0 ? (
-          <p className="settings-row-desc settings-api-log-empty">
-            No Vendoo calls yet. Create, update, or open a listing and requests will show up here.
-          </p>
+          <SettingsNote>No Vendoo calls yet. Create, update, or open a listing and requests will show up here.</SettingsNote>
         ) : (
-          <div className="settings-api-log">
-            <table className="settings-api-log-table" aria-label="Vendoo API calls">
-              <thead>
+          <div className={LOG_SCROLL}>
+            <table className={LOG_TABLE} aria-label="Vendoo API calls">
+              <thead className={LOG_HEAD}>
                 <tr>
                   <th scope="col">Time</th>
                   <th scope="col">Method</th>
@@ -223,24 +253,21 @@ function VendooApiLogSection() {
                   const open = openId === entry.id;
                   return (
                     <Fragment key={entry.id}>
-                      <tr className={[entry.ok ? "" : "is-failed", open ? "is-open" : ""].filter(Boolean).join(" ") || undefined}>
-                        <td>{formatLogTime(entry.at)}</td>
-                        <td>{entry.method}</td>
-                        <td>{entry.status ?? entry.error ?? ""}</td>
-                        <td>{entry.duration_ms} ms</td>
-                        <td className="settings-api-log-path">
-                          <button
-                            type="button"
-                            className="settings-api-log-toggle"
-                            aria-expanded={open}
-                            onClick={() => setOpenId(open ? null : entry.id)}
-                          >
+                      <tr className={cn(LOG_ROW, open && "bg-muted/30")}>
+                        <td className="whitespace-nowrap">{formatLogTime(entry.at)}</td>
+                        <td className="font-mono">{entry.method}</td>
+                        <td className={entry.ok ? "text-success-foreground" : "text-destructive-foreground"}>
+                          {entry.status ?? entry.error ?? ""}
+                        </td>
+                        <td className="whitespace-nowrap">{entry.duration_ms} ms</td>
+                        <td className="w-full font-mono">
+                          <LogToggle open={open} onClick={() => setOpenId(open ? null : entry.id)}>
                             {entry.url}
-                          </button>
+                          </LogToggle>
                         </td>
                       </tr>
                       {open ? (
-                        <tr className="settings-api-log-detail-row">
+                        <tr className="border-b border-border/40 bg-muted/30 last:border-b-0">
                           <td colSpan={5}>
                             <LogDetail id={entry.id} />
                           </td>

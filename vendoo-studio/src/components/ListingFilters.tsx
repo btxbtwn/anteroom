@@ -1,8 +1,23 @@
 /** Vendoo Inventory's filter bar, sized for Studio's sidebar. */
 
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
+import { cn } from "../lib/utils";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceLabel } from "./fillLog/marketplaces";
+import { SIDEBAR_ROW } from "./sidebar/sidebarStyles";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "./ui/menu";
 import {
   DEFAULT_LISTING_FILTERS,
   LISTING_SORTS,
@@ -24,14 +39,6 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "Failed",
 };
 
-function CheckGlyph() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M3 8.5l3.5 3.5L13 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 /** One narrowing, as a checkable menu row: check, glyph, name, count. */
 function FilterRow({
   checked,
@@ -51,22 +58,31 @@ function FilterRow({
   onSelect: () => void;
 }) {
   return (
-    <button
-      type="button"
-      role="menuitemcheckbox"
-      aria-checked={checked}
-      className="listing-filter-row"
+    <MenuCheckboxItem
+      checked={checked}
       disabled={disabled}
       title={title}
-      onClick={onSelect}
+      closeOnClick={false}
+      onCheckedChange={onSelect}
     >
-      <span className="listing-filter-row-check" aria-hidden="true">
-        {checked ? <CheckGlyph /> : null}
+      <span className="flex min-w-0 items-center gap-2">
+        {glyph}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
       </span>
-      {glyph}
-      <span className="listing-filter-row-text">{label}</span>
-      <span className="listing-filter-row-count">{count}</span>
-    </button>
+    </MenuCheckboxItem>
+  );
+}
+
+function Dot({ tone = "muted" }: { tone?: "muted" | "warning" | "info" }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "mx-[3px] size-2 shrink-0 rounded-full",
+        tone === "warning" ? "bg-warning" : tone === "info" ? "bg-primary" : "bg-muted-foreground/40",
+      )}
+    />
   );
 }
 
@@ -100,117 +116,65 @@ export function ListingFilters({
   staleCounts: Record<number, number>;
   onChange: (next: Filters) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
   const chosen = activeFilterCount(filters);
   // Vendoo hides the tab it has nothing for; "failed" is Studio's own state.
   const tabs: ListingStatusFilter[] = [
     "all",
     ...LISTING_STATUS_TABS.filter((status) => status !== "failed" || counts.failed),
   ];
-
-  // The menu closes the way every other menu in Studio does, and hands the
-  // focus back to the button that opened it.
-  const close = () => {
-    setOpen(false);
-    trigger.current?.focus();
-  };
-
-  useEffect(() => {
-    if (!open) return;
-    menu.current?.querySelector<HTMLButtonElement>(".listing-filter-row:not(:disabled)")?.focus();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-        trigger.current?.focus();
-      }
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("keydown", onKeyDown);
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.removeEventListener("pointerdown", onPointerDown);
-    };
-  }, [open]);
-
-  /** Arrow keys walk the rows, the way a menu is expected to. */
-  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
-    if (!keys.includes(event.key)) return;
-    const rows = [...(menu.current?.querySelectorAll<HTMLButtonElement>(".listing-filter-row:not(:disabled)") || [])];
-    if (!rows.length) return;
-    event.preventDefault();
-    const here = rows.indexOf(document.activeElement as HTMLButtonElement);
-    const next =
-      event.key === "Home"
-        ? 0
-        : event.key === "End"
-          ? rows.length - 1
-          : event.key === "ArrowDown"
-            ? (here + 1) % rows.length
-            : (here <= 0 ? rows.length : here) - 1;
-    rows[next]?.focus();
-  };
+  const sortLabel = LISTING_SORTS.find((option) => option.id === filters.sort)?.label ?? "Sort";
 
   return (
-    <div className="listing-filters" ref={root}>
-      <div className="listing-filter-tabs" role="tablist" aria-label="Listing status">
-        {tabs.map((status) => (
-          <button
-            key={status}
-            type="button"
-            role="tab"
-            aria-selected={filters.status === status}
-            className={`listing-filter-tab${filters.status === status ? " selected" : ""}`}
-            // A narrow sidebar drops the counts, so the tab itself carries one.
-            title={`${STATUS_LABELS[status]} · ${counts[status] || 0}`}
-            onClick={() => onChange({ ...filters, status })}
-          >
-            <span className="listing-filter-tab-inner">
-              <span className="listing-filter-tab-label">{STATUS_LABELS[status]}</span>
-              <span className="listing-filter-tab-count">{compactCount(counts[status] || 0)}</span>
-            </span>
-          </button>
-        ))}
+    <div className="flex shrink-0 flex-col gap-1.5 px-(--sidebar-content-inset) pb-2">
+      {/* The tabs answer to the sidebar's own width, which the reader drags
+          between 200px and 30vw: counts drop first, the selected one's last. */}
+      <div
+        className="@container/tabs flex gap-0.5 rounded-[var(--control-radius)] bg-sidebar-control-surface p-0.5 ring-1 ring-sidebar-border ring-inset"
+        role="tablist"
+        aria-label="Listing status"
+      >
+        {tabs.map((status) => {
+          const selected = filters.status === status;
+          return (
+            <button
+              key={status}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              data-active={selected}
+              className="group/tab flex h-6 min-w-0 flex-1 cursor-pointer items-center justify-center overflow-hidden rounded-md px-1 text-xs font-medium text-sidebar-muted-foreground outline-none transition-colors hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground data-[active=true]:shadow-xs/5"
+              // A narrow sidebar drops the counts, so the tab itself carries one.
+              title={`${STATUS_LABELS[status]} · ${counts[status] || 0}`}
+              onClick={() => onChange({ ...filters, status })}
+            >
+              <span className="flex min-w-0 items-baseline gap-1">
+                <span className="min-w-0 truncate">{STATUS_LABELS[status]}</span>
+                <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums @max-[268px]/tabs:group-data-[active=false]/tab:hidden @max-[212px]/tabs:hidden">
+                  {compactCount(counts[status] || 0)}
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      <div className="listing-filter-controls">
-        <div className="listing-filter-menu-wrap">
-          <button
-            ref={trigger}
-            type="button"
-            className={`listing-filter-toggle${open ? " open" : ""}${chosen ? " active" : ""}`}
-            aria-expanded={open}
-            aria-haspopup="menu"
-            onClick={() => setOpen((value) => !value)}
+      <div className="flex items-center gap-1">
+        <Menu>
+          <MenuTrigger
+            data-active={chosen > 0}
+            className={cn(SIDEBAR_ROW, "h-7 w-auto gap-1.5 px-2 text-xs data-[popup-open]:bg-sidebar-row-hover [&>svg]:size-3.5")}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M2 4h12M4 8h8M6.5 12h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
+            <ListFilterIcon />
             <span>Filters</span>
-            {chosen ? <span className="listing-filter-badge">{chosen}</span> : null}
-          </button>
-
-          {open ? (
-            <div
-              ref={menu}
-              className="listing-filter-menu"
-              role="menu"
-              aria-label="Filter listings"
-              onKeyDown={moveFocus}
-            >
-              <span className="listing-filter-menu-label">
-                {filters.notListed ? "Not listed on" : "Marketplaces"}
+            {chosen ? (
+              <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-3xs font-semibold text-primary-foreground tabular-nums">
+                {chosen}
               </span>
+            ) : null}
+          </MenuTrigger>
+          <MenuPopup align="start" className="max-h-[min(70vh,32rem)] min-w-56" aria-label="Filter listings">
+            <MenuGroup>
+              <MenuGroupLabel>{filters.notListed ? "Not listed on" : "Marketplaces"}</MenuGroupLabel>
               {marketplaces.length ? (
                 marketplaces.map((id) => (
                   <FilterRow
@@ -223,108 +187,113 @@ export function ListingFilters({
                   />
                 ))
               ) : (
-                <span className="listing-filter-empty">Nothing listed yet</span>
+                <p className="px-2 py-1 text-xs text-muted-foreground">Nothing listed yet</p>
               )}
-              <span className="listing-filter-menu-sep" role="separator" />
-              <FilterRow
-                checked={filters.notListed}
-                count={notListedCount}
-                // "Not listed" asks the opposite question of the marketplace
-                // rows, so it turns them around rather than fighting them.
-                title="Listings no marketplace carries — pick marketplaces above to see what is missing from them"
-                glyph={<span className="listing-filter-row-dot" aria-hidden="true" />}
-                label="Not listed"
-                // Turning it off drops the picks: a marketplace nothing sits
-                // on has no row to untick once the question is "listed on".
-                onSelect={() =>
-                  onChange(
-                    filters.notListed
-                      ? { ...filters, notListed: false, marketplaces: [] }
-                      : { ...filters, notListed: true },
-                  )
-                }
-              />
-              <FilterRow
-                checked={filters.needsRelist}
-                count={needsRelistCount}
-                title="Live listings still showing the copy from before Studio's last update — delist and relist them in Vendoo"
-                glyph={<span className="listing-filter-row-dot is-relist" aria-hidden="true" />}
-                label="Needs relist"
-                onSelect={() => onChange({ ...filters, needsRelist: !filters.needsRelist })}
-              />
-              <FilterRow
-                checked={filters.unsent}
-                count={unsentCount}
-                title="Edited in Studio since Vendoo last had this listing — press Update Vendoo"
-                glyph={<span className="listing-filter-row-dot is-unsent" aria-hidden="true" />}
-                label="Unsent edits"
-                onSelect={() => onChange({ ...filters, unsent: !filters.unsent })}
-              />
+            </MenuGroup>
+            <MenuSeparator />
+            <FilterRow
+              checked={filters.notListed}
+              count={notListedCount}
+              // "Not listed" asks the opposite question of the marketplace
+              // rows, so it turns them around rather than fighting them.
+              title="Listings no marketplace carries — pick marketplaces above to see what is missing from them"
+              glyph={<Dot />}
+              label="Not listed"
+              // Turning it off drops the picks: a marketplace nothing sits
+              // on has no row to untick once the question is "listed on".
+              onSelect={() =>
+                onChange(
+                  filters.notListed
+                    ? { ...filters, notListed: false, marketplaces: [] }
+                    : { ...filters, notListed: true },
+                )
+              }
+            />
+            <FilterRow
+              checked={filters.needsRelist}
+              count={needsRelistCount}
+              title="Live listings still showing the copy from before Studio's last update — delist and relist them in Vendoo"
+              glyph={<Dot tone="warning" />}
+              label="Needs relist"
+              onSelect={() => onChange({ ...filters, needsRelist: !filters.needsRelist })}
+            />
+            <FilterRow
+              checked={filters.unsent}
+              count={unsentCount}
+              title="Edited in Studio since Vendoo last had this listing — press Update Vendoo"
+              glyph={<Dot tone="info" />}
+              label="Unsent edits"
+              onSelect={() => onChange({ ...filters, unsent: !filters.unsent })}
+            />
 
-              <span className="listing-filter-menu-sep" role="separator" />
-              <span className="listing-filter-menu-label">Stale since listed</span>
+            <MenuSeparator />
+            <MenuGroup>
+              <MenuGroupLabel>Stale since listed</MenuGroupLabel>
               {STALE_DAY_OPTIONS.map((days) => (
                 <FilterRow
                   key={days}
                   checked={filters.staleDays === days}
                   count={staleCounts[days] || 0}
-                  glyph={<span className="listing-filter-row-dot" aria-hidden="true" />}
+                  glyph={<Dot />}
                   label={`${days}+ days`}
                   // One cutoff at a time: picking the one already on turns it off.
                   onSelect={() => onChange({ ...filters, staleDays: filters.staleDays === days ? 0 : days })}
                 />
               ))}
+            </MenuGroup>
 
-              {labels.length ? (
-                <>
-                  <span className="listing-filter-menu-sep" role="separator" />
-                  <span className="listing-filter-menu-label">Vendoo labels</span>
+            {labels.length ? (
+              <>
+                <MenuSeparator />
+                <MenuGroup>
+                  <MenuGroupLabel>Vendoo labels</MenuGroupLabel>
                   {labels.map((label) => (
                     <FilterRow
                       key={label}
                       checked={filters.labels.includes(label)}
                       count={labelCounts[label.toLowerCase()] || 0}
-                      glyph={<span className="listing-filter-row-dot" aria-hidden="true" />}
+                      glyph={<Dot />}
                       label={label}
                       onSelect={() => onChange({ ...filters, labels: toggleValue(filters.labels, label) })}
                     />
                   ))}
-                </>
-              ) : null}
+                </MenuGroup>
+              </>
+            ) : null}
 
-              {chosen ? (
-                <>
-                  <span className="listing-filter-menu-sep" role="separator" />
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="listing-filter-row is-clear"
-                    onClick={() => {
-                      onChange({ ...DEFAULT_LISTING_FILTERS, sort: filters.sort });
-                      close();
-                    }}
-                  >
-                    <span className="listing-filter-row-check" aria-hidden="true" />
-                    <span className="listing-filter-row-text">Clear filters</span>
-                  </button>
-                </>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+            {chosen ? (
+              <>
+                <MenuSeparator />
+                <MenuItem onClick={() => onChange({ ...DEFAULT_LISTING_FILTERS, sort: filters.sort })}>
+                  <XIcon />
+                  Clear filters
+                </MenuItem>
+              </>
+            ) : null}
+          </MenuPopup>
+        </Menu>
 
-        <select
-          className="listing-filter-sort"
-          value={filters.sort}
-          aria-label="Sort listings"
-          onChange={(event) => onChange({ ...filters, sort: event.target.value as ListingSortId })}
-        >
-          {LISTING_SORTS.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <Menu>
+          <MenuTrigger
+            aria-label="Sort listings"
+            className={cn(SIDEBAR_ROW, "ml-auto h-7 w-auto gap-1 px-2 text-xs data-[popup-open]:bg-sidebar-row-hover [&>svg]:size-3")}
+          >
+            <span className="truncate">{sortLabel}</span>
+            <ChevronDownIcon />
+          </MenuTrigger>
+          <MenuPopup align="end" className="min-w-44">
+            <MenuRadioGroup
+              value={filters.sort}
+              onValueChange={(value) => onChange({ ...filters, sort: value as ListingSortId })}
+            >
+              {LISTING_SORTS.map((option) => (
+                <MenuRadioItem key={option.id} value={option.id}>
+                  {option.label}
+                </MenuRadioItem>
+              ))}
+            </MenuRadioGroup>
+          </MenuPopup>
+        </Menu>
       </div>
     </div>
   );

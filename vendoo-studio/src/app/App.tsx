@@ -10,7 +10,19 @@ import { ChatPanel } from "../components/ChatPanel";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { BrowserPreview } from "../components/BrowserPreview";
 import { ListingSidebar } from "../components/ListingSidebar";
-import { AnalyticsIcon, AssistantIcon, BackIcon, SourcingIcon, ComposeIcon, HamburgerIcon, MarketingIcon, QueueIcon, SearchIcon, SettingsIcon } from "../components/sidebar/SidebarIcons";
+import {
+  ArrowLeftIcon,
+  BoxIcon,
+  ChartColumnIcon,
+  ListIcon,
+  MegaphoneIcon,
+  MenuIcon,
+  MessageCircleIcon,
+  PlusIcon,
+  SearchIcon,
+  SettingsIcon,
+  SquarePenIcon,
+} from "lucide-react";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTION_LABELS,
@@ -22,14 +34,16 @@ import { PhotoDropOverlay } from "../components/PhotoDropOverlay";
 import { BulkUploadDialog } from "../components/BulkUploadDialog";
 import { useBulkRegenerate } from "../components/useBulkRegenerate";
 import { bulkRegenerateToast } from "../bulkRegenerate";
-import { ToastHost } from "../components/ToastHost";
 import { PanelResizeHandle, usePanelCollapsed, usePanelWidth, type PanelWidthLimits } from "../components/PanelResizeHandle";
 import { WorkspaceTopbar } from "../components/WorkspaceTopbar";
 import { workspaceCrumbs, type WorkspaceView } from "../components/workspaceCrumbs";
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
-import { addToast } from "../ui/toast";
+import { toastManager } from "../components/ui/toast";
+import { Button } from "../components/ui/button";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import { Spinner } from "../components/ui/spinner";
 import {
   groupImageFilesByFolder,
   listingTitleForFolder,
@@ -69,10 +83,8 @@ const SourcingPage = lazy(loadSourcingPage);
 // app has settled means a tap does not wait on the network for it.
 const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketingPage, loadSourcingPage];
 const pageLoading = (
-  <div className="analytics-page">
-    <div className="analytics-inner">
-      <p className="analytics-status" role="status">Loading…</p>
-    </div>
+  <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading">
+    <Spinner className="size-5 text-muted-foreground" />
   </div>
 );
 const FirstRunGuide = lazy(() =>
@@ -178,7 +190,7 @@ export function App() {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
       if (job.status === "completed" || job.status === "failed") {
-        addToast({
+        toastManager.add({
           type: job.status === "failed" ? "error" : "success",
           title: job.status === "failed" ? "Vendoo send failed" : "Vendoo draft saved",
           description: job.last_error || job.listing_title,
@@ -343,12 +355,12 @@ export function App() {
     },
     onSuccess: (result) => {
       if (result.warning) {
-        addToast({ type: "error", title: "Browser is view-only", description: result.warning });
+        toastManager.add({ type: "error", title: "Browser is view-only", description: result.warning });
       }
     },
     onError: (err: Error, jobId: string) => {
       setBrowserJobId((current) => (current === jobId ? null : current));
-      addToast({ type: "error", title: "Could not open the Vendoo draft", description: err.message });
+      toastManager.add({ type: "error", title: "Could not open the Vendoo draft", description: err.message });
     },
   });
 
@@ -449,7 +461,7 @@ export function App() {
       .map((listing) => ({ convId: listing.convId, title: listingTitleForFolder(listing.folder) }));
     if (!listings.length) return;
     if (bulk.running) {
-      addToast({
+      toastManager.add({
         type: "warning",
         title: "Studio is already working through a batch",
         description: "Generate these from the sidebar's Regenerate button when it finishes.",
@@ -459,7 +471,7 @@ export function App() {
     const ids = listings.map((listing) => listing.convId);
     const titles = new Map(listings.map((listing) => [listing.convId, listing.title]));
     const result = await bulk.start(ids, titles, "generate");
-    if (result) addToast(bulkRegenerateToast(result, "generate"));
+    if (result) toastManager.add(bulkRegenerateToast(result, "generate"));
   };
 
   // Photos dropped anywhere in the window land on the open listing; with no
@@ -514,10 +526,10 @@ export function App() {
         const description = `Added ${totalPhotos} photo${totalPhotos === 1 ? "" : "s"} from separate folders.`;
         if (result.generate) void generateBatch(result.listings);
         if (errors.length) {
-          addToast({ type: "error", title, description: errors.join("; ") });
+          toastManager.add({ type: "error", title, description: errors.join("; ") });
           return;
         }
-        addToast({ type: "success", title, description });
+        toastManager.add({ type: "success", title, description });
         return;
       }
 
@@ -533,13 +545,13 @@ export function App() {
       }
       const title = `Added ${count} photo${count === 1 ? "" : "s"}`;
       if (errors.length) {
-        addToast({ type: "error", title, description: errors.join("; ") });
+        toastManager.add({ type: "error", title, description: errors.join("; ") });
         return;
       }
-      addToast({ type: "success", title, description: created ? "Started a new listing for them." : undefined });
+      toastManager.add({ type: "success", title, description: created ? "Started a new listing for them." : undefined });
     },
     onError: (err: Error) => {
-      addToast({ type: "error", title: "Could not add photos", description: err.message });
+      toastManager.add({ type: "error", title: "Could not add photos", description: err.message });
     },
   });
 
@@ -641,7 +653,7 @@ export function App() {
                 setMobileSidebarOpen(true);
               }}
             >
-              <BackIcon />
+              <ArrowLeftIcon className="size-4" />
             </button>
             <div className="mobile-workspace-title">{workspaceTitle}</div>
             {activeView === "listings" ? (
@@ -653,7 +665,7 @@ export function App() {
                   aria-label={`Queue${queueCount ? ` (${queueCount})` : ""}`}
                   onClick={() => togglePage("queue")}
                 >
-                  <QueueIcon />
+                  <ListIcon className="size-4" />
                   {queueCount ? <span className="queue-nav-dot" aria-hidden="true" /> : null}
                 </button>
                 <div className="mobile-workspace-panes" role="tablist" aria-label="Workspace views">
@@ -694,7 +706,7 @@ export function App() {
                   aria-label="Sourcing"
                   onClick={openSourcing}
                 >
-                  <SourcingIcon />
+                  <BoxIcon className="size-4" />
                 </button>
                 <button
                   type="button"
@@ -703,7 +715,7 @@ export function App() {
                   aria-label="Analytics"
                   onClick={openAnalytics}
                 >
-                  <AnalyticsIcon />
+                  <ChartColumnIcon className="size-4" />
                 </button>
                 <button
                   type="button"
@@ -712,7 +724,7 @@ export function App() {
                   aria-label="Marketing"
                   onClick={openMarketing}
                 >
-                  <MarketingIcon />
+                  <MegaphoneIcon className="size-4" />
                 </button>
                 <button
                   type="button"
@@ -721,7 +733,7 @@ export function App() {
                   aria-label="Assistant"
                   onClick={openAssistant}
                 >
-                  <AssistantIcon />
+                  <MessageCircleIcon className="size-4" />
                 </button>
                 <button
                   type="button"
@@ -730,7 +742,7 @@ export function App() {
                   aria-label="Settings"
                   onClick={openSettings}
                 >
-                  <SettingsIcon />
+                  <SettingsIcon className="size-4" />
                 </button>
               </>
             ) : null}
@@ -794,25 +806,29 @@ export function App() {
                   onCreate={createListing}
                 />
               ) : (
-                <div className="empty-state">
-                  <div className="empty-state-headline">Turn product photos<br />into marketplace-ready drafts.</div>
-                  <div className="empty-state-rule" />
-                  <SuggestionsPanel
-                    variant="workspace"
-                    selectedConvId={selectedConvId}
-                    onSelect={openListing}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    style={{ marginTop: 8 }}
-                    disabled={createConv.isPending}
-                    title={createListingTitle}
-                    onClick={createListing}
-                  >
-                    Create a listing
-                  </button>
-                </div>
+                <Empty className="flex-1 overflow-y-auto">
+                  <EmptyHeader>
+                    <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
+                    <EmptyDescription>Pick up where Studio suggests, or start a new listing.</EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent className="max-w-md">
+                    <SuggestionsPanel
+                      variant="workspace"
+                      selectedConvId={selectedConvId}
+                      onSelect={openListing}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={createConv.isPending}
+                      title={createListingTitle}
+                      onClick={createListing}
+                    >
+                      <PlusIcon />
+                      Create a listing
+                    </Button>
+                  </EmptyContent>
+                </Empty>
               )}
               {selectedConvId && (
                 <div hidden={activeView !== "listings"} className={`listing-workspace${browserOpen && browserExpanded ? " is-browser-expanded" : ""}`}>
@@ -897,9 +913,9 @@ export function App() {
                     </div>
                   ))
                 ) : (
-                  <div className="empty-state">
-                    <p className="text-xs text-muted font-mono">Select a listing to inspect</p>
-                  </div>
+                  <Empty className="h-full">
+                    <EmptyDescription>Select a listing to inspect</EmptyDescription>
+                  </Empty>
                 )}
               </aside>
             )}
@@ -917,10 +933,10 @@ export function App() {
             aria-controls="listings-sidebar"
             onClick={() => setMobileSidebarOpen((open) => !open)}
           >
-            <HamburgerIcon />
+            <MenuIcon className="size-5" />
           </button>
           <label className="mobile-mail-search">
-            <SearchIcon />
+            <SearchIcon className="size-4.5 shrink-0" />
             <input
               type="search"
               value={listingQuery}
@@ -937,16 +953,16 @@ export function App() {
             disabled={createConv.isPending}
             onClick={createListing}
           >
-            <ComposeIcon />
+            <SquarePenIcon className="size-5" />
           </button>
         </nav>
       )}
-      <footer className="status-bar">
-        <div className="status-left">
+      <footer className="relative flex shrink-0 items-center justify-between border-t border-sidebar-border bg-sidebar px-3.5 pt-1 pb-[max(--spacing(1),env(safe-area-inset-bottom,0px),var(--visual-bottom-inset,0px))] text-2xs text-sidebar-muted-foreground max-[900px]:hidden">
+        <div className="flex items-center gap-3">
           <ExtensionStatus />
           <ProviderStatus />
         </div>
-        <div className="status-right">
+        <div className="flex items-center gap-3">
           <BuildVersion backendVersion={status?.version} />
         </div>
       </footer>
@@ -979,7 +995,6 @@ export function App() {
         />
       ) : null}
       <ThemeSync />
-      <ToastHost />
       <ConfirmDialogHost />
       {setupGuideOpen ? (
         <Suspense fallback={null}>

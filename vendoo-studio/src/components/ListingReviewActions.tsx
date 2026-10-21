@@ -1,54 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { EllipsisIcon, Globe2Icon } from "lucide-react";
+import type { MouseEvent, ReactNode } from "react";
 import { api } from "../api/client";
 import { jobsPollMs } from "../api/polling";
+import { cn } from "../lib/utils";
 import { RegenerateListingButton, useClearListing } from "./ClearListingButton";
 import { OpenListingButton } from "./OpenListingButton";
-
-/* T3 Code marks a browser surface with lucide's globe-2 (RightPanelTabs.tsx),
-   drawn at the same 16px / stroke-2 as the titlebar's panel toggles. */
-function BrowserIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <path d="M21.54 15H17a2 2 0 0 0-2 2v4.54" />
-      <path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17" />
-      <path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05" />
-    </svg>
-  );
-}
-
-/* lucide `ellipsis`. T3 Code hangs a thread's rare and destructive actions off
-   one of these rather than spending titlebar width on them. */
-function MoreIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="19" cy="12" r="1" />
-      <circle cx="5" cy="12" r="1" />
-    </svg>
-  );
-}
+import { Button } from "./ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 function notesVendooItemId(notes?: string | null): string | null {
   if (!notes) return null;
@@ -91,8 +51,9 @@ function useListingJob(convId: string) {
   };
 }
 
+
 /** Icon-only: it opens a surface in the window the way T3 Code's panel toggles
-    do, not a listing action like Clear. */
+    do (lucide globe-2, as in T3's RightPanelTabs), not a listing action. */
 export function ListingBrowserButton({
   convId,
   browserOpen,
@@ -107,74 +68,47 @@ export function ListingBrowserButton({
   if (!listingJob.vendoo_item_id && !listingJob.vendoo_url) return null;
 
   return (
-    <button
-      type="button"
-      className="titlebar-control"
-      disabled={browserOpen}
-      aria-label="Open the Vendoo draft in Studio"
-      aria-pressed={browserOpen}
-      title="Work in the Vendoo draft here: click, type, and point Studio at fields to fill"
-      onClick={() => onOpenBrowser(listingJob.id)}
-    >
-      <BrowserIcon />
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            disabled={browserOpen}
+            aria-label="Open the Vendoo draft in Studio"
+            aria-pressed={browserOpen}
+            data-pressed={browserOpen ? "" : undefined}
+            onClick={() => onOpenBrowser(listingJob.id)}
+          />
+        }
+      >
+        <Globe2Icon />
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">
+        Work in the Vendoo draft here: click, type, and point Studio at fields to fill
+      </TooltipPopup>
+    </Tooltip>
   );
 }
 
-/** Everything rare enough not to earn a place in the titlebar. Clearing is the
+/** Everything rare enough not to earn a place in the header. Clearing is the
     only item today, and it stays out of reach of the tabs next door. */
 function ListingActionsMenu({ convId, onCleared }: { convId: string; onCleared?: () => void }) {
-  const [open, setOpen] = useState(false);
   const { clear, isPending } = useClearListing(convId, onCleared);
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointer = (event: globalThis.MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest(".pr-menu-wrap")) return;
-      setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onPointer);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onPointer);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   return (
-    <div className="pr-menu-wrap">
-      <button
-        type="button"
-        className="titlebar-control"
-        aria-label="More listing actions"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="More listing actions"
-        onClick={() => setOpen((value) => !value)}
+    <Menu>
+      <MenuTrigger
+        render={<Button variant="ghost" size="icon-xs" aria-label="More listing actions" />}
       >
-        <MoreIcon />
-      </button>
-      {open ? (
-        <div className="pr-menu pr-menu-fit" role="menu">
-          <button
-            type="button"
-            role="menuitem"
-            className="pr-menu-item pr-menu-item-destructive"
-            disabled={isPending}
-            onClick={() => {
-              setOpen(false);
-              void clear();
-            }}
-          >
-            {isPending ? "Clearing..." : "Clear listing"}
-          </button>
-        </div>
-      ) : null}
-    </div>
+        <EllipsisIcon />
+      </MenuTrigger>
+      <MenuPopup align="end" width="content">
+        <MenuItem variant="destructive" disabled={isPending} onClick={() => void clear()}>
+          {isPending ? "Clearing…" : "Clear listing"}
+        </MenuItem>
+      </MenuPopup>
+    </Menu>
   );
 }
 
@@ -197,19 +131,15 @@ export function ListingReviewActions({
   const { listingJob, importedItemId, importedUrl } = useListingJob(convId);
 
   return (
-    <div
-      className={`pr-review-actions${className ? ` ${className}` : ""}`}
-      onMouseDown={onMouseDown}
-    >
+    <div className={cn("ms-auto flex shrink-0 items-center gap-1", className)} onMouseDown={onMouseDown}>
       {listingJob ? (
         <OpenListingButton
           jobId={listingJob.id}
           vendooItemId={listingJob.vendoo_item_id || importedItemId}
           vendooUrl={listingJob.vendoo_url || importedUrl}
-          className="pr-review-open"
         />
       ) : null}
-      <RegenerateListingButton convId={convId} className="pr-review-open" onRegenerated={onCleared} />
+      <RegenerateListingButton convId={convId} onRegenerated={onCleared} />
       {children}
       <ListingActionsMenu convId={convId} onCleared={onCleared} />
     </div>

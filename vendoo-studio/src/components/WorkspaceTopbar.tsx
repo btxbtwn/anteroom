@@ -1,44 +1,12 @@
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactElement } from "react";
+import { PanelLeftCloseIcon, PanelLeftIcon, PanelRightCloseIcon, PanelRightIcon } from "lucide-react";
+import { Toggle } from "./ui/toggle";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import type { WorkspaceCrumbs } from "./workspaceCrumbs";
 
 /** A titlebar click must not start a window drag on the desktop build. */
 export function stopTitlebarDrag(event: MouseEvent<HTMLElement>) {
   event.stopPropagation();
-}
-
-/* T3 Code's panel toggles are lucide's panel-left-close / panel-left and
-   panel-right-close / panel-right: the open panel carries the chevron that
-   shows which way it will go. Settings lives in the sidebar footer only. */
-const ICON_PROPS = {
-  width: 16,
-  height: 16,
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 2,
-  strokeLinecap: "round",
-  strokeLinejoin: "round",
-  "aria-hidden": true,
-} as const;
-
-export function PanelLeftIcon({ open = false }: { open?: boolean }) {
-  return (
-    <svg {...ICON_PROPS}>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M9 3v18" />
-      {open ? <path d="m16 15-3-3 3-3" /> : null}
-    </svg>
-  );
-}
-
-export function PanelRightIcon({ open = false }: { open?: boolean }) {
-  return (
-    <svg {...ICON_PROPS}>
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <path d="M15 3v18" />
-      {open ? <path d="m8 9 3 3-3 3" /> : null}
-    </svg>
-  );
 }
 
 interface Props {
@@ -51,54 +19,81 @@ interface Props {
   onToggleDetail: () => void;
 }
 
-/** One window-wide titlebar like T3 Code: crumbs left, panel toggles right. */
-export function WorkspaceTopbar({
-  crumbs,
-  sidebarOpen,
-  onToggleSidebar,
-  detailOpen,
-  onToggleDetail,
-}: Props) {
+/** A ghost panel toggle with a tooltip, as T3 Code's PanelLayoutControls. */
+function PanelToggle({
+  pressed,
+  label,
+  controls,
+  onToggle,
+  children,
+}: {
+  pressed: boolean;
+  label: string;
+  controls: string;
+  onToggle: () => void;
+  children: ReactElement;
+}) {
   return (
-    <header className="workspace-topbar">
-      <div className="workspace-topbar-drag pywebview-drag-region" aria-hidden="true" />
-      <button
-        type="button"
-        className="titlebar-control"
-        aria-label={sidebarOpen ? "Hide listings" : "Show listings"}
-        aria-expanded={sidebarOpen}
-        aria-controls="listings-sidebar"
-        title={sidebarOpen ? "Hide listings" : "Show listings"}
-        onMouseDown={stopTitlebarDrag}
-        onClick={onToggleSidebar}
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Toggle
+            className="shrink-0 [-webkit-app-region:no-drag]"
+            pressed={pressed}
+            onPressedChange={onToggle}
+            aria-label={label}
+            aria-expanded={pressed}
+            aria-controls={controls}
+            variant="ghost"
+            size="sm"
+            onMouseDown={stopTitlebarDrag}
+          />
+        }
       >
-        <PanelLeftIcon open={sidebarOpen} />
-      </button>
-      <div className="workspace-crumbs">
-        <span className="workspace-crumb-context">{crumbs.context}</span>
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+/** One window-wide titlebar like T3 Code: crumbs left, panel toggles right. */
+export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, detailOpen, onToggleDetail }: Props) {
+  return (
+    <header className="workspace-topbar relative z-2 flex h-(--workspace-topbar-height) w-full shrink-0 items-center gap-2 bg-sidebar pr-2.5 pl-3 select-none max-[900px]:hidden [html.desktop-app_&]:pl-[90px]">
+      {/* The pywebview window drags by this layer; controls sit above it. */}
+      <div className="pywebview-drag-region absolute inset-0" aria-hidden="true" />
+      <PanelToggle
+        pressed={sidebarOpen}
+        label={sidebarOpen ? "Hide listings" : "Show listings"}
+        controls="listings-sidebar"
+        onToggle={onToggleSidebar}
+      >
+        {sidebarOpen ? <PanelLeftCloseIcon className="size-4" /> : <PanelLeftIcon className="size-4" />}
+      </PanelToggle>
+      <div className="relative flex h-7 min-w-0 flex-1 items-center gap-2 text-sm leading-none tracking-tight">
+        <span className="shrink-0 text-muted-foreground">{crumbs.context}</span>
         {crumbs.title ? (
           <>
-            <span className="workspace-crumb-sep" aria-hidden="true">/</span>
-            <span className="workspace-crumb-title" title={crumbs.title}>{crumbs.title}</span>
+            <span className="shrink-0 text-muted-foreground/60" aria-hidden="true">/</span>
+            <span className="min-w-0 truncate font-medium text-foreground" title={crumbs.title}>
+              {crumbs.title}
+            </span>
           </>
         ) : null}
       </div>
-      <div className="workspace-topbar-actions">
-        {detailOpen === null ? null : (
-          <button
-            type="button"
-            className="titlebar-control"
-            aria-label={detailOpen ? "Hide the listing inspector" : "Show the listing inspector"}
-            aria-expanded={detailOpen}
-            aria-controls="listing-inspector"
-            title={detailOpen ? "Hide the listing inspector" : "Show the listing inspector"}
-            onMouseDown={stopTitlebarDrag}
-            onClick={onToggleDetail}
+      {detailOpen === null ? null : (
+        <div className="relative ml-auto flex min-w-0 items-center gap-1">
+          <PanelToggle
+            pressed={detailOpen}
+            label={detailOpen ? "Hide the listing inspector" : "Show the listing inspector"}
+            controls="listing-inspector"
+            onToggle={onToggleDetail}
           >
-            <PanelRightIcon open={detailOpen} />
-          </button>
-        )}
-      </div>
+            {detailOpen ? <PanelRightCloseIcon className="size-4" /> : <PanelRightIcon className="size-4" />}
+          </PanelToggle>
+        </div>
+      )}
     </header>
   );
 }

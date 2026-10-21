@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { IDLE_POLL_MS, pollMs } from "../api/polling";
 import { ProviderLogo, resolveProviderLogoId } from "./ProviderLogo";
+import { StatusDot } from "./StatusDot";
 
 export function providerStatusModelLabel(
   configured: boolean,
@@ -34,9 +35,13 @@ export function ProviderStatus() {
   const title = connected && logoId ? `${providerLabel} · ${modelName}` : modelName;
 
   return (
-    <span className="status-provider" title={title}>
-      {!connected ? <span className="status-dot error" /> : null}
-      {connected && logoId ? <ProviderLogo id={logoId} label={providerLabel} size={14} /> : null}
+    <span className="flex items-center gap-1.5" title={title}>
+      {!connected ? <StatusDot tone="error" /> : null}
+      {connected && logoId ? (
+        <span className="inline-flex overflow-hidden rounded-[3px] bg-white [&>span]:flex [&>span]:items-center [&>span]:justify-center [&_svg]:block">
+          <ProviderLogo id={logoId} label={providerLabel} size={14} />
+        </span>
+      ) : null}
       <span>{modelName}</span>
     </span>
   );

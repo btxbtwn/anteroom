@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { EXTENSION_STATUS_POLL_MS, pollMs } from "../api/polling";
 import { ConnectChromeButton } from "./ConnectChromeButton";
+import { StatusDot } from "./StatusDot";
 
 export function ExtensionStatus() {
   const { data } = useQuery({
@@ -30,12 +31,10 @@ export function ExtensionStatus() {
       ].join(" ")
     : undefined;
 
-  const dotClass = outdated ? "outdated" : connected ? "connected" : "";
-
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <span className={`status-dot ${dotClass}`} />
-      <span className={outdated ? "status-outdated" : undefined} title={title}>
+    <span className="flex items-center gap-1.5">
+      <StatusDot tone={outdated ? "warning" : connected ? "success" : "muted"} />
+      <span className={outdated ? "text-warning-foreground" : undefined} title={title}>
         {label}
       </span>
       {(!connected || outdated) && <ConnectChromeButton compact />}

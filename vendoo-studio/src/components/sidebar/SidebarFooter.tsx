@@ -1,14 +1,54 @@
+import type { ComponentType, ReactNode } from "react";
+import {
+  ArrowLeftIcon,
+  BoxIcon,
+  ChartColumnIcon,
+  ListIcon,
+  MegaphoneIcon,
+  MessageCircleIcon,
+  SettingsIcon,
+} from "lucide-react";
+import { cn } from "../../lib/utils";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UpdateButton } from "../UpdateButton";
 import { VendooImportButton } from "../VendooImportButton";
 import type { WorkspaceView } from "../workspaceCrumbs";
-import {
-  AnalyticsIcon,
-  AssistantIcon,
-  MarketingIcon,
-  QueueIcon,
-  SettingsIcon,
-  SourcingIcon,
-} from "./SidebarIcons";
+import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebarStyles";
+
+function FooterButton({
+  label,
+  icon: Icon,
+  active,
+  onClick,
+  children,
+}: {
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  active?: boolean;
+  onClick: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className={cn(SIDEBAR_ICON_BUTTON, "max-w-8 min-w-6 flex-[1_1_0]")}
+            aria-label={label}
+            aria-pressed={active === undefined ? undefined : active}
+            data-active={active}
+            onClick={onClick}
+          />
+        }
+      >
+        <Icon />
+        {children}
+      </TooltipTrigger>
+      <TooltipPopup side="top">{label}</TooltipPopup>
+    </Tooltip>
+  );
+}
 
 /** The page buttons along the bottom of the sidebar, or Back while in settings. */
 export function SidebarFooter({
@@ -35,83 +75,31 @@ export function SidebarFooter({
   onOpenSettings: () => void;
 }) {
   return (
-    <div className="sidebar-footer">
-      <div className="sidebar-footer-actions">
+    <div className="flex shrink-0 items-center p-(--sidebar-content-inset) max-[900px]:hidden">
+      <div className="flex w-full flex-wrap items-center gap-0.5">
         {settingsMode ? (
-          <button
-            type="button"
-            className="sidebar-back-btn"
-            aria-label="Back"
-            onClick={onCloseSettings}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+          <button type="button" className={cn(SIDEBAR_ROW, "w-auto text-xs")} aria-label="Back" onClick={onCloseSettings}>
+            <ArrowLeftIcon />
             <span>Back</span>
           </button>
         ) : (
           <>
-            <button
-              type="button"
-              className={`sidebar-icon-btn queue-nav${activeView === "queue" ? " selected" : ""}`}
-              title={queueCount ? `Queue (${queueCount})` : "Queue"}
-              aria-label={`Queue${queueCount ? ` (${queueCount})` : ""}`}
-              aria-pressed={activeView === "queue"}
+            <FooterButton
+              label={queueCount ? `Queue (${queueCount})` : "Queue"}
+              icon={ListIcon}
+              active={activeView === "queue"}
               onClick={onOpenQueue}
             >
-              <QueueIcon />
-              {queueCount ? <span className="queue-nav-dot" aria-hidden="true" /> : null}
-            </button>
+              {queueCount ? (
+                <span className="absolute top-1.25 right-1.25 size-1.25 rounded-full bg-primary" aria-hidden="true" />
+              ) : null}
+            </FooterButton>
             <VendooImportButton />
-            <button
-              type="button"
-              className={`sidebar-icon-btn${activeView === "sourcing" ? " selected" : ""}`}
-              title="Sourcing"
-              aria-label="Sourcing"
-              aria-pressed={activeView === "sourcing"}
-              onClick={onOpenSourcing}
-            >
-              <SourcingIcon />
-            </button>
-            <button
-              type="button"
-              className={`sidebar-icon-btn${activeView === "analytics" ? " selected" : ""}`}
-              title="Analytics"
-              aria-label="Analytics"
-              aria-pressed={activeView === "analytics"}
-              onClick={onOpenAnalytics}
-            >
-              <AnalyticsIcon />
-            </button>
-            <button
-              type="button"
-              className={`sidebar-icon-btn${activeView === "marketing" ? " selected" : ""}`}
-              title="Marketing"
-              aria-label="Marketing"
-              aria-pressed={activeView === "marketing"}
-              onClick={onOpenMarketing}
-            >
-              <MarketingIcon />
-            </button>
-            <button
-              type="button"
-              className={`sidebar-icon-btn${activeView === "assistant" ? " selected" : ""}`}
-              title="Assistant"
-              aria-label="Assistant"
-              aria-pressed={activeView === "assistant"}
-              onClick={onOpenAssistant}
-            >
-              <AssistantIcon />
-            </button>
-            <button
-              type="button"
-              className="sidebar-icon-btn"
-              title="Settings"
-              aria-label="Settings"
-              onClick={onOpenSettings}
-            >
-              <SettingsIcon />
-            </button>
+            <FooterButton label="Sourcing" icon={BoxIcon} active={activeView === "sourcing"} onClick={onOpenSourcing} />
+            <FooterButton label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} onClick={onOpenAnalytics} />
+            <FooterButton label="Marketing" icon={MegaphoneIcon} active={activeView === "marketing"} onClick={onOpenMarketing} />
+            <FooterButton label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
+            <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />
           </>
         )}
         <UpdateButton />

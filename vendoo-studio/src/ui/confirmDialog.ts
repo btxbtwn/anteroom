@@ -8,6 +8,14 @@ type ConfirmState =
       variant: ConfirmVariant;
       confirmLabel: string;
       resolve: (value: boolean) => void;
+    }
+  /* Answered, still animating out: keeps the copy on screen until the host
+     calls completeConfirmDialogClose (T3 Code's confirm dialog does the same). */
+  | {
+      status: "closing";
+      message: string;
+      variant: ConfirmVariant;
+      confirmLabel: string;
     };
 
 let state: ConfirmState = { status: "idle" };
@@ -65,9 +73,15 @@ export function confirmDialog(
 
 export function respondToConfirmDialog(value: boolean) {
   if (state.status !== "confirming") return;
-  const resolve = state.resolve;
-  state = { status: "idle" };
+  const { resolve, message, variant, confirmLabel } = state;
+  state = { status: "closing", message, variant, confirmLabel };
   resolve(value);
+  emit();
+}
+
+export function completeConfirmDialogClose() {
+  if (state.status !== "closing") return;
+  state = { status: "idle" };
   emit();
 }
 

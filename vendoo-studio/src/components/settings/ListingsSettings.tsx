@@ -3,7 +3,24 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { DuplicateVendooLinksButton } from "../DuplicateVendooLinksButton";
 import { MarketplaceLogo } from "../MarketplaceLogo";
-import { SettingsRow, SettingsSection } from "./SettingsLayout";
+import { EyeIcon, RotateCcwIcon } from "lucide-react";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Spinner } from "../ui/spinner";
+import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
+import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+
+function LoadingNote({ children }: { children: string }) {
+  return (
+    <SettingsNote className="flex items-center gap-1.5">
+      <Spinner size="xs" tone="muted" />
+      {children}
+    </SettingsNote>
+  );
+}
 
 function orderedSelection(
   available: { id: string }[],
@@ -37,62 +54,72 @@ function MarketplacesSection() {
         description="Every marketplace Vendoo lists to. The thread status popup and sidebar logos show only the ones you check; empty-field prompts and Send to Vendoo fill the checked ones Studio supports."
         control={
           <>
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
+            <Button
+              size="xs"
+              variant="ghost-muted"
               disabled={mutation.isPending || available.every((item) => selectedSet.has(item.id))}
               onClick={() => save(available.map((item) => item.id))}
             >
               All
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost-muted"
               disabled={mutation.isPending || selected.length === 0}
               onClick={() => save([])}
             >
               None
-            </button>
+            </Button>
           </>
         }
       >
         {isPending ? (
-          <p className="settings-row-desc">Loading marketplaces…</p>
+          <LoadingNote>Loading marketplaces</LoadingNote>
         ) : isError ? (
-          <p className="settings-row-desc text-error">{(error as Error).message || "Could not load marketplaces"}</p>
+          <SettingsNote tone="error">{(error as Error).message || "Could not load marketplaces"}</SettingsNote>
         ) : (
-          <div className="settings-marketplace-grid" role="group" aria-label="Marketplaces to list to">
-            {available.map((item) => (
-              <label key={item.id} className="settings-marketplace-option">
-                <input
-                  type="checkbox"
-                  checked={selectedSet.has(item.id)}
-                  disabled={mutation.isPending}
-                  onChange={(event) => {
-                    const next = new Set(selected);
-                    if (event.target.checked) next.add(item.id);
-                    else next.delete(item.id);
-                    save(next);
-                  }}
-                />
-                <MarketplaceLogo id={item.id} label={item.label} size={16} />
-                <span>
-                  {item.label}
-                  {!item.fillable ? <span className="settings-marketplace-note"> · Vendoo crosslist only</span> : null}
-                </span>
-              </label>
-            ))}
+          <>
+            <div
+              className="grid gap-px overflow-hidden rounded-lg border border-border/60 bg-border/50 sm:grid-cols-2"
+              role="group"
+              aria-label="Marketplaces to list to"
+            >
+              {available.map((item) => (
+                <Label
+                  key={item.id}
+                  className="flex min-h-11 cursor-pointer items-center gap-2.5 bg-background px-3 py-2 font-normal transition-colors hover:bg-muted/40 dark:bg-card"
+                >
+                  <MarketplaceLogo id={item.id} label={item.label} size={16} />
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.label}</span>
+                  {!item.fillable ? (
+                    <Badge variant="outline" size="sm" className="shrink-0 text-muted-foreground">
+                      Crosslist only
+                    </Badge>
+                  ) : null}
+                  <Switch
+                    checked={selectedSet.has(item.id)}
+                    disabled={mutation.isPending}
+                    aria-label={`List to ${item.label}`}
+                    onCheckedChange={(checked) => {
+                      const next = new Set(selected);
+                      if (checked) next.add(item.id);
+                      else next.delete(item.id);
+                      save(next);
+                    }}
+                  />
+                </Label>
+              ))}
+              {available.length % 2 === 1 ? <span aria-hidden className="hidden bg-background sm:block dark:bg-card" /> : null}
+            </div>
             {available.some((item) => !item.fillable) ? (
-              <p className="settings-row-desc">
-                Studio doesn’t fill forms for “Vendoo crosslist only” marketplaces yet — Send skips them and you
+              <SettingsNote>
+                Studio doesn’t fill forms for “Crosslist only” marketplaces yet — Send skips them and you
                 crosslist to them from Vendoo. Their live status still shows on the thread.
-              </p>
+              </SettingsNote>
             ) : null}
-          </div>
+          </>
         )}
-        {mutation.isError ? (
-          <p className="settings-row-desc text-error">{(mutation.error as Error).message}</p>
-        ) : null}
+        {mutation.isError ? <SettingsNote tone="error">{(mutation.error as Error).message}</SettingsNote> : null}
       </SettingsRow>
     </SettingsSection>
   );
@@ -137,41 +164,34 @@ function PackageDimensionsSection() {
         description="Used as the L × W × H default on every generated listing. Packaged weight is inferred separately for each item from its evidence."
       >
         {isPending ? (
-          <p className="settings-row-desc">Loading package dimensions…</p>
+          <LoadingNote>Loading package dimensions</LoadingNote>
         ) : error ? (
-          <p className="settings-row-desc text-error">{(error as Error).message || "Could not load package dimensions"}</p>
+          <SettingsNote tone="error">{(error as Error).message || "Could not load package dimensions"}</SettingsNote>
         ) : (
-          <div className="settings-dimensions-editor">
+          <div className="flex flex-wrap items-end gap-2">
             {(["length", "width", "height"] as const).map((name) => (
-              <label className="settings-dimension-field" key={name}>
-                <span className="settings-formula-label">{name[0].toUpperCase() + name.slice(1)} (in)</span>
-                <input
-                  className="input"
+              <Label className="grid w-24 gap-1 text-xs font-normal text-muted-foreground" key={name}>
+                {name[0].toUpperCase() + name.slice(1)} (in)
+                <Input
+                  size="sm"
                   type="number"
                   min="1"
                   max="120"
                   step="1"
                   value={values[name]}
+                  aria-invalid={draft && !valid ? true : undefined}
                   onChange={(event) => setDraft({ ...values, [name]: event.target.value })}
                 />
-              </label>
+              </Label>
             ))}
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              disabled={!dirty || saveMutation.isPending}
-              onClick={() => saveMutation.mutate(parsed)}
-            >
-              {saveMutation.isPending ? "Saving…" : "Save dimensions"}
-            </button>
+            <Button size="sm" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate(parsed)}>
+              {saveMutation.isPending ? <Spinner /> : null}
+              {saveMutation.isPending ? "Saving" : "Save dimensions"}
+            </Button>
           </div>
         )}
-        {draft && !valid ? (
-          <p className="settings-row-desc text-error">Use whole inches from 1 to 120.</p>
-        ) : null}
-        {saveMutation.isError ? (
-          <p className="settings-row-desc text-error">{(saveMutation.error as Error).message}</p>
-        ) : null}
+        {draft && !valid ? <SettingsNote tone="error">Use whole inches from 1 to 120.</SettingsNote> : null}
+        {saveMutation.isError ? <SettingsNote tone="error">{(saveMutation.error as Error).message}</SettingsNote> : null}
       </SettingsRow>
     </SettingsSection>
   );
@@ -200,36 +220,33 @@ function HiddenFieldsSection() {
         description="These marketplace fields stay off the Fields tab on every listing. Hide more from a field’s × menu, or restore them here."
       >
         {isPending ? (
-          <p className="settings-row-desc">Loading hidden fields…</p>
+          <LoadingNote>Loading hidden fields</LoadingNote>
         ) : isError ? (
-          <p className="settings-row-desc text-error">{(error as Error).message || "Could not load hidden fields"}</p>
+          <SettingsNote tone="error">{(error as Error).message || "Could not load hidden fields"}</SettingsNote>
         ) : always.length === 0 ? (
-          <p className="settings-row-desc">None yet. On Fields, open a field’s × menu and choose Always hide.</p>
+          <SettingsNote>None yet. On Fields, open a field’s × menu and choose Always hide.</SettingsNote>
         ) : (
-          <div className="settings-hidden-list">
+          <ul className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60">
             {always.map((item) => (
-              <div key={`${item.marketplace}:${item.field}`} className="settings-hidden-row">
-                <div className="settings-hidden-copy">
-                  <span className="settings-hidden-name">{item.label || item.field}</span>
-                  <span className="settings-hidden-meta">
-                    {item.marketplace === "general" ? "Vendoo" : item.marketplace}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost"
+              <li key={`${item.marketplace}:${item.field}`} className="flex min-w-0 items-center gap-3 py-1.5 pr-1.5 pl-3">
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.label || item.field}</span>
+                <span className="shrink-0 text-xs capitalize text-muted-foreground">
+                  {item.marketplace === "general" ? "Vendoo" : item.marketplace}
+                </span>
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
                   disabled={restoreMutation.isPending}
                   onClick={() => restoreMutation.mutate({ marketplace: item.marketplace, field: item.field })}
                 >
+                  <EyeIcon />
                   Show
-                </button>
-              </div>
+                </Button>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-        {restoreMutation.isError ? (
-          <p className="settings-row-desc text-error">{(restoreMutation.error as Error).message}</p>
-        ) : null}
+        {restoreMutation.isError ? <SettingsNote tone="error">{(restoreMutation.error as Error).message}</SettingsNote> : null}
       </SettingsRow>
     </SettingsSection>
   );
@@ -276,63 +293,58 @@ function ListingFormulasSection() {
         description="Studio pins these formulas into every listing generation. Leave them as the defaults, or edit the placeholders for your shop. Clearing a field and saving restores the built-in formula."
       >
         {isPending ? (
-          <p className="settings-row-desc">Loading formulas…</p>
+          <LoadingNote>Loading formulas</LoadingNote>
         ) : isError ? (
-          <p className="settings-row-desc text-error">{(error as Error).message || "Could not load formulas"}</p>
+          <SettingsNote tone="error">{(error as Error).message || "Could not load formulas"}</SettingsNote>
         ) : (
-          <div className="settings-formula-editor">
-            <label className="settings-formula-field">
-              <span className="settings-formula-label">Title</span>
-              <input
-                className="input"
+          <div className="grid gap-3">
+            <Label className="grid gap-1 text-xs font-normal text-muted-foreground">
+              Title
+              <Input
+                size="sm"
+                font="mono"
                 value={title}
                 onChange={(e) => setDraft({ title: e.target.value, description })}
                 spellCheck={false}
                 aria-label="Title formula"
               />
-            </label>
-            <label className="settings-formula-field">
-              <span className="settings-formula-label">Description</span>
-              <textarea
-                className="input settings-formula-textarea"
+            </Label>
+            <Label className="grid gap-1 text-xs font-normal text-muted-foreground">
+              Description
+              <Textarea
+                size="sm"
+                className="font-mono text-xs"
                 value={description}
                 onChange={(e) => setDraft({ title, description: e.target.value })}
                 spellCheck={false}
                 rows={6}
                 aria-label="Description formula"
               />
-            </label>
-            <div className="settings-formula-actions">
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                disabled={saveMutation.isPending || !dirty}
-                onClick={() => persist(title, description)}
-              >
-                {saveMutation.isPending ? "Saving…" : "Save formulas"}
-              </button>
-              <button
-                type="button"
-                className="btn btn-sm btn-outline"
+            </Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" disabled={saveMutation.isPending || !dirty} onClick={() => persist(title, description)}>
+                {saveMutation.isPending ? <Spinner /> : null}
+                {saveMutation.isPending ? "Saving" : "Save formulas"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 disabled={saveMutation.isPending || (!usingCustom && !dirty)}
                 onClick={() => {
                   setDraft({ title: defaultTitle, description: defaultDescription });
                   persist(defaultTitle, defaultDescription);
                 }}
               >
+                <RotateCcwIcon />
                 Reset to defaults
-              </button>
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {usingCustom ? "Custom formulas are active for new generations." : "Using the built-in list-this formulas."}
+              </span>
             </div>
-            {usingCustom ? (
-              <p className="settings-row-desc">Custom formulas are active for new generations.</p>
-            ) : (
-              <p className="settings-row-desc">Using the built-in list-this formulas.</p>
-            )}
           </div>
         )}
-        {saveMutation.isError ? (
-          <p className="settings-row-desc text-error">{(saveMutation.error as Error).message}</p>
-        ) : null}
+        {saveMutation.isError ? <SettingsNote tone="error">{(saveMutation.error as Error).message}</SettingsNote> : null}
       </SettingsRow>
     </SettingsSection>
   );

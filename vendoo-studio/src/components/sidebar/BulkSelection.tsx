@@ -3,6 +3,7 @@ import { BulkPriceDropDialog } from "../BulkPriceDropDialog";
 import { RegenerateReviewDialog } from "../RegenerateReviewDialog";
 import type { BulkRegenerate, BulkRegenerateRun } from "../useBulkRegenerate";
 import type { ListingSelection } from "./useListingSelection";
+import { Button } from "../ui/button";
 
 /** The bar under the list while selecting or while a bulk run is going. */
 export function BulkActionBar({
@@ -16,37 +17,47 @@ export function BulkActionBar({
 }) {
   const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, exitSelecting } = selection;
   return (
-    <div className="sidebar-bulk-bar" role="region" aria-label="Regenerate listings">
-      <p className="sidebar-bulk-count">{bulkStatusLabel(bulk.run, selectedIds.size, eligibleIds.length)}</p>
-      <div className="sidebar-bulk-actions">
-        <button
+    <div
+      className="flex shrink-0 flex-col gap-1.5 border-t border-sidebar-border px-(--sidebar-content-inset) py-2"
+      role="region"
+      aria-label="Regenerate listings"
+    >
+      <p className="min-w-0 px-1 text-xs font-medium leading-snug text-sidebar-foreground">
+        {bulkStatusLabel(bulk.run, selectedIds.size, eligibleIds.length)}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        <Button
           type="button"
-          className="btn btn-ghost btn-sm"
+          variant="ghost"
+          size="xs"
           disabled={bulk.running || eligibleIds.length === 0}
           onClick={toggleSelectAll}
         >
           {eligibleIds.length > 0 && eligibleIds.every((id) => selectedIds.has(id)) ? "None" : "All"}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="btn btn-danger btn-sm"
+          variant="destructive"
+          size="xs"
           disabled={bulk.running || selectedIds.size === 0}
           onClick={() => { void regenerateSelected(); }}
         >
           Regenerate
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="btn btn-outline btn-sm"
+          variant="outline"
+          size="xs"
           title="Review a lower price for each selected listing. Saves in Studio only; nothing is sent to Vendoo."
           disabled={bulk.running || selectedIds.size === 0}
           onClick={() => setMarkdownIds(eligibleIds.filter((id) => selectedIds.has(id)))}
         >
           Mark down
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="btn btn-ghost btn-sm"
+          variant="ghost"
+          size="xs"
           disabled={Boolean(bulk.run?.cancelRequested)}
           onClick={() => {
             if (bulk.running) bulk.cancel();
@@ -54,7 +65,7 @@ export function BulkActionBar({
           }}
         >
           {bulk.running ? (bulk.run?.cancelRequested ? "Finishing…" : "Stop batch") : "Cancel"}
-        </button>
+        </Button>
       </div>
     </div>
   );

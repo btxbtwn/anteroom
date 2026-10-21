@@ -1,59 +1,58 @@
+// Adapted from T3 Code's ConfirmDialogHost (https://github.com/pingdotgg/t3code),
+// MIT License, (c) 2026 T3 Tools Inc.
 import { useEffect, useSyncExternalStore } from "react";
 import {
+  completeConfirmDialogClose,
   readConfirmDialogState,
   registerConfirmDialogHost,
   resolveConfirmDialogCopy,
   respondToConfirmDialog,
   subscribeConfirmDialog,
 } from "../ui/confirmDialog";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
+import { Button } from "./ui/button";
 
 export function ConfirmDialogHost() {
   const state = useSyncExternalStore(subscribeConfirmDialog, readConfirmDialogState, readConfirmDialogState);
 
   useEffect(() => registerConfirmDialogHost(), []);
 
-  useEffect(() => {
-    if (state.status !== "confirming") return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopPropagation();
-      respondToConfirmDialog(false);
-    };
-    window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [state.status]);
-
-  if (state.status !== "confirming") return null;
-
-  const copy = resolveConfirmDialogCopy(state.message);
-  const confirmClass = state.variant === "destructive" ? "btn btn-danger" : "btn btn-primary";
+  const copy = resolveConfirmDialogCopy(state.status === "idle" ? "" : state.message);
+  const variant = state.status === "idle" ? "default" : state.variant;
+  const confirmLabel = state.status === "idle" ? "Confirm" : state.confirmLabel;
 
   return (
-    <div className="confirm-dialog" role="presentation">
-      <button type="button" className="confirm-dialog-backdrop" aria-label="Cancel" onClick={() => respondToConfirmDialog(false)} />
-      <div
-        className="confirm-dialog-popup"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="confirm-dialog-title"
-        aria-describedby={copy.description ? "confirm-dialog-description" : undefined}
-      >
-        <div className="confirm-dialog-header">
-          <h2 id="confirm-dialog-title" className="confirm-dialog-title">{copy.title}</h2>
+    <AlertDialog
+      open={state.status === "confirming"}
+      onOpenChange={(open) => {
+        if (!open) respondToConfirmDialog(false);
+      }}
+      onOpenChangeComplete={(open) => {
+        if (!open) completeConfirmDialogClose();
+      }}
+    >
+      <AlertDialogPopup>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{copy.title}</AlertDialogTitle>
           {copy.description ? (
-            <p id="confirm-dialog-description" className="confirm-dialog-description">{copy.description}</p>
+            <AlertDialogDescription className="whitespace-pre-line">{copy.description}</AlertDialogDescription>
           ) : null}
-        </div>
-        <div className="confirm-dialog-footer">
-          <button type="button" className="btn btn-outline" onClick={() => respondToConfirmDialog(false)}>
-            Cancel
-          </button>
-          <button type="button" className={confirmClass} onClick={() => respondToConfirmDialog(true)}>
-            {state.confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+          <Button variant={variant} onClick={() => respondToConfirmDialog(true)}>
+            {confirmLabel}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogPopup>
+    </AlertDialog>
   );
 }

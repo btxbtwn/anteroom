@@ -2,7 +2,11 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { backupSummary, formatBytes } from "../backupSummary";
-import { SettingsRow, SettingsSection } from "./SettingsLayout";
+import { CheckIcon, CopyIcon, TriangleAlertIcon } from "lucide-react";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Spinner } from "../ui/spinner";
+import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 function BackupsSection() {
   const queryClient = useQueryClient();
@@ -40,9 +44,14 @@ function BackupsSection() {
       {warning ? (
         <SettingsRow
           id="backup-warning"
-          title="Cannot back up safely"
+          title={
+            <>
+              <TriangleAlertIcon className="size-3.5 text-warning" />
+              Cannot back up safely
+            </>
+          }
           description={warning}
-          status={<span className="text-error">Action needed</span>}
+          status={<span className="text-warning-foreground">Action needed</span>}
         />
       ) : null}
       <SettingsRow
@@ -51,26 +60,30 @@ function BackupsSection() {
         description="Studio copies the database when it starts, every six hours, and before any update or schema change. Each copy is checked before it is kept. Old copies are dropped once they fill the retention budget."
         status={
           isLoading ? (
-            "Checking…"
+            <span className="inline-flex items-center gap-1.5">
+              <Spinner size="xs" tone="muted" />
+              Checking
+            </span>
           ) : error ? (
-            <span className="text-error">{(error as Error).message || "Could not read backups"}</span>
+            <span className="text-destructive-foreground">{(error as Error).message || "Could not read backups"}</span>
           ) : data && !data.can_snapshot && warning ? (
-            <span className="text-error">{warning}</span>
+            <span className="text-destructive-foreground">{warning}</span>
           ) : latest ? (
             backupSummary(data)
           ) : (
-            <span className="text-error">No backups yet</span>
+            <span className="text-warning-foreground">No backups yet</span>
           )
         }
         control={
-          <button
-            type="button"
-            className="btn btn-sm btn-outline"
+          <Button
+            size="xs"
+            variant="outline"
             onClick={() => snapshot.mutate()}
             disabled={snapshot.isPending || data?.can_snapshot === false}
           >
-            {snapshot.isPending ? "Backing up…" : "Back up now"}
-          </button>
+            {snapshot.isPending ? <Spinner /> : null}
+            {snapshot.isPending ? "Backing up" : "Back up now"}
+          </Button>
         }
       />
       <SettingsRow
@@ -79,33 +92,36 @@ function BackupsSection() {
         description="Somewhere that is not this Mac: an external drive, a synced folder, or a network share. Every snapshot and every photo is copied there. Without one, the only copies are on this disk."
         status={
           folderError ? (
-            <span className="text-error">{folderError}</span>
+            <span className="text-destructive-foreground">{folderError}</span>
           ) : currentFolder ? (
             <>Copying to {currentFolder}</>
           ) : (
-            <span className="text-error">Not set — backups stay on this Mac</span>
+            <span className="text-warning-foreground">Not set — backups stay on this Mac</span>
           )
         }
       >
-        <div className="extension-load-path-row">
-          <input
-            type="text"
-            className="input input-sm"
+        <div className="flex min-w-0 items-center gap-2">
+          <Input
+            size="sm"
+            font="mono"
+            aria-label="Backup folder"
             placeholder="/Volumes/Backup/List This Studio"
             value={shownFolder}
+            spellCheck={false}
             onChange={(event) => {
               setEdited(true);
               setFolder(event.target.value);
             }}
           />
-          <button
-            type="button"
-            className="btn btn-sm btn-outline"
+          <Button
+            size="xs"
+            variant="outline"
             onClick={() => saveFolder.mutate(shownFolder.trim() ? shownFolder.trim() : null)}
             disabled={saveFolder.isPending}
           >
-            {saveFolder.isPending ? "Checking…" : "Save"}
-          </button>
+            {saveFolder.isPending ? <Spinner /> : null}
+            {saveFolder.isPending ? "Checking" : "Save"}
+          </Button>
         </div>
       </SettingsRow>
     </SettingsSection>
@@ -128,7 +144,7 @@ function DatabaseMaintenanceRow() {
 
   const top = data?.tables?.[0];
   const status = isLoading
-    ? "Checking…"
+    ? "Checking"
     : error
       ? ((error as Error).message || "Could not read the database")
       : data
@@ -140,33 +156,30 @@ function DatabaseMaintenanceRow() {
       id="database-maintenance"
       title="Database"
       description="Listings and job history live here. Prune drops leftover job events; free space returns to the disk the next time you quit Studio."
-      status={error ? <span className="text-error">{status}</span> : status}
+      status={error ? <span className="text-destructive-foreground">{status}</span> : status}
       control={
-        <button
-          type="button"
-          className="btn btn-sm btn-outline"
-          onClick={() => prune.mutate()}
-          disabled={prune.isPending || isLoading}
-        >
-          {prune.isPending ? "Pruning…" : "Prune leftover events"}
-        </button>
+        <Button size="xs" variant="outline" onClick={() => prune.mutate()} disabled={prune.isPending || isLoading}>
+          {prune.isPending ? <Spinner /> : null}
+          {prune.isPending ? "Pruning" : "Prune leftover events"}
+        </Button>
       }
     >
       {data?.tables?.length ? (
-        <div className="settings-hidden-list">
+        <ul className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60">
           {data.tables.slice(0, 5).map((row) => (
-            <div key={row.table}>
-              {row.table}
-              {row.bytes != null ? ` · ${formatBytes(row.bytes)}` : ""} · {row.rows} rows
-            </div>
+            <li key={row.table} className="flex min-w-0 items-center gap-3 px-3 py-2 text-xs">
+              <span className="min-w-0 flex-1 truncate font-mono text-foreground">{row.table}</span>
+              {row.bytes != null ? <span className="text-muted-foreground tabular-nums">{formatBytes(row.bytes)}</span> : null}
+              <span className="w-24 text-right text-muted-foreground tabular-nums">{row.rows} rows</span>
+            </li>
           ))}
-        </div>
+        </ul>
       ) : null}
       {prune.data?.pruned && prune.data.pruned.deleted > 0 ? (
-        <p className="text-sm opacity-70">
+        <SettingsNote tone="success">
           Removed {prune.data.pruned.deleted} leftover event
           {prune.data.pruned.deleted === 1 ? "" : "s"}. Quit Studio to reclaim the disk space.
-        </p>
+        </SettingsNote>
       ) : null}
     </SettingsRow>
   );
@@ -194,15 +207,19 @@ function DataFolderRow() {
       description="Listings, photos, drafts, hidden fields, fill logs, settings, and logs stay here when you reinstall the app. API keys remain in macOS Keychain on this Mac."
     >
       {isLoading ? (
-        <p className="settings-row-desc">Looking up the data folder…</p>
+        <SettingsNote className="flex items-center gap-1.5">
+          <Spinner size="xs" tone="muted" />
+          Looking up the data folder
+        </SettingsNote>
       ) : error ? (
-        <p className="settings-row-desc text-error">{(error as Error).message || "Could not load data folder"}</p>
+        <SettingsNote tone="error">{(error as Error).message || "Could not load data folder"}</SettingsNote>
       ) : (
-        <div className="extension-load-path-row">
-          <code className="extension-load-path-code">{path}</code>
-          <button type="button" className="btn btn-sm btn-outline" onClick={() => void copy()}>
+        <div className="flex min-w-0 items-center gap-1 rounded-md border border-border/70 bg-muted/40 py-0.5 pr-0.5 pl-2">
+          <SettingsCode className="min-w-0 flex-1 truncate bg-transparent px-0">{path}</SettingsCode>
+          <Button size="xs" variant="ghost-muted" onClick={() => void copy()}>
+            {copied ? <CheckIcon /> : <CopyIcon />}
             {copied ? "Copied" : "Copy path"}
-          </button>
+          </Button>
         </div>
       )}
     </SettingsRow>

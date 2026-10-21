@@ -1,20 +1,29 @@
+/*
+ * Cascade layers. Studio's hand-written CSS lives in `legacy`, after Tailwind's
+ * preflight (`base`) so it keeps its element rules, and before `components`
+ * and `utilities` so Tailwind classes on the ported T3 primitives always win.
+ * T3's theme (t3-theme.css) stays unlayered, as in T3, so its tokens win too.
+ */
+@layer theme, base, legacy, components, utilities;
+
+@import "./t3-theme.css";
+
 /* Import order is cascade order. Responsive overrides must stay after component styles. */
-@import "./base.css";
-@import "./layout.css";
-@import "./open-listing-tabs.css";
-@import "./controls.css";
-@import "./sidebar.css";
-@import "./empty-state.css";
-@import "./chat.css";
-@import "./item-details.css";
-@import "./photo-tray.css";
-@import "./listing-editor.css";
-@import "./fields-panel.css";
-@import "./settings.css";
-@import "./analytics.css";
-@import "./assistant.css";
-@import "./queue.css";
-@import "./sourcing.css";
-@import "./utilities.css";
-@import "./responsive.css";
-@import "./overlays.css";
+@import "./base.css" layer(legacy);
+@import "./layout.css" layer(legacy);
+@import "./controls.css" layer(legacy);
+@import "./sidebar.css" layer(legacy);
+@import "./empty-state.css" layer(legacy);
+@import "./chat.css" layer(legacy);
+@import "./item-details.css" layer(legacy);
+@import "./photo-tray.css" layer(legacy);
+@import "./listing-editor.css" layer(legacy);
+@import "./fields-panel.css" layer(legacy);
+@import "./settings.css" layer(legacy);
+@import "./analytics.css" layer(legacy);
+@import "./assistant.css" layer(legacy);
+@import "./queue.css" layer(legacy);
+@import "./sourcing.css" layer(legacy);
+@import "./utilities.css" layer(legacy);
+@import "./responsive.css" layer(legacy);
+@import "./overlays.css" layer(legacy);

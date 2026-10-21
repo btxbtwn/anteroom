@@ -10,6 +10,7 @@ import { HelpSettings } from "./settings/HelpSettings";
 import { ListingsSettings } from "./settings/ListingsSettings";
 import { LogsSettings } from "./settings/LogsSettings";
 import { ProvidersSettings } from "./settings/ProvidersSettings";
+import { SettingsPageContainer } from "./settings/SettingsLayout";
 
 function scrollToSettingsTarget(targetId: string) {
   const target = document.getElementById(targetId);
@@ -51,16 +52,14 @@ export function SettingsPage({
   }, [section, targetId, onTargetHandled]);
 
   return (
-    <div className="settings-page" data-settings-page-scroll>
-      <div className="settings-page-inner">
-        {section === "general" ? <GeneralSettings onOpenSetupGuide={onOpenSetupGuide} /> : null}
-        {section === "listings" ? <ListingsSettings onOpenListing={onOpenListing} /> : null}
-        {section === "providers" ? <ProvidersSettings /> : null}
-        {section === "connections" ? <ConnectionsSettings /> : null}
-        {section === "data" ? <DataSettings /> : null}
-        {section === "logs" ? <LogsSettings /> : null}
-        {section === "help" ? <HelpSettings /> : null}
-      </div>
-    </div>
+    <SettingsPageContainer className={section === "providers" ? "@container/providers" : undefined}>
+      {section === "general" ? <GeneralSettings onOpenSetupGuide={onOpenSetupGuide} /> : null}
+      {section === "listings" ? <ListingsSettings onOpenListing={onOpenListing} /> : null}
+      {section === "providers" ? <ProvidersSettings /> : null}
+      {section === "connections" ? <ConnectionsSettings /> : null}
+      {section === "data" ? <DataSettings /> : null}
+      {section === "logs" ? <LogsSettings /> : null}
+      {section === "help" ? <HelpSettings /> : null}
+    </SettingsPageContainer>
   );
 }
