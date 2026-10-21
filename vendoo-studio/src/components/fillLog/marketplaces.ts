@@ -34,6 +34,15 @@ export function liveStatusClass(status?: string): string {
   return "";
 }
 
+/**
+ * True when the item is (or was) actually on this marketplace. Every Vendoo
+ * draft carries a "Not listed" status for every marketplace, so that alone is
+ * no reason to show one the seller turned off in Settings.
+ */
+export function isLiveOnMarketplace(status?: string): boolean {
+  return Boolean(status) && liveStatusClass(status) !== "is-not-listed";
+}
+
 /** Map Vendoo's API ``listings.<mp>.status`` object onto the nav chip labels. */
 export function statusFromListingStatus(status: unknown): string | undefined {
   if (!status || typeof status !== "object" || Array.isArray(status)) return undefined;

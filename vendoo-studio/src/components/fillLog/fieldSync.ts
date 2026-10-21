@@ -96,6 +96,14 @@ export function formSyncCounts(
   return counts;
 }
 
+// Blank on purpose: the listing rules fill SKU only when the seller gives one
+// and Secondary Color only when a second color shows. Chat cannot answer them.
+const SELLER_ONLY_FIELDS = new Set(["general:sku", "general:secondary color"]);
+
+function isSellerOnlyField(marketplace: string, field: DraftField): boolean {
+  return SELLER_ONLY_FIELDS.has(`${marketplace}:${normalizeLookupKey(field.label || field.key)}`);
+}
+
 export function fieldsNeedingListingValues(
   forms: DraftForm[],
   listing: Record<string, unknown> | undefined,
@@ -104,6 +112,7 @@ export function fieldsNeedingListingValues(
   return forms.flatMap((form) =>
     form.fields
       .filter((field) => !field.notApplicable && !isUnfillableField(field, form.id))
+      .filter((field) => !isSellerOnlyField(form.id, field))
       .filter((field) => !isDoesNotApplyValue(listingValueForField(listing, form.id, field, true)))
       .filter((field) => !fieldIntentionallyEmpty(listing, form.id, field))
       .filter((field) => listingFieldEmpty(listing, form.id, field))
