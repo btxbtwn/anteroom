@@ -1023,7 +1023,7 @@ export function App() {
           </button>
         </nav>
       )}
-      <footer className="relative flex shrink-0 items-center justify-between border-t border-sidebar-border bg-sidebar px-3.5 pt-1 pb-[max(--spacing(1),env(safe-area-inset-bottom,0px),var(--visual-bottom-inset,0px))] text-2xs text-sidebar-muted-foreground max-[900px]:hidden">
+      <footer className="relative flex shrink-0 items-center justify-between border-t border-sidebar-border px-3.5 pt-1 pb-[max(--spacing(1),env(safe-area-inset-bottom,0px),var(--visual-bottom-inset,0px))] text-2xs text-sidebar-muted-foreground max-[900px]:hidden">
         <div className="flex items-center gap-3">
           <ExtensionStatus />
         </div>

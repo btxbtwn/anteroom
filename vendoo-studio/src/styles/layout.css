@@ -30,13 +30,28 @@
   width: clamp(200px, var(--sidebar-width), 30vw);
   flex-shrink: 0;
   min-height: 0;
-  background: var(--color-ink);
+  background: var(--sidebar);
   color: var(--color-ink-muted);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   border-right: 1px solid var(--color-ink-border);
   padding: 0;
+}
+
+/* The status bar sits under both columns. Keep the piece under the thread list
+   the same black, so the left bar reaches the bottom of the window. */
+.app-shell > footer {
+  background: var(--sidebar);
+}
+
+.dark .app-shell:not(:has(.sidebar-collapsed)) > footer {
+  background: linear-gradient(
+    to right,
+    #000 0,
+    #000 clamp(200px, var(--sidebar-width), 30vw),
+    var(--sidebar) clamp(200px, var(--sidebar-width), 30vw)
+  );
 }
 
 /* Vertical splitter sitting on the border between two panels. It takes no

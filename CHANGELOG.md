@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.296 — 2026-10-20
+
+- The thread list on the left is black, the same surface T3 Code uses.
+
 ## 0.1.295 — 2026-10-20
 
 - The listing list no longer has a Settled section or a settle button. Sold listings stay under the Sold filter.
