@@ -22,6 +22,21 @@ class AssistantThread(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow, index=True)
 
 
+class AssistantMemory(Base):
+    """One fact the business assistant keeps about how the seller runs the shop.
+
+    A conversation can be cleared. These stay, and a later turn can rewrite or
+    drop one when the seller corrects it. The seller's own note is separate.
+    """
+
+    __tablename__ = "assistant_memories"
+
+    id = Column(String, primary_key=True, default=new_id)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    updated_at = Column(DateTime, nullable=False, default=utcnow)
+
+
 class AssistantMessage(Base):
     """One turn of a conversation about the business.
 
