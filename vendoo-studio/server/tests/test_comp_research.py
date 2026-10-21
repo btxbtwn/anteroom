@@ -201,26 +201,41 @@ class ModelReportTest(unittest.TestCase):
 
 
 class ResearchTest(unittest.IsolatedAsyncioTestCase):
-    async def test_model_comps_skip_brave(self):
+    async def test_sold_and_active_search_side_by_side_with_brave(self):
         brave = AsyncMock(return_value=brave_report())
         calls: list = []
         model = ModelSearch("ChatGPT", searcher(listing_json(
             (22, "511 Slim Shorts", "https://www.ebay.com/itm/1"),
             (19, "Slim Shorts", "https://poshmark.com/listing/2"),
             (25, "511 Shorts", "https://www.mercari.com/us/item/m3"),
-            live=((28, "Shorts", "https://www.ebay.com/itm/4"),
-                  (29, "Shorts", "https://www.ebay.com/itm/5"),
-                  (30, "Shorts", "https://www.ebay.com/itm/6")),
-        ), calls=calls))
+            live=((28, "Shorts", "https://www.ebay.com/itm/4"),),
+        ), delay=0.05, calls=calls))
         first, second, third = patched(model, brave=brave)
+        started = asyncio.get_running_loop().time()
         with first, second, third:
             text = await research_sold_comps(ANALYSIS)
-        brave.assert_not_awaited()
-        report = parse_sold_comps(text)
-        self.assertEqual(report.source, "ChatGPT")
-        self.assertEqual([comp.price for comp in report.comps], [22, 19, 25])
+        # Both model searches and Brave ran at once, not one after another.
+        self.assertLess(asyncio.get_running_loop().time() - started, 0.1)
+        self.assertEqual(len(calls), 2)
+        asks = sorted(call[1]["content"] for call in calls)
+        self.assertTrue(asks[0].startswith("Find active marketplace listings"))
+        self.assertTrue(asks[1].startswith("Find recently sold comps for: Levi's"))
         self.assertIn("Require explicit evidence that the item sold", calls[0][0]["content"])
-        self.assertIn("Levi's", calls[0][1]["content"])
+        brave.assert_awaited_once()
+        # A small fixed budget: the top sold queries plus one active query.
+        from vendoo_studio.services.brave_search import brave_active_queries, brave_sold_queries, item_fields
+
+        fields = item_fields(ANALYSIS)
+        self.assertEqual(
+            brave.await_args.args[0],
+            [*brave_sold_queries(fields)[:3], *brave_active_queries(fields)[:1]],
+        )
+        self.assertIn(" sold ", brave.await_args.args[0][0])
+        self.assertNotIn("sold", brave.await_args.args[0][-1])
+        report = parse_sold_comps(text)
+        self.assertEqual(report.source, "ChatGPT + Brave")
+        # Only the sold search vouches for sales; the active one's comps are dropped.
+        self.assertEqual(sorted(comp.price for comp in report.comps), [19, 22, 25])
 
     async def test_thin_model_results_are_supplemented(self):
         brave = AsyncMock(return_value=brave_report(
@@ -237,14 +252,18 @@ class ResearchTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(comps_confident(text))
         self.assertEqual(parse_sold_comps(text).source, "ChatGPT + Brave")
 
-    async def test_enough_sold_but_thin_active_only_searches_active(self):
+    async def test_spent_brave_quota_is_not_asked_again_this_month(self):
+        from vendoo_studio.services.brave_search import _note_quota_exhausted, reset_quota_backoff
+
+        _note_quota_exhausted("Brave HTTP 402: USAGE_LIMIT_EXCEEDED")
+        self.addCleanup(reset_quota_backoff)
         brave = AsyncMock(return_value=brave_report())
         first, second, third = patched(ModelSearch("ChatGPT", searcher(THREE_SOLD)), brave=brave)
         with first, second, third:
-            await research_sold_comps(ANALYSIS)
-        queries = brave.await_args.args[0]
-        self.assertEqual(len(queries), 5)
-        self.assertTrue(all("sold" not in query for query in queries))
+            text = await research_sold_comps(ANALYSIS)
+        brave.assert_not_awaited()
+        self.assertEqual(parse_sold_comps(text).source, "ChatGPT")
+
 
     async def test_supplement_failure_preserves_model_results(self):
         brave = AsyncMock(side_effect=RuntimeError("unavailable"))
@@ -275,16 +294,21 @@ class ResearchTest(unittest.IsolatedAsyncioTestCase):
         first, second, third = patched(ModelSearch("MiMo", searcher(error=RuntimeError("MiMo HTTP 401"))), brave=brave)
         with first, second, third:
             events = [event async for event in stream_sold_comps(ANALYSIS)]
-        states = [(event.source, event.state) for event in events if event.kind == "source"]
-        self.assertEqual(states, [("MiMo", "searching"), ("MiMo", "failed"), ("Brave", "searching"), ("Brave", "done")])
+        states = {(event.source, event.state) for event in events if event.kind == "source"}
+        self.assertEqual(states, {
+            ("MiMo (sold)", "searching"), ("MiMo (active)", "searching"), ("Brave", "searching"),
+            ("MiMo (sold)", "failed"), ("MiMo (active)", "failed"), ("Brave", "done"),
+        })
         self.assertEqual(parse_sold_comps(events[-1].text).source, "Brave")
 
-    async def test_slow_model_times_out_to_brave(self):
+    async def test_slow_model_times_out_while_brave_answers(self):
         brave = AsyncMock(return_value=brave_report((21, "Slim Shorts", "https://www.ebay.com/itm/5")))
         first, second, third = patched(ModelSearch("Cursor", searcher(THREE_SOLD, delay=60)), brave=brave)
         with first, second, third, patch("vendoo_studio.services.comp_research.MODEL_SEARCH_TIMEOUT_SEC", 0.05):
             events = [event async for event in stream_sold_comps(ANALYSIS)]
-        self.assertIn(("Cursor", "timeout"), [(event.source, event.state) for event in events])
+        states = [(event.source, event.state) for event in events]
+        self.assertIn(("Cursor (sold)", "timeout"), states)
+        self.assertIn(("Cursor (active)", "timeout"), states)
         brave.assert_awaited_once()
         self.assertEqual(parse_sold_comps(events[-1].text).source, "Brave")
 

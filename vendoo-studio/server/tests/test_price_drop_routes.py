@@ -102,6 +102,32 @@ class PriceDropRouteTest(unittest.TestCase):
         self.assertEqual(preview["suggested_mode"], "comps")
         self.assertTrue(res.text.rstrip().endswith("data: [DONE]"))
 
+    def test_comps_stream_shows_agent_progress_and_results_as_steps(self):
+        async def fake_stream(_analysis, evidence):
+            async with live_trace.agent("comps-sold", "Sold comps") as agent:
+                live_trace.emit("step", "Claude searched: nike tee sold")
+                agent.result("Found 8 sold comps")
+            try:
+                async with live_trace.agent("comps-brave", "Brave search"):
+                    raise RuntimeError("Brave HTTP 402")
+            except RuntimeError:
+                pass
+            yield CompsEvent("done", text="Sold comps:\nQuery: Nike tee sold comps\n")
+
+        with (
+            patch("vendoo_studio.services.price_drop.comps_search_available", return_value=True),
+            patch("vendoo_studio.services.comp_research.stream_sold_comps", new=fake_stream),
+        ):
+            res = self.client.post(f"/api/conversations/{self.conv.id}/price-drop/comps")
+        self.assertEqual(res.status_code, 200, res.text)
+        steps = [
+            block.split("data: ", 1)[1]
+            for block in res.text.strip().split("\n\n")
+            if block.startswith("event: step")
+        ]
+        # Progress, the done result and the failure reason, each once.
+        self.assertEqual(steps, ["Claude searched: nike tee sold", "Found 8 sold comps", "Brave HTTP 402"])
+
     def test_rejects_raise_or_missing_price(self):
         bad = self.client.post(
             f"/api/conversations/{self.conv.id}/price-drop",

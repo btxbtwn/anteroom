@@ -1,9 +1,14 @@
-"""Sold comps research: the listing model's own web search, Brave as fallback.
+"""Sold comps research: the listing model's own web search, plus Brave.
 
 The model that writes listings (Settings → Listing AI: the primary when it is
-connected, else the fallback) searches with its native web search tool. Brave
-supplements thin sold or active results, and runs when no model is connected.
-``stream_sold_comps`` reports each source and the report as they land, so the chat and the Regenerate dialog can show progress.
+connected, else the fallback) searches with its native web search tool. It
+runs as two searches side by side — one for sold comps, one for listings still
+for sale — so each spends its whole search budget on one question and the pair
+finishes in the time of the slower one rather than the sum. Brave, when it has
+a key and quota left this month, runs beside them instead of after them, so it
+never adds wall time. Every source answers into one merged, de-duplicated
+report. ``stream_sold_comps`` reports each source and the report as they land,
+so the chat and the Regenerate dialog can show progress.
 """
 
 from __future__ import annotations
@@ -11,22 +16,22 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from vendoo_studio.config import skills_dir
-from vendoo_studio.services import live_trace
+from vendoo_studio.services import live_trace, model_slots
 from vendoo_studio.services.brave_search import (
     brave_active_queries,
     brave_sold_queries,
     comp_identities,
     item_fields,
+    quota_exhausted,
     research_brave_report,
     sold_comps_query,
 )
 from vendoo_studio.services.keychain import get_brave_api_key
 from vendoo_studio.services.listing_provider import get_listing_provider
 from vendoo_studio.services.sold_comps import (
-    MIN_CONFIDENT_COMPS,
     SoldCompsReport,
     comps_from_model_answer,
     format_sold_comps,
@@ -36,11 +41,11 @@ from vendoo_studio.services.sold_comps import (
 
 log = logging.getLogger("vendoo_studio.comp_research")
 
-# How long the model's search gets before Brave takes over.
-# Cursor's agent reads listing pages one by one and can run for minutes.
+# How long each model search gets. Cursor's agent reads listing pages one by
+# one and can run for minutes.
 MODEL_SEARCH_TIMEOUT_SEC = 90
-# The whole lookup, Brave included. Mobile generate SSE drops when comps stall
-# for many minutes on the prior status.
+# The whole lookup. Mobile generate SSE drops when comps stall for many minutes
+# on the prior status.
 SOLD_COMPS_TIMEOUT_SEC = 120
 
 COMPS_SETUP_NOTE = (
@@ -58,13 +63,39 @@ COMPS_FAILED_NOTE = (
     "Sold comps search failed. Use an estimated baseline."
 )
 
+# Brave runs on every listing beside the model search, so it gets a small fixed
+# budget: the broad sold query and the first per-site ones (the builders put the
+# highest-value queries first), plus one active query.
+BRAVE_SOLD_QUERIES = 3
+BRAVE_ACTIVE_QUERIES = 1
+
+SOLD = "sold"
+ACTIVE = "active"
+_FOCUS = {
+    SOLD: (
+        "Find recently sold comps for: {query}\n"
+        "Another search is covering listings still for sale, so spend every search on sold "
+        'items and return "live": [].'
+    ),
+    ACTIVE: (
+        "Find active marketplace listings still for sale for: {query}\n"
+        "Another search is covering sold comps, so spend every search on current listings "
+        'and return "comps": [].'
+    ),
+}
+_AGENTS = {SOLD: ("comps-sold", "Sold comps"), ACTIVE: ("comps-active", "Active listings")}
 
 
-def comps_search_messages(query: str) -> list[dict]:
+def comps_search_messages(query: str, side: str | None = None) -> list[dict]:
+    """The comp-research prompt; ``side`` narrows it to sold or active listings."""
     prompt = (skills_dir() / "list-this" / "references" / "comp-research.md").read_text(encoding="utf-8")
+    if side is None:
+        ask = f"Find recently sold comps and active marketplace listings for: {query}"
+    else:
+        ask = _FOCUS[side].format(query=query)
     return [
         {"role": "system", "content": prompt},
-        {"role": "user", "content": f"Find recently sold comps and active marketplace listings for: {query}"},
+        {"role": "user", "content": ask},
     ]
 
 
@@ -127,19 +158,32 @@ def model_report(
     )
 
 
+def _active_query(query: str) -> str:
+    return query.removesuffix(" sold comps").strip() or query
+
+
 async def _run_model_search(
-    search: ModelSearch, query: str, expected_names: tuple[str, ...]
+    search: ModelSearch, query: str, expected_names: tuple[str, ...], side: str
 ) -> SoldCompsReport:
-    result = await search.search(comps_search_messages(query))
+    asked = query if side == SOLD else _active_query(query)
+    async with model_slots.slot():
+        result = await asyncio.wait_for(
+            search.search(comps_search_messages(asked, side)),
+            timeout=MODEL_SEARCH_TIMEOUT_SEC,
+        )
     answer = str(result.get("answer") or "")
     sources = result.get("sources") if isinstance(result.get("sources"), list) else []
-    return model_report(
+    report = model_report(
         search.label,
         query,
         answer,
         [item for item in sources if isinstance(item, dict)],
         expected_names=expected_names,
     )
+    if side == ACTIVE:
+        # Only a sold search may vouch for a sale.
+        report = replace(report, comps=[], market="", note="")
+    return report
 
 
 @dataclass(frozen=True)
@@ -160,7 +204,38 @@ def _found(report: SoldCompsReport) -> str:
     return f"{len(report.comps)} sold, {len(report.live)} live"
 
 
-async def _stream_sold_comps(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
+async def _model_side(
+    search: ModelSearch, query: str, expected_names: tuple[str, ...], side: str
+) -> SoldCompsReport:
+    key, label = _AGENTS[side]
+    async with live_trace.agent(key, label) as agent:
+        agent.update(f"{search.label} is searching the web")
+        try:
+            report = await _run_model_search(search, query, expected_names, side)
+        except TimeoutError:
+            agent.result(f"{search.label} timed out")
+            raise
+        if side == SOLD:
+            agent.result(f"Found {len(report.comps)} sold comps")
+        else:
+            agent.result(f"Found {len(report.live)} active listings")
+        return report
+
+
+async def _brave_side(queries: list[str], expected_names: tuple[str, ...]) -> SoldCompsReport:
+    async with live_trace.agent("comps-brave", "Brave search") as agent:
+        report = await research_brave_report(queries, expected_names=expected_names)
+        agent.result(f"Found {_found(report)}")
+        return report
+
+
+def _in_order(sources: dict[asyncio.Task, str], answered: dict[asyncio.Task, SoldCompsReport]) -> list[SoldCompsReport]:
+    """Reports in the order the sources started, not the order they answered,
+    so the merged report reads the same however the race went."""
+    return [answered[task] for task in sources if task in answered]
+
+
+async def _stream_comps(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
     query = sold_comps_query(fields)
     if not query:
         yield CompsEvent("done", text=_comps_note("", "photo analysis", COMPS_THIN_IDENTITY_NOTE))
@@ -172,76 +247,67 @@ async def _stream_sold_comps(fields: dict[str, str]) -> AsyncIterator[CompsEvent
         yield CompsEvent("done", text=comps_setup_note())
         return
 
-    reports: list[SoldCompsReport] = []
+    answered: dict[asyncio.Task, SoldCompsReport] = {}
     errors: list[str] = []
+    sources: dict[asyncio.Task, str] = {}
     if search is not None:
-        label = search.label
-        live_trace.emit("step", f"{label} is searching the web for sold comps")
-        yield CompsEvent("source", source=label, state="searching")
-        try:
-            report = await asyncio.wait_for(
-                _run_model_search(search, query, expected_names),
-                timeout=MODEL_SEARCH_TIMEOUT_SEC,
-            )
-        except TimeoutError:
-            errors.append(f"{label}: timed out")
-            live_trace.emit("step", f"{label} web search timed out")
-            yield CompsEvent("source", source=label, state="timeout")
-        except Exception as exc:
-            log.warning("%s sold-comps search failed: %s", label, exc)
-            errors.append(f"{label}: {exc}")
-            live_trace.emit("step", f"{label} web search failed")
-            yield CompsEvent("source", source=label, state="failed", detail=str(exc))
+        for side in (SOLD, ACTIVE):
+            source = f"{search.label} ({side})"
+            sources[asyncio.create_task(_model_side(search, query, expected_names, side))] = source
+            yield CompsEvent("source", source=source, state="searching")
+    if brave_key:
+        spent = quota_exhausted()
+        if spent:
+            # Asking again would cost a request and fail the same way.
+            errors.append(f"Brave: {spent}")
+            if search is None:
+                live_trace.emit("step", "Brave quota is spent until next month")
         else:
-            reports.append(report)
-            live_trace.emit("step", f"{label} found {_found(report)}")
-            yield CompsEvent(
-                "source", source=label, state="done",
-                sold=len(report.comps), live=len(report.live),
-            )
-            yield CompsEvent("report", text=format_sold_comps(report))
+            queries = [
+                *brave_sold_queries(fields)[:BRAVE_SOLD_QUERIES],
+                *brave_active_queries(fields)[:BRAVE_ACTIVE_QUERIES],
+            ]
+            sources[asyncio.create_task(_brave_side(queries, expected_names))] = "Brave"
+            yield CompsEvent("source", source="Brave", state="searching")
 
-    # Supplement only the side of the research that is still too thin.
-    merged = merge_reports(query, reports)
-    queries: list[str] = []
-    if len(merged.comps) < MIN_CONFIDENT_COMPS:
-        queries.extend(brave_sold_queries(fields))
-    if len(merged.live) < MIN_CONFIDENT_COMPS:
-        queries.extend(brave_active_queries(fields))
-    if brave_key and queries:
-        yield CompsEvent("source", source="Brave", state="searching")
-        try:
-            brave = await research_brave_report(
-                queries,
-                expected_names=expected_names,
-            )
-        except Exception as exc:
-            log.warning("Brave sold-comps search failed: %s", exc)
-            errors.append(f"Brave: {exc}")
-            yield CompsEvent("source", source="Brave", state="failed", detail=str(exc))
-        else:
-            reports.append(brave)
-            yield CompsEvent(
-                "source", source="Brave", state="done",
-                sold=len(brave.comps), live=len(brave.live),
-            )
-            yield CompsEvent("report", text=format_sold_comps(merge_reports(query, reports)))
+    pending = set(sources)
+    try:
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                source = sources[task]
+                exc = task.exception()
+                if isinstance(exc, TimeoutError):
+                    errors.append(f"{source}: timed out")
+                    yield CompsEvent("source", source=source, state="timeout")
+                elif exc is not None:
+                    log.warning("%s comps search failed: %s", source, exc)
+                    errors.append(f"{source}: {exc}")
+                    yield CompsEvent("source", source=source, state="failed", detail=str(exc))
+                else:
+                    report = task.result()
+                    answered[task] = report
+                    yield CompsEvent(
+                        "source", source=source, state="done",
+                        sold=len(report.comps), live=len(report.live),
+                    )
+                    yield CompsEvent("report", text=format_sold_comps(merge_reports(query, _in_order(sources, answered))))
+    finally:
+        for task in pending:
+            task.cancel()
 
-    if not reports:
+    if not answered:
         note = COMPS_FAILED_NOTE
         if errors:
             note = f"{note} ({'; '.join(errors)})"
         yield CompsEvent("done", text=_comps_note(query, "web search", note))
         return
-    yield CompsEvent("done", text=format_sold_comps(merge_reports(query, reports)))
+    yield CompsEvent("done", text=format_sold_comps(merge_reports(query, _in_order(sources, answered))))
 
 
-async def stream_sold_comps(
-    analysis_text: str | None, evidence: dict | None = None
-) -> AsyncIterator[CompsEvent]:
-    """Progress events for one comps lookup, ending with a ``done`` event."""
-    fields = item_fields(analysis_text, evidence)
-    stream = _stream_sold_comps(fields)
+async def stream_comps_for_fields(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
+    """Progress events for one comps lookup on item fields, ending with ``done``."""
+    stream = _stream_comps(fields)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + SOLD_COMPS_TIMEOUT_SEC
     last_report = ""
@@ -269,9 +335,21 @@ async def stream_sold_comps(
         await stream.aclose()
 
 
-async def research_sold_comps(analysis_text: str | None, evidence: dict | None = None) -> str:
+async def stream_sold_comps(
+    analysis_text: str | None, evidence: dict | None = None
+) -> AsyncIterator[CompsEvent]:
+    """Progress events for one comps lookup, ending with a ``done`` event."""
+    async for event in stream_comps_for_fields(item_fields(analysis_text, evidence)):
+        yield event
+
+
+async def research_comps_for_fields(fields: dict[str, str]) -> str:
     text = ""
-    async for event in stream_sold_comps(analysis_text, evidence):
+    async for event in stream_comps_for_fields(fields):
         if event.kind == "done":
             text = event.text
     return text
+
+
+async def research_sold_comps(analysis_text: str | None, evidence: dict | None = None) -> str:
+    return await research_comps_for_fields(item_fields(analysis_text, evidence))

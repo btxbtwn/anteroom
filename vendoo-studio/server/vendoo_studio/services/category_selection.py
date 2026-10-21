@@ -8,6 +8,7 @@ from sqlalchemy import or_
 
 from vendoo_studio.models.catalog import CategoryTree, CategoryTreeNode
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
+from vendoo_studio.services import model_slots
 from vendoo_studio.services.catalog_index import search_catalog
 from vendoo_studio.services.category_lookup import (
     category_department,
@@ -193,7 +194,7 @@ async def _ask_model(provider, analysis: str, notes: str, choices: dict) -> dict
         # tee came back as Fastener Nuts. The old budget was kept short so
         # Chrome field discovery could start; the category-specifics endpoint
         # replaced that, so there is nothing waiting on this any more.
-        async with asyncio.timeout(SELECTION_TIMEOUT_SEC):
+        async with model_slots.slot(), asyncio.timeout(SELECTION_TIMEOUT_SEC):
             async for chunk in _selection_stream(provider, messages):
                 kind, value = unpack_stream_item(chunk)
                 if kind != "thinking":
