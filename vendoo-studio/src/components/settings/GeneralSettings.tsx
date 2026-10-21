@@ -5,7 +5,9 @@ import type { ListingNames } from "../../api/types";
 import { useStudioUpdate } from "../UpdateButton";
 import { ChangelogDialog } from "../ChangelogDialog";
 import { applyTheme, normalizeTheme, type ThemePreference } from "../../theme";
-import { SettingsRow, SettingsSection } from "./SettingsLayout";
+import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
+import { SettingsCode, SettingsRow, SettingsSection, SettingsSelect } from "./SettingsLayout";
 
 function AppearanceSection() {
   const queryClient = useQueryClient();
@@ -32,17 +34,17 @@ function AppearanceSection() {
         title="Theme"
         description="Dark matches the Studio workbench. Light inverts the same shell. System follows the OS."
         control={
-          <select
-            className="input settings-model-select"
+          <SettingsSelect<ThemePreference>
             aria-label="Theme"
             value={theme}
             disabled={isPending || mutation.isPending}
-            onChange={(event) => mutation.mutate(event.target.value as ThemePreference)}
-          >
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
-            <option value="system">System</option>
-          </select>
+            onChange={(value) => mutation.mutate(value)}
+            options={[
+              { value: "system", label: "System" },
+              { value: "light", label: "Light" },
+              { value: "dark", label: "Dark" },
+            ]}
+          />
         }
       />
       <SettingsRow
@@ -50,16 +52,16 @@ function AppearanceSection() {
         title="Listing names"
         description="What the sidebar calls each listing. By SKU, a listing without a SKU keeps its title."
         control={
-          <select
-            className="input settings-model-select"
+          <SettingsSelect<ListingNames>
             aria-label="Listing names"
             value={data?.listing_names ?? "title"}
             disabled={isPending || namesMutation.isPending}
-            onChange={(event) => namesMutation.mutate(event.target.value as ListingNames)}
-          >
-            <option value="title">Title</option>
-            <option value="sku">SKU</option>
-          </select>
+            onChange={(value) => namesMutation.mutate(value)}
+            options={[
+              { value: "title", label: "Title" },
+              { value: "sku", label: "SKU" },
+            ]}
+          />
         }
       />
     </SettingsSection>
@@ -71,23 +73,24 @@ function AboutVersionRow({ version }: { version: string }) {
   return (
     <SettingsRow
       title={
-        <span className="settings-version-title">
+        <>
           Version
-          <code className="settings-row-code">{version}</code>
-        </span>
+          <SettingsCode>{version}</SettingsCode>
+        </>
       }
       description={description}
       control={
-        <button
-          type="button"
-          className={`btn btn-sm ${busy || available || downloaded ? "btn-primary" : "btn-outline"}${busy ? " is-busy" : ""}`}
+        <Button
+          size="xs"
+          variant={busy || available || downloaded ? "default" : "outline"}
           onClick={onClick}
           disabled={busy}
           aria-busy={busy || undefined}
           title={iconTooltip}
         >
+          {busy ? <Spinner size="xs" /> : null}
           {settingsLabel}
-        </button>
+        </Button>
       }
     />
   );
@@ -101,9 +104,9 @@ function WhatsNewRow() {
         title="What's new"
         description="Every change to List This Studio, newest first."
         control={
-          <button type="button" className="btn btn-sm btn-outline" onClick={() => setOpen(true)}>
+          <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
             View changelog
-          </button>
+          </Button>
         }
       />
       <ChangelogDialog open={open} onClose={() => setOpen(false)} />
@@ -124,9 +127,9 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
           title="First-run tutorial"
           description="Walk through ChatGPT or MiMo, Brave Search, Connect Chrome, and how the listing workspace is laid out."
           control={
-            <button type="button" className="btn btn-sm btn-outline" onClick={onOpenSetupGuide}>
+            <Button size="xs" variant="outline" onClick={onOpenSetupGuide}>
               Open setup guide
-            </button>
+            </Button>
           }
         />
       </SettingsSection>
