@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.291 — 2026-10-21
+
+- The rest of Studio matches the new look: sidebar, settings, providers, queue, analytics, marketing, sourcing, and the listing editor.
+- Toasts, confirmations, empty screens, and loading placeholders use that same look.
+
 ## 0.1.289 — 2026-10-21
 
 - Fields for marketplaces you turned off in Settings, like Grailed and Shopify, no longer show up after you send to Vendoo.
