@@ -32,7 +32,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.assistant import AssistantMessage
+from vendoo_studio.models.assistant import NEW_THREAD_TITLE, AssistantMessage, AssistantThread
+from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
 from vendoo_studio.services import assistant_changes
 from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsItem
@@ -170,25 +171,130 @@ _LOOKUP_BLOCK = re.compile(r"```sql\s*\n(.*?)(?:```|\Z)", re.DOTALL | re.IGNOREC
 _READ_ACTIONS = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
 
 
-def list_messages(db: Session) -> list[AssistantMessage]:
-    return db.query(AssistantMessage).order_by(AssistantMessage.created_at, AssistantMessage.id).all()
+THREAD_TITLE_LIMIT = 80
 
 
-def add_message(
-    db: Session, role: str, text: str, *, provider: str | None = None, model: str | None = None,
-    changes: dict[str, Any] | None = None, attachments: list[dict[str, Any]] | None = None,
-):
-    row = AssistantMessage(
-        role=role, text=text, provider=provider, model=model, changes=changes, attachments=attachments or None,
+class UnknownThread(LookupError):
+    """The seller named a conversation that is not in Studio."""
+
+
+def thread_title_from(text: str) -> str:
+    title = " ".join(text.split())
+    if not title:
+        return NEW_THREAD_TITLE
+    if len(title) <= THREAD_TITLE_LIMIT:
+        return title
+    return title[: THREAD_TITLE_LIMIT - 1].rstrip() + "…"
+
+
+def _iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat()
+
+
+def thread_view(row: AssistantThread) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "title": row.title,
+        "created_at": _iso(row.created_at),
+        "updated_at": _iso(row.updated_at),
+    }
+
+
+def list_threads(db: Session) -> list[AssistantThread]:
+    return (
+        db.query(AssistantThread)
+        .order_by(AssistantThread.updated_at.desc(), AssistantThread.id.desc())
+        .all()
     )
+
+
+def latest_thread(db: Session) -> AssistantThread | None:
+    return (
+        db.query(AssistantThread)
+        .order_by(AssistantThread.updated_at.desc(), AssistantThread.id.desc())
+        .first()
+    )
+
+
+def create_thread(db: Session) -> AssistantThread:
+    row = AssistantThread()
     db.add(row)
     db.commit()
     db.refresh(row)
     return row
 
 
-def clear_messages(db: Session) -> None:
-    db.query(AssistantMessage).delete()
+def delete_thread(db: Session, thread_id: str) -> bool:
+    thread = db.get(AssistantThread, thread_id)
+    if thread is None:
+        return False
+    db.query(AssistantMessage).filter(AssistantMessage.thread_id == thread_id).delete()
+    db.delete(thread)
+    db.commit()
+    return True
+
+
+def resolve_thread(db: Session, thread_id: str | None) -> AssistantThread:
+    """The conversation a new turn belongs to.
+
+    A named id must already exist. With none, the turn joins the latest
+    conversation, or starts one when the seller has not kept any.
+    """
+    if thread_id:
+        thread = db.get(AssistantThread, thread_id)
+        if thread is None:
+            raise UnknownThread(thread_id)
+        return thread
+    return latest_thread(db) or create_thread(db)
+
+
+def list_messages(db: Session, thread_id: str | None = None) -> list[AssistantMessage]:
+    if thread_id is None:
+        thread = latest_thread(db)
+        if thread is None:
+            return []
+        thread_id = thread.id
+    return (
+        db.query(AssistantMessage)
+        .filter(AssistantMessage.thread_id == thread_id)
+        .order_by(AssistantMessage.created_at, AssistantMessage.id)
+        .all()
+    )
+
+
+def add_message(
+    db: Session, role: str, text: str, *, provider: str | None = None, model: str | None = None,
+    changes: dict[str, Any] | None = None, attachments: list[dict[str, Any]] | None = None,
+    thread_id: str | None = None,
+):
+    thread = resolve_thread(db, thread_id)
+    row = AssistantMessage(
+        thread_id=thread.id, role=role, text=text, provider=provider, model=model,
+        changes=changes, attachments=attachments or None,
+    )
+    if role == "user" and thread.title == NEW_THREAD_TITLE:
+        titled = thread_title_from(text)
+        if titled != NEW_THREAD_TITLE:
+            thread.title = titled
+    thread.updated_at = utcnow()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def clear_messages(db: Session, thread_id: str | None = None) -> None:
+    """Drop the turns of one conversation and keep the conversation itself."""
+    if thread_id is None:
+        thread = latest_thread(db)
+        if thread is None:
+            return
+        thread_id = thread.id
+    db.query(AssistantMessage).filter(AssistantMessage.thread_id == thread_id).delete()
     db.commit()
 
 
@@ -283,14 +389,15 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
     )
 
 
-def build_messages(db: Session, question: str, shop: Shop) -> list[dict]:
+def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None = None) -> list[dict]:
     """The prompt for ``question``: instructions, the brief, earlier turns, then the question.
 
     The seller's question must already be saved; it is the last turn read back.
+    History is that conversation only, never another thread or a listing's chat.
     """
     earlier = [
         {"role": row.role, "content": row.text + assistant_changes.history_note(row.changes)}
-        for row in list_messages(db)[-(HISTORY_MESSAGES + 1):]
+        for row in list_messages(db, thread_id)[-(HISTORY_MESSAGES + 1):]
     ]
     if not earlier or earlier[-1] != {"role": "user", "content": question}:
         earlier.append({"role": "user", "content": question})

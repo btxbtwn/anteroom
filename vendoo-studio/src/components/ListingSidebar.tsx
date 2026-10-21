@@ -37,6 +37,7 @@ import { ListingRow } from "./sidebar/ListingRow";
 import { activeAnchorMs, settledAnchorMs, type Listing } from "./sidebar/listingShelves";
 import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
 import { SettingsSidebarNav } from "./sidebar/SettingsSidebarNav";
+import { AssistantThreadSection } from "./sidebar/AssistantThreadSection";
 import { SidebarFooter } from "./sidebar/SidebarFooter";
 import { useListingSelection } from "./sidebar/useListingSelection";
 import { useSettledShelf } from "./sidebar/useSettledShelf";
@@ -68,6 +69,9 @@ interface Props {
   onOpenAnalytics: () => void;
   onOpenMarketing: () => void;
   onOpenAssistant: () => void;
+  onOpenInventory: () => void;
+  assistantThreadId: string | null;
+  onSelectAssistantThread: (id: string | null) => void;
   onOpenSourcing: () => void;
   onOpenQueue: () => void;
   queueCount: number;
@@ -92,6 +96,9 @@ export function ListingSidebar({
   onOpenAnalytics,
   onOpenMarketing,
   onOpenAssistant,
+  onOpenInventory,
+  assistantThreadId,
+  onSelectAssistantThread,
   onOpenSourcing,
   onOpenQueue,
   queueCount,
@@ -272,7 +279,7 @@ export function ListingSidebar({
       id="listings-sidebar"
       data-app-sidebar
       className={`panel sidebar${settingsMode ? " sidebar-settings" : ""}`}
-      aria-label={settingsMode ? "Settings" : "Listings"}
+      aria-label={settingsMode ? "Settings" : activeView === "assistant" ? "Assistant threads" : "Listings"}
       aria-hidden={mobileOpen === false ? true : undefined}
     >
       <div className="sidebar-header pywebview-drag-region">
@@ -295,8 +302,8 @@ export function ListingSidebar({
           <button
             type="button"
             className="sidebar-icon-btn sidebar-header-settings"
-            title="Back to listings"
-            aria-label="Back to listings"
+            title="Back"
+            aria-label="Back"
             onMouseDown={stopTitlebarDrag}
             onClick={onCloseSettings}
           >
@@ -356,6 +363,8 @@ export function ListingSidebar({
             onSettingsSectionChange={onSettingsSectionChange}
           />
         </>
+      ) : activeView === "assistant" ? (
+        <AssistantThreadSection selectedId={assistantThreadId} onSelect={onSelectAssistantThread} />
       ) : (
         <>
           <div className="flex shrink-0 items-center gap-1 px-(--sidebar-content-inset) py-2 max-[900px]:hidden">
@@ -487,7 +496,7 @@ export function ListingSidebar({
         </>
       )}
 
-      {!settingsMode && (selecting || bulk.running) && (
+      {!settingsMode && activeView !== "assistant" && (selecting || bulk.running) && (
         <BulkActionBar bulk={bulk} selection={selection} eligibleIds={eligibleIds} />
       )}
 
@@ -501,6 +510,7 @@ export function ListingSidebar({
         onOpenAnalytics={onOpenAnalytics}
         onOpenMarketing={onOpenMarketing}
         onOpenAssistant={onOpenAssistant}
+        onOpenInventory={onOpenInventory}
         onOpenSettings={onOpenSettings}
       />
       <BulkSelectionDialogs selection={selection} />

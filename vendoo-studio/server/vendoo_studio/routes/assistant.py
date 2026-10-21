@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal, get_db
-from vendoo_studio.models.assistant import AssistantMessage
+from vendoo_studio.models.assistant import AssistantMessage, AssistantThread
 from vendoo_studio.routes.attachments import AttachmentUpload, store_uploads
 from vendoo_studio.services import assistant_changes, business_assistant
 from vendoo_studio.services.chat_attachments import attach_to_last_user_turn
@@ -46,6 +46,8 @@ router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
 # The one answer that can be in progress, in the registry listing generations use.
 ANSWER_RUN = "assistant"
+# Which conversation that answer belongs to, so another thread does not replay it.
+_answering_thread_id: str | None = None
 # How a listing's revision history names a save the seller applied from here.
 REVISION_SOURCE = "assistant"
 UNREADABLE_CHANGES = (
@@ -56,20 +58,47 @@ UNREADABLE_CHANGES = (
 class AssistantQuestion(BaseModel):
     text: str = Field(default="", max_length=8000)
     attachments: list[AttachmentUpload] = Field(default_factory=list)
+    thread_id: str | None = None
 
 
 class BusinessNote(BaseModel):
     note: str = Field(max_length=MAX_BUSINESS_NOTE_CHARS)
 
 
+@router.get("/threads")
+def get_threads(db: Session = Depends(get_db)):
+    return [business_assistant.thread_view(row) for row in business_assistant.list_threads(db)]
+
+
+@router.post("/threads")
+def create_thread(db: Session = Depends(get_db)):
+    return business_assistant.thread_view(business_assistant.create_thread(db))
+
+
+@router.delete("/threads/{thread_id}")
+def remove_thread(thread_id: str, db: Session = Depends(get_db)):
+    if thread_id == _answering_thread_id and active_generation(ANSWER_RUN) is not None:
+        raise HTTPException(409, "That conversation is still being answered.")
+    if not business_assistant.delete_thread(db, thread_id):
+        raise HTTPException(404, "That conversation is gone.")
+    return {"ok": True}
+
+
+def _require_thread(db: Session, thread_id: str | None) -> None:
+    if thread_id and db.get(AssistantThread, thread_id) is None:
+        raise HTTPException(404, "That conversation is gone.")
+
+
 @router.get("/messages")
-def get_messages(db: Session = Depends(get_db)):
-    return [business_assistant.message_view(row) for row in business_assistant.list_messages(db)]
+def get_messages(thread_id: str | None = None, db: Session = Depends(get_db)):
+    _require_thread(db, thread_id)
+    return [business_assistant.message_view(row) for row in business_assistant.list_messages(db, thread_id)]
 
 
 @router.delete("/messages")
-def clear_messages(db: Session = Depends(get_db)):
-    business_assistant.clear_messages(db)
+def clear_messages(thread_id: str | None = None, db: Session = Depends(get_db)):
+    _require_thread(db, thread_id)
+    business_assistant.clear_messages(db, thread_id)
     return {"ok": True}
 
 
@@ -91,18 +120,21 @@ def _propose(block: str) -> dict | None:
         db.close()
 
 
-def _prepare(question: str, attachments: list[dict] | None = None):
+def _prepare(question: str, attachments: list[dict] | None = None, thread_id: str | None = None):
     """Read the shop and build the prompt, on a worker thread with its own session."""
     db = SessionLocal()
     try:
         shop = business_assistant.read_shop(db)
-        messages = business_assistant.build_messages(db, question, shop)
+        messages = business_assistant.build_messages(db, question, shop, thread_id)
         return attach_to_last_user_turn(messages, attachments), shop
     finally:
         db.close()
 
 
-async def _answer(run: GenerationRun, provider, question: str, attachments: list[dict] | None = None) -> None:
+async def _answer(
+    run: GenerationRun, provider, question: str, attachments: list[dict] | None = None,
+    thread_id: str | None = None,
+) -> None:
     """Answer in the background and publish each piece to whoever is following.
 
     The answer belongs to Studio, not to the connection that asked: a phone
@@ -113,7 +145,9 @@ async def _answer(run: GenerationRun, provider, question: str, attachments: list
     shop = None
     try:
         run.publish(sse_event("status", "Reading your shop…"))
-        messages, shop = await await_with_pulses(run, asyncio.to_thread(_prepare, question, attachments), [])
+        messages, shop = await await_with_pulses(
+            run, asyncio.to_thread(_prepare, question, attachments, thread_id), [],
+        )
         async for item in iter_with_keepalives(business_assistant.answer(provider, messages, shop)):
             if item is None:
                 # A comment alone does not keep some mobile connections open; pulse repeats the status too.
@@ -153,6 +187,7 @@ async def _answer(run: GenerationRun, provider, question: str, attachments: list
                     provider=getattr(provider, "name", None),
                     model=getattr(provider, "listing_model", None),
                     changes=changes,
+                    thread_id=thread_id,
                 )
             finally:
                 save_db.close()
@@ -169,19 +204,34 @@ async def ask(body: AssistantQuestion, db: Session = Depends(get_db)):
     if provider is None:
         raise HTTPException(400, "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.")
     attachments = store_uploads(body.attachments)
-    business_assistant.add_message(db, "user", question, attachments=attachments)
+    try:
+        thread = business_assistant.resolve_thread(db, body.thread_id)
+    except business_assistant.UnknownThread:
+        raise HTTPException(404, "That conversation is gone.") from None
+    business_assistant.add_message(db, "user", question, attachments=attachments, thread_id=thread.id)
+    thread_id = thread.id
     # Release the request-scoped session before background work opens its own.
     db.close()
-    run = start_generation(ANSWER_RUN, functools.partial(_answer, provider=provider, question=question, attachments=attachments))
+    global _answering_thread_id
+    _answering_thread_id = thread_id
+    run = start_generation(
+        ANSWER_RUN,
+        functools.partial(_answer, provider=provider, question=question, attachments=attachments, thread_id=thread_id),
+    )
     await asyncio.sleep(0)
     return stream_generation(run)
 
 
 @router.post("/messages/resume")
-async def resume():
-    """Follow the answer in progress from its start, or finish at once when there is none."""
+async def resume(thread_id: str | None = None):
+    """Follow the answer in progress from its start, or finish at once when there is none.
+
+    A thread only hears the answer that was asked in it.
+    """
     run = active_generation(ANSWER_RUN)
-    return stream_generation(run) if run is not None else stream_finished()
+    if run is None or (thread_id and thread_id != _answering_thread_id):
+        return stream_finished()
+    return stream_generation(run)
 
 
 @router.post("/messages/stop")

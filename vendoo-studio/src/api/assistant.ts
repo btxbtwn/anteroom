@@ -1,5 +1,13 @@
 import type { ChatAttachment } from "./types";
 
+/** One conversation with the business assistant, apart from any listing's chat. */
+export interface AssistantThread {
+  id: string;
+  title: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 /** One turn of the seller's conversation with the business assistant. */
 export interface AssistantMessage {
   id: string;

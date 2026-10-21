@@ -9,6 +9,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 ## 0.1.294 — 2026-10-20
 
 - The listing panel no longer has a Fields tab. Input and Forms sit next to Open listing and Regenerate, and marketplace fields are edited on Forms. Hidden fields are still restored in Settings.
+- Studio opens on the business assistant. Each of its conversations is a thread in the sidebar, separate from inventory.
 
 ## 0.1.293 — 2026-10-20
 

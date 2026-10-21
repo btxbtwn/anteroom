@@ -19,6 +19,7 @@ export function workspaceCrumbs(
   view: WorkspaceView,
   settingsLabel: string,
   listing: { title?: string | null } | null | undefined,
+  detail?: string | null,
 ): WorkspaceCrumbs {
   if (view === "queue") return { context: "Queue", title: null };
   if (view === "settings") {
@@ -34,7 +35,8 @@ export function workspaceCrumbs(
     return { context: SOURCING_CRUMB, title: null };
   }
   if (view === "assistant") {
-    return { context: ASSISTANT_CRUMB, title: null };
+    const title = String(detail || "").trim();
+    return { context: ASSISTANT_CRUMB, title: title && title !== "New thread" ? title : null };
   }
   if (!listing) return { context: LISTINGS_CRUMB, title: null };
   return { context: LISTINGS_CRUMB, title: String(listing.title || "").trim() || UNTITLED_LISTING };

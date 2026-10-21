@@ -34,8 +34,12 @@ export const ASSISTANT_STARTERS = [
   "Find listings whose size differs between forms and fix them.",
 ];
 
-const MESSAGES_KEY = ["assistant", "messages"];
 const NOTE_KEY = ["assistant", "note"];
+const THREADS_KEY = ["assistant", "threads"];
+
+function messagesKey(threadId: string) {
+  return ["assistant", "messages", threadId] as const;
+}
 const NOTE_MAX = 4000;
 /** How often, and how many times, a dropped connection is retried before saying so. */
 const RECONNECT_MS = 1500;
@@ -63,6 +67,12 @@ export function liveParts(live: Pick<LiveTurn, "question" | "asked">, turns: Ass
 interface Props {
   onOpenProviders: () => void;
   onOpenListing: (id: string) => void;
+  /** The open conversation. Null on a home screen that has not started one yet. */
+  threadId?: string | null;
+  /** A question started a conversation; the sidebar should select it. */
+  onThreadReady?: (id: string) => void;
+  /** True until the thread list has loaded, so an existing conversation is not flashed past. */
+  threadsPending?: boolean;
 }
 
 export interface LiveTurn {
@@ -77,21 +87,29 @@ export interface LiveTurn {
   startedAtMs: number;
 }
 
-/** Finished turns of this session keep their "Worked for" rows while the app is open. */
-let sessionFolds: FoldedTurn[] = [];
+/** Finished turns of this session keep their "Worked for" rows while the app is open, per conversation. */
+const sessionFolds = new Map<string, FoldedTurn[]>();
 let foldSeq = 0;
+
+function foldsFor(threadId: string): FoldedTurn[] {
+  return sessionFolds.get(threadId) ?? [];
+}
 
 /**
  * A chat about the business as a whole, apart from any listing's chat. Every
  * question is answered from all of Studio's data. An answer can propose
  * changes to listings; they are written only when the seller applies them.
  */
-export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
+export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null, onThreadReady, threadsPending = false }: Props) {
   const queryClient = useQueryClient();
-  const messages = useQuery({ queryKey: MESSAGES_KEY, queryFn: api.assistant.messages });
+  const messages = useQuery({
+    queryKey: messagesKey(threadId ?? ""),
+    queryFn: () => api.assistant.messages(threadId!),
+    enabled: Boolean(threadId),
+  });
   const [input, setInput] = useState("");
   const [live, setLive] = useState<LiveTurn | null>(null);
-  const [folds, setFolds] = useState<FoldedTurn[]>(sessionFolds);
+  const [folds, setFolds] = useState<FoldedTurn[]>(() => (threadId ? foldsFor(threadId) : []));
   const [error, setError] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const controller = useRef<AbortController | null>(null);
@@ -102,10 +120,15 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
   const turns = messages.data ?? [];
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
+  const threadIdRef = useRef(threadId);
+  threadIdRef.current = threadId;
+  /** The conversation the in-flight follow belongs to, so selecting a thread this page just created does not cancel the question. */
+  const followThread = useRef<string | null>(null);
 
-  const keepFold = (fold: FoldedTurn) => {
-    sessionFolds = [...sessionFolds, fold];
-    setFolds(sessionFolds);
+  const keepFold = (id: string, fold: FoldedTurn) => {
+    const next = [...foldsFor(id), fold];
+    sessionFolds.set(id, next);
+    if (threadIdRef.current === id) setFolds(next);
   };
 
   /**
@@ -115,6 +138,22 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
    */
   const follow = async (question: string | null, uploads: ChatAttachmentUpload[] = [], shownImages: ChatAttachment[] = []) => {
     if (controller.current) return;
+    let id = threadIdRef.current;
+    if (question !== null && !id) {
+      try {
+        const created = await api.assistant.createThread();
+        id = created.id;
+        followThread.current = id;
+        onThreadReady?.(id);
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : "Could not start a conversation.");
+        setInput((current) => current || question);
+        return;
+      }
+    }
+    if (!id) return;
+    followThread.current = id;
+    const threadKey = messagesKey(id);
     const abort = new AbortController();
     controller.current = abort;
     let asking = question !== null;
@@ -147,8 +186,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
         };
         try {
           const result = asking && question !== null
-            ? await api.assistant.ask(question, handlers, abort.signal, uploads)
-            : await api.assistant.resume(handlers, abort.signal);
+            ? await api.assistant.ask(question, handlers, abort.signal, uploads, id)
+            : await api.assistant.resume(handlers, abort.signal, id);
           paint.flush();
           if (result.error) setError(result.error);
           break;
@@ -184,7 +223,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
       const endedAtMs = Date.now();
       if (turnHasWork(parts.trace)) {
         foldSeq += 1;
-        keepFold({
+        keepFold(id, {
           id: `assistant-turn-${foldSeq}`,
           trace: parts.trace,
           agents: settleAgents(parts.agents, endedAtMs),
@@ -195,10 +234,11 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
         });
       }
       // Show the saved turns before dropping the live one, so the answer does not blink.
-      await queryClient.invalidateQueries({ queryKey: MESSAGES_KEY });
+      await queryClient.invalidateQueries({ queryKey: threadKey });
+      await queryClient.invalidateQueries({ queryKey: THREADS_KEY });
       if (question !== null && dropped && !abort.signal.aborted) {
         // The connection may have dropped before Studio ever received the question.
-        const saved = queryClient.getQueryData<AssistantMessage[]>(MESSAGES_KEY);
+        const saved = queryClient.getQueryData<AssistantMessage[]>(threadKey);
         if (saved && !saved.some((turn) => turn.role === "user" && turn.text === question)) {
           setError("Could not reach Studio. Check the connection and ask again.");
           setInput((current) => current || question);
@@ -216,21 +256,33 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
     followRef.current = follow;
   });
 
-  // Pick an answer back up after leaving the page, locking the phone, or reloading.
+  // Pick an answer back up after opening a conversation, leaving the page, or locking the phone.
   useEffect(() => {
+    if (!threadId) return;
     const reattach = () => {
-      if (document.hidden) return;
+      if (document.hidden || controller.current) return;
       setError((current) => (current === LOST_CONNECTION ? "" : current));
       void followRef.current(null);
     };
-    reattach();
+    // A question that just created this thread is already being followed.
+    if (!(followThread.current === threadId && controller.current)) {
+      setLive(null);
+      setError("");
+      setFolds(foldsFor(threadId));
+      reattach();
+    }
     document.addEventListener("visibilitychange", reattach);
     return () => {
       document.removeEventListener("visibilitychange", reattach);
-      controller.current?.abort();
-      controller.current = null;
+      // Render already moved the ref when the seller switched threads. A strict-mode
+      // re-run keeps the same id, and must not cancel the question.
+      if (threadIdRef.current !== threadId) {
+        controller.current?.abort();
+        controller.current = null;
+        followThread.current = null;
+      }
     };
-  }, []);
+  }, [threadId]);
 
   const ask = async (raw: string) => {
     const question = raw.trim();
@@ -254,17 +306,17 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
       variant: "destructive",
       confirmLabel: "Clear conversation",
     });
-    if (!confirmed) return;
-    await api.assistant.clear();
-    sessionFolds = [];
+    if (!confirmed || !threadId) return;
+    await api.assistant.clear(threadId);
+    sessionFolds.delete(threadId);
     setFolds([]);
     setError("");
-    await queryClient.invalidateQueries({ queryKey: MESSAGES_KEY });
+    await queryClient.invalidateQueries({ queryKey: messagesKey(threadId) });
   };
 
   // Applied changes reach every page that shows a listing, a total or a box.
   const changesSettled = (message: AssistantMessage, applied: boolean) => {
-    queryClient.setQueryData<AssistantMessage[]>(MESSAGES_KEY, (saved) =>
+    queryClient.setQueryData<AssistantMessage[]>(messagesKey(threadId ?? ""), (saved) =>
       saved?.map((turn) => (turn.id === message.id ? message : turn)));
     if (applied) void queryClient.invalidateQueries();
   };
@@ -285,7 +337,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
 
   const drawn = live ? liveParts(live, turns) : { question: false, answer: false };
   const visible = live && drawn.answer ? stableStreamingText(live.parts.content) : "";
-  const empty = !turns.length && !live && !messages.isLoading;
+  const waitingForThread = !threadId && threadsPending;
+  const empty = !waitingForThread && !turns.length && !live && !messages.isLoading;
   const needsProvider = /sign in with chatgpt/i.test(error);
   const foldPositions = placeTurnFolds(turns, folds);
   const foldsAt = (index: number) => folds.filter((_, k) => foldPositions[k] === index);
@@ -321,7 +374,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing }: Props) {
               </ul>
             </div>
           ) : null}
-          {messages.isLoading && !turns.length ? (
+          {(waitingForThread || messages.isLoading) && !turns.length ? (
             <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
           ) : null}
           {messages.isError ? (

@@ -53,7 +53,7 @@ import type {
 } from "./types";
 import { readSse } from "./sse";
 import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
-import { AssistantRefused, type AssistantMessage, type AssistantStreamHandlers } from "./assistant";
+import { AssistantRefused, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 
 const BASE = "/api";
@@ -257,8 +257,13 @@ export const api = {
       request<ScoutCheck>(`/scout/${id}/decision`, { method: "POST", body: JSON.stringify({ decision }) }),
   },
   assistant: {
-    messages: () => request<AssistantMessage[]>("/assistant/messages"),
-    clear: () => request<{ ok: boolean }>("/assistant/messages", { method: "DELETE" }),
+    threads: () => request<AssistantThread[]>("/assistant/threads"),
+    createThread: () => request<AssistantThread>("/assistant/threads", { method: "POST" }),
+    deleteThread: (id: string) => request<{ ok: boolean }>(`/assistant/threads/${id}`, { method: "DELETE" }),
+    messages: (threadId?: string) =>
+      request<AssistantMessage[]>(`/assistant/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`),
+    clear: (threadId?: string) =>
+      request<{ ok: boolean }>(`/assistant/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`, { method: "DELETE" }),
     /** What the seller told the assistant about how they run the shop. */
     note: () => request<{ note: string }>("/assistant/note"),
     saveNote: (note: string) => request<{ note: string }>("/assistant/note", { method: "PUT", body: JSON.stringify({ note }) }),
@@ -267,16 +272,27 @@ export const api = {
      * drops; `resume` picks it back up. Resolves with the assistant's own
      * error, if it reported one.
      */
-    ask: (text: string, handlers: AssistantStreamHandlers, signal?: AbortSignal, attachments: ChatAttachmentUpload[] = []) =>
+    ask: (
+      text: string,
+      handlers: AssistantStreamHandlers,
+      signal?: AbortSignal,
+      attachments: ChatAttachmentUpload[] = [],
+      threadId?: string,
+    ) =>
       followAssistant(
         "/assistant/messages",
-        JSON.stringify(attachments.length ? { text, attachments } : { text }),
+        JSON.stringify({ text, ...(attachments.length ? { attachments } : {}), ...(threadId ? { thread_id: threadId } : {}) }),
         handlers,
         signal,
       ),
-    /** Follow the answer in progress from its start; ends at once when there is none. */
-    resume: (handlers: AssistantStreamHandlers, signal?: AbortSignal) =>
-      followAssistant("/assistant/messages/resume", undefined, handlers, signal),
+    /** Follow the answer in progress from its start; ends at once when there is none, or when it belongs to another thread. */
+    resume: (handlers: AssistantStreamHandlers, signal?: AbortSignal, threadId?: string) =>
+      followAssistant(
+        `/assistant/messages/resume${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`,
+        undefined,
+        handlers,
+        signal,
+      ),
     /** Stop the answer in progress; what it had written is kept. */
     stop: () => request<{ ok: boolean }>("/assistant/messages/stop", { method: "POST" }),
     /** Write the changes an answer proposed. Resolves with the answer and what became of each listing. */

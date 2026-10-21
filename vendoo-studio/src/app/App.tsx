@@ -19,6 +19,7 @@ import {
   MenuIcon,
   MessageCircleIcon,
   PlusIcon,
+  Rows3Icon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -122,7 +123,12 @@ export function App() {
   const selectedConvId = listingTabs.selectedId;
   const setSelectedConvId = (id: string) => dispatchListingTab({ type: "open", id });
   const clearListingWorkspace = (id: string) => dispatchListingTab({ type: "clear", id });
-  const [activeView, setActiveView] = useState<WorkspaceView>("listings");
+  const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
+  const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
+  /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
+  const shell = useRef<"listings" | "assistant">(listingFromUrl ? "listings" : "assistant");
+  const viewBeforeSettings = useRef<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
+  const [pickedThreadId, setPickedThreadId] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<"workspace" | "editor" | "browser">("workspace");
@@ -167,6 +173,13 @@ export function App() {
     queryFn: () => api.jobs.list(selectedConvId || undefined),
     refetchInterval: (query) => jobsPollMs(query.state.data),
   });
+  const assistantThreads = useQuery({
+    queryKey: ["assistant", "threads"],
+    queryFn: api.assistant.threads,
+  });
+  const assistantThreadId = assistantThreads.data?.some((thread) => thread.id === pickedThreadId)
+    ? pickedThreadId
+    : (assistantThreads.data?.[0]?.id ?? null);
   const queue = useQuery({
     queryKey: ["queue"],
     queryFn: api.jobs.queue,
@@ -266,16 +279,18 @@ export function App() {
       : activeView === "marketing"
         ? "Marketing"
       : activeView === "assistant"
-        ? "Assistant"
+        ? (assistantThreads.data?.find((thread) => thread.id === assistantThreadId)?.title || "Assistant")
       : activeView === "queue"
         ? "Queue"
       : activeView === "sourcing"
         ? "Sourcing"
         : String(selectedListing?.title || "Vendoo Studio");
+  const assistantThreadTitle = assistantThreads.data?.find((thread) => thread.id === assistantThreadId)?.title ?? null;
   const crumbs = workspaceCrumbs(
     activeView,
     SETTINGS_SECTION_LABELS[settingsSection],
     activeView === "listings" ? selectedListing : null,
+    activeView === "assistant" ? assistantThreadTitle : null,
   );
   // The sidebar overlays the workspace on mobile and the editor is its own pane
   // there, so the desktop collapse states only apply to the desktop layout.
@@ -284,7 +299,19 @@ export function App() {
 
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
 
+  const goListings = () => {
+    shell.current = "listings";
+    setActiveView("listings");
+  };
+  const goAssistant = () => {
+    shell.current = "assistant";
+    setActiveView("assistant");
+    setMobilePane("workspace");
+    closeMobileSidebar();
+  };
+
   const openSettings = () => {
+    if (activeView !== "settings") viewBeforeSettings.current = activeView;
     setSettingsSection(DEFAULT_SETTINGS_SECTION);
     setSettingsTargetId(null);
     setActiveView("settings");
@@ -294,16 +321,17 @@ export function App() {
   };
 
   const closeSettings = () => {
-    setActiveView("listings");
+    const back = viewBeforeSettings.current;
+    setActiveView(back === "settings" ? shell.current : back);
     setSettingsTargetId(null);
     closeMobileSidebar();
   };
 
-  // Analytics, Marketing, Sourcing and the Assistant are toggles: pressing the open one goes back to listings.
-  const togglePage = (view: "analytics" | "marketing" | "sourcing" | "assistant" | "queue") => {
+  // Analytics, Marketing, Sourcing and the Queue toggle back to whichever of home or inventory was open.
+  const togglePage = (view: "analytics" | "marketing" | "sourcing" | "queue") => {
     setMobilePane("workspace");
     if (activeView === view) {
-      setActiveView("listings");
+      setActiveView(shell.current);
       return;
     }
     setActiveView(view);
@@ -311,8 +339,9 @@ export function App() {
   };
   const openAnalytics = () => togglePage("analytics");
   const openMarketing = () => togglePage("marketing");
-  const openAssistant = () => togglePage("assistant");
+  const openAssistant = () => goAssistant();
   const openProviders = () => {
+    if (activeView !== "settings") viewBeforeSettings.current = activeView;
     setSettingsSection("providers");
     setSettingsTargetId(null);
     setActiveView("settings");
@@ -323,7 +352,7 @@ export function App() {
 
   const openListing = (id: string) => {
     setSelectedConvId(id);
-    setActiveView("listings");
+    goListings();
     setMobilePane("workspace");
     closeMobileSidebar();
   };
@@ -408,7 +437,7 @@ export function App() {
   }, [isMobile, mobileSidebarOpen]);
 
   useEffect(() => {
-    if (activeView === "listings") return;
+    if (activeView === "listings" || activeView === "assistant") return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented || isConfirmDialogOpen()) return;
       if (isMobile && mobileSidebarOpen) return;
@@ -420,7 +449,7 @@ export function App() {
         return;
       }
       if (activeView === "settings") closeSettings();
-      else setActiveView("listings");
+      else setActiveView(shell.current);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -438,7 +467,7 @@ export function App() {
     onSuccess: (conv) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       setSelectedConvId(conv.id);
-      setActiveView("listings");
+      goListings();
       setMobilePane("workspace");
       setMobileSidebarOpen(false);
     },
@@ -517,7 +546,7 @@ export function App() {
         if (first) {
           setSelectedConvId(first.convId);
           setMobileSidebarOpen(false);
-          setActiveView("listings");
+          goListings();
           setMobilePane("workspace");
         }
         const totalPhotos = result.listings.reduce((sum, row) => sum + row.count, 0);
@@ -540,7 +569,7 @@ export function App() {
         setMobileSidebarOpen(false);
       }
       if (created || activeView !== "listings") {
-        setActiveView("listings");
+        goListings();
         setMobilePane("workspace");
       }
       const title = `Added ${count} photo${count === 1 ? "" : "s"}`;
@@ -603,6 +632,13 @@ export function App() {
             onOpenAnalytics={openAnalytics}
             onOpenMarketing={openMarketing}
             onOpenAssistant={openAssistant}
+            onOpenInventory={() => {
+              goListings();
+              setMobilePane("workspace");
+              closeMobileSidebar();
+            }}
+            assistantThreadId={assistantThreadId}
+            onSelectAssistantThread={setPickedThreadId}
             onOpenSourcing={openSourcing}
             onOpenQueue={() => togglePage("queue")}
             queueCount={queueCount}
@@ -630,11 +666,15 @@ export function App() {
               type="button"
               className="sidebar-icon-btn sidebar-toggle"
               aria-label={
-                activeView === "settings"
+                activeView === "assistant"
                   ? mobileSidebarOpen
-                    ? "Back to listings"
+                    ? "Hide threads"
+                    : "Show threads"
+                  : activeView === "settings"
+                  ? mobileSidebarOpen
+                    ? "Back"
                     : "Settings menu"
-                  : "Back to listings"
+                  : "Back"
               }
               onClick={() => {
                 if (activeView === "settings") {
@@ -645,8 +685,12 @@ export function App() {
                   closeSettings();
                   return;
                 }
-                if (activeView === "analytics" || activeView === "marketing" || activeView === "sourcing" || activeView === "assistant") {
-                  setActiveView("listings");
+                if (activeView === "assistant") {
+                  setMobileSidebarOpen((open) => !open);
+                  return;
+                }
+                if (activeView === "analytics" || activeView === "marketing" || activeView === "sourcing" || activeView === "queue") {
+                  setActiveView(shell.current);
                   setMobileSidebarOpen(true);
                   return;
                 }
@@ -656,6 +700,21 @@ export function App() {
               <ArrowLeftIcon className="size-4" />
             </button>
             <div className="mobile-workspace-title">{workspaceTitle}</div>
+            {activeView === "assistant" ? (
+              <button
+                type="button"
+                className="sidebar-icon-btn mobile-workspace-settings"
+                title="Inventory"
+                aria-label="Inventory"
+                onClick={() => {
+                  goListings();
+                  setMobilePane("workspace");
+                  setMobileSidebarOpen(true);
+                }}
+              >
+                <Rows3Icon className="size-4" />
+              </button>
+            ) : null}
             {activeView === "listings" ? (
               <>
                 <button
@@ -789,7 +848,13 @@ export function App() {
                 </Suspense>
               ) : activeView === "assistant" ? (
                 <Suspense fallback={pageLoading}>
-                  <AssistantPage onOpenProviders={openProviders} onOpenListing={openListing} />
+                  <AssistantPage
+                    onOpenProviders={openProviders}
+                    onOpenListing={openListing}
+                    threadId={assistantThreadId}
+                    onThreadReady={setPickedThreadId}
+                    threadsPending={!assistantThreads.isFetched}
+                  />
                 </Suspense>
               ) : activeView === "sourcing" ? (
                 <Suspense fallback={pageLoading}>
@@ -904,7 +969,7 @@ export function App() {
                             const first = listings[0]?.convId;
                             if (!first) return;
                             setSelectedConvId(first);
-                            setActiveView("listings");
+                            goListings();
                             setMobilePane("workspace");
                             setMobileSidebarOpen(false);
                           }}
