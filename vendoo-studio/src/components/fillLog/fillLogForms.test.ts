@@ -343,3 +343,51 @@ describe("intentionally cleared Ask chat fields", () => {
     ])).toBe(1);
   });
 });
+
+describe("marketplaces turned off in Settings", () => {
+  const draft = {
+    generalDetails: { title: "Dress" },
+    listings: {
+      ebay: { status: { notListed: true }, categorySpecifics: { "1_brand": "" } },
+      grailed: { status: { notListed: true }, marketplaceSpecifics: { minimum_price: "" } },
+      shopify: { status: { notListed: true }, marketplaceSpecifics: { productType: "" } },
+      facebook: { status: { listed: true }, marketplaceSpecifics: { condition: "" } },
+    },
+  };
+
+  it("drops a draft's Not listed sections for marketplaces the seller does not list on", () => {
+    const { sourceForms } = sourceFormsForJob(draft, undefined, {}, ["ebay"]);
+    const ids = sourceForms.map((form) => form.id);
+    expect(ids).toContain("ebay");
+    expect(ids).not.toContain("grailed");
+    expect(ids).not.toContain("shopify");
+  });
+
+  it("still shows an unselected marketplace the item is live on", () => {
+    const { sourceForms } = sourceFormsForJob(draft, undefined, {}, ["ebay"]);
+    expect(sourceForms.map((form) => form.id)).toContain("facebook");
+  });
+});
+
+describe("Ask chat before Send", () => {
+  const listing = {
+    title: "Blouse", primaryColor: "Blue", secondaryColor: null, sku: null,
+    weight_lb: 0, weight_oz: 12,
+  };
+
+  it("reads the listing's package weight and skips SKU and Secondary Color", () => {
+    const { sourceForms } = sourceFormsForJob(undefined, undefined, listing, ["ebay"]);
+    const labels = fieldsNeedingListingValues(sourceForms, listing).map(({ field }) => field.label);
+    expect(labels).not.toContain("Package Weight (lb)");
+    expect(labels).not.toContain("Package Weight (oz)");
+    expect(labels).not.toContain("SKU");
+    expect(labels).not.toContain("Secondary Color");
+  });
+
+  it("still asks for a package weight the listing does not have", () => {
+    const bare = { ...listing, weight_lb: null, weight_oz: null };
+    const { sourceForms } = sourceFormsForJob(undefined, undefined, bare, ["ebay"]);
+    const labels = fieldsNeedingListingValues(sourceForms, bare).map(({ field }) => field.label);
+    expect(labels).toContain("Package Weight (oz)");
+  });
+});

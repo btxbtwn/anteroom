@@ -10,7 +10,7 @@ import {
 } from "./fieldValues";
 import { organizeFields } from "./formLayout";
 import { toForm, type DraftField, type DraftForm } from "./formModel";
-import { allowedMarketplaceIds } from "./marketplaces";
+import { allowedMarketplaceIds, isLiveOnMarketplace } from "./marketplaces";
 
 function overlayListingForms(forms: DraftForm[], listingForms: DraftForm[]): DraftForm[] {
   if (!listingForms.length) return forms;
@@ -89,7 +89,7 @@ export function sourceFormsForJob(
   const sourceForms = overlayListingForms(
     draftForms.length ? draftForms : fillForms.length ? fillForms : listingForms,
     listingForms,
-  ).filter((form) => enabled.has(form.id) || Boolean(form.liveStatus));
+  ).filter((form) => enabled.has(form.id) || isLiveOnMarketplace(form.liveStatus));
   return { sourceForms, fromVendooDraft: draftForms.length > 0 };
 }
 

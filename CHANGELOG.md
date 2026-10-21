@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.289 — 2026-10-21
+
+- Fields for marketplaces you turned off in Settings, like Grailed and Shopify, no longer show up after you send to Vendoo.
+- "Ask chat for fields" no longer counts package weight when the listing already has one, and no longer asks for a SKU or second color you left blank on purpose.
+
 ## 0.1.288 — 2026-10-21
 
 - Fixing a listing's category from chat now sticks. Before, the "Category must be a terminal Vendoo path" error came back no matter how many times you asked.
