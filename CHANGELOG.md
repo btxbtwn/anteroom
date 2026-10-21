@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.304 — 2026-10-21
+
+- A listing no longer fails with "ebay_specifics.unitQuantity: Input should be a valid string" when the AI writes a number like Unit Quantity 1 without quotes. Numbers in eBay, Depop and Etsy specifics are now read as text.
+
 ## 0.1.303 — 2026-10-21
 
 - The model picker in the chat box now works like T3 Code's: providers down the left with a Favorites star at the top, a "Search models..." box, each model with its provider underneath, and ⌘1–⌘9 to pick one. Star a model to keep it under Favorites on every Studio you use. Effort moved behind the "…" button and only lists what the chosen model supports.
