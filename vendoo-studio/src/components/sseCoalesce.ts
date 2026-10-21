@@ -1,6 +1,17 @@
-import type { LiveTraceEntry } from "./liveTrace";
+import type { LiveAgents, LiveTraceEntry } from "./liveTrace";
 
-export type SseParts = { content: string; thinking: string; status: string; trace: LiveTraceEntry[] };
+export type SseParts = {
+  content: string;
+  thinking: string;
+  status: string;
+  trace: LiveTraceEntry[];
+  /** Subagents by id. Every `agent` event folds in here before batching, so no update is lost. */
+  agents: LiveAgents;
+};
+
+export function emptySseParts(): SseParts {
+  return { content: "", thinking: "", status: "", trace: [], agents: {} };
+}
 
 /** Batch window for streamed SSE events, in milliseconds. */
 const SSE_FLUSH_MS = 50;

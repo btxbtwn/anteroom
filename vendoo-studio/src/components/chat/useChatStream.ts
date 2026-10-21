@@ -15,7 +15,8 @@ import {
   SSE_FETCH,
   type StreamRequestError,
 } from "./chatStream";
-import { applySseToLive, getLive, patchLive, refreshListingQueries } from "./liveChatStore";
+import { applySseToLive, foldLiveTurn, getLive, patchLive, refreshListingQueries } from "./liveChatStore";
+import type { Message } from "../../api/types";
 
 interface Options {
   convId: string;
@@ -45,6 +46,11 @@ export function useChatStream({
   browserRef.current = browser;
   const [stopping, setStopping] = useState(false);
   const queryClient = useQueryClient();
+  // The turn's own messages are whatever arrives after these; its fold row sits above them.
+  const messageIds = useCallback(
+    () => (queryClient.getQueryData<Message[]>(["messages", convId]) || []).map((m) => String(m.id)),
+    [convId, queryClient],
+  );
 
   const streamFromFetch = useCallback(async (url: string, initialStatus = "", resumeFirst = false) => {
     const liveState = getLive(convId);
@@ -56,6 +62,7 @@ export function useChatStream({
       generating: url.endsWith("/generate") ? true : liveState.generating,
       streamText: "",
       streamTrace: [],
+      turnBaseIds: messageIds(),
       streamStatus: initialStatus,
       thinkingStarted: Boolean(initialStatus),
       failedAction: null,
@@ -171,6 +178,7 @@ export function useChatStream({
         if (getLive(convId).userCancelled) {
           const restoreText = getLive(convId).lastSendText;
           const restore = getLive(convId).restoreInputOnAbort;
+          foldLiveTurn(convId, { cancelled: true });
           patchLive(convId, {
             streamText: "",
             streamTrace: [],
@@ -206,6 +214,8 @@ export function useChatStream({
     const failed = isStreamError(assembled);
     if (stillMine()) {
       patchLive(convId, { streaming: false, generating: false, controller: null });
+      // The answer stays on screen below "Worked for"; a failure keeps its work in view.
+      if (!failed) foldLiveTurn(convId);
     }
     await refreshListingQueries(queryClient, convId);
     if (stillMine() && !failed) {
@@ -216,7 +226,7 @@ export function useChatStream({
         thinkingStarted: false,
       });
     }
-  }, [convId, queryClient, setInput]);
+  }, [convId, queryClient, setInput, messageIds]);
 
   const handleGenerate = useCallback(async () => {
     pinChatToBottom();
@@ -255,6 +265,7 @@ export function useChatStream({
       generating: false,
       streamText: "",
       streamTrace: [],
+      turnBaseIds: messageIds(),
       streamStatus: "",
       thinkingStarted: true,
       failedAction: null,
@@ -310,7 +321,10 @@ export function useChatStream({
       const { parts } = await consumeResponseSse(res, (event, nextParts) => applySseToLive(convId, event, nextParts));
       const assembled = parts.content;
       if (stillMine() && isStreamError(assembled)) patchLive(convId, { failedAction: "send" });
-      if (stillMine()) patchLive(convId, { streaming: false, controller: null });
+      if (stillMine()) {
+        patchLive(convId, { streaming: false, controller: null });
+        if (!isStreamError(assembled)) foldLiveTurn(convId);
+      }
       await refreshListingQueries(queryClient, convId);
       if (stillMine() && !isStreamError(assembled)) {
         patchLive(convId, {
@@ -326,6 +340,7 @@ export function useChatStream({
         if (!stillMine()) return true;
         if (getLive(convId).userCancelled) {
           const restore = getLive(convId).restoreInputOnAbort;
+          foldLiveTurn(convId, { cancelled: true });
           patchLive(convId, {
             streamText: "",
             streamTrace: [],
@@ -356,7 +371,7 @@ export function useChatStream({
       }
       return true;
     }
-  }, [convId, queryClient, pinChatToBottom, onBrowserFieldsChange, setInput]);
+  }, [convId, queryClient, pinChatToBottom, onBrowserFieldsChange, setInput, messageIds]);
 
   const handleCancel = useCallback(async () => {
     const liveState = getLive(convId);

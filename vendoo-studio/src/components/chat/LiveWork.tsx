@@ -36,6 +36,7 @@ export function LiveWork({ busy, stopping, workStartedAtMs, streamTrace, message
     if (entry.kind === "thought") {
       return <LiveThought key={`thought-${index}`} text={entry.text} live={localLive && index === lastTraceIndex} />;
     }
+    if (entry.kind === "agents") return null;
     if (entry.kind === "step") {
       return <LiveActivityRow key={`step-${index}`} icon={<SearchIcon />} label={entry.text} live={false} />;
     }
