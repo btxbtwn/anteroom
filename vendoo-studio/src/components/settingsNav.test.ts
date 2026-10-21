@@ -23,7 +23,7 @@ describe("searchSettings", () => {
 
   it("only points at real sections", () => {
     for (const item of SETTINGS_SEARCH_ITEMS) expect(isSettingsSectionId(item.section)).toBe(true);
-    expect(SETTINGS_NAV_ITEMS.map((item) => item.id)).toEqual(["general", "listings", "providers", "usage", "connections", "data", "logs", "help"]);
+    expect(SETTINGS_NAV_ITEMS.map((item) => item.id)).toEqual(["general", "listings", "assistant", "providers", "usage", "connections", "data", "logs", "help"]);
     expect(searchSettings("api logs").map((item) => item.id)).toEqual(["vendoo-api-logs"]);
     expect(searchSettings("rate limit").map((item) => item.id)).toEqual(["usage-limits"]);
     expect(isSettingsSectionId("billing")).toBe(false);

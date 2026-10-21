@@ -264,8 +264,6 @@ export const api = {
     deleteThread: (id: string) => request<{ ok: boolean }>(`/assistant/threads/${id}`, { method: "DELETE" }),
     messages: (threadId?: string) =>
       request<AssistantMessage[]>(`/assistant/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`),
-    clear: (threadId?: string) =>
-      request<{ ok: boolean }>(`/assistant/messages${threadId ? `?thread_id=${encodeURIComponent(threadId)}` : ""}`, { method: "DELETE" }),
     /** What the seller told the assistant about how they run the shop. */
     note: () => request<{ note: string }>("/assistant/note"),
     saveNote: (note: string) => request<{ note: string }>("/assistant/note", { method: "PUT", body: JSON.stringify({ note }) }),

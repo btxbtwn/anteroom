@@ -15,7 +15,7 @@ from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.models.ad_spend import AdSpend
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.routes import assistant as assistant_route
-from vendoo_studio.services import assistant_changes, boxes, business_assistant
+from vendoo_studio.services import assistant_changes, assistant_memory, boxes, business_assistant
 
 NOW = datetime(2026, 10, 1, tzinfo=UTC)
 
@@ -270,8 +270,8 @@ def test_asking_streams_the_answer_and_keeps_both_turns(workspace, monkeypatch):
     assert [(row["role"], row["text"]) for row in saved] == [
         ("user", "What sold last month?"), ("assistant", "You sold one item."),
     ]
-    assert client.delete("/api/assistant/messages").json() == {"ok": True}
-    assert client.get("/api/assistant/messages").json() == []
+    # Starting over is a new thread or deleting this one; there is no clearing a conversation in place.
+    assert client.delete("/api/assistant/messages").status_code == 405
 
 
 def test_a_failed_answer_reports_the_error_and_keeps_what_arrived(workspace, monkeypatch):
@@ -559,3 +559,92 @@ def test_each_thread_keeps_its_own_conversation(workspace, monkeypatch):
     assert client.get("/api/assistant/messages", params={"thread_id": first["id"]}).status_code == 404
     assert client.get("/api/assistant/messages", params={"thread_id": second["id"]}).json()[0]["text"] == "Which box paid off?"
     assert client.post("/api/assistant/messages", json={"text": "Again", "thread_id": "missing"}).status_code == 404
+
+
+def test_saving_the_answer_does_not_stall_studio_and_a_follow_up_goes_straight_through(workspace, monkeypatch):
+    """A save waiting on SQLite's write lock (a sync sweep holding it) used to freeze the whole server.
+
+    The answer's stream could not end, so the page stayed busy and the follow-up never sent.
+    """
+    import threading
+    import time as clock
+
+    db, _client = workspace
+    saved = business_assistant.add_message
+    on_loop = []
+
+    def slow_save(session, role, *args, **kwargs):
+        if role == "assistant":
+            on_loop.append(threading.current_thread() is threading.main_thread())
+            clock.sleep(0.4)
+        return saved(session, role, *args, **kwargs)
+
+    monkeypatch.setattr(business_assistant, "add_message", slow_save)
+
+    async def scenario():
+        ticks = 0
+
+        async def tick():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.02)
+                ticks += 1
+
+        ticker = asyncio.create_task(tick())
+        provider = SlowProvider()
+        run = await start_answer(db, provider)
+        provider.release.set()
+        before = ticks
+        await run.task
+        during = ticks - before
+        ticker.cancel()
+        # The run is over once its stream ends: a follow-up is not refused.
+        assert assistant_route.active_generation(assistant_route.ANSWER_RUN) is None
+        return during
+
+    assert asyncio.run(scenario()) >= 5
+    assert on_loop == [False]
+    assert [row.text for row in business_assistant.list_messages(db)] == ["What sold?", "Half of it done."]
+
+
+def test_the_shop_is_read_once_until_something_it_rests_on_changes(workspace, monkeypatch):
+    from vendoo_studio.services import business_context
+
+    db, _client = workspace
+    seed(db)
+    reads = []
+    real = business_assistant._read_data
+    monkeypatch.setattr(business_assistant, "_read_data", lambda *args: reads.append(1) or real(*args))
+
+    first = business_assistant.read_shop(db)
+    second = business_assistant.read_shop(db)
+    assert len(reads) == 1 and first.brief == second.brief
+    # Each question still gets its own lookup copy.
+    first.lookups.close()
+    assert business_assistant.run_lookup(second.lookups, "SELECT count(*) FROM listings").endswith("\n3")
+
+    add_listing(db, "Pendleton Board Shirt", {"price": 45})
+    third = business_assistant.read_shop(db)
+    assert len(reads) == 2 and "Pendleton Board Shirt" in third.brief
+
+    # What the seller says and what it remembers are always read fresh, and come last.
+    assistant_memory.apply(db, json.dumps([{"op": "add", "text": "Ships from Dallas."}]))
+    db.commit()
+    fourth = business_assistant.read_shop(db)
+    assert len(reads) == 2 and fourth.brief.rstrip().endswith("Ships from Dallas.")
+
+    business_context.invalidate_business_context()
+    business_assistant.read_shop(db)
+    assert len(reads) == 3
+    for shop in (second, third, fourth):
+        shop.lookups.close()
+
+
+def test_the_brief_reads_the_same_through_the_day_so_a_prompt_cache_can_keep_it(workspace):
+    db, _client = workspace
+    seed(db)
+    morning = business_assistant.read_shop(db, now=datetime(2026, 10, 1, 9, 0, 1, 1234, tzinfo=UTC))
+    later = business_assistant.read_shop(db, now=datetime(2026, 10, 1, 9, 47, 33, 98765, tzinfo=UTC))
+    assert morning.brief == later.brief
+    for shop in (morning, later):
+        shop.lookups.close()

@@ -212,6 +212,22 @@ def test_a_refreshed_buy_list_reaches_the_next_question(db):
     assert sourcing_section(after.brief)["checked_at"] == (NOW + timedelta(hours=6)).isoformat()
 
 
+def test_a_refreshed_buy_list_and_new_prefs_reach_the_next_question_through_the_kept_copy(db):
+    # Without a clock, the assistant reuses the copy it read for the last question.
+    write_snapshot(boxes())
+    before = business_assistant.read_shop(db)
+    assert "Graphic Tees 60 pcs" in before.brief
+
+    write_snapshot([_box("raghouse", 9, "Flannel Shirts 40 pcs", 40.0, 20.0, 40, "good", 14.0)])
+    after = business_assistant.read_shop(db)
+    assert "Flannel Shirts 40 pcs" in after.brief and "Graphic Tees 60 pcs" not in after.brief
+
+    box_scout.set_prefs(min_roi=0.5)
+    assert "changed min roi since this check" in sourcing_section(business_assistant.read_shop(db).brief)["freshness"]
+    for shop in (before, after):
+        shop.lookups.close()
+
+
 def test_recent_sales_by_category_and_by_kind_of_box(db):
     add_sale(db, "Vintage Graphic Tee Harley", "T-Shirts", 30, 3, "2026-09-01T00:00:00+00:00", "2026-09-11T00:00:00+00:00")
     add_sale(db, "Graphic Band Tee", "T-Shirts", 20, 3, "2026-09-01T00:00:00+00:00", "2026-09-21T00:00:00+00:00")

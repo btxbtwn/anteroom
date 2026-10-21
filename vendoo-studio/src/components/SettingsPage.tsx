@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS_SECTION,
   type SettingsSectionId,
 } from "./settingsNav";
+import { AssistantSettings } from "./settings/AssistantSettings";
 import { ConnectionsSettings } from "./settings/ConnectionsSettings";
 import { DataSettings } from "./settings/DataSettings";
 import { GeneralSettings } from "./settings/GeneralSettings";
@@ -56,6 +57,7 @@ export function SettingsPage({
     <SettingsPageContainer className={section === "providers" ? "@container/providers" : undefined}>
       {section === "general" ? <GeneralSettings onOpenSetupGuide={onOpenSetupGuide} /> : null}
       {section === "listings" ? <ListingsSettings onOpenListing={onOpenListing} /> : null}
+      {section === "assistant" ? <AssistantSettings /> : null}
       {section === "providers" ? <ProvidersSettings /> : null}
       {section === "usage" ? <UsageSettings /> : null}
       {section === "connections" ? <ConnectionsSettings /> : null}
