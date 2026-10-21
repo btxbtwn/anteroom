@@ -27,6 +27,7 @@ from vendoo_studio.services.vendoo_item_update import (
     force_condition_updates,
 )
 from vendoo_studio.services.vendoo_import import listing_from_vendoo
+from vendoo_studio.services.vendoo_marketplace_fields import offer_floors
 
 
 # Shaped like what GET /api/item/{id} returns: coded values carrying a label.
@@ -160,7 +161,7 @@ class DefaultSectionTest(unittest.TestCase):
         self.assertEqual(section["overrides"]["weight"], {"pounds": "0", "ounces": "0"})
         self.assertEqual(section["marketplaceSpecifics"], {
             "originalPrice": "",
-            "smartSell": {"enabled": True, "minPrice": "5"},
+            "smartSell": {"enabled": False, "minPrice": ""},
         })
         self.assertEqual(section["sales"], [])
 
@@ -273,8 +274,10 @@ class BuildItemTest(unittest.TestCase):
         self.assertEqual(ebay["marketplaceSpecifics"]["pricingFormat"], "FixedPriceItem")
         self.assertTrue(fixed["allowBestOffer"])
         self.assertEqual(fixed["buyItNowPrice"], "48")
-        self.assertEqual(fixed["acceptOffersOfAtLeast"], "19")
-        self.assertEqual(posh["marketplaceSpecifics"]["smartSell"], {"enabled": True, "minPrice": "5"})
+        # list-this offer floors: auto-accept at list - $2, decline under list - $4.
+        self.assertEqual(fixed["acceptOffersOfAtLeast"], "46")
+        self.assertEqual(fixed["declineOffersLowerThan"], "44")
+        self.assertEqual(posh["marketplaceSpecifics"]["smartSell"], {"enabled": True, "minPrice": "44"})
         etsy = listings["etsy"]
         self.assertEqual(etsy["marketplaceSpecifics"]["whoMade"], "someone_else")
         self.assertEqual(etsy["marketplaceSpecifics"]["whatIsIt"], "0")
@@ -334,8 +337,12 @@ class BuildItemTest(unittest.TestCase):
             ["casual", "retro", "boho"],
         )
         self.assertEqual(item["listings"]["depop"]["overrides"]["brand"], "Other")
+        # No price, no floor: Smart Sell stays off rather than accepting anything.
         posh = item["listings"]["poshmark"]["marketplaceSpecifics"]["smartSell"]
-        self.assertEqual(posh, {"enabled": True, "minPrice": "5"})
+        self.assertEqual(posh, {"enabled": False, "minPrice": ""})
+        ebay_fixed = item["listings"]["ebay"]["marketplaceSpecifics"]["pricingFormatDetails"]["fixedPrice"]
+        self.assertEqual(ebay_fixed["acceptOffersOfAtLeast"], "")
+        self.assertEqual(ebay_fixed["declineOffersLowerThan"], "")
         etsy = item["listings"]["etsy"]["marketplaceSpecifics"]
         self.assertEqual(etsy["whoMade"], "someone_else")
         self.assertEqual(etsy["whatIsIt"], "0")
@@ -396,7 +403,16 @@ class BuildItemTest(unittest.TestCase):
         fixed = item["listings"]["ebay"]["marketplaceSpecifics"]["pricingFormatDetails"]["fixedPrice"]
         self.assertTrue(fixed["allowBestOffer"])
         self.assertEqual(fixed["buyItNowPrice"], "16")
-        self.assertEqual(fixed["acceptOffersOfAtLeast"], "6")
+        self.assertEqual(fixed["acceptOffersOfAtLeast"], "14")
+        self.assertEqual(fixed["declineOffersLowerThan"], "12")
+
+    def test_offer_floors_follow_the_list_price(self):
+        self.assertEqual(offer_floors("19.99"), ("18", "16"))
+        self.assertEqual(offer_floors(5), ("3", "1"))
+        # Too cheap for a floor, or no price: every offer waits for the seller.
+        self.assertIsNone(offer_floors(4))
+        self.assertIsNone(offer_floors(""))
+        self.assertIsNone(offer_floors("abc"))
 
     def test_empty_brand_checks_mercari_no_brand(self):
         item, _ = build_vendoo_item({"title": "Tee", "brand": ""}, self.schema)
