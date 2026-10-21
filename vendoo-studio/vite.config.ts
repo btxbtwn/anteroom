@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const ROOT = import.meta.dirname;
 
@@ -26,6 +27,7 @@ export default defineConfig({
   define: { __STUDIO_BUILD__: JSON.stringify(stamp) },
   plugins: [
     react(),
+    tailwindcss(),
     {
       // Written beside index.html so the Python launcher can compare the built
       // bundle against the checkout before it opens a window.

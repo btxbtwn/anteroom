@@ -6,7 +6,7 @@ export type ResolvedTheme = "dark" | "light";
 export const THEME_STORAGE_KEY = "vendoo-studio:theme";
 export const DEFAULT_THEME: ThemePreference = "dark";
 
-const LIGHT_THEME_COLOR = "#f4f4f5";
+const LIGHT_THEME_COLOR = "#ffffff";
 const DARK_THEME_COLOR = "#0a0a0a";
 
 export function normalizeTheme(value: unknown): ThemePreference {
@@ -45,14 +45,25 @@ function setMeta(name: string, content: string): void {
   if (meta) meta.setAttribute("content", content);
 }
 
-/** Paint `data-theme` and related chrome from a preference (or its cache). */
+/**
+ * Toggle T3 Code's `.dark` class (its tokens and `dark:` variants key off it)
+ * and related chrome from a preference (or its cache). Transitions are
+ * suppressed for the frame the palette flips, as T3 does in useTheme.ts.
+ */
 export function applyTheme(preference: ThemePreference = readCachedTheme()): ResolvedTheme {
   const resolved = resolveTheme(preference);
   const root = document.documentElement;
-  root.dataset.theme = resolved;
+  const switching = root.classList.contains("dark") !== (resolved === "dark");
+  if (switching) root.classList.add("no-transitions");
+  root.classList.toggle("dark", resolved === "dark");
   root.style.colorScheme = resolved;
   setMeta("theme-color", resolved === "light" ? LIGHT_THEME_COLOR : DARK_THEME_COLOR);
   setMeta("color-scheme", resolved);
   cacheTheme(preference);
+  if (switching) {
+    // Force a reflow so no-transitions takes effect before it is removed.
+    void root.offsetHeight;
+    requestAnimationFrame(() => root.classList.remove("no-transitions"));
+  }
   return resolved;
 }
