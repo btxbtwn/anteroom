@@ -26,8 +26,9 @@
   overflow-y: auto;
 }
 
+/* App sets --sidebar-width and --sidebar-min-width from the footer's button row. */
 .sidebar {
-  width: clamp(200px, var(--sidebar-width), 30vw);
+  width: clamp(var(--sidebar-min-width), var(--sidebar-width), 30vw);
   flex-shrink: 0;
   min-height: 0;
   background: var(--sidebar);
@@ -36,6 +37,20 @@
   flex-direction: column;
   overflow: hidden;
   border-right: 1px solid var(--color-ink-border);
+  padding: 0;
+}
+
+/* The assistant's chats: T3 Code's sidebar surface, docked on the right. */
+.thread-sidebar {
+  width: clamp(200px, var(--threads-width, 16rem), 30vw);
+  flex-shrink: 0;
+  min-height: 0;
+  background: var(--sidebar);
+  color: var(--color-ink-muted);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--color-ink-border);
   padding: 0;
 }
 

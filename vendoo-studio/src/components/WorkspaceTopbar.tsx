@@ -14,9 +14,17 @@ interface Props {
   /** Listings sidebar is open. */
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
-  /** `null` when the view has no inspector to toggle. */
-  detailOpen: boolean | null;
-  onToggleDetail: () => void;
+  /** The view's right-hand panel (the listing inspector or the assistant's chats), `null` when it has none. */
+  rightPanel: RightPanel | null;
+}
+
+export interface RightPanel {
+  open: boolean;
+  /** What the panel holds, as in "Hide the listing inspector". */
+  name: string;
+  /** The panel element's id. */
+  controls: string;
+  onToggle: () => void;
 }
 
 /** A ghost panel toggle with a tooltip, as T3 Code's PanelLayoutControls. */
@@ -58,7 +66,7 @@ function PanelToggle({
 }
 
 /** One window-wide titlebar like T3 Code: crumbs left, panel toggles right. */
-export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, detailOpen, onToggleDetail }: Props) {
+export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPanel }: Props) {
   return (
     <header className="workspace-topbar relative z-2 flex h-(--workspace-topbar-height) w-full shrink-0 items-center gap-2 bg-sidebar pr-2.5 pl-3 select-none max-[900px]:hidden [html.desktop-app_&]:pl-[90px]">
       {/* The pywebview window drags by this layer; controls sit above it. */}
@@ -82,15 +90,15 @@ export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, detailOp
           </>
         ) : null}
       </div>
-      {detailOpen === null ? null : (
+      {rightPanel === null ? null : (
         <div className="relative ml-auto flex min-w-0 items-center gap-1">
           <PanelToggle
-            pressed={detailOpen}
-            label={detailOpen ? "Hide the listing inspector" : "Show the listing inspector"}
-            controls="listing-inspector"
-            onToggle={onToggleDetail}
+            pressed={rightPanel.open}
+            label={`${rightPanel.open ? "Hide" : "Show"} ${rightPanel.name}`}
+            controls={rightPanel.controls}
+            onToggle={rightPanel.onToggle}
           >
-            {detailOpen ? <PanelRightCloseIcon className="size-4" /> : <PanelRightIcon className="size-4" />}
+            {rightPanel.open ? <PanelRightCloseIcon className="size-4" /> : <PanelRightIcon className="size-4" />}
           </PanelToggle>
         </div>
       )}

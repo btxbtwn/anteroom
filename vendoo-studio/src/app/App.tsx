@@ -8,6 +8,8 @@ import { ChatPanel } from "../components/ChatPanel";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { BrowserPreview } from "../components/BrowserPreview";
 import { ListingSidebar } from "../components/ListingSidebar";
+import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
+import { SIDEBAR_FOOTER_WIDTH } from "../components/sidebar/SidebarFooter";
 import {
   ArrowLeftIcon,
   BoxIcon,
@@ -16,6 +18,7 @@ import {
   MegaphoneIcon,
   MenuIcon,
   MessageCircleIcon,
+  MessagesSquareIcon,
   PlusIcon,
   Rows3Icon,
   SearchIcon,
@@ -92,7 +95,9 @@ const FirstRunGuide = lazy(() =>
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "awaiting_extension", "dispatched"]);
 const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
-const SIDEBAR_WIDTH: PanelWidthLimits = { min: 200, max: 420, maxVw: 30 };
+/* The listings sidebar opens, and never narrows, below the width that fits its footer buttons. */
+const SIDEBAR_WIDTH: PanelWidthLimits = { min: SIDEBAR_FOOTER_WIDTH, max: 420, maxVw: 30 };
+const THREADS_WIDTH: PanelWidthLimits = { min: 200, max: 420, maxVw: 30 };
 /* Min 420 so the inspector can't shrink under the titlebar listing chrome. */
 const DETAIL_WIDTH: PanelWidthLimits = { min: 420, max: 640, maxVw: 45 };
 const MAIN_PANEL_MIN_WIDTH = 360;
@@ -130,7 +135,9 @@ export function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
   const [mobilePane, setMobilePane] = useState<"workspace" | "editor" | "browser">("workspace");
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
+  // On mobile the listings start open only when a listing link opened the app; home is the assistant.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
+  const [mobileThreadsOpen, setMobileThreadsOpen] = useState(false);
   const [listingQuery, setListingQuery] = useState("");
   const [setupGuideOpen, setSetupGuideOpen] = useState(setupGuideAutoOpen === true);
   const [browserJobId, setBrowserJobId] = useState<string | null>(null);
@@ -141,11 +148,16 @@ export function App() {
   const mainPanelRef = useRef<HTMLElement>(null);
   const [sidebarWidth, setSidebarWidth] = usePanelWidth("sidebar");
   const [detailWidth, setDetailWidth] = usePanelWidth("detail");
+  const [threadsWidth, setThreadsWidth] = usePanelWidth("threads");
   const [sidebarCollapsed, setSidebarCollapsed] = usePanelCollapsed("sidebar");
   const [detailCollapsed, setDetailCollapsed] = usePanelCollapsed("detail");
+  const [threadsCollapsed, setThreadsCollapsed] = usePanelCollapsed("threads");
   const panelWidthStyle = {
-    ...(sidebarWidth ? { "--sidebar-width": `${sidebarWidth}px` } : {}),
+    // A width the seller dragged to wins, unless it would clip the footer buttons.
+    "--sidebar-width": `${Math.max(sidebarWidth ?? 0, SIDEBAR_WIDTH.min)}px`,
+    "--sidebar-min-width": `${SIDEBAR_WIDTH.min}px`,
     ...(detailWidth ? { "--detail-width": `${detailWidth}px` } : {}),
+    ...(threadsWidth ? { "--threads-width": `${threadsWidth}px` } : {}),
   } as CSSProperties;
 
   const { data: status } = useQuery({
@@ -298,6 +310,7 @@ export function App() {
   // there, so the desktop collapse states only apply to the desktop layout.
   const sidebarHidden = !isMobile && sidebarCollapsed;
   const detailHidden = !isMobile && detailCollapsed;
+  const threadsHidden = !isMobile && threadsCollapsed;
 
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
 
@@ -309,6 +322,7 @@ export function App() {
     shell.current = "assistant";
     setActiveView("assistant");
     setMobilePane("workspace");
+    setMobileThreadsOpen(false);
     closeMobileSidebar();
   };
 
@@ -613,8 +627,23 @@ export function App() {
         crumbs={crumbs}
         sidebarOpen={!sidebarHidden}
         onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-        detailOpen={activeView === "listings" ? !detailHidden : null}
-        onToggleDetail={() => setDetailCollapsed(!detailCollapsed)}
+        rightPanel={
+          activeView === "listings"
+            ? {
+                open: !detailHidden,
+                name: "the listing inspector",
+                controls: "listing-inspector",
+                onToggle: () => setDetailCollapsed(!detailCollapsed),
+              }
+            : activeView === "assistant"
+              ? {
+                  open: !threadsHidden,
+                  name: "chats",
+                  controls: "assistant-threads",
+                  onToggle: () => setThreadsCollapsed(!threadsCollapsed),
+                }
+              : null
+        }
       />
       <div
         className={`app-content mobile-pane-${mobilePane}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
@@ -639,8 +668,6 @@ export function App() {
               setMobilePane("workspace");
               closeMobileSidebar();
             }}
-            assistantThreadId={assistantThreadId}
-            onSelectAssistantThread={setPickedThreadId}
             onOpenSourcing={openSourcing}
             onOpenQueue={() => togglePage("queue")}
             queueCount={queueCount}
@@ -669,9 +696,7 @@ export function App() {
               className="sidebar-icon-btn sidebar-toggle"
               aria-label={
                 activeView === "assistant"
-                  ? mobileSidebarOpen
-                    ? "Hide threads"
-                    : "Show threads"
+                  ? "Inventory"
                   : activeView === "settings"
                   ? mobileSidebarOpen
                     ? "Back"
@@ -688,7 +713,8 @@ export function App() {
                   return;
                 }
                 if (activeView === "assistant") {
-                  setMobileSidebarOpen((open) => !open);
+                  goListings();
+                  setMobileSidebarOpen(true);
                   return;
                 }
                 if (activeView === "analytics" || activeView === "marketing" || activeView === "sourcing" || activeView === "queue") {
@@ -699,22 +725,20 @@ export function App() {
                 setMobileSidebarOpen(true);
               }}
             >
-              <ArrowLeftIcon className="size-4" />
+              {activeView === "assistant" ? <Rows3Icon className="size-4" /> : <ArrowLeftIcon className="size-4" />}
             </button>
             <div className="mobile-workspace-title">{workspaceTitle}</div>
             {activeView === "assistant" ? (
               <button
                 type="button"
                 className="sidebar-icon-btn mobile-workspace-settings"
-                title="Inventory"
-                aria-label="Inventory"
-                onClick={() => {
-                  goListings();
-                  setMobilePane("workspace");
-                  setMobileSidebarOpen(true);
-                }}
+                title="Chats"
+                aria-label={mobileThreadsOpen ? "Hide chats" : "Show chats"}
+                aria-expanded={mobileThreadsOpen}
+                aria-controls="assistant-threads"
+                onClick={() => setMobileThreadsOpen((open) => !open)}
               >
-                <Rows3Icon className="size-4" />
+                <MessagesSquareIcon className="size-4" />
               </button>
             ) : null}
             {activeView === "listings" ? (
@@ -984,6 +1008,26 @@ export function App() {
                   </Empty>
                 )}
               </aside>
+            )}
+
+            {activeView === "assistant" && !threadsHidden && !isMobile && (
+              <PanelResizeHandle
+                label="Resize chats"
+                panel="after"
+                width={threadsWidth}
+                onResize={setThreadsWidth}
+                absorberRef={mainPanelRef}
+                absorberMin={MAIN_PANEL_MIN_WIDTH}
+                {...THREADS_WIDTH}
+              />
+            )}
+            {activeView === "assistant" && !threadsHidden && (
+              <AssistantThreadPanel
+                selectedId={assistantThreadId}
+                onSelect={setPickedThreadId}
+                mobileOpen={isMobile ? mobileThreadsOpen : undefined}
+                onCloseMobile={() => setMobileThreadsOpen(false)}
+              />
             )}
           </div>
         </div>
