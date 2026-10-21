@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.306 — 2026-10-21
+
+- Ask the assistant whether a Sourcing box is worth buying and it now looks at the box's own photos, and frames from its video, on the store's page right then, before it answers. You get Buy, Maybe or Skip for each box, with the reasons: brands it could see on tags, condition, sizes, season and weight, how much of the box the photos actually show, and any red flags such as stock photos or a single photo for a big lot. It says which boxes it really saw photos for. A box whose photos would not load counts as not viewed, never as "looks fine". Nothing is downloaded to your Mac.
+- Box links from the assistant are the real ones from the Sourcing tab. It no longer makes a link up from a box's title, and any link Studio did not give it is removed from the answer.
+- When the assistant looks something up and nothing matches, or the lookup fails, it is told so and says so, instead of quietly guessing.
+
 ## 0.1.305 — 2026-10-21
 
 - A question you send while the assistant is still answering is no longer lost: it waits under the answer marked Queued and sends as soon as the answer finishes. You can remove it before then.
