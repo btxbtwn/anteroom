@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.293 — 2026-10-20
+
+- Cursor generates listings faster. It keeps one connection open instead of starting a new one for every step, category picks and JSON fixes use the lightest reasoning, and sold-comps search stops after eight lookups.
+
 ## 0.1.292 — 2026-10-21
 
 - Chat follows a reply while it is being written, then folds the work into a "Worked for…" line you can open. A button brings you back to the latest message.

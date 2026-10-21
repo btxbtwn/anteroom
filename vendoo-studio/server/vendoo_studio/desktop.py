@@ -608,11 +608,11 @@ BRIDGE_MARKER = "cursor-sdk-bridge"
 def reap_orphaned_bridges() -> int:
     """Kill Cursor bridge processes left behind by an earlier Studio.
 
-    Every listing run launches a cursor-sdk-bridge subprocess pair. The
-    context manager around it only unwinds on a clean exit, so a force-quit --
-    which is what a blank window usually ends in -- strands both halves. They
-    get reparented to launchd and sit there holding memory until reboot, which
-    on a small machine is what pushes the next run into swap.
+    Listing runs keep a cursor-sdk-bridge subprocess pair and reuse it. A
+    force-quit -- which is what a blank window usually ends in -- skips the
+    shutdown that would close it, so the pair is reparented to launchd and sits
+    there holding memory until reboot, which on a small machine is what pushes
+    the next run into swap.
 
     Only processes that are both orphaned (reparented to PID 1) and pointed at
     this install's workspace are killed, so a second Studio's live bridges are
