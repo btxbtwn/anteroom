@@ -1,3 +1,5 @@
+import { cn } from "../lib/utils";
+import { Spinner } from "./ui/spinner";
 import { WorkingDuration } from "./WorkingDuration";
 
 export function sendProgressLabel(step: string, photos?: { completed: number; total: number } | null): string {
@@ -19,24 +21,46 @@ export function sendProgressLabel(step: string, photos?: { completed: number; to
   return labels[step] || "Working with Vendoo…";
 }
 
+/** Measured photo progress only; never a synthetic percentage. */
+export function SendPhotoProgress({ photos, className }: {
+  photos: { completed: number; total: number };
+  className?: string;
+}) {
+  return (
+    <progress
+      className={cn(
+        "h-1 w-full appearance-none overflow-hidden rounded-full bg-muted-foreground/12 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-success [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-success",
+        className,
+      )}
+      aria-label="Photos uploaded"
+      max={photos.total}
+      value={photos.completed}
+    />
+  );
+}
+
 export function SendProgress({
   label,
   startedAt,
   photos,
+  className,
 }: {
   label: string;
   startedAt?: string | null;
   photos?: { completed: number; total: number } | null;
+  className?: string;
 }) {
   const startedAtMs = startedAt ? Date.parse(/(?:Z|[+-]\d{2}:\d{2})$/.test(startedAt) ? startedAt : `${startedAt}Z`) : NaN;
   return (
-    <div className="send-progress">
-      <div className="send-progress-row" role="status">
-        <span className="send-spinner" aria-hidden="true" />
-        <span className="send-progress-label">{label}</span>
-        {Number.isFinite(startedAtMs) && <WorkingDuration startedAtMs={startedAtMs} className="send-progress-percent" />}
+    <div className={cn("mt-2 flex min-w-0 flex-col gap-1.5", className)}>
+      <div className="flex min-w-0 items-center gap-2" role="status">
+        <Spinner size="sm" className="text-success" aria-hidden role={undefined} />
+        <span className="min-w-0 flex-1 text-xs text-foreground">{label}</span>
+        {Number.isFinite(startedAtMs) && (
+          <WorkingDuration startedAtMs={startedAtMs} className="shrink-0 text-xs text-muted-foreground tabular-nums" />
+        )}
       </div>
-      {photos && photos.total > 0 && <progress className="send-photo-progress" aria-label="Photos uploaded" max={photos.total} value={photos.completed} />}
+      {photos && photos.total > 0 && <SendPhotoProgress photos={photos} />}
     </div>
   );
 }

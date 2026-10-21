@@ -54,7 +54,7 @@ describe("MarketingPage", () => {
 
   it("holds the sale calendar and lists stale stock with how deep to cut", () => {
     const html = render(data);
-    expect(html).toContain("<h1>Marketing</h1>");
+    expect(html).toContain(">Marketing</h1>");
     expect(html).toContain("Sale calendar");
     expect(html).toContain("No events here yet. Select a day and plan a sale.");
     expect(html).toContain("Discount deeper");
