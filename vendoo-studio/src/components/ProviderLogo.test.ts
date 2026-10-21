@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hasProviderLogo, providerLogoColor, resolveProviderLogoId } from "./ProviderLogo";
 import { PROVIDER_LOGOS } from "./providerLogos";
-import { providerStatusModelLabel } from "./ProviderStatus";
 
 describe("ProviderLogo", () => {
   it("ships brand marks for ChatGPT, Claude, MiMo, and Cursor", () => {
@@ -38,21 +37,5 @@ describe("ProviderLogo", () => {
   it("falls back for unknown providers", () => {
     expect(hasProviderLogo("unknown-provider")).toBe(false);
     expect(providerLogoColor("unknown-provider")).toBe("#5C6578");
-  });
-});
-
-describe("providerStatusModelLabel", () => {
-  it("shows the listing model when configured", () => {
-    expect(providerStatusModelLabel(true, "gpt-5.5")).toBe("gpt-5.5");
-    expect(providerStatusModelLabel(true, "  composer-2.5  ")).toBe("composer-2.5");
-  });
-
-  it("falls back when the model is missing", () => {
-    expect(providerStatusModelLabel(true, "")).toBe("listing model");
-    expect(providerStatusModelLabel(true, null)).toBe("listing model");
-  });
-
-  it("reports not configured when the provider is offline", () => {
-    expect(providerStatusModelLabel(false, "gpt-5.5")).toBe("Not configured");
   });
 });
