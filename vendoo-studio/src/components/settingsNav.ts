@@ -80,7 +80,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     title: "Always hidden fields",
     section: "listings",
     targetId: "hidden-fields",
-    searchTerms: ["exclude", "hide fields", "fields tab"],
+    searchTerms: ["exclude", "hide fields"],
   },
   {
     id: "listing-formulas",

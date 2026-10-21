@@ -475,7 +475,7 @@ def summarize_missing_fields(patches: list[dict]) -> str:
         label = market_labels.get(market) or market.replace("_", " ").title()
         lines.append(f"{label} / {field}: {text}")
     if not lines:
-        return "Saved field values to the listing JSON. Review them in Fields, then Fill on Vendoo."
+        return "Saved field values to the listing JSON. Review them in Forms, then Fill on Vendoo."
     if len(lines) == 1:
         return f"Saved to the listing JSON — {lines[0]}. Fill on Vendoo when ready."
     bullet = "\n".join(f"- {line}" for line in lines[:MAX_PATCH_FIELDS])

@@ -1080,7 +1080,7 @@ def listing_save_summary(
             return (
                 f"{lead} with questions outstanding. "
                 + " — ".join(parts)
-                + ". Finish them in Fields before Send."
+                + ". Finish them in Forms before Send."
             )
         return f"{lead} with questions outstanding. Answer them in chat before Send."
     if missing or discovered:
@@ -1088,17 +1088,17 @@ def listing_save_summary(
         if missing:
             parts.append(f"{missing} required field(s) still missing in Studio")
         if discovered:
-            # No count: the Fields panel counts its own forms, and two different
-            # numbers for "empty fields" read as chat contradicting itself.
+            # No count: Forms and chat would otherwise quote two different
+            # numbers for "empty fields" and read as contradicting each other.
             parts.append("some discovered fields are still empty")
         return (
             f"{lead}. "
             + " — ".join(parts)
-            + ". Open Fields to review what still needs chat, then Send when ready."
+            + ". Review Forms for what still needs chat, then Send when ready."
         )
     return (
         f"{lead}. Required and discovered Studio fields are filled. "
-        "Review Fields, then Send when the draft looks right."
+        "Review Forms, then Send when the draft looks right."
     )
 
 
