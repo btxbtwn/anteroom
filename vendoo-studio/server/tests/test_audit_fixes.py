@@ -863,6 +863,13 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
         self.assertFalse(any("not a current dropdown value" in error["message"] for error in result.errors), result.errors)
 
+    def test_numeric_ebay_specifics_are_read_as_text(self):
+        listing = dict(VALID_LISTING)
+        listing["ebay_specifics"] = {**VALID_LISTING["ebay_specifics"], "unitQuantity": 1}
+        result = validate_listing(listing, 5, selected_marketplaces=["ebay"])
+        self.assertTrue(result.can_send, result.errors)
+        self.assertFalse(any(err["field"].startswith("ebay_specifics.unitQuantity") for err in result.errors))
+
     def test_etsy_when_made_falls_back_to_ebay_year(self):
         listing = dict(VALID_LISTING)
         listing["ebay_specifics"] = {

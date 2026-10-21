@@ -108,6 +108,8 @@ def _coerce_string_map(
         if isinstance(value, (list, dict)):
             text = _scalar_text(value)
             out[key] = text if text is not None else value
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[key] = str(value)
         else:
             out[key] = value
     return out
