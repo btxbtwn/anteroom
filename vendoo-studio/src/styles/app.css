@@ -11,7 +11,6 @@
 /* Import order is cascade order. Responsive overrides must stay after component styles. */
 @import "./base.css" layer(legacy);
 @import "./layout.css" layer(legacy);
-@import "./open-listing-tabs.css" layer(legacy);
 @import "./controls.css" layer(legacy);
 @import "./sidebar.css" layer(legacy);
 @import "./empty-state.css" layer(legacy);

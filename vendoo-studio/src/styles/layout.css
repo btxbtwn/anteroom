@@ -605,3 +605,6 @@
   min-width: 32px;
   font-size: 18px;
 }
+
+.detail-panel > .listing-session { height: 100%; }
+.listing-session[hidden], .listing-workspace[hidden], .detail-panel[hidden] { display: none; }

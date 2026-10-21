@@ -18,6 +18,7 @@ import {
   MegaphoneIcon,
   MenuIcon,
   MessageCircleIcon,
+  PlusIcon,
   SearchIcon,
   SettingsIcon,
   SquarePenIcon,
@@ -40,6 +41,9 @@ import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
 import { toastManager } from "../components/ui/toast";
+import { Button } from "../components/ui/button";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
+import { Spinner } from "../components/ui/spinner";
 import {
   groupImageFilesByFolder,
   listingTitleForFolder,
@@ -79,10 +83,8 @@ const SourcingPage = lazy(loadSourcingPage);
 // app has settled means a tap does not wait on the network for it.
 const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketingPage, loadSourcingPage];
 const pageLoading = (
-  <div className="analytics-page">
-    <div className="analytics-inner">
-      <p className="analytics-status" role="status">Loading…</p>
-    </div>
+  <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading">
+    <Spinner className="size-5 text-muted-foreground" />
   </div>
 );
 const FirstRunGuide = lazy(() =>
@@ -804,25 +806,29 @@ export function App() {
                   onCreate={createListing}
                 />
               ) : (
-                <div className="empty-state">
-                  <div className="empty-state-headline">Turn product photos<br />into marketplace-ready drafts.</div>
-                  <div className="empty-state-rule" />
-                  <SuggestionsPanel
-                    variant="workspace"
-                    selectedConvId={selectedConvId}
-                    onSelect={openListing}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    style={{ marginTop: 8 }}
-                    disabled={createConv.isPending}
-                    title={createListingTitle}
-                    onClick={createListing}
-                  >
-                    Create a listing
-                  </button>
-                </div>
+                <Empty className="flex-1 overflow-y-auto">
+                  <EmptyHeader>
+                    <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
+                    <EmptyDescription>Pick up where Studio suggests, or start a new listing.</EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent className="max-w-md">
+                    <SuggestionsPanel
+                      variant="workspace"
+                      selectedConvId={selectedConvId}
+                      onSelect={openListing}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={createConv.isPending}
+                      title={createListingTitle}
+                      onClick={createListing}
+                    >
+                      <PlusIcon />
+                      Create a listing
+                    </Button>
+                  </EmptyContent>
+                </Empty>
               )}
               {selectedConvId && (
                 <div hidden={activeView !== "listings"} className={`listing-workspace${browserOpen && browserExpanded ? " is-browser-expanded" : ""}`}>
@@ -907,9 +913,9 @@ export function App() {
                     </div>
                   ))
                 ) : (
-                  <div className="empty-state">
-                    <p className="text-xs text-muted font-mono">Select a listing to inspect</p>
-                  </div>
+                  <Empty className="h-full">
+                    <EmptyDescription>Select a listing to inspect</EmptyDescription>
+                  </Empty>
                 )}
               </aside>
             )}
