@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import type { ListingProviderId, ProviderStatus } from "../../api/types";
+import type { ListingProviderId, ModelFavorite, ProviderStatus } from "../../api/types";
+import type { ModelEsque } from "./providerIconUtils";
 
 /**
- * The provider, model and effort the listing chat, generation and the
- * assistant use, read and saved through the same settings Settings → Providers
+ * The data behind the composer's model picker: every provider, its models,
+ * the one in use, its effort levels and the starred models.
+ *
+ * The provider, model and effort are the same settings Settings → Providers
  * edits. There is one source of truth: no per-conversation choice.
  */
 
@@ -23,32 +26,30 @@ export const PROVIDER_LABELS: Record<ListingProviderId, string> = {
   chatgpt: "ChatGPT",
   claude: "Claude",
   cursor: "Cursor",
-  mimo: "MiMo",
+  mimo: "Xiaomi MiMo",
 };
 
-const PROVIDER_ORDER: ListingProviderId[] = ["chatgpt", "claude", "cursor", "mimo"];
 const MIMO_LISTING_MODEL = "mimo-v2.5-pro";
 const FALLBACK_CHATGPT_EFFORTS = ["none", "low", "medium", "high", "xhigh"];
 
-export interface ModelOption {
-  value: string;
-  label: string;
-}
-
-export interface ProviderModels {
-  id: ListingProviderId;
-  label: string;
+/** One provider in the picker's rail, the role T3 Code's ProviderInstanceEntry plays. */
+export interface ProviderInstanceEntry {
+  instanceId: ListingProviderId;
+  displayName: string;
   /** Signed in or keyed; a provider that is not ready cannot be picked. */
   ready: boolean;
-  models: ModelOption[];
-  /** The saved listing model for this provider. */
-  model: string;
-  loading: boolean;
-  error: string | null;
+  /** Why the provider cannot be picked, or why its models did not load. */
+  message: string | null;
+}
+
+export interface EffortOption {
+  value: string;
+  label: string;
+  isDefault?: boolean;
 }
 
 export interface EffortChoice {
-  options: ModelOption[];
+  options: EffortOption[];
   value: string;
 }
 
@@ -71,65 +72,86 @@ export function providerOrderFor(
   return { primary: next, fallback };
 }
 
-export function modelLabel(provider: ListingProviderId, value: string): string {
-  if (provider === "cursor" && value === "auto") return "Auto";
-  return value;
-}
-
-/** The composer offers one current model from each of these, newest first within a family. */
-const CURSOR_PICKER_FAMILIES = ["auto", "composer", "grok", "claude-sonnet", "claude-opus", "gpt"] as const;
-
-function cursorPickerFamily(id: string): (typeof CURSOR_PICKER_FAMILIES)[number] | null {
-  if (id === "auto") return "auto";
-  // Fast, mini and coding variants stay available in Settings, not this menu.
-  if (/fast|mini|nano|flash|codex|haiku/i.test(id)) return null;
-  if (id.startsWith("composer")) return "composer";
-  if (id.startsWith("grok")) return "grok";
-  if (id.startsWith("claude-sonnet")) return "claude-sonnet";
-  if (id.startsWith("claude-opus")) return "claude-opus";
-  if (id.startsWith("gpt-")) return "gpt";
-  return null;
-}
-
-function newerModelId(left: string, right: string): string {
-  const leftParts = (left.match(/\d+/g) ?? []).map(Number);
-  const rightParts = (right.match(/\d+/g) ?? []).map(Number);
-  const length = Math.max(leftParts.length, rightParts.length);
-  for (let index = 0; index < length; index += 1) {
-    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
-    if (diff !== 0) return diff > 0 ? left : right;
-  }
-  return left;
-}
+const UPPERCASE_WORDS = new Set(["gpt", "oss"]);
 
 /**
- * The Cursor catalog is every model the account can call. The composer shows
- * one current model per family, plus whatever is already selected.
+ * A readable name for a model id that has no display name of its own:
+ * `gpt-5.3-codex` → `GPT-5.3-Codex`, `mimo-v2.5-pro` → `MiMo-V2.5-Pro`.
  */
-export function cursorPickerModels(models: readonly ModelOption[], selected: string): ModelOption[] {
-  const best = new Map<string, ModelOption>();
-  for (const model of models) {
-    const family = cursorPickerFamily(model.value);
-    if (!family) continue;
-    const current = best.get(family);
-    if (!current || newerModelId(model.value, current.value) === model.value) best.set(family, model);
-  }
-  const picked = CURSOR_PICKER_FAMILIES.flatMap((family) => {
-    const model = best.get(family);
-    return model ? [model] : [];
-  });
-  if (selected && !picked.some((model) => model.value === selected)) {
-    const saved = models.find((model) => model.value === selected);
-    if (saved) picked.push(saved);
-  }
-  return picked;
+export function modelNameFromSlug(slug: string): string {
+  return slug
+    .split("-")
+    .map((part) => {
+      const lower = part.toLowerCase();
+      if (UPPERCASE_WORDS.has(lower)) return part.toUpperCase();
+      if (lower === "mimo") return "MiMo";
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join("-");
 }
 
-export function effortOptions(values: readonly string[], withDefault: boolean): ModelOption[] {
+export function effortOptions(values: readonly string[], withDefault: boolean): EffortOption[] {
   return [
-    ...(withDefault ? [{ value: "default", label: EFFORT_LABELS.default }] : []),
+    ...(withDefault ? [{ value: "default", label: EFFORT_LABELS.default, isDefault: true }] : []),
     ...values.map((value) => ({ value, label: EFFORT_LABELS[value] ?? value })),
   ];
+}
+
+/** Rows for one provider: the catalog, plus the saved model if the catalog no longer lists it. */
+export function providerModelOptions(
+  models: readonly { slug: string; name: string }[],
+  saved: string,
+): ModelEsque[] {
+  const options: ModelEsque[] = models.map((model) => ({ slug: model.slug, name: model.name }));
+  if (saved && !options.some((option) => option.slug === saved)) {
+    options.push({ slug: saved, name: modelNameFromSlug(saved), isUnavailable: true });
+  }
+  return options;
+}
+
+function errorMessage(error: unknown): string | null {
+  return error instanceof Error ? error.message : null;
+}
+
+const SETTINGS_UI_KEY = ["settings-ui"];
+
+/** Starred models, kept with the other UI preferences so every Studio sees the same stars. */
+export function toggleFavorite(
+  favorites: readonly ModelFavorite[],
+  provider: ListingProviderId,
+  model: string,
+): ModelFavorite[] {
+  const exists = favorites.some((favorite) => favorite.provider === provider && favorite.model === model);
+  return exists
+    ? favorites.filter((favorite) => !(favorite.provider === provider && favorite.model === model))
+    : [...favorites, { provider, model }];
+}
+
+export function useModelFavorites() {
+  const queryClient = useQueryClient();
+  const prefs = useQuery({ queryKey: SETTINGS_UI_KEY, queryFn: api.settings.ui });
+  type Prefs = typeof prefs.data;
+  const favorites = prefs.data?.model_favorites ?? [];
+  const save = useMutation({
+    mutationFn: (next: ModelFavorite[]) => api.settings.setUi({ model_favorites: next }),
+    onMutate: async (next) => {
+      await queryClient.cancelQueries({ queryKey: SETTINGS_UI_KEY });
+      const previous = queryClient.getQueryData<Prefs>(SETTINGS_UI_KEY);
+      if (previous) queryClient.setQueryData(SETTINGS_UI_KEY, { ...previous, model_favorites: next });
+      return { previous };
+    },
+    onError: (_error, _next, context) => {
+      if (context?.previous) queryClient.setQueryData(SETTINGS_UI_KEY, context.previous);
+    },
+    onSuccess: (payload) => queryClient.setQueryData(SETTINGS_UI_KEY, payload),
+  });
+  return {
+    favorites,
+    toggle: (provider: ListingProviderId, model: string) => {
+      const current = queryClient.getQueryData<Prefs>(SETTINGS_UI_KEY)?.model_favorites ?? favorites;
+      save.mutate(toggleFavorite(current, provider, model));
+    },
+  };
 }
 
 export function useComposerModel() {
@@ -145,55 +167,82 @@ export function useComposerModel() {
   const cursor = useQuery({ queryKey: ["cursor-models"], queryFn: api.settings.cursorModels, enabled: cursorReady, staleTime: 5 * 60_000 });
 
   const active = activeProviderId(status.data);
-  const providers: ProviderModels[] = PROVIDER_ORDER.map((id) => {
-    switch (id) {
-      case "chatgpt":
-        return {
-          id,
-          label: PROVIDER_LABELS[id],
-          ready: chatgptReady,
-          models: (chatgpt.data?.models ?? []).map((value) => ({ value, label: value })),
-          model: chatgpt.data?.listing_model ?? "",
-          loading: chatgpt.isLoading,
-          error: chatgpt.data?.error || (chatgpt.error as Error | null)?.message || null,
-        };
-      case "claude":
-        return {
-          id,
-          label: PROVIDER_LABELS[id],
-          ready: claudeReady,
-          models: (claude.data?.models ?? []).map(({ value, label }) => ({ value, label })),
-          model: claude.data?.listing_model ?? "",
-          loading: claude.isLoading,
-          error: claude.data?.error || (claude.error as Error | null)?.message || null,
-        };
-      case "cursor":
-        return {
-          id,
-          label: PROVIDER_LABELS[id],
-          ready: cursorReady,
-          models: cursorPickerModels(
-            (cursor.data?.models ?? []).map((value) => ({ value, label: modelLabel("cursor", value) })),
-            cursor.data?.listing_model ?? "",
-          ),
-          model: cursor.data?.listing_model ?? "",
-          loading: cursor.isLoading,
-          error: cursor.data?.error || (cursor.error as Error | null)?.message || null,
-        };
-      case "mimo":
-        return {
-          id,
-          label: PROVIDER_LABELS[id],
-          ready: mimoReady,
-          models: [{ value: MIMO_LISTING_MODEL, label: MIMO_LISTING_MODEL }],
-          model: MIMO_LISTING_MODEL,
-          loading: false,
-          error: null,
-        };
-    }
-  });
-  const current = providers.find((provider) => provider.id === active) ?? null;
-  const currentModel = current ? current.model || status.data?.listing_model || "" : "";
+
+  const entries: ProviderInstanceEntry[] = [
+    {
+      instanceId: "chatgpt",
+      displayName: PROVIDER_LABELS.chatgpt,
+      ready: chatgptReady,
+      message: chatgptReady
+        ? chatgpt.data?.error || errorMessage(chatgpt.error)
+        : "Not ready. Sign in to ChatGPT in Settings → Providers.",
+    },
+    {
+      instanceId: "claude",
+      displayName: PROVIDER_LABELS.claude,
+      ready: claudeReady,
+      message: claudeReady
+        ? claude.data?.error || errorMessage(claude.error)
+        : "Not ready. Sign in to Claude in Settings → Providers.",
+    },
+    {
+      instanceId: "cursor",
+      displayName: PROVIDER_LABELS.cursor,
+      ready: cursorReady,
+      message: cursorReady
+        ? cursor.data?.error || errorMessage(cursor.error)
+        : "Not ready. Add a Cursor API key in Settings → Providers.",
+    },
+    {
+      instanceId: "mimo",
+      displayName: PROVIDER_LABELS.mimo,
+      ready: mimoReady,
+      message: mimoReady ? null : "Not ready. Add a Xiaomi MiMo API key in Settings → Providers.",
+    },
+  ];
+
+  const savedModel: Record<ListingProviderId, string> = {
+    chatgpt: chatgpt.data?.listing_model ?? "",
+    claude: claude.data?.listing_model ?? "",
+    cursor: cursor.data?.listing_model ?? "",
+    mimo: MIMO_LISTING_MODEL,
+  };
+
+  const modelOptionsByInstance = new Map<ListingProviderId, ModelEsque[]>([
+    [
+      "chatgpt",
+      chatgptReady
+        ? providerModelOptions(
+            (chatgpt.data?.models ?? []).map((slug) => ({ slug, name: modelNameFromSlug(slug) })),
+            savedModel.chatgpt,
+          )
+        : [],
+    ],
+    [
+      "claude",
+      claudeReady
+        ? providerModelOptions(
+            (claude.data?.models ?? []).map(({ value, label }) => ({ slug: value, name: label })),
+            savedModel.claude,
+          )
+        : [],
+    ],
+    [
+      "cursor",
+      cursorReady
+        ? providerModelOptions(
+            (cursor.data?.models ?? []).map((slug) => ({
+              slug,
+              name: cursor.data?.labels?.[slug] || (slug === "auto" ? "Auto" : modelNameFromSlug(slug)),
+            })),
+            savedModel.cursor,
+          )
+        : [],
+    ],
+    ["mimo", mimoReady ? [{ slug: MIMO_LISTING_MODEL, name: modelNameFromSlug(MIMO_LISTING_MODEL) }] : []],
+  ]);
+
+  const model = active ? savedModel[active] || status.data?.listing_model || "" : "";
 
   // Effort only offers what the chosen model supports.
   const effort: EffortChoice | null = (() => {
@@ -217,13 +266,13 @@ export function useComposerModel() {
   };
 
   const selectModel = useMutation({
-    mutationFn: async ({ provider, model }: { provider: ListingProviderId; model: string }) => {
+    mutationFn: async ({ provider, model: next }: { provider: ListingProviderId; model: string }) => {
       if (status.data && provider !== active) {
         await api.settings.setPreferredProvider(providerOrderFor(provider, status.data));
       }
-      if (provider === "chatgpt") await api.settings.setChatGPTModels({ listing_model: model });
-      else if (provider === "claude") await api.settings.setClaudeModels({ listing_model: model });
-      else if (provider === "cursor") await api.settings.setCursorModels({ listing_model: model });
+      if (provider === "chatgpt") await api.settings.setChatGPTModels({ listing_model: next });
+      else if (provider === "claude") await api.settings.setClaudeModels({ listing_model: next });
+      else if (provider === "cursor") await api.settings.setCursorModels({ listing_model: next });
     },
     onSettled: refresh,
   });
@@ -239,14 +288,14 @@ export function useComposerModel() {
 
   return {
     loading: status.isLoading,
-    providers,
+    entries,
+    modelOptionsByInstance,
     active,
-    current,
-    currentModel,
+    model,
     effort,
-    selectModel: (provider: ListingProviderId, model: string) => selectModel.mutate({ provider, model }),
+    selectModel: (provider: ListingProviderId, next: string) => selectModel.mutate({ provider, model: next }),
     selectEffort: (value: string) => selectEffort.mutate(value),
     pending: selectModel.isPending || selectEffort.isPending,
-    error: (selectModel.error as Error | null)?.message || (selectEffort.error as Error | null)?.message || null,
+    error: errorMessage(selectModel.error) || errorMessage(selectEffort.error),
   };
 }

@@ -325,6 +325,39 @@ export interface ClaudeStatus {
 }
 
 export type ListingProviderId = "chatgpt" | "claude" | "mimo" | "cursor";
+
+/** A starred model in the composer picker, synced through the UI preferences. */
+export interface ModelFavorite {
+  provider: ListingProviderId;
+  model: string;
+}
+
+/**
+ * One rate-limit window, the shape T3 Code's ServerProviderUsageWindow uses.
+ * `id` is stable per provider (`five_hour`, `primary`, `totalPercentUsed`).
+ */
+export interface ProviderUsageWindow {
+  id: string;
+  kind: "session" | "weekly" | "monthly" | "other";
+  label: string;
+  used_percent: number;
+  resets_at?: string;
+  window_duration_mins?: number;
+  description?: string;
+}
+
+/**
+ * A provider's subscription usage. `unavailable` tells an account that can
+ * never report windows (`unsupported`) from a read that failed this time.
+ */
+export interface ProviderUsageLimits {
+  provider: ListingProviderId;
+  label: string;
+  checked_at: string;
+  windows: ProviderUsageWindow[];
+  plan?: string;
+  unavailable?: { reason: "unsupported" | "probeFailed"; message?: string };
+}
 /** "same" reads photos with the listing provider. */
 export type PhotoProviderChoice = "same" | ListingProviderId;
 
