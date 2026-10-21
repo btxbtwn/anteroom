@@ -92,6 +92,7 @@ GENERAL_LISTING_KEYS = {
     "us size": "size",
     "sku": "sku",
     "category": "category_path",
+    "category path": "category_path",
     "tags": "tags",
     "labels": "labels",
     "vendoo labels": "labels",
@@ -544,8 +545,11 @@ def write_values_into_listing(listing: dict, patches: list[dict]) -> dict:
                 dimensions[{"length": 0, "width": 1, "height": 2}[lookup]] = value
                 dimensions_changed = True
             # lookup is the spaced form ("size type"), the only one label_to_json_key maps.
+            # A field named by its listing key ("category_path") is that key;
+            # camel-casing its label would write a stray "categoryPath".
             mapped = (
-                GENERAL_LISTING_KEYS.get(lookup)
+                (field if field in updated and not field.endswith("_specifics") else None)
+                or GENERAL_LISTING_KEYS.get(lookup)
                 or GENERAL_LISTING_KEYS.get(key)
                 or label_to_json_key(lookup)
                 or label_to_json_key(field)

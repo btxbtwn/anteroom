@@ -5348,7 +5348,7 @@
           }
       }
 
-      const categoryShown = controlValue(VENDOO_SELECTORS.category);
+      const categoryShown = readCategoryDisplay(findGeneralCategoryControl());
       if (data?.category_path && categoryShown) {
           const ok = normalizeComparableText(categoryShown).includes(normalizeComparableText(String(data.category_path).split('>').pop()));
           fields.category = { state: ok ? 'audited_complete' : 'mismatch', expected: data.category_path, observed: categoryShown };
@@ -6206,7 +6206,7 @@
           price: controlValue(VENDOO_SELECTORS.price),
           cost: controlValue(VENDOO_SELECTORS.cost),
           notes: controlValue(VENDOO_SELECTORS.notes),
-          categoryV2: controlValue(VENDOO_SELECTORS.category),
+          categoryV2: readCategoryDisplay(findGeneralCategoryControl()),
           weight: {
               pounds: controlValue(VENDOO_SELECTORS.weightLb),
               ounces: controlValue(VENDOO_SELECTORS.weightOz),

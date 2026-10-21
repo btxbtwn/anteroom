@@ -347,6 +347,15 @@ class FillLogServiceTest(unittest.TestCase):
         self.assertNotIn("Season", listing["ebay_specifics"])
         self.assertNotIn("ebaySeason", listing["ebay_specifics"])
 
+    def test_write_values_into_listing_writes_category_path_key(self):
+        path = "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts"
+        for start in ({"category_path": "Clothing, Shoes & AccessoriesMenMen's ClothingSweaters"}, {}):
+            listing = write_values_into_listing(
+                start, [{"marketplace": "general", "field": "category_path", "value": path}],
+            )
+            self.assertEqual(listing["category_path"], path)
+            self.assertNotIn("categoryPath", listing)
+
     def test_write_values_into_listing_clears_blank_values(self):
         listing = write_values_into_listing(
             {"brand": "Taylor", "depop_specifics": {"material": "Chiffon"}},

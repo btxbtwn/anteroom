@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.288 — 2026-10-21
+
+- Fixing a listing's category from chat now sticks. Before, the "Category must be a terminal Vendoo path" error came back no matter how many times you asked.
+- Categories read from a Vendoo draft keep their " > " steps instead of running the words together.
+
 ## 0.1.287 — 2026-10-20
 
 - Boxes you bought now grade each box and store like a supplier: average sale, how many sold for $35 or more, how much sold within 30, 60 and 90 days of buying, and profit per $100 spent.
