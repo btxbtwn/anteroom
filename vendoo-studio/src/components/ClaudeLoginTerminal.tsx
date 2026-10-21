@@ -3,9 +3,30 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
+import { XIcon } from "lucide-react";
 import { api } from "../api/client";
+import { Button } from "./ui/button";
+import { Spinner } from "./ui/spinner";
 
 type TerminalState = "running" | "succeeded" | "failed";
+
+/**
+ * Resolve a theme token to the rgb() string xterm can parse. T3's tokens are
+ * oklch and color-mix, so let the browser compute them through a canvas.
+ */
+function themeColor(host: HTMLElement, token: string, fallback: string): string {
+  const probe = document.createElement("span");
+  probe.style.color = `var(${token}, ${fallback})`;
+  host.appendChild(probe);
+  const computed = getComputedStyle(probe).color;
+  probe.remove();
+  const canvas = document.createElement("canvas").getContext("2d");
+  if (!canvas) return fallback;
+  canvas.fillStyle = computed;
+  canvas.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = canvas.getImageData(0, 0, 1, 1).data;
+  return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+}
 
 /** Open links the way Studio's other external links open: in the seller's browser. */
 function openLink(_event: MouseEvent, url: string) {
@@ -40,9 +61,10 @@ export function ClaudeLoginTerminal({ onClose }: { onClose: (signedIn: boolean) 
       fontSize: 12,
       fontFamily: styles.getPropertyValue("--font-mono").trim() || "ui-monospace, Menlo, monospace",
       theme: {
-        background: "#000000",
-        foreground: styles.getPropertyValue("--color-text").trim() || undefined,
-        cursor: styles.getPropertyValue("--color-text").trim() || undefined,
+        background: themeColor(host, "--terminal-background", "#0a0a0a"),
+        foreground: themeColor(host, "--terminal-foreground", "#f5f5f5"),
+        cursor: themeColor(host, "--terminal-cursor", "#b4cbff"),
+        selectionBackground: themeColor(host, "--terminal-selection-background", "rgb(180 203 255 / 25%)"),
       },
     });
     const fit = new FitAddon();
@@ -90,9 +112,19 @@ export function ClaudeLoginTerminal({ onClose }: { onClose: (signedIn: boolean) 
   }, []);
 
   return (
-    <div className="claude-login-terminal">
-      <div className="claude-login-terminal-bar">
-        <span className={state === "failed" ? "text-error" : undefined}>
+    <div className="grid gap-2">
+      <div className="flex min-w-0 items-center gap-2 text-xs">
+        {state === "running" ? <Spinner size="sm" tone="muted" /> : null}
+        <span
+          role="status"
+          className={
+            state === "failed"
+              ? "min-w-0 flex-1 text-destructive-foreground"
+              : state === "succeeded"
+                ? "min-w-0 flex-1 text-success-foreground"
+                : "min-w-0 flex-1 text-muted-foreground"
+          }
+        >
           {message ??
             (state === "running"
               ? "Finish signing in in the browser. If Claude asks for a code, paste it here."
@@ -100,11 +132,14 @@ export function ClaudeLoginTerminal({ onClose }: { onClose: (signedIn: boolean) 
                 ? "Signed in to Claude."
                 : "Sign-in did not finish. Close it and sign in again.")}
         </span>
-        <button type="button" className="btn btn-sm btn-ghost" onClick={() => onClose(state === "succeeded")}>
+        <Button size="xs" variant="ghost-muted" onClick={() => onClose(state === "succeeded")}>
+          <XIcon />
           Close
-        </button>
+        </Button>
       </div>
-      <div ref={hostRef} className="claude-login-terminal-view" />
+      <div className="relative h-64 overflow-hidden rounded-md border border-border bg-(--terminal-background) p-2">
+        <div ref={hostRef} className="size-full" />
+      </div>
     </div>
   );
 }

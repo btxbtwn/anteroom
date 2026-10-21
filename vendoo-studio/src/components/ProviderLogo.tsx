@@ -29,7 +29,7 @@ export function ProviderLogo({
   if (logo) {
     return (
       <span
-        className="provider-logo"
+        className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm bg-white shadow-xs/5 ring-1 ring-black/5"
         title={label}
         aria-label={label}
         style={{ width: size, height: size }}
@@ -40,6 +40,7 @@ export function ProviderLogo({
           viewBox={logo.viewBox}
           preserveAspectRatio="xMidYMid meet"
           aria-hidden="true"
+          className="block"
         >
           {logo.paths.map((path, index) => (
             <path
@@ -58,12 +59,12 @@ export function ProviderLogo({
   const letter = (label || id || "?").trim().charAt(0).toUpperCase() || "?";
   return (
     <span
-      className="provider-logo provider-logo-fallback"
+      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted-foreground"
       title={label}
       aria-label={label}
       style={{ width: size, height: size }}
     >
-      <span className="provider-logo-letter" aria-hidden="true">
+      <span className="text-[9px] leading-none font-bold tracking-tight text-background" aria-hidden="true">
         {letter}
       </span>
     </span>
