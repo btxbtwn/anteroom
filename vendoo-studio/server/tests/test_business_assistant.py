@@ -2,6 +2,7 @@
 import asyncio
 import functools
 import json
+import re
 from datetime import UTC, date, datetime
 
 import pytest
@@ -18,6 +19,7 @@ from vendoo_studio.routes import assistant as assistant_route
 from vendoo_studio.services import assistant_changes, assistant_memory, boxes, business_assistant
 
 NOW = datetime(2026, 10, 1, tzinfo=UTC)
+FAILED = re.compile(r"Lookup \w+ failed: ")
 
 
 def add_listing(db, title, listing, notes=None, box_id=None):
@@ -150,7 +152,7 @@ def test_a_lookup_reads_the_copy_and_nothing_else(workspace, tmp_path):
         "SELECT 1; DELETE FROM listings",
         "SELECT nope FROM listings",
     ):
-        assert business_assistant.run_lookup(lookups, refused).startswith("Lookup failed:"), refused
+        assert FAILED.match(business_assistant.run_lookup(lookups, refused)), refused
     assert not (tmp_path / "real.db").exists()
     assert f"{jeans.id}" in business_assistant.run_lookup(lookups, "SELECT id FROM listings")
 
@@ -167,7 +169,7 @@ def test_a_runaway_lookup_is_stopped(workspace, monkeypatch):
     db, _client = workspace
     monkeypatch.setattr(business_assistant, "LOOKUP_SECONDS", 0.05)
     runaway = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n"
-    assert business_assistant.run_lookup(business_assistant.read_shop(db, now=NOW).lookups, runaway).startswith("Lookup failed:")
+    assert "ran past the" in business_assistant.run_lookup(business_assistant.read_shop(db, now=NOW).lookups, runaway)
 
 
 def test_a_question_is_sent_with_the_brief_and_earlier_turns(workspace):
@@ -186,13 +188,23 @@ def test_a_question_is_sent_with_the_brief_and_earlier_turns(workspace):
     ]
 
 
-def test_a_reply_is_a_lookup_only_when_it_is_nothing_else():
-    assert business_assistant.lookup_sql("  ```sql\n-- sales by size\nSELECT 1\n```") == "-- sales by size\nSELECT 1"
-    assert business_assistant.lookup_sql("```SQL\nSELECT 2") == "SELECT 2"
-    assert business_assistant.lookup_sql("Here is how:\n```sql\nSELECT 1\n```") is None
-    assert business_assistant.lookup_sql("```sql\n```") is None
+def test_every_way_a_model_writes_a_lookup_is_read_as_one():
+    sql = business_assistant.lookup_sql
+    assert sql("  ```sql\n-- sales by size\nSELECT 1\n```") == "-- sales by size\nSELECT 1"
+    assert sql("```SQL\nSELECT 2") == "SELECT 2"
+    # Words before the block, the query on the fence line, another language tag, or no tag at all.
+    assert sql("Let me check.\n```sql\nSELECT 1\n```") == "SELECT 1"
+    assert sql("```sql SELECT 3```") == "SELECT 3"
+    assert sql("```sqlite\nSELECT 4\n```") == "SELECT 4"
+    assert sql("```\nSELECT 5\n```") == "SELECT 5"
+    # An empty block is still a lookup, so it gets an answer instead of being shown.
+    assert sql("```sql\n```") == ""
+    assert sql("No lookup here.") is None and sql("```python\nprint(1)\n```") is None
+    media = business_assistant.find_lookup("```view_box_media\nraghouse:1\n```")
+    assert (media.kind, media.body) == ("media", "raghouse:1")
     assert business_assistant.lookup_label("-- sales by size.\nSELECT 1") == "Looking up sales by size…"
     assert business_assistant.lookup_label("SELECT 1") == "Looking up more detail…"
+    assert business_assistant.lookup_label(media) == "Looking at the box photos…"
 
 
 class Provider:
