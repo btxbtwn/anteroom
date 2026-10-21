@@ -23,8 +23,23 @@ class SourceBox(Base):
     # bought, so what the store actually charged can tune later estimates.
     list_shipping = Column(Float, nullable=True)
     pieces = Column(Integer, nullable=True)
+    # Pieces that arrived not worth listing: stained, torn, wrong item. Their
+    # cost lands on the pieces that can sell.
+    unsellable = Column(Integer, nullable=True)
     # What the buy list expected one piece to sell for when the box was bought,
     # so real sales can show how far off the estimates run.
     estimate_per_piece = Column(Float, nullable=True)
     bought_at = Column(DateTime, nullable=False, default=utcnow)
     created_at = Column(DateTime, default=utcnow)
+
+    @property
+    def landed(self) -> float:
+        """What the box cost, delivered."""
+        return (self.price or 0.0) + (self.shipping or 0.0)
+
+    @property
+    def sellable(self) -> int | None:
+        """Pieces worth listing, once the piece count is known."""
+        if not self.pieces:
+            return None
+        return max(0, self.pieces - (self.unsellable or 0))

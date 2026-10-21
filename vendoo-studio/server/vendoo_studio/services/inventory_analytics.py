@@ -41,6 +41,15 @@ EVENT_PERCENT = 25
 DEEP_PERCENTS = (40, 35)
 # With no cost recorded there is no floor to check, so stay at the shallower cut.
 UNKNOWN_COST_PERCENT = 35
+# Sale-price bands, low to high, by the lowest price each starts at. Raising the
+# average sale price means more of what sells landing in the upper two.
+PRICE_TIERS = (
+    ("budget", "Under $20", 0.0),
+    ("standard", "$20–$34", 20.0),
+    ("premium", "$35–$59", 35.0),
+    ("high", "$60 and up", 60.0),
+)
+PREMIUM_PRICE = PRICE_TIERS[2][2]
 
 
 @dataclass(frozen=True)
@@ -153,13 +162,8 @@ def load_rows(db) -> list[AnalyticsItem]:
         )
     }
     # An item with no cost of its own carries its share of the box it came from.
-    box_share = {
-        box_id: _money((price + shipping) / pieces)
-        for box_id, price, shipping, pieces in db.query(
-            SourceBox.id, SourceBox.price, SourceBox.shipping, SourceBox.pieces,
-        ).all()
-        if pieces
-    }
+    # Pieces that were not worth listing add their cost to the ones that were.
+    box_share = {box.id: _money(box.landed / box.sellable) for box in db.query(SourceBox).all() if box.sellable}
     rows: list[AnalyticsItem] = []
     conversations = db.query(
         Conversation.id,
@@ -264,6 +268,7 @@ def summarize(
         "marketplaces": _ranked_groups(_groups(sales, _marketplace_key)),
         "categories": _ranked_groups(_groups(sales, _category_key)),
         "brands": _ranked_groups(_groups(sales, _brand_key)),
+        "price_tiers": _price_tiers(sales),
         "aging": _aging(items, now),
         "stale": _stale(items, now),
         "recent": _recent(sales, events or []),
@@ -287,6 +292,25 @@ def _incomplete_sales(items: list[AnalyticsItem]) -> list[dict[str, Any]]:
         if item.missing_sale_details
     ]
     return sorted(rows, key=lambda row: (row["title"].casefold(), row["conversation_id"]))
+
+
+def price_tier(price: float) -> str:
+    """The band a sale price falls in: the highest one whose floor it reaches."""
+    return next(tier for tier, _label, floor in reversed(PRICE_TIERS) if price >= floor)
+
+
+def _price_tiers(sales: list[AnalyticsItem]) -> list[dict[str, Any]]:
+    """Every band, low to high, with the period's sales that fell in it, so the
+    seller can see whether more of what sells is moving into the higher bands."""
+    priced = [item for item in sales if item.sold_price is not None]
+    return [
+        {
+            "id": tier,
+            "label": label,
+            **_sales_stats([item for item in priced if price_tier(item.sold_price or 0.0) == tier]),
+        }
+        for tier, label, _floor in PRICE_TIERS
+    ]
 
 
 def _sales_stats(sales: list[AnalyticsItem]) -> dict[str, Any]:

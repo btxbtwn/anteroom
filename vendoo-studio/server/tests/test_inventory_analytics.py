@@ -277,6 +277,24 @@ class SummarizeAnalyticsTest(unittest.TestCase):
         markets = {row["id"]: row["revenue"] for row in payload["marketplaces"]}
         self.assertEqual(markets, {"depop": 30, "ebay": 10})
 
+    def test_sales_fall_into_price_tiers_low_to_high(self):
+        payload = summarize(
+            [
+                _item(conversation_id="a", sold_price=19.99),
+                _item(conversation_id="b", sold_price=20),
+                _item(conversation_id="c", sold_price=34.5),
+                _item(conversation_id="d", sold_price=35),
+                _item(conversation_id="e", sold_price=60),
+                _item(conversation_id="f", sold_price=None),
+            ],
+            range_id="all",
+            now=NOW,
+        )
+        tiers = [(row["id"], row["count"], row["revenue"]) for row in payload["price_tiers"]]
+        self.assertEqual(tiers, [
+            ("budget", 1, 19.99), ("standard", 2, 54.5), ("premium", 1, 35), ("high", 1, 60),
+        ])
+
     def test_aging_uses_how_long_active_listings_have_been_up(self):
         payload = summarize(
             [

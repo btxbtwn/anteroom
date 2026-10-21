@@ -139,6 +139,7 @@ class AnalyticsResponse(BaseModel):
     marketplaces: list[AnalyticsGroup]
     categories: list[AnalyticsGroup]
     brands: list[AnalyticsGroup]
+    price_tiers: list[AnalyticsGroup]
     aging: list[AnalyticsAging]
     stale: list[AnalyticsStaleListing]
     recent: list[AnalyticsSale]

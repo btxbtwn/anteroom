@@ -119,7 +119,7 @@ CHANGES_INSTRUCTIONS = (
     "Never write such a note yourself.\n"
 )
 
-_SALES_KEYS = ("range", "sell_through_rate", "sales", "previous", "periods", "marketplaces", "categories", "ads")
+_SALES_KEYS = ("range", "sell_through_rate", "sales", "previous", "periods", "marketplaces", "categories", "price_tiers", "ads")
 _LOT_KEYS = (
     "store", "title", "price", "pcs", "grade", "theme", "landed", "cog_per_pc", "resale_per_pc",
     "sell_through", "expected_revenue", "expected_profit", "roi", "downside_profit", "comps_count",
@@ -138,8 +138,9 @@ LISTING_COLUMNS = (
 SIZING_COLUMNS = ("id", "title", "status", "category", "size", "form_sizes", "photo_size", "size_issue")
 CHANGE_COLUMNS = ("listing_id", "changed_on", "old_price", "new_price")
 BOX_COLUMNS = (
-    "id", "store", "title", "price", "shipping", "pieces", "cost_per_piece", "bought_at", "spent", "listings",
-    "listed", "sold", "returned", "profit", "roi", "sell_through", "unsold_asking", "median_days",
+    "id", "store", "title", "price", "shipping", "pieces", "unsellable", "sellable", "unsellable_rate",
+    "cost_per_piece", "bought_at", "spent", "listings", "listed", "sold", "returned", "profit", "roi",
+    "sell_through", "unsold_asking", "median_days", "asp", "sold_premium",
 )
 AD_COLUMNS = (
     "marketplace", "start_date", "end_date", "spend", "clicks", "orders", "revenue", "roas", "cost_per_click", "notes",

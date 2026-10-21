@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.287 — 2026-10-20
+
+- Boxes you bought now grade each box and store like a supplier: average sale, how many sold for $35 or more, how much sold within 30, 60 and 90 days of buying, and profit per $100 spent.
+- Record how many pieces in a box weren't worth listing. Their cost is spread over the pieces that sell, so cost per piece and profit reflect what the sellable pieces really cost.
+- Analytics shows a new Sales by price section: how your sales split across under $20, $20–$34, $35–$59 and $60 and up.
+
 ## 0.1.286 — 2026-10-20
 
 - eBay and Poshmark no longer take lowball offers on their own. eBay accepts offers at $2 under your price, turns down anything more than $4 under, and sends the rest to you; Poshmark Smart Sell uses the same $4-under floor. Before, eBay auto-accepted 40% of the price and Poshmark went as low as $5.
