@@ -17,7 +17,9 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal, get_db
 from vendoo_studio.models.assistant import AssistantMessage
+from vendoo_studio.routes.attachments import AttachmentUpload, store_uploads
 from vendoo_studio.services import assistant_changes, business_assistant
+from vendoo_studio.services.chat_attachments import attach_to_last_user_turn
 from vendoo_studio.services.listing_provider import get_listing_provider
 from vendoo_studio.services.streaming import (
     GenerationRun,
@@ -52,7 +54,8 @@ UNREADABLE_CHANGES = (
 
 
 class AssistantQuestion(BaseModel):
-    text: str = Field(min_length=1, max_length=8000)
+    text: str = Field(default="", max_length=8000)
+    attachments: list[AttachmentUpload] = Field(default_factory=list)
 
 
 class BusinessNote(BaseModel):
@@ -88,17 +91,18 @@ def _propose(block: str) -> dict | None:
         db.close()
 
 
-def _prepare(question: str):
+def _prepare(question: str, attachments: list[dict] | None = None):
     """Read the shop and build the prompt, on a worker thread with its own session."""
     db = SessionLocal()
     try:
         shop = business_assistant.read_shop(db)
-        return business_assistant.build_messages(db, question, shop), shop
+        messages = business_assistant.build_messages(db, question, shop)
+        return attach_to_last_user_turn(messages, attachments), shop
     finally:
         db.close()
 
 
-async def _answer(run: GenerationRun, provider, question: str) -> None:
+async def _answer(run: GenerationRun, provider, question: str, attachments: list[dict] | None = None) -> None:
     """Answer in the background and publish each piece to whoever is following.
 
     The answer belongs to Studio, not to the connection that asked: a phone
@@ -109,7 +113,7 @@ async def _answer(run: GenerationRun, provider, question: str) -> None:
     shop = None
     try:
         run.publish(sse_event("status", "Reading your shop…"))
-        messages, shop = await await_with_pulses(run, asyncio.to_thread(_prepare, question), [])
+        messages, shop = await await_with_pulses(run, asyncio.to_thread(_prepare, question, attachments), [])
         async for item in iter_with_keepalives(business_assistant.answer(provider, messages, shop)):
             if item is None:
                 # A comment alone does not keep some mobile connections open; pulse repeats the status too.
@@ -157,17 +161,18 @@ async def _answer(run: GenerationRun, provider, question: str) -> None:
 @router.post("/messages")
 async def ask(body: AssistantQuestion, db: Session = Depends(get_db)):
     question = body.text.strip()
-    if not question:
+    if not question and not body.attachments:
         raise HTTPException(422, "Ask a question first.")
     if active_generation(ANSWER_RUN) is not None:
         raise HTTPException(409, "The assistant is still answering your last question.")
     provider = get_listing_provider()
     if provider is None:
         raise HTTPException(400, "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.")
-    business_assistant.add_message(db, "user", question)
+    attachments = store_uploads(body.attachments)
+    business_assistant.add_message(db, "user", question, attachments=attachments)
     # Release the request-scoped session before background work opens its own.
     db.close()
-    run = start_generation(ANSWER_RUN, functools.partial(_answer, provider=provider, question=question))
+    run = start_generation(ANSWER_RUN, functools.partial(_answer, provider=provider, question=question, attachments=attachments))
     await asyncio.sleep(0)
     return stream_generation(run)
 

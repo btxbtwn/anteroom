@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, UTC
 
-from sqlalchemy import Column, String, Text, DateTime, Integer, ForeignKey
+from sqlalchemy import JSON, Column, String, Text, DateTime, Integer, ForeignKey
 from sqlalchemy.orm import relationship
 
 from vendoo_studio.database import Base
@@ -45,6 +45,9 @@ class Message(Base):
     text = Column(Text, nullable=False)
     provider = Column(String, nullable=True)
     model = Column(String, nullable=True)
+    # Images the seller attached: [{id, name, mime_type, size_bytes, width, height}];
+    # the files live under the data folder, see services/chat_attachments.py.
+    attachments = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
     conversation = relationship("Conversation", back_populates="messages")

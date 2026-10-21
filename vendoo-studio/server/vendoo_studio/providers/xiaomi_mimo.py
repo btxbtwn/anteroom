@@ -194,6 +194,15 @@ WEB_SEARCH_TOOL = {
 }
 
 
+def _has_images(messages: list[dict]) -> bool:
+    return any(
+        isinstance(part, dict) and part.get("type") == "image_url"
+        for message in messages
+        if isinstance(message.get("content"), list)
+        for part in message["content"]
+    )
+
+
 class MiMoProvider:
     name = "xiaomi-mimo"
     vision_model = "mimo-v2.5"
@@ -304,6 +313,11 @@ class MiMoProvider:
         messages: list[dict],
         stream: bool = True,
     ):
+        if _has_images(messages):
+            # The seller attached images to this turn; the pro listing model cannot see them.
+            async for content in self.vision_chat(messages):
+                yield content
+            return
         if stream:
             yielded = False
             try:
