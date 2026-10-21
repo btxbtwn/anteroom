@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import sqlite3
 import time
@@ -35,8 +36,17 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.assistant import NEW_THREAD_TITLE, AssistantMessage, AssistantThread
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
-from vendoo_studio.services import assistant_changes, assistant_memory, business_context, sourcing_boxes
+from vendoo_studio.services import (
+    answer_links,
+    assistant_changes,
+    assistant_memory,
+    box_media,
+    business_context,
+    sourcing_boxes,
+)
 from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsItem
+
+log = logging.getLogger("vendoo_studio.business_assistant")
 
 # Earlier turns sent back with a question, so a follow-up can lean on them.
 HISTORY_MESSAGES = 20
@@ -74,6 +84,20 @@ INSTRUCTIONS = (
     "- When you name a specific listing, link it so the seller can open it: [its title](#listing-ID), "
     "with the id from its row. Use only ids that appear in the snapshot or in a lookup result.\n"
     "- Other ids only tie rows together. Name a box by its store and title, never by its id.\n"
+    "- Web links: never build, guess or complete a URL, not even from a box's title or store. Give only a `url` "
+    "Studio returned, exactly as it came, from the snapshot or a lookup this turn. When none came back for a box, "
+    "say so and tell the seller to open it from the Sourcing tab. Studio removes any other link from the answer.\n"
+    "- Box photos: when the seller asks about specific boxes or whether a box is worth buying, look at their "
+    "photos first with a view_box_media lookup (up to 5 boxes per answer, 8 images each). Then judge whether the "
+    "contents are worth buying and give each box a clear verdict, Buy, Maybe or Skip, with its reasons. Weigh: "
+    "brands visible on tags, condition issues (stains, holes, pilling, fading), the spread of sizes, season and "
+    "fabric weight, how much of the box is actually visible against the claimed piece count, and red flags "
+    "(stock or reused photos, a single photo for a large lot, contents that do not match the title). Set that "
+    "against the box's figures and the seller's own sales of that kind (`kind_*`, `categories`, "
+    "`sales_by_category`). Mark which observations come from the photos (\"from the listing photos\"); they are "
+    "what the store chose to show, not verified contents. Say which boxes you actually saw images for. A box "
+    "whose photos were not attached this turn, failed to load, or has none is \"not viewed\": never call it fine "
+    "or clean, and judge it on its figures alone, saying so. A video marked NOT viewed was not watched.\n"
     "- Sourcing: every box on the Sourcing tab is in the snapshot's box table, best first, and all of them, with "
     "the url and every figure, are in the `sourcing_boxes` lookup table. `recommended_lots` is the buy list Studio "
     "recommends; when it is empty, `empty_reason` says why. To rank boxes against what the seller sells, set each "
@@ -103,6 +127,12 @@ LOOKUP_INSTRUCTIONS = (
     "`buy_list` recommended or what kept it off the list, and `kind_*` the seller's own sales of its kind.\n"
     "`sales_by_category` is the Analytics category breakdown for each `period` (30d, 90d, 12m, all); `margin` is "
     "profit as a percent of revenue over the sales with a cost recorded (`profit_known`).\n"
+    "Every lookup answers: rows, \"0 rows matched\", or \"Lookup ... failed: <reason>\". Read that reply; when a "
+    "lookup failed or matched nothing, say so or try a corrected query, and never fill the gap with a guess.\n"
+    "Seeing a box's photos: reply with nothing but one ```view_box_media block listing the box ids from the "
+    "sourcing_boxes table (or the snapshot's box table), one per line. Studio fetches each box's product page now "
+    "and replies with its photos and frames from its video as images, saying which images belong to which box and "
+    "which boxes could not be viewed and why. It counts as one of the lookups.\n"
 )
 
 CHANGES_INSTRUCTIONS = (
@@ -138,7 +168,7 @@ CHANGES_INSTRUCTIONS = (
 _SALES_KEYS = ("range", "sell_through_rate", "sales", "previous", "periods", "marketplaces", "categories", "price_tiers", "ads")
 # One Sourcing-tab box, as the brief's table shows it.
 SOURCING_COLUMNS = (
-    "id", "store", "title", "contents", "price", "shipping", "pieces", "resale_per_piece", "projected_profit",
+    "id", "store", "title", "url", "contents", "price", "shipping", "pieces", "resale_per_piece", "projected_profit",
     "roi_percent", "roi_gap_points", "profit_shortfall", "on_its_own", "buy_list", "kind_sold_12m", "kind_average_price",
     "kind_margin", "kind_median_days",
 )
@@ -190,8 +220,15 @@ _RANGE_LABELS = {
     "12m": "last 12 calendar months",
     "all": "all time",
 }
-_LOOKUP_FENCE = "```sql"
-_LOOKUP_BLOCK = re.compile(r"```sql\s*\n(.*?)(?:```|\Z)", re.DOTALL | re.IGNORECASE)
+# A lookup is a fenced block in the reply: ```sql (or ```sqlite) holding one SELECT, or
+# ```view_box_media holding box ids. A bare ``` fence opening the reply with a SELECT counts too.
+_LOOKUP_LANGS = {"sql": "sql", "sqlite": "sql", "view_box_media": "media"}
+_LOOKUP_FENCES = ("```sql", "```view_box_media")
+_FENCED = re.compile(r"```[ \t]*([A-Za-z_]*)(.*?)(?:```|\Z)", re.DOTALL)
+_SELECTISH = re.compile(r"^(?:--|select\b|with\b)", re.IGNORECASE)
+_FROM_TABLE = re.compile(r"\bfrom\s+([A-Za-z_]+)", re.IGNORECASE)
+_WHERE = re.compile(r"\bwhere\b(.*?)(?:\bgroup\s+by\b|\border\s+by\b|\blimit\b|\bhaving\b|;|\Z)",
+                    re.IGNORECASE | re.DOTALL)
 _READ_ACTIONS = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
 
 
@@ -463,18 +500,34 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     return [{"role": "system", "content": system}, *earlier]
 
 
+@dataclass
+class Lookup:
+    """A lookup the model asked for: where its block sits in the reply, and what it holds."""
+
+    kind: str  # "sql" or "media"
+    body: str
+    start: int
+    end: int
+
+
 async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tuple[str, str]]:
     """Stream the answer as ``(kind, text)``: ``text``, ``thinking``, ``status``, ``error`` or ``changes``.
 
-    A reply that is a lookup is run and fed back instead of shown, until the
-    model answers or runs out of lookups. A memory block and a changes block
-    the answer ends with are kept out of the text and handed over whole, last.
+    A lookup block in a reply is run and fed back instead of shown, until the
+    model answers or runs out of lookups; words written before the block are
+    kept. Every lookup comes back to the model with its rows or with a reason,
+    never with nothing. A memory block and a changes block the answer ends with
+    are kept out of the text and handed over whole, last. Every web address in
+    the text is checked against the ones Studio gave the model this turn.
     """
     messages = list(messages)
+    links = answer_links.LinkGuard(answer_links.message_texts(messages))
+    viewed: list[str] = []
+    written = False
     for used in range(MAX_LOOKUPS + 1):
         reply = ""
-        shown = 0
-        showing = False
+        released = 0
+        lead = "\n\n" if written else ""
         async for item in provider.chat(messages, stream=True):
             kind, text = unpack_stream_item(item)
             if not text:
@@ -483,68 +536,157 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
                 yield "thinking", text
                 continue
             reply += text
-            if not showing:
-                # Hold the opening until it is clear whether this is a lookup or the answer.
-                opening = reply.lstrip().lower()
-                if len(opening) < len(_LOOKUP_FENCE) or opening.startswith(_LOOKUP_FENCE):
-                    continue
-                showing = True
-            visible = assistant_memory.visible_text(reply)
-            if len(visible) > shown:
-                yield "text", visible[shown:]
-                shown = len(visible)
-        sql = None if showing else lookup_sql(reply)
-        if sql is None:
+            visible = _visible(reply)
+            end = answer_links.safe_end(visible, released)
+            if end > released:
+                piece = links.clean(visible[released:end])
+                released = end
+                if piece:
+                    yield "text", lead + piece
+                    lead, written = "", True
+        lookup = find_lookup(reply)
+        if lookup is None:
             words, memory, changes = assistant_memory.peel(reply)
-            if memory is not None and not words.strip():
+            if memory is not None and not words.strip() and not written:
                 words = "I'll remember that."
-            if len(words) > shown:
-                yield "text", words[shown:]
+            rest = links.clean(words[released:]) if len(words) > released else ""
+            if rest.strip():
+                yield "text", lead + rest
             if memory is not None:
                 yield "memory", memory
             if changes is not None:
                 yield "changes", changes
             return
+        before = assistant_memory.visible_text(reply[:lookup.start]).rstrip()
+        if len(before) > released:
+            piece = links.clean(before[released:])
+            if piece.strip():
+                yield "text", lead + piece
+                written = True
         if used == MAX_LOOKUPS:
             yield "error", "The assistant kept looking things up without answering. Ask again, or ask something narrower."
             return
-        yield "status", lookup_label(sql)
-        result = await asyncio.to_thread(run_lookup, shop.lookups, sql)
+        yield "status", lookup_label(lookup)
+        result = await run_any_lookup(lookup, shop, viewed)
+        texts = [result] if isinstance(result, str) else [part["text"] for part in result if part.get("type") == "text"]
+        links.allow(texts)
         if used == MAX_LOOKUPS - 1:
-            result += "\n\nThat was the last lookup for this question. Answer now with what you have."
-        messages += [{"role": "assistant", "content": reply}, {"role": "user", "content": result}]
+            last = "\n\nThat was the last lookup for this question. Answer now with what you have."
+            if isinstance(result, str):
+                result += last
+            else:
+                result[0] = {"type": "text", "text": result[0]["text"] + last}
+        messages += [{"role": "assistant", "content": reply[:lookup.end]}, {"role": "user", "content": result}]
+
+
+def _visible(reply: str) -> str:
+    """What of a reply still being written the seller may read: never a lookup block or the start of one."""
+    shown = assistant_memory.visible_text(reply)
+    opening = shown.lstrip()
+    if "```".startswith(opening):
+        return ""
+    if opening.startswith("```"):
+        tag = re.match(r"```[ \t]*([A-Za-z_]*)", opening)
+        language = tag.group(1).lower()
+        settled = len(opening) > tag.end()
+        # A reply that opens with a bare fence or a lookup is held whole until it ends.
+        if not settled or not language or language in _LOOKUP_LANGS:
+            return ""
+    lowered = shown.lower()
+    at = min((found for fence in _LOOKUP_FENCES if (found := lowered.find(fence)) >= 0), default=len(shown))
+    if at < len(shown):
+        return shown[:at]
+    hold = 0
+    for fence in _LOOKUP_FENCES:
+        for size in range(min(len(fence) - 1, len(shown)), 0, -1):
+            if fence.startswith(lowered[-size:]):
+                hold = max(hold, size)
+                break
+    return shown[:-hold] if hold else shown
+
+
+def find_lookup(reply: str) -> Lookup | None:
+    """The first lookup block in a reply, wherever it sits, or None when the reply is an answer."""
+    opening = len(reply) - len(reply.lstrip())
+    for match in _FENCED.finditer(reply):
+        language = match.group(1).lower()
+        body = match.group(2).strip()
+        kind = _LOOKUP_LANGS.get(language)
+        if kind is None and not language and match.start() == opening and _SELECTISH.match(body):
+            kind = "sql"
+        if kind is not None:
+            return Lookup(kind=kind, body=body, start=match.start(), end=match.end())
+    return None
 
 
 def lookup_sql(reply: str) -> str | None:
-    """The query a reply asks for, when the reply is a lookup and nothing else."""
-    if not reply.lstrip().lower().startswith(_LOOKUP_FENCE):
-        return None
-    match = _LOOKUP_BLOCK.search(reply)
-    sql = match.group(1).strip() if match else ""
-    return sql or None
+    """The query a reply asks for, or None when it asks for none (an empty block is still a request)."""
+    lookup = find_lookup(reply)
+    return lookup.body if lookup is not None and lookup.kind == "sql" else None
 
 
-def lookup_label(sql: str) -> str:
+def lookup_label(lookup: Lookup | str) -> str:
     """What the seller sees while a lookup runs: the model's own first-line comment."""
+    if isinstance(lookup, Lookup) and lookup.kind == "media":
+        return "Looking at the box photos…"
+    sql = lookup.body if isinstance(lookup, Lookup) else lookup
     first = sql.lstrip().splitlines()[0].strip() if sql.strip() else ""
     words = first[2:].strip(" .") if first.startswith("--") else ""
     return f"Looking up {words[:80]}…" if words else "Looking up more detail…"
 
 
+async def run_any_lookup(lookup: Lookup, shop: Shop, viewed: list[str]) -> str | list[dict[str, Any]]:
+    """Run one lookup and return what goes back to the model; a failure comes back as its reason."""
+    name = "view_box_media" if lookup.kind == "media" else _lookup_name(lookup.body)
+    try:
+        if lookup.kind == "media":
+            return await view_box_media(shop, lookup.body, viewed)
+        return await asyncio.to_thread(run_lookup, shop.lookups, lookup.body)
+    except Exception as exc:  # noqa: BLE001 - the model is told, so it never answers from nothing
+        log.exception("assistant lookup failed")
+        return f"Lookup {name} failed: {type(exc).__name__}: {str(exc).strip() or 'no detail'}"
+
+
+def _lookup_name(sql: str) -> str:
+    match = _FROM_TABLE.search(re.sub(r"--[^\n]*", "", sql))
+    return match.group(1) if match else "sql"
+
+
+def _matched(sql: str) -> str:
+    where = _WHERE.search(re.sub(r"--[^\n]*", "", sql))
+    clause = " ".join(where.group(1).split()) if where else ""
+    return f"WHERE {clause[:200]}" if clause else "the query"
+
+
 def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
-    """Run one SELECT over the in-memory copy and describe the result, or the error, as text."""
+    """Run one SELECT over the in-memory copy and describe the result, or why there is none, as text."""
+    sql = (sql or "").strip()
+    name = _lookup_name(sql)
+    if not re.sub(r"--[^\n]*", "", sql).strip():
+        return f"Lookup {name} failed: the sql block was empty. Put one SELECT in it."
     deadline = time.monotonic() + LOOKUP_SECONDS
     lookups.set_progress_handler(lambda: time.monotonic() > deadline, 10_000)
     try:
         cursor = lookups.execute(sql)
         if cursor.description is None:
-            return "Lookup failed: only a single SELECT can be run."
+            return f"Lookup {name} failed: only a single SELECT can be run."
         header = " | ".join(column[0] for column in cursor.description)
         rows = cursor.fetchmany(LOOKUP_ROWS + 1)
     except sqlite3.Error as exc:
-        return f"Lookup failed: {exc}"
+        reason = str(exc).strip() or type(exc).__name__
+        if time.monotonic() > deadline:
+            reason = f"it ran past the {LOOKUP_SECONDS:g}-second limit. Narrow or aggregate the query"
+        elif "no such table" in reason:
+            reason += f". The tables are: {', '.join(TABLES)}"
+        elif "not authorized" in reason or "prohibited" in reason:
+            reason += ". Only a single SELECT over the tables listed can be run"
+        return f"Lookup {name} failed: {reason}."
+    except Exception as exc:  # noqa: BLE001 - a bad argument is reported like any other failure
+        return f"Lookup {name} failed: {type(exc).__name__}: {str(exc).strip() or 'no detail'}."
     finally:
         lookups.set_progress_handler(None, 0)
+    if not rows:
+        return f"Lookup result: 0 rows matched {_matched(sql)}.\n{header}"
     lines: list[str] = []
     used = 0
     for row in rows[:LOOKUP_ROWS]:
@@ -557,6 +699,62 @@ def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
     if len(lines) < len(rows):
         count = f"the first {len(lines)} rows; there are more, so narrow or aggregate the query to see the rest"
     return "\n".join([f"Lookup result ({count}):", header, *lines])
+
+
+def _box_ids(body: str) -> list[str]:
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, list):
+        items = [str(item) for item in parsed]
+    elif isinstance(parsed, (str, int)):
+        items = [str(parsed)]
+    else:
+        items = re.split(r"[\n,]+", body)
+    ids = [item.strip().lstrip("-*• ").strip().strip("\"'`").strip() for item in items]
+    return list(dict.fromkeys(item for item in ids if item))
+
+
+def _sourcing_rows(lookups: sqlite3.Connection) -> list[dict[str, Any]]:
+    cursor = lookups.execute("SELECT id, store, title, url FROM sourcing_boxes")
+    return [dict(zip(("id", "store", "title", "url"), row, strict=True)) for row in cursor.fetchall()]
+
+
+async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list[dict[str, Any]]:
+    """The photos and video frames of the boxes asked for, as image parts the model can see.
+
+    Up to ``box_media.MAX_BOXES_PER_ANSWER`` boxes in one answer, however many
+    lookups ask; ``viewed`` carries the ones already attached.
+    """
+    ids = _box_ids(body)
+    if not ids:
+        return ("Lookup view_box_media failed: no box ids were given. Put the id of each box from the "
+                "sourcing_boxes table on its own line.")
+    rows = await asyncio.to_thread(_sourcing_rows, shop.lookups)
+    by_id = {row["id"]: row for row in rows}
+    by_title: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_title.setdefault(str(row["title"]).strip().lower(), []).append(row)
+    chosen: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    for ident in ids:
+        row = by_id.get(ident)
+        if row is None and len(by_title.get(ident.lower(), [])) == 1:
+            row = by_title[ident.lower()][0]
+        if row is None:
+            skipped.append(f"{ident}: NOT VIEWED — no box with that id is on the Sourcing tab.")
+        elif row["id"] in viewed or any(row["id"] == other["id"] for other in chosen):
+            skipped.append(f"Box {row['id']} ({row['title']}): its images are already attached in this answer.")
+        elif len(viewed) + len(chosen) >= box_media.MAX_BOXES_PER_ANSWER:
+            skipped.append(f"Box {row['id']} ({row['title']}, {row['store']}): NOT VIEWED — at most "
+                           f"{box_media.MAX_BOXES_PER_ANSWER} boxes' photos can be viewed in one answer.")
+        else:
+            chosen.append(row)
+    views = await box_media.view_boxes(chosen) if chosen else []
+    viewed.extend(view.box_id for view in views if view.viewed)
+    text, parts = box_media.describe(views, skipped=skipped)
+    return [{"type": "text", "text": text}, *parts] if parts else text
 
 
 def _lookup_database(tables: dict[str, list[dict[str, Any]]]) -> sqlite3.Connection:
@@ -815,7 +1013,8 @@ def _sourcing_box_rows(tab_boxes: list[dict[str, Any]]) -> str:
         lines.append(line)
         used += len(line) + 1
     note = (
-        "Recommended boxes first, then each supplier's top picks, then the rest by ROI. `contents` is the kind of "
+        "Recommended boxes first, then each supplier's top picks, then the rest by ROI. `url` is the box's product "
+        "page as the store gave it; it is the only link to give the seller for that box. `contents` is the kind of "
         "piece, `shipping` the estimate to the seller's ZIP, `roi_percent` and `projected_profit` at the settings the "
         "check used; `roi_gap_points` and `profit_shortfall` are how far a box misses the min ROI. `on_its_own` is how it "
         "fares bought on its own and `buy_list` what kept it off the list. `kind_*` is the seller's own sales of that "
@@ -823,7 +1022,8 @@ def _sourcing_box_rows(tab_boxes: list[dict[str, Any]]) -> str:
     )
     left_out = len(tab_boxes) - len(lines)
     if left_out:
-        note += f" {left_out} more boxes did not fit; the sourcing_boxes lookup has every box, with its url."
+        note += (f" {left_out} of the {len(tab_boxes)} boxes did not fit and are omitted here, the lowest-ranked ones; "
+                 "the sourcing_boxes lookup has every box, with its url.")
     return "\n".join([title, note, " | ".join(SOURCING_COLUMNS), *lines])
 
 

@@ -2,6 +2,7 @@
 import asyncio
 import functools
 import json
+import re
 from datetime import UTC, date, datetime
 
 import pytest
@@ -18,6 +19,7 @@ from vendoo_studio.routes import assistant as assistant_route
 from vendoo_studio.services import assistant_changes, assistant_memory, boxes, business_assistant
 
 NOW = datetime(2026, 10, 1, tzinfo=UTC)
+FAILED = re.compile(r"Lookup \w+ failed: ")
 
 
 def add_listing(db, title, listing, notes=None, box_id=None):
@@ -150,7 +152,7 @@ def test_a_lookup_reads_the_copy_and_nothing_else(workspace, tmp_path):
         "SELECT 1; DELETE FROM listings",
         "SELECT nope FROM listings",
     ):
-        assert business_assistant.run_lookup(lookups, refused).startswith("Lookup failed:"), refused
+        assert FAILED.match(business_assistant.run_lookup(lookups, refused)), refused
     assert not (tmp_path / "real.db").exists()
     assert f"{jeans.id}" in business_assistant.run_lookup(lookups, "SELECT id FROM listings")
 
@@ -167,7 +169,7 @@ def test_a_runaway_lookup_is_stopped(workspace, monkeypatch):
     db, _client = workspace
     monkeypatch.setattr(business_assistant, "LOOKUP_SECONDS", 0.05)
     runaway = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n"
-    assert business_assistant.run_lookup(business_assistant.read_shop(db, now=NOW).lookups, runaway).startswith("Lookup failed:")
+    assert "ran past the" in business_assistant.run_lookup(business_assistant.read_shop(db, now=NOW).lookups, runaway)
 
 
 def test_a_question_is_sent_with_the_brief_and_earlier_turns(workspace):
@@ -186,13 +188,23 @@ def test_a_question_is_sent_with_the_brief_and_earlier_turns(workspace):
     ]
 
 
-def test_a_reply_is_a_lookup_only_when_it_is_nothing_else():
-    assert business_assistant.lookup_sql("  ```sql\n-- sales by size\nSELECT 1\n```") == "-- sales by size\nSELECT 1"
-    assert business_assistant.lookup_sql("```SQL\nSELECT 2") == "SELECT 2"
-    assert business_assistant.lookup_sql("Here is how:\n```sql\nSELECT 1\n```") is None
-    assert business_assistant.lookup_sql("```sql\n```") is None
+def test_every_way_a_model_writes_a_lookup_is_read_as_one():
+    sql = business_assistant.lookup_sql
+    assert sql("  ```sql\n-- sales by size\nSELECT 1\n```") == "-- sales by size\nSELECT 1"
+    assert sql("```SQL\nSELECT 2") == "SELECT 2"
+    # Words before the block, the query on the fence line, another language tag, or no tag at all.
+    assert sql("Let me check.\n```sql\nSELECT 1\n```") == "SELECT 1"
+    assert sql("```sql SELECT 3```") == "SELECT 3"
+    assert sql("```sqlite\nSELECT 4\n```") == "SELECT 4"
+    assert sql("```\nSELECT 5\n```") == "SELECT 5"
+    # An empty block is still a lookup, so it gets an answer instead of being shown.
+    assert sql("```sql\n```") == ""
+    assert sql("No lookup here.") is None and sql("```python\nprint(1)\n```") is None
+    media = business_assistant.find_lookup("```view_box_media\nraghouse:1\n```")
+    assert (media.kind, media.body) == ("media", "raghouse:1")
     assert business_assistant.lookup_label("-- sales by size.\nSELECT 1") == "Looking up sales by size…"
     assert business_assistant.lookup_label("SELECT 1") == "Looking up more detail…"
+    assert business_assistant.lookup_label(media) == "Looking at the box photos…"
 
 
 class Provider:
@@ -245,6 +257,61 @@ def test_lookups_are_capped(workspace, monkeypatch):
     assert len(provider.calls) == business_assistant.MAX_LOOKUPS + 1
     assert provider.calls[-1][-1]["content"].endswith("Answer now with what you have.")
     assert [row["text"] for row in client.get("/api/assistant/messages").json()] == ["Loop forever"]
+
+
+FENCE = "`" * 3
+
+
+def ask_through(client, monkeypatch, *turns):
+    provider = Provider(*turns)
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: provider)
+    return provider, client.post("/api/assistant/messages", json={"text": "Which sizes sell?"}).text
+
+
+@pytest.mark.parametrize(("lookup", "told"), [
+    (f"{FENCE}sql\n{FENCE}", "Lookup sql failed: the sql block was empty. Put one SELECT in it."),
+    (f"{FENCE}sql\n-- just a comment\n{FENCE}", "Lookup sql failed: the sql block was empty."),
+    (f"{FENCE}sql\nSELECT * FROM sourcing_box\n{FENCE}",
+     "Lookup sourcing_box failed: no such table: sourcing_box. The tables are: listings, price_changes"),
+    (f"{FENCE}sql\nSELECT title FROM listings WHERE size = '99'\n{FENCE}",
+     "Lookup result: 0 rows matched WHERE size = '99'.\ntitle"),
+    (f"{FENCE}sql\nSELECT nope FROM listings\n{FENCE}", "Lookup listings failed: no such column: nope."),
+    (f"{FENCE}sql\nDELETE FROM listings\n{FENCE}", "Lookup listings failed: not authorized."),
+    (f"{FENCE}sql\nSELECT title FROM listings WHERE title = 'x\x00'\n{FENCE}", "Lookup listings failed: the query contains a null character."),
+])
+def test_every_lookup_answers_the_model_with_rows_or_a_reason(workspace, monkeypatch, lookup, told):
+    db, client = workspace
+    seed(db)
+    provider, response = ask_through(client, monkeypatch, (lookup,), ("Nothing matched.",))
+    assert provider.calls[1][-1]["content"].startswith(told), provider.calls[1][-1]["content"]
+    assert "SELECT" not in response and "Nothing matched." in response
+
+
+def test_a_lookup_that_raises_still_answers_the_model(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+
+    def broken(*_args):
+        raise MemoryError("out of room")
+    monkeypatch.setattr(business_assistant, "run_lookup", broken)
+    provider, _ = ask_through(client, monkeypatch, (f"{FENCE}sql\nSELECT 1 FROM listings\n{FENCE}",), ("Sorry.",))
+    assert provider.calls[1][-1]["content"] == "Lookup listings failed: MemoryError: out of room"
+
+
+def test_a_lookup_after_words_or_on_the_fence_line_runs_and_is_never_shown(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    provider, response = ask_through(
+        client, monkeypatch,
+        ("Let me check that. ", f"{FENCE}sql SELECT size FROM listings WHERE status = 'sold'{FENCE}",
+         " It is 34, probably."),
+        ("Size 34 sold.",),
+    )
+    assert provider.calls[1][-1]["content"] == "Lookup result (1 rows):\nsize\n34"
+    # The words before the block stay; the guess after it is dropped with the block.
+    assert "data: Let me check that. \n\n" in response and "probably" not in response and "SELECT" not in response
+    assert [row["text"] for row in client.get("/api/assistant/messages").json()][-1] == (
+        "Let me check that. \n\nSize 34 sold.")
 
 
 def test_a_short_answer_is_not_held_back(workspace, monkeypatch):

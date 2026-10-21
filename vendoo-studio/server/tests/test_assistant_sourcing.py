@@ -1,4 +1,5 @@
 """The business assistant sees every box the Sourcing tab shows, with the tab's own figures."""
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -10,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.database import Base, load_models
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.routes.sourcing import _response
-from vendoo_studio.services import box_scout, business_assistant, sourcing_boxes
+from vendoo_studio.services import box_media, box_scout, business_assistant, sourcing_boxes
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 PREFS = {"budget": 250.0, "min_roi": 1.0, "sell_through": 0.5, "fees": 0.2, "cost_per_piece": 2.0}
@@ -249,3 +250,127 @@ def test_recent_sales_by_category_and_by_kind_of_box(db):
             kinds["raghouse:1"]["kind_median_days"]) == (3, 25.0, 10)
     assert (kinds["tvf:2"]["kind_sold_12m"], kinds["tvf:2"]["kind_average_price"]) == (1, 50.0)
     assert (kinds["papercrane:3"]["kind_sold_12m"], kinds["papercrane:3"]["kind_average_price"]) == (0, None)
+
+
+def test_the_box_table_gives_each_box_its_url_and_counts_what_it_leaves_out(db, monkeypatch):
+    write_snapshot(boxes())
+    brief = business_assistant.read_shop(db, now=NOW).brief
+    table = brief.split("--- Boxes on the Sourcing tab (3) ---\n")[1].split("\n\n")[0]
+    assert "\nid | store | title | url | contents |" in table
+    assert "raghouse:1 | Raghouse | Graphic Tees 60 pcs | https://raghouse.example/1 |" in table
+    assert "did not fit" not in table
+
+    # Best first: a smaller budget keeps the recommended box and says how many were omitted.
+    first_row = next(line for line in table.splitlines() if line.startswith("raghouse:1 |"))
+    monkeypatch.setattr(business_assistant, "SOURCING_ROWS_BUDGET", len(first_row) + 1)
+    table = business_assistant.read_shop(db, now=NOW).brief.split("--- Boxes on the Sourcing tab (3) ---\n")[1]
+    assert first_row in table and "tvf:2 |" not in table.split("\n\n")[0]
+    assert "2 of the 3 boxes did not fit and are omitted here" in table
+
+
+class ScriptedProvider:
+    def __init__(self, *turns):
+        self.turns, self.calls = list(turns), []
+
+    async def chat(self, messages, stream=True):
+        self.calls.append(list(messages))
+        for piece in self.turns[min(len(self.calls), len(self.turns)) - 1]:
+            yield piece
+
+
+def run_answer(provider, shop, question="Is the tee box worth it?", system=None):
+    async def collect():
+        return [item async for item in business_assistant.answer(
+            provider, [{"role": "system", "content": shop.brief if system is None else system},
+                       {"role": "user", "content": question}], shop)]
+    return asyncio.run(collect())
+
+
+def text_of(items):
+    return "".join(text for kind, text in items if kind == "text")
+
+
+def fake_views(seen):
+    async def view_boxes(boxes, **_kwargs):
+        seen.append([box["id"] for box in boxes])
+        return [box_media.BoxView(box_id=box["id"], title=box["title"], store=box["store"], url=box["url"],
+                                  images=[("photo 1 of 1", "data:image/jpeg;base64,AAAA")], photos_on_page=1)
+                for box in boxes]
+    return view_boxes
+
+
+FENCE = "`" * 3
+
+
+def media_block(*ids):
+    return f"{FENCE}view_box_media\n" + "\n".join(ids) + f"\n{FENCE}"
+
+
+def test_asking_about_a_box_attaches_its_photos_as_images(db, monkeypatch):
+    write_snapshot(boxes())
+    shop = business_assistant.read_shop(db, now=NOW)
+    seen = []
+    monkeypatch.setattr(box_media, "view_boxes", fake_views(seen))
+    provider = ScriptedProvider((media_block("raghouse:1", "nope:404"),), ("Buy: tees look clean.",))
+    items = run_answer(provider, shop)
+
+    assert ("status", "Looking at the box photos…") in items
+    assert seen == [["raghouse:1"]]
+    sent = provider.calls[1][-1]
+    assert sent["role"] == "user" and sent["content"][1] == {
+        "type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAAA"}}
+    told = sent["content"][0]["text"]
+    assert "Box raghouse:1 (Graphic Tees 60 pcs, Raghouse): VIEWED — images 1-1" in told
+    assert "nope:404: NOT VIEWED — no box with that id is on the Sourcing tab." in told
+    assert text_of(items) == "Buy: tees look clean."
+
+
+def test_no_more_than_five_boxes_are_viewed_in_one_answer(db, monkeypatch):
+    lots = [_box("raghouse", n, f"Graphic Tees {n} pcs", 30.0, 20.0, 60, "good", 12.0) for n in range(1, 8)]
+    write_snapshot(lots)
+    shop = business_assistant.read_shop(db, now=NOW)
+    seen = []
+    monkeypatch.setattr(box_media, "view_boxes", fake_views(seen))
+    provider = ScriptedProvider(
+        (media_block("raghouse:1", "raghouse:2", "raghouse:3"),),
+        (media_block("raghouse:1", "raghouse:4", "raghouse:5", "raghouse:6"),),
+        ("Done.",),
+    )
+    run_answer(provider, shop)
+    assert seen == [["raghouse:1", "raghouse:2", "raghouse:3"], ["raghouse:4", "raghouse:5"]]
+    told = provider.calls[2][-1]["content"][0]["text"]
+    assert "Box raghouse:1 (Graphic Tees 1 pcs): its images are already attached in this answer." in told
+    assert "Box raghouse:6 (Graphic Tees 6 pcs, Raghouse): NOT VIEWED — at most 5 boxes' photos" in told
+
+
+def test_a_media_lookup_with_nothing_to_view_says_so(db, monkeypatch):
+    write_snapshot(boxes())
+    shop = business_assistant.read_shop(db, now=NOW)
+    monkeypatch.setattr(box_media, "view_boxes", fake_views([]))
+    provider = ScriptedProvider((media_block(),), (media_block("not-a-box"),), ("Sorry.",))
+    run_answer(provider, shop)
+    assert provider.calls[1][-1]["content"].startswith("Lookup view_box_media failed: no box ids were given.")
+    assert "not-a-box: NOT VIEWED — no box with that id is on the Sourcing tab." in provider.calls[2][-1]["content"]
+
+
+def test_a_box_url_studio_gave_stays_and_a_guessed_one_is_removed(db):
+    write_snapshot(boxes())
+    shop = business_assistant.read_shop(db, now=NOW)
+    provider = ScriptedProvider((
+        "Buy [Graphic Tees](https://raghouse.ex", "ample/1). Skip https://raghouse.com/products/graphic-",
+        "tees-60-pcs, or see www.made-up.example/box.",
+    ),)
+    assert text_of(run_answer(provider, shop)) == (
+        "Buy [Graphic Tees](https://raghouse.example/1). Skip (link removed: Studio did not return that address), "
+        "or see (link removed: Studio did not return that address)."
+    )
+
+
+def test_a_link_from_a_lookup_this_turn_is_kept(db):
+    write_snapshot(boxes())
+    shop = business_assistant.read_shop(db, now=NOW)
+    monkeypatch_sql = f"{FENCE}sql\nSELECT url FROM sourcing_boxes WHERE id = 'papercrane:3'\n{FENCE}"
+    answer = ("[Lot](https://papercrane.example/3/)",)
+    # Told nothing but the lookup's result, the link it returned is still the seller's to follow.
+    assert text_of(run_answer(ScriptedProvider((monkeypatch_sql,), answer), shop, system="")) == answer[0]
+    assert "link removed" in text_of(run_answer(ScriptedProvider(answer), shop, system=""))
