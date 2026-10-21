@@ -10,6 +10,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 - The listing panel no longer has a Fields tab. Input and Forms sit next to Open listing and Regenerate, and marketplace fields are edited on Forms. Hidden fields are still restored in Settings.
 - Studio opens on the business assistant. Each of its conversations is a thread in the sidebar, separate from inventory.
+- The model menu shows one current model from each family instead of every model the provider offers. The full list is still in Settings → Providers.
 
 ## 0.1.293 — 2026-10-20
 

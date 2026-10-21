@@ -76,6 +76,55 @@ export function modelLabel(provider: ListingProviderId, value: string): string {
   return value;
 }
 
+/** The composer offers one current model from each of these, newest first within a family. */
+const CURSOR_PICKER_FAMILIES = ["auto", "composer", "grok", "claude-sonnet", "claude-opus", "gpt"] as const;
+
+function cursorPickerFamily(id: string): (typeof CURSOR_PICKER_FAMILIES)[number] | null {
+  if (id === "auto") return "auto";
+  // Fast, mini and coding variants stay available in Settings, not this menu.
+  if (/fast|mini|nano|flash|codex|haiku/i.test(id)) return null;
+  if (id.startsWith("composer")) return "composer";
+  if (id.startsWith("grok")) return "grok";
+  if (id.startsWith("claude-sonnet")) return "claude-sonnet";
+  if (id.startsWith("claude-opus")) return "claude-opus";
+  if (id.startsWith("gpt-")) return "gpt";
+  return null;
+}
+
+function newerModelId(left: string, right: string): string {
+  const leftParts = (left.match(/\d+/g) ?? []).map(Number);
+  const rightParts = (right.match(/\d+/g) ?? []).map(Number);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (diff !== 0) return diff > 0 ? left : right;
+  }
+  return left;
+}
+
+/**
+ * The Cursor catalog is every model the account can call. The composer shows
+ * one current model per family, plus whatever is already selected.
+ */
+export function cursorPickerModels(models: readonly ModelOption[], selected: string): ModelOption[] {
+  const best = new Map<string, ModelOption>();
+  for (const model of models) {
+    const family = cursorPickerFamily(model.value);
+    if (!family) continue;
+    const current = best.get(family);
+    if (!current || newerModelId(model.value, current.value) === model.value) best.set(family, model);
+  }
+  const picked = CURSOR_PICKER_FAMILIES.flatMap((family) => {
+    const model = best.get(family);
+    return model ? [model] : [];
+  });
+  if (selected && !picked.some((model) => model.value === selected)) {
+    const saved = models.find((model) => model.value === selected);
+    if (saved) picked.push(saved);
+  }
+  return picked;
+}
+
 export function effortOptions(values: readonly string[], withDefault: boolean): ModelOption[] {
   return [
     ...(withDefault ? [{ value: "default", label: EFFORT_LABELS.default }] : []),
@@ -123,7 +172,10 @@ export function useComposerModel() {
           id,
           label: PROVIDER_LABELS[id],
           ready: cursorReady,
-          models: (cursor.data?.models ?? []).map((value) => ({ value, label: modelLabel("cursor", value) })),
+          models: cursorPickerModels(
+            (cursor.data?.models ?? []).map((value) => ({ value, label: modelLabel("cursor", value) })),
+            cursor.data?.listing_model ?? "",
+          ),
           model: cursor.data?.listing_model ?? "",
           loading: cursor.isLoading,
           error: cursor.data?.error || (cursor.error as Error | null)?.message || null,
