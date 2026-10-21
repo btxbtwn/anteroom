@@ -1,13 +1,13 @@
 import { Fragment, useEffect, useRef, useState, type MouseEvent } from "react";
 import { CircleAlertIcon } from "lucide-react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { AssistantRefused, type AssistantMessage } from "../api/assistant";
+import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage } from "../api/assistant";
 import type { ChatAttachment, ChatAttachmentUpload } from "../api/types";
-import { confirmDialog } from "../ui/confirmDialog";
 import { addToast } from "../ui/toast";
 import { AssistantChangesCard } from "./AssistantChangesCard";
 import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
+import { newQueuedChatMessage, type QueuedChatMessage } from "./chatMessageQueue";
 import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { stableStreamingText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
@@ -16,13 +16,13 @@ import { ChatComposer } from "./chat/ChatComposer";
 import { foldSseEvent } from "./chat/chatStream";
 import { ChatTranscript } from "./chat/ChatTranscript";
 import { FoldedTurnRow, LiveWork } from "./chat/LiveWork";
+import { QueuedMessages } from "./chat/QueuedMessages";
 import { AssistantMessageRow, UserMessageRow } from "./chat/TimelineRows";
 import { useChatScroll } from "./chat/useChatScroll";
 import { placeTurnFolds, turnHasWork, type FoldedTurn } from "./chat/workLogModel";
 import { Alert, AlertAction, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
-import { Textarea } from "./ui/textarea";
 
 /** Questions that show what the assistant can see, offered before the first one is asked. */
 export const ASSISTANT_STARTERS = [
@@ -34,14 +34,11 @@ export const ASSISTANT_STARTERS = [
   "Find listings whose size differs between forms and fix them.",
 ];
 
-const NOTE_KEY = ["assistant", "note"];
-const MEMORY_KEY = ["assistant", "memory"];
 const THREADS_KEY = ["assistant", "threads"];
 
 function messagesKey(threadId: string) {
   return ["assistant", "messages", threadId] as const;
 }
-const NOTE_MAX = 4000;
 /** How often, and how many times, a dropped connection is retried before saying so. */
 const RECONNECT_MS = 1500;
 const RECONNECT_TRIES = 8;
@@ -72,6 +69,23 @@ interface Props {
   threadId?: string | null;
   /** A question started a conversation; the sidebar should select it. */
   onThreadReady?: (id: string) => void;
+}
+
+/** A follow-up asked while an answer is still being written, with the images sent along. */
+export interface QueuedQuestion extends QueuedChatMessage {
+  uploads: ChatAttachmentUpload[];
+  shown: ChatAttachment[];
+  /** The conversation it was asked in; null on a home screen that has not started one. */
+  threadId: string | null;
+}
+
+/**
+ * What asking does right now: send it, or hold it until the answer being
+ * written ends. Asking while busy used to do nothing at all, and the
+ * follow-up sat in the composer as if Studio had hung.
+ */
+export function askNow(busy: boolean, queued: readonly QueuedQuestion[]): "send" | "queue" {
+  return busy || queued.length ? "queue" : "send";
 }
 
 export interface LiveTurn {
@@ -110,7 +124,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [folds, setFolds] = useState<FoldedTurn[]>(() => (threadId ? foldsFor(threadId) : []));
   const [error, setError] = useState("");
-  const [noteOpen, setNoteOpen] = useState(false);
+  const [queued, setQueued] = useState<QueuedQuestion[]>([]);
   const controller = useRef<AbortController | null>(null);
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
   const images = useComposerImages();
@@ -135,15 +149,22 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
    * whichever is already being written. Studio keeps writing when this
    * connection drops, so a drop is retried, not reported.
    */
-  const follow = async (question: string | null, uploads: ChatAttachmentUpload[] = [], shownImages: ChatAttachment[] = []) => {
+  const follow = async (
+    question: string | null,
+    uploads: ChatAttachmentUpload[] = [],
+    shownImages: ChatAttachment[] = [],
+    inThread: string | null = threadIdRef.current,
+  ) => {
     if (controller.current) return;
-    let id = threadIdRef.current;
+    let id = inThread;
     if (question !== null && !id) {
       try {
         const created = await api.assistant.createThread();
         id = created.id;
         followThread.current = id;
         onThreadReady?.(id);
+        // The sidebar lists it, and the page selects it, while the answer is still being written.
+        void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "Could not start a conversation.");
         setInput((current) => current || question);
@@ -233,9 +254,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         });
       }
       // Show the saved turns before dropping the live one, so the answer does not blink.
+      void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
+      void queryClient.invalidateQueries({ queryKey: ASSISTANT_MEMORY_KEY });
       await queryClient.invalidateQueries({ queryKey: threadKey });
-      await queryClient.invalidateQueries({ queryKey: THREADS_KEY });
-      await queryClient.invalidateQueries({ queryKey: MEMORY_KEY });
       if (question !== null && dropped && !abort.signal.aborted) {
         // The connection may have dropped before Studio ever received the question.
         const saved = queryClient.getQueryData<AssistantMessage[]>(threadKey);
@@ -275,8 +296,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     return () => {
       document.removeEventListener("visibilitychange", reattach);
       // Render already moved the ref when the seller switched threads. A strict-mode
-      // re-run keeps the same id, and must not cancel the question.
-      if (threadIdRef.current !== threadId) {
+      // re-run keeps the same id, and must not cancel the question; nor does the
+      // page selecting the thread its own question just created.
+      if (threadIdRef.current !== threadId && followThread.current !== threadIdRef.current) {
         controller.current?.abort();
         controller.current = null;
         followThread.current = null;
@@ -284,34 +306,44 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     };
   }, [threadId]);
 
+  // Follow-ups wait for the conversation they were asked in; another thread drops them.
+  useEffect(() => {
+    setQueued((current) => {
+      const kept = current.filter((message) => message.threadId === threadId || message.threadId === followThread.current);
+      return kept.length === current.length ? current : kept;
+    });
+  }, [threadId]);
+
+  // Send the oldest held follow-up once the answer before it has ended.
+  useEffect(() => {
+    if (live || controller.current || !queued.length) return;
+    const [next, ...rest] = queued;
+    setQueued(rest);
+    void followRef.current(next.text, next.uploads, next.shown, next.threadId ?? followThread.current ?? threadIdRef.current);
+  }, [live, queued]);
+
   const ask = async (raw: string) => {
     const question = raw.trim();
     const attached = images.images;
-    if ((!question && !attached.length) || live) return;
+    if (!question && !attached.length) return;
     const uploads = attached.length ? await images.prepare(attached) : [];
     if (uploads === null) return;
     // The live bubble shows the images by name until the saved turn brings them back.
     const shown = attached.map((image, index) => ({ id: "", name: uploads[index]?.name ?? image.file.name, mime_type: image.file.type }));
     images.clear();
+    if (askNow(Boolean(live || controller.current), queued) === "queue") {
+      setInput("");
+      scroll.pinChatToBottom();
+      const asked = followThread.current ?? threadIdRef.current;
+      setQueued((current) => [...current, { ...newQueuedChatMessage(question), uploads, shown, threadId: asked }]);
+      return;
+    }
     void follow(question, uploads, shown);
   };
 
   const stop = async () => {
     await api.assistant.stop().catch(() => undefined);
     controller.current?.abort();
-  };
-
-  const startOver = async () => {
-    const confirmed = await confirmDialog("Clear this conversation? Your listings and sales are not touched.", {
-      variant: "destructive",
-      confirmLabel: "Clear conversation",
-    });
-    if (!confirmed || !threadId) return;
-    await api.assistant.clear(threadId);
-    sessionFolds.delete(threadId);
-    setFolds([]);
-    setError("");
-    await queryClient.invalidateQueries({ queryKey: messagesKey(threadId) });
   };
 
   // Applied changes reach every page that shows a listing, a total or a box.
@@ -357,20 +389,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         onSend={() => { void ask(input); }}
         onStop={() => { void stop(); }}
         stopLabel="Stop answering"
-        queueLabel={null}
-        className="pb-2 sm:pb-2"
+        queueLabel="Send when this answer is finished"
       />
-      {noteOpen ? <BusinessNote onClose={() => setNoteOpen(false)} /> : null}
-      <div className="flex justify-between gap-3 px-5 pb-3 sm:px-6">
-        <Button type="button" size="xs" variant="ghost-muted" aria-expanded={noteOpen} onClick={() => setNoteOpen((open) => !open)}>
-          About your business
-        </Button>
-        {turns.length && !live ? (
-          <Button type="button" size="xs" variant="ghost-muted" onClick={() => { void startOver(); }}>
-            Clear conversation
-          </Button>
-        ) : null}
-      </div>
     </div>
   );
 
@@ -462,6 +482,10 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
               ) : null}
             </>
           ) : null}
+          <QueuedMessages
+            queue={queued}
+            onRemove={(id) => setQueued((current) => current.filter((message) => message.id !== id))}
+          />
           {error ? (
             <Alert variant="error" className="my-2">
               <CircleAlertIcon />
@@ -478,94 +502,6 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         </div>
       </ChatTranscript>
       {composer}
-    </div>
-  );
-}
-
-/**
- * What the seller wants the assistant to keep in mind, plus the facts the
- * chat has learned and can rewrite.
- */
-function BusinessNote({ onClose }: { onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const saved = useQuery({ queryKey: NOTE_KEY, queryFn: api.assistant.note });
-  const remembered = useQuery({ queryKey: MEMORY_KEY, queryFn: api.assistant.memory });
-  const [draft, setDraft] = useState<string | null>(null);
-  const save = useMutation({
-    mutationFn: (note: string) => api.assistant.saveNote(note),
-    onSuccess: (result) => {
-      queryClient.setQueryData(NOTE_KEY, result);
-      onClose();
-    },
-  });
-  const forget = useMutation({
-    mutationFn: (id: string) => api.assistant.forget(id),
-    onSuccess: (result) => queryClient.setQueryData(MEMORY_KEY, result),
-  });
-  const note = draft ?? saved.data?.note ?? "";
-  const memories = remembered.data?.memories ?? [];
-
-  return (
-    <div className="mx-3 mb-2 flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-3.5 sm:mx-4">
-      <form
-        className="flex flex-col gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          save.mutate(note);
-        }}
-      >
-        <label htmlFor="assistant-note-text" className="font-medium text-foreground text-sm">About your business</label>
-        <p className="text-muted-foreground text-xs leading-relaxed">
-          Anything the assistant should keep in mind on every question: your goals, the margin you want, how much time
-          you have, what you will not source, where you ship from.
-        </p>
-        <Textarea
-          id="assistant-note-text"
-          rows={5}
-          maxLength={NOTE_MAX}
-          value={note}
-          disabled={saved.isLoading}
-          placeholder="I want at least $15 profit per item and sell mostly vintage menswear. I list about 20 items a week."
-          onChange={(event) => setDraft(event.target.value)}
-        />
-        {save.isError ? <p className="text-destructive-foreground text-sm">{(save.error as Error).message || "Could not save."}</p> : null}
-        <div className="flex justify-end gap-2">
-          <Button type="button" size="sm" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" size="sm" disabled={save.isPending || saved.isLoading}>Save</Button>
-        </div>
-      </form>
-      <div className="flex flex-col gap-2 border-t border-border/70 pt-3">
-        <h3 className="font-medium text-foreground text-sm">What it remembers</h3>
-        <p className="text-muted-foreground text-xs leading-relaxed">
-          Facts it picked up from your chats. They stay when you start a new chat, and it rewrites one when you
-          correct it. Remove a fact if it is wrong.
-        </p>
-        {remembered.isError ? (
-          <p className="text-destructive-foreground text-sm">Could not load what it remembers.</p>
-        ) : memories.length ? (
-          <ul className="flex flex-col gap-1.5">
-            {memories.map((fact) => (
-              <li key={fact.id} className="flex items-start justify-between gap-3 text-sm">
-                <span className="min-w-0 text-foreground">{fact.text}</span>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost-muted"
-                  disabled={forget.isPending}
-                  onClick={() => forget.mutate(fact.id)}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground text-xs">
-            {remembered.isLoading ? "Loading…" : "Nothing yet. Mention how you like to run the shop and it will keep it."}
-          </p>
-        )}
-        {forget.isError ? <p className="text-destructive-foreground text-sm">{(forget.error as Error).message || "Could not remove that."}</p> : null}
-      </div>
     </div>
   );
 }

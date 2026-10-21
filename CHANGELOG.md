@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.305 — 2026-10-21
+
+- A question you send while the assistant is still answering is no longer lost: it waits under the answer marked Queued and sends as soon as the answer finishes. You can remove it before then.
+- The assistant no longer gets stuck looking busy after a reply when Studio is busy saving something else in the background.
+- The chat stays on the newest line while the assistant thinks and writes, on the phone too, and stays exactly where you left it when you scroll up to read. Listing chats get the same fix.
+- Answers come back faster: the assistant reuses what it already read about your shop for a couple of minutes (refreshed the moment a listing, sale, box or sourcing check changes), and Claude reuses the shop details it already read for follow-up questions instead of reading them all again.
+- "About your business" and the facts the assistant remembers moved to Settings → Assistant, where you can edit the note and remove any fact.
+- The "Clear conversation" button is gone. Start a new chat for a fresh start, or delete a chat from the sidebar.
+
 ## 0.1.304 — 2026-10-21
 
 - A listing no longer fails with "ebay_specifics.unitQuantity: Input should be a valid string" when the AI writes a number like Unit Quantity 1 without quotes. Numbers in eBay, Depop and Etsy specifics are now read as text.

@@ -1,6 +1,6 @@
 /** T3 Code-style settings categories for Vendoo Studio. */
 
-export type SettingsSectionId = "general" | "listings" | "providers" | "usage" | "connections" | "data" | "logs" | "help";
+export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "usage" | "connections" | "data" | "logs" | "help";
 
 export type SettingsNavItem = {
   id: SettingsSectionId;
@@ -20,6 +20,7 @@ export type SettingsSearchItem = {
 export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
   { id: "general", label: "General" },
   { id: "listings", label: "Listings" },
+  { id: "assistant", label: "Assistant" },
   { id: "providers", label: "Providers" },
   { id: "usage", label: "Usage" },
   { id: "connections", label: "Connections" },
@@ -31,6 +32,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>> = {
   general: "General",
   listings: "Listings",
+  assistant: "Assistant",
   providers: "Providers",
   usage: "Usage",
   connections: "Connections",
@@ -42,6 +44,20 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  {
+    id: "business-note",
+    title: "About your business",
+    section: "assistant",
+    targetId: "business-note",
+    searchTerms: ["assistant", "business", "shop", "goals", "margin", "profit", "note", "keep in mind"],
+  },
+  {
+    id: "assistant-memory",
+    title: "What the assistant remembers",
+    section: "assistant",
+    targetId: "assistant-memory",
+    searchTerms: ["assistant", "memory", "memories", "facts", "forget", "remove"],
+  },
   {
     id: "duplicate-vendoo-links",
     title: "Duplicate check",

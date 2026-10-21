@@ -142,6 +142,10 @@ def _write_state(state: dict, *, preserve_prefs: bool = False) -> None:
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(state, indent=2) + "\n")
         tmp.replace(path)
+    # The business assistant keeps a copy of the buy list; a refresh or new prefs must reach the next question.
+    from vendoo_studio.services.business_context import invalidate_business_context
+
+    invalidate_business_context()
 
 
 def _now() -> datetime:

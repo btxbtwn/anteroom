@@ -92,7 +92,7 @@ def test_an_update_that_repeats_another_fact_drops_the_duplicate(workspace):
     assert [fact["text"] for fact in assistant_memory.list_memories(db)] == ["Ships from Austin."]
 
 
-def test_the_shop_brief_includes_every_fact_and_clearing_a_chat_keeps_them(workspace):
+def test_the_shop_brief_includes_every_fact_and_deleting_a_chat_keeps_them(workspace):
     db, client = workspace
     assistant_memory.apply(db, json.dumps([{"op": "add", "text": "Lists about 20 items a week."}]))
     db.commit()
@@ -100,8 +100,9 @@ def test_the_shop_brief_includes_every_fact_and_clearing_a_chat_keeps_them(works
     fact = assistant_memory.list_memories(db)[0]
     assert f"--- What you remember ---\n- {fact['id']}: Lists about 20 items a week." in brief
 
-    business_assistant.add_message(db, "user", "How is the shop doing?")
-    business_assistant.clear_messages(db)
+    turn = business_assistant.add_message(db, "user", "How is the shop doing?")
+    assert client.delete(f"/api/assistant/threads/{turn.thread_id}").json() == {"ok": True}
+    assert client.get("/api/assistant/messages", params={"thread_id": turn.thread_id}).status_code == 404
     assert assistant_memory.list_memories(db) == [fact]
 
     listed = client.get("/api/assistant/memory").json()["memories"]

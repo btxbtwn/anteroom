@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.assistant import NEW_THREAD_TITLE, AssistantMessage, AssistantThread
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
-from vendoo_studio.services import assistant_changes, assistant_memory, sourcing_boxes
+from vendoo_studio.services import assistant_changes, assistant_memory, business_context, sourcing_boxes
 from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsItem
 
 # Earlier turns sent back with a question, so a follow-up can lean on them.
@@ -311,17 +311,6 @@ def add_message(
     return row
 
 
-def clear_messages(db: Session, thread_id: str | None = None) -> None:
-    """Drop the turns of one conversation and keep the conversation itself."""
-    if thread_id is None:
-        thread = latest_thread(db)
-        if thread is None:
-            return
-        thread_id = thread.id
-    db.query(AssistantMessage).filter(AssistantMessage.thread_id == thread_id).delete()
-    db.commit()
-
-
 def message_view(row: AssistantMessage) -> dict[str, Any]:
     created = row.created_at
     if created is not None and created.tzinfo is None:
@@ -345,14 +334,37 @@ class Shop:
 
 
 def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
-    """Everything Studio knows about the business, read once for one question."""
-    from vendoo_studio.services import ad_spend, boxes, box_scout, scout
-    from vendoo_studio.services.inventory_analytics import inventory_analytics, load_rows
+    """Everything Studio knows about the business, read once for one question.
+
+    Without ``now`` the figures may come from the copy kept for the last
+    question (``business_context``), until anything they rest on is written.
+    The brief is the same text for the same data, with what the seller says
+    and what the assistant remembers last, so a provider's prompt cache keeps
+    the whole snapshot from one question to the next.
+    """
     from vendoo_studio.services.user_settings import get_business_note
 
     clock = now or datetime.now(UTC)
     if clock.tzinfo is None:
         clock = clock.replace(tzinfo=UTC)
+    if now is None:
+        data, tables = business_context.cached(db, clock.date(), lambda: _read_data(db, clock))
+    else:
+        data, tables = _read_data(db, clock)
+    note = get_business_note()
+    sections = [
+        data,
+        f"--- What the seller says about their business ---\n{note}" if note else "",
+        assistant_memory.section(db),
+    ]
+    return Shop(brief="\n\n".join(section for section in sections if section), lookups=_lookup_database(tables))
+
+
+def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
+    """The snapshot's figures as text, and the tables a lookup reads."""
+    from vendoo_studio.services import ad_spend, boxes, box_scout, scout
+    from vendoo_studio.services.inventory_analytics import inventory_analytics, load_rows
+
     rows = load_rows(db)
     ranges = {
         range_id: inventory_analytics(db, range_id=range_id, now=clock, rows=rows)
@@ -365,7 +377,6 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
     ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
     events = _sale_events(db)
     scout_sales = scout.outcomes(db)
-    note = get_business_note()
     sourcing_state = box_scout.read_state()
     tab_boxes = sourcing_boxes.box_rows(sourcing_state, rows, clock)
     categories = [
@@ -375,8 +386,6 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
     sections = [
         f"Today is {clock.date().isoformat()} (UTC). "
         f"Sales and statuses were last synced from Vendoo at {everything['last_updated_at'] or 'an unknown time'}.",
-        f"--- What the seller says about their business ---\n{note}" if note else "",
-        assistant_memory.section(db),
         _section("Inventory now", {
             **everything["inventory"],
             "aging_of_active_listings": [
@@ -388,6 +397,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
         *(
             _section(f"Sales, {_RANGE_LABELS[range_id]}", {
                 **{key: payload[key] for key in _SALES_KEYS},
+                "previous": _by_day(payload["previous"]),
                 "brands": payload["brands"][:BRAND_GROUPS],
             })
             for range_id, payload in ranges.items()
@@ -409,9 +419,9 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
             ],
         }),
     ]
-    return Shop(
-        brief="\n\n".join(section for section in sections if section),
-        lookups=_lookup_database({
+    return (
+        "\n\n".join(section for section in sections if section),
+        {
             "listings": records,
             "price_changes": changes,
             "boxes": box_results["boxes"],
@@ -419,8 +429,16 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
             "sale_events": events,
             "sourcing_boxes": tab_boxes,
             "sales_by_category": categories,
-        }),
+        },
     )
+
+
+def _by_day(previous: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The comparison window to the day: its start moves with the clock, and a
+    snapshot that changed every second could never be served from a prompt cache."""
+    if not previous:
+        return previous
+    return {**previous, **{key: str(previous[key])[:10] for key in ("start", "end") if previous.get(key)}}
 
 
 def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None = None) -> list[dict]:

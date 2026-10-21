@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { AssistantChanges, AssistantMessage } from "../api/assistant";
 import { changeValue, changesHeading } from "./AssistantChangesCard";
-import { ASSISTANT_STARTERS, AssistantPage, linkedListingId, liveParts } from "./AssistantPage";
+import { ASSISTANT_STARTERS, AssistantPage, askNow, linkedListingId, liveParts, type QueuedQuestion } from "./AssistantPage";
 
 const { useQuery } = vi.hoisted(() => ({ useQuery: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -26,18 +26,18 @@ describe("AssistantPage", () => {
     expect(html).toContain(">Ask about your business</h1>");
     expect(html).toContain("You review every change before it is saved");
     for (const starter of ASSISTANT_STARTERS) expect(html).toContain(starter);
-    expect(html).toContain("About your business");
-    expect(html).not.toContain("Clear conversation");
+    // The business note and the memory list live in Settings → Assistant now.
+    expect(html).not.toContain("About your business");
   });
 
-  it("shows the saved conversation and offers to clear it", () => {
+  it("shows the saved conversation; threads, not a clear button, start over", () => {
     const html = render([
       { id: "q", role: "user", text: "What sold last week?", created_at: null },
       { id: "a", role: "assistant", text: "Three items for $96.", created_at: null },
     ]);
     expect(html).toMatch(/data-message-role="user".*<p>What sold last week\?<\/p>/);
     expect(html).toMatch(/data-message-role="assistant".*<p>Three items for \$96\.<\/p>/);
-    expect(html).toContain("Clear conversation");
+    expect(html).not.toContain("Clear conversation");
     expect(html).not.toContain("Ask about your business");
   });
 
@@ -105,5 +105,14 @@ describe("AssistantPage", () => {
     const resumed = { ...live, question: null };
     expect(liveParts(resumed, [...earlier, turn("user", "Same question")])).toEqual({ question: false, answer: true });
     expect(liveParts(resumed, earlier)).toEqual({ question: false, answer: false });
+  });
+
+  it("holds a follow-up asked while an answer is being written, and sends it after", () => {
+    const held: QueuedQuestion = { id: "q", text: "And last week?", createdAt: "", uploads: [], shown: [], threadId: "t" };
+    // Asking mid-answer used to be dropped without a word; now it waits its turn.
+    expect(askNow(true, [])).toBe("queue");
+    expect(askNow(false, [])).toBe("send");
+    // A question never jumps ahead of one already waiting.
+    expect(askNow(false, [held])).toBe("queue");
   });
 });

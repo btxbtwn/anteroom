@@ -58,6 +58,16 @@ def _no_sourcing_timer():
 
 
 @pytest.fixture(autouse=True)
+def _fresh_business_context():
+    """Each test reads its own shop, never the assistant's copy from the test before."""
+    from vendoo_studio.services.business_context import invalidate_business_context
+
+    invalidate_business_context()
+    yield
+    invalidate_business_context()
+
+
+@pytest.fixture(autouse=True)
 def _claude_signed_out(monkeypatch):
     """Keep the machine's own Claude Code login out of tests unless one opts in."""
     from vendoo_studio.services import claude_auth

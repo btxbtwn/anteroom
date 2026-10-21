@@ -95,13 +95,6 @@ def get_messages(thread_id: str | None = None, db: Session = Depends(get_db)):
     return [business_assistant.message_view(row) for row in business_assistant.list_messages(db, thread_id)]
 
 
-@router.delete("/messages")
-def clear_messages(thread_id: str | None = None, db: Session = Depends(get_db)):
-    _require_thread(db, thread_id)
-    business_assistant.clear_messages(db, thread_id)
-    return {"ok": True}
-
-
 @router.get("/note")
 def get_note():
     return {"note": get_business_note()}
@@ -175,7 +168,7 @@ async def _answer(
             elif kind == "memory":
                 memory_block = text
             elif kind == "changes":
-                changes = _propose(text)
+                changes = await asyncio.to_thread(_propose, text)
                 if changes is None:
                     note = UNREADABLE_CHANGES
                 elif not answer.strip():
@@ -196,24 +189,30 @@ async def _answer(
         if shop is not None:
             shop.lookups.close()
         # Also reached when the seller presses Stop: keep what was written so far.
+        # Off the event loop: a save that waits on SQLite's write lock must not
+        # freeze every other request, or hold this answer's stream open.
         if answer.strip():
-            save_db = SessionLocal()
+            await asyncio.to_thread(_save_answer, provider, answer, changes, memory_block, thread_id)
+
+
+def _save_answer(provider, answer: str, changes: dict | None, memory_block: str | None, thread_id: str | None) -> None:
+    save_db = SessionLocal()
+    try:
+        if memory_block:
             try:
-                if memory_block:
-                    try:
-                        assistant_memory.apply(save_db, memory_block)
-                    except Exception:
-                        log.exception("could not update assistant memory")
-                        save_db.rollback()
-                business_assistant.add_message(
-                    save_db, "assistant", answer,
-                    provider=getattr(provider, "name", None),
-                    model=getattr(provider, "listing_model", None),
-                    changes=changes,
-                    thread_id=thread_id,
-                )
-            finally:
-                save_db.close()
+                assistant_memory.apply(save_db, memory_block)
+            except Exception:
+                log.exception("could not update assistant memory")
+                save_db.rollback()
+        business_assistant.add_message(
+            save_db, "assistant", answer,
+            provider=getattr(provider, "name", None),
+            model=getattr(provider, "listing_model", None),
+            changes=changes,
+            thread_id=thread_id,
+        )
+    finally:
+        save_db.close()
 
 
 @router.post("/messages")
