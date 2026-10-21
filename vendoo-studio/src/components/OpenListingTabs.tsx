@@ -36,7 +36,8 @@ export function OpenListingTabs({ tabs, selectedId, onSelect, onClose, onCreate,
 
   /* Pill tabs after T3 Code's RightPanelTabs (MIT, (c) 2026 T3 Tools Inc.). */
   return (
-    <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2">
+    // Phones open one listing at a time from Inventory, so the tab strip is desktop-only.
+    <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 max-[900px]:hidden">
       <div
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         role={tabs.length ? "tablist" : undefined}

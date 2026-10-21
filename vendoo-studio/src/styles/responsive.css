@@ -1,8 +1,6 @@
 /* ── Responsive ── */
 
 @media (max-width: 900px) {
-  
-
   .app-content {
     flex-direction: column;
     position: relative;
@@ -17,11 +15,13 @@
     display: none;
   }
 
-  .sidebar-icon-btn.sidebar-header-settings {
+  /* Round glass header buttons, a full 44px touch target (Apple HIG). */
+  .mobile-workspace-bar .sidebar-icon-btn,
+  .sidebar-header .sidebar-icon-btn {
     display: inline-flex;
-    width: 36px;
-    height: 36px;
-    border-radius: 18px;
+    width: 44px;
+    height: 44px;
+    border-radius: 22px;
     border: 1px solid var(--color-chrome-glass-border);
     background: var(--color-chrome-glass);
     color: var(--color-text);
@@ -29,42 +29,67 @@
     -webkit-backdrop-filter: blur(24px) saturate(160%);
   }
 
+  /* The inventory and settings lists carry their own page header on phones. */
   .sidebar-header {
     display: flex;
-    height: 56px;
-    padding: 8px 16px 0;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    min-height: 60px;
+    height: auto;
+    gap: 12px;
+    padding: 8px 8px 8px 8px;
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    background: var(--color-ink);
   }
 
-  .sidebar-wordmark {
+  .sidebar-mobile-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 22px;
-    font-weight: 800;
-    letter-spacing: -0.04em;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--color-text);
   }
 
-  .sidebar-product {
-    font-size: 22px;
-    font-weight: 500;
+  .sidebar-select-btn {
+    min-width: 44px;
+    height: 44px;
+    padding: 0 14px;
+    flex-shrink: 0;
+    border: 1px solid var(--color-chrome-glass-border);
+    border-radius: 22px;
+    background: var(--color-chrome-glass);
+    color: var(--color-text);
+    font-size: 15px;
+    font-weight: 600;
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
   }
 
-  
+  .sidebar-select-btn[data-active="true"] {
+    background: var(--color-cobalt);
+    border-color: transparent;
+    color: #fff;
+  }
 
-  
-
-  
-
-  
-
-  
+  .sidebar-select-btn:disabled {
+    opacity: 0.45;
+  }
 
   .app-content.mobile-sidebar-open .mobile-workspace-bar {
     display: none;
   }
 
+  /* Search and New listing float over the inventory list, like Mail's toolbar. */
   .mobile-mail-toolbar {
     display: flex;
     position: fixed;
-    left: 16px;
-    right: 16px;
+    left: max(16px, env(safe-area-inset-left, 0px));
+    right: max(16px, env(safe-area-inset-right, 0px));
     bottom: max(10px, env(safe-area-inset-bottom, 0px));
     align-items: center;
     gap: 8px;
@@ -73,8 +98,14 @@
     height: 48px;
     margin: 0 auto;
     padding: 0;
-    z-index: 60;
+    /* Over the inventory list (z 40), under sheets and dialogs (z 45+). */
+    z-index: 42;
     pointer-events: none;
+  }
+
+  /* Selecting puts the bulk actions where the toolbar was. */
+  body:has([data-bulk-bar]) .mobile-mail-toolbar {
+    display: none;
   }
 
   .mobile-mail-toolbar > * {
@@ -136,26 +167,18 @@
     color: var(--color-text-muted);
   }
 
+  /* One header row: back or navigation, the title, then the page's own action.
+     A listing adds its Chat / Listing / Browser switch as a second row. */
   .mobile-workspace-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     flex-shrink: 0;
     flex-wrap: wrap;
-    min-height: 52px;
+    min-height: 60px;
     padding: 8px 12px;
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
     background: var(--color-paper);
-  }
-
-  .mobile-workspace-bar .sidebar-icon-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: 18px;
-    border: 1px solid var(--color-chrome-glass-border);
-    background: var(--color-chrome-glass);
-    color: var(--color-text);
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
   }
 
   .mobile-workspace-title {
@@ -164,48 +187,55 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--text-sm);
-    font-weight: 500;
+    font-size: 17px;
+    font-weight: 600;
     color: var(--color-text);
-  }
-
-  .mobile-workspace-panes {
-    display: flex;
-    flex-shrink: 1;
-    gap: 2px;
-    min-width: 0;
-    max-width: 48%;
   }
 
   .mobile-workspace-settings {
     flex-shrink: 0;
   }
 
-  .mobile-workspace-panes button {
+  .mobile-workspace-panes {
+    display: flex;
+    flex: 1 0 100%;
+    order: 1;
+    gap: 2px;
     min-width: 0;
-    height: 32px;
+    padding: 2px;
+    border-radius: 12px;
+    background: var(--color-ink-raised);
+  }
+
+  .mobile-workspace-panes button {
+    flex: 1;
+    min-width: 0;
+    height: 36px;
     padding: 0 8px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: 10px;
     background: transparent;
     color: var(--color-text-muted);
-    font-size: var(--text-xs);
+    font-size: 15px;
     font-weight: 500;
+    position: relative;
+  }
+
+  /* 36px pills, 44px to the finger: the hit area reaches into the row's padding. */
+  .mobile-workspace-panes button::after {
+    content: "";
+    position: absolute;
+    inset: -4px 0;
   }
 
   .mobile-workspace-panes button.selected {
     color: var(--color-text);
-    background: var(--color-ink-raised);
+    background: var(--color-chrome-glass);
+    box-shadow: inset 0 0 0 1px var(--color-chrome-glass-border);
   }
-
-  .mobile-workspace-panes button:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-
   input.input,
   select.input,
   textarea.input,
@@ -217,8 +247,6 @@
   html, body {
     touch-action: manipulation;
   }
-
-  
 
   .workspace-frame,
   .main-panel,
@@ -243,10 +271,14 @@
     max-width: 100%;
     min-width: 0;
     margin: 0;
-    padding: var(--space-2) 0 var(--space-2) var(--space-2);
+    padding: 0 4px;
     border: none;
     border-radius: 0;
     background: var(--color-ink);
+    /* One scroll for the whole list page: suggestions and filters scroll away with it. */
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     transform: translateX(-110%);
     pointer-events: none;
     transition: transform 0.2s ease;
@@ -258,17 +290,9 @@
     }
   }
 
-  .sidebar-header {
-    padding-left: 8px;
-  }
-
   /* The sidebar is an overlay on mobile: there is nothing to collapse it into. */
   .sidebar-collapse {
     display: none;
-  }
-
-  html.desktop-app .sidebar-header {
-    padding-left: 8px;
   }
 
   /* The chats panel is a sheet from the right on mobile. */
@@ -398,6 +422,20 @@
     padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
   }
 
+  /* The keyboard covers the home indicator, so its inset is not needed above it. */
+  html[data-keyboard="open"] .chat-composer {
+    padding-bottom: 8px;
+  }
+
+  /* Typing into a field needs the room more than the Send footer does. */
+  html[data-keyboard="open"] .listing-send-footer {
+    display: none;
+  }
+
+  html[data-keyboard="open"] .mobile-mail-toolbar {
+    bottom: calc(var(--keyboard-inset, 0px) + 8px);
+  }
+
   .chat-panel,
   .chat-scroll,
   .msg {
@@ -453,40 +491,6 @@
 }
 
 @media (max-width: 600px) {
-  /* Give the title, shortcuts and pane switcher their own rows on phones.
-     Seven fixed-size buttons otherwise squeeze the title out of the viewport. */
-  .mobile-workspace-bar:has(.mobile-workspace-panes) {
-    display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-    row-gap: 6px;
-  }
-
-  .mobile-workspace-title {
-    grid-column: 2 / -1;
-  }
-
-  .mobile-workspace-settings {
-    justify-self: center;
-  }
-
-  .mobile-workspace-panes {
-    order: 1;
-    grid-column: 1 / -1;
-    max-width: none;
-    padding: 2px;
-    border-radius: var(--radius-md);
-    background: var(--color-ink-raised);
-  }
-
-  .mobile-workspace-panes button {
-    flex: 1;
-  }
-
-  .mobile-workspace-panes button.selected {
-    background: var(--color-chrome-glass);
-    box-shadow: inset 0 0 0 1px var(--color-chrome-glass-border);
-  }
-
   .settings-row-control {
     flex-wrap: wrap;
     min-width: 0;
@@ -522,5 +526,62 @@
   .browser-navigation .browser-tool {
     min-width: 44px;
     min-height: 44px;
+  }
+}
+
+/* ── Touch screens ──
+   Phones get Apple's 44pt minimum for anything tapped, and 16px text in every
+   field so iOS Safari does not zoom the page when one is focused. */
+@media (max-width: 900px) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+
+  summary {
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .btn {
+    min-height: 44px;
+  }
+
+  .setup-guide-rail-item {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .pr-pill {
+    position: relative;
+    min-height: 36px;
+  }
+
+  /* 36px pills, 44px to the finger. */
+  .pr-pill::after {
+    content: "";
+    position: absolute;
+    inset: -4px 0;
+  }
+}
+
+/* Landscape phones: the listing switch fits beside the title, keeping the
+   short screen for the chat. */
+@media (min-width: 601px) and (max-width: 900px) {
+  .mobile-workspace-panes {
+    flex: 0 1 300px;
+    order: 0;
+  }
+}
+
+@media (max-width: 900px) and (max-height: 500px) {
+  .mobile-workspace-bar,
+  .sidebar-header {
+    min-height: 52px;
+    padding-top: max(4px, env(safe-area-inset-top, 0px));
+    padding-bottom: 4px;
   }
 }

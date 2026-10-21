@@ -10,21 +10,7 @@ import { BrowserPreview } from "../components/BrowserPreview";
 import { ListingSidebar } from "../components/ListingSidebar";
 import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
 import { SIDEBAR_FOOTER_WIDTH } from "../components/sidebar/SidebarFooter";
-import {
-  ArrowLeftIcon,
-  BoxIcon,
-  ChartColumnIcon,
-  ListIcon,
-  MegaphoneIcon,
-  MenuIcon,
-  MessageCircleIcon,
-  MessagesSquareIcon,
-  PlusIcon,
-  Rows3Icon,
-  SearchIcon,
-  SettingsIcon,
-  SquarePenIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, MessagesSquareIcon, PlusIcon, SearchIcon, SquarePenIcon } from "lucide-react";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTION_LABELS,
@@ -61,6 +47,7 @@ import { ThemeSync } from "../components/ThemeSync";
 import { QueuePage } from "../components/QueuePage";
 
 import { OpenListingTabs } from "../components/OpenListingTabs";
+import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
 import { initialListingTabs, listingTabsReducer } from "./listingTabs";
 
 const ListingEditor = lazy(() =>
@@ -138,6 +125,7 @@ export function App() {
   // On mobile the listings start open only when a listing link opened the app; home is the assistant.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
   const [mobileThreadsOpen, setMobileThreadsOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [listingQuery, setListingQuery] = useState("");
   const [setupGuideOpen, setSetupGuideOpen] = useState(setupGuideAutoOpen === true);
   const [browserJobId, setBrowserJobId] = useState<string | null>(null);
@@ -473,6 +461,26 @@ export function App() {
 
   const showMailToolbar = isMobile && activeView === "listings" && mobileSidebarOpen;
 
+  /** Phone pages open from the navigation drawer; a listing and a settings section step back to their list. */
+  const navigateMobile = (target: MobileNavTarget) => {
+    setMobilePane("workspace");
+    setMobileThreadsOpen(false);
+    if (target === "assistant") goAssistant();
+    else if (target === "settings") openSettings();
+    else if (target === "listings") {
+      goListings();
+      setMobileSidebarOpen(true);
+    } else {
+      setActiveView(target);
+      closeMobileSidebar();
+    }
+  };
+  const mobileBack = activeView === "listings"
+    ? { label: "Inventory", onClick: () => setMobileSidebarOpen(true) }
+    : activeView === "settings"
+      ? { label: "Settings", onClick: () => setMobileSidebarOpen(true) }
+      : null;
+
   const handleListingSearch = (value: string) => {
     setListingQuery(value);
     if (isMobile) setMobileSidebarOpen(true);
@@ -669,6 +677,7 @@ export function App() {
               closeMobileSidebar();
             }}
             onOpenSourcing={openSourcing}
+            onOpenMobileNav={() => setMobileNavOpen(true)}
             onOpenQueue={() => togglePage("queue")}
             queueCount={queueCount}
             onCloseSettings={closeSettings}
@@ -691,43 +700,20 @@ export function App() {
 
         <div className="workspace-frame">
           <header className="mobile-workspace-bar">
-            <button
-              type="button"
-              className="sidebar-icon-btn sidebar-toggle"
-              aria-label={
-                activeView === "assistant"
-                  ? "Inventory"
-                  : activeView === "settings"
-                  ? mobileSidebarOpen
-                    ? "Back"
-                    : "Settings menu"
-                  : "Back"
-              }
-              onClick={() => {
-                if (activeView === "settings") {
-                  if (!mobileSidebarOpen) {
-                    setMobileSidebarOpen(true);
-                    return;
-                  }
-                  closeSettings();
-                  return;
-                }
-                if (activeView === "assistant") {
-                  goListings();
-                  setMobileSidebarOpen(true);
-                  return;
-                }
-                if (activeView === "analytics" || activeView === "marketing" || activeView === "sourcing" || activeView === "queue") {
-                  setActiveView(shell.current);
-                  setMobileSidebarOpen(true);
-                  return;
-                }
-                setMobileSidebarOpen(true);
-              }}
-            >
-              {activeView === "assistant" ? <Rows3Icon className="size-4" /> : <ArrowLeftIcon className="size-4" />}
-            </button>
-            <div className="mobile-workspace-title">{workspaceTitle}</div>
+            {mobileBack ? (
+              <button
+                type="button"
+                className="sidebar-icon-btn sidebar-toggle"
+                aria-label={mobileBack.label}
+                title={mobileBack.label}
+                onClick={mobileBack.onClick}
+              >
+                <ArrowLeftIcon className="size-4.5" />
+              </button>
+            ) : (
+              <MobileNavButton onClick={() => setMobileNavOpen(true)} />
+            )}
+            <div className="mobile-workspace-title" data-mobile-title>{workspaceTitle}</div>
             {activeView === "assistant" ? (
               <button
                 type="button"
@@ -738,98 +724,41 @@ export function App() {
                 aria-controls="assistant-threads"
                 onClick={() => setMobileThreadsOpen((open) => !open)}
               >
-                <MessagesSquareIcon className="size-4" />
+                <MessagesSquareIcon className="size-4.5" />
               </button>
             ) : null}
-            {activeView === "listings" ? (
-              <>
+            {activeView === "listings" && selectedConvId ? (
+              <div className="mobile-workspace-panes" role="tablist" aria-label="Listing views">
                 <button
                   type="button"
-                  className="sidebar-icon-btn mobile-workspace-settings queue-nav"
-                  title="Queue"
-                  aria-label={`Queue${queueCount ? ` (${queueCount})` : ""}`}
-                  onClick={() => togglePage("queue")}
+                  role="tab"
+                  aria-selected={mobilePane === "workspace"}
+                  className={mobilePane === "workspace" ? "selected" : ""}
+                  onClick={() => setMobilePane("workspace")}
                 >
-                  <ListIcon className="size-4" />
-                  {queueCount ? <span className="queue-nav-dot" aria-hidden="true" /> : null}
+                  Chat
                 </button>
-                <div className="mobile-workspace-panes" role="tablist" aria-label="Workspace views">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={mobilePane === "workspace"}
-                    className={mobilePane === "workspace" ? "selected" : ""}
-                    onClick={() => setMobilePane("workspace")}
-                  >
-                    Workspace
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={mobilePane === "editor"}
-                    className={mobilePane === "editor" ? "selected" : ""}
-                    disabled={!selectedConvId}
-                    onClick={() => setMobilePane("editor")}
-                  >
-                    Listing
-                  </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mobilePane === "editor"}
+                  className={mobilePane === "editor" ? "selected" : ""}
+                  onClick={() => setMobilePane("editor")}
+                >
+                  Listing
+                </button>
+                {browserOpen ? (
                   <button
                     type="button"
                     role="tab"
                     aria-selected={mobilePane === "browser"}
                     className={mobilePane === "browser" ? "selected" : ""}
-                    disabled={!selectedConvId || !browserOpen}
                     onClick={() => setMobilePane("browser")}
                   >
                     Browser
                   </button>
-                </div>
-                <button
-                  type="button"
-                  className="sidebar-icon-btn mobile-workspace-settings"
-                  title="Sourcing"
-                  aria-label="Sourcing"
-                  onClick={openSourcing}
-                >
-                  <BoxIcon className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-icon-btn mobile-workspace-settings"
-                  title="Analytics"
-                  aria-label="Analytics"
-                  onClick={openAnalytics}
-                >
-                  <ChartColumnIcon className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-icon-btn mobile-workspace-settings"
-                  title="Marketing"
-                  aria-label="Marketing"
-                  onClick={openMarketing}
-                >
-                  <MegaphoneIcon className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-icon-btn mobile-workspace-settings"
-                  title="Assistant"
-                  aria-label="Assistant"
-                  onClick={openAssistant}
-                >
-                  <MessageCircleIcon className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-icon-btn mobile-workspace-settings"
-                  title="Settings"
-                  aria-label="Settings"
-                  onClick={openSettings}
-                >
-                  <SettingsIcon className="size-4" />
-                </button>
-              </>
+                ) : null}
+              </div>
             ) : null}
           </header>
           {activeView === "listings" ? (
@@ -1035,16 +964,6 @@ export function App() {
 
       {showMailToolbar && (
         <nav className="mobile-mail-toolbar" aria-label="Search and create listings">
-          <button
-            type="button"
-            className="mobile-mail-btn"
-            aria-label={mobileSidebarOpen ? "Close listings" : "Open listings"}
-            aria-expanded={mobileSidebarOpen}
-            aria-controls="listings-sidebar"
-            onClick={() => setMobileSidebarOpen((open) => !open)}
-          >
-            <MenuIcon className="size-5" />
-          </button>
           <label className="mobile-mail-search">
             <SearchIcon className="size-4.5 shrink-0" />
             <input
@@ -1093,6 +1012,15 @@ export function App() {
             setPendingBulkGroups(null);
             dropPhotos.mutate({ items, bulkDefaults, generate });
           }}
+        />
+      ) : null}
+      {isMobile ? (
+        <MobileNav
+          open={mobileNavOpen}
+          onOpenChange={setMobileNavOpen}
+          activeView={activeView}
+          queueCount={queueCount}
+          onNavigate={navigateMobile}
         />
       ) : null}
       <ThemeSync />

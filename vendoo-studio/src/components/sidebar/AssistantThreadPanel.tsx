@@ -69,7 +69,7 @@ export function AssistantThreadPanel({
         <span className="text-lg font-semibold text-sidebar-foreground">Chats</span>
         <button
           type="button"
-          className="inline-flex size-9 cursor-pointer items-center justify-center rounded-full text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+          className="inline-flex size-9 max-[900px]:size-11 cursor-pointer items-center justify-center rounded-full text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
           aria-label="Hide chats"
           onClick={onCloseMobile}
         >
@@ -124,7 +124,7 @@ export function AssistantThreadPanel({
               </button>
               <button
                 type="button"
-                className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-[var(--control-radius)] text-sidebar-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 group-hover:opacity-100 max-[900px]:opacity-100"
+                className="inline-flex size-7 max-[900px]:size-11 shrink-0 cursor-pointer items-center justify-center rounded-[var(--control-radius)] text-sidebar-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 group-hover:opacity-100 max-[900px]:opacity-100"
                 aria-label={`Delete ${thread.title}`}
                 disabled={remove.isPending}
                 onClick={() => { void deleteThread(thread); }}

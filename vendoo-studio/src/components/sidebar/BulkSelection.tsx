@@ -18,7 +18,8 @@ export function BulkActionBar({
   const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, exitSelecting } = selection;
   return (
     <div
-      className="flex shrink-0 flex-col gap-1.5 border-t border-sidebar-border px-(--sidebar-content-inset) py-2"
+      className="flex shrink-0 flex-col gap-1.5 border-t border-sidebar-border px-(--sidebar-content-inset) py-2 max-[900px]:sticky max-[900px]:bottom-0 max-[900px]:z-10 max-[900px]:bg-sidebar max-[900px]:pb-[max(8px,env(safe-area-inset-bottom,0px))]"
+      data-bulk-bar
       role="region"
       aria-label="Regenerate listings"
     >
