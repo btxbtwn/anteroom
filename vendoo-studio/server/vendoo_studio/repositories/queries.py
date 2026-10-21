@@ -360,8 +360,19 @@ class ConversationRepo:
         if changed:
             self.db.commit()
 
-    def add_message(self, conv_id: str, role: str, text: str, provider: str | None = None, model: str | None = None) -> Message:
-        msg = Message(conversation_id=conv_id, role=role, text=text, provider=provider, model=model)
+    def add_message(
+        self,
+        conv_id: str,
+        role: str,
+        text: str,
+        provider: str | None = None,
+        model: str | None = None,
+        attachments: list[dict] | None = None,
+    ) -> Message:
+        msg = Message(
+            conversation_id=conv_id, role=role, text=text, provider=provider, model=model,
+            attachments=attachments or None,
+        )
         self.db.add(msg)
         # ``created_at`` is a column default, so it exists only once the INSERT
         # is flushed. Reading it before that stamped the conversation's

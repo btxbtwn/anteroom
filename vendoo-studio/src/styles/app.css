@@ -7,6 +7,7 @@
 @layer theme, base, legacy, components, utilities;
 
 @import "./t3-theme.css";
+@import "./t3-chat.css";
 
 /* Import order is cascade order. Responsive overrides must stay after component styles. */
 @import "./base.css" layer(legacy);

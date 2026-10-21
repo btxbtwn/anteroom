@@ -554,6 +554,7 @@ def _msg_response(msg) -> dict:
         "provider": msg.provider,
         "model": msg.model,
         "created_at": msg.created_at.isoformat() if msg.created_at else "",
+        "attachments": msg.attachments or [],
     }
 
 

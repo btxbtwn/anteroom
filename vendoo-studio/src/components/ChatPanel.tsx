@@ -1,24 +1,32 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { Fragment, useState, useRef, useEffect, useCallback } from "react";
 import { newQueuedChatMessage } from "./chatMessageQueue";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
 import { type ChatCitation } from "./chatCitations";
 import { ChatCitationRevealContext } from "./chatCitationContext";
 import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
-import { SendProgress } from "./SendProgress";
 import { currentPhaseIndex } from "./liveTrace";
 import { assistantDisplayText, extractJson, isListingJson, isStreamError } from "./chat/assistantDisplay";
+import { BrowserFieldChips } from "./chat/BrowserFieldChips";
+import { useComposerImages } from "./chat/ComposerAttachments";
 import { ChatComposer } from "./chat/ChatComposer";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
 import { ChatMessage } from "./chat/ChatMessage";
-import { LiveWork } from "./chat/LiveWork";
+import { ChatTranscript } from "./chat/ChatTranscript";
+import { FoldedTurnRow, LiveWork } from "./chat/LiveWork";
 import { QueuedMessages } from "./chat/QueuedMessages";
+import { AssistantMessageRow } from "./chat/TimelineRows";
+import { WorkingRow } from "./chat/TimelineRows";
 import { useChatQueue } from "./chat/useChatQueue";
 import { useChatScroll } from "./chat/useChatScroll";
 import { useChatServerState } from "./chat/useChatServerState";
 import { useChatStream, useGenerateRecovery } from "./chat/useChatStream";
 import { useLiveChat } from "./chat/useLiveChat";
+import { placeTurnFolds } from "./chat/workLogModel";
+import { Button } from "./ui/button";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
+import { Spinner } from "./ui/spinner";
 import type { BrowserField } from "../api/client";
+import type { Message } from "../api/types";
 
 interface Props {
   convId: string;
@@ -29,20 +37,30 @@ interface Props {
   onBrowserFieldsChange?: (fields: BrowserField[]) => void;
 }
 
+/** Spacing under each transcript row, as T3 Code's TimelineRowContent pads them. */
+function messageRowPadding(m: Message): string {
+  return m.role === "user" || m.role === "assistant" || m.role === "model" ? "pb-4" : "pb-2";
+}
+
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, browser, onBrowserFieldsChange }: Props) {
   const [input, setInput] = useState("");
   // Quotes live inline in the composer itself, T3 Code style: `input` is the
   // markdown prompt, and a quote inside it is its citation link.
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
+  const images = useComposerImages();
+  const clearImages = images.clear;
 
   useEffect(() => {
     setInput("");
-  }, [convId]);
+    clearImages();
+  }, [convId, clearImages]);
   const {
     streaming,
     generating,
     streamText,
     streamTrace,
+    streamAgents,
+    foldedTurns,
     streamStatus,
     resetting,
     workStartedAtMs,
@@ -53,16 +71,8 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
     convId,
     streaming || generating || resetting,
   );
-  const {
-    chatViewport,
-    setScrollEl,
-    pinChatToBottom,
-    handleChatScroll,
-    handleChatWheel,
-    handleChatTouchStart,
-    handleChatTouchMove,
-    handleShowCitation,
-  } = useChatScroll(convId, messages, streamText, streamTrace);
+  const scroll = useChatScroll(convId);
+  const { pinChatToBottom, chatViewport, handleShowCitation } = scroll;
   const {
     stopping,
     streamFromFetch,
@@ -99,8 +109,13 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
   const handleSend = useCallback(() => {
     const text = input.trim();
     const liveFields = browser?.fields || [];
-    if (!text && !liveFields.length) return;
+    const attached = images.images;
+    if (!text && !liveFields.length && !attached.length) return;
     if (busy) {
+      if (attached.length) {
+        images.setError("Images go with the next message once the current run finishes.");
+        return;
+      }
       // Queue plain follow-ups; browser chips ride along as a snapshot so a
       // later field pick doesn't rewrite what the user queued.
       const message = newQueuedChatMessage(text, liveFields.length
@@ -122,8 +137,13 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
       pinChatToBottom();
       return;
     }
-    void sendMessage(text);
-  }, [busy, input, browser, sendMessage, onBrowserFieldsChange, pinChatToBottom, enqueue]);
+    void (async () => {
+      const uploads = attached.length ? await images.prepare(attached) : [];
+      if (uploads === null) return;
+      images.clear();
+      void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);
+    })();
+  }, [busy, input, browser, sendMessage, onBrowserFieldsChange, pinChatToBottom, enqueue, images]);
 
   const hasPhotos = Boolean(photos && photos.length > 0);
   const hasMessages = Boolean(messages && messages.length > 0);
@@ -134,7 +154,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
   const streamFailed = isStreamError(streamText);
   const streamVisible = streamFailed ? "" : assistantDisplayText(streamText);
   // Persist finishes (and messages refetch) before the SSE stream is cleared —
-  // hide the live bubble once the same assistant prose is already on screen.
+  // hide the live reply once the same assistant prose is already on screen.
   const streamAlreadyPersisted = Boolean(
     streamVisible
       && messages?.some((m) => {
@@ -174,7 +194,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
   const livePhase = currentPhaseIndex(streamTrace, localLive);
   const postedIds = new Set(streamTrace.flatMap((entry) => (entry.kind === "posted" ? [entry.id] : [])));
   // Before the first status lands, or while only server work runs, the
-  // header still needs a live row saying what is happening.
+  // log still needs a live row saying what is happening.
   const tailLabel = busy && !resetting && livePhase < 0 && !showStreamBubble
     ? localLive ? localLabel || activityDetail : activityDetail
     : "";
@@ -192,74 +212,80 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
 
   useGenerateRecovery(convId, generating, hasListingJson, streamFromFetch);
 
+  const allMessages = messages ?? [];
+  const foldPositions = placeTurnFolds(allMessages, foldedTurns);
+  const foldsAt = (index: number) => foldedTurns.filter((_, k) => foldPositions[k] === index);
+  const renderPosted = (id: string) => {
+    const message = allMessages.find((m) => String(m.id) === id);
+    return message ? <ChatMessage message={message} /> : null;
+  };
+
   return (
     <ChatCitationRevealContext value={handleShowCitation}>
-    <div className="chat-panel">
-      <div
-        ref={setScrollEl}
-        className="chat-scroll"
-        onScroll={handleChatScroll}
-        onWheel={handleChatWheel}
-        onTouchStart={handleChatTouchStart}
-        onTouchMove={handleChatTouchMove}
-      >
-        {isLoading && !hasMessages && (
-          <div className="empty-state" style={{ padding: "16px 0" }}><p className="text-xs text-muted">Loading...</p></div>
-        )}
+    <div className="chat-panel flex min-h-0 flex-1 flex-col">
+      <ChatTranscript scroll={scroll}>
+        {isLoading && !hasMessages ? (
+          <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
+        ) : null}
 
-        {!isLoading && !hasMessages && !busy && !streamFailed && (
-          <div className="empty-state" style={{ padding: "32px 16px" }}>
-            <h3 style={{ fontStyle: "italic", fontSize: 20, marginBottom: 4, lineHeight: 1.2 }}>Generate a Listing</h3>
+        {!isLoading && !hasMessages && !busy && !streamFailed ? (
+          <Empty className="py-8">
+            <EmptyHeader>
+              <EmptyTitle>Generate a listing</EmptyTitle>
+              <EmptyDescription>
+                {hasPhotos
+                  ? `${photos?.length ?? 0} photo${photos?.length !== 1 ? "s" : ""} uploaded`
+                  : "Upload photos to begin"}
+              </EmptyDescription>
+            </EmptyHeader>
             {hasPhotos ? (
-              <>
-                <p className="text-xs text-muted">{photos?.length ?? 0} photo{photos?.length !== 1 ? "s" : ""} uploaded</p>
-                <button type="button" className="btn btn-primary" onClick={handleGenerate} disabled={generating || streaming} style={{ marginTop: 12, padding: "9px 22px" }}>
-                  Generate Listing
-                </button>
-              </>
-            ) : (
-              <p className="text-xs text-muted">Upload photos to begin</p>
+              <EmptyContent>
+                <Button type="button" onClick={handleGenerate} disabled={generating || streaming}>
+                  Generate listing
+                </Button>
+              </EmptyContent>
+            ) : null}
+          </Empty>
+        ) : null}
+
+        {allMessages.map((m, index) => (
+          <Fragment key={m.id}>
+            {foldsAt(index).map((turn) => <FoldedTurnRow key={turn.id} turn={turn} />)}
+            {postedIds.has(String(m.id)) ? null : (
+              <div className={messageRowPadding(m)} data-message-id={m.id}>
+                <ChatMessage message={m} />
+              </div>
             )}
-          </div>
-        )}
+          </Fragment>
+        ))}
+        {foldsAt(allMessages.length).map((turn) => <FoldedTurnRow key={turn.id} turn={turn} />)}
 
-        {messages?.filter((m) => !postedIds.has(String(m.id))).map((m) => <ChatMessage key={m.id} message={m} />)}
+        {resetting ? (
+          <div className="pb-1.5"><WorkingRow startedAtMs={workStartedAtMs} /></div>
+        ) : null}
 
-        {resetting && (
-          <div className="thinking-block">
-            <SendProgress label="Clearing chat and generated fields…" />
-          </div>
-        )}
-
-        {busy || streamTrace.length > 0 ? (
+        {(busy && !resetting) || streamTrace.length > 0 ? (
           <LiveWork
             busy={busy}
             stopping={stopping}
             workStartedAtMs={workStartedAtMs}
             streamTrace={streamTrace}
-            messages={messages}
+            streamAgents={streamAgents}
             localLive={localLive}
-            livePhase={livePhase}
             tailLabel={tailLabel}
+            renderPosted={renderPosted}
           />
         ) : null}
 
-        {showStreamBubble && (
-          streamVisible ? (
-            <div className="msg msg-assistant">
-              <ChatMarkdown text={streamVisible} isStreaming />
-            </div>
-          ) : livePhase >= 0 ? null : (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 8 }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--color-cobalt)", flexShrink: 0 }} />
-              <span className="text-xs text-muted">UPDATING LISTING…</span>
-            </div>
-          )
-        )}
+        {showStreamBubble && streamVisible ? (
+          <div className="pb-4">
+            <AssistantMessageRow text={streamVisible} streaming />
+          </div>
+        ) : null}
 
         <QueuedMessages queue={pendingQueue} onRemove={handleRemoveQueued} />
 
-        {streamFailed && (
+        {streamFailed ? (
           <StreamErrorPanel
             streamText={streamText}
             activeProbe={activeProbe}
@@ -268,23 +294,16 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
             onCancelDiscovery={handleCancelDiscovery}
             onRetry={handleRetry}
           />
-        )}
+        ) : null}
 
-        {hasMessages && !hasListingJson && !streamFailed && !busy && hasPhotos && (
+        {hasMessages && !hasListingJson && !streamFailed && !busy && hasPhotos ? (
           <UnfinishedGenerationPanel
             probeActive={Boolean(activeProbe)}
             onCancelDiscovery={handleCancelDiscovery}
             onRetry={() => (activeProbe ? handleRetry() : handleGenerate())}
           />
-        )}
-
-        {hasMessages && !busy && !streamFailed && (
-          <div className="chat-activity is-done" role="status">
-            <span className="chat-activity-dot" aria-hidden="true" />
-            <span className="chat-activity-text">Done — nothing running</span>
-          </div>
-        )}
-      </div>
+        ) : null}
+      </ChatTranscript>
 
       <CiteSelectionToolbar viewport={chatViewport} onCite={handleCite} />
 
@@ -293,12 +312,14 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
         input={input}
         onInputChange={setInput}
         placeholder={composerPlaceholder}
-        browserFields={browser?.fields}
-        onBrowserFieldsChange={onBrowserFieldsChange}
+        images={images}
+        header={<BrowserFieldChips fields={browser?.fields} onChange={onBrowserFieldsChange} />}
+        hasOtherContent={Boolean(browser?.fields?.length)}
         busy={busy}
         stopping={stopping}
         onSend={handleSend}
-        onCancel={handleCancel}
+        onStop={() => { void handleCancel(); }}
+        stopLabel="Stop everything running for this listing"
       />
     </div>
     </ChatCitationRevealContext>

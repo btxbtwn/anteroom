@@ -2,7 +2,8 @@ import React from "react";
 import { type QueryClient } from "@tanstack/react-query";
 import { type SseParts } from "../sseCoalesce";
 import { stableStreamingText } from "../streamingText";
-import { type LiveTraceEntry } from "../liveTrace";
+import { settleAgents, type LiveAgents, type LiveTraceEntry } from "../liveTrace";
+import { turnHasWork, type FoldedTurn } from "./workLogModel";
 import { isStreamError } from "./assistantDisplay";
 import { TRACE_ONLY_EVENTS } from "./chatStream";
 
@@ -26,6 +27,15 @@ type LiveStream = {
   resetting: boolean;
   /** Wall-clock start of the current busy stretch (Working for …). */
   workStartedAtMs: number | null;
+  /** Start and end of the latest busy stretch; outlive it so the fold can say how long it took. */
+  lastWorkStartedAtMs: number | null;
+  lastWorkEndedAtMs: number | null;
+  /** Subagents the current turn kicked off, by id. Cleared with the trace. */
+  streamAgents: LiveAgents;
+  /** Message ids on screen when the current turn started. */
+  turnBaseIds: string[];
+  /** Finished turns of this session, each folded into a "Worked for" row. */
+  foldedTurns: FoldedTurn[];
   listeners: Set<() => void>;
 };
 
@@ -48,7 +58,41 @@ function emptyLive(): Omit<LiveStream, "listeners"> {
     startQueued: false,
     resetting: false,
     workStartedAtMs: null,
+    lastWorkStartedAtMs: null,
+    lastWorkEndedAtMs: null,
+    streamAgents: {},
+    turnBaseIds: [],
+    foldedTurns: [],
   };
+}
+
+let foldSeq = 0;
+
+/**
+ * Fold the finished turn's work into a "Worked for" row, T3 Code style, and
+ * clear the live trace. Kept for the session only. A turn with no work to show
+ * folds into nothing.
+ */
+export function foldLiveTurn(convId: string, { cancelled = false }: { cancelled?: boolean } = {}) {
+  const live = getLive(convId);
+  const trace = live.streamTrace;
+  const endedAtMs = live.lastWorkEndedAtMs ?? Date.now();
+  if (turnHasWork(trace)) {
+    foldSeq += 1;
+    const turn: FoldedTurn = {
+      id: `turn-${foldSeq}`,
+      trace,
+      agents: settleAgents(live.streamAgents, endedAtMs),
+      startedAtMs: live.workStartedAtMs ?? live.lastWorkStartedAtMs ?? endedAtMs,
+      endedAtMs: live.workStartedAtMs != null ? Date.now() : endedAtMs,
+      cancelled,
+      baseIds: live.turnBaseIds,
+    };
+    live.foldedTurns = [...live.foldedTurns, turn];
+  }
+  live.streamTrace = [];
+  live.streamAgents = {};
+  emitLive(convId);
 }
 
 export function getLive(convId: string): LiveStream {
@@ -159,7 +203,14 @@ export function patchLive(convId: string, patch: Partial<Omit<LiveStream, "liste
     // paragraph buffer when the provider ends the turn.
     live.streamDisplayText = live.streamText;
   }
-  if (busy && live.workStartedAtMs == null) live.workStartedAtMs = Date.now();
+  // Whoever clears the trace means the whole turn's work, agents included.
+  if (patch.streamTrace?.length === 0 && patch.streamAgents === undefined) live.streamAgents = {};
+  if (busy && live.workStartedAtMs == null) {
+    live.workStartedAtMs = Date.now();
+    live.lastWorkStartedAtMs = live.workStartedAtMs;
+    live.lastWorkEndedAtMs = null;
+  }
+  if (!busy && wasBusy) live.lastWorkEndedAtMs = Date.now();
   if (!busy) live.workStartedAtMs = null;
   emitLive(convId);
 }
@@ -167,8 +218,9 @@ export function patchLive(convId: string, patch: Partial<Omit<LiveStream, "liste
 export function applySseToLive(convId: string, event: string, parts: SseParts) {
   const live = getLive(convId);
   const previousDisplayText = live.streamDisplayText;
-  const traceChanged = parts.trace !== live.streamTrace;
+  const traceChanged = parts.trace !== live.streamTrace || parts.agents !== live.streamAgents;
   live.streamTrace = parts.trace;
+  live.streamAgents = parts.agents;
   if (event === "thinking" || event === "status") live.thinkingStarted = true;
   if (event === "status") live.streamStatus = parts.status;
   if (event !== "thinking" && event !== "status" && event !== "listing_updated" && !TRACE_ONLY_EVENTS.has(event)) {

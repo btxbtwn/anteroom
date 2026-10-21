@@ -176,9 +176,11 @@ def list_messages(db: Session) -> list[AssistantMessage]:
 
 def add_message(
     db: Session, role: str, text: str, *, provider: str | None = None, model: str | None = None,
-    changes: dict[str, Any] | None = None,
+    changes: dict[str, Any] | None = None, attachments: list[dict[str, Any]] | None = None,
 ):
-    row = AssistantMessage(role=role, text=text, provider=provider, model=model, changes=changes)
+    row = AssistantMessage(
+        role=role, text=text, provider=provider, model=model, changes=changes, attachments=attachments or None,
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -200,6 +202,7 @@ def message_view(row: AssistantMessage) -> dict[str, Any]:
         "text": row.text,
         "created_at": created.isoformat() if created else None,
         "changes": row.changes,
+        "attachments": row.attachments or [],
     }
 
 

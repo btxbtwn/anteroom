@@ -1,3 +1,5 @@
+import type { ChatAttachment } from "./types";
+
 /** One turn of the seller's conversation with the business assistant. */
 export interface AssistantMessage {
   id: string;
@@ -6,6 +8,8 @@ export interface AssistantMessage {
   created_at: string | null;
   /** Changes this answer proposed, and what the seller did with them. */
   changes?: AssistantChanges | null;
+  /** Images attached to a question. */
+  attachments?: ChatAttachment[];
 }
 
 /**
@@ -35,10 +39,9 @@ export interface AssistantChanges {
 }
 
 export interface AssistantStreamHandlers {
-  /** The next piece of the answer. */
-  onText: (piece: string) => void;
-  /** What the assistant is doing before the answer starts. */
-  onStatus: (status: string) => void;
+  /** One stream event as it arrives: `message` (the next piece of the answer),
+   *  `status`, `thinking`, `step`, `agent`; `error` is returned instead. */
+  onEvent: (event: string, data: string) => void;
 }
 
 /** Studio answered the request and refused it; a dropped connection is any other error. */

@@ -1,4 +1,7 @@
+import { CircleAlertIcon } from "lucide-react";
 import type { Job } from "../../api/types";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
+import { Button } from "../ui/button";
 import { isResumableGenerateFailure } from "./chatStream";
 
 function streamErrorHint(activeProbe: Job | undefined, streamText: string): string {
@@ -35,30 +38,21 @@ export function StreamErrorPanel({
 }) {
   const errorHint = streamErrorHint(activeProbe, streamText);
   return (
-    <div className="chat-error" role="alert">
-      <div className="chat-error-text">{streamText}</div>
-      {errorHint ? <div className="chat-error-hint">{errorHint}</div> : null}
-      <div className="chat-error-actions">
+    <Alert variant="error" role="alert" className="my-2">
+      <CircleAlertIcon />
+      <AlertTitle className="whitespace-pre-wrap break-words">{streamText}</AlertTitle>
+      {errorHint ? <AlertDescription>{errorHint}</AlertDescription> : null}
+      <AlertAction>
         {activeProbe ? (
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => { void onCancelDiscovery(); }}
-            disabled={busy}
-          >
+          <Button type="button" size="xs" variant="outline" onClick={() => { void onCancelDiscovery(); }} disabled={busy}>
             Cancel discovery
-          </button>
+          </Button>
         ) : null}
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={() => { void onRetry(); }}
-          disabled={busy || !canRetry}
-        >
+        <Button type="button" size="xs" onClick={() => { void onRetry(); }} disabled={busy || !canRetry}>
           {busy ? "Retrying..." : activeProbe ? "Cancel & retry" : "Retry"}
-        </button>
-      </div>
-    </div>
+        </Button>
+      </AlertAction>
+    </Alert>
   );
 }
 
@@ -73,31 +67,22 @@ export function UnfinishedGenerationPanel({
   onRetry: () => Promise<void>;
 }) {
   return (
-    <div className="chat-error">
-      <div className="chat-error-text">Listing generation did not finish.</div>
+    <Alert variant="error" className="my-2">
+      <CircleAlertIcon />
+      <AlertTitle>Listing generation did not finish.</AlertTitle>
       {probeActive ? (
-        <div className="chat-error-hint">
-          Field discovery is still running in Chrome. Cancel it from here, then retry.
-        </div>
+        <AlertDescription>Field discovery is still running in Chrome. Cancel it from here, then retry.</AlertDescription>
       ) : null}
-      <div className="chat-error-actions">
+      <AlertAction>
         {probeActive ? (
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => { void onCancelDiscovery(); }}
-          >
+          <Button type="button" size="xs" variant="outline" onClick={() => { void onCancelDiscovery(); }}>
             Cancel discovery
-          </button>
+          </Button>
         ) : null}
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={() => { void onRetry(); }}
-        >
+        <Button type="button" size="xs" onClick={() => { void onRetry(); }}>
           {probeActive ? "Cancel & retry" : "Retry"}
-        </button>
-      </div>
-    </div>
+        </Button>
+      </AlertAction>
+    </Alert>
   );
 }

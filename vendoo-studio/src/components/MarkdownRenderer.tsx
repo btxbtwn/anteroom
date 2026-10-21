@@ -2,7 +2,9 @@ import React, { use, useMemo } from "react";
 import ReactMarkdown, { defaultUrlTransform, type ExtraProps } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { cn } from "../lib/utils";
 import { CitationChip } from "./CitationChip";
+import { MarkdownCodeBlock, MarkdownTable } from "./MarkdownBlocks";
 import { ChatCitationRevealContext } from "./chatCitationContext";
 import { parseChatCitationHref } from "./chatCitations";
 import {
@@ -14,6 +16,7 @@ interface Props {
   text: string;
   lineBreaks?: boolean;
   isStreaming?: boolean;
+  className?: string;
 }
 
 type MarkdownProps<Tag extends keyof React.JSX.IntrinsicElements> =
@@ -27,7 +30,7 @@ function markdownUrlTransform(href: string): string | null | undefined {
   return parseChatCitationHref(href) ? href : defaultUrlTransform(href);
 }
 
-export default function MarkdownRenderer({ text, lineBreaks = false, isStreaming = false }: Props) {
+export default function MarkdownRenderer({ text, lineBreaks = false, isStreaming = false, className }: Props) {
   const reveal = use(ChatCitationRevealContext);
   const incrementalParsing = isStreaming && shouldParseIncrementally(text);
   const remarkPlugins = useMemo(
@@ -40,7 +43,7 @@ export default function MarkdownRenderer({ text, lineBreaks = false, isStreaming
 
   return (
     <div
-      className="chat-markdown"
+      className={cn("chat-markdown w-full min-w-0 [overflow-wrap:anywhere] [word-break:break-word]", className)}
       // Gates the fade-in for blocks that arrive while the response streams.
       data-streaming={isStreaming ? "" : undefined}
     >
@@ -62,11 +65,10 @@ export default function MarkdownRenderer({ text, lineBreaks = false, isStreaming
             );
           },
           table({ children }: MarkdownProps<"table">) {
-            return (
-              <div className="chat-markdown-table-container">
-                <table>{children}</table>
-              </div>
-            );
+            return <MarkdownTable>{children}</MarkdownTable>;
+          },
+          pre({ children }: MarkdownProps<"pre">) {
+            return <MarkdownCodeBlock>{children}</MarkdownCodeBlock>;
           },
           input({ type, node: _node, ...props }: MarkdownProps<"input">) {
             return <input type={type} disabled={type === "checkbox"} {...props} />;

@@ -18,6 +18,8 @@ from vendoo_studio.services.chat_citations import (
     citations_to_plain_text,
     expand_citations_for_provider,
 )
+from vendoo_studio.routes.attachments import AttachmentUpload, store_uploads
+from vendoo_studio.services.chat_attachments import attach_to_last_user_turn
 from vendoo_studio.services.chat_listing import persist_chat_result
 from vendoo_studio.services.chat_prompts import build_chat_messages
 from vendoo_studio.services.listing_generate import (
@@ -90,6 +92,7 @@ class BrowserChatContext(BaseModel):
 class ChatMessage(BaseModel):
     text: str
     browser: BrowserChatContext | None = None
+    attachments: list[AttachmentUpload] = Field(default_factory=list)
 
 
 def _browser_message_text(body: ChatMessage) -> str:
@@ -176,7 +179,8 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
         if not job or job.conversation_id != conv_id:
             raise HTTPException(404, "That Vendoo draft does not belong to this listing")
 
-    repo.add_message(conv_id, "user", _browser_message_text(body))
+    attachments = store_uploads(body.attachments)
+    repo.add_message(conv_id, "user", _browser_message_text(body), attachments=attachments)
     provider = get_listing_provider()
     if provider is None:
         repo.add_message(
@@ -223,7 +227,9 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
             yield sse_event("status", "Reading the listing…")
             build_db = SessionLocal()
             try:
-                messages = await build_chat_messages(conv_id, build_db, body.text)
+                messages = attach_to_last_user_turn(
+                    await build_chat_messages(conv_id, build_db, body.text), attachments,
+                )
             finally:
                 build_db.close()
             async for item in iter_with_keepalives(provider.chat(messages, stream=True)):

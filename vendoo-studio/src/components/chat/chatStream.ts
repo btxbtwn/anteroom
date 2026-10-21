@@ -1,5 +1,5 @@
-import { coalesceSseEvents, type SseParts } from "../sseCoalesce";
-import { appendLiveTrace } from "../liveTrace";
+import { coalesceSseEvents, emptySseParts, type SseParts } from "../sseCoalesce";
+import { appendLiveTrace, applyAgentEvent, parseAgentEvent } from "../liveTrace";
 
 export function detailFromResponseBody(body: unknown): string {
   if (!body || typeof body !== "object") return "";
@@ -79,12 +79,35 @@ export function formatClientStreamError(
 
 /**
  * Events that only feed the live trace and never belong in the reply text.
- * `agent` carries JSON state for parallel generation work; it is ignored here
- * until the chat renders it.
+ * `agent` is parallel generation work. The timeline renders it.
  */
 export const TRACE_ONLY_EVENTS = new Set(["step", "posted", "agent"]);
 
-type SseParseState = { eventType: string; parts: SseParts; dataLines: number };
+type SseParseState = { eventType: string; parts: SseParts; dataLines: number; agentData: string };
+
+/**
+ * Fold one whole event (its data lines already joined with newlines) into the
+ * parts, as the line parser below does. The business assistant's stream comes
+ * through `readSse` whole-event, and shares the listing chat's work log this way.
+ */
+export function foldSseEvent(parts: SseParts, event: string, data: string): void {
+  if (event === "agent") {
+    const agent = parseAgentEvent(data);
+    if (!agent) return;
+    const next = applyAgentEvent(parts.trace, parts.agents, agent);
+    parts.trace = next.trace;
+    parts.agents = next.agents;
+    return;
+  }
+  parts.trace = appendLiveTrace(parts.trace, event, data);
+  if (event === "thinking") parts.thinking += data;
+  else if (event === "status") parts.status = data;
+  else if (!TRACE_ONLY_EVENTS.has(event)) parts.content += data;
+}
+
+function newParseState(): SseParseState {
+  return { eventType: "message", parts: emptySseParts(), dataLines: 0, agentData: "" };
+}
 
 export const SSE_FETCH: RequestInit = {
   method: "POST",
@@ -101,6 +124,7 @@ function applySseLine(
   if (!line) {
     state.eventType = "message";
     state.dataLines = 0;
+    state.agentData = "";
     return false;
   }
   if (line.startsWith(":")) return false;
@@ -117,6 +141,18 @@ function applySseLine(
   // Data lines within one event are joined with newlines (the server splits multi-line text this way).
   const continued = state.dataLines++ > 0;
   const text = continued ? `\n${chunk}` : chunk;
+  if (state.eventType === "agent") {
+    // One JSON object per event; a multi-line payload parses once it is whole.
+    state.agentData += text;
+    const agent = parseAgentEvent(state.agentData);
+    if (!agent) return false;
+    state.agentData = "";
+    const next = applyAgentEvent(state.parts.trace, state.parts.agents, agent);
+    state.parts.trace = next.trace;
+    state.parts.agents = next.agents;
+    onEvent(state.eventType, state.parts);
+    return false;
+  }
   state.parts.trace = appendLiveTrace(state.parts.trace, state.eventType, text, continued);
   if (state.eventType === "thinking") state.parts.thinking += text;
   else if (state.eventType === "status") state.parts.status = continued ? state.parts.status + text : text;
@@ -129,7 +165,7 @@ function consumeSseText(
   text: string,
   onEvent: (event: string, parts: SseParts) => void,
 ): { parts: SseParts; sawDone: boolean } {
-  const state: SseParseState = { eventType: "message", parts: { content: "", thinking: "", status: "", trace: [] }, dataLines: 0 };
+  const state = newParseState();
   let sawDone = false;
   const batch = coalesceSseEvents(onEvent);
   try {
@@ -149,7 +185,7 @@ async function consumeSse(
   const decoder = new TextDecoder();
   let buffer = "";
   let sawDone = false;
-  const state: SseParseState = { eventType: "message", parts: { content: "", thinking: "", status: "", trace: [] }, dataLines: 0 };
+  const state = newParseState();
   const batch = coalesceSseEvents(onEvent);
   const emit = (event: string, parts: SseParts) => batch.push(event, parts);
   try {

@@ -1,16 +1,14 @@
+import { InfoIcon } from "lucide-react";
 import type { Message } from "../../api/types";
-import { ChatMarkdown } from "../ChatMarkdown";
 import { EvidenceCard } from "../EvidenceCard";
 import { SoldCompsCard } from "../SoldCompsCard";
 import { assistantDisplayText, isCompResearch, isPhotoAnalysis } from "./assistantDisplay";
+import { AssistantMessageRow, UserMessageRow } from "./TimelineRows";
+import { WorkLogRow } from "./WorkLog";
 
 export function ChatMessage({ message: m }: { message: Message }) {
   if (m.role === "user") {
-    return (
-      <div className="msg msg-user">
-        <ChatMarkdown text={m.text} lineBreaks />
-      </div>
-    );
+    return <UserMessageRow text={m.text} createdAt={m.created_at} attachments={m.attachments} />;
   }
 
   if (m.role === "system" && isPhotoAnalysis(m.text)) {
@@ -23,18 +21,15 @@ export function ChatMessage({ message: m }: { message: Message }) {
 
   if (m.role === "system") {
     return (
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "4px 0" }}>
-        <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--color-border-bright)", flexShrink: 0, marginTop: 6 }} />
-        <span className="msg-system" style={{ padding: 0, borderLeft: "none", maxWidth: "none", whiteSpace: "pre-wrap" }}>{m.text}</span>
-      </div>
+      <WorkLogRow
+        wrapLabel
+        icon={<InfoIcon className="size-4 text-icon-muted" />}
+        label={<span className="whitespace-pre-wrap text-sm leading-relaxed">{m.text}</span>}
+      />
     );
   }
 
   const visible = assistantDisplayText(m.text);
   if (!visible) return null;
-  return (
-    <div className="msg msg-assistant" data-citation-source={m.id}>
-      <ChatMarkdown text={visible} />
-    </div>
-  );
+  return <AssistantMessageRow text={visible} createdAt={m.created_at} messageId={m.id} />;
 }

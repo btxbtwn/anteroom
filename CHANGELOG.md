@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.292 — 2026-10-21
+
+- Chat follows a reply while it is being written, then folds the work into a "Worked for…" line you can open. A button brings you back to the latest message.
+- You can attach photos in chat, pick the model and effort from the message box, and the business assistant uses this same chat.
+
 ## 0.1.291 — 2026-10-21
 
 - The rest of Studio matches the new look: sidebar, settings, providers, queue, analytics, marketing, sourcing, and the listing editor.
