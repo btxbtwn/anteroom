@@ -5,7 +5,7 @@ import json
 import logging
 import re
 from typing import Any
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -1046,68 +1046,9 @@ async def download_vendoo_photos(urls: list[str]) -> list[dict[str, Any]]:
 
 
 async def _download_public_image(client: httpx.AsyncClient, url: str) -> tuple[bytes, str | None, str]:
-    from vendoo_studio.services.safe_fetch import (
-        MAX_DOWNLOAD_BYTES,
-        MAX_REDIRECTS,
-        UnsafeURLError,
-        resolve_fetch_target,
-    )
+    from vendoo_studio.services.safe_fetch import fetch_public, is_image_type
 
-    current = str(url or "").strip()
-    for _ in range(MAX_REDIRECTS + 1):
-        current, addresses = resolve_fetch_target(current, allow_http=False)
-        parsed = urlparse(current)
-        host = str(parsed.hostname or "")
-        host_header = f"[{host}]" if ":" in host else host
-        if parsed.port is not None:
-            host_header = f"{host_header}:{parsed.port}"
-
-        response = None
-        last_connect_error = None
-        for address in addresses:
-            pinned_host = f"[{address}]" if ":" in address else address
-            if parsed.port is not None:
-                pinned_host = f"{pinned_host}:{parsed.port}"
-            pinned_url = urlunparse(parsed._replace(netloc=pinned_host))
-            request = client.build_request(
-                "GET",
-                pinned_url,
-                headers={"Host": host_header, "Connection": "close"},
-                extensions={"sni_hostname": host},
-            )
-            try:
-                response = await client.send(request, stream=True, follow_redirects=False)
-                break
-            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-                last_connect_error = exc
-        if response is None:
-            if last_connect_error is not None:
-                raise last_connect_error
-            raise UnsafeURLError(f"Could not connect to {host}")
-
-        try:
-            if response.is_redirect:
-                location = response.headers.get("location")
-                if not location:
-                    raise UnsafeURLError("Redirect was missing a Location header")
-                current = urljoin(current, location)
-                continue
-            response.raise_for_status()
-            content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
-            if content_type and not content_type.startswith("image/") and content_type not in {
-                "application/octet-stream",
-                "binary/octet-stream",
-            }:
-                raise UnsafeURLError(f"URL did not return an image ({content_type})")
-            content = bytearray()
-            async for chunk in response.aiter_bytes():
-                content.extend(chunk)
-                if len(content) > MAX_DOWNLOAD_BYTES:
-                    raise UnsafeURLError("Image exceeded the download size limit")
-            return bytes(content), content_type, current
-        finally:
-            await response.aclose()
-    raise UnsafeURLError("Too many redirects")
+    return await fetch_public(client, url, accept=is_image_type)
 
 
 def _merge_payloads(form: dict | None, item: dict | None) -> dict[str, Any]:
