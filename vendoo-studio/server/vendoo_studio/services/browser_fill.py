@@ -84,7 +84,7 @@ async def apply_patches(
         ConversationRepo(db).add_message(
             job.conversation_id,
             "system",
-            f"Applied {len(patches)} value(s) onto the Vendoo draft. Review Fields, then Send when ready.",
+            f"Applied {len(patches)} value(s) onto the Vendoo draft. Review Forms, then Send when ready.",
             provider="system",
             model="",
         )

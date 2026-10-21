@@ -217,14 +217,14 @@ function HiddenFieldsSection() {
     <SettingsSection id="hidden-fields" title="Fields">
       <SettingsRow
         title="Always hidden"
-        description="These marketplace fields stay off the Fields tab on every listing. Hide more from a field’s × menu, or restore them here."
+        description="These marketplace fields stay hidden on every listing. Restore any you want back."
       >
         {isPending ? (
           <LoadingNote>Loading hidden fields</LoadingNote>
         ) : isError ? (
           <SettingsNote tone="error">{(error as Error).message || "Could not load hidden fields"}</SettingsNote>
         ) : always.length === 0 ? (
-          <SettingsNote>None yet. On Fields, open a field’s × menu and choose Always hide.</SettingsNote>
+          <SettingsNote>None yet.</SettingsNote>
         ) : (
           <ul className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60">
             {always.map((item) => (

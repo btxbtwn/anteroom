@@ -6,6 +6,7 @@ import {
   ListIcon,
   MegaphoneIcon,
   MessageCircleIcon,
+  Rows3Icon,
   SettingsIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -61,6 +62,7 @@ export function SidebarFooter({
   onOpenAnalytics,
   onOpenMarketing,
   onOpenAssistant,
+  onOpenInventory,
   onOpenSettings,
 }: {
   settingsMode: boolean;
@@ -72,6 +74,7 @@ export function SidebarFooter({
   onOpenAnalytics: () => void;
   onOpenMarketing: () => void;
   onOpenAssistant: () => void;
+  onOpenInventory: () => void;
   onOpenSettings: () => void;
 }) {
   return (
@@ -82,6 +85,11 @@ export function SidebarFooter({
             <ArrowLeftIcon />
             <span>Back</span>
           </button>
+        ) : activeView === "assistant" ? (
+          <>
+            <FooterButton label="Inventory" icon={Rows3Icon} onClick={onOpenInventory} />
+            <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />
+          </>
         ) : (
           <>
             <FooterButton
@@ -98,7 +106,8 @@ export function SidebarFooter({
             <FooterButton label="Sourcing" icon={BoxIcon} active={activeView === "sourcing"} onClick={onOpenSourcing} />
             <FooterButton label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} onClick={onOpenAnalytics} />
             <FooterButton label="Marketing" icon={MegaphoneIcon} active={activeView === "marketing"} onClick={onOpenMarketing} />
-            <FooterButton label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
+            <FooterButton label="Inventory" icon={Rows3Icon} active={activeView === "listings"} onClick={onOpenInventory} />
+            <FooterButton label="Assistant" icon={MessageCircleIcon} onClick={onOpenAssistant} />
             <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />
           </>
         )}

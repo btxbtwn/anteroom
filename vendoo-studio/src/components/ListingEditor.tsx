@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Job, ListingData, MarketplaceForm } from "../api/types";
 import { cloneListing, getListingEditorValue, setListingEditorValue } from "../listingPaths";
-import { FillLogPanel } from "./FillLogPanel";
 import { PhotoTray } from "./PhotoTray";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
@@ -58,7 +57,6 @@ import { FieldLabel, NativeSelect } from "./ListingFormControls";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
-import { Empty, EmptyDescription, EmptyHeader } from "./ui/empty";
 import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
 import { Textarea } from "./ui/textarea";
@@ -101,14 +99,11 @@ export function ListingEditor({
   const editorRef = React.useRef<HTMLDivElement>(null);
   const showJsonEditor = React.useCallback(() => setEditTab("json"), []);
 
-  // isFetching is read only where Retry renders: destructuring it here would
-  // re-render the whole editor twice on every jobs poll.
-  const jobsQuery = useQuery({
+  const { data: jobs, isLoading: jobsLoading } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
     refetchInterval: (query) => jobsPollMs(query.state.data),
   });
-  const { data: jobs, isLoading: jobsLoading } = jobsQuery;
   const { data: photos, isLoading: photosLoading } = useQuery({
     queryKey: ["photos", convId],
     queryFn: () => api.conversations.photos(convId),
@@ -118,7 +113,6 @@ export function ListingEditor({
     listingJob?.mode === "schema_probe"
     && ["queued", "awaiting_extension", "dispatched"].includes(String(listingJob?.status || "")),
   );
-  const [ensureError, setEnsureError] = React.useState<string | null>(null);
   const discardUnsent = useMutation({
     mutationFn: () => api.vendooApi.pull(convId),
     onSuccess: () => {
@@ -161,7 +155,6 @@ export function ListingEditor({
       return { job, fresh, imported };
     },
     onSuccess: ({ job, fresh, imported }) => {
-      setEnsureError(null);
       queryClient.setQueryData(["jobs", convId], (old: Job[] | undefined) => {
         const rest = (old || []).filter((item) => item.id !== job.id);
         return [job, ...rest];
@@ -190,7 +183,6 @@ export function ListingEditor({
       // Remount on Regenerate/Clear aborts an in-flight refresh; that is not a failure.
       const name = err?.name || "";
       if (name === "AbortError" || name === "CancelledError") return;
-      setEnsureError(err.message || "Could not load the Vendoo draft fields.");
       toastManager.add({
         type: "error",
         title: "Could not refresh fields",
@@ -323,15 +315,6 @@ export function ListingEditor({
       .filter((id) => !sold[id])
       .map(marketplaceName);
   }, [conversation]);
-
-  // Opening an imported draft selects Fields once. The parent creates a new
-  // callback on each render; that must not reset the seller's tab selection.
-  const openImportedFields = React.useEffectEvent(() => onReviewTabChange("fields"));
-  React.useEffect(() => {
-    if (importedItemId && listingJob?.status === "imported") {
-      openImportedFields();
-    }
-  }, [importedItemId, listingJob?.status, listingJob?.id]);
 
   const ensureAttemptKey = React.useRef<string | null>(null);
   React.useEffect(() => {
@@ -481,60 +464,12 @@ export function ListingEditor({
         </Alert>
       )}
 
-      <div
-        className={cn(
-          "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pt-3 pb-3",
-          reviewTab === "fields" && "flex flex-col",
-        )}
-      >
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pt-3 pb-3">
         {reviewTab === "input" ? (
           <>
             <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
             <ItemDetails convId={convId} />
           </>
-        ) : reviewTab === "fields" ? (
-          listingJob ? (
-            <FillLogPanel
-              jobId={listingJob.id}
-              conversationId={convId}
-              jobStatus={listingJob.status}
-              jobStep={listingJob.current_step}
-              vendooItemId={listingJob.vendoo_item_id || importedItemId}
-              vendooUrl={listingJob.vendoo_url || importedUrl}
-              listing={listing}
-              onAskChat={askChat}
-              onFilled={() => queryClient.invalidateQueries({ queryKey: ["listing", convId] })}
-            />
-          ) : (
-            <Empty size="compact" className="min-h-48">
-              <EmptyHeader>
-                {jobsLoading || ensureDraftMutation.isPending ? <Spinner className="mb-3 size-5 text-muted-foreground" /> : null}
-                <EmptyDescription>
-                  {jobsLoading || ensureDraftMutation.isPending
-                    ? "Loading fields…"
-                    : importedItemId
-                      ? "This listing already has a Vendoo draft, but its job isn’t loaded yet."
-                      : "Send this listing to Vendoo, then open Fields to review each marketplace."}
-                </EmptyDescription>
-                {ensureError && <p className="mt-2 text-destructive-foreground text-xs">{ensureError}</p>}
-              </EmptyHeader>
-              {importedItemId && !jobsLoading && ensureError && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={jobsQuery.isFetching || ensureDraftMutation.isPending}
-                  onClick={() => {
-                    setEnsureError(null);
-                    ensureAttemptKey.current = null;
-                    ensureDraftMutation.reset();
-                    ensureDraftMutation.mutate();
-                  }}
-                >
-                  {ensureDraftMutation.isPending || jobsQuery.isFetching ? "Retrying…" : "Retry"}
-                </Button>
-              )}
-            </Empty>
-          )
         ) : (
           <>
             <div
@@ -1120,7 +1055,7 @@ function SendToVendooButton({
   const chromeConnected = Boolean(extStatus?.connected);
   const hasDraft = Boolean(vendooItemId || listingJob?.vendoo_item_id || listingJob?.vendoo_url);
 
-  // Same draft + fill-log cache as Fields, so one Ask chat counts the full schema.
+  // Same draft + fill-log cache the ask-chat button uses, so one prompt counts the full schema.
   const { data: draft } = useQuery({
     queryKey: vendooItemQueryKey(listingJobId || ""),
     queryFn: ({ signal }) => api.jobs.vendooItem(listingJobId!, { refresh: true, signal }),

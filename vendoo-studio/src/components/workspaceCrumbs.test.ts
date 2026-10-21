@@ -56,4 +56,12 @@ describe("workspaceCrumbs", () => {
       title: null,
     });
   });
+
+  it("reads the open assistant thread under Assistant", () => {
+    expect(workspaceCrumbs("assistant", "Providers", null, "How did last month do?")).toEqual({
+      context: "Assistant",
+      title: "How did last month do?",
+    });
+    expect(workspaceCrumbs("assistant", "Providers", null, "New thread").title).toBeNull();
+  });
 });

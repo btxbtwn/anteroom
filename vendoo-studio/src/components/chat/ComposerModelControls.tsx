@@ -73,18 +73,23 @@ function ModelList({
   onPick: (model: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const models = provider.models.filter((model) => model.label.toLowerCase().includes(query.trim().toLowerCase()));
+  const searchable = provider.models.length > 8;
+  const models = searchable
+    ? provider.models.filter((model) => model.label.toLowerCase().includes(query.trim().toLowerCase()))
+    : provider.models;
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-l border-border/70 bg-muted/40">
-      <label className="flex h-9 shrink-0 items-center gap-2 border-b border-border/70 px-3">
-        <SearchIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground/70" />
-        <input
-          className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
-          placeholder="Search models..."
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
+      {searchable ? (
+        <label className="flex h-9 shrink-0 items-center gap-2 border-b border-border/70 px-3">
+          <SearchIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground/70" />
+          <input
+            className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
+            placeholder="Search models..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto p-1" role="listbox" aria-label={`${provider.label} models`}>
         {provider.loading ? <p className="px-2 py-2 text-muted-foreground text-xs">Loading models…</p> : null}
         {models.map((model) => {
@@ -96,15 +101,9 @@ function ModelList({
               aria-selected={selected}
               key={model.value}
               onClick={() => onPick(model.value)}
-              className="group relative flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left outline-none hover:bg-accent focus-visible:bg-accent"
+              className="group relative flex h-8 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-2 text-left outline-none hover:bg-accent focus-visible:bg-accent"
             >
-              <span className="min-w-0 flex-1">
-                <span className="block min-w-0 truncate text-xs font-medium leading-snug">{model.label}</span>
-                <span className="mt-1 flex items-center gap-1.5">
-                  <ProviderLogo id={provider.id} label={provider.label} size={12} />
-                  <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">{provider.label}</span>
-                </span>
-              </span>
+              <span className="min-w-0 flex-1 truncate text-xs font-medium">{model.label}</span>
               {selected ? <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
             </button>
           );

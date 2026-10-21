@@ -532,3 +532,29 @@ def test_sizing_out_of_step_is_pointed_out_and_one_size_fixes_every_form(workspa
     shop = business_assistant.read_shop(db, now=NOW)
     assert "--- Listings whose sizing needs a look (0) ---" in shop.brief
     shop.lookups.close()
+
+
+def test_each_thread_keeps_its_own_conversation(workspace, monkeypatch):
+    _db, client = workspace
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(("Noted.",)))
+    first = client.post("/api/assistant/threads").json()
+    second = client.post("/api/assistant/threads").json()
+    assert first["title"] == "New thread"
+
+    client.post("/api/assistant/messages", json={"text": "How did last month do?", "thread_id": first["id"]})
+    client.post("/api/assistant/messages", json={"text": "Which box paid off?", "thread_id": second["id"]})
+
+    assert [row["text"] for row in client.get("/api/assistant/messages", params={"thread_id": first["id"]}).json()] == [
+        "How did last month do?", "Noted.",
+    ]
+    assert [row["text"] for row in client.get("/api/assistant/messages", params={"thread_id": second["id"]}).json()] == [
+        "Which box paid off?", "Noted.",
+    ]
+    titles = {row["id"]: row["title"] for row in client.get("/api/assistant/threads").json()}
+    assert titles[first["id"]] == "How did last month do?"
+    assert titles[second["id"]] == "Which box paid off?"
+
+    assert client.delete(f"/api/assistant/threads/{first['id']}").json() == {"ok": True}
+    assert client.get("/api/assistant/messages", params={"thread_id": first["id"]}).status_code == 404
+    assert client.get("/api/assistant/messages", params={"thread_id": second["id"]}).json()[0]["text"] == "Which box paid off?"
+    assert client.post("/api/assistant/messages", json={"text": "Again", "thread_id": "missing"}).status_code == 404
