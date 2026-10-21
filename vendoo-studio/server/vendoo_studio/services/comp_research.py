@@ -223,6 +223,12 @@ async def _brave_side(queries: list[str], expected_names: tuple[str, ...]) -> So
         return report
 
 
+def _in_order(sources: dict[asyncio.Task, str], answered: dict[asyncio.Task, SoldCompsReport]) -> list[SoldCompsReport]:
+    """Reports in the order the sources started, not the order they answered,
+    so the merged report reads the same however the race went."""
+    return [answered[task] for task in sources if task in answered]
+
+
 async def _stream_comps(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
     query = sold_comps_query(fields)
     if not query:
@@ -235,7 +241,7 @@ async def _stream_comps(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
         yield CompsEvent("done", text=comps_setup_note())
         return
 
-    reports: list[SoldCompsReport] = []
+    answered: dict[asyncio.Task, SoldCompsReport] = {}
     errors: list[str] = []
     sources: dict[asyncio.Task, str] = {}
     if search is not None:
@@ -271,23 +277,23 @@ async def _stream_comps(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
                     yield CompsEvent("source", source=source, state="failed", detail=str(exc))
                 else:
                     report = task.result()
-                    reports.append(report)
+                    answered[task] = report
                     yield CompsEvent(
                         "source", source=source, state="done",
                         sold=len(report.comps), live=len(report.live),
                     )
-                    yield CompsEvent("report", text=format_sold_comps(merge_reports(query, reports)))
+                    yield CompsEvent("report", text=format_sold_comps(merge_reports(query, _in_order(sources, answered))))
     finally:
         for task in pending:
             task.cancel()
 
-    if not reports:
+    if not answered:
         note = COMPS_FAILED_NOTE
         if errors:
             note = f"{note} ({'; '.join(errors)})"
         yield CompsEvent("done", text=_comps_note(query, "web search", note))
         return
-    yield CompsEvent("done", text=format_sold_comps(merge_reports(query, reports)))
+    yield CompsEvent("done", text=format_sold_comps(merge_reports(query, _in_order(sources, answered))))
 
 
 async def stream_comps_for_fields(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
