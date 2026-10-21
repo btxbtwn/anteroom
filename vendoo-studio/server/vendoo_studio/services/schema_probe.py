@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from copy import deepcopy
 from typing import Any
@@ -321,6 +322,56 @@ def _validate_schema_paths(schema: dict, paths: dict, platforms: list[str]) -> N
             )
 
 
+def _fitting_mapped_paths(mapped: dict[str, str], general: str, analysis: str, notes: str) -> dict[str, str]:
+    """Mapper answers that fit the general category, remapped to the right leaf."""
+    if not mapped:
+        return {}
+    from vendoo_studio.services.category_lookup import marketplace_path_fits_general
+    from vendoo_studio.services.registry import map_marketplace_category_path
+
+    mapped = {
+        mp: path
+        for mp, path in mapped.items()
+        if marketplace_path_fits_general(general, path)
+    }
+    listing_cues = {
+        "category_path": general,
+        "title": analysis,
+        "description": notes,
+    }
+    # Vendoo's mapper often returns Tank Tops / Tunics / Blouse for a bare
+    # Women's Tops general because every top maps to the same leaf. Remap
+    # with photo/seller text so a tee reaches the T-shirts leaf.
+    return {
+        mp: map_marketplace_category_path(mp, path, listing_cues) or path
+        for mp, path in mapped.items()
+    }
+
+
+async def _select_tree_categories(
+    provider, analysis: str, notes: str, platforms: list[str], locked_general: str,
+) -> dict:
+    """Model picks for these marketplace trees, on a session of its own."""
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.services.category_selection import select_categories
+
+    db = SessionLocal()
+    try:
+        return await select_categories(db, provider, analysis, notes, platforms, locked_general)
+    finally:
+        db.close()
+
+
+def _drop_task(task: asyncio.Task | None) -> None:
+    """Cancel a speculative task, or consume the error it ended with."""
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    elif not task.cancelled():
+        task.exception()
+
+
 async def prepare_generation_schema(
     db: Session,
     conv_id: str,
@@ -352,44 +403,37 @@ async def prepare_generation_schema(
     paths = await select_categories(db, provider, analysis, notes, [], override)
     seed["category_path"] = paths["general"]
     status("Matching marketplace categories…")
-    mapped = await mapped_marketplace_paths(paths["general"], platforms)
-    if mapped:
-        from vendoo_studio.services.category_lookup import marketplace_path_fits_general
-        from vendoo_studio.services.registry import map_marketplace_category_path
-
-        mapped = {
-            mp: path
-            for mp, path in mapped.items()
-            if marketplace_path_fits_general(paths["general"], path)
-        }
-        listing_cues = {
-            "category_path": paths["general"],
-            "title": analysis,
-            "description": notes,
-        }
-        # Vendoo's mapper often returns Tank Tops / Tunics / Blouse for a bare
-        # Women's Tops general because every top maps to the same leaf. Remap
-        # with photo/seller text so a tee reaches the T-shirts leaf.
-        mapped = {
-            mp: map_marketplace_category_path(mp, path, listing_cues) or path
-            for mp, path in mapped.items()
-        }
     # Only marketplaces with a local tree can be chosen without Vendoo's mapper;
     # the rest stay unmapped here and resolve when the draft is created.
     from vendoo_studio.services.category_tree import MARKETPLACES as TREE_MARKETPLACES
 
-    missing = [mp for mp in platforms if mp not in mapped and mp in TREE_MARKETPLACES]
-    if missing:
-        # No mapper (no Chrome, say), or mapper returned hardware collisions —
-        # ask for the missing trees. Lock the general leaf we already chose.
-        fallback = await select_categories(
-            db, provider, analysis, notes, missing, override or paths["general"],
+    # When the mapper cannot answer (no Chrome, say) or maps into a hardware
+    # collision, the model picks those trees. Ask it now, beside the mapper,
+    # rather than after it; the answer is dropped if the mapper covers them.
+    fallback_task = None
+    tree_platforms = [mp for mp in platforms if mp in TREE_MARKETPLACES]
+    if tree_platforms:
+        fallback_task = asyncio.create_task(_select_tree_categories(
+            provider, analysis, notes, tree_platforms, override or paths["general"],
+        ))
+    try:
+        mapped = _fitting_mapped_paths(
+            await mapped_marketplace_paths(paths["general"], platforms),
+            paths["general"],
+            analysis,
+            notes,
         )
-        seed["category_path"] = fallback.get("general") or paths["general"]
-        for marketplace in missing:
-            path = fallback.get(marketplace)
-            if path:
-                mapped[marketplace] = path
+        missing = [mp for mp in tree_platforms if mp not in mapped]
+        if missing and fallback_task is not None:
+            # Lock the general leaf we already chose.
+            fallback = await fallback_task
+            seed["category_path"] = fallback.get("general") or paths["general"]
+            for marketplace in missing:
+                path = fallback.get(marketplace)
+                if path:
+                    mapped[marketplace] = path
+    finally:
+        _drop_task(fallback_task)
     seed["marketplace_categories"] = mapped
     conv = ConversationRepo(db).get(conv_id)
     seed_probe_general_fields(seed, conv.notes if conv else notes)
