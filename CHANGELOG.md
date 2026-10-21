@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.300 — 2026-10-20
+
+- MiMo’s icon is the M from Xiaomi’s logo, so you can tell it apart next to ChatGPT, Claude, and Cursor.
+
 ## 0.1.299 — 2026-10-20
 
 - The business chat remembers facts about how you run the shop. They stay when you start a new chat, and it updates one when you correct it. About your business shows them, and you can remove one that is wrong.
