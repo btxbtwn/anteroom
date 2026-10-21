@@ -23,13 +23,6 @@ export function AssistantThreadSection({
   const queryClient = useQueryClient();
   const [query, setQuery] = useState("");
   const threads = useQuery({ queryKey: ["assistant", "threads"], queryFn: api.assistant.threads });
-  const create = useMutation({
-    mutationFn: () => api.assistant.createThread(),
-    onSuccess: (thread) => {
-      queryClient.setQueryData<AssistantThread[]>(["assistant", "threads"], (saved) => [thread, ...(saved ?? [])]);
-      onSelect(thread.id);
-    },
-  });
   const remove = useMutation({
     mutationFn: (id: string) => api.assistant.deleteThread(id),
     onSuccess: (_result, id) => {
@@ -67,11 +60,11 @@ export function AssistantThreadSection({
         <button
           type="button"
           className={cn(SIDEBAR_ROW, "w-auto shrink-0 px-2 text-xs font-semibold")}
-          disabled={create.isPending}
-          onClick={() => create.mutate()}
+          aria-pressed={selectedId === null}
+          onClick={() => onSelect(null)}
         >
           <PlusIcon />
-          New
+          New chat
         </button>
       </div>
       <div
@@ -84,7 +77,7 @@ export function AssistantThreadSection({
           <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">Could not load threads</p>
         ) : shown.length === 0 ? (
           <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">
-            {threads.data?.length ? "No matching threads" : "No threads yet"}
+            {threads.data?.length ? "No matching chats" : "No chats yet"}
           </p>
         ) : (
           shown.map((thread) => (

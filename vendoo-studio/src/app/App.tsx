@@ -177,9 +177,12 @@ export function App() {
     queryKey: ["assistant", "threads"],
     queryFn: api.assistant.threads,
   });
-  const assistantThreadId = assistantThreads.data?.some((thread) => thread.id === pickedThreadId)
+  // A blank chat is the home screen. A thread opens only when the seller picks one or sends the first message.
+  const assistantThreadId = pickedThreadId && (
+    assistantThreads.data?.some((thread) => thread.id === pickedThreadId) ?? !assistantThreads.isFetched
+  )
     ? pickedThreadId
-    : (assistantThreads.data?.[0]?.id ?? null);
+    : null;
   const queue = useQuery({
     queryKey: ["queue"],
     queryFn: api.jobs.queue,
@@ -853,7 +856,6 @@ export function App() {
                     onOpenListing={openListing}
                     threadId={assistantThreadId}
                     onThreadReady={setPickedThreadId}
-                    threadsPending={!assistantThreads.isFetched}
                   />
                 </Suspense>
               ) : activeView === "sourcing" ? (

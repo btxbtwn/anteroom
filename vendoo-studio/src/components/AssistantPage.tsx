@@ -71,8 +71,6 @@ interface Props {
   threadId?: string | null;
   /** A question started a conversation; the sidebar should select it. */
   onThreadReady?: (id: string) => void;
-  /** True until the thread list has loaded, so an existing conversation is not flashed past. */
-  threadsPending?: boolean;
 }
 
 export interface LiveTurn {
@@ -100,7 +98,7 @@ function foldsFor(threadId: string): FoldedTurn[] {
  * question is answered from all of Studio's data. An answer can propose
  * changes to listings; they are written only when the seller applies them.
  */
-export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null, onThreadReady, threadsPending = false }: Props) {
+export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null, onThreadReady }: Props) {
   const queryClient = useQueryClient();
   const messages = useQuery({
     queryKey: messagesKey(threadId ?? ""),
@@ -337,8 +335,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   const drawn = live ? liveParts(live, turns) : { question: false, answer: false };
   const visible = live && drawn.answer ? stableStreamingText(live.parts.content) : "";
-  const waitingForThread = !threadId && threadsPending;
-  const empty = !waitingForThread && !turns.length && !live && !messages.isLoading;
+  const empty = !live && !turns.length && !messages.isLoading && !messages.isError;
   const needsProvider = /sign in with chatgpt/i.test(error);
   const foldPositions = placeTurnFolds(turns, folds);
   const foldsAt = (index: number) => folds.filter((_, k) => foldPositions[k] === index);
@@ -346,35 +343,69 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     ? live.parts.status || "Answering…"
     : "";
 
+  const composer = (
+    <div className="mx-auto w-full max-w-208">
+      <ChatComposer
+        composerRef={composerRef}
+        input={input}
+        onInputChange={setInput}
+        placeholder="Ask anything about the shop…"
+        images={images}
+        busy={Boolean(live)}
+        onSend={() => { void ask(input); }}
+        onStop={() => { void stop(); }}
+        stopLabel="Stop answering"
+        queueLabel={null}
+        className="pb-2 sm:pb-2"
+      />
+      {noteOpen ? <BusinessNote onClose={() => setNoteOpen(false)} /> : null}
+      <div className="flex justify-between gap-3 px-5 pb-3 sm:px-6">
+        <Button type="button" size="xs" variant="ghost-muted" aria-expanded={noteOpen} onClick={() => setNoteOpen((open) => !open)}>
+          About your business
+        </Button>
+        {turns.length && !live ? (
+          <Button type="button" size="xs" variant="ghost-muted" onClick={() => { void startOver(); }}>
+            Clear conversation
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  if (empty) {
+    return (
+      <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col items-center px-4">
+        <div className="grid h-full w-full max-w-208 grid-rows-[1fr_auto_1fr]">
+          <div className="flex flex-col justify-end pb-5">
+            <h1 className="mb-2 text-center font-semibold text-2xl text-foreground">Ask about your business</h1>
+            <p className="text-center text-muted-foreground text-sm leading-relaxed">
+              You review every change before it is saved, and nothing here publishes a listing.
+            </p>
+          </div>
+          {composer}
+          <ul className="mt-1 flex list-none flex-wrap content-start justify-center gap-2 p-0">
+            {ASSISTANT_STARTERS.map((starter) => (
+              <li key={starter}>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-full border border-border/70 bg-card px-3 py-1.5 text-left text-secondary-label text-sm leading-snug transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
+                  onClick={() => { void ask(starter); }}
+                >
+                  {starter}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="assistant-page flex min-h-0 min-w-0 flex-1 flex-col">
       <ChatTranscript scroll={scroll} laneClassName="max-w-208 px-4 pt-8 sm:px-8">
         <div className="contents" onClick={openLinkedListing}>
-          {empty ? (
-            <div className="pb-6">
-              <h1 className="mb-2 font-semibold text-2xl text-foreground">Ask about your business</h1>
-              <p className="text-muted-foreground text-sm leading-relaxed">
-                The assistant reads every listing, sale, box, ad and sale event in Studio each time you ask. It
-                answers questions, gives advice, and can fix listings for you: prices, costs, labels, titles, and
-                sizes that differ between marketplace forms. You review every change before it is saved, and it
-                never sends or publishes anything.
-              </p>
-              <ul className="mt-5 grid list-none grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-2 p-0">
-                {ASSISTANT_STARTERS.map((starter) => (
-                  <li key={starter}>
-                    <button
-                      type="button"
-                      className="h-full w-full cursor-pointer rounded-xl border border-border/70 bg-card px-3.5 py-3 text-left text-secondary-label text-sm leading-snug transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
-                      onClick={() => { void ask(starter); }}
-                    >
-                      {starter}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {(waitingForThread || messages.isLoading) && !turns.length ? (
+          {messages.isLoading && !turns.length ? (
             <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
           ) : null}
           {messages.isError ? (
@@ -444,32 +475,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           ) : null}
         </div>
       </ChatTranscript>
-      <div className="mx-auto w-full max-w-208 sm:px-4">
-        <ChatComposer
-          composerRef={composerRef}
-          input={input}
-          onInputChange={setInput}
-          placeholder="Ask a question, or ask for a change…"
-          images={images}
-          busy={Boolean(live)}
-          onSend={() => { void ask(input); }}
-          onStop={() => { void stop(); }}
-          stopLabel="Stop answering"
-          queueLabel={null}
-          className="pb-2 sm:pb-2"
-        />
-        {noteOpen ? <BusinessNote onClose={() => setNoteOpen(false)} /> : null}
-        <div className="flex justify-between gap-3 px-5 pb-3 sm:px-6">
-          <Button type="button" size="xs" variant="ghost-muted" aria-expanded={noteOpen} onClick={() => setNoteOpen((open) => !open)}>
-            About your business
-          </Button>
-          {turns.length && !live ? (
-            <Button type="button" size="xs" variant="ghost-muted" onClick={() => { void startOver(); }}>
-              Clear conversation
-            </Button>
-          ) : null}
-        </div>
-      </div>
+      {composer}
     </div>
   );
 }
