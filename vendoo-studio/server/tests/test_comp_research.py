@@ -222,7 +222,16 @@ class ResearchTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(asks[1].startswith("Find recently sold comps for: Levi's"))
         self.assertIn("Require explicit evidence that the item sold", calls[0][0]["content"])
         brave.assert_awaited_once()
-        self.assertEqual(len(brave.await_args.args[0]), 11)
+        # A small fixed budget: the top sold queries plus one active query.
+        from vendoo_studio.services.brave_search import brave_active_queries, brave_sold_queries, item_fields
+
+        fields = item_fields(ANALYSIS)
+        self.assertEqual(
+            brave.await_args.args[0],
+            [*brave_sold_queries(fields)[:3], *brave_active_queries(fields)[:1]],
+        )
+        self.assertIn(" sold ", brave.await_args.args[0][0])
+        self.assertNotIn("sold", brave.await_args.args[0][-1])
         report = parse_sold_comps(text)
         self.assertEqual(report.source, "ChatGPT + Brave")
         # Only the sold search vouches for sales; the active one's comps are dropped.

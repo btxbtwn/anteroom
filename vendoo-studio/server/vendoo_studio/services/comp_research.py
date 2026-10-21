@@ -63,6 +63,12 @@ COMPS_FAILED_NOTE = (
     "Sold comps search failed. Use an estimated baseline."
 )
 
+# Brave runs on every listing beside the model search, so it gets a small fixed
+# budget: the broad sold query and the first per-site ones (the builders put the
+# highest-value queries first), plus one active query.
+BRAVE_SOLD_QUERIES = 3
+BRAVE_ACTIVE_QUERIES = 1
+
 SOLD = "sold"
 ACTIVE = "active"
 _FOCUS = {
@@ -257,7 +263,10 @@ async def _stream_comps(fields: dict[str, str]) -> AsyncIterator[CompsEvent]:
             if search is None:
                 live_trace.emit("step", "Brave quota is spent until next month")
         else:
-            queries = [*brave_sold_queries(fields), *brave_active_queries(fields)]
+            queries = [
+                *brave_sold_queries(fields)[:BRAVE_SOLD_QUERIES],
+                *brave_active_queries(fields)[:BRAVE_ACTIVE_QUERIES],
+            ]
             sources[asyncio.create_task(_brave_side(queries, expected_names))] = "Brave"
             yield CompsEvent("source", source="Brave", state="searching")
 
