@@ -9,6 +9,7 @@ listing registers here so chat can show it and Stop can cancel it.
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 
 
@@ -26,6 +27,11 @@ class Work:
 
 
 _work: dict[str, list[Work]] = {}
+# The latest state of each ``live_trace.agent`` in a listing's current
+# generation, by agent id. The generate stream carries these as ``agent``
+# events, but the stream has ended by the time marketplace fields are filled,
+# so activity polling exposes them too.
+_agents: dict[str, dict[str, dict]] = {}
 
 
 def begin(conv_id: str, label: str) -> Work:
@@ -69,8 +75,29 @@ def cancel(conv_id: str) -> int:
     return len(items)
 
 
+def record_agent(conv_id: str, event: str | dict) -> None:
+    """Keep the newest state of one agent (a ``live_trace`` ``agent`` event)."""
+    try:
+        state = json.loads(event) if isinstance(event, str) else dict(event)
+    except (TypeError, ValueError):
+        return
+    if not isinstance(state, dict) or not state.get("id"):
+        return
+    _agents.setdefault(conv_id, {})[str(state["id"])] = state
+
+
+def agents(conv_id: str) -> list[dict]:
+    """Every agent of the listing's latest generation, in start order."""
+    return sorted(_agents.get(conv_id, {}).values(), key=lambda state: state.get("started_at") or 0)
+
+
+def clear_agents(conv_id: str) -> None:
+    _agents.pop(conv_id, None)
+
+
 def reset() -> None:
     for items in list(_work.values()):
         for work in items:
             work.cancel()
     _work.clear()
+    _agents.clear()
