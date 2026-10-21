@@ -46,27 +46,15 @@
     font-weight: 500;
   }
 
-  .sidebar-footer {
-    display: none;
-  }
+  
 
-  .sidebar-toolbar {
-    display: none;
-  }
+  
 
-  .sidebar-settings .sidebar-toolbar {
-    display: flex;
-  }
+  
 
-  .sidebar-list {
-    min-height: 0;
-    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-    touch-action: pan-y;
-  }
+  
 
-  .sidebar-settings .sidebar-list {
-    padding-bottom: 16px;
-  }
+  
 
   .app-content.mobile-sidebar-open .mobile-workspace-bar {
     display: none;
@@ -222,8 +210,7 @@
   select.input,
   textarea.input,
   .item-field .input,
-  .chat-composer-input,
-  .sidebar-search input {
+  .chat-composer-input {
     font-size: 16px;
   }
 
@@ -231,10 +218,7 @@
     touch-action: manipulation;
   }
 
-  .nav-item .nav-actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
+  
 
   .workspace-frame,
   .main-panel,

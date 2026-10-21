@@ -10,7 +10,18 @@ import { ChatPanel } from "../components/ChatPanel";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { BrowserPreview } from "../components/BrowserPreview";
 import { ListingSidebar } from "../components/ListingSidebar";
-import { AnalyticsIcon, AssistantIcon, BackIcon, SourcingIcon, ComposeIcon, HamburgerIcon, MarketingIcon, QueueIcon, SearchIcon, SettingsIcon } from "../components/sidebar/SidebarIcons";
+import {
+  ArrowLeftIcon,
+  BoxIcon,
+  ChartColumnIcon,
+  ListIcon,
+  MegaphoneIcon,
+  MenuIcon,
+  MessageCircleIcon,
+  SearchIcon,
+  SettingsIcon,
+  SquarePenIcon,
+} from "lucide-react";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTION_LABELS,
@@ -640,7 +651,7 @@ export function App() {
                 setMobileSidebarOpen(true);
               }}
             >
-              <BackIcon />
+              <ArrowLeftIcon className="size-4" />
             </button>
             <div className="mobile-workspace-title">{workspaceTitle}</div>
             {activeView === "listings" ? (
@@ -652,7 +663,7 @@ export function App() {
                   aria-label={`Queue${queueCount ? ` (${queueCount})` : ""}`}
                   onClick={() => togglePage("queue")}
                 >
-                  <QueueIcon />
+                  <ListIcon className="size-4" />
                   {queueCount ? <span className="queue-nav-dot" aria-hidden="true" /> : null}
                 </button>
                 <div className="mobile-workspace-panes" role="tablist" aria-label="Workspace views">
@@ -693,7 +704,7 @@ export function App() {
                   aria-label="Sourcing"
                   onClick={openSourcing}
                 >
-                  <SourcingIcon />
+                  <BoxIcon className="size-4" />
                 </button>
                 <button
                   type="button"
@@ -702,7 +713,7 @@ export function App() {
                   aria-label="Analytics"
                   onClick={openAnalytics}
                 >
-                  <AnalyticsIcon />
+                  <ChartColumnIcon className="size-4" />
                 </button>
                 <button
                   type="button"
@@ -711,7 +722,7 @@ export function App() {
                   aria-label="Marketing"
                   onClick={openMarketing}
                 >
-                  <MarketingIcon />
+                  <MegaphoneIcon className="size-4" />
                 </button>
                 <button
                   type="button"
@@ -720,7 +731,7 @@ export function App() {
                   aria-label="Assistant"
                   onClick={openAssistant}
                 >
-                  <AssistantIcon />
+                  <MessageCircleIcon className="size-4" />
                 </button>
                 <button
                   type="button"
@@ -729,7 +740,7 @@ export function App() {
                   aria-label="Settings"
                   onClick={openSettings}
                 >
-                  <SettingsIcon />
+                  <SettingsIcon className="size-4" />
                 </button>
               </>
             ) : null}
@@ -916,10 +927,10 @@ export function App() {
             aria-controls="listings-sidebar"
             onClick={() => setMobileSidebarOpen((open) => !open)}
           >
-            <HamburgerIcon />
+            <MenuIcon className="size-5" />
           </button>
           <label className="mobile-mail-search">
-            <SearchIcon />
+            <SearchIcon className="size-4.5 shrink-0" />
             <input
               type="search"
               value={listingQuery}
@@ -936,7 +947,7 @@ export function App() {
             disabled={createConv.isPending}
             onClick={createListing}
           >
-            <ComposeIcon />
+            <SquarePenIcon className="size-5" />
           </button>
         </nav>
       )}
