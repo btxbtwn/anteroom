@@ -35,10 +35,12 @@ WEB_SEARCH_PREAMBLE = (
 )
 # The only built-in tools a comps search may use.
 WEB_TOOLS = ("webSearch", "webFetch")
-# Cursor keeps searching well past any budget the prompt asks for, and a run
-# stopped from outside returns nothing. So the search is stopped here and the
-# same agent, which remembers what it found, is asked to answer at once.
-# Leaves room inside comp_research's MODEL_SEARCH_TIMEOUT_SEC for that answer.
+# Cursor keeps searching well past the budget the prompt asks for, and a run
+# stopped from outside returns nothing. Stop after that many tool calls — each
+# search or page fetch counts — and ask the same agent for the JSON it already
+# has. The timer is only the backstop, and it leaves room inside comp_research's
+# MODEL_SEARCH_TIMEOUT_SEC for the answer.
+WEB_SEARCH_MAX_CALLS = 8
 WEB_SEARCH_WRAP_UP_SEC = 55.0
 WEB_SEARCH_WRAP_UP = (
     "Stop searching now. Reply immediately with the JSON of every sold comp and live "
@@ -68,6 +70,74 @@ def listing_scratch_dir() -> Path:
     path = user_data_root() / "cursor-listing-workspace"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+# One bridge process serves later runs. Launching a new one for every photo
+# pass, category pick, and repair is most of the wait next to ChatGPT, which
+# is a single HTTP call. Two covers category selection and comps running together.
+_BRIDGE_POOL_MAX = 2
+_bridge_pool_lock = threading.Lock()
+_idle_bridges: list = []
+# Lowest reasoning choice per model id. None means the model has no such knob.
+_reasoning_floor: dict[str, tuple[str, str] | None] = {}
+_LOWEST_REASONING = ("none", "minimal", "low")
+
+
+def reset_cursor_bridges() -> None:
+    """Drop idle bridges and the cached reasoning floor. Tests use this."""
+    with _bridge_pool_lock:
+        idle = list(_idle_bridges)
+        _idle_bridges.clear()
+        _reasoning_floor.clear()
+    for client in idle:
+        with contextlib.suppress(Exception):
+            client.close()
+
+
+def _acquire_bridge(scratch: str):
+    from cursor_sdk import Client
+
+    with _bridge_pool_lock:
+        if _idle_bridges:
+            return _idle_bridges.pop()
+    with _patched_bridge_env():
+        return Client.launch_bridge(workspace=scratch)
+
+
+def _settle_bridge(client, handles: dict[str, object]) -> None:
+    """Return a healthy bridge to the pool, or close one a cancelled run killed."""
+    with _bridge_pool_lock:
+        if handles.get("discard"):
+            already = bool(handles.get("closed"))
+            handles["closed"] = True
+            _idle_bridges[:] = [item for item in _idle_bridges if item is not client]
+        elif len(_idle_bridges) < _BRIDGE_POOL_MAX:
+            _idle_bridges.append(client)
+            return
+        else:
+            already = bool(handles.get("closed"))
+            handles["closed"] = True
+    if not already:
+        with contextlib.suppress(Exception):
+            client.close()
+
+
+def _abort_bridge(handles: dict[str, object]) -> None:
+    """Cancel the run and close its bridge so a blocked wait() returns."""
+    run = handles.get("run")
+    client = handles.get("client")
+    with contextlib.suppress(Exception):
+        if run is not None:
+            run.cancel()  # type: ignore[union-attr]
+    with _bridge_pool_lock:
+        handles["discard"] = True
+        already = bool(handles.get("closed"))
+        handles["closed"] = True
+        if client is not None:
+            _idle_bridges[:] = [item for item in _idle_bridges if item is not client]
+    if client is not None and not already:
+        with contextlib.suppress(Exception):
+            client.close()  # type: ignore[union-attr]
 
 
 def uvloop_safe_subprocess_env(source: Mapping[str, object] | None = None) -> dict[str, str]:
@@ -165,8 +235,36 @@ def default_param_value(model, param_id: str) -> str | None:
     return None
 
 
-def model_selection(model: str) -> str | dict:
-    """``model`` with the saved reasoning level when it was chosen for this model."""
+def lowest_reasoning(model) -> tuple[str, str] | None:
+    """``(param id, lowest value)`` for a catalog model, or None when it has no knob."""
+    param = reasoning_parameter(model)
+    if param is None:
+        return None
+    values = [str(getattr(item, "value", "") or "") for item in getattr(param, "values", ()) or ()]
+    for name in _LOWEST_REASONING:
+        if name in values:
+            return (str(getattr(param, "id", "") or ""), name)
+    if values and values[0]:
+        return (str(getattr(param, "id", "") or ""), values[0])
+    return None
+
+
+def remember_reasoning_floor(models) -> None:
+    with _bridge_pool_lock:
+        for model in models:
+            model_id = getattr(model, "id", None)
+            if isinstance(model_id, str) and model_id.strip():
+                _reasoning_floor[model_id] = lowest_reasoning(model)
+
+
+def model_selection(model: str, *, lowest: bool = False) -> str | dict:
+    """``model`` with a reasoning level: the saved one, or the lowest for a quick reply."""
+    if lowest:
+        with _bridge_pool_lock:
+            floor = _reasoning_floor.get(model)
+        if floor:
+            return {"id": model, "params": [{"id": floor[0], "value": floor[1]}]}
+        return model
     reasoning = get_cursor_reasoning()
     if not reasoning or reasoning["model"] != model:
         return model
@@ -331,6 +429,20 @@ class CursorProvider:
         async for content in self._run(messages, stream=stream, model=self.listing_model):
             yield content
 
+    async def quick_chat(self, messages: list[dict]):
+        """Mechanical JSON: no tools and the model's lowest reasoning, the way ChatGPT repairs."""
+        text = ""
+        async for chunk in self._run(
+            messages,
+            stream=False,
+            model=self.listing_model,
+            lowest=True,
+        ):
+            text += chunk
+        if not text:
+            raise RuntimeError("Cursor returned an empty repair response")
+        yield text
+
     async def web_search(self, messages: list[dict]) -> dict:
         """Run ``messages`` with web search and fetch only: ``{"answer", "sources"}``.
 
@@ -367,13 +479,13 @@ class CursorProvider:
         *,
         stream: bool,
         model: str | None = None,
-        tools: tuple[str, ...] | None = None,
+        tools: tuple[str, ...] | None = (),
         on_thinking: Callable[[_Thinking], None] | None = None,
         wrap_up: tuple[float, str] | None = None,
         preamble: str = TEXT_ONLY_PREAMBLE,
+        lowest: bool = False,
     ):
         from cursor_sdk import (
-            Client,
             CursorAgentError,
             LocalAgentOptions,
             UserMessage,
@@ -396,101 +508,119 @@ class CursorProvider:
         handles: dict[str, object] = {}
 
         def _worker() -> None:
+            client = None
             try:
-                with _patched_bridge_env():
-                    with Client.launch_bridge(workspace=scratch) as client:
-                        handles["client"] = client
-                        with client.agents.create(
-                            {"tools": list(tools)} if tools is not None else None,
-                            model=model_selection(selected),
-                            api_key=self.api_key,
-                            local=LocalAgentOptions(cwd=scratch, setting_sources=[]),
-                        ) as agent:
-                            status_notes: list[str] = []
+                client = _acquire_bridge(scratch)
+                handles["client"] = client
+                if lowest:
+                    with _bridge_pool_lock:
+                        known = selected in _reasoning_floor
+                    if not known:
+                        try:
+                            remember_reasoning_floor(client.list_models(api_key=self.api_key))
+                        except Exception:
+                            log.warning("Cursor model catalog unavailable for a quick reply", exc_info=True)
+                            with _bridge_pool_lock:
+                                _reasoning_floor.setdefault(selected, None)
+                with client.agents.create(
+                    {"tools": list(tools or ())},
+                    model=model_selection(selected, lowest=lowest),
+                    api_key=self.api_key,
+                    local=LocalAgentOptions(cwd=scratch, setting_sources=[]),
+                ) as agent:
+                    status_notes: list[str] = []
 
-                            def drain(run) -> bool:
-                                """Relay thinking and (when streaming) text; True if text went out.
+                    def drain(run, *, stop_after_tools: int | None = None) -> bool:
+                        """Relay thinking and (when streaming) text; True if text went out.
 
-                                Always reads the stream: a failed run's result
-                                carries only its id, and the reason arrives as
-                                a status message.
-                                """
-                                yielded = False
-                                for sdk_message in run.stream():
-                                    kind = getattr(sdk_message, "type", "")
-                                    if kind == "status":
-                                        note = str(getattr(sdk_message, "message", "") or "").strip()
-                                        if note:
-                                            status_notes.append(note)
-                                    elif kind == "thinking" and on_thinking is not None:
-                                        _emit(_Thinking(
-                                            text=str(getattr(sdk_message, "text", "") or ""),
-                                            finished=getattr(sdk_message, "thinking_duration_ms", None) is not None,
-                                        ))
-                                    elif kind == "assistant" and stream:
-                                        content = getattr(getattr(sdk_message, "message", None), "content", ())
-                                        for block in content:
-                                            chunk = getattr(block, "text", "")
-                                            if chunk:
-                                                yielded = True
-                                                _emit(chunk)
-                                return yielded
+                        Always reads the stream: a failed run's result
+                        carries only its id, and the reason arrives as
+                        a status message.
+                        """
+                        yielded = False
+                        tool_calls = 0
+                        for sdk_message in run.stream():
+                            kind = getattr(sdk_message, "type", "")
+                            if kind == "status":
+                                note = str(getattr(sdk_message, "message", "") or "").strip()
+                                if note:
+                                    status_notes.append(note)
+                            elif kind == "tool_call" and stop_after_tools:
+                                if getattr(sdk_message, "status", "") in {"completed", "error"}:
+                                    tool_calls += 1
+                                    if tool_calls >= stop_after_tools and not wrapped.is_set():
+                                        wrapped.set()
+                                        with contextlib.suppress(Exception):
+                                            run.cancel()
+                            elif kind == "thinking" and on_thinking is not None:
+                                _emit(_Thinking(
+                                    text=str(getattr(sdk_message, "text", "") or ""),
+                                    finished=getattr(sdk_message, "thinking_duration_ms", None) is not None,
+                                ))
+                            elif kind == "assistant" and stream:
+                                content = getattr(getattr(sdk_message, "message", None), "content", ())
+                                for block in content:
+                                    chunk = getattr(block, "text", "")
+                                    if chunk:
+                                        yielded = True
+                                        _emit(chunk)
+                        return yielded
 
-                            run = agent.send(message)
-                            handles["run"] = run
-                            wrapped = threading.Event()
-                            timer = None
-                            if wrap_up is not None:
-                                def _stop_searching() -> None:
-                                    wrapped.set()
-                                    with contextlib.suppress(Exception):
-                                        run.cancel()
+                    run = agent.send(message)
+                    handles["run"] = run
+                    wrapped = threading.Event()
+                    timer = None
+                    if wrap_up is not None:
+                        def _stop_searching() -> None:
+                            wrapped.set()
+                            with contextlib.suppress(Exception):
+                                run.cancel()
 
-                                timer = threading.Timer(wrap_up[0], _stop_searching)
-                                timer.daemon = True
-                                timer.start()
-                            try:
-                                yielded = drain(run)
-                                result = run.wait()
-                            finally:
-                                if timer is not None:
-                                    timer.cancel()
-                            if wrap_up is not None and wrapped.is_set() and result.status == "cancelled":
-                                run = agent.send(UserMessage(text=wrap_up[1]))
-                                handles["run"] = run
-                                yielded = drain(run)
-                                result = run.wait()
-                            if result.status == "error":
-                                reason = status_notes[-1] if status_notes else (result.result or "").strip()
-                                if reason:
-                                    raise RuntimeError(f"Cursor run failed: {reason[:300]}")
-                                raise RuntimeError(f"Cursor run failed: {result.id}")
-                            if stream:
-                                if not yielded and result.result:
-                                    _emit(result.result)
-                                return
-                            text = (result.result or "").strip()
-                            if not text:
-                                raise RuntimeError("Cursor returned an empty listing response")
-                            _emit(text)
+                        timer = threading.Timer(wrap_up[0], _stop_searching)
+                        timer.daemon = True
+                        timer.start()
+                    try:
+                        yielded = drain(
+                            run,
+                            stop_after_tools=WEB_SEARCH_MAX_CALLS if wrap_up is not None else None,
+                        )
+                        result = run.wait()
+                    finally:
+                        if timer is not None:
+                            timer.cancel()
+                    if wrap_up is not None and wrapped.is_set() and result.status == "cancelled":
+                        run = agent.send(UserMessage(text=wrap_up[1]))
+                        handles["run"] = run
+                        yielded = drain(run)
+                        result = run.wait()
+                    if result.status == "error":
+                        reason = status_notes[-1] if status_notes else (result.result or "").strip()
+                        if reason:
+                            raise RuntimeError(f"Cursor run failed: {reason[:300]}")
+                        raise RuntimeError(f"Cursor run failed: {result.id}")
+                    if stream:
+                        if not yielded and result.result:
+                            _emit(result.result)
+                        return
+                    text = (result.result or "").strip()
+                    if not text:
+                        raise RuntimeError("Cursor returned an empty listing response")
+                    _emit(text)
             except CursorAgentError as exc:
+                handles["discard"] = True
                 _emit(RuntimeError(f"Cursor agent error: {exc}"))
             except Exception as exc:
+                handles["discard"] = True
                 _emit(exc)
             finally:
+                if client is not None:
+                    _settle_bridge(client, handles)
                 _emit(_STREAM_DONE)
 
         def _abort() -> None:
-            # Cancelling the run and closing the bridge ends the worker's
-            # blocking wait, so the thread exits instead of outliving the caller.
-            run = handles.get("run")
-            client = handles.get("client")
-            with contextlib.suppress(Exception):
-                if run is not None:
-                    run.cancel()
-            with contextlib.suppress(Exception):
-                if client is not None:
-                    client.close()
+            # Cancelling the run and closing its bridge ends the worker's
+            # blocking wait. The bridge is not reused: close is what unblocks it.
+            _abort_bridge(handles)
 
         worker_done = threading.Event()
 

@@ -97,6 +97,18 @@ class UvloopSafeEnvTest(unittest.TestCase):
 
 
 class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        super().setUp()
+        from vendoo_studio.providers.cursor_agent import reset_cursor_bridges
+
+        reset_cursor_bridges()
+
+    def tearDown(self):
+        from vendoo_studio.providers.cursor_agent import reset_cursor_bridges
+
+        reset_cursor_bridges()
+        super().tearDown()
+
     async def test_chat_streams_text(self):
         provider = CursorProvider(api_key="cursor_test")
 
@@ -135,6 +147,33 @@ class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("".join(chunks), "Hello world")
         fake_agent.send.assert_called_once()
+        self.assertEqual(fake_agents.create.call_args.args[0], {"tools": []})
+
+    async def test_second_run_reuses_the_bridge(self):
+        provider = CursorProvider(api_key="cursor_test")
+
+        class FakeRun:
+            def __init__(self):
+                self.id = "run-reuse"
+
+            def stream(self):
+                yield assistant("ok")
+
+            def wait(self):
+                return MagicMock(status="finished", result="ok", id=self.id)
+
+        fake_client, fake_agents = fake_bridge(FakeRun())
+        with (
+            patch("cursor_sdk.Client.launch_bridge", return_value=fake_client) as launch,
+            patch("vendoo_studio.providers.cursor_agent.listing_scratch_dir") as scratch,
+        ):
+            scratch.return_value = MagicMock(__str__=lambda self: "/tmp/cursor-scratch")
+            for _ in range(2):
+                async for _chunk in provider.chat([{"role": "user", "content": "Hi"}], stream=False):
+                    pass
+
+        self.assertEqual(launch.call_count, 1)
+        self.assertEqual(fake_agents.create.call_count, 2)
 
     async def test_failed_photo_run_reports_cursors_reason(self):
         provider = CursorProvider(api_key="cursor_test")
@@ -244,6 +283,58 @@ class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["answer"], answer)
         self.assertEqual(agent.send.call_count, 2)
         self.assertIn("Stop searching now", agent.send.call_args.args[0].text)
+
+    async def test_web_search_stops_after_eight_tool_calls(self):
+        provider = CursorProvider(api_key="cursor_test")
+        answer = '{"comps":[],"live":[]}'
+
+        class SearchingRun:
+            id = "run-tools"
+
+            def __init__(self):
+                self.stopped = threading.Event()
+                self.cancels = 0
+
+            def stream(self):
+                for index in range(20):
+                    if self.stopped.is_set():
+                        return
+                    yield SimpleNamespace(
+                        type="tool_call", status="completed", name="webSearch", call_id=str(index),
+                    )
+                self.stopped.wait(5)
+
+            def cancel(self):
+                self.cancels += 1
+                self.stopped.set()
+
+            def wait(self):
+                return MagicMock(status="cancelled", result="", id=self.id)
+
+        class WrapUpRun:
+            id = "run-wrap"
+
+            def stream(self):
+                return iter(())
+
+            def wait(self):
+                return MagicMock(status="finished", result=answer, id=self.id)
+
+        searching = SearchingRun()
+        fake_client, fake_agents = fake_bridge(searching)
+        agent = fake_agents.create.return_value
+        agent.send = MagicMock(side_effect=[searching, WrapUpRun()])
+        with (
+            patch("cursor_sdk.Client.launch_bridge", return_value=fake_client),
+            patch("vendoo_studio.providers.cursor_agent.listing_scratch_dir") as scratch,
+            patch("vendoo_studio.providers.cursor_agent.WEB_SEARCH_WRAP_UP_SEC", 30),
+        ):
+            scratch.return_value = MagicMock(__str__=lambda self: "/tmp/cursor-scratch")
+            result = await provider.web_search([{"role": "user", "content": "Nike tee sold comps"}])
+
+        self.assertEqual(result["answer"], answer)
+        self.assertEqual(searching.cancels, 1)
+        self.assertEqual(agent.send.call_count, 2)
 
     async def test_stalled_run_times_out_and_closes_the_bridge(self):
         provider = CursorProvider(api_key="cursor_test")
@@ -555,8 +646,10 @@ class CursorReasoningTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         import tempfile
 
+        from vendoo_studio.providers.cursor_agent import reset_cursor_bridges
         from vendoo_studio.services import user_settings
 
+        reset_cursor_bridges()
         self._tmp = tempfile.TemporaryDirectory()
         self._settings = patch.object(
             user_settings, "settings_path", return_value=Path(self._tmp.name) / "settings.json"
@@ -564,6 +657,9 @@ class CursorReasoningTest(unittest.IsolatedAsyncioTestCase):
         self._settings.start()
 
     def tearDown(self):
+        from vendoo_studio.providers.cursor_agent import reset_cursor_bridges
+
+        reset_cursor_bridges()
         self._settings.stop()
         self._tmp.cleanup()
 
@@ -600,6 +696,42 @@ class CursorReasoningTest(unittest.IsolatedAsyncioTestCase):
             {"id": "gpt-5.5", "params": [{"id": "reasoning_effort", "value": "high"}]},
         )
         self.assertEqual(vision_call.kwargs["model"], "composer-2.5")
+        self.assertEqual(listing_call.args[0], {"tools": []})
+
+    async def test_quick_chat_uses_the_lowest_reasoning(self):
+        from vendoo_studio.services import user_settings
+
+        user_settings.set_cursor_models(listing_model="gpt-5.5")
+        user_settings.set_cursor_reasoning(model="gpt-5.5", param="reasoning_effort", value="high")
+        provider = CursorProvider(api_key="cursor_test")
+
+        class FakeRun:
+            id = "run-quick"
+
+            def stream(self):
+                return iter(())
+
+            def wait(self):
+                return MagicMock(status="finished", result='{"title": "Fixed"}', id=self.id)
+
+        fake_client, fake_agents = fake_bridge(FakeRun())
+        fake_client.list_models = MagicMock(return_value=[
+            sdk_model("gpt-5.5", effort=("low", "medium", "high"), default="medium"),
+        ])
+        with (
+            patch("cursor_sdk.Client.launch_bridge", return_value=fake_client),
+            patch("vendoo_studio.providers.cursor_agent.listing_scratch_dir") as scratch,
+        ):
+            scratch.return_value = MagicMock(__str__=lambda self: "/tmp/cursor-scratch")
+            chunks = [chunk async for chunk in provider.quick_chat([{"role": "user", "content": "fix"}])]
+
+        self.assertEqual(chunks, ['{"title": "Fixed"}'])
+        call = fake_agents.create.call_args
+        self.assertEqual(call.args[0], {"tools": []})
+        self.assertEqual(
+            call.kwargs["model"],
+            {"id": "gpt-5.5", "params": [{"id": "reasoning_effort", "value": "low"}]},
+        )
 
     def test_changing_models_keeps_the_saved_reasoning(self):
         from vendoo_studio.services import user_settings
