@@ -1,5 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { EXTENSION_STATUS_POLL_MS, pollMs } from "../../api/polling";
+import { extensionConnection } from "../ExtensionStatus";
+import { StatusDot } from "../StatusDot";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
 import { ConnectChromeButton } from "../ConnectChromeButton";
@@ -69,10 +72,32 @@ function CategoryTreesRow() {
   );
 }
 
+function ExtensionConnectionRow() {
+  const { data } = useQuery({
+    queryKey: ["extension-status"],
+    queryFn: api.extension.status,
+    refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
+  });
+  const connection = extensionConnection(data);
+  return (
+    <SettingsRow
+      title="Extension"
+      description={connection.detail}
+      control={
+        <span className="flex items-center gap-1.5 text-xs text-foreground">
+          <StatusDot tone={connection.tone} />
+          {connection.label}
+        </span>
+      }
+    />
+  );
+}
+
 export function ConnectionsSettings() {
   return (
     <>
       <SettingsSection id="connections" title="Vendoo">
+        <ExtensionConnectionRow />
         <SettingsRow
           title="Vendoo in Chrome"
           description="Connect Chrome opens Vendoo in your everyday Chrome and reloads Studio's listing extension so it matches this build. Send to Vendoo creates or updates a draft over Vendoo's API using that signed-in session."

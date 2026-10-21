@@ -91,7 +91,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "Go to Settings → Connections and press **Connect Chrome**. Vendoo opens in your everyday Chrome.",
       "First time only: copy the **Listing extension folder** path, open chrome://extensions, turn on Developer mode, click Load unpacked, press ⌘⇧G, paste the path, then Go and Open.",
       "Sign in to Vendoo in that Chrome window.",
-      "The status bar shows **Extension connected** when it works. If it says offline or outdated, press **Connect Chrome** again.",
+      "Settings → Connections shows **Connected** when it works. If it says offline or outdated, press **Connect Chrome** again.",
     ],
   },
   {

@@ -3,8 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, jobsPollMs, pollMs } from "../api/polling";
 import type { BrowserField } from "../api/client";
-import { BuildVersion } from "../components/BuildVersion";
-import { ExtensionStatus } from "../components/ExtensionStatus";
+import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { ChatPanel } from "../components/ChatPanel";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { BrowserPreview } from "../components/BrowserPreview";
@@ -154,6 +153,7 @@ export function App() {
     queryFn: api.status,
     refetchInterval: (query) => pollMs(query.state.data?.active_job_id ? BUSY_POLL_MS : IDLE_POLL_MS),
   });
+  useReloadStaleFrontend(status?.version);
   // Re-reading the whole inventory is the heaviest request Studio makes, so it
   // only runs fast while a Vendoo send is moving rows. Studio's own edits
   // invalidate it; the slow pass picks up Vendoo's background syncs.
@@ -1023,14 +1023,6 @@ export function App() {
           </button>
         </nav>
       )}
-      <footer className="relative flex shrink-0 items-center justify-between border-t border-sidebar-border px-3.5 pt-1 pb-[max(--spacing(1),env(safe-area-inset-bottom,0px),var(--visual-bottom-inset,0px))] text-2xs text-sidebar-muted-foreground max-[900px]:hidden">
-        <div className="flex items-center gap-3">
-          <ExtensionStatus />
-        </div>
-        <div className="flex items-center gap-3">
-          <BuildVersion backendVersion={status?.version} />
-        </div>
-      </footer>
       <PhotoDropOverlay
         title={
           selectedConvId

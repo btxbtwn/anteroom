@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.297 — 2026-10-20
+
+- The bottom status bar is gone. The version is in Settings → General → About, and whether the extension is connected is in Settings → Connections.
+
 ## 0.1.296 — 2026-10-20
 
 - The thread list on the left is black, the same surface T3 Code uses.

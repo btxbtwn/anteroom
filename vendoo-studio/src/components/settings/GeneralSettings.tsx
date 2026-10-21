@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { ListingNames } from "../../api/types";
+import { frontendBuildState } from "../buildStamp";
 import { useStudioUpdate } from "../UpdateButton";
 import { ChangelogDialog } from "../ChangelogDialog";
 import { applyTheme, normalizeTheme, type ThemePreference } from "../../theme";
@@ -70,15 +71,16 @@ function AppearanceSection() {
 
 function AboutVersionRow({ version }: { version: string }) {
   const { available, busy, downloaded, description, iconTooltip, onClick, settingsLabel } = useStudioUpdate();
+  const build = frontendBuildState(__STUDIO_BUILD__, version === "…" ? null : version);
   return (
     <SettingsRow
       title={
         <>
           Version
-          <SettingsCode>{version}</SettingsCode>
+          <SettingsCode>{build.outdated ? build.label : version}</SettingsCode>
         </>
       }
-      description={description}
+      description={build.outdated ? build.title : description}
       control={
         <Button
           size="xs"
