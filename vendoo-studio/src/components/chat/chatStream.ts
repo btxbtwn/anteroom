@@ -77,8 +77,12 @@ export function formatClientStreamError(
   return `Error: ${raw}`;
 }
 
-/** Events that only feed the live trace and never belong in the reply text. */
-export const TRACE_ONLY_EVENTS = new Set(["step", "posted"]);
+/**
+ * Events that only feed the live trace and never belong in the reply text.
+ * `agent` carries JSON state for parallel generation work; it is ignored here
+ * until the chat renders it.
+ */
+export const TRACE_ONLY_EVENTS = new Set(["step", "posted", "agent"]);
 
 type SseParseState = { eventType: string; parts: SseParts; dataLines: number };
 
