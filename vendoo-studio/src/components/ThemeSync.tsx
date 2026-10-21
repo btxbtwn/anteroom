@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { applyTheme, normalizeTheme, type ThemePreference } from "../theme";
 
-/** Keep `data-theme` in sync with Settings → Appearance (and the OS when System). */
+/** Keep the `.dark` class in sync with Settings → Appearance (and the OS when System). */
 export function ThemeSync() {
   const { data } = useQuery({
     queryKey: ["settings-ui"],
