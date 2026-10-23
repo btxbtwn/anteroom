@@ -77,33 +77,96 @@ def seed(db):
     return box, jeans, coat
 
 
-def test_the_brief_carries_every_listing_and_the_figures_behind_it(workspace):
+def test_the_brief_summarizes_the_shop_and_points_to_the_rows(workspace):
     db, _client = workspace
     box, jeans, coat = seed(db)
-    brief = business_assistant.read_shop(db, now=NOW).brief
+    shop = business_assistant.read_shop(db, now=NOW)
+    brief = shop.brief
 
-    assert "--- Every listing (3) ---" in brief
-    # The sale is a row with what it is, where it is listed, its box's cost share and what it cleared.
-    assert (
-        f"{jeans.id} | Levi's 501 Jeans | sold | Levi's | Jeans | 34 | Pre-Owned - Good | Blue | Bin 4 | A-12"
-        f" | ebay, depop | 60 | 10 | 48 | 6 | 32 | ebay | 2026-08-01 | 2026-09-10 | 40 | {box.id}"
-    ) in brief
-    # An active listing counts the days it has been up; a pipe cannot split its columns.
-    assert f"{coat.id} | Carhartt / Chore Coat | active | Carhartt | Coats |  |  |  |  |  |  | 120 | 25 |" in brief
-    assert "| 2026-07-03 |  | 90 | " in brief
-    assert "Unfinished draft | draft" in brief
+    assert "--- Listings (3: 1 sold, 1 active, 1 draft) ---" in brief
+    # The latest sale, with what it cleared, and the active listing that has been up longest; a pipe cannot
+    # split a row's columns.
+    assert f"{jeans.id} | Levi's 501 Jeans | Levi's | Jeans | 48 | 32 | ebay | 2026-09-10 | 40" in brief
+    assert f"{coat.id} | Carhartt / Chore Coat | Carhartt | Coats |  | 120 | 25 | 90 | 2026-07-03 | " in brief
+    assert "\nCoats | 1 | 120 | 90 | 90\n" in brief
+    # Row-level detail is the lookup's: the draft is counted but not listed, and nothing a lookup reads is lost.
+    assert "Unfinished draft" not in brief and "Classic straight leg denim." not in brief
+    assert "Unfinished draft" in business_assistant.run_lookup(shop.lookups, "SELECT title FROM listings")
+    assert f"{box.id}" in business_assistant.run_lookup(shop.lookups, "SELECT box FROM listings WHERE status = 'sold'")
     # The coat's asking price was cut once; nothing else moved.
     assert "--- Asking-price changes (1) ---" in brief
     assert f"{coat.id} | " in brief.split("--- Asking-price changes")[1] and " | 150 | 120" in brief
-    for heading in ("Inventory now", "Sales, last 30 days", "Sales, all time", "Wholesale boxes bought",
-                    "Ad spend the seller recorded", "Sale events", "Sourcing checks"):
+    for heading in ("Inventory now", "Sales by range", "Sales by calendar month", "Sales by marketplace",
+                    "Sales by category", "Brands", "Wholesale boxes bought", "Ad spend the seller recorded",
+                    "Sale events", "Sourcing checks"):
         assert f"--- {heading}" in brief
+    assert "\n30d | 1 | 48 | 32 | 1 | " in brief.split("--- Sales by range ---")[1]
+    assert "\n30d Levi's | 1 | 48 | 32 | 1 | " in brief.split("--- Brands ---")[1]
     assert '"store":"Raghouse"' in brief and '"spend":31.0' in brief
     assert "No sourcing check has finished yet" in brief.split("--- Sourcing buy list ---")[1]
-    assert "--- Boxes on the Sourcing tab (0) ---\nNo boxes in the last sourcing check." in brief
+    assert "--- Best boxes on the Sourcing tab (0 of 0) ---\nNo boxes in the last sourcing check." in brief
     assert "What the seller says" not in brief
+    shop.lookups.close()
 
 
+def test_the_breakdowns_behind_the_summary_can_be_looked_up(workspace):
+    db, _client = workspace
+    seed(db)
+    lookups = business_assistant.read_shop(db, now=NOW).lookups
+    run = functools.partial(business_assistant.run_lookup, lookups)
+
+    assert run("SELECT period, count, profit FROM sales_by_brand WHERE brand = 'Levi''s' ORDER BY period") == (
+        "Lookup result (4 rows):\nperiod | count | profit\n12m | 1 | 32.0\n30d | 1 | 32.0\n90d | 1 | 32.0\nall | 1 | 32.0"
+    )
+    assert run("SELECT count FROM sales_by_marketplace WHERE period = '30d' AND marketplace = 'ebay'").endswith("\n1")
+    assert run("SELECT sum(count) FROM sales_over_time WHERE range = '12m'").endswith("\n1")
+    lookups.close()
+
+
+def test_the_prompt_names_every_lookup_table_and_column(workspace):
+    db, _client = workspace
+    seed(db)
+    shop = business_assistant.read_shop(db, now=NOW)
+    system = business_assistant.build_messages(db, "Hi", shop)[0]["content"]
+
+    schema = business_assistant.lookup_schema()
+    assert f"Lookup tables, all of them, with every column:\n{schema}\n" in system
+    # Stable text ahead of the figures, so a prompt cache keeps it.
+    assert system.index(schema) < system.index(shop.brief)
+    assert len(schema.splitlines()) == len(business_assistant.TABLES)
+    for name, columns in business_assistant.TABLES.items():
+        assert f"- {name}({', '.join(columns)})" in schema
+        # Each table is there to read, with exactly those columns.
+        header = business_assistant.run_lookup(shop.lookups, f"SELECT * FROM {name} LIMIT 1").splitlines()[1]
+        assert header == " | ".join(columns), name
+    shop.lookups.close()
+
+
+def test_the_brief_stays_small_however_big_the_shop_grows(workspace):
+    """The summary is capped, not the shop: hundreds of listings cost what a handful do, give or take."""
+    db, _client = workspace
+    seed(db)
+    small = business_assistant.read_shop(db, now=NOW)
+    brands = [f"Brand {n:02d}" for n in range(60)]
+    categories = [f"Women > Category {n:02d}" for n in range(30)]
+    for n in range(400):
+        listing = {"price": 20 + n % 30, "cost": 3, "brand": brands[n % 60], "category_path": categories[n % 30],
+                   "size": "M", "description": "Measurements and a long description. " * 20}
+        when = f"2026-{1 + n % 9:02d}-{1 + n % 27:02d}T00:00:00+00:00"
+        notes = (sold(18 + n % 20, ("ebay", "depop", "poshmark")[n % 3], when, "2026-09-28T00:00:00+00:00", fees=3)
+                 if n % 2 else {"vendooStatus": "active", "vendooDates": {"listed": when}})
+        add_listing(db, f"{brands[n % 60]} Womens M Long Descriptive Listing Title Number {n} Blue Regular Fit",
+                    listing, notes)
+    big = business_assistant.read_shop(db, now=NOW)
+    system = business_assistant.build_messages(db, "How is the shop doing?", big)[0]["content"]
+
+    assert "--- Listings (403: " in big.brief
+    assert business_assistant.run_lookup(big.lookups, "SELECT count(*) FROM listings").endswith("\n403")
+    # About 3.5 characters to a token: the whole prompt stays under the 20k-token target.
+    assert len(system) / 3.5 < business_assistant.PROMPT_TOKEN_BUDGET
+    assert len(big.brief) < len(small.brief) + 16_000
+    for shop in (small, big):
+        shop.lookups.close()
 def test_the_sellers_note_about_the_business_leads_the_brief(workspace, monkeypatch):
     db, client = workspace
     assert client.get("/api/assistant/note").json() == {"note": ""}
@@ -115,18 +178,6 @@ def test_the_sellers_note_about_the_business_leads_the_brief(workspace, monkeypa
     assert client.put("/api/assistant/note", json={"note": "x" * 4001}).status_code == 422
     assert client.put("/api/assistant/note", json={"note": ""}).json() == {"note": ""}
     assert "What the seller says" not in business_assistant.read_shop(db, now=NOW).brief
-
-
-def test_rows_past_the_budget_are_left_out_and_counted(workspace, monkeypatch):
-    db, _client = workspace
-    seed(db)
-    monkeypatch.setattr(business_assistant, "LISTING_ROWS_BUDGET", 200)
-    shop = business_assistant.read_shop(db, now=NOW)
-    # Sales come first, so the draft is what gives way.
-    assert "Levi's 501 Jeans | sold" in shop.brief and "Unfinished draft | draft" not in shop.brief
-    assert "2 listings did not fit" in shop.brief
-    # A lookup still reaches what the brief left out.
-    assert "Unfinished draft" in business_assistant.run_lookup(shop.lookups, "SELECT title FROM listings")
 
 
 def test_a_lookup_reads_the_copy_and_nothing_else(workspace, tmp_path):
@@ -182,7 +233,7 @@ def test_a_question_is_sent_with_the_brief_and_earlier_turns(workspace):
     assert messages[0]["role"] == "system"
     assert messages[0]["content"].startswith(business_assistant.INSTRUCTIONS)
     assert "- price_changes(listing_id, changed_on, old_price, new_price)" in messages[0]["content"]
-    assert "Levi's 501 Jeans | sold" in messages[0]["content"]
+    assert "Levi's 501 Jeans | Levi's | Jeans | 48" in messages[0]["content"]
     assert [(m["role"], m["content"]) for m in messages[1:]] == [
         ("user", "What sold?"), ("assistant", "One pair of jeans."), ("user", "For how much?"),
     ]
@@ -331,7 +382,7 @@ def test_asking_streams_the_answer_and_keeps_both_turns(workspace, monkeypatch):
     assert "event: status\ndata: Reading your shop…" in response.text
     assert response.text.endswith("data: You sold \n\ndata: one item.\n\n")
     assert provider.seen[-1] == {"role": "user", "content": "What sold last month?"}
-    assert "Levi's 501 Jeans | sold" in provider.seen[0]["content"]
+    assert "Levi's 501 Jeans | Levi's | Jeans | 48" in provider.seen[0]["content"]
 
     saved = client.get("/api/assistant/messages").json()
     assert [(row["role"], row["text"]) for row in saved] == [
@@ -692,7 +743,7 @@ def test_the_shop_is_read_once_until_something_it_rests_on_changes(workspace, mo
 
     add_listing(db, "Pendleton Board Shirt", {"price": 45})
     third = business_assistant.read_shop(db)
-    assert len(reads) == 2 and "Pendleton Board Shirt" in third.brief
+    assert len(reads) == 2 and "--- Listings (4: " in third.brief
 
     # What the seller says and what it remembers are always read fresh, and come last.
     assistant_memory.apply(db, json.dumps([{"op": "add", "text": "Ships from Dallas."}]))

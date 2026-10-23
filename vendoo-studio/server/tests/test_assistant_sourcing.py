@@ -141,7 +141,7 @@ def test_every_box_on_the_tab_reaches_the_assistant_with_its_figures(db):
     assert mixed["passes_min_roi"] is None and mixed["roi_gap_points"] is None
     assert (mixed["buy_list"], mixed["on_its_own"]) == ("needs_research", "needs_research")
     # The brief has a line for each box too, named by store and title.
-    table = shop.brief.split("--- Boxes on the Sourcing tab (3) ---")[1]
+    table = shop.brief.split("--- Best boxes on the Sourcing tab (3 of 3) ---")[1]
     for title in ("Graphic Tees 60 pcs", "Light Jackets Mix (20 Pieces)", "Mixed Apparel Lot of 40"):
         assert title in table
 
@@ -252,20 +252,39 @@ def test_recent_sales_by_category_and_by_kind_of_box(db):
     assert (kinds["papercrane:3"]["kind_sold_12m"], kinds["papercrane:3"]["kind_average_price"]) == (0, None)
 
 
-def test_the_box_table_gives_each_box_its_url_and_counts_what_it_leaves_out(db, monkeypatch):
-    write_snapshot(boxes())
-    brief = business_assistant.read_shop(db, now=NOW).brief
-    table = brief.split("--- Boxes on the Sourcing tab (3) ---\n")[1].split("\n\n")[0]
-    assert "\nid | store | title | url | contents |" in table
-    assert "raghouse:1 | Raghouse | Graphic Tees 60 pcs | https://raghouse.example/1 |" in table
-    assert "did not fit" not in table
+def test_the_box_table_is_the_tabs_best_boxes_and_points_to_the_rest(db):
+    lots = [_box("raghouse", n, f"Graphic Tees {n} pcs", 30.0 + n, 20.0, 60, "good", 12.0) for n in range(1, 21)]
+    write_snapshot(lots)
+    shop = business_assistant.read_shop(db, now=NOW)
+    every = lookup(shop, "SELECT * FROM sourcing_boxes")
+    table = shop.brief.split("--- Best boxes on the Sourcing tab (15 of 20) ---\n")[1].split("\n\n")[0]
+    lines = table.splitlines()
 
-    # Best first: a smaller budget keeps the recommended box and says how many were omitted.
-    first_row = next(line for line in table.splitlines() if line.startswith("raghouse:1 |"))
-    monkeypatch.setattr(business_assistant, "SOURCING_ROWS_BUDGET", len(first_row) + 1)
-    table = business_assistant.read_shop(db, now=NOW).brief.split("--- Boxes on the Sourcing tab (3) ---\n")[1]
-    assert first_row in table and "tvf:2 |" not in table.split("\n\n")[0]
-    assert "2 of the 3 boxes did not fit and are omitted here" in table
+    assert lines[1] == ("id | store | title | url | contents | landed | projected_profit | roi_percent | passes_min_roi"
+                        " | kind_sold_12m | kind_margin")
+    # The tab's own order, best first, and only the first 15.
+    assert [line.split(" | ")[0] for line in lines[2:]] == [row["id"] for row in every[:15]]
+    best = every[0]
+    assert lines[2] == (f"{best['id']} | Raghouse | {best['title']} | {best['url']} | {best['contents']} | "
+                        f"{best['landed']:g} | {best['projected_profit']:g} | {best['roi_percent']:g} | True | 0 | ")
+    assert "The other 5 boxes" in lines[0] and "sourcing_boxes lookup table" in lines[0]
+    # What the table leaves out is still a lookup away.
+    assert every[19]["url"] not in shop.brief and len(every) == 20
+
+
+def test_a_box_url_only_a_lookup_returned_passes_the_link_guard(db):
+    lots = [_box("raghouse", n, f"Graphic Tees {n} pcs", 30.0 + n, 20.0, 60, "good", 12.0) for n in range(1, 21)]
+    write_snapshot(lots)
+    shop = business_assistant.read_shop(db, now=NOW)
+    last = lookup(shop, "SELECT * FROM sourcing_boxes")[-1]
+    assert last["url"] not in shop.brief
+    system = business_assistant.build_messages(db, "Is the last box worth it?", shop)[0]["content"]
+    sql = f"{FENCE}sql\n-- the last box\nSELECT title, url FROM sourcing_boxes WHERE id = '{last['id']}'\n{FENCE}"
+    answer = (f"Skip [{last['title']}]({last['url']}).",)
+
+    # Linked from the lookup this turn, the address stays; given without it, Studio takes it out.
+    assert text_of(run_answer(ScriptedProvider((sql,), answer), shop, system=system)) == answer[0]
+    assert "link removed" in text_of(run_answer(ScriptedProvider(answer), shop, system=system))
 
 
 class ScriptedProvider:

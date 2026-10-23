@@ -62,6 +62,9 @@ LATEST_SALES = 10
 SIZING_ROWS = 10
 PRICE_CHANGE_ROWS = 10
 TOP_GROUPS = 12
+# What the whole prompt may cost on a large shop, in tokens (about 3.5 characters each). The tests hold a
+# shop of hundreds of listings to it, so a new section cannot quietly bring every row back.
+PROMPT_TOKEN_BUDGET = 20_000
 # Lookups one question may run, and what one may cost and return.
 MAX_LOOKUPS = 6
 LOOKUP_SECONDS = 5.0
