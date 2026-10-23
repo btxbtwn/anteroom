@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -498,3 +501,23 @@ class PackagedUpdateTest(unittest.TestCase):
         self.assertIn("xattr -cr", text)
         self.assertIn("chmod -R u+x", text)
         self.assertIn("/usr/bin/open", text)
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("ditto"), "needs macOS ditto")
+    def test_replacer_swaps_in_a_clean_bundle(self):
+        # Files left over from the old build break the code seal, and Keychain
+        # then asks for the password on every launch.
+        root = Path(self.tmp.name)
+        app = root / "List This Studio.app"
+        new_app = root / "new" / "List This Studio.app"
+        (app / "Contents" / "Resources").mkdir(parents=True)
+        (app / "Contents" / "Resources" / "stale.js").write_text("old", encoding="utf-8")
+        (new_app / "Contents" / "MacOS").mkdir(parents=True)
+        (new_app / "Contents" / "MacOS" / "List This Studio").write_text("new", encoding="utf-8")
+        os.environ["VENDOO_STUDIO_DATA_DIR"] = str(root / "data")
+        script = packaged_updates._write_replacer(app, new_app, 999999)
+        text = script.read_text(encoding="utf-8").replace("/usr/bin/open ", "/usr/bin/true ")
+        subprocess.run(["/bin/bash", "-c", text], check=True)
+        self.assertFalse((app / "Contents" / "Resources" / "stale.js").exists())
+        self.assertEqual((app / "Contents" / "MacOS" / "List This Studio").read_text(encoding="utf-8"), "new")
+        self.assertFalse(app.with_name(f"{app.name}.updating").exists())
+        self.assertFalse(app.with_name(f"{app.name}.previous").exists())

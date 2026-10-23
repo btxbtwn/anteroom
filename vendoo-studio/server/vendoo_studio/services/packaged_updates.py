@@ -462,7 +462,13 @@ def _extract_app(archive: Path, destination: Path) -> Path:
 def _write_replacer(app_path: Path, new_app: Path, pid: int) -> Path:
     script = user_data_root() / "updates" / "replace-app.sh"
     script.parent.mkdir(parents=True, exist_ok=True)
-    macos = app_path / "Contents" / "MacOS"
+    # Copy beside the installed app and swap it in whole. Copying over the
+    # installed bundle merges the two: files the new build dropped stay behind,
+    # the code seal no longer matches, and Keychain stops recognising the app,
+    # asking for the login password on every launch.
+    staged = app_path.with_name(f"{app_path.name}.updating")
+    retired = app_path.with_name(f"{app_path.name}.previous")
+    app, staged_q, retired_q = (shlex.quote(str(p)) for p in (app_path, staged, retired))
     script.write_text(
         "\n".join(
             [
@@ -470,10 +476,14 @@ def _write_replacer(app_path: Path, new_app: Path, pid: int) -> Path:
                 "set -euo pipefail",
                 f"while /bin/kill -0 {pid} 2>/dev/null; do sleep 0.2; done",
                 "sleep 0.4",
-                f"/usr/bin/ditto {shlex.quote(str(new_app))} {shlex.quote(str(app_path))}",
-                f"/usr/bin/xattr -cr {shlex.quote(str(app_path))} || true",
-                f"/bin/chmod -R u+x {shlex.quote(str(macos))} || true",
-                f"/usr/bin/open {shlex.quote(str(app_path))}",
+                f"/bin/rm -rf {staged_q} {retired_q}",
+                f"/usr/bin/ditto {shlex.quote(str(new_app))} {staged_q}",
+                f"/usr/bin/xattr -cr {staged_q} || true",
+                f"/bin/chmod -R u+x {staged_q}/Contents/MacOS || true",
+                f"/bin/mv {app} {retired_q}",
+                f"/bin/mv {staged_q} {app}",
+                f"/bin/rm -rf {retired_q}",
+                f"/usr/bin/open {app}",
                 "",
             ]
         ),
