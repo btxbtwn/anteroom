@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.308 — 2026-10-22
+
+- The business assistant now uses far less of your Claude plan on each question. It used to read every listing and every sourcing box each time. Now it reads a short summary of your shop: your totals, your best brands and categories, the listings that have sat longest, your latest sales and the 15 best boxes. When a question needs more, such as ranking every box or the details of one listing, it looks those up first. Its answers are as complete as before and usually start sooner.
+
 ## 0.1.307 — 2026-10-21
 
 - On your phone, every page has one header with a menu button at the top left that opens all of Studio's pages. A listing now shows Chat and Listing as two tabs under its title, so the chat gets most of the screen.

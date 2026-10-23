@@ -1,16 +1,19 @@
 """The business assistant: questions about the whole shop, answered from Studio's data.
 
-A listing's chat knows one item. This one is handed everything Studio holds
-about the business on every question — each listing as a row, the same sales
-and inventory totals Analytics shows, price changes, the boxes bought and what
-they returned, the current buy list, ad spend, sale events, and sourcing
-checks — and answers from that. The brief is read fresh each time, so an
-answer is never older than the last Vendoo sync.
+A listing's chat knows one item. This one is handed a summary of the business
+on every question — the same sales and inventory totals Analytics shows, by
+range and by month, the leading brands and categories, the listings that have
+sat longest and the latest sales, the boxes bought and what they returned, the
+current buy list with its best boxes, ad spend, sale events, and sourcing
+checks — and the exact tables it can look the rest up in. The brief is read
+fresh each time, so an answer is never older than the last Vendoo sync.
 
-What the brief leaves out, the assistant can look up. The same rows, with each
-listing's description and full field values, are copied into a throwaway
-in-memory SQLite database, and the model may ask for a ``SELECT`` over it
-before it answers. The copy is the only thing a lookup can touch.
+Every row behind the summary can be looked up. Each listing with its
+description and full field values, every Sourcing-tab box, and the sales
+breakdowns are copied into a throwaway in-memory SQLite database, and the model
+may ask for a ``SELECT`` over it before it answers. The copy is the only thing a
+lookup can touch. The summary stays small, so a question does not spend the
+seller's model usage on rows it never needed.
 
 It reads, and it proposes. A reply may end with changes to listings, which are
 kept with the reply for the seller to apply or dismiss
@@ -25,7 +28,9 @@ import json
 import logging
 import re
 import sqlite3
+import statistics
 import time
+from collections import Counter
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -50,15 +55,17 @@ log = logging.getLogger("vendoo_studio.business_assistant")
 
 # Earlier turns sent back with a question, so a follow-up can lean on them.
 HISTORY_MESSAGES = 20
-# Room for the listing rows, in characters. Past it the oldest rows are left
-# out and the brief says so; the totals above the table still count them, and
-# a lookup can still reach them.
-LISTING_ROWS_BUDGET = 300_000
-PRICE_CHANGE_ROWS = 300
-BRAND_GROUPS = 40
-# Room for the Sourcing tab's boxes, in characters; a lookup reads every one.
-SOURCING_ROWS_BUDGET = 30_000
-SIZING_ROWS = 200
+# How many rows of each kind the summary shows; a lookup reads every one.
+TOP_BOXES = 15
+LONGEST_LISTED = 15
+LATEST_SALES = 10
+SIZING_ROWS = 10
+PRICE_CHANGE_ROWS = 10
+TOP_GROUPS = 12
+OVER_TIME_BUCKETS = 24
+# What the whole prompt may cost on a large shop, in tokens (about 3.5 characters each). The tests hold a
+# shop of hundreds of listings to it, so a new section cannot quietly bring every row back.
+PROMPT_TOKEN_BUDGET = 20_000
 # Lookups one question may run, and what one may cost and return.
 MAX_LOOKUPS = 6
 LOOKUP_SECONDS = 5.0
@@ -69,12 +76,19 @@ INSTRUCTIONS = (
     "You are the business assistant inside Vendoo Studio, talking to a reseller about their own shop. "
     "They sell clothing and similar goods on marketplaces such as eBay, Poshmark, Mercari, Depop and Etsy, "
     "cross-listed through Vendoo.\n\n"
-    "Below is a snapshot, taken now, of everything Studio holds about the business. Answer from it.\n"
+    "Below is a summary of the business, taken now: the totals Analytics shows and the few rows most often "
+    "wanted. Every row behind it is in the lookup tables described below.\n"
+    "- Answer from the summary only when it holds everything the question needs. When the question needs rows "
+    "it leaves out, look them up first and then answer: ranking or comparing the boxes, a specific listing's "
+    "details, every stale listing, sales of one brand, category, size, marketplace or month, a breakdown the "
+    "summary does not show. The summary's short tables are the top rows only; never present one as the whole "
+    "list or rank from it alone. Never tell the seller a figure is unavailable until a lookup has failed to "
+    "find it.\n"
     "- Work figures out from the rows when no total is given, and check a total against the rows when both exist.\n"
     "- Say what a figure rests on when the data is partial: how many sales had a cost recorded, "
     "how many listings had a list date, and so on. Unknown is not zero.\n"
-    "- When the snapshot cannot answer the question, say what is missing and where in Studio it gets recorded. "
-    "Never invent a sale, a price, a cost or a date.\n"
+    "- When neither the summary nor a lookup can answer the question, say what is missing and where in Studio "
+    "it gets recorded. Never invent a sale, a price, a cost or a date.\n"
     "- Profit is the sold price plus shipping the buyer paid, less fees, shipping the seller paid, and the item's cost.\n"
     "- Give advice when asked — what to source, reprice, discount or drop — and tie each point to the numbers behind it. "
     "Fit it to what the seller says about their business and to what you remember about them.\n"
@@ -82,55 +96,64 @@ INSTRUCTIONS = (
     "and you cannot list, delist, publish or send anything to Vendoo or a marketplace. "
     "When the seller wants one of those, tell them where in Studio to do it.\n"
     "- When you name a specific listing, link it so the seller can open it: [its title](#listing-ID), "
-    "with the id from its row. Use only ids that appear in the snapshot or in a lookup result.\n"
+    "with the id from its row. Use only ids that appear in the summary or in a lookup result.\n"
     "- Other ids only tie rows together. Name a box by its store and title, never by its id.\n"
     "- Web links: never build, guess or complete a URL, not even from a box's title or store. Give only a `url` "
-    "Studio returned, exactly as it came, from the snapshot or a lookup this turn. When none came back for a box, "
-    "say so and tell the seller to open it from the Sourcing tab. Studio removes any other link from the answer.\n"
+    "Studio returned, exactly as it came, from the summary or a lookup this turn. A box missing from the summary "
+    "has its `url` in sourcing_boxes: select it with the box. When none came back for a box, say so and tell "
+    "the seller to open it from the Sourcing tab. Studio removes any other link from the answer.\n"
     "- Box photos: when the seller asks about specific boxes or whether a box is worth buying, look at their "
     "photos first with a view_box_media lookup (up to 5 boxes per answer, 8 images each). Then judge whether the "
     "contents are worth buying and give each box a clear verdict, Buy, Maybe or Skip, with its reasons. Weigh: "
     "brands visible on tags, condition issues (stains, holes, pilling, fading), the spread of sizes, season and "
     "fabric weight, how much of the box is actually visible against the claimed piece count, and red flags "
     "(stock or reused photos, a single photo for a large lot, contents that do not match the title). Set that "
-    "against the box's figures and the seller's own sales of that kind (`kind_*`, `categories`, "
-    "`sales_by_category`). Mark which observations come from the photos (\"from the listing photos\"); they are "
-    "what the store chose to show, not verified contents. Say which boxes you actually saw images for. A box "
-    "whose photos were not attached this turn, failed to load, or has none is \"not viewed\": never call it fine "
-    "or clean, and judge it on its figures alone, saying so. A video marked NOT viewed was not watched.\n"
-    "- Sourcing: every box on the Sourcing tab is in the snapshot's box table, best first, and all of them, with "
-    "the url and every figure, are in the `sourcing_boxes` lookup table. `recommended_lots` is the buy list Studio "
-    "recommends; when it is empty, `empty_reason` says why. To rank boxes against what the seller sells, set each "
-    "box's projected profit and ROI beside its `kind_*` figures (the seller's own sales of that kind of piece in the "
-    "last 12 months: count, average price, margin, median days to sell) and the `categories` in the Sales sections "
-    "or the `sales_by_category` table. A box whose kind the seller has sold often, at a good margin and quickly, "
-    "beats one with a higher ROI resting on few or no sales of its kind. A box missing the min ROI says by how "
-    "many points (`roi_gap_points`) and dollars (`profit_shortfall`). Empty figures are unknown, never zero.\n"
+    "against the box's figures and the seller's own sales of that kind (`kind_*`, `sales_by_category`). Mark "
+    "which observations come from the photos (\"from the listing photos\"); they are what the store chose to "
+    "show, not verified contents. Say which boxes you actually saw images for. A box whose photos were not "
+    "attached this turn, failed to load, or has none is \"not viewed\": never call it fine or clean, and judge "
+    "it on its figures alone, saying so. A video marked NOT viewed was not watched.\n"
+    "- Sourcing: the summary's box table holds only the tab's best boxes; every box, with its url and every "
+    "figure, is in the `sourcing_boxes` lookup table. `recommended_lots` is the buy list Studio recommends; when "
+    "it is empty, `empty_reason` says why. To rank boxes against what the seller sells, look up sourcing_boxes "
+    "and set each box's projected profit and ROI beside its `kind_*` figures (the seller's own sales of that "
+    "kind of piece in the last 12 months: count, average price, margin, median days to sell) and "
+    "`sales_by_category`. A box whose kind the seller has sold often, at a good margin and quickly, beats one "
+    "with a higher ROI resting on few or no sales of its kind. A box missing the min ROI says by how many points "
+    "(`roi_gap_points`) and dollars (`profit_shortfall`). Empty figures are unknown, never zero.\n"
     "- Write plain English and lead with the answer. Use a table when comparing several things. Amounts are US dollars.\n"
 )
 
 LOOKUP_INSTRUCTIONS = (
-    "Looking things up: the snapshot is also loaded into a SQLite database. When the snapshot does not already "
-    "answer the question — listing rows were left out, you need a description or a marketplace's field values, "
-    "or a breakdown is easier to compute than to count by hand — reply with nothing but one ```sql block holding "
-    "a single SELECT. Make its first line a comment saying in plain words what you are looking up, like "
-    "`-- sales by size`. Studio runs it and replies with the rows. You may do this up to {limit} times for one "
-    "question, then answer. Never show SQL or mention the database to the seller.\n"
-    "Tables:\n{schema}\n"
-    "`listings.form_sizes` is the size each marketplace form holds, `photo_size` the size read from the photos "
-    "and where it was read, and `size_issue` why the sizing needs a look (NULL when nothing stands out).\n"
-    "`listings.details` is the listing's full JSON, including each marketplace's fields; read it with "
-    "json_extract(details, '$.ebay_specifics'). Dates are YYYY-MM-DD text. Amounts are numbers; NULL means not recorded.\n"
+    "Looking things up: the shop is also loaded into a SQLite database. When the summary does not already "
+    "answer the question, reply with nothing but one ```sql block holding a single SELECT. Make its first line "
+    "a comment saying in plain words what you are looking up, like `-- sales by size`. Studio runs it and "
+    "replies with up to {rows} rows, so filter, aggregate, or ORDER BY with a LIMIT. You may do this up to "
+    "{limit} times for one question, then answer. Never show SQL or mention the database to the seller.\n"
+    "Lookup tables, all of them, with every column:\n{schema}\n"
+    "Dates are YYYY-MM-DD text. Amounts are numbers; NULL means not recorded. `margin` is profit as a percent of "
+    "revenue over the sales with a cost recorded (`profit_known`); `median_days` is days from listing to sale.\n"
+    "`listings` is every listing. `days` is days to sell for a sold listing and days listed so far for an active "
+    "one; `listed_on` is where it is cross-listed, `sold_on` where it sold, and `box` the id of the bought box it "
+    "came from (`boxes.id`). `form_sizes` is the size each marketplace form holds, `photo_size` the size read "
+    "from the photos and where it was read, and `size_issue` why the sizing needs a look (NULL when nothing "
+    "stands out). `details` is the listing's full JSON, including each marketplace's fields; read it with "
+    "json_extract(details, '$.ebay_specifics'). `category` is the Analytics category; a kind of piece is best "
+    "matched on the title too, like title LIKE '%jacket%'.\n"
+    "`boxes` is the wholesale boxes the seller bought and what each returned; `price_changes` each asking-price "
+    "change made in Studio.\n"
     "`sourcing_boxes` is every box on the Sourcing tab from its last check: `contents` the kind of piece, `landed` "
     "price plus shipping and checkout fee, `projected_profit` and `roi_percent` at the settings that check used, "
     "`on_its_own` how the box fares bought on its own (qualifies, return_target, downside, needs_research, budget), "
     "`buy_list` recommended or what kept it off the list, and `kind_*` the seller's own sales of its kind.\n"
-    "`sales_by_category` is the Analytics category breakdown for each `period` (30d, 90d, 12m, all); `margin` is "
-    "profit as a percent of revenue over the sales with a cost recorded (`profit_known`).\n"
+    "`sales_by_category`, `sales_by_brand` and `sales_by_marketplace` are the Analytics breakdowns for each "
+    "`period` (30d, 90d, 12m, all). `sales_over_time` is each range's sales per `bucket`, as the Analytics chart "
+    "draws them, `position` 1 the oldest; range all reaches back to the first sale and range 12m is one row per "
+    "calendar month.\n"
     "Every lookup answers: rows, \"0 rows matched\", or \"Lookup ... failed: <reason>\". Read that reply; when a "
     "lookup failed or matched nothing, say so or try a corrected query, and never fill the gap with a guess.\n"
     "Seeing a box's photos: reply with nothing but one ```view_box_media block listing the box ids from the "
-    "sourcing_boxes table (or the snapshot's box table), one per line. Studio fetches each box's product page now "
+    "sourcing_boxes table (or the summary's box table), one per line. Studio fetches each box's product page now "
     "and replies with its photos and frames from its video as images, saying which images belong to which box and "
     "which boxes could not be viewed and why. It counts as one of the lookups.\n"
 )
@@ -165,29 +188,35 @@ CHANGES_INSTRUCTIONS = (
     "Never write such a note yourself.\n"
 )
 
-_SALES_KEYS = ("range", "sell_through_rate", "sales", "previous", "periods", "marketplaces", "categories", "price_tiers", "ads")
-# One Sourcing-tab box, as the brief's table shows it.
-SOURCING_COLUMNS = (
-    "id", "store", "title", "url", "contents", "price", "shipping", "pieces", "resale_per_piece", "projected_profit",
-    "roi_percent", "roi_gap_points", "profit_shortfall", "on_its_own", "buy_list", "kind_sold_12m", "kind_average_price",
-    "kind_margin", "kind_median_days",
+BREAKDOWN_PERIODS = ("30d", "90d", "12m", "all")
+# What each sales group carries, in the summary and in the breakdown tables.
+GROUP_STATS = (
+    "count", "revenue", "average_price", "profit", "profit_known", "margin", "median_days", "days_known",
 )
-CATEGORY_RANGES = ("30d", "90d", "12m", "all")
-CATEGORY_COLUMNS = (
-    "period", "category", "count", "revenue", "average_price", "profit", "profit_known", "margin", "median_days",
-    "days_known",
+CATEGORY_COLUMNS = ("period", "category", *GROUP_STATS)
+BRAND_COLUMNS = ("period", "brand", *GROUP_STATS)
+MARKETPLACE_COLUMNS = ("period", "marketplace", *GROUP_STATS)
+OVER_TIME_COLUMNS = ("range", "position", "bucket", *GROUP_STATS)
+# The summary's own tables.
+RANGE_COLUMNS = (
+    "range", "count", "revenue", "profit", "profit_known", "margin", "average_price", "median_days",
+    "sell_through", "ad_spend", "previous_count", "previous_revenue", "previous_profit", "previous_margin",
 )
-# One listing, as the brief's table shows it.
-ROW_COLUMNS = (
+GROUP_COLUMNS = ("label", "count", "revenue", "profit", "profit_known", "margin", "average_price", "median_days")
+TOP_BOX_COLUMNS = (
+    "id", "store", "title", "url", "contents", "landed", "projected_profit", "roi_percent", "passes_min_roi",
+    "kind_sold_12m", "kind_margin",
+)
+LONGEST_COLUMNS = ("id", "title", "brand", "category", "size", "asking", "cost", "days", "listed", "listed_on")
+SALE_COLUMNS = ("id", "title", "brand", "category", "sold_for", "profit", "sold_on", "sold", "days")
+ACTIVE_GROUP_COLUMNS = ("category", "active", "asking_value", "median_days_listed", "most_days_listed")
+# One listing, as a lookup reads it.
+LISTING_COLUMNS = (
     "id", "title", "status", "brand", "category", "size", "condition", "color", "labels", "sku", "listed_on",
     "asking", "cost", "sold_for", "fees", "profit", "sold_on", "listed", "sold", "days", "box",
+    "shipping_cost", "shipping_credit", "form_sizes", "photo_size", "size_issue", "description", "details",
 )
-# What a lookup can read as well: too long, or too rarely wanted, for every question.
-LISTING_COLUMNS = (
-    *ROW_COLUMNS, "shipping_cost", "shipping_credit", "form_sizes", "photo_size", "size_issue", "description",
-    "details",
-)
-# A listing whose sizing needs a look, as the brief shows it.
+# A listing whose sizing needs a look, as the summary shows it.
 SIZING_COLUMNS = ("id", "title", "status", "category", "size", "form_sizes", "photo_size", "size_issue")
 CHANGE_COLUMNS = ("listing_id", "changed_on", "old_price", "new_price")
 BOX_COLUMNS = (
@@ -209,6 +238,9 @@ TABLES = {
     "sale_events": EVENT_COLUMNS,
     "sourcing_boxes": sourcing_boxes.BOX_COLUMNS,
     "sales_by_category": CATEGORY_COLUMNS,
+    "sales_by_brand": BRAND_COLUMNS,
+    "sales_by_marketplace": MARKETPLACE_COLUMNS,
+    "sales_over_time": OVER_TIME_COLUMNS,
 }
 _RANGE_LABELS = {
     "wtd": "this week so far (Monday to now)",
@@ -398,7 +430,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
 
 
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
-    """The snapshot's figures as text, and the tables a lookup reads."""
+    """The summary as text, and the tables a lookup reads."""
     from vendoo_studio.services import ad_spend, boxes, box_scout, scout
     from vendoo_studio.services.inventory_analytics import inventory_analytics, load_rows
 
@@ -416,9 +448,17 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     scout_sales = scout.outcomes(db)
     sourcing_state = box_scout.read_state()
     tab_boxes = sourcing_boxes.box_rows(sourcing_state, rows, clock)
-    categories = [
-        {"period": range_id, "category": group["label"], **{key: group[key] for key in CATEGORY_COLUMNS[2:]}}
-        for range_id in CATEGORY_RANGES for group in ranges[range_id]["categories"]
+    breakdowns = {
+        name: _breakdown(ranges, key, label)
+        for name, key, label in (
+            ("sales_by_category", "categories", "category"),
+            ("sales_by_brand", "brands", "brand"),
+            ("sales_by_marketplace", "marketplaces", "marketplace"),
+        )
+    }
+    over_time = [
+        {"range": range_id, "position": position, "bucket": bucket["label"], **{key: bucket[key] for key in GROUP_STATS}}
+        for range_id, payload in ranges.items() for position, bucket in enumerate(payload["periods"], 1)
     ]
     sections = [
         f"Today is {clock.date().isoformat()} (UTC). "
@@ -431,15 +471,13 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
             "sold_listings_missing_a_sale_date": everything["undated_sales"],
             "sales_missing_details_in_vendoo": len(everything["incomplete_sales"]),
         }),
-        *(
-            _section(f"Sales, {_RANGE_LABELS[range_id]}", {
-                **{key: payload[key] for key in _SALES_KEYS},
-                "previous": _by_day(payload["previous"]),
-                "brands": payload["brands"][:BRAND_GROUPS],
-            })
-            for range_id, payload in ranges.items()
-        ),
-        _listing_rows(records),
+        _sales_by_range(ranges),
+        _sales_over_time(everything["periods"]),
+        _top_groups(ranges, "marketplaces", "Sales by marketplace", "sales_by_marketplace"),
+        _top_groups(ranges, "categories", "Sales by category", "sales_by_category"),
+        _top_groups(ranges, "brands", "Brands", "sales_by_brand", by_profit=True),
+        _top_groups(ranges, "price_tiers", "Sales by price tier", None),
+        _listing_summary(records),
         _sizing_rows(records),
         _price_change_rows(changes),
         _section("Wholesale boxes bought, and what each has returned", box_results),
@@ -465,17 +503,80 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
             "ad_spend": ads,
             "sale_events": events,
             "sourcing_boxes": tab_boxes,
-            "sales_by_category": categories,
+            **breakdowns,
+            "sales_over_time": over_time,
         },
     )
 
 
-def _by_day(previous: dict[str, Any] | None) -> dict[str, Any] | None:
-    """The comparison window to the day: its start moves with the clock, and a
-    snapshot that changed every second could never be served from a prompt cache."""
-    if not previous:
-        return previous
-    return {**previous, **{key: str(previous[key])[:10] for key in ("start", "end") if previous.get(key)}}
+def _breakdown(ranges: dict[str, dict[str, Any]], key: str, label: str) -> list[dict[str, Any]]:
+    return [
+        {"period": range_id, label: group["label"], **{stat: group[stat] for stat in GROUP_STATS}}
+        for range_id in BREAKDOWN_PERIODS for group in ranges[range_id][key]
+    ]
+
+
+def _sales_by_range(ranges: dict[str, dict[str, Any]]) -> str:
+    """One line per Analytics range: its sales, its sell-through, and the window just before it."""
+    lines = []
+    for range_id, payload in ranges.items():
+        previous = (payload["previous"] or {}).get("sales") or {}
+        lines.append({
+            "range": range_id,
+            **payload["sales"],
+            "sell_through": payload["sell_through_rate"],
+            "ad_spend": (payload.get("ads") or {}).get("spend"),
+            **{f"previous_{key}": previous.get(key) for key in ("count", "revenue", "profit", "margin")},
+        })
+    note = (
+        f"Ranges: {'; '.join(f'{range_id} = {label}' for range_id, label in _RANGE_LABELS.items())}. "
+        "`previous_*` is the window of the same length just before (empty for all). `sell_through` is the "
+        "range's sales as a percent of those sales plus what is still listed. `profit` and `margin` rest on the "
+        "`profit_known` sales with a cost recorded."
+    )
+    return _table("Sales by range", note, RANGE_COLUMNS, lines)
+
+
+def _sales_over_time(buckets: list[dict[str, Any]]) -> str:
+    """Every sale since the first, bucketed as the Analytics chart draws all time: by month for most shops."""
+    shown = buckets[-OVER_TIME_BUCKETS:]
+    note = ("All time, oldest first, as the Analytics chart buckets it. A label without a year is this year. "
+            "sales_over_time has each range's buckets.")
+    if len(shown) < len(buckets):
+        note += f" Only the latest {OVER_TIME_BUCKETS} of {len(buckets)} are here; sales_over_time has every one."
+    return _table("Sales over time", note, GROUP_COLUMNS, shown)
+
+
+def _top_groups(
+    ranges: dict[str, dict[str, Any]], key: str, title: str, table: str | None, *, by_profit: bool = False,
+) -> str:
+    """The leading groups of one breakdown for the last 30 days and 12 months; a lookup reads all of them."""
+    lines = []
+    left_out = 0
+    for range_id in ("30d", "12m"):
+        groups = list(ranges[range_id][key])
+        if by_profit:
+            groups.sort(key=lambda group: -(group["profit"] or 0))
+        left_out += max(0, len(groups) - TOP_GROUPS)
+        lines += [{**group, "label": f"{range_id} {group['label']}"} for group in groups[:TOP_GROUPS]]
+    order = "by profit" if by_profit else "as Analytics ranks them"
+    note = f"Last 30 days, then last 12 months, {order}."
+    if left_out and table:
+        note += f" Only the top {TOP_GROUPS} of each are here; {table} has every one, for 30d, 90d, 12m and all."
+    elif table:
+        note += f" {table} has the same for 90d and all time."
+    return _table(title, note, GROUP_COLUMNS, lines)
+
+
+def _table(title: str, note: str, columns: tuple[str, ...], rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return f"--- {title} ---\nNothing recorded."
+    return "\n".join([f"--- {title} ---", note, " | ".join(columns), *(_line(row, columns) for row in rows)])
+
+
+def lookup_schema() -> str:
+    """Every lookup table with every column, one line each, so the model knows what it can fetch."""
+    return "\n".join(f"- {name}({', '.join(columns)})" for name, columns in TABLES.items())
 
 
 def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None = None) -> list[dict]:
@@ -490,10 +591,10 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     ]
     if not earlier or earlier[-1] != {"role": "user", "content": question}:
         earlier.append({"role": "user", "content": question})
-    schema = "\n".join(f"- {name}({', '.join(columns)})" for name, columns in TABLES.items())
     # The instructions lead so a provider's prefix cache still hits when the figures move.
+    lookups = LOOKUP_INSTRUCTIONS.format(limit=MAX_LOOKUPS, rows=LOOKUP_ROWS, schema=lookup_schema())
     system = (
-        f"{INSTRUCTIONS}\n{LOOKUP_INSTRUCTIONS.format(limit=MAX_LOOKUPS, schema=schema)}\n"
+        f"{INSTRUCTIONS}\n{lookups}\n"
         f"{CHANGES_INSTRUCTIONS.format(limit=assistant_changes.MAX_CHANGES)}\n"
         f"{assistant_memory.INSTRUCTIONS}\n{shop.brief}"
     )
@@ -885,31 +986,49 @@ def _joined(values: Any) -> str | None:
     return ", ".join(str(value).strip() for value in values if str(value).strip()) or None
 
 
-def _listing_rows(records: list[dict[str, Any]]) -> str:
-    """One line per listing, as many as fit."""
-    title = f"--- Every listing ({len(records)}) ---"
+def _listing_summary(records: list[dict[str, Any]]) -> str:
+    """What is for sale by category, the listings that have sat longest, and the latest sales."""
+    statuses = Counter(record["status"] for record in records)
+    counted = ", ".join(f"{count} {status}" for status, count in statuses.most_common())
+    title = f"--- Listings ({len(records)}{': ' + counted if counted else ''}) ---"
     if not records:
         return f"{title}\nNo listings yet."
-    lines: list[str] = []
-    used = 0
-    for record in records:
-        line = _line(record, ROW_COLUMNS)
-        if used + len(line) > LISTING_ROWS_BUDGET:
-            break
-        lines.append(line)
-        used += len(line) + 1
+    active = [record for record in records if record["status"] == "active"]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for record in active:
+        groups.setdefault(record["category"] or "Uncategorized", []).append(record)
+    by_category = []
+    for category, members in sorted(groups.items(), key=lambda item: (-len(item[1]), item[0])):
+        days = [record["days"] for record in members if record["days"] is not None]
+        by_category.append({
+            "category": category,
+            "active": len(members),
+            "asking_value": round(sum(record["asking"] or 0 for record in members), 2),
+            "median_days_listed": statistics.median(days) if days else None,
+            "most_days_listed": max(days) if days else None,
+        })
+    longest = sorted(active, key=lambda record: (record["days"] is None, -(record["days"] or 0), record["id"]))
+    latest = [record for record in records if record["status"] == "sold"][:LATEST_SALES]
     note = (
-        "`days` is days to sell for a sold listing and days listed so far for an active one. "
-        "`listed_on` is where it is cross-listed, `sold_on` where it sold, and `box` the id of the wholesale "
-        "box it came from. Empty means not recorded."
+        "Only these rows are here. The `listings` lookup table has every listing with every column: brand, size, "
+        "condition, labels, cost, fees, profit, description and each marketplace's fields. `days` is days listed "
+        "so far for an active listing and days to sell for a sold one. Empty means not recorded."
     )
-    left_out = len(records) - len(lines)
-    if left_out:
-        note += (
-            f" {left_out} listings did not fit and are left out, oldest sales and drafts first;"
-            " the totals above still count them, and a lookup can read them."
-        )
-    return "\n".join([title, note, " | ".join(ROW_COLUMNS), *lines])
+    parts = [title, note]
+    if active:
+        shown = by_category[:TOP_GROUPS]
+        parts += [
+            f"Active listings by category ({len(shown)} of {len(by_category)} categories, most listings first):",
+            " | ".join(ACTIVE_GROUP_COLUMNS), *(_line(group, ACTIVE_GROUP_COLUMNS) for group in shown),
+            f"Active listings up longest ({min(LONGEST_LISTED, len(active))} of {len(active)}):",
+            " | ".join(LONGEST_COLUMNS), *(_line(record, LONGEST_COLUMNS) for record in longest[:LONGEST_LISTED]),
+        ]
+    if latest:
+        parts += [
+            f"Latest sales ({len(latest)} of {statuses['sold']}):",
+            " | ".join(SALE_COLUMNS), *(_line(record, SALE_COLUMNS) for record in latest),
+        ]
+    return "\n".join(parts)
 
 
 def _sizing_rows(records: list[dict[str, Any]]) -> str:
@@ -923,7 +1042,7 @@ def _sizing_rows(records: list[dict[str, Any]]) -> str:
         "photos showed and where. A size the photos read differently is not always wrong: M and Medium are the same."
     )
     if len(flagged) > SIZING_ROWS:
-        note += f" Only the first {SIZING_ROWS} are shown; a lookup on size_issue can read the rest."
+        note += f" Only the first {SIZING_ROWS} are shown; the rest are the listings rows with a size_issue that have not sold."
     return "\n".join([
         title, note, " | ".join(SIZING_COLUMNS),
         *(_line(record, SIZING_COLUMNS) for record in flagged[:SIZING_ROWS]),
@@ -1000,31 +1119,23 @@ def _sourcing(state: dict, tab_boxes: list[dict[str, Any]], now: datetime) -> st
 
 
 def _sourcing_box_rows(tab_boxes: list[dict[str, Any]]) -> str:
-    """One line per box on the Sourcing tab, best first, as many as fit."""
-    title = f"--- Boxes on the Sourcing tab ({len(tab_boxes)}) ---"
+    """The Sourcing tab's best boxes, in the tab's order; the sourcing_boxes lookup has every one."""
+    title = f"--- Best boxes on the Sourcing tab ({min(TOP_BOXES, len(tab_boxes))} of {len(tab_boxes)}) ---"
     if not tab_boxes:
         return f"{title}\nNo boxes in the last sourcing check."
-    lines: list[str] = []
-    used = 0
-    for box in tab_boxes:
-        line = _line(box, SOURCING_COLUMNS)
-        if used + len(line) > SOURCING_ROWS_BUDGET:
-            break
-        lines.append(line)
-        used += len(line) + 1
     note = (
         "Recommended boxes first, then each supplier's top picks, then the rest by ROI. `url` is the box's product "
         "page as the store gave it; it is the only link to give the seller for that box. `contents` is the kind of "
-        "piece, `shipping` the estimate to the seller's ZIP, `roi_percent` and `projected_profit` at the settings the "
-        "check used; `roi_gap_points` and `profit_shortfall` are how far a box misses the min ROI. `on_its_own` is how it "
-        "fares bought on its own and `buy_list` what kept it off the list. `kind_*` is the seller's own sales of that "
-        "kind in the last 12 months. Empty means unknown."
+        "piece, `landed` price plus shipping and fees, `roi_percent` and `projected_profit` at the settings the "
+        "check used, and `kind_*` the seller's own sales of that kind in the last 12 months. Empty means unknown."
     )
-    left_out = len(tab_boxes) - len(lines)
-    if left_out:
-        note += (f" {left_out} of the {len(tab_boxes)} boxes did not fit and are omitted here, the lowest-ranked ones; "
-                 "the sourcing_boxes lookup has every box, with its url.")
-    return "\n".join([title, note, " | ".join(SOURCING_COLUMNS), *lines])
+    if len(tab_boxes) > TOP_BOXES:
+        note += (f" The other {len(tab_boxes) - TOP_BOXES} boxes, and every box's other figures (shipping, pieces, "
+                 "resale_per_piece, roi_gap_points, on_its_own, buy_list), are in the sourcing_boxes lookup table, "
+                 "with their urls.")
+    return "\n".join([
+        title, note, " | ".join(TOP_BOX_COLUMNS), *(_line(box, TOP_BOX_COLUMNS) for box in tab_boxes[:TOP_BOXES]),
+    ])
 
 
 def _sale_events(db: Session) -> list[dict[str, Any]]:
