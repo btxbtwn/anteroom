@@ -62,6 +62,7 @@ LATEST_SALES = 10
 SIZING_ROWS = 10
 PRICE_CHANGE_ROWS = 10
 TOP_GROUPS = 12
+OVER_TIME_BUCKETS = 24
 # What the whole prompt may cost on a large shop, in tokens (about 3.5 characters each). The tests hold a
 # shop of hundreds of listings to it, so a new section cannot quietly bring every row back.
 PROMPT_TOKEN_BUDGET = 20_000
@@ -81,7 +82,8 @@ INSTRUCTIONS = (
     "it leaves out, look them up first and then answer: ranking or comparing the boxes, a specific listing's "
     "details, every stale listing, sales of one brand, category, size, marketplace or month, a breakdown the "
     "summary does not show. The summary's short tables are the top rows only; never present one as the whole "
-    "list or rank from it alone.\n"
+    "list or rank from it alone. Never tell the seller a figure is unavailable until a lookup has failed to "
+    "find it.\n"
     "- Work figures out from the rows when no total is given, and check a total against the rows when both exist.\n"
     "- Say what a figure rests on when the data is partial: how many sales had a cost recorded, "
     "how many listings had a list date, and so on. Unknown is not zero.\n"
@@ -145,8 +147,9 @@ LOOKUP_INSTRUCTIONS = (
     "`on_its_own` how the box fares bought on its own (qualifies, return_target, downside, needs_research, budget), "
     "`buy_list` recommended or what kept it off the list, and `kind_*` the seller's own sales of its kind.\n"
     "`sales_by_category`, `sales_by_brand` and `sales_by_marketplace` are the Analytics breakdowns for each "
-    "`period` (30d, 90d, 12m, all). `sales_over_time` is each range's sales per `bucket`, oldest first, as the "
-    "Analytics chart draws them; range 12m has one row per calendar month.\n"
+    "`period` (30d, 90d, 12m, all). `sales_over_time` is each range's sales per `bucket`, as the Analytics chart "
+    "draws them, `position` 1 the oldest; range all reaches back to the first sale and range 12m is one row per "
+    "calendar month.\n"
     "Every lookup answers: rows, \"0 rows matched\", or \"Lookup ... failed: <reason>\". Read that reply; when a "
     "lookup failed or matched nothing, say so or try a corrected query, and never fill the gap with a guess.\n"
     "Seeing a box's photos: reply with nothing but one ```view_box_media block listing the box ids from the "
@@ -193,7 +196,7 @@ GROUP_STATS = (
 CATEGORY_COLUMNS = ("period", "category", *GROUP_STATS)
 BRAND_COLUMNS = ("period", "brand", *GROUP_STATS)
 MARKETPLACE_COLUMNS = ("period", "marketplace", *GROUP_STATS)
-OVER_TIME_COLUMNS = ("range", "bucket", *GROUP_STATS)
+OVER_TIME_COLUMNS = ("range", "position", "bucket", *GROUP_STATS)
 # The summary's own tables.
 RANGE_COLUMNS = (
     "range", "count", "revenue", "profit", "profit_known", "margin", "average_price", "median_days",
@@ -454,8 +457,8 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         )
     }
     over_time = [
-        {"range": range_id, "bucket": bucket["label"], **{key: bucket[key] for key in GROUP_STATS}}
-        for range_id, payload in ranges.items() for bucket in payload["periods"]
+        {"range": range_id, "position": position, "bucket": bucket["label"], **{key: bucket[key] for key in GROUP_STATS}}
+        for range_id, payload in ranges.items() for position, bucket in enumerate(payload["periods"], 1)
     ]
     sections = [
         f"Today is {clock.date().isoformat()} (UTC). "
@@ -469,10 +472,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
             "sales_missing_details_in_vendoo": len(everything["incomplete_sales"]),
         }),
         _sales_by_range(ranges),
-        _table(
-            "Sales by calendar month, last 12 months", "Oldest first. sales_over_time has every range's buckets.",
-            GROUP_COLUMNS, [{"label": bucket["label"], **bucket} for bucket in ranges["12m"]["periods"]],
-        ),
+        _sales_over_time(everything["periods"]),
         _top_groups(ranges, "marketplaces", "Sales by marketplace", "sales_by_marketplace"),
         _top_groups(ranges, "categories", "Sales by category", "sales_by_category"),
         _top_groups(ranges, "brands", "Brands", "sales_by_brand", by_profit=True),
@@ -535,6 +535,16 @@ def _sales_by_range(ranges: dict[str, dict[str, Any]]) -> str:
         "`profit_known` sales with a cost recorded."
     )
     return _table("Sales by range", note, RANGE_COLUMNS, lines)
+
+
+def _sales_over_time(buckets: list[dict[str, Any]]) -> str:
+    """Every sale since the first, bucketed as the Analytics chart draws all time: by month for most shops."""
+    shown = buckets[-OVER_TIME_BUCKETS:]
+    note = ("All time, oldest first, as the Analytics chart buckets it. A label without a year is this year. "
+            "sales_over_time has each range's buckets.")
+    if len(shown) < len(buckets):
+        note += f" Only the latest {OVER_TIME_BUCKETS} of {len(buckets)} are here; sales_over_time has every one."
+    return _table("Sales over time", note, GROUP_COLUMNS, shown)
 
 
 def _top_groups(

@@ -96,7 +96,7 @@ def test_the_brief_summarizes_the_shop_and_points_to_the_rows(workspace):
     # The coat's asking price was cut once; nothing else moved.
     assert "--- Asking-price changes (1) ---" in brief
     assert f"{coat.id} | " in brief.split("--- Asking-price changes")[1] and " | 150 | 120" in brief
-    for heading in ("Inventory now", "Sales by range", "Sales by calendar month", "Sales by marketplace",
+    for heading in ("Inventory now", "Sales by range", "Sales over time", "Sales by marketplace",
                     "Sales by category", "Brands", "Wholesale boxes bought", "Ad spend the seller recorded",
                     "Sale events", "Sourcing checks"):
         assert f"--- {heading}" in brief
