@@ -8,6 +8,7 @@ import logging
 import re
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,19 @@ _rebuild_running = False
 _INDEX = None
 _INDEX_FINGERPRINT: str | None = None
 _STALE = False
+# When the fingerprint last matched the published index. Every search checks
+# it, and computing it counts 48k category rows, so a match is trusted for a
+# little while. Writers that change the catalog mark it stale, which forces
+# the next search to check again.
+_FINGERPRINT_CHECKED_AT = 0.0
+FINGERPRINT_RECHECK_SEC = 30.0
+# The category leaves are most of the index (tens of thousands of docs) and
+# change only when a category tree syncs. They get an index of their own, kept
+# in memory and saved to disk, so a learned schema or a restart does not pay to
+# re-embed every leaf. Schemas, options, skills and fill helpers are small and
+# are rebuilt and merged in on every rebuild.
+_CATEGORY_INDEX = None
+_CATEGORY_FINGERPRINT: str | None = None
 
 _META_RE = re.compile(
     r"^kind:\s*(?P<kind>\S+)\s*$"
@@ -61,7 +75,18 @@ _FORM_MARKETPLACE = {
 
 
 def catalog_docs_dir() -> Path:
+    """Schema, option, skill and fill docs."""
     return user_data_root() / "catalog-index" / "docs"
+
+
+def category_docs_dir() -> Path:
+    """One doc per category leaf, kept apart so it can be indexed once."""
+    return user_data_root() / "catalog-index" / "category-docs"
+
+
+def category_index_dir() -> Path:
+    """The saved Semble index of ``category_docs_dir``."""
+    return user_data_root() / "catalog-index" / "categories.semble"
 
 
 def catalog_meta_path() -> Path:
@@ -69,18 +94,22 @@ def catalog_meta_path() -> Path:
 
 
 def mark_catalog_index_stale() -> None:
-    global _STALE
+    global _STALE, _FINGERPRINT_CHECKED_AT
     with _INDEX_LOCK:
         _STALE = True
+        _FINGERPRINT_CHECKED_AT = 0.0
 
 
 def reset_catalog_index_cache() -> None:
     """Drop the in-memory index (tests and forced rebuilds)."""
-    global _INDEX, _INDEX_FINGERPRINT, _STALE
+    global _INDEX, _INDEX_FINGERPRINT, _STALE, _CATEGORY_INDEX, _CATEGORY_FINGERPRINT, _FINGERPRINT_CHECKED_AT
     with _INDEX_LOCK:
+        _FINGERPRINT_CHECKED_AT = 0.0
         _INDEX = None
         _INDEX_FINGERPRINT = None
         _STALE = True
+        _CATEGORY_INDEX = None
+        _CATEGORY_FINGERPRINT = None
 
 
 def _safe_stem(value: str) -> str:
@@ -354,8 +383,7 @@ def _materialize_fill_helpers(root: Path) -> int:
     return count
 
 
-def materialize_catalog_docs(db: Session, root: Path | None = None) -> Path:
-    docs = root or catalog_docs_dir()
+def _fresh_dir(docs: Path) -> None:
     if docs.exists():
         # Replace atomically-ish so concurrent rebuilds do not race on rmtree.
         stale = docs.with_name(docs.name + ".stale")
@@ -368,8 +396,19 @@ def materialize_catalog_docs(db: Session, root: Path | None = None) -> Path:
         else:
             shutil.rmtree(stale, ignore_errors=True)
     docs.mkdir(parents=True, exist_ok=True)
+
+
+def materialize_category_docs(db: Session, root: Path | None = None) -> Path:
+    docs = root or category_docs_dir()
+    _fresh_dir(docs)
     for node in _leaf_query(db).order_by(CategoryTreeNode.marketplace, CategoryTreeNode.path):
         _write_category_doc(docs, node.marketplace, node.category_id, node.path, node.label)
+    return docs
+
+
+def materialize_catalog_docs(db: Session, root: Path | None = None) -> Path:
+    docs = root or catalog_docs_dir()
+    _fresh_dir(docs)
     for row in db.query(CategorySchema).order_by(CategorySchema.marketplace, CategorySchema.general_path):
         _write_schema_doc(docs, row)
         for field in (row.fields if isinstance(row.fields, list) else []):
@@ -411,6 +450,58 @@ def _publish_index(index, fp_text: str) -> None:
         catalog_meta_path().write_text(fp_text, encoding="utf-8")
 
 
+def _index_docs(docs: Path):
+    if not any(docs.rglob("*.md")):
+        return None
+    try:
+        return _load_semble_index(docs)
+    except Exception:
+        log.exception("failed to open Semble catalog index at %s; using lexical fallback", docs)
+        return None
+
+
+def _category_index(db: Session, trees_text: str):
+    """The category-leaf index: from memory, else from disk, else built and saved.
+
+    Caller holds ``_REBUILD_LOCK``.
+    """
+    global _CATEGORY_INDEX, _CATEGORY_FINGERPRINT
+    if _CATEGORY_FINGERPRINT == trees_text:
+        return _CATEGORY_INDEX
+    saved = category_index_dir()
+    stamp = saved / "studio-fingerprint.json"
+    index = None
+    if stamp.is_file() and stamp.read_text(encoding="utf-8") == trees_text:
+        try:
+            from semble import SembleIndex
+
+            index = SembleIndex.load_from_disk(saved)
+        except Exception:
+            log.warning("saved category index unreadable; rebuilding", exc_info=True)
+    if index is None:
+        index = _index_docs(materialize_category_docs(db))
+        shutil.rmtree(saved, ignore_errors=True)
+        if index is not None:
+            try:
+                index.save(saved)
+                stamp.write_text(trees_text, encoding="utf-8")
+            except Exception:
+                log.warning("could not save category index", exc_info=True)
+    _CATEGORY_INDEX, _CATEGORY_FINGERPRINT = index, trees_text
+    return index
+
+
+def _merged(category_index, catalog_index):
+    if category_index is None or catalog_index is None:
+        return category_index or catalog_index
+    from semble import SembleIndex
+
+    return SembleIndex.merge([
+        (str(category_docs_dir()), category_index),
+        (str(catalog_docs_dir()), catalog_index),
+    ])
+
+
 def _rebuild_unlocked(db: Session) -> dict[str, Any]:
     """Materialize and tokenize without holding the reader lock.
 
@@ -418,19 +509,24 @@ def _rebuild_unlocked(db: Session) -> dict[str, Any]:
     moment readers wait, and that wait is a pointer swap.
     """
     fp = fingerprint(db)
+    categories = _category_index(db, json.dumps(fp["trees"], sort_keys=True))
     docs = materialize_catalog_docs(db)
-    index = None
-    if any(path.suffix == ".md" for path in docs.rglob("*.md")):
-        try:
-            index = _load_semble_index(docs)
-        except Exception:
-            log.exception("failed to open Semble catalog index; using lexical fallback")
-            index = None
+    try:
+        index = _merged(categories, _index_docs(docs))
+    except Exception:
+        log.exception("failed to merge catalog indexes; using lexical fallback")
+        index = None
     fp_text = json.dumps(fp, sort_keys=True)
     _publish_index(index, fp_text)
     counts = {
-        name: sum(1 for _ in (docs / name).rglob("*.md")) if (docs / name).exists() else 0
-        for name in ("categories", "schemas", "options", "skills", "fill")
+        name: sum(1 for _ in (root / name).rglob("*.md")) if (root / name).exists() else 0
+        for root, name in (
+            (category_docs_dir(), "categories"),
+            (docs, "schemas"),
+            (docs, "options"),
+            (docs, "skills"),
+            (docs, "fill"),
+        )
     }
     log.info("catalog index rebuilt: %s", counts)
     return {"ok": True, "fingerprint": fp, "docs": str(docs), "counts": counts}
@@ -474,10 +570,21 @@ def ensure_catalog_index(db: Session) -> dict[str, Any]:
     for as long as that build took. Search uses the previous index, or the
     lexical fallback, until the background rebuild publishes.
     """
+    global _FINGERPRINT_CHECKED_AT
+    with _INDEX_LOCK:
+        recently_matched = (
+            not _STALE
+            and _INDEX is not None
+            and time.monotonic() - _FINGERPRINT_CHECKED_AT < FINGERPRINT_RECHECK_SEC
+        )
+    if recently_matched:
+        return {"ok": True, "rebuilt": False}
     fp = fingerprint(db)
     fp_text = json.dumps(fp, sort_keys=True)
     with _INDEX_LOCK:
         needs = _index_needs_rebuild(fp_text)
+        if not needs:
+            _FINGERPRINT_CHECKED_AT = time.monotonic()
     if not needs:
         return {"ok": True, "rebuilt": False, "fingerprint": fp}
     try:
@@ -635,13 +742,12 @@ def _lexical_docs(
         return []
     tokens = [token.casefold() for token in re.findall(r"[a-z0-9']+", query.casefold()) if len(token) > 1]
     hits: list[tuple[int, dict]] = []
+    # Categories and schemas rank from the database in _lexical_fallback.
     folders = {
-        "category": ["categories"],
-        "schema": ["schemas"],
         "option": ["options"],
         "skill": ["skills"],
         "fill": ["fill"],
-        "all": ["categories", "schemas", "options", "skills", "fill"],
+        "all": ["options", "skills", "fill"],
     }.get(kind, [])
     for folder in folders:
         base = docs / folder
@@ -661,8 +767,6 @@ def _lexical_docs(
             if tokens and score <= 0:
                 continue
             verified = _verify_hit(None, meta, content, "")  # type: ignore[arg-type]
-            if kind in {"category", "schema"}:
-                continue  # category/schema lexical uses DB below
             if not verified:
                 continue
             verified["score"] = float(score)

@@ -412,6 +412,46 @@ class CatalogIndexTest(unittest.TestCase):
         self.assertFalse(result["rebuilt"])
         self.assertTrue(kicked)
 
+    def test_learned_schema_rebuild_reuses_the_category_index(self):
+        """A schema change must not re-embed tens of thousands of category leaves."""
+        from vendoo_studio.services import catalog_index as catalog
+
+        self.db.add(CategorySchema(
+            id="schema-2", general_path="Clothing > Men > Shirts > T-Shirts", marketplace="general",
+            category_path="Clothing > Men > Shirts > T-Shirts", fields=[{"label": "Sleeve", "key": "sleeve"}],
+        ))
+        self.db.commit()
+        with patch.object(catalog, "materialize_category_docs", side_effect=AssertionError("re-indexed categories")):
+            rebuild_catalog_index(self.db)
+        self.assertTrue(any(
+            hit.get("general_path") == "Clothing > Men > Shirts > T-Shirts"
+            for hit in search_catalog(self.db, "Men T-Shirts Sleeve", kind="schema", top_k=5, ensure=False)
+        ))
+        self.assertEqual(
+            search_catalog(self.db, "women floral blouse tops", kind="category", top_k=5, ensure=False)[0]["id"],
+            "tops",
+        )
+
+    def test_restart_loads_the_saved_category_index(self):
+        from vendoo_studio.services import catalog_index as catalog
+
+        reset_catalog_index_cache()
+        with patch.object(catalog, "materialize_category_docs", side_effect=AssertionError("re-indexed categories")):
+            rebuild_catalog_index(self.db)
+        hits = search_catalog(self.db, "women floral blouse tops", kind="category", top_k=5, ensure=False)
+        self.assertEqual(hits[0]["id"], "tops")
+
+    def test_category_tree_change_rebuilds_the_category_index(self):
+        self.db.add(CategoryTreeNode(
+            marketplace="general", category_id="jeans", parent_id="__root",
+            label="Jeans", path="Clothing > Men > Jeans", is_leaf=True, has_children=False,
+            children_loaded=True,
+        ))
+        self.db.commit()
+        rebuild_catalog_index(self.db)
+        hits = search_catalog(self.db, "men denim jeans", kind="category", top_k=5, ensure=False)
+        self.assertIn("jeans", [hit["id"] for hit in hits])
+
     def test_search_returns_verified_leaf_for_womens_tops(self):
         hits = search_catalog(self.db, "women floral blouse tops", kind="category", top_k=5)
         self.assertTrue(hits)
@@ -447,7 +487,7 @@ class CatalogIndexTest(unittest.TestCase):
         self.assertTrue(any(hit.get("symbol") for hit in hits))
 
     def test_invented_doc_ids_are_not_returned(self):
-        docs = Path(self.tmp.name) / "catalog-index" / "docs" / "categories" / "general"
+        docs = Path(self.tmp.name) / "catalog-index" / "category-docs" / "categories" / "general"
         docs.mkdir(parents=True, exist_ok=True)
         (docs / "fake.md").write_text(
             "kind: category\nmarketplace: general\nid: invented\npath: Fake > Path\nlabel: Fake\n\nFake > Path\n",

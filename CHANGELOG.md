@@ -6,9 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.314 — 2026-10-24
+
+- Running several listings at once is much lighter on your Mac. Anteroom no longer re-reads its whole category catalog after every send or sync, opens faster after a restart, and stops re-shrinking the same photos when you regenerate.
+- With Claude or Cursor, Anteroom keeps their helper programs running between steps instead of starting a fresh one for every step, so many listings can generate together without bogging down your Mac. With ChatGPT, Anteroom keeps its connection open, so each listing finishes a little sooner.
+
 ## 0.1.313 — 2026-10-24
 
 - The app is now called Anteroom, with a new doorway icon. It updates itself as usual and moves to Anteroom.app in Applications. Your listings, photos and settings come along to the new Anteroom data folder, and the Chrome extension keeps working without being loaded again. If you pinned the app to the Dock, pin Anteroom again after the update.
+
 ## 0.1.312 — 2026-10-24
 
 - In Inventory, your open listings now show as tabs in the top bar, so they no longer overlap the title and the listing starts right under the bar.
