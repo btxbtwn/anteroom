@@ -36,7 +36,7 @@ export const SIDEBAR_FOOTER_BUTTONS = [
   "queue",
   "analytics",
   "marketing",
-  "ebay",
+  "marketplaces",
   "usage",
   "settings",
   "update",
@@ -96,7 +96,7 @@ export function SidebarFooter({
   onOpenSourcing,
   onOpenAnalytics,
   onOpenMarketing,
-  onOpenEbay,
+  onOpenMarketplaces,
   onOpenAssistant,
   onOpenSettings,
   onOpenUsage,
@@ -109,7 +109,7 @@ export function SidebarFooter({
   onOpenSourcing: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketing: () => void;
-  onOpenEbay: () => void;
+  onOpenMarketplaces: () => void;
   onOpenAssistant: () => void;
   onOpenSettings: () => void;
   onOpenUsage: () => void;
@@ -137,7 +137,7 @@ export function SidebarFooter({
     marketing: (
       <FooterButton label="Marketing" icon={MegaphoneIcon} active={activeView === "marketing"} onClick={onOpenMarketing} />
     ),
-    ebay: <FooterButton label="eBay" icon={StoreIcon} active={activeView === "ebay"} onClick={onOpenEbay} />,
+    marketplaces: <FooterButton label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />,
     usage: <FooterButton label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
     settings: <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: <UpdateButton />,

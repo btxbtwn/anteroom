@@ -1274,7 +1274,7 @@ class ExtensionRouteSafetyTest(unittest.TestCase):
         self.assertNotIn("identPayload('direct'", background)
         self.assertNotIn("Draft ${job.vendoo_item_id} already exists, skipping photo upload", background)
         self.assertIn("type: 'VERIFY_SAVED_DRAFT'", background)
-        self.assertIn("files: ['diagnostic-collector.js']", background)
+        self.assertIn("importScripts('diagnostic-collector.js')", background)
         self.assertIn("PROHIBITED_TERMS", content)
         self.assertIn("LISTED|LIVE|ACTIVE|SOLD|PUBLISHED", content)
         self.assertIn("Another automation job is already running", background)

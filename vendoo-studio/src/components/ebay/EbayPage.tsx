@@ -10,7 +10,7 @@ import { ActivityPanel, DashboardPanel, InboxPanel, OrdersPanel } from "./Seller
 import { MarketingPanel } from "./MarketingPanel";
 import { ListingsPanel, ResearchPanel } from "./ListingsPanel";
 import { WorkspaceTabs } from "./WorkspaceTabs";
-import { FormDraftProvider } from "./FormDrafts";
+import { useFormDraft } from "./FormDrafts";
 import "./ebay.css";
 
 const TABS = ["Dashboard", "Inbox", "Orders", "Marketing", "Listings", "Research", "Offers", "Activity"] as const;
@@ -27,7 +27,7 @@ const FEATURES = [
 ];
 
 export function EbayPage() {
-  const [tab, setTab] = useState<Tab>("Dashboard");
+  const [tab, setTab] = useFormDraft<Tab>("workspace:tab", () => "Dashboard");
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [features, setFeatures] = useState(FEATURES.map((feature) => feature.id));
   const queryClient = useQueryClient();
@@ -46,13 +46,13 @@ export function EbayPage() {
       </div>
     </header>
     {connection.error ? <PageError message={connection.error.message} /> : null}
-    {account?.connected ? <FormDraftProvider key={`${account.label}-${account.connectedAt}`}><WorkspaceTabs label="eBay workspace" main items={TABS} value={tab} onChange={(value) => setTab(value as Tab)}>
+    {account?.connected ? <WorkspaceTabs label="eBay workspace" main items={TABS} value={tab} onChange={(value) => setTab(value as Tab)}>
       <div className="ebay-tab-content" key={`${account.connectedAt}-${tab}`}>
         {tab === "Dashboard" ? <DashboardPanel /> : tab === "Inbox" ? <InboxPanel /> : tab === "Orders" ? <OrdersPanel />
           : tab === "Marketing" ? <MarketingPanel /> : tab === "Listings" ? <ListingsPanel /> : tab === "Research" ? <ResearchPanel />
             : tab === "Offers" ? <><div className="ebay-tab-intro"><h2>Offers to interested buyers</h2><p>Set each listing’s minimum price before sending or enabling automatic offers.</p></div><EbayOffersSettings /></> : <ActivityPanel />}
       </div>
-    </WorkspaceTabs></FormDraftProvider> : <div className="ebay-data-panel space-y-4">
+    </WorkspaceTabs> : <div className="ebay-data-panel space-y-4">
       <h2>{connection.isPending ? "Checking your connection…" : "Connect your eBay account"}</h2>
       <p className="text-muted-foreground">Choose the tools you need and authorize them through eBay. You review account changes before confirming them.</p>
       {!connection.isPending ? <Button onClick={() => setPermissionsOpen(true)}>Connect eBay</Button> : null}

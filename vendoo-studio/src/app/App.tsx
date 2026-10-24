@@ -65,8 +65,8 @@ const AssistantPage = lazy(loadAssistantPage);
 const loadMarketingPage = () =>
   import("../components/MarketingPage").then((module) => ({ default: module.MarketingPage }));
 const MarketingPage = lazy(loadMarketingPage);
-const loadEbayPage = () => import("../components/ebay/EbayPage").then((module) => ({ default: module.EbayPage }));
-const EbayPage = lazy(loadEbayPage);
+const loadMarketplacePage = () => import("../components/MarketplacePage").then((module) => ({ default: module.MarketplacePage }));
+const MarketplacePage = lazy(loadMarketplacePage);
 const loadUsagePage = () =>
   import("../components/UsagePage").then((module) => ({ default: module.UsagePage }));
 const UsagePage = lazy(loadUsagePage);
@@ -75,7 +75,7 @@ const loadSourcingPage = () =>
 const SourcingPage = lazy(loadSourcingPage);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
-const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketingPage, loadUsagePage, loadSourcingPage, loadEbayPage];
+const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketingPage, loadUsagePage, loadSourcingPage, loadMarketplacePage];
 const pageLoading = (
   <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading">
     <Spinner className="size-5 text-muted-foreground" />
@@ -120,6 +120,7 @@ export function App() {
   const clearListingWorkspace = (id: string) => dispatchListingTab({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
   const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
+  const [marketplace, setMarketplace] = useState<"ebay" | "etsy" | null>(null);
   /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
   const shell = useRef<"listings" | "assistant">(listingFromUrl ? "listings" : "assistant");
   const viewBeforeSettings = useRef<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
@@ -285,8 +286,8 @@ export function App() {
       ? "Analytics"
       : activeView === "marketing"
         ? "Marketing"
-      : activeView === "ebay"
-        ? "eBay"
+      : activeView === "marketplaces"
+        ? (marketplace === "ebay" ? "eBay" : marketplace === "etsy" ? "Etsy" : "Marketplaces")
       : activeView === "usage"
         ? "Usage"
       : activeView === "assistant"
@@ -301,7 +302,7 @@ export function App() {
     activeView,
     SETTINGS_SECTION_LABELS[settingsSection],
     activeView === "listings" ? selectedListing : null,
-    activeView === "assistant" ? assistantThreadTitle : null,
+    activeView === "assistant" ? assistantThreadTitle : activeView === "marketplaces" ? (marketplace === "ebay" ? "eBay" : marketplace === "etsy" ? "Etsy" : null) : null,
   );
   // The sidebar overlays the workspace on mobile and the editor is its own pane
   // there, so the desktop collapse states only apply to the desktop layout.
@@ -341,7 +342,7 @@ export function App() {
   };
 
   // Analytics, Marketing, Usage, Sourcing and the Queue toggle back to whichever of home or inventory was open.
-  const togglePage = (view: "analytics" | "marketing" | "usage" | "sourcing" | "queue" | "ebay") => {
+  const togglePage = (view: "analytics" | "marketing" | "usage" | "sourcing" | "queue" | "marketplaces") => {
     setMobilePane("workspace");
     if (activeView === view) {
       setActiveView(shell.current);
@@ -352,7 +353,15 @@ export function App() {
   };
   const openAnalytics = () => togglePage("analytics");
   const openMarketing = () => togglePage("marketing");
-  const openEbay = () => togglePage("ebay");
+  const openMarketplaces = () => togglePage("marketplaces");
+  const openMarketplaceConnections = () => {
+    viewBeforeSettings.current = "marketplaces";
+    setSettingsSection("connections");
+    setSettingsTargetId(null);
+    setActiveView("settings");
+    setMobilePane("workspace");
+    closeMobileSidebar();
+  };
   const openAssistant = () => goAssistant();
   const openProviders = () => {
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
@@ -696,7 +705,7 @@ export function App() {
             onOpenUsage={openUsage}
             onOpenAnalytics={openAnalytics}
             onOpenMarketing={openMarketing}
-            onOpenEbay={openEbay}
+            onOpenMarketplaces={openMarketplaces}
             onOpenAssistant={openAssistant}
             onOpenSourcing={openSourcing}
             onOpenMobileNav={() => setMobileNavOpen(true)}
@@ -810,9 +819,9 @@ export function App() {
                 <Suspense fallback={pageLoading}>
                   <MarketingPage onOpenListing={openListing} />
                 </Suspense>
-              ) : activeView === "ebay" ? (
+              ) : activeView === "marketplaces" ? (
                 <Suspense fallback={pageLoading}>
-                  <EbayPage />
+                  <MarketplacePage selected={marketplace} onSelect={setMarketplace} onOpenListing={openListing} onOpenConnections={openMarketplaceConnections} />
                 </Suspense>
               ) : activeView === "usage" ? (
                 <Suspense fallback={pageLoading}>

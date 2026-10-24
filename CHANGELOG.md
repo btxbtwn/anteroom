@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.327 — 2026-10-24
+
+- Choose eBay or Etsy from the Marketplaces hub. Keep eBay draft details when switching channels, and open Etsy sale alerts and Shop Manager from one place.
+
 ## 0.1.326 — 2026-10-24
 
 - See eBay order proceeds and matched item costs using the permissions already available to Anteroom. Grant all workspace permissions together, and load payment disputes correctly.

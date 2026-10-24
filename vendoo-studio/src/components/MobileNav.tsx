@@ -15,7 +15,7 @@ import { cn } from "../lib/utils";
 import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import type { WorkspaceView } from "./workspaceCrumbs";
 
-export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "queue" | "analytics" | "marketing" | "usage" | "settings" | "ebay";
+export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "queue" | "analytics" | "marketing" | "usage" | "settings" | "marketplaces";
 
 /** Same order as the desktop sidebar footer: home and inventory, the day's work, insight, settings. */
 const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ className?: string }> }[] = [
@@ -25,7 +25,7 @@ const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ classNa
   { id: "queue", label: "Queue", icon: ListIcon },
   { id: "analytics", label: "Analytics", icon: ChartColumnIcon },
   { id: "marketing", label: "Marketing", icon: MegaphoneIcon },
-  { id: "ebay", label: "eBay", icon: StoreIcon },
+  { id: "marketplaces", label: "Marketplaces", icon: StoreIcon },
   { id: "usage", label: "Usage", icon: GaugeIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];

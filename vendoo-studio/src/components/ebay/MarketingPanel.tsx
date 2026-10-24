@@ -7,6 +7,7 @@ import { Button } from "../ui/button";
 import { ListingPicker, RemoteList } from "./shared";
 import { ActionForm } from "./ActionForm";
 import { WorkspaceTabs } from "./WorkspaceTabs";
+import { useFormDraft } from "./FormDrafts";
 
 const future = (days: number) => {
   const date = new Date(Date.now() + days * 86400000);
@@ -15,12 +16,12 @@ const future = (days: number) => {
 const iso = (value: string) => new Date(value).toISOString();
 
 export function MarketingPanel() {
-  const [task, setTask] = useState("Discounts");
-  const [audienceCodes, setAudienceCodes] = useState<string[]>([]);
+  const [task, setTask] = useFormDraft("marketing:task", () => "Discounts");
+  const [audienceCodes, setAudienceCodes] = useFormDraft<string[]>("marketing:audiences", () => []);
   const [defaults] = useState(() => ({ start: future(1), end: future(8),
     reportStart: new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10),
     reportEnd: new Date(Date.now() - 86400000).toISOString().slice(0, 10) }));
-  const [ids, setIds] = useState<string[]>([]);
+  const [ids, setIds] = useFormDraft<string[]>("marketing:listings", () => []);
   const [campaign, setCampaign] = useState<EbayRow | null>(null);
   const [promotion, setPromotion] = useState<EbayRow | null>(null);
   const [report, setReport] = useState<EbayRow | null>(null);
