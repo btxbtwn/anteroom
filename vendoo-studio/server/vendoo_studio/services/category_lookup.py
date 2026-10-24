@@ -24,8 +24,9 @@ _GARMENT_RE = re.compile(
 )
 _TEE_LEAF_RE = re.compile(r"\bt-?shirts?\b|\btees?\b", re.I)
 _SWEAT_RE = re.compile(r"\bsweatshirts?\b|\bhoodies?\b|\bsweaters?\b", re.I)
-_WOMEN_RE = re.compile(r"\bwomen(?:['’]s)?\b", re.I)
-_MEN_RE = re.compile(r"\bmen(?:['’]s)?\b", re.I)
+# Grailed and Depop root their trees at Menswear / Womenswear.
+_WOMEN_RE = re.compile(r"\bwomen(?:['’]s|swear)?\b", re.I)
+_MEN_RE = re.compile(r"\bmen(?:['’]s|swear)?\b", re.I)
 # Girls'/boys' items were read as having no gender at all, which threw away
 # half the query on every kids' listing.
 _GIRLS_RE = re.compile(r"\bgirls?(?:['’]s)?\b", re.I)
@@ -57,8 +58,10 @@ _APPAREL_GENERAL_RE = re.compile(
     re.I,
 )
 _APPAREL_MARKET_RE = re.compile(
-    r"\b(clothing|fashion|women|men|kids|girls|boys|baby|tops?|tees?|t-?shirts?|"
-    r"blouses?|shirts?|dresses?|jeans?|pants?|skirts?|shoes|accessories)\b",
+    r"\b(clothing|fashion|women|men|womenswear|menswear|kids|girls|boys|baby|"
+    r"tops?|tees?|t-?shirts?|blouses?|shirts?|dresses?|jeans?|pants?|skirts?|"
+    r"outerwear|jackets?|coats?|vests?|sweaters?|hoodies?|sweatshirts?|shorts|"
+    r"bottoms|footwear|sneakers|boots|shoes|accessories)\b",
     re.I,
 )
 

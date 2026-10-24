@@ -67,6 +67,18 @@ class MarketplacePathFitsGeneralTest(unittest.TestCase):
             "Men > Shirts > Tees - Short Sleeve",
         ))
 
+    def test_accepts_grailed_menswear_outerwear(self):
+        general = (
+            "Clothing, Shoes & Accessories > Men > Men's Clothing > "
+            "Coats, Jackets & Vests"
+        )
+        self.assertTrue(marketplace_path_fits_general(
+            general, "Menswear > Outerwear > Light Jackets",
+        ))
+        self.assertFalse(marketplace_path_fits_general(
+            general, "Womenswear > Outerwear > Light Jackets",
+        ))
+
 
 class PickCategoryPathTest(unittest.TestCase):
     def test_prefers_sweatshirt_leaf_over_tshirt(self):
