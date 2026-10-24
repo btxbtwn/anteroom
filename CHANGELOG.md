@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.313 — 2026-10-24
+
+- Running several listings at once is much lighter on your Mac. Studio no longer re-reads its whole category catalog after every send or sync, opens faster after a restart, and stops re-shrinking the same photos when you regenerate.
+
 ## 0.1.312 — 2026-10-24
 
 - In Inventory, your open listings now show as tabs in the top bar, so they no longer overlap the title and the listing starts right under the bar.
