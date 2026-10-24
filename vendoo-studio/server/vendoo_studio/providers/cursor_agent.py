@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -112,17 +113,53 @@ def _close_bridges(clients: list) -> None:
             client.close()
 
 
-def _acquire_bridge(scratch: str):
-    from cursor_sdk import Client
+class _Bridge:
+    """A Cursor bridge process with an agent store of its own.
 
+    By default every bridge on a workspace shares one SQLite file under
+    ~/.cursor/projects, and a bridge opening it while another writes fails with
+    "database is locked" (several listings generate at once). Studio never
+    resumes a Cursor agent, so each bridge keeps its records in a JSONL store
+    that is deleted when the bridge closes.
+    """
+
+    def __init__(self, scratch: str):
+        from cursor_sdk import Client, LocalAgentOptions
+
+        self._store = tempfile.TemporaryDirectory(prefix="cursor-run-", ignore_cleanup_errors=True)
+        self.local = LocalAgentOptions(
+            cwd=scratch,
+            setting_sources=[],
+            store={"type": "jsonl", "root_dir": self._store.name},
+        )
+        try:
+            with _patched_bridge_env():
+                self.client = Client.launch_bridge(workspace=scratch, local=self.local)
+        except BaseException:
+            self._store.cleanup()
+            raise
+
+    def close(self) -> None:
+        try:
+            self.client.close()
+        finally:
+            self._store.cleanup()
+
+    def __enter__(self) -> _Bridge:
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+
+def _acquire_bridge(scratch: str) -> _Bridge:
     with _bridge_pool_lock:
         stale = _take_stale_bridges()
-        client = _idle_bridges.pop()[0] if _idle_bridges else None
+        bridge = _idle_bridges.pop()[0] if _idle_bridges else None
     _close_bridges(stale)
-    if client is not None:
-        return client
-    with _patched_bridge_env():
-        return Client.launch_bridge(workspace=scratch)
+    if bridge is not None:
+        return bridge
+    return _Bridge(scratch)
 
 
 def _settle_bridge(client, handles: dict[str, object]) -> None:
@@ -350,7 +387,7 @@ class CursorProvider:
         Raises RuntimeError with a user-facing message on failure so Settings can
         show the real Cursor/SDK error instead of a generic "Connection failed".
         """
-        from cursor_sdk import Client, CursorAgentError, CursorSDKError
+        from cursor_sdk import CursorAgentError, CursorSDKError
 
         if not self.api_key:
             raise RuntimeError("Cursor API key is empty.")
@@ -358,9 +395,8 @@ class CursorProvider:
         scratch = str(listing_scratch_dir())
 
         def _probe() -> list:
-            with _patched_bridge_env():
-                with Client.launch_bridge(workspace=scratch) as client:
-                    return list(client.list_models(api_key=self.api_key))
+            with _Bridge(scratch) as bridge:
+                return list(bridge.client.list_models(api_key=self.api_key))
 
         try:
             # Sync bridge uses subprocess.Popen, which tolerates PathLike env
@@ -382,12 +418,8 @@ class CursorProvider:
 
     def list_models(self) -> list:
         """Return the account's model catalog for Settings (sync; call from a worker thread)."""
-        from cursor_sdk import Client
-
-        scratch = str(listing_scratch_dir())
-        with _patched_bridge_env():
-            with Client.launch_bridge(workspace=scratch) as client:
-                models = list(client.list_models(api_key=self.api_key))
+        with _Bridge(str(listing_scratch_dir())) as bridge:
+            models = list(bridge.client.list_models(api_key=self.api_key))
         return [item for item in models if isinstance(getattr(item, "id", None), str) and item.id.strip()]
 
     async def analyze_photos(
@@ -508,11 +540,7 @@ class CursorProvider:
         preamble: str = TEXT_ONLY_PREAMBLE,
         lowest: bool = False,
     ):
-        from cursor_sdk import (
-            CursorAgentError,
-            LocalAgentOptions,
-            UserMessage,
-        )
+        from cursor_sdk import CursorAgentError, UserMessage
 
         selected = (model or self.listing_model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
         prompt, images = _flatten_messages(messages, preamble)
@@ -531,25 +559,25 @@ class CursorProvider:
         handles: dict[str, object] = {}
 
         def _worker() -> None:
-            client = None
+            bridge = None
             try:
-                client = _acquire_bridge(scratch)
-                handles["client"] = client
+                bridge = _acquire_bridge(scratch)
+                handles["client"] = bridge
                 if lowest:
                     with _bridge_pool_lock:
                         known = selected in _reasoning_floor
                     if not known:
                         try:
-                            remember_reasoning_floor(client.list_models(api_key=self.api_key))
+                            remember_reasoning_floor(bridge.client.list_models(api_key=self.api_key))
                         except Exception:
                             log.warning("Cursor model catalog unavailable for a quick reply", exc_info=True)
                             with _bridge_pool_lock:
                                 _reasoning_floor.setdefault(selected, None)
-                with client.agents.create(
+                with bridge.client.agents.create(
                     {"tools": list(tools or ())},
                     model=model_selection(selected, lowest=lowest),
                     api_key=self.api_key,
-                    local=LocalAgentOptions(cwd=scratch, setting_sources=[]),
+                    local=bridge.local,
                 ) as agent:
                     status_notes: list[str] = []
 
@@ -636,8 +664,8 @@ class CursorProvider:
                 handles["discard"] = True
                 _emit(exc)
             finally:
-                if client is not None:
-                    _settle_bridge(client, handles)
+                if bridge is not None:
+                    _settle_bridge(bridge, handles)
                 _emit(_STREAM_DONE)
 
         def _abort() -> None:

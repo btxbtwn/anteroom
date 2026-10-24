@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.319 — 2026-10-24
+
+- Cursor no longer fails with "database is locked" when several listings generate at once.
+
 ## 0.1.318 — 2026-10-24
 
 - The Inventory and Vendoo sync buttons are gone from the bottom of the sidebar. Sync from Vendoo now lives in Settings → Data (and still on Analytics).

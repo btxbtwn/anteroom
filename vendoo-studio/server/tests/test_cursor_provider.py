@@ -206,6 +206,49 @@ class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
         old_client.close.assert_called_once()
         new_client.close.assert_not_called()
 
+    async def test_each_bridge_keeps_its_own_agent_store(self):
+        # Bridges sharing Cursor's default SQLite store fail with "database is
+        # locked" when two of them write at once.
+        from vendoo_studio.providers import cursor_agent
+
+        class FakeRun:
+            id = "run-store"
+
+            def stream(self):
+                yield assistant("ok")
+
+            def wait(self):
+                return MagicMock(status="finished", result="ok", id=self.id)
+
+        first, first_agents = fake_bridge(FakeRun())
+        second, second_agents = fake_bridge(FakeRun())
+        with patch("cursor_sdk.Client.launch_bridge", side_effect=[first, second]) as launch:
+            # Two runs at once each take a bridge of their own.
+            bridges = [cursor_agent._acquire_bridge("/tmp/cursor-scratch") for _ in range(2)]
+            stores = [launch.call_args_list[i].kwargs["local"].store for i in range(2)]
+            for bridge, store in zip(bridges, stores, strict=True):
+                self.assertIs(bridge.local.store, store)
+                self.assertEqual(store["type"], "jsonl")
+                self.assertTrue(Path(store["root_dir"]).is_dir())
+            self.assertNotEqual(stores[0]["root_dir"], stores[1]["root_dir"])
+            for bridge in bridges:
+                cursor_agent._settle_bridge(bridge, {})
+
+            async for _chunk in CursorProvider(api_key="cursor_test").chat(
+                [{"role": "user", "content": "Hi"}], stream=False,
+            ):
+                pass
+            # The run reuses a pooled bridge and its store.
+            ran = [agents for agents in (first_agents, second_agents) if agents.create.called]
+            self.assertEqual(len(ran), 1)
+            local = ran[0].create.call_args.kwargs["local"]
+            self.assertIn(local.store["root_dir"], {store["root_dir"] for store in stores})
+            self.assertEqual(launch.call_count, 2)
+
+        cursor_agent.reset_cursor_bridges()
+        for store in stores:
+            self.assertFalse(Path(store["root_dir"]).exists())
+
     async def test_failed_photo_run_reports_cursors_reason(self):
         provider = CursorProvider(api_key="cursor_test")
 
