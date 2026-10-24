@@ -5,6 +5,7 @@ import { extensionConnection } from "../ExtensionStatus";
 import { StatusDot } from "../StatusDot";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
+import type { DirectAccountStatus, DirectMarketplace } from "../../api/directConnections";
 import { ConnectChromeButton } from "../ConnectChromeButton";
 import { ExtensionLoadPath } from "../ExtensionLoadPath";
 import { MarketplaceLogo } from "../MarketplaceLogo";
@@ -93,6 +94,124 @@ function ExtensionConnectionRow() {
   );
 }
 
+const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }[] = [
+  {
+    id: "ebay",
+    name: "eBay",
+    what: "Tells Anteroom the moment something sells on eBay, so you can delist it everywhere else.",
+  },
+  {
+    id: "etsy",
+    name: "Etsy",
+    what: "Tells Anteroom the moment something sells on Etsy, so you can delist it everywhere else.",
+  },
+];
+
+function directAccountState(account: DirectAccountStatus | undefined): {
+  tone: "success" | "warning" | "error" | "muted";
+  label: string;
+} {
+  if (account?.connected) return { tone: "success", label: account.label ? `Connected as ${account.label}` : "Connected" };
+  if (account?.pending) return { tone: "warning", label: "Waiting for sign-in" };
+  if (account?.error) return { tone: "error", label: "Not connected" };
+  return { tone: "muted", label: "Not connected" };
+}
+
+function DirectConnectionRow({
+  marketplace,
+  account,
+}: {
+  marketplace: (typeof DIRECT_MARKETPLACES)[number];
+  account: DirectAccountStatus | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["direct-connections"] });
+  const connect = useMutation({ mutationFn: () => api.directConnections.connect(marketplace.id), onSettled: refresh });
+  const cancel = useMutation({ mutationFn: () => api.directConnections.cancel(marketplace.id), onSettled: refresh });
+  const disconnect = useMutation({ mutationFn: () => api.directConnections.disconnect(marketplace.id), onSettled: refresh });
+  const state = directAccountState(account);
+  const busy = connect.isPending || cancel.isPending || disconnect.isPending;
+  const error = (connect.error || disconnect.error)?.message || account?.error || null;
+
+  const control = account?.connected ? (
+    <Button size="xs" variant="outline" disabled={busy} onClick={() => disconnect.mutate()}>
+      {disconnect.isPending ? <Spinner /> : null}
+      Disconnect
+    </Button>
+  ) : account?.pending ? (
+    <Button size="xs" variant="ghost" disabled={busy} onClick={() => cancel.mutate()}>
+      Cancel
+    </Button>
+  ) : (
+    <Button size="xs" variant="outline" disabled={busy} onClick={() => connect.mutate()}>
+      {connect.isPending ? <Spinner /> : null}
+      Connect
+    </Button>
+  );
+
+  return (
+    <SettingsRow
+      id={`direct-${marketplace.id}`}
+      title={
+        <span className="flex items-center gap-2">
+          <MarketplaceLogo id={marketplace.id} label={marketplace.name} size={16} />
+          {marketplace.name}
+        </span>
+      }
+      description={marketplace.what}
+      status={
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <StatusDot tone={state.tone} />
+          {state.label}
+        </span>
+      }
+      control={control}
+    >
+      {account?.pending && account.authorizeUrl ? (
+        <SettingsNote>
+          Finish signing in on the {marketplace.name} page that opened in your browser.{" "}
+          <a className="underline underline-offset-2" href={account.authorizeUrl} target="_blank" rel="noreferrer">
+            Open it again
+          </a>
+        </SettingsNote>
+      ) : null}
+      {error && !account?.pending ? <SettingsNote tone="error">{error}</SettingsNote> : null}
+    </SettingsRow>
+  );
+}
+
+function DirectConnectionsSection() {
+  const { data } = useQuery({
+    queryKey: ["direct-connections"],
+    queryFn: api.directConnections.status,
+    refetchInterval: (query) => {
+      const accounts = query.state.data?.accounts;
+      return accounts && Object.values(accounts).some((a) => a.pending) ? 2000 : 15000;
+    },
+  });
+  const anyConnected = Boolean(data && Object.values(data.accounts).some((a) => a.connected));
+  const relay = data?.relay;
+  return (
+    <SettingsSection id="direct-connections" title="Sale alerts">
+      {DIRECT_MARKETPLACES.map((marketplace) => (
+        <DirectConnectionRow key={marketplace.id} marketplace={marketplace} account={data?.accounts[marketplace.id]} />
+      ))}
+      <SettingsRow
+        title="How it works"
+        description="Vendoo still lists everything. Connecting an account only lets Anteroom hear about sales: eBay and Etsy notify Anteroom's relay, and this Mac picks the sale up. When something sells, the listing shows which other marketplaces to delist, and nothing is delisted until you choose. The relay keeps only IDs, never buyer details."
+        status={
+          anyConnected ? (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <StatusDot tone={relay?.connected ? "success" : "warning"} />
+              {relay?.connected ? "Listening for sales" : relay?.lastError || "Connecting"}
+            </span>
+          ) : null
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 export function ConnectionsSettings() {
   return (
     <>
@@ -112,6 +231,7 @@ export function ConnectionsSettings() {
         </SettingsRow>
         <CategoryTreesRow />
       </SettingsSection>
+      <DirectConnectionsSection />
       <SettingsSection id="remote-access" title="Remote access">
         <TailscaleHttpsRow />
       </SettingsSection>

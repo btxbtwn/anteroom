@@ -12,6 +12,7 @@ import { ListingHistory } from "./ListingHistory";
 import { blockerTarget, matchingEditorField } from "./listingChanges";
 import { VendooSyncStatus } from "./VendooSyncStatus";
 import { OpenListingButton } from "./OpenListingButton";
+import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
 import {
@@ -404,6 +405,8 @@ export function ListingEditor({
           {data?.can_send && !generating && <Badge variant="success">Ready</Badge>}
         </div>
       </div>
+
+      <SoldElsewhereNotice convId={convId} />
 
       {relistMarketplaces.length > 0 && (
         <Alert

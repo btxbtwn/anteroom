@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.315 — 2026-10-24
+
+- New: sale alerts. In Settings → Connections → Sale alerts, connect your eBay account (Etsy once Etsy approves Anteroom's app) and Anteroom hears about a sale the moment it happens, even before Vendoo does. Your Mac shows a notification, and the listing shows which other marketplaces it's still on, with a Delist button that goes through Vendoo. Nothing is delisted until you choose. Vendoo still does all the listing.
+
 ## 0.1.314 — 2026-10-24
 
 - Running several listings at once is much lighter on your Mac. Anteroom no longer re-reads its whole category catalog after every send or sync, opens faster after a restart, and stops re-shrinking the same photos when you regenerate.

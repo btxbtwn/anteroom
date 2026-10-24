@@ -11,7 +11,7 @@ from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
 from vendoo_studio.database import init_db
 from vendoo_studio.static_files import FrontendFiles
 from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports
-from vendoo_studio.routes import ad_spend, analytics, assistant, attachments, backups, boxes, browser, catalog, changelog, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
+from vendoo_studio.routes import ad_spend, analytics, assistant, attachments, backups, boxes, browser, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
 
 
@@ -71,6 +71,11 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=_prune_event_bloat, name="prune-job-events", daemon=True).start()
     except Exception:
         pass
+    try:
+        from vendoo_studio.services.marketplace_accounts import start_listening
+        start_listening()
+    except Exception:
+        pass
     from vendoo_studio.providers import chatgpt_codex, claude_sessions
 
     claude_sessions.keep_warm_on_this_loop()
@@ -79,6 +84,11 @@ async def lifespan(app: FastAPI):
     try:
         await claude_sessions.close_warm_processes()
         await chatgpt_codex.close_connection()
+    except Exception:
+        pass
+    try:
+        from vendoo_studio.services.relay_client import stop_stream
+        stop_stream()
     except Exception:
         pass
     try:
@@ -125,6 +135,7 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(health.router)
+app.include_router(marketplace_accounts.router)
 app.include_router(conversations.router)
 app.include_router(photos.router)
 app.include_router(measurements.router)

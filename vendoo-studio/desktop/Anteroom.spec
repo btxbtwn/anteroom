@@ -65,6 +65,8 @@ hiddenimports = [
     # Modules only: the SDK's 240 MB bundled CLI stays out. Studio runs the
     # seller's own Claude Code install, whose login is what it signs in with.
     *collect_submodules("claude_agent_sdk"),
+    # The relay client imports websockets.connect, which websockets loads lazily.
+    *collect_submodules("websockets"),
     "uvicorn.logging",
     "uvicorn.loops",
     "uvicorn.loops.auto",
