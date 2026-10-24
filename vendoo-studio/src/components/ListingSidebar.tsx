@@ -63,7 +63,7 @@ interface Props {
   onOpenUsage: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketing: () => void;
-  onOpenEbay: () => void;
+  onOpenMarketplaces: () => void;
   onOpenAssistant: () => void;
   onOpenSourcing: () => void;
   /** Phones: opens the page drawer from the sidebar header. */
@@ -91,7 +91,7 @@ export function ListingSidebar({
   onOpenUsage,
   onOpenAnalytics,
   onOpenMarketing,
-  onOpenEbay,
+  onOpenMarketplaces,
   onOpenAssistant,
   onOpenSourcing,
   onOpenMobileNav,
@@ -441,7 +441,7 @@ export function ListingSidebar({
         onOpenSourcing={onOpenSourcing}
         onOpenAnalytics={onOpenAnalytics}
         onOpenMarketing={onOpenMarketing}
-        onOpenEbay={onOpenEbay}
+        onOpenMarketplaces={onOpenMarketplaces}
         onOpenAssistant={onOpenAssistant}
         onOpenSettings={onOpenSettings}
         onOpenUsage={onOpenUsage}
