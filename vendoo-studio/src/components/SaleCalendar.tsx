@@ -11,12 +11,10 @@ import { cn } from "../lib/utils";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Skeleton } from "./ui/skeleton";
 import { Textarea } from "./ui/textarea";
 import { EmptyRow, FormError, FormField, PageNote, PageSection, Panel } from "./WorkspacePage";
 
-const MARKETS: SaleMarketplace[] = ["ebay", "depop", "etsy", "sellwild"];
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 type CalendarSave = { kind: "plan"; input: SalePlan } | { kind: "record"; input: SaleRecord };
 type FormSeed = { start: string; end: string; marketplace: string; event?: SaleEvent; record?: boolean };
@@ -68,7 +66,7 @@ function patternDiscount(pattern: SalePattern | undefined, items: SaleCalendarIt
   return suggestDiscount(items.filter(item => item.marketplaces.includes(pattern.marketplace)), pattern.fee_percent, pattern.shipping_cost ?? 0, 0);
 }
 
-export function SaleCalendar({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+export function SaleCalendar({ marketplace: market, onOpenListing }: { marketplace: SaleMarketplace; onOpenListing: (id: string) => void }) {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const [today, setToday] = useState(() => calendarDate(new Date()));
   useEffect(() => {
@@ -76,7 +74,6 @@ export function SaleCalendar({ onOpenListing }: { onOpenListing: (id: string) =>
     return () => window.clearInterval(timer);
   }, []);
   const [month, setMonth] = useState(today.slice(0, 7));
-  const [market, setMarket] = useState<SaleMarketplace | "all">("all");
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [form, setForm] = useState<FormSeed | null>(null);
   const [notice, setNotice] = useState("");
@@ -91,13 +88,14 @@ export function SaleCalendar({ onOpenListing }: { onOpenListing: (id: string) =>
     onSuccess: () => Promise.all([queryClient.invalidateQueries({ queryKey: ["sale-calendar"] }), queryClient.invalidateQueries({ queryKey: ["analytics"] })]),
   });
   const busy = statusMutation.isPending || deleteMutation.isPending;
-  const events = (query.data?.events ?? []).filter(event => market === "all" || event.marketplace === market);
+  const patterns = (query.data?.patterns ?? []).filter(pattern => pattern.marketplace === market);
+  const events = (query.data?.events ?? []).filter(event => event.marketplace === market);
   const visible = events.filter(event => selectedDay
     ? event.start_date <= selectedDay && event.end_date >= selectedDay
     : event.start_date <= monthDays(month)[41]! && event.end_date >= `${month}-01`);
   const activeEvents = events.filter(event => event.status !== "cancelled");
 
-  function newPlan(start = selectedDay ?? today, end = start, marketplace: SaleMarketplace = market === "all" ? "ebay" : market) {
+  function newPlan(start = selectedDay ?? today, end = start, marketplace: SaleMarketplace = market) {
     setForm({ start, end, marketplace });
     setMonth(start.slice(0, 7));
     setNotice("");
@@ -116,7 +114,7 @@ export function SaleCalendar({ onOpenListing }: { onOpenListing: (id: string) =>
       description="Plan, run the sale on the marketplace, then mark it as run here. Saving a plan only adds it to this calendar."
       actions={<>
         <Button variant="ghost-muted" size="xs" disabled={query.isFetching} onClick={() => void query.refetch()}>Refresh calendar</Button>
-        <Button variant="outline" size="xs" disabled={!query.data} onClick={() => setForm({ start: today, end: today, marketplace: market === "all" ? "ebay" : market, record: true })}>Record a sale I ran</Button>
+        <Button variant="outline" size="xs" disabled={!query.data} onClick={() => setForm({ start: today, end: today, marketplace: market, record: true })}>Record a sale I ran</Button>
         <Button size="xs" disabled={!query.data} onClick={() => newPlan()}>Plan a sale</Button>
       </>}
     >
@@ -132,8 +130,8 @@ export function SaleCalendar({ onOpenListing }: { onOpenListing: (id: string) =>
       {statusMutation.isError || deleteMutation.isError ? <FormError>{(statusMutation.error ?? deleteMutation.error)?.message}</FormError> : null}
       {notice ? <PageNote role="status" className="text-foreground">{notice}</PageNote> : null}
       {query.data ? <>
-        {query.data.patterns.length ? <div className="grid gap-3 @2xl/page:grid-cols-2 @4xl/page:grid-cols-3">
-          {query.data.patterns.map(pattern => {
+        {patterns.length ? <div className="grid gap-3 @2xl/page:grid-cols-2 @4xl/page:grid-cols-3">
+          {patterns.map(pattern => {
             const discount = patternDiscount(pattern, query.data.items);
             return <Panel divided={false} key={pattern.marketplace} className="flex flex-col gap-3 p-4">
               <h3 className="text-sm font-medium text-foreground">{marketplaceName(pattern.marketplace)}</h3>
@@ -160,15 +158,7 @@ export function SaleCalendar({ onOpenListing }: { onOpenListing: (id: string) =>
               <Button variant="ghost" size="icon-xs" aria-label="Next month" onClick={() => { setMonth(shiftMonth(month, 1)); setSelectedDay(null); }}><ChevronRightIcon /></Button>
               <Button variant="outline" size="xs" className="ms-1" onClick={() => { setMonth(today.slice(0, 7)); setSelectedDay(today); }}>Today</Button>
             </div>
-            <Select value={market} onValueChange={value => setMarket(value as typeof market)}>
-              <SelectTrigger aria-label="Marketplace" size="xs" className="w-auto min-w-40">
-                <SelectValue>{market === "all" ? "All marketplaces" : marketplaceName(market)}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem value="all">All marketplaces</SelectItem>
-                {MARKETS.map(value => <SelectItem key={value} value={value}>{marketplaceName(value)}</SelectItem>)}
-              </SelectPopup>
-            </Select>
+
           </div>
           <div className="grid grid-cols-7 gap-1" role="group" aria-label="Promotion dates">
             {WEEKDAYS.map(day => <div className="py-1 text-center text-2xs text-muted-foreground" key={day}>{day}</div>)}
@@ -242,7 +232,7 @@ function SalePlanForm({ seed, items, patterns, timezone, onOpenListing, onClose,
   const recording = seed.record === true;
   const history = (marketplace: string) => patterns.find(pattern => pattern.marketplace === marketplace);
   const [title, setTitle] = useState(event?.title ?? `${marketplaceName(seed.marketplace)} sale`);
-  const [market, setMarket] = useState(seed.marketplace);
+  const market = seed.marketplace;
   const [start, setStart] = useState(seed.start);
   const [end, setEnd] = useState(seed.end);
   const [tz, setTz] = useState(event?.timezone ?? timezone);
@@ -272,13 +262,6 @@ function SalePlanForm({ seed, items, patterns, timezone, onOpenListing, onClose,
   const thin = estimates.filter(row => row.profit != null && row.profit < Number(floor));
   const uncosted = listings.filter(item => item.cost == null);
 
-  function changeMarket(value: string) {
-    setMarket(value);
-    const past = history(value);
-    if (past?.fee_percent != null) setFees(String(past.fee_percent));
-    if (past?.shipping_cost != null) setShipping(String(past.shipping_cost));
-  }
-
   function submit(e: FormEvent) {
     e.preventDefault();
     setError("");
@@ -300,15 +283,7 @@ function SalePlanForm({ seed, items, patterns, timezone, onOpenListing, onClose,
       <fieldset className="flex min-w-0 flex-col gap-4" disabled={save.isPending}>
         <div className="grid grid-cols-1 gap-3 @lg/page:grid-cols-2 @3xl/page:grid-cols-3">
           <FormField label="Title"><Input nativeInput autoFocus required maxLength={120} value={title} onChange={e => setTitle(e.target.value)} /></FormField>
-          <FormField label="Marketplace">
-            <Select value={market} onValueChange={value => changeMarket(String(value))}>
-              <SelectTrigger aria-label="Marketplace"><SelectValue>{marketplaceName(market)}</SelectValue></SelectTrigger>
-              <SelectPopup>
-                {!MARKETS.includes(market as SaleMarketplace) ? <SelectItem value={market}>{marketplaceName(market)}</SelectItem> : null}
-                {MARKETS.map(value => <SelectItem key={value} value={value}>{marketplaceName(value)}</SelectItem>)}
-              </SelectPopup>
-            </Select>
-          </FormField>
+
           <FormField label="Start date"><Input nativeInput type="date" required value={start} onChange={e => setStart(e.target.value)} /></FormField>
           <FormField label="End date (inclusive)"><Input nativeInput type="date" required min={start} value={end} onChange={e => setEnd(e.target.value)} /></FormField>
           <FormField label="Event time zone"><Input nativeInput required value={tz} onChange={e => setTz(e.target.value)} /></FormField>

@@ -58,7 +58,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "One listing: press **Regenerate**. The dialog suggests a new price from live comps and your past drops. Pick one and press **Confirm**.",
       "Many at once: press **Select**, tick them, press **Regenerate**, choose −10%, −15% or −20% each, or **Each listing's suggestion**, then **Drop and rewrite**.",
       "Press **Update Vendoo** on each listing to carry the new price to its draft.",
-      "For a timed sale instead, open **Marketing** and use **Plan a sale** in the Sale calendar.",
+      "For a timed sale instead, open **Marketplaces**, choose the marketplace, and use **Plan a sale** in the Sale calendar.",
     ],
   },
   {

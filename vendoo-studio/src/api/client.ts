@@ -61,6 +61,7 @@ import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
+import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
 
@@ -220,6 +221,11 @@ export const api = {
   },
   etsy: {
     notAllowed: () => request<EtsyNotAllowedResponse>("/etsy/not-allowed"),
+    shop: () => request<EtsyShop>("/etsy/shop"),
+    orders: (params: { start: string; end: string; offset: number; status: EtsyOrderStatus }) =>
+      request<EtsyOrders>(`/etsy/orders?${new URLSearchParams({ ...params, offset: String(params.offset) })}`),
+    listings: (state: EtsyListingState, offset: number) =>
+      request<EtsyPage<EtsyListing>>(`/etsy/listings?${new URLSearchParams({ state, offset: String(offset) })}`),
   },
   analytics: {
     get: (range: AnalyticsRange, custom?: { start: string; end: string }) => {

@@ -23,7 +23,6 @@
 @import "./settings.css" layer(legacy);
 @import "./analytics.css" layer(legacy);
 @import "./assistant.css" layer(legacy);
-@import "./queue.css" layer(legacy);
 @import "./sourcing.css" layer(legacy);
 @import "./utilities.css" layer(legacy);
 @import "./responsive.css" layer(legacy);

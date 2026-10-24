@@ -7,7 +7,7 @@
 }
 .dark .ebay-workspace, .dark .ebay-action-dialog { --ebay-accent: #9ac3ff; --ebay-tint: #9ac3ff0d; }
 .ebay-workspace { min-width: 0; padding-bottom: 24px; }
-.ebay-workspace h1 { font-size: 28px; letter-spacing: -.04em; font-weight: 650; line-height: 1.2; }
+.ebay-workspace .ebay-page-heading h2 { font-size: 28px; letter-spacing: -.04em; font-weight: 650; line-height: 1.2; }
 .ebay-workspace h2 { font-size: 17px; letter-spacing: -.02em; font-weight: 600; }
 .ebay-workspace h3 { font-size: 14px; font-weight: 600; }
 .ebay-workspace p { max-width: 70ch; }

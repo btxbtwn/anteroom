@@ -4,8 +4,6 @@ import {
   BoxIcon,
   ChartColumnIcon,
   GaugeIcon,
-  ListIcon,
-  MegaphoneIcon,
   MessageCircleIcon,
   SettingsIcon,
   StoreIcon,
@@ -25,7 +23,7 @@ const SIDEBAR_BORDER_PX = 1;
 
 /**
  * The footer buttons in seller-workflow order: home first, then the day's work
- * (sourcing, the send queue), then insight (analytics, marketing, plan usage),
+ * (sourcing), marketplace tools, then insight (analytics, plan usage),
  * then settings and the updater last, the way T3 Code ends its sidebar footer
  * with settings. The listings above are the inventory; Vendoo sync lives in
  * Settings → Data and on Analytics.
@@ -33,10 +31,8 @@ const SIDEBAR_BORDER_PX = 1;
 export const SIDEBAR_FOOTER_BUTTONS = [
   "assistant",
   "sourcing",
-  "queue",
   "analytics",
-  "marketing",
-  "ebay",
+  "marketplaces",
   "usage",
   "settings",
   "update",
@@ -90,26 +86,20 @@ function FooterButton({
 export function SidebarFooter({
   settingsMode,
   activeView,
-  queueCount,
   onCloseSettings,
-  onOpenQueue,
   onOpenSourcing,
   onOpenAnalytics,
-  onOpenMarketing,
-  onOpenEbay,
+  onOpenMarketplaces,
   onOpenAssistant,
   onOpenSettings,
   onOpenUsage,
 }: {
   settingsMode: boolean;
   activeView: WorkspaceView;
-  queueCount: number;
   onCloseSettings: () => void;
-  onOpenQueue: () => void;
   onOpenSourcing: () => void;
   onOpenAnalytics: () => void;
-  onOpenMarketing: () => void;
-  onOpenEbay: () => void;
+  onOpenMarketplaces: () => void;
   onOpenAssistant: () => void;
   onOpenSettings: () => void;
   onOpenUsage: () => void;
@@ -119,25 +109,10 @@ export function SidebarFooter({
       <FooterButton label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
     ),
     sourcing: <FooterButton label="Sourcing" icon={BoxIcon} active={activeView === "sourcing"} onClick={onOpenSourcing} />,
-    queue: (
-      <FooterButton
-        label={queueCount ? `Queue (${queueCount})` : "Queue"}
-        icon={ListIcon}
-        active={activeView === "queue"}
-        onClick={onOpenQueue}
-      >
-        {queueCount ? (
-          <span className="absolute top-1.25 right-1.25 size-1.25 rounded-full bg-primary" aria-hidden="true" />
-        ) : null}
-      </FooterButton>
-    ),
     analytics: (
       <FooterButton label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} onClick={onOpenAnalytics} />
     ),
-    marketing: (
-      <FooterButton label="Marketing" icon={MegaphoneIcon} active={activeView === "marketing"} onClick={onOpenMarketing} />
-    ),
-    ebay: <FooterButton label="eBay" icon={StoreIcon} active={activeView === "ebay"} onClick={onOpenEbay} />,
+    marketplaces: <FooterButton label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />,
     usage: <FooterButton label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
     settings: <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: <UpdateButton />,

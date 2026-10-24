@@ -62,14 +62,11 @@ interface Props {
   onOpenSettings: () => void;
   onOpenUsage: () => void;
   onOpenAnalytics: () => void;
-  onOpenMarketing: () => void;
-  onOpenEbay: () => void;
+  onOpenMarketplaces: () => void;
   onOpenAssistant: () => void;
   onOpenSourcing: () => void;
   /** Phones: opens the page drawer from the sidebar header. */
   onOpenMobileNav?: () => void;
-  onOpenQueue: () => void;
-  queueCount: number;
   onCloseSettings: () => void;
   onSettingsSectionChange: (section: SettingsSectionId) => void;
   onSettingsSearchResult: (item: SettingsSearchItem) => void;
@@ -90,13 +87,10 @@ export function ListingSidebar({
   onOpenSettings,
   onOpenUsage,
   onOpenAnalytics,
-  onOpenMarketing,
-  onOpenEbay,
+  onOpenMarketplaces,
   onOpenAssistant,
   onOpenSourcing,
   onOpenMobileNav,
-  onOpenQueue,
-  queueCount,
   onCloseSettings,
   onSettingsSectionChange,
   onSettingsSearchResult,
@@ -435,13 +429,10 @@ export function ListingSidebar({
       <SidebarFooter
         settingsMode={settingsMode}
         activeView={activeView}
-        queueCount={queueCount}
         onCloseSettings={onCloseSettings}
-        onOpenQueue={onOpenQueue}
         onOpenSourcing={onOpenSourcing}
         onOpenAnalytics={onOpenAnalytics}
-        onOpenMarketing={onOpenMarketing}
-        onOpenEbay={onOpenEbay}
+        onOpenMarketplaces={onOpenMarketplaces}
         onOpenAssistant={onOpenAssistant}
         onOpenSettings={onOpenSettings}
         onOpenUsage={onOpenUsage}

@@ -118,7 +118,7 @@ function directAccountState(account: DirectAccountStatus | undefined): {
   return { tone: "muted", label: "Not connected" };
 }
 
-function DirectConnectionRow({
+export function DirectConnectionRow({
   marketplace,
   account,
 }: {

@@ -50,9 +50,9 @@ describe("workspaceCrumbs", () => {
     });
   });
 
-  it("reads Marketing with nothing open under it", () => {
-    expect(workspaceCrumbs("marketing", "Providers", { title: "REI XL" })).toEqual({
-      context: "Marketing",
+  it("reads Marketplaces with nothing open under it", () => {
+    expect(workspaceCrumbs("marketplaces", "Providers", { title: "REI XL" })).toEqual({
+      context: "Marketplaces",
       title: null,
     });
   });

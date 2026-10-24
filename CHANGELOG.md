@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.326 — 2026-10-24
+
+- Removed the Queue page from navigation. Approved Sends still wait their turn and save drafts in the background; progress stays visible on each listing.
+- Replaced the separate Marketing and eBay tabs with Marketplaces. Marketplace tools, sale calendars, and ad history are grouped by marketplace; inventory discount suggestions are in Analytics.
+- Added an Etsy dashboard under Marketplaces with live shop metrics, orders, shipping status, and listings. Etsy sales planning and ad imports are in its Marketing tab.
+
 ## 0.1.325 — 2026-10-24
 
 - Preview eBay offers in Settings → Connections, set a minimum price for each item, and choose to send now or enable automatic offers while Anteroom is running. Offers use live eBay prices, and uncertain sends pause for a Seller Hub check.
