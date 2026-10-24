@@ -308,7 +308,7 @@ export function ListingRow({
             {listing.unsent_edits ? (
               <ListingTag
                 tone="info"
-                title="Edited in Studio since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
+                title="Edited in Anteroom since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
               >
                 unsent
               </ListingTag>
@@ -319,7 +319,7 @@ export function ListingRow({
                 title={relistStageNow === "list"
                   ? "Delisted in Vendoo and not listed again yet, so it is live nowhere."
                     + ` List it again to finish: ${relistMarketplaces.map(marketplaceName).join(", ")}.`
-                  : `Updated in Studio after ${relistMarketplaces.map(marketplaceName).join(", ")} went live.`
+                  : `Updated in Anteroom after ${relistMarketplaces.map(marketplaceName).join(", ")} went live.`
                     + " Delist and relist in Vendoo to publish the new version."}
               >
                 relist

@@ -97,7 +97,7 @@ export function AssistantChangesCard({ message, changes, onSettled }: Props) {
       {changes.status === "proposed" ? (
         <>
           <p className="analytics-note">
-            Applying saves these in Studio. A listing already on Vendoo keeps its old values there until you send it
+            Applying saves these in Anteroom. A listing already on Vendoo keeps its old values there until you send it
             again.
           </p>
           {failure ? <p className="text-destructive-foreground text-sm">{failure.message || "Could not save the changes."}</p> : null}

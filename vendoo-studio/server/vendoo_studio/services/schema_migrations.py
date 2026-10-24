@@ -139,8 +139,8 @@ def ensure_schema(engine: Engine | None = None) -> str:
 
     if not _known(current):
         raise SchemaError(
-            f"This database is at revision {current}, which this build of Studio "
-            "does not know. It was written by a newer version. Update Studio "
+            f"This database is at revision {current}, which this build of Anteroom "
+            "does not know. It was written by a newer version. Update Anteroom "
             "rather than opening it with this one, so the data is not written "
             "in a shape the newer version cannot read."
         )

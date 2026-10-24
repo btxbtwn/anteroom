@@ -108,10 +108,10 @@ def describe(drift: Drift) -> str:
             report += [f"  {name}" for name in drift.missing_columns]
         report.append("")
         if drift.healed_by_init_db:
-            report.append("Starting Studio adds all of these. No action needed.")
+            report.append("Starting Anteroom adds all of these. No action needed.")
         else:
             report.append(
-                "Starting Studio will NOT add these columns: "
+                "Starting Anteroom will NOT add these columns: "
                 + ", ".join(drift.unhealed_columns)
                 + ". Name them in BACKFILLED_COLUMNS (vendoo_studio/database.py) "
                 "before running against this database."

@@ -20,7 +20,7 @@ def _cancel_leftover_jobs(db: Session) -> list[str]:
     for job in jobs:
         job.status = "cancelled"
         job.current_step = None
-        job.last_error = "Cancelled so Studio can update"
+        job.last_error = "Cancelled so Anteroom can update"
         cancelled.append(job.id)
     if jobs:
         db.commit()

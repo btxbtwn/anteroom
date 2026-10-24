@@ -74,7 +74,7 @@ def frontend_needs_build() -> str | None:
     version = app_version()
     built = str(stamp.get("version") or "").strip()
     if built != version:
-        return f"the built interface is {built or 'unknown'} but Studio is {version}"
+        return f"the built interface is {built or 'unknown'} but Anteroom is {version}"
 
     sha = head_sha()
     built_sha = str(stamp.get("sha") or "").strip()

@@ -1,11 +1,14 @@
 # Changelog
 
-Every change to List This Studio, newest first. Studio bumps its patch version
+Every change to Anteroom, newest first. Anteroom bumps its patch version
 on each merged pull request, so a version here is one change. The app reads this
 file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.313 — 2026-10-24
+
+- The app is now called Anteroom, with a new doorway icon. It updates itself as usual and moves to Anteroom.app in Applications. Your listings, photos and settings come along to the new Anteroom data folder, and the Chrome extension keeps working without being loaded again. If you pinned the app to the Dock, pin Anteroom again after the update.
 ## 0.1.312 — 2026-10-24
 
 - In Inventory, your open listings now show as tabs in the top bar, so they no longer overlap the title and the listing starts right under the bar.

@@ -134,7 +134,7 @@ function ErrorLogSection() {
       <SettingsRow
         id="error-logs"
         title="Warnings and errors"
-        description="Problems Studio ran into while it was open, such as an AI provider rejecting its key or photos it could not read. Click one with details to see them. Keys and tokens are masked. The list clears when Studio restarts; the log file keeps them."
+        description="Problems Anteroom ran into while it was open, such as an AI provider rejecting its key or photos it could not read. Click one with details to see them. Keys and tokens are masked. The list clears when Anteroom restarts; the log file keeps them."
         status={entries.length ? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}` : undefined}
         control={
           <Button
@@ -153,10 +153,10 @@ function ErrorLogSection() {
       >
         {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
         {entries.length === 0 ? (
-          <SettingsNote>No warnings or errors since Studio started.</SettingsNote>
+          <SettingsNote>No warnings or errors since Anteroom started.</SettingsNote>
         ) : (
           <div className={LOG_SCROLL}>
-            <table className={LOG_TABLE} aria-label="Studio warnings and errors">
+            <table className={LOG_TABLE} aria-label="Anteroom warnings and errors">
               <thead className={LOG_HEAD}>
                 <tr>
                   <th scope="col">Time</th>
@@ -223,7 +223,7 @@ function VendooApiLogSection() {
       <SettingsRow
         id="vendoo-api-logs"
         title="Live requests"
-        description="Calls the extension makes to Vendoo while Studio is open. Click a request to see its full URL, headers, and bodies. Tokens, API keys, and cookies are masked. The list clears when Studio restarts."
+        description="Calls the extension makes to Vendoo while Anteroom is open. Click a request to see its full URL, headers, and bodies. Tokens, API keys, and cookies are masked. The list clears when Anteroom restarts."
         status={entries.length ? `${entries.length} ${entries.length === 1 ? "call" : "calls"}` : undefined}
         control={
           <Button

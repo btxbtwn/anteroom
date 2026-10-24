@@ -27,7 +27,7 @@ Depop help text: Brand new = unused with tags; Like new = mint pre-owned or new 
 
 eBay has no Poor option. Casing differs from Vendoo (`Pre-owned` vs `Pre-Owned`).
 
-The Studio extension maps Vendoo general condition → marketplace labels before filling:
+The Anteroom extension maps Vendoo general condition → marketplace labels before filling:
 
 | Vendoo general | eBay | Poshmark | Mercari | Depop |
 |---|---|---|---|---|
@@ -50,7 +50,7 @@ The Studio extension maps Vendoo general condition → marketplace labels before
 
 Depop uses **Grey** (not Gray) and **Multi** (not Multicolor), plus Burgundy, Navy, Khaki.
 
-The Studio extension maps Vendoo general colors before filling. When Multicolor has no marketplace option, secondary is promoted to primary so the required field is not left blank:
+The Anteroom extension maps Vendoo general colors before filling. When Multicolor has no marketplace option, secondary is promoted to primary so the required field is not left blank:
 
 | Incoming / Vendoo | eBay | Etsy | Poshmark | Depop |
 |---|---|---|---|---|
@@ -101,7 +101,7 @@ The Studio extension maps Vendoo general colors before filling. When Multicolor 
 
 ## Depop
 
-Source, age, style, material, and occasion on the live form **do not match** the old Studio enums.
+Source, age, style, material, and occasion on the live form **do not match** the old Anteroom enums.
 
 - **Source:** Vintage, Preloved, Reworked, Custom, Handmade, Deadstock, Designer, Repaired
 - **Age:** Modern, y2k, 90s, 80s, 70s, 60s, 50s, Antique

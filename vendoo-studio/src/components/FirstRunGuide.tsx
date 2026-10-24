@@ -12,7 +12,7 @@ export const SETUP_GUIDE_STEPS = [
   { id: "listing-ai", label: "Listing AI" },
   { id: "brave", label: "Brave Search" },
   { id: "chrome", label: "Connect Chrome" },
-  { id: "tour", label: "How Studio works" },
+  { id: "tour", label: "How Anteroom works" },
   { id: "updates", label: "Updating live listings" },
   { id: "ready", label: "Create a listing" },
 ] as const;
@@ -260,7 +260,7 @@ export function FirstRunGuide({
               <>
                 <h2 id="setup-guide-title" className="setup-guide-title">Turn photos into Vendoo drafts</h2>
                 <p className="setup-guide-copy">
-                  List This Studio stays on this Mac. You add product photos, chat writes the listing, then Studio fills a Vendoo draft. It never publishes. You review and send live yourself.
+                  Anteroom stays on this Mac. You add product photos, chat writes the listing, then Anteroom fills a Vendoo draft. It never publishes. You review and send live yourself.
                 </p>
                 <ul className="setup-guide-points">
                   <li>Choose ChatGPT, a Xiaomi MiMo key, or a Cursor API key so chat can read photos.</li>
@@ -494,7 +494,7 @@ export function FirstRunGuide({
               <>
                 <h2 id="setup-guide-title" className="setup-guide-title">Connect Chrome</h2>
                 <p className="setup-guide-copy">
-                  Studio uses Chrome for a signed-in Vendoo session. Load the listing extension from the folder below once, then sign in to Vendoo. After that, Send to Vendoo creates or updates a draft over the API. It never publishes.
+                  Anteroom uses Chrome for a signed-in Vendoo session. Load the listing extension from the folder below once, then sign in to Vendoo. After that, Send to Vendoo creates or updates a draft over the API. It never publishes.
                 </p>
                 {!chromeAvailable ? (
                   <p className="setup-guide-copy">
@@ -548,7 +548,7 @@ export function FirstRunGuide({
               <>
                 <h2 id="setup-guide-title" className="setup-guide-title">Editing something already listed</h2>
                 <p className="setup-guide-copy">
-                  Studio writes the Vendoo <em>form</em>. Vendoo only carries a form change onto a
+                  Anteroom writes the Vendoo <em>form</em>. Vendoo only carries a form change onto a
                   live marketplace listing when you delist and list it again — so a regenerated
                   listing is live on its old copy until you do that, in Vendoo.
                 </p>
@@ -557,13 +557,13 @@ export function FirstRunGuide({
                     <strong>1. Regenerate here.</strong> The listing wears a blue <em>unsent</em> chip until you press <strong>Update Vendoo</strong> — until then even the Vendoo form is on the old copy.
                   </li>
                   <li>
-                    <strong>2. Update Vendoo, then open the item there.</strong> The Vendoo form now matches Studio; the live listings still do not. The ⋮ menu beside Vendoo Form → Delist Item takes it off every marketplace at once.
+                    <strong>2. Update Vendoo, then open the item there.</strong> The Vendoo form now matches Anteroom; the live listings still do not. The ⋮ menu beside Vendoo Form → Delist Item takes it off every marketplace at once.
                   </li>
                   <li>
                     <strong>3. List it again from Vendoo.</strong> The new listing carries the updated copy, and its listing date resets.
                   </li>
                   <li>
-                    <strong>Studio tracks every step for you.</strong> A blue <em>unsent</em> chip until the edit reaches Vendoo, then an amber <em>relist</em> chip until the listing is back up — and Filters collects each set. The relist chip stays through the middle, where the item reads as a draft because it really is live nowhere, and clears itself once Vendoo reports the new listing date.
+                    <strong>Anteroom tracks every step for you.</strong> A blue <em>unsent</em> chip until the edit reaches Vendoo, then an amber <em>relist</em> chip until the listing is back up — and Filters collects each set. The relist chip stays through the middle, where the item reads as a draft because it really is live nowhere, and clears itself once Vendoo reports the new listing date.
                   </li>
                 </ul>
               </>
@@ -588,7 +588,7 @@ export function FirstRunGuide({
                 {!canCreateListing ? (
                   <p className="setup-guide-note">
                     {listingReady
-                      ? "Waiting for Studio to see ChatGPT, MiMo, or Cursor before creating a listing."
+                      ? "Waiting for Anteroom to see ChatGPT, MiMo, or Cursor before creating a listing."
                       : "Sign in with ChatGPT or save a MiMo or Cursor key first."}
                   </p>
                 ) : null}

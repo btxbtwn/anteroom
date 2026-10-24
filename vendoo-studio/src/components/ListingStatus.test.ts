@@ -10,8 +10,8 @@ describe("statusHint", () => {
 
   it("explains the states Studio itself causes", () => {
     expect(statusHint("failed")).toBe("The last send to Vendoo failed");
-    expect(statusHint("listing")).toBe("Studio is sending this listing to Vendoo");
-    expect(statusHint("in_progress")).toBe("Studio is working on this listing");
+    expect(statusHint("listing")).toBe("Anteroom is sending this listing to Vendoo");
+    expect(statusHint("in_progress")).toBe("Anteroom is working on this listing");
   });
 
   it("still names Vendoo for a status it does not know", () => {

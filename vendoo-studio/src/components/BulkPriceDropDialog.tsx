@@ -80,7 +80,7 @@ export function BulkPriceDropDialog({
       title={outcomes ? markdownSummary(outcomes) : "Mark down listings"}
       description={outcomes
         ? "Nothing was sent to Vendoo. Each listing now has unsent edits: open it and press Update Vendoo to send the new price to the marketplaces."
-        : "Each price starts on the listing's suggestion from your own sales and prior drops. Edit any price or skip a listing. Applying saves the prices in Studio only."}
+        : "Each price starts on the listing's suggestion from your own sales and prior drops. Edit any price or skip a listing. Applying saves the prices in Anteroom only."}
       busy={apply.isPending}
       onClose={onClose}
       footer={outcomes ? (
@@ -105,7 +105,7 @@ export function BulkPriceDropDialog({
                   {money(outcome.from)} → {money(outcome.to)}
                   <Badge
                     variant="info"
-                    title="Edited in Studio since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
+                    title="Edited in Anteroom since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
                   >
                     unsent
                   </Badge>

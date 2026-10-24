@@ -41,8 +41,8 @@ export function installConfirmationMessage(data: UpdateStatus) {
   const lines = data.commits || [];
   if (data.packaged) {
     const title = headline
-      ? `Install “${headline}” and restart List This Studio?`
-      : `Install update${version ? ` ${version}` : ""} and restart List This Studio?`;
+      ? `Install “${headline}” and restart Anteroom?`
+      : `Install update${version ? ` ${version}` : ""} and restart Anteroom?`;
     const details = [
       version ? `Build ${version}` : "",
       headline ? "" : "A new Mac build is on GitHub.",
@@ -58,8 +58,8 @@ export function installConfirmationMessage(data: UpdateStatus) {
   }
   const n = data.behind || 0;
   const title = headline
-    ? `Install “${headline}” and restart List This Studio?`
-    : `Install update${version ? ` ${version}` : ""} and restart List This Studio?`;
+    ? `Install “${headline}” and restart Anteroom?`
+    : `Install update${version ? ` ${version}` : ""} and restart Anteroom?`;
   const details = [
     headline ? "" : `Update available on main (${n} commit${n === 1 ? "" : "s"}).`,
     ...lines.filter((line) => line.trim() && line.trim() !== headline),

@@ -5,8 +5,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
 PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
 RELEASE="$ROOT/release"
-APP="$RELEASE/List This Studio.app"
-ZIP="$RELEASE/List-This-Studio-macos.zip"
+APP="$RELEASE/Anteroom.app"
+ZIP="$RELEASE/Anteroom-macos.zip"
+# Builds from before the rename download this zip and look for this bundle in
+# it. Publishing the same app under the old names lets them update once; after
+# that the updater moves the app to Anteroom.app. Drop both once no install
+# older than the rename is left.
+LEGACY_ZIP="$RELEASE/List-This-Studio-macos.zip"
+LEGACY_APP_NAME="List This Studio.app"
 
 if [[ ! -x "$PYTHON" ]]; then
   echo "Create the Python environment first:" >&2
@@ -76,7 +82,7 @@ mkdir -p "$RELEASE"
   --noconfirm \
   --distpath "$RELEASE" \
   --workpath "$ROOT/build/pyinstaller" \
-  "$ROOT/desktop/ListThisStudio.spec"
+  "$ROOT/desktop/Anteroom.spec"
 
 if [[ ! -d "$APP" ]]; then
   echo "PyInstaller did not create $APP" >&2
@@ -86,7 +92,7 @@ fi
 # macOS only draws the current (larger) traffic lights for binaries linked
 # against the macOS 26 SDK. PyInstaller's bootloader reports a much older SDK;
 # stamp the executable before deep-signing so the shipped app matches T3 Code.
-EXE="$APP/Contents/MacOS/List This Studio"
+EXE="$APP/Contents/MacOS/Anteroom"
 if command -v vtool >/dev/null 2>&1 && [[ -f "$EXE" ]]; then
   MINOS="$(vtool -show-build "$EXE" 2>/dev/null | awk '/minos/{print $2; exit}')"
   MINOS="${MINOS:-13.0}"
@@ -100,7 +106,7 @@ fi
 # the whole bundle with one identity. Drop *.dist-info / *.egg-info first —
 # codesign --deep treats those metadata dirs as bundles and fails.
 if ! command -v codesign >/dev/null 2>&1; then
-  echo "codesign is required to package List This Studio.app" >&2
+  echo "codesign is required to package Anteroom.app" >&2
   exit 1
 fi
 "$PYTHON" - "$APP" <<'PY'
@@ -148,15 +154,24 @@ else
 fi
 
 PAYLOAD="$RELEASE/payload"
-rm -rf "$PAYLOAD" "$ZIP"
-mkdir -p "$PAYLOAD"
-ditto "$APP" "$PAYLOAD/List This Studio.app"
+LEGACY_PAYLOAD="$RELEASE/legacy-payload"
+rm -rf "$PAYLOAD" "$LEGACY_PAYLOAD" "$ZIP" "$LEGACY_ZIP"
+mkdir -p "$PAYLOAD" "$LEGACY_PAYLOAD"
+ditto "$APP" "$PAYLOAD/Anteroom.app"
 cp "$ROOT/desktop/HowToOpen.txt" "$PAYLOAD/How to Open.txt"
 (
   cd "$PAYLOAD"
   ditto -c -k . "$ZIP"
 )
-"$PYTHON" - "$ZIP" <<'PY'
+# The bundle's directory name is not part of its code signature, so the
+# renamed copy is the same signed app.
+ditto "$APP" "$LEGACY_PAYLOAD/$LEGACY_APP_NAME"
+(
+  cd "$LEGACY_PAYLOAD"
+  ditto -c -k . "$LEGACY_ZIP"
+)
+for archive in "$ZIP" "$LEGACY_ZIP"; do
+"$PYTHON" - "$archive" <<'PY'
 import sys
 import tempfile
 from pathlib import Path
@@ -174,26 +189,35 @@ except PackagedUpdateError as exc:
     raise SystemExit(f"Update zip has unsafe symbolic links: {exc}") from exc
 print("Update zip symlinks are safe in-bundle relative links")
 PY
+done
 cp "$ROOT/desktop/build_info.json" "$RELEASE/build_info.json"
-"$PYTHON" - "$ZIP" "$RELEASE/build_info.json" <<'PY'
+"$PYTHON" - "$RELEASE/build_info.json" "$ZIP" "$LEGACY_ZIP" <<'PY'
 import hashlib
 import json
 import sys
 from pathlib import Path
 
-archive = Path(sys.argv[1])
-info_path = Path(sys.argv[2])
-digest = hashlib.sha256()
-with archive.open("rb") as handle:
-    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-        digest.update(chunk)
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+info_path = Path(sys.argv[1])
+current, legacy = Path(sys.argv[2]), Path(sys.argv[3])
 payload = json.loads(info_path.read_text(encoding="utf-8"))
-payload["zip_sha256"] = digest.hexdigest()
+payload["zips"] = {current.name: sha256(current), legacy.name: sha256(legacy)}
+# Builds from before the rename read only this key, and download the legacy zip.
+payload["zip_sha256"] = payload["zips"][legacy.name]
 info_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-print(f"Release build_info zip_sha256={payload['zip_sha256']}")
+for name, digest in payload["zips"].items():
+    print(f"Release build_info {name} sha256={digest}")
 PY
 echo "Built $APP"
 echo "Share $ZIP"
 echo "Publish with: $ROOT/scripts/publish-macos-release.sh"
-echo "Recipients: unzip, read How to Open.txt, move List This Studio.app to Applications."
+echo "Recipients: unzip, read How to Open.txt, move Anteroom.app to Applications."
 echo "They need macOS 13+, Google Chrome, and a ChatGPT account or Xiaomi MiMo API key. Python is included; the frontend is prebuilt."

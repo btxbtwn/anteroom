@@ -128,7 +128,7 @@ function browserSessionFor(msg) {
   if (running) {
     return {
       error: running.job_id === jobId
-        ? 'Studio is filling this draft. Wait for it to finish or cancel it.'
+        ? 'Anteroom is filling this draft. Wait for it to finish or cancel it.'
         : 'Another automation job is running',
     };
   }
@@ -331,7 +331,7 @@ async function runBrowserAction(session, payload) {
   const after = await browserDraftScope(session);
   if (!after.ok && after.url && session.itemId) {
     await chrome.tabs.update(session.tabId, { url: `https://web.vendoo.co/app/item/${session.itemId}` });
-    return { ok: false, error: 'That action left the draft, so Studio went back to it. Unsaved edits may be lost.' };
+    return { ok: false, error: 'That action left the draft, so Anteroom went back to it. Unsaved edits may be lost.' };
   }
   return result;
 }
@@ -355,7 +355,7 @@ async function runScopedBrowserAction(session, payload) {
     }
     const target = await browserContentCommand(tabId, { type: 'PICK_FIELD_AT', x_ratio: xRatio, y_ratio: yRatio });
     if (target.element?.danger) {
-      return { ok: false, error: `Refused to press "${target.element.text}". Studio never publishes or deletes listings.` };
+      return { ok: false, error: `Refused to press "${target.element.text}". Anteroom never publishes or deletes listings.` };
     }
     await browserClickAt(tabId, xRatio, yRatio);
     return { ok: true, clicked: target.element || null, field: target.field || null };

@@ -69,10 +69,10 @@ describe("AssistantPage", () => {
 
     const applied = render(answer({
       status: "applied",
-      items: [changes.items[0], { ...changes.items[1], skipped: "It is no longer in Studio." }],
+      items: [changes.items[0], { ...changes.items[1], skipped: "It is no longer in Anteroom." }],
     }));
     expect(applied).toContain("Applied to 1 listing, 1 skipped");
-    expect(applied).toContain("Not changed. It is no longer in Studio.");
+    expect(applied).toContain("Not changed. It is no longer in Anteroom.");
     expect(applied).not.toContain(">Apply</button>");
     expect(changesHeading({ ...changes, status: "dismissed" })).toBe("Dismissed. Nothing was changed.");
     expect(changeValue("title", "")).toBe("none");
@@ -80,7 +80,7 @@ describe("AssistantPage", () => {
 
   it("holds the welcome back while the conversation loads, and reports a failed load", () => {
     expect(render(undefined, { isLoading: true })).not.toContain("Ask about your business");
-    expect(render(undefined, { error: new Error("Studio is not running") })).toContain("Studio is not running");
+    expect(render(undefined, { error: new Error("Anteroom is not running") })).toContain("Anteroom is not running");
   });
 
   it("reads the listing an answer links to, and leaves other links alone", () => {

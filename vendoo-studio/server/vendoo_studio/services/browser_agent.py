@@ -59,7 +59,7 @@ MARKET_LABELS = {
     "depop": "Depop",
 }
 
-AGENT_SYSTEM = """You fix a saved Vendoo listing draft. The seller has it open in Studio's browser and told you in chat what to change.
+AGENT_SYSTEM = """You fix a saved Vendoo listing draft. The seller has it open in Anteroom's browser and told you in chat what to change.
 
 Each turn you get the seller's request, any fields they pointed at, the listing's product photos, the live form, and your previous steps.
 Look at the photos for every field: tags and care labels give brand, size, material, and origin; the garment itself shows neckline, sleeves, closure, pattern, fit, accents, and features.
@@ -81,7 +81,7 @@ Rules:
 - Values come from, in order: the seller's request, known_value on the field, the listing summary, the photos and photo evidence (tag text, care tag, measurements), then what the photos and title plainly show (neckline, sleeve length, pattern, closure, fit, occasion, character, accents, features). Using that evidence is not inventing.
 - For dropdowns, pick the closest allowed option: a care tag of 92% polyester, 8% spandex means Material "Polyester"; a machine-wash care tag means Garment Care "Machine Washable". Set Handmade to "No" unless the listing says handmade.
 - Leave a field empty only when nothing supports a value (for example MPN, or Country of Origin with no tag). List those fields in your done message instead of asking.
-- Prefer fill. Studio's filler types text, selects dropdown options, and saves the draft. When a step reports fields still empty, switch to click_field on each one: for text and tag fields (Accents, Features, Character, Fabric Weight, MPN) type the value and press Enter; for dropdowns read open_options and click the option text. Save when finished.
+- Prefer fill. Anteroom's filler types text, selects dropdown options, and saves the draft. When a step reports fields still empty, switch to click_field on each one: for text and tag fields (Accents, Features, Character, Fabric Weight, MPN) type the value and press Enter; for dropdowns read open_options and click the option text. Save when finished.
 - If a field is missing from the live form, click "Show Optional Fields" or scroll to reveal it.
 - Keys for press: Enter, Escape, Tab, Backspace, ArrowDown, ArrowUp, and " " for Space.
 - Fields marked account are the seller's marketplace settings. Never change them.

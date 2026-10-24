@@ -51,7 +51,7 @@ function MarketplacesSection() {
     <SettingsSection id="marketplaces" title="Marketplaces">
       <SettingsRow
         title="List to"
-        description="Every marketplace Vendoo lists to. The thread status popup and sidebar logos show only the ones you check; empty-field prompts and Send to Vendoo fill the checked ones Studio supports."
+        description="Every marketplace Vendoo lists to. The thread status popup and sidebar logos show only the ones you check; empty-field prompts and Send to Vendoo fill the checked ones Anteroom supports."
         control={
           <>
             <Button
@@ -113,7 +113,7 @@ function MarketplacesSection() {
             </div>
             {available.some((item) => !item.fillable) ? (
               <SettingsNote>
-                Studio doesn’t fill forms for “Crosslist only” marketplaces yet — Send skips them and you
+                Anteroom doesn’t fill forms for “Crosslist only” marketplaces yet — Send skips them and you
                 crosslist to them from Vendoo. Their live status still shows on the thread.
               </SettingsNote>
             ) : null}
@@ -290,7 +290,7 @@ function ListingFormulasSection() {
     <SettingsSection id="listing-formulas" title="Listing formulas">
       <SettingsRow
         title="Title and description"
-        description="Studio pins these formulas into every listing generation. Leave them as the defaults, or edit the placeholders for your shop. Clearing a field and saving restores the built-in formula."
+        description="Anteroom pins these formulas into every listing generation. Leave them as the defaults, or edit the placeholders for your shop. Clearing a field and saving restores the built-in formula."
       >
         {isPending ? (
           <LoadingNote>Loading formulas</LoadingNote>
@@ -360,7 +360,7 @@ export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string
       <SettingsSection id="duplicate-vendoo-links" title="Duplicate check">
         <SettingsRow
           title="Duplicate Vendoo links"
-          description="Find Studio listings that share the same Vendoo item and open each listing to review its link."
+          description="Find Anteroom listings that share the same Vendoo item and open each listing to review its link."
           control={<DuplicateVendooLinksButton onSelect={onOpenListing} />}
         />
       </SettingsSection>

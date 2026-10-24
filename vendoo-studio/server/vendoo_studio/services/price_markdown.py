@@ -28,7 +28,7 @@ from vendoo_studio.services.price_drop import (
 
 NO_PRICE = "Listing has no price to drop"
 NOT_LOWER = "New price must be lower than the current price"
-BUSY = "Studio is generating or sending this listing"
+BUSY = "Anteroom is generating or sending this listing"
 CHANGED = "This listing changed since you reviewed it"
 NOT_FOUND = "Conversation not found"
 
@@ -165,7 +165,7 @@ def batch_preview(conv_ids: list[str], db: Session) -> list[dict[str, Any]]:
         }
         rows.append(row)
         if conv is None:
-            row["skip_reason"] = "It is no longer in Studio"
+            row["skip_reason"] = "It is no longer in Anteroom"
             continue
         try:
             listing, revisions = current_listing(conv_id, db)

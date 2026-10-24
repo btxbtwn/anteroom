@@ -57,7 +57,7 @@ function BackupsSection() {
       <SettingsRow
         id="backup-status"
         title="Snapshots"
-        description="Studio copies the database when it starts, every six hours, and before any update or schema change. Each copy is checked before it is kept. Old copies are dropped once they fill the retention budget."
+        description="Anteroom copies the database when it starts, every six hours, and before any update or schema change. Each copy is checked before it is kept. Old copies are dropped once they fill the retention budget."
         status={
           isLoading ? (
             <span className="inline-flex items-center gap-1.5">
@@ -105,7 +105,7 @@ function BackupsSection() {
             size="sm"
             font="mono"
             aria-label="Backup folder"
-            placeholder="/Volumes/Backup/List This Studio"
+            placeholder="/Volumes/Backup/Anteroom"
             value={shownFolder}
             spellCheck={false}
             onChange={(event) => {
@@ -155,7 +155,7 @@ function DatabaseMaintenanceRow() {
     <SettingsRow
       id="database-maintenance"
       title="Database"
-      description="Listings and job history live here. Prune drops leftover job events; free space returns to the disk the next time you quit Studio."
+      description="Listings and job history live here. Prune drops leftover job events; free space returns to the disk the next time you quit Anteroom."
       status={error ? <span className="text-destructive-foreground">{status}</span> : status}
       control={
         <Button size="xs" variant="outline" onClick={() => prune.mutate()} disabled={prune.isPending || isLoading}>
@@ -178,7 +178,7 @@ function DatabaseMaintenanceRow() {
       {prune.data?.pruned && prune.data.pruned.deleted > 0 ? (
         <SettingsNote tone="success">
           Removed {prune.data.pruned.deleted} leftover event
-          {prune.data.pruned.deleted === 1 ? "" : "s"}. Quit Studio to reclaim the disk space.
+          {prune.data.pruned.deleted === 1 ? "" : "s"}. Quit Anteroom to reclaim the disk space.
         </SettingsNote>
       ) : null}
     </SettingsRow>

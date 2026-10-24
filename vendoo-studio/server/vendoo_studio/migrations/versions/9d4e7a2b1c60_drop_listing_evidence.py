@@ -16,4 +16,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("This migration is forward-only. Restore a pre-migration snapshot with the matching Studio version.")
+    raise RuntimeError("This migration is forward-only. Restore a pre-migration snapshot with the matching Anteroom version.")

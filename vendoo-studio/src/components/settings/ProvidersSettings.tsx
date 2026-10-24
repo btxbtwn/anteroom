@@ -747,7 +747,7 @@ export function ProvidersSettings() {
                   Signed in{claude?.email ? ` as ${claude.email}` : ""}
                   {claude?.plan ? ` · ${claude.plan.charAt(0).toUpperCase()}${claude.plan.slice(1)}` : ""}.{" "}
                   {roleSentence("claude")} Signing out of Claude Code (<SettingsCode>claude auth logout</SettingsCode> in
-                  Terminal) signs Studio out too; Sign in here brings it back.
+                  Terminal) signs Anteroom out too; Sign in here brings it back.
                 </>
               ) : (
                 "Uses your Claude Pro or Max subscription through Claude Code. Usage counts against your Claude plan, not an API key."

@@ -54,12 +54,12 @@ export function calibrationNote(
   const sales = calibration.sales === 1 ? "1 sale" : `${calibration.sales} sales`;
   if (calibration.factor == null) {
     const more = calibration.needed - calibration.sales;
-    return `${storeLabel}: ${sales} from bought boxes so far. Studio starts adjusting its estimates after ${more} more.`;
+    return `${storeLabel}: ${sales} from bought boxes so far. Anteroom starts adjusting its estimates after ${more} more.`;
   }
   const percent = Math.round(calibration.factor * 100);
-  if (percent > 100) return `${storeLabel}: your ${sales} beat Studio's past estimates. Current research still caps new price estimates.`;
-  if (percent === 100) return `${storeLabel}: your ${sales} match Studio's estimates.`;
-  return `${storeLabel}: your ${sales} sold for ${percent}% of what Studio estimated, so its ${storeLabel} prices are set to ${percent}%.`;
+  if (percent > 100) return `${storeLabel}: your ${sales} beat Anteroom's past estimates. Current research still caps new price estimates.`;
+  if (percent === 100) return `${storeLabel}: your ${sales} match Anteroom's estimates.`;
+  return `${storeLabel}: your ${sales} sold for ${percent}% of what Anteroom estimated, so its ${storeLabel} prices are set to ${percent}%.`;
 }
 
 /** One sentence on how a store's real shipping charges have set its estimates, or null. */

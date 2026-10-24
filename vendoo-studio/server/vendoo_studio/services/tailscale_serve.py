@@ -181,7 +181,7 @@ def enable() -> dict[str, Any]:
     if not updated.get("enabled"):
         raise TailscaleServeError(
             updated.get("error")
-            or "Tailscale reported success but Studio's Serve route was not present."
+            or "Tailscale reported success but Anteroom's Serve route was not present."
         )
     return updated
 
@@ -202,11 +202,11 @@ def disable() -> dict[str, Any]:
             return current
         if state == "conflict":
             raise TailscaleServeError(
-                f"Refusing to clear HTTPS port {HTTPS_PORT}: it is not Studio's Serve route."
+                f"Refusing to clear HTTPS port {HTTPS_PORT}: it is not Anteroom's Serve route."
             )
         if state == "funnel":
             raise TailscaleServeError(
-                "Funnel is enabled for this route. Disable Funnel in Tailscale before turning Studio Serve off."
+                "Funnel is enabled for this route. Disable Funnel in Tailscale before turning off Anteroom's Serve route."
             )
 
     completed = _run(["serve", f"--https={HTTPS_PORT}", "off"], check=False)

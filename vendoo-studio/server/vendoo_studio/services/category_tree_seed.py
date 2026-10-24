@@ -11,7 +11,7 @@ from vendoo_studio.services.category_tree import MARKETPLACES
 
 SEED_VERSION = 1
 SEED_NAME = "category-trees-seed.json.gz"
-PACKAGED_DB = Path.home() / "Library" / "Application Support" / "List This Studio" / "vendoo_studio.db"
+PACKAGED_DB = Path.home() / "Library" / "Application Support" / "Anteroom" / "vendoo_studio.db"
 
 _CREATE_TREES = """
 CREATE TABLE IF NOT EXISTS category_trees (

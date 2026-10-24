@@ -24,7 +24,7 @@ _TRAILING = ".,;:!?"
 _OPEN_URL = re.compile(r"(?:https?://|www\.)[^\s<>\"'`)\]|]*$", re.IGNORECASE)
 _OPEN_LINK = re.compile(r"\[[^\[\]\n]{0,300}(?:\](?:\([^)\n]{0,2000})?)?$")
 _SCHEMES = ("https://", "http://", "www.")
-REMOVED = "(link removed: Studio did not return that address)"
+REMOVED = "(link removed: Anteroom did not return that address)"
 
 
 def addresses(texts: Iterable[str]) -> set[str]:

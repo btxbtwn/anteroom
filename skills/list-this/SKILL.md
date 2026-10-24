@@ -18,7 +18,7 @@ Generate accurate, formula-compliant marketplace listings from product photos. E
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | photos | array | Yes* | Product images (minimum: front, tag/label, any flaws). If `path` is provided, load the images from there. |
-| measurements | string | No | User-provided measurements. The Studio passes the measurements for the seller's selected garment type (inches): tops as `- Measurements (top): Pit to pit: 22.5"; Length: 27"; Sleeve: 9"`, pants and shorts (both under pants) as `- Measurements (pants): Waist: 16"; Rise: 11"; Inseam: 30"; Leg opening: 8"`, skirts as `- Measurements (skirt): Waist: 14"; Hip: 19"; Length: 22"`. Use these exact values in the description; do not modify or estimate them. |
+| measurements | string | No | User-provided measurements. Anteroom passes the measurements for the seller's selected garment type (inches): tops as `- Measurements (top): Pit to pit: 22.5"; Length: 27"; Sleeve: 9"`, pants and shorts (both under pants) as `- Measurements (pants): Waist: 16"; Rise: 11"; Inseam: 30"; Leg opening: 8"`, skirts as `- Measurements (skirt): Waist: 14"; Hip: 19"; Length: 22"`. Use these exact values in the description; do not modify or estimate them. |
 | path | string | No | Local file or folder path for the product photos. If it is a folder, save `listing.json` for standard listings or `listing.md` for Etsy digital downloads there. If it is a file, save the output in that file's parent folder. |
 
 ## Input Requirements
@@ -235,7 +235,7 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 
 **Pitfall: Depop Show Optional Fields are also non-negotiable.** Fill Source, Age, Style (exactly 3), Occasion (exactly 3), and Parcel Size. Omit Size Grouping for Regular sizing (it does not apply). Fill Material only from tag evidence. Never leave applicable optional rows blank.
 
-**Does Not Apply stays in the listing, never on the form.** Keep writing it wherever the rules above call for it — Studio shows the row as answered so it is not chased again. Studio and the extension push a blank to the marketplace form instead of the phrase, because eBay renders "Does Not Apply" verbatim as an item specific.
+**Does Not Apply stays in the listing, never on the form.** Keep writing it wherever the rules above call for it — Anteroom shows the row as answered so it is not chased again. Anteroom and the extension push a blank to the marketplace form instead of the phrase, because eBay renders "Does Not Apply" verbatim as an item specific.
 
 **Pitfall: eBay Season has no "All Seasons" option.** Choose exactly one of Spring, Summer, Fall, or Winter from the garment (fabric, sleeve, type, title cues). For year-round items, put `"All Seasons"` under **Features** and still set Season to the primary wear season.
 
@@ -317,18 +317,18 @@ Ceiling       = median asking price of 3+ similar live listings; price at or
 Auto-accept   = Listing Price - $2
 Minimum       = Listing Price - $4
 ```
-Studio fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / decline below) and Minimum into the Poshmark Smart Sell floor. Under $5 there is no floor and offers wait for the seller.
+Anteroom fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / decline below) and Minimum into the Poshmark Smart Sell floor. Under $5 there is no floor and offers wait for the seller.
 
 ### Seller History During Generation
-- Use recent recorded sales from the seller's own inventory alongside current outside sold comps when Studio supplies seller history. Candidate matches share brand, full general category and condition when known; check item type, model, era, size and visible details before treating them as comparable. A category such as women's Tops can contain both tees and blouses.
+- Use recent recorded sales from the seller's own inventory alongside current outside sold comps when Anteroom supplies seller history. Candidate matches share brand, full general category and condition when known; check item type, model, era, size and visible details before treating them as comparable. A category such as women's Tops can contain both tees and blouses.
 - With at least five genuinely comparable recorded sales, use the seller's sold-price median to inform the market-comp baseline. The supplied medians summarize only the shown examples: use them only when those examples are comparable, never assume unseen matching records prove an exact-model price. Cross-check recent outside comps; do not blindly average conflicting cohorts or let old sales override current market evidence. With fewer than five, treat personal sales as examples only. Without three outside sold comps or five comparable personal sales, keep the conservative estimated baseline.
 - Apply the PRICING Formula to the chosen baseline, preserve the current live asking ceiling, and always keep a price explicitly set by the seller. Cost and fees describe profitability; they do not prove that a buyer will pay more.
 - Similar unsold inventory is a weak caution about demand and overpricing, not evidence of completed sales, a historical sell-through rate, or a reason to copy its asking prices.
 - Historical titles can supply relevant vocabulary only when supported by this item's photos and seller notes. Never copy another item's brand, size, material, flaws, measurements, manufacturing date, or vintage claim. A sale does not prove its wording caused the sale. Keep sales evidence, cost, profit, and pricing reasoning out of the buyer-facing description.
 
 ### Seller Corrections and Sale Snapshots
-- Studio supplies deliberate form edits captured before automatic normalization. Current-item corrections are seller evidence, including deliberate clears; honor them when consistent with the latest seller instructions and photos. Newer instructions and explicitly chosen prices take precedence. Related title/description edits are examples of editing choices only. Never transfer another item's facts, flaws, measurements or unsupported keywords, or infer a permanent preference from a single correction. Canonical and seller-customized formulas remain authoritative.
-- A sale snapshot labeled `vendoo_first_observed_sold` freezes the remote listing when Studio first observes the dated sale. That may be after the actual sale: its timestamp does not verify the exact text at sale or prove that wording caused a sale. Legacy `current_listing_not_verified_at_sale` text is weaker evidence. Neither justifies a claim about winning keywords or conversion.
+- Anteroom supplies deliberate form edits captured before automatic normalization. Current-item corrections are seller evidence, including deliberate clears; honor them when consistent with the latest seller instructions and photos. Newer instructions and explicitly chosen prices take precedence. Related title/description edits are examples of editing choices only. Never transfer another item's facts, flaws, measurements or unsupported keywords, or infer a permanent preference from a single correction. Canonical and seller-customized formulas remain authoritative.
+- A sale snapshot labeled `vendoo_first_observed_sold` freezes the remote listing when Anteroom first observes the dated sale. That may be after the actual sale: its timestamp does not verify the exact text at sale or prove that wording caused a sale. Legacy `current_listing_not_verified_at_sale` text is weaker evidence. Neither justifies a claim about winning keywords or conversion.
 - Keep all correction examples and sale snapshots out of buyer-facing listing copy.
 
 ## Rules (VIOLATION = INCORRECT LISTING)
@@ -344,7 +344,7 @@ Studio fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / decli
 9. **Reference vendoo_listing_template.md BEFORE generating** — structure/order priority
 10. **For Etsy digital downloads, use the Etsy Digital Download Description Formula** — do not use the physical-item description template
 11. **For Etsy digital downloads, return the Etsy Digital Download Output Format** — do not output JSON
-12. **Infer packaged shipping weight on every listing; do not ask the seller for it** — always populate both `weight_lb` and `weight_oz` with a reasonable packaged-shipping estimate supported by the item type, size, material, photos, seller notes, and research evidence (include typical packaging). Pounds may be `0`, but the combined weight must be greater than zero. Examples: light tee/tank ~6–10 oz; heavy graphic tee ~10–14 oz; hoodie/sweatshirt ~1 lb 0–8 oz; jeans/pants ~1–1.5 lb; light jacket ~1–2 lb. Prefer seller-provided scale weight when given. Studio supplies `package_dimensions_in` from the seller's saved package-dimensions default (initially `13x10x3`); do not ask the seller to confirm routine apparel shipping weight or package size. Infer unread tag size/material, department, when-made era, and other product facts from photos and initial seller notes when supportable; leave unsupported facts empty — never ask.
+12. **Infer packaged shipping weight on every listing; do not ask the seller for it** — always populate both `weight_lb` and `weight_oz` with a reasonable packaged-shipping estimate supported by the item type, size, material, photos, seller notes, and research evidence (include typical packaging). Pounds may be `0`, but the combined weight must be greater than zero. Examples: light tee/tank ~6–10 oz; heavy graphic tee ~10–14 oz; hoodie/sweatshirt ~1 lb 0–8 oz; jeans/pants ~1–1.5 lb; light jacket ~1–2 lb. Prefer seller-provided scale weight when given. Anteroom supplies `package_dimensions_in` from the seller's saved package-dimensions default (initially `13x10x3`); do not ask the seller to confirm routine apparel shipping weight or package size. Infer unread tag size/material, department, when-made era, and other product facts from photos and initial seller notes when supportable; leave unsupported facts empty — never ask.
 13. **Never ask clarifying questions** — generate from the photos and notes provided up front. The seller reviews the draft; do not pause to interview them.
 
 ## Pre-Output Verification (MANDATORY)
@@ -465,7 +465,7 @@ Before outputting ANY listing, verify:
 
 ## Notes
 
-- Use web search for comps. Studio uses the web search of the model that writes the listing (ChatGPT, Cursor or MiMo), and falls back to Brave Search when that search fails, times out, or returns fewer than three sold or active listings and a key is saved.
+- Use web search for comps. Anteroom uses the web search of the model that writes the listing (ChatGPT, Cursor or MiMo), and falls back to Brave Search when that search fails, times out, or returns fewer than three sold or active listings and a key is saved.
 - Standard listing JSON output must be copy/paste friendly with a `json` code block
 - Etsy digital download output must be copy-pasteable plain text or markdown, not JSON
 - When the user provides a local path, save the final standard listing as `listing.json` or the Etsy digital download listing as `listing.md` in the resolved photo folder

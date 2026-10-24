@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Vendoo Listing Studio",
+    title="Anteroom",
     version=app_version(),
     description="Local web app for generating and automating Vendoo marketplace listings",
     lifespan=lifespan,

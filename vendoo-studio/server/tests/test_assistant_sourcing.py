@@ -380,8 +380,8 @@ def test_a_box_url_studio_gave_stays_and_a_guessed_one_is_removed(db):
         "tees-60-pcs, or see www.made-up.example/box.",
     ),)
     assert text_of(run_answer(provider, shop)) == (
-        "Buy [Graphic Tees](https://raghouse.example/1). Skip (link removed: Studio did not return that address), "
-        "or see (link removed: Studio did not return that address)."
+        "Buy [Graphic Tees](https://raghouse.example/1). Skip (link removed: Anteroom did not return that address), "
+        "or see (link removed: Anteroom did not return that address)."
     )
 
 

@@ -49,7 +49,7 @@ GAP_FILL_SYSTEM = (
     "- When allowed options are listed, copy one of them exactly, character for "
     "character. Those are the only values the field accepts.\n"
     "- When an optional field truly does not apply, include it with value \"\" "
-    "and status \"not_applicable\". Studio remembers that decision and blanks the "
+    "and status \"not_applicable\". Anteroom remembers that decision and blanks the "
     "Vendoo field. Missing evidence or no suitable option is not non-applicability.\n"
     "- Fill every field that does pertain, on every marketplace.\n"
     "- Depop Parcel Size follows the packaged weight: under 4oz Extra extra "

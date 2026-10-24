@@ -150,14 +150,14 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
         change_instructions = (
             "The seller asked you to fill specific empty/leftover fields.\n"
             "1. Write one short sentence confirming which fields you filled.\n"
-            "2. Then include a fenced json code block with this exact shape so Studio saves them "
+            "2. Then include a fenced json code block with this exact shape so Anteroom saves them "
             "into the listing JSON automatically:\n"
             "```json\n"
             '{"missing_fields":[{"marketplace":"etsy","field":"Pattern","value":"Solid"}]}\n'
             "```\n"
             "Use the marketplace ids and field names from the seller request exactly. "
             "Do not use a JSON Patch array. Do not rewrite unrelated listing fields.\n"
-            "Studio saves the listing JSON and refreshes the Forms/Fields UI; "
+            "Anteroom saves the listing JSON and refreshes the Forms/Fields UI; "
             "filling the live Vendoo draft is a separate later step.\n\n"
         )
     else:
@@ -256,10 +256,10 @@ LISTING_INSTRUCTIONS = (
     "Always infer and include packaged shipping weight_lb and weight_oz from the item type, size, materials, "
     "photos, seller notes, and research evidence. Pounds may be 0, but both fields must be present and their "
     "combined weight must be greater than 0. Do not ask the seller for routine shipping weight. "
-    "Studio supplies package_dimensions_in from the seller's saved Settings default. "
+    "Anteroom supplies package_dimensions_in from the seller's saved Settings default. "
     "Never invent brand, size, material, age, or other product facts without photo or seller evidence. "
     "Prefer verbatim tag text from the photo analysis for brand, size, and material. "
-    "Studio applies generated values onto the bound Vendoo draft automatically when Chrome is connected. "
+    "Anteroom applies generated values onto the bound Vendoo draft automatically when Chrome is connected. "
     "Choose the pricing baseline from current sold comps and relevant seller history using the "
     "canonical PRICING Formula below. Follow its evidence thresholds and live asking ceiling. "
     "Never mention pricing in the description.\n"

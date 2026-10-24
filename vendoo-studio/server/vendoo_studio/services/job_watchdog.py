@@ -43,7 +43,7 @@ STALL_AFTER = timedelta(minutes=10)
 SWEEP_INTERVAL_SEC = 15.0
 
 STALLED_JOB = (
-    "Studio heard nothing from this job for 10 minutes and stopped it. "
+    "Anteroom heard nothing from this job for 10 minutes and stopped it. "
     "Check the draft in Vendoo, then try again."
 )
 

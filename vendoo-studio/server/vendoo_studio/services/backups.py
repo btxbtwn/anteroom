@@ -306,7 +306,7 @@ def storage_status(*, source: str | Path | None = None) -> dict:
     warning = blocker
     if warning is None and retained >= MAX_RETAINED_BYTES:
         warning = (
-            f"Snapshots are using {_readable_size(retained)}, the most Studio keeps. "
+            f"Snapshots are using {_readable_size(retained)}, the most Anteroom keeps. "
             "The oldest are removed as new ones are taken."
         )
     try:
