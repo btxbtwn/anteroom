@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import and_, func, select
@@ -64,13 +65,38 @@ def _sync_settlement(conv: Conversation, status: str, *, backfill: bool = False)
     return False
 
 
-def _facet(sku: Any, price: Any) -> dict[str, Any]:
+def _facet(sku: Any, price: Any, etsy: Any = None, year: Any = None) -> dict[str, Any]:
+    from vendoo_studio.models.etsy_fields import etsy_eligible
+
     text = str(sku or "").strip()
     try:
         amount = float(price) if price is not None and str(price) != "" else None
     except (TypeError, ValueError):
         amount = None
-    return {"sku": text or None, "price": amount}
+    # json_extract hands an object back as JSON text.
+    try:
+        specifics = json.loads(etsy) if isinstance(etsy, str) else etsy
+    except json.JSONDecodeError:
+        specifics = None
+    listing = {
+        "etsy_specifics": specifics if isinstance(specifics, dict) else {},
+        "ebay_specifics": {"yearManufactured": year} if year else {},
+    }
+    return {"sku": text or None, "price": amount, "etsy_eligible": etsy_eligible(listing)}
+
+
+# What ``_facet`` reads from a revision, extracted inside SQLite.
+def _facet_columns() -> tuple:
+    doc = ListingRevision.listing_json
+    return (
+        func.json_extract(doc, "$.sku"),
+        func.json_extract(doc, "$.price"),
+        func.json_extract(doc, "$.etsy_specifics"),
+        func.coalesce(
+            func.json_extract(doc, "$.ebay_specifics.yearManufactured"),
+            func.json_extract(doc, "$.ebay_specifics.year_manufactured"),
+        ),
+    )
 
 
 class ConversationRepo:
@@ -144,22 +170,18 @@ class ConversationRepo:
         return self.db.query(Conversation).order_by(Conversation.updated_at.desc()).all()
 
     def listing_facets(self) -> dict[str, dict[str, Any]]:
-        """SKU and price for every listing, read inside SQLite.
+        """SKU, price and Etsy eligibility for every listing, read inside SQLite.
 
         The sidebar filters and sorts on both. Loading whole revisions to reach
         two fields would mean hauling the entire inventory's listing JSON into
         Python on every sidebar read, so SQLite extracts them instead.
         """
         rows = (
-            self.db.query(
-                Listing.conversation_id,
-                func.json_extract(ListingRevision.listing_json, "$.sku"),
-                func.json_extract(ListingRevision.listing_json, "$.price"),
-            )
+            self.db.query(Listing.conversation_id, *_facet_columns())
             .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
             .all()
         )
-        return {conv_id: _facet(sku, price) for conv_id, sku, price in rows}
+        return {conv_id: _facet(*values) for conv_id, *values in rows}
 
     def current_revision_ids(self) -> dict[str, str]:
         """Each listing's current revision, for the sidebar in one query.
@@ -181,15 +203,12 @@ class ConversationRepo:
 
     def listing_facet(self, conv_id: str) -> dict[str, Any]:
         row = (
-            self.db.query(
-                func.json_extract(ListingRevision.listing_json, "$.sku"),
-                func.json_extract(ListingRevision.listing_json, "$.price"),
-            )
+            self.db.query(*_facet_columns())
             .join(Listing, ListingRevision.id == Listing.current_revision_id)
             .filter(Listing.conversation_id == conv_id)
             .first()
         )
-        return _facet(*row) if row else _facet(None, None)
+        return _facet(*row) if row else {"sku": None, "price": None, "etsy_eligible": True}
 
     def cover_photos(self) -> dict[str, tuple[str, str | None]]:
         """Map each conversation to its first photo's id and checksum, for sidebar thumbnails."""

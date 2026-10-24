@@ -21,6 +21,7 @@ export type Listing = {
   vendoo_form_updated_at?: string | null;
   vendoo_relist_pending?: string[];
   unsent_edits?: boolean;
+  etsy_eligible?: boolean;
 };
 
 export function readLegacySettledExpanded(): boolean | null {

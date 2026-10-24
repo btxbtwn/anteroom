@@ -6,9 +6,36 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.315 — 2026-10-24
+## 0.1.321 — 2026-10-24
 
 - The Chrome extension no longer runs on etsy.com. It never filled Etsy's own site, and Etsy listings still go through Vendoo's Etsy section exactly as before.
+
+## 0.1.320 — 2026-10-24
+
+- The Usage button at the bottom of the sidebar now opens its own Usage page, like Analytics and Marketing, instead of jumping into Settings. Click it again to go back. Usage is no longer a section in Settings.
+
+## 0.1.319 — 2026-10-24
+
+- Reading measurements from photos with Cursor no longer fails with "database is locked" when several listings are read at once.
+
+## 0.1.318 — 2026-10-24
+
+- The Inventory and Vendoo sync buttons are gone from the bottom of the sidebar. Sync from Vendoo now lives in Settings → Data (and still on Analytics).
+
+## 0.1.317 — 2026-10-24
+
+- Grailed categories like Menswear › Outerwear › Light Jackets are saved and reused again instead of being refused as "incompatible" in the logs.
+
+## 0.1.316 — 2026-10-24
+
+- A Usage button now sits along the bottom of the sidebar with the other buttons. It opens Settings → Usage, so you can check how much of your plan is left without digging through Settings.
+
+## 0.1.315 — 2026-10-24
+
+- Etsy only allows vintage (20+ years), handmade, craft supplies, and digital items, and it removes modern resale. Send to Vendoo now leaves the Etsy form empty for modern resale items, so Etsy never shows as ready for them in Vendoo, and the listing says "Not sent to Etsy: modern resale items aren't allowed there." Vintage, handmade, supply, and digital items go to Etsy as before.
+- Relist reminders no longer ask you to relist a modern resale item on Etsy.
+- Analytics has a new "Not allowed on Etsy" list: modern resale items still live on Etsy, each with a link to open it there, so you can delist them yourself before Etsy does. Anteroom never delists anything for you.
+- Vintage items now reach Etsy with their real decade. Before, Anteroom sent every item to Vendoo's Etsy form as made in 2020–2026, so a 1990s piece looked brand new to Etsy.
 
 ## 0.1.314 — 2026-10-24
 

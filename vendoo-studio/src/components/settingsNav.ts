@@ -1,6 +1,6 @@
 /** T3 Code-style settings categories for Vendoo Studio. */
 
-export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "usage" | "connections" | "data" | "logs" | "help";
+export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "connections" | "data" | "logs" | "help";
 
 export type SettingsNavItem = {
   id: SettingsSectionId;
@@ -22,7 +22,6 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
   { id: "listings", label: "Listings" },
   { id: "assistant", label: "Assistant" },
   { id: "providers", label: "Providers" },
-  { id: "usage", label: "Usage" },
   { id: "connections", label: "Connections" },
   { id: "data", label: "Data" },
   { id: "logs", label: "Logs" },
@@ -34,7 +33,6 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
   listings: "Listings",
   assistant: "Assistant",
   providers: "Providers",
-  usage: "Usage",
   connections: "Connections",
   data: "Data",
   logs: "Logs",
@@ -115,6 +113,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["tutorial", "onboarding", "first run", "chatgpt", "claude", "mimo", "cursor", "brave"],
   },
   {
+    id: "vendoo-sync",
+    title: "Sync from Vendoo",
+    section: "data",
+    targetId: "vendoo-sync",
+    searchTerms: ["vendoo", "sync", "import", "inventory", "resync", "pull", "download"],
+  },
+  {
     id: "backups",
     title: "Backups",
     section: "data",
@@ -148,13 +153,6 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "general",
     targetId: "about",
     searchTerms: ["changelog", "release notes", "history", "changes", "what changed"],
-  },
-  {
-    id: "usage-limits",
-    title: "Usage limits",
-    section: "usage",
-    targetId: "usage-limits",
-    searchTerms: ["usage", "rate limit", "quota", "percentage", "reset", "subscription", "plan"],
   },
   {
     id: "listing-ai",

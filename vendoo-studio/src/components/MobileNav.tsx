@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import {
   BoxIcon,
   ChartColumnIcon,
+  GaugeIcon,
   ListIcon,
   MegaphoneIcon,
   MenuIcon,
@@ -13,7 +14,7 @@ import { cn } from "../lib/utils";
 import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import type { WorkspaceView } from "./workspaceCrumbs";
 
-export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "queue" | "analytics" | "marketing" | "settings";
+export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "queue" | "analytics" | "marketing" | "usage" | "settings";
 
 /** Same order as the desktop sidebar footer: home and inventory, the day's work, insight, settings. */
 const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ className?: string }> }[] = [
@@ -23,6 +24,7 @@ const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ classNa
   { id: "queue", label: "Queue", icon: ListIcon },
   { id: "analytics", label: "Analytics", icon: ChartColumnIcon },
   { id: "marketing", label: "Marketing", icon: MegaphoneIcon },
+  { id: "usage", label: "Usage", icon: GaugeIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ];
 

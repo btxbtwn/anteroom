@@ -14,6 +14,7 @@ import { VendooSyncStatus } from "./VendooSyncStatus";
 import { OpenListingButton } from "./OpenListingButton";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
+import { ETSY_INELIGIBLE_NOTICE } from "./etsyEligibility";
 import {
   joinMarketplaces,
   marketplacesNeedingRelist,
@@ -295,13 +296,19 @@ export function ListingEditor({
   // marketplace listing only when the seller delists and relists it there, so
   // the app says which listings are still on the old copy instead of leaving a
   // regenerated item reading as though it were published.
+  // The listing's own answer is fresher than the sidebar row's after an edit.
+  const etsyEligible = data?.etsy_eligible ?? conversation?.etsy_eligible ?? true;
+  const relistSource = React.useMemo(
+    () => (conversation ? { ...conversation, etsy_eligible: etsyEligible } : conversation),
+    [conversation, etsyEligible],
+  );
   const relistMarketplaces = React.useMemo(
-    () => marketplacesNeedingRelist(conversation).map(marketplaceName),
-    [conversation],
+    () => marketplacesNeedingRelist(relistSource).map(marketplaceName),
+    [relistSource],
   );
   // Which half is left. After Delist Item the item is live nowhere, which the
   // banner has to say plainly — that is the state most easily walked away from.
-  const stage = React.useMemo(() => relistStage(conversation), [conversation]);
+  const stage = React.useMemo(() => relistStage(relistSource), [relistSource]);
   const relistDone = useMutation({
     mutationFn: () => api.vendooApi.relistDone(convId),
     onSuccess: () => {
@@ -404,6 +411,20 @@ export function ListingEditor({
           {data?.can_send && !generating && <Badge variant="success">Ready</Badge>}
         </div>
       </div>
+
+      {!etsyEligible && (marketplaceSettings?.selected ?? ["etsy"]).includes("etsy") && (
+        <Alert variant="info" role="status" className="mx-3 mt-2.5 shrink-0">
+          <AlertTitle>{ETSY_INELIGIBLE_NOTICE}</AlertTitle>
+          <AlertDescription>
+            <p>
+              Etsy only takes vintage (20+ years), handmade, craft-supply, or digital items.
+              {(conversation?.vendoo_marketplaces || []).includes("etsy") && !conversation?.vendoo_sold_dates?.etsy
+                ? " This item is still live on Etsy — delist it there yourself."
+                : ""}
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {relistMarketplaces.length > 0 && (
         <Alert
