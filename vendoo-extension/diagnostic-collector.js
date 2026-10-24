@@ -1,4 +1,4 @@
-// Shared diagnostic collector used by the popup and background worker.
+// Diagnostic collector used by the Studio background worker.
 
 const COLLECTOR_VERSION = '1.0.0';
 

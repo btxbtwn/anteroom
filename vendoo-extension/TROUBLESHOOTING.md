@@ -8,13 +8,11 @@
 3. Click "Load unpacked" and select the repo's `vendoo-extension/` folder
 4. **Important**: After making any code changes, click the refresh icon on the extension card
 
-### 2. Test on Vendoo
-1. Open Vendoo and navigate to create a new listing or edit an existing one
-2. Open the extension popup (click the extension icon)
-3. If you see "⚠ Content script not ready. Please REFRESH the Vendoo page" - **refresh the Vendoo page**
-4. After refresh, reopen the popup - you should see "✓ Connected to content script on VENDOO"
-5. The popup's **Diagnose Page** button downloads the active page structure and now attempts to capture live dropdown values from the current listing state
-6. If the popup closes while diagnostics run, that is expected - the background worker should still finish and trigger the JSON download
+### 2. Test from Anteroom
+1. Keep Anteroom running and use **Connect Chrome**.
+2. Refresh open Vendoo tabs after reloading the extension.
+3. Review a listing in Anteroom and approve a Send to Vendoo.
+4. Follow progress, fill results, and the browser preview in Anteroom. The extension connects automatically and has no separate interface.
 
 ### 3. Run Diagnostic Tool
 If fields aren't being filled correctly:
@@ -24,9 +22,6 @@ If fields aren't being filled correctly:
 3. Run these commands:
 
 ```javascript
-// Check if extension is loaded
-vendooDiagnostics.checkExtension()
-
 // Find all input fields on the page
 vendooDiagnostics.findAllInputs()
 
@@ -45,7 +40,7 @@ vendooDiagnostics.exportStructure()
 
 ## Common Issues
 
-### Issue: Extension says "Content script not ready"
+### Issue: Anteroom cannot reach the content script
 **Solution:**
 - Refresh the Vendoo page
 - Make sure you're on a Vendoo listing page (URL should contain `/item/` or `/listing/`)
@@ -53,8 +48,8 @@ vendooDiagnostics.exportStructure()
 
 ### Issue: Fields not being filled
 **Solution:**
-1. Open the debug console (extension popup > "Debug Console" section)
-2. Look for error messages in red
+1. Open the listing’s fill results in Anteroom
+2. Look for failed or missing fields
 3. Check Chrome DevTools console (F12) for more detailed `[VENDOO]` logs
 4. Run the diagnostic tool to see what selectors are available
 
@@ -131,19 +126,16 @@ if (dataAttrMatch) {
 2. Go to `chrome://extensions/`
 3. Click refresh icon on the Vendoo extension
 4. Hard refresh the Vendoo page (Ctrl+Shift+R or Cmd+Shift+R)
-5. Reopen extension popup and test
+5. Approve a draft Send from Anteroom and inspect its fill results
 
 ## Bundle Path Notes
 
 - Generate fresh listing payloads from the top-level `skills/list-this/SKILL.md`.
 - The top-level `skills/` directory is the source of truth for listing rules.
 
-## Debug Mode
+## Diagnostics
 
-The extension has a built-in debug status box that appears in the bottom-right corner when filling. Look for:
-- **Green text**: Normal operations
-- **Orange text**: Warnings (field not found, skipped)
-- **Red text**: Errors (fill failed)
+Use Anteroom’s fill results for per-field outcomes and the page’s DevTools console for detailed logs. The extension does not add a debug panel or highlight fields on the page.
 
 ## Getting Help
 

@@ -35,7 +35,6 @@ importScripts('background/vendoo-item.js');
 importScripts('background/vendoo-api.js');
 importScripts('background/job-steps.js');
 importScripts('background/import-listing.js');
-importScripts('background/popup-actions.js');
 importScripts('background/sold-listings.js');
 importScripts('browser-session.js');
 
@@ -1040,46 +1039,14 @@ function sleep(ms) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-// Existing popup message handlers (backward compatible)
+// Content-script connection wakeups and seller save notifications.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === 'GET_STUDIO_STATUS') {
-    if (!paired) {
-      ensureStudioConnection({ resetBackoff: true });
-    }
-    sendResponse({
-      connected: paired,
-      paired,
-      active_job_id: activeJob?.job_id || null,
-      active_job_step: activeJob?.current_step || null,
-    });
-    return true;
-  }
-
   if (msg.type === 'ENSURE_STUDIO_CONNECTION') {
     ensureStudioConnection({ resetBackoff: true }).then((result) => {
       sendResponse({ ok: true, paired, ...(result || {}) });
     }).catch((err) => {
       sendResponse({ ok: false, error: err.message });
     });
-    return true;
-  }
-
-  if (msg.type === 'PAIR_WITH_STUDIO') {
-    const token = msg.token;
-    if (token) {
-      setPairingToken(token).then(() => {
-        ensureStudioConnection({ resetBackoff: true });
-        sendResponse({ ok: true });
-      });
-    } else {
-      sendResponse({ ok: false, error: 'No token provided' });
-    }
-    return true;
-  }
-
-  if (msg.type === 'OPEN_STUDIO') {
-    chrome.tabs.create({ url: `${STUDIO_URL}/`, active: true });
-    sendResponse({ ok: true });
     return true;
   }
 
@@ -1106,69 +1073,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  if (msg.type === 'IMPORT_VENDOO_LISTING') {
-    importVendooListing(msg.tabId).then(sendResponse).catch((err) => {
-      sendResponse({ ok: false, error: err.message });
-    });
-    return true;
-  }
-
-  if (msg.type === 'IGNORE_PAIRING') {
-    fetchStudioPairingToken().then(() => {
-      if (socketIsOpen()) sendIdent();
-      else ensureStudioConnection({ resetBackoff: true });
-      sendResponse({ ok: true });
-    }).catch((err) => {
-      sendResponse({ ok: false, error: err.message });
-    });
-    return true;
-  }
-
-  // Existing manual fill handlers
-  if (msg.type === 'START_VENDOO' && msg.data) {
-    startVendooFill(msg.data, 'vendoo', msg.tabId);
-    sendResponse({ ok: true });
-    return true;
-  }
-  if (msg.type === 'START_EBAY' && msg.data) {
-    startVendooFill(msg.data, 'ebay', msg.tabId);
-    sendResponse({ ok: true });
-    return true;
-  }
-  if (msg.type === 'START_POSHMARK' && msg.data) {
-    startVendooFill(msg.data, 'poshmark', msg.tabId);
-    sendResponse({ ok: true });
-    return true;
-  }
-  if (msg.type === 'START_MERCARI' && msg.data) {
-    startVendooFill(msg.data, 'mercari', msg.tabId);
-    sendResponse({ ok: true });
-    return true;
-  }
-  if (msg.type === 'START_DEPOP' && msg.data) {
-    startVendooFill(msg.data, 'depop', msg.tabId);
-    sendResponse({ ok: true });
-    return true;
-  }
-  if (msg.type === 'START_ETSY' && msg.data) {
-    startVendooFill(msg.data, 'etsy', msg.tabId);
-    sendResponse({ ok: true });
-    return true;
-  }
-  if (msg.type === 'RUN_DIAGNOSTIC') {
-    runDiagnostic(msg.tabId)
-      .then(result => sendResponse({ ok: true, ...result }))
-      .catch(err => sendResponse({ ok: false, error: err.message }));
-    return true;
-  }
-
   if (msg.type === 'FILL_COMPLETE') {
-    chrome.runtime.sendMessage(msg).catch(() => {});
+    log(`${msg.platform}: fill complete`);
     sendResponse({ ok: true });
     return true;
   }
   if (msg.type === 'FILL_ERROR') {
-    chrome.runtime.sendMessage(msg).catch(() => {});
+    error(`${msg.platform}: ${msg.error}`);
     sendResponse({ ok: true });
     return true;
   }

@@ -49,7 +49,7 @@ upload stops creation, and the saved draft is still read back for verification.
 - Chrome extension controls Vendoo.
 - Draft saving only; never publish automatically.
 - Human approval required before sending to Vendoo.
-- Existing extension popup remains as a manual fallback.
+- The extension runs without its own interface. Anteroom owns review, approved Sends, progress, and diagnostics.
 - One automation job runs at a time. Additional Send to Vendoo approvals enqueue and start when the current job finishes, fails, or is cancelled.
 
 ### Security Decision
@@ -698,7 +698,6 @@ No section is complete when values were merely typed. Completion requires visibl
 
 Add:
 
-- Existing popup-message compatibility.
 - WebSocket lifecycle and pairing.
 - Active-job persistence and idempotency.
 - Vendoo tab creation or controlled reuse.
@@ -783,13 +782,13 @@ Structured result example:
 }
 ```
 
-### `vendoo-extension/popup.html` and `popup.js`
+### Extension interface
 
-- Add Anteroom connection status.
-- Add pairing/unpairing controls.
-- Show active job summary and last error.
-- Add Open Anteroom action.
-- Preserve manual JSON and platform controls as fallback behavior.
+- No toolbar popup, on-page debug panel, field highlighting, or manual JSON controls.
+- Pair automatically with the local Anteroom server and reconnect in the background.
+- Keep content-script connection wakeups and seller-save notifications.
+- Show connection status, active jobs, fill results, and errors in Anteroom.
+- Remove permissions used only by the deleted manual controls (`activeTab` and `downloads`).
 
 ### Documentation
 
@@ -977,8 +976,6 @@ Live Vendoo smoke test:
 - `vendoo-extension/manifest.json`: permissions and extension metadata.
 - `vendoo-extension/background.js`: Anteroom connection and job orchestration.
 - `vendoo-extension/content-scripts/vendoo.js`: photo upload and fill/save/audit operations.
-- `vendoo-extension/popup.html`: pairing and Anteroom status.
-- `vendoo-extension/popup.js`: pairing, status, and manual fallback.
 - `vendoo-extension/sample-listing.json`: shared validation and automation fixture.
 - `vendoo-extension/diagnostic-collector.js`: structured failure evidence where applicable.
 - `vendoo-extension/README.md`: setup and workflow documentation.

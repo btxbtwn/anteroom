@@ -47,7 +47,7 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 ## Repository Structure
 
 - **`skills/`** — Agent skills for listing generation (`list-this`), sourcing (`box-scout`) and reading measurements from ruler photos (`measure-this`).
-- **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. Content scripts under `content-scripts/` handle Vendoo, eBay, Poshmark, Mercari, Depop, and Etsy. `background.js` routes messages and loads the worker modules in `background/`; `popup.html`/`popup.js` provide the manual paste-and-fill UI. Node unit tests live in `tests/`.
+- **`vendoo-extension/`** — Chrome MV3 extension that consumes listing JSON and fills marketplace forms. Content scripts under `content-scripts/` handle Vendoo, eBay, Poshmark, Mercari, Depop, and Etsy. `background.js` routes messages and loads the worker modules in `background/`; the extension runs without its own interface, with review and approved Sends handled in Anteroom. Node unit tests live in `tests/`.
 - **`webhook-relay/`** — Cloudflare Worker that receives eBay and Etsy webhooks, verifies their signatures, keeps only IDs, and holds them in a per-device inbox until that Mac's Anteroom pulls them over an outbound connection. It also brokers eBay and Etsy sign-in and forwards Etsy API calls, so eBay's Cert ID and Etsy's shared secret never ship in the app. See its `README.md`.
 - **`vendoo-studio/`** — React + TypeScript frontend (`src/`) and FastAPI Python backend (`server/vendoo_studio/`). Frontend API clients live under `src/api/`. Backend routes live under `server/vendoo_studio/routes/`; domain behavior lives in `server/vendoo_studio/services/` and `server/vendoo_studio/repositories/`.
 
@@ -88,7 +88,7 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 
 - **Anteroom frontend:** `cd vendoo-studio && npm ci && npm run lint && npm test && npm run build`
 - **Anteroom backend:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
-- **Extension:** `node --check` on changed JS files, `node --test 'vendoo-extension/tests/*.test.js'`, and `python -m json.tool vendoo-extension/manifest.json`. Then reload the unpacked extension and test affected marketplace flows manually. Use platform-prefixed console logs (`[EBAY]`, `[POSHMARK]`, etc.), the **Diagnose Page** button for live form structure, and the debug overlay (bottom-left) for per-field fill results.
+- **Extension:** `node --check` on changed JS files, `node --test 'vendoo-extension/tests/*.test.js'`, and `python -m json.tool vendoo-extension/manifest.json`. Then reload the unpacked extension and test affected marketplace flows manually. Use platform-prefixed console logs (`[EBAY]`, `[POSHMARK]`, etc.), the DevTools diagnostic tool for live form structure, and Anteroom’s fill results for per-field outcomes.
 - **Skills:** Confirm `skills/list-this/SKILL.md` exists and `python -m json.tool skills/list-this/references/vendoo-dropdown-options.json` succeeds.
 - **Secrets:** Do not track `.env`, key files, photos, or private exports. CI scans the working tree with gitleaks.
 

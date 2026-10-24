@@ -123,12 +123,6 @@ test('imported listings keep unique image URLs only', () => {
   assert.deepEqual(urls, ['https://res.cloudinary.com/demo/a.jpg', 'https://cdn.example.com/b.webp?w=800']);
 });
 
-test('diagnostic filenames are slugged from the page URL', () => {
-  const name = call(worker, 'buildDiagnosticFilename', 'https://web.vendoo.co/app/item/new?marketplace=ebay');
-  assert.match(name, /^vendoo-diagnostic-web-vendoo-co-app-item-new-marketplace-ebay-\d{4}-\d{2}-\d{2}T[\d-]+Z\.json$/);
-  assert.match(call(worker, 'buildDiagnosticFilename', ''), /^vendoo-diagnostic-page-/);
-});
-
 test('Vendoo label names resolve to ids, creating missing labels', async () => {
   const vm = require('node:vm');
   const requests = [];

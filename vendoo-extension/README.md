@@ -1,38 +1,27 @@
-# Vendoo Multi-Platform Lister - Chrome Extension MVP
+# Anteroom Bridge
 
-Anteroom users: **Connect Chrome** in Anteroom opens everyday Chrome. Load this folder unpacked there once (`chrome://extensions/` → Developer mode → Load unpacked). Zip users load `~/Library/Application Support/Anteroom/vendoo-extension`. The steps below are the same load path, plus the manual paste-and-fill popup.
-
-Flow A: Paste JSON → Fill Vendoo first → Sequential fill for eBay/Poshmark/Mercari/Depop/Etsy (draft-only)
+The extension runs in the background and connects Chrome to Anteroom. Listing review, approved Sends, progress, and diagnostics live in Anteroom. The extension has no popup, on-page panel, or field highlighting.
 
 ## Installation
 
-1. Open Chrome and go to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in top right)
-3. Click "Load unpacked"
-4. Select the repo's `vendoo-extension/` folder
+1. Use **Connect Chrome** in Anteroom to open everyday Chrome.
+2. Open `chrome://extensions/` and enable **Developer mode**.
+3. Click **Load unpacked** and select the repo's `vendoo-extension/` folder. Zip users select `~/Library/Application Support/Anteroom/vendoo-extension`.
+4. Keep Anteroom running. The extension pairs automatically with Anteroom on `127.0.0.1:4318`.
 
 ## Usage
 
-1. Click the extension icon in your toolbar
-2. Paste your listing JSON (see format below)
-3. Click "Fill Vendoo First"
-4. Extension opens Vendoo's create listing page and fills the form
-5. Review and save as draft manually
-6. (Future) Continue to other platforms sequentially
+1. Create or import a listing in Anteroom and review it there.
+2. Approve **Send to Vendoo** in Anteroom to start a draft job.
+3. Follow the browser preview and fill results in Anteroom. Automation stops at a saved draft.
+
+Chrome still shows the extension in its extensions menu for browser-managed permissions and removal. Clicking its icon does not open an extension interface.
+
+After updating the extension, reload it in `chrome://extensions/` and refresh open marketplace tabs.
 
 ## Companion Skills
 
-This bundle keeps the canonical listing skills in the top-level `skills/` directory.
-
-- `skills/list-this/` is the source of truth for listing copy and the JSON payload consumed by this extension.
-
-Typical flow:
-
-1. Use `skills/list-this/SKILL.md` to generate a Vendoo-ready listing JSON from product photos
-2. Paste the JSON into the `vendoo-extension/` popup
-3. Use the extension to fill Vendoo and marketplace sections
-
-Reference material for the canonical skill lives in top-level `skills/list-this/references/vendoo_listing_template.md`.
+`skills/list-this/SKILL.md` is the canonical source for listing rules and the JSON payload shared by Anteroom and the extension. Its references live in top-level `skills/list-this/references/`.
 
 ## JSON Format
 
@@ -110,10 +99,9 @@ Every permission in `manifest.json` has a caller. Remove a permission when its l
 
 | Permission | Why |
 |---|---|
-| `activeTab` | **Diagnose Page** inspects whatever tab is active when you click it. |
-| `storage` | Keeps the Anteroom pairing token, the active job, the preview window id, and popup drafts. |
+| `alarms` | Wakes the worker to reconnect to Anteroom. |
+| `storage` | Keeps the Anteroom pairing token, the active job, the preview window id, and diagnostic observations. |
 | `scripting` | Injects fill helpers and the diagnostic collector into marketplace tabs. |
-| `downloads` | Saves the **Diagnose Page** JSON report. |
 | `tabs` | Finds, opens, and focuses the Vendoo tab for a fill job. |
 | `debugger` | Streams the live browser preview into Anteroom through the DevTools protocol. |
 | `system.display` | Places the automation window inside a real display work area. |
@@ -148,11 +136,10 @@ node --test 'vendoo-extension/tests/*.test.js'
 They load `background.js` and its `background/` modules into one Node VM with a stubbed `chrome` API.
 
 For live pages:
-1. Open browser DevTools console
-2. Watch for `[platform]` prefixed logs
-3. Check for fill errors
-4. Use the popup's **Diagnose Page** button to download the current form structure plus live dropdown options from the page's current state when available
-5. The diagnostic download now runs from the background worker, so the popup may close while the page is being inspected and the file should still download
+1. Reload the extension in `chrome://extensions/` and refresh the marketplace page.
+2. Approve a draft Send from Anteroom and inspect its browser preview and fill results.
+3. Open browser DevTools and filter by `[VENDOO]` or the marketplace prefix for detailed logs.
+4. For manual form inspection, paste `diagnostic-tool.js` into the page's DevTools console and use `vendooDiagnostics.exportStructure()`. Anteroom also receives diagnostic observations from the worker.
 
 ### Icons
 Add icon files:
@@ -164,8 +151,6 @@ Add icon files:
 
 - [ ] Update selectors with real values from each platform
 - [ ] Implement image upload handling
-- [ ] Add "Next Platform" button after Vendoo
 - [ ] Auto-detect when user saves draft
 - [ ] Category tree navigation
 - [ ] Better error recovery
-- [ ] Field mapping configuration UI
