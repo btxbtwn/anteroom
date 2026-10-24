@@ -22,7 +22,7 @@
     // "production" or "sandbox".
     "EBAY_ENV": "production",
     // The eBay RuName whose accept and decline URLs are /oauth/ebay/callback.
-    "EBAY_RUNAME": ""
+    "EBAY_RUNAME": "Cristian_Caniza-Cristian-Antero-dqronlnu"
   },
   "observability": { "enabled": true }
   // Secrets (set with `wrangler secret put`, never committed):

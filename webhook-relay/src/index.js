@@ -62,6 +62,15 @@ async function readBody(request) {
   return new TextEncoder().encode(text).length > MAX_BODY_BYTES ? null : text;
 }
 
+// Field names only, for logging an event Anteroom could not route.
+function shape(value, depth = 0) {
+  if (Array.isArray(value)) return value.length ? [shape(value[0], depth + 1)] : [];
+  if (value && typeof value === "object" && depth < 4) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, shape(v, depth + 1)]));
+  }
+  return typeof value;
+}
+
 function bearer(request) {
   const header = request.headers.get("authorization") ?? "";
   return header.startsWith("Bearer ") ? header.slice(7).trim() : "";
@@ -103,7 +112,8 @@ async function handleEbayNotification(request, env) {
   if (!(await verifyEbaySignature({ rawBody, signature: header.signature, publicKeyPem }))) {
     return json({ error: "signature mismatch" }, 412);
   }
-  const event = extractEbayEvent(JSON.parse(rawBody));
+  const payload = JSON.parse(rawBody);
+  const event = extractEbayEvent(payload);
   if (!event) return json({ error: "unrecognised notification" }, 400);
   const userId = event.ids.userId?.[0];
   const dir = directory(env);
@@ -111,7 +121,7 @@ async function handleEbayNotification(request, env) {
   if (event.eventType === "MARKETPLACE_ACCOUNT_DELETION" && userId) await dir.unlink("ebay", userId);
   if (!deviceId) {
     // Not one of our sellers (or eBay's portal test). Acknowledge so eBay stops retrying.
-    console.log("[EBAY]", event.eventType, "for an unlinked account");
+    console.log("[EBAY]", event.eventType, "for an unlinked account", userId ?? `(no user ID; fields: ${JSON.stringify(shape(payload?.notification?.data))})`);
     return new Response(null, { status: 204 });
   }
   await inbox(env, deviceId).add(event);
