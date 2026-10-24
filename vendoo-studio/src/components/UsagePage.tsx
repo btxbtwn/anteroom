@@ -1,5 +1,5 @@
 /**
- * Settings → Usage: how much of each provider's subscription is left, with
+ * The Usage page: how much of each provider's subscription is left, with
  * the reset times. Laid out like T3 Code's Usage page in its Limits view
  * (apps/web/src/components/usage/UsagePage.tsx and UsageLimitsPooled.tsx,
  * MIT, © 2026 T3 Tools Inc.).
@@ -7,13 +7,14 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
-import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
-import { Spinner } from "../ui/spinner";
-import { ProviderUsageSection } from "../usage/UsageLimits";
-import { useUsageLimits } from "../usage/useUsageLimits";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
+import { Spinner } from "./ui/spinner";
+import { ProviderUsageSection } from "./usage/UsageLimits";
+import { useUsageLimits } from "./usage/useUsageLimits";
+import { PageHeader, WorkspacePage } from "./WorkspacePage";
 
-export function UsageSettings() {
+export function UsagePage() {
   const usage = useUsageLimits();
   // The page advances `now` on refresh rather than ticking, as T3's does.
   const [now, setNow] = useState(() => Date.now());
@@ -22,14 +23,11 @@ export function UsageSettings() {
   const withoutLimits = providers.filter((provider) => provider.windows.length === 0);
 
   return (
-    <section id="usage-limits" tabIndex={-1} className="flex flex-col gap-8 outline-none">
-      <div className="flex min-h-7 items-center justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-sm font-medium text-foreground">Limits</h2>
-          <p className="text-xs text-muted-foreground">
-            How much of each subscription is left, and when it resets. Hover or tap a bar for details.
-          </p>
-        </div>
+    <WorkspacePage>
+      <PageHeader
+        title="Usage"
+        description="How much of each subscription is left, and when it resets. Hover or tap a bar for details."
+        actions={
         <Button
           size="icon-sm"
           variant="ghost"
@@ -42,7 +40,8 @@ export function UsageSettings() {
         >
           <RefreshCwIcon className={cn(usage.refreshing && "animate-spin")} />
         </Button>
-      </div>
+        }
+      />
       {usage.isLoading ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner className="size-4" /> Reading usage…
@@ -59,6 +58,6 @@ export function UsageSettings() {
           ))}
         </>
       )}
-    </section>
+    </WorkspacePage>
   );
 }

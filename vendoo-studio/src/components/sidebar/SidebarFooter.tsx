@@ -133,7 +133,7 @@ export function SidebarFooter({
     marketing: (
       <FooterButton label="Marketing" icon={MegaphoneIcon} active={activeView === "marketing"} onClick={onOpenMarketing} />
     ),
-    usage: <FooterButton label="Usage" icon={GaugeIcon} onClick={onOpenUsage} />,
+    usage: <FooterButton label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
     settings: <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: <UpdateButton />,
   };
