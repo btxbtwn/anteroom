@@ -291,20 +291,14 @@ html.desktop-app .editor-header {
   }
 }
 
-/* Inventory sync sits beside Settings / Check for Updates — same ink color. */
-.sidebar-vendoo-sync-btn.is-busy,
-.sidebar-vendoo-sync-btn:disabled.is-busy {
-  opacity: 1;
-  cursor: wait;
-}
-
-/* Whole-inventory Vendoo import, in the sidebar footer beside the updater. */
+/* Whole-inventory Vendoo sync progress, shown in place of its button (Analytics, Settings → Data). */
 .vendoo-import.is-running {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
+  flex: 0 1 22rem;
   min-width: 0;
+  max-width: 100%;
   padding: 0 4px;
 }
 
@@ -317,8 +311,8 @@ html.desktop-app .editor-header {
 }
 
 .vendoo-import-label {
-  font-size: var(--text-2xs);
-  color: var(--color-ink-muted);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -344,8 +338,8 @@ html.desktop-app .editor-header {
   flex-shrink: 0;
   border: none;
   background: transparent;
-  color: var(--color-ink-muted);
-  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
   cursor: pointer;
   padding: 2px 4px;
 }

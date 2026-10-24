@@ -12,7 +12,6 @@ import { ListingsSettings } from "./settings/ListingsSettings";
 import { LogsSettings } from "./settings/LogsSettings";
 import { ProvidersSettings } from "./settings/ProvidersSettings";
 import { SettingsPageContainer } from "./settings/SettingsLayout";
-import { UsageSettings } from "./settings/UsageSettings";
 
 function scrollToSettingsTarget(targetId: string) {
   const target = document.getElementById(targetId);
@@ -59,7 +58,6 @@ export function SettingsPage({
       {section === "listings" ? <ListingsSettings onOpenListing={onOpenListing} /> : null}
       {section === "assistant" ? <AssistantSettings /> : null}
       {section === "providers" ? <ProvidersSettings /> : null}
-      {section === "usage" ? <UsageSettings /> : null}
       {section === "connections" ? <ConnectionsSettings /> : null}
       {section === "data" ? <DataSettings /> : null}
       {section === "logs" ? <LogsSettings /> : null}

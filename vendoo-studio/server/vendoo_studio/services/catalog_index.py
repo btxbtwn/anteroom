@@ -154,7 +154,6 @@ def _extension_script_files() -> list[Path]:
         "content-scripts/poshmark.js",
         "content-scripts/mercari.js",
         "content-scripts/depop.js",
-        "content-scripts/etsy.js",
         "background.js",
     ):
         path = root / rel

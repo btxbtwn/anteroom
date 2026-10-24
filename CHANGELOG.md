@@ -6,9 +6,33 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.316 — 2026-10-24
+## 0.1.322 — 2026-10-24
 
 - New: sale alerts. In Settings → Connections → Sale alerts, connect your eBay account (Etsy once Etsy approves Anteroom's app) and Anteroom hears about a sale the moment it happens, even before Vendoo does. Your Mac shows a notification, and the listing shows which other marketplaces it's still on, with a button to open it in Vendoo and delist it there. Vendoo still does all the listing and delisting.
+
+## 0.1.321 — 2026-10-24
+
+- The Chrome extension no longer runs on etsy.com. It never filled Etsy's own site, and Etsy listings still go through Vendoo's Etsy section exactly as before.
+
+## 0.1.320 — 2026-10-24
+
+- The Usage button at the bottom of the sidebar now opens its own Usage page, like Analytics and Marketing, instead of jumping into Settings. Click it again to go back. Usage is no longer a section in Settings.
+
+## 0.1.319 — 2026-10-24
+
+- Reading measurements from photos with Cursor no longer fails with "database is locked" when several listings are read at once.
+
+## 0.1.318 — 2026-10-24
+
+- The Inventory and Vendoo sync buttons are gone from the bottom of the sidebar. Sync from Vendoo now lives in Settings → Data (and still on Analytics).
+
+## 0.1.317 — 2026-10-24
+
+- Grailed categories like Menswear › Outerwear › Light Jackets are saved and reused again instead of being refused as "incompatible" in the logs.
+
+## 0.1.316 — 2026-10-24
+
+- A Usage button now sits along the bottom of the sidebar with the other buttons. It opens Settings → Usage, so you can check how much of your plan is left without digging through Settings.
 
 ## 0.1.315 — 2026-10-24
 

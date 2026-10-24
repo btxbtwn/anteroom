@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.35",
+  "version": "0.2.36",
   "minimum_chrome_version": "116",
   "description": "Connect Anteroom to automate marketplace listing drafts",
   "permissions": [
@@ -22,7 +22,6 @@
     "https://poshmark.com/*",
     "https://www.mercari.com/*",
     "https://www.depop.com/*",
-    "https://www.etsy.com/*",
     "http://127.0.0.1:4318/*",
     "ws://127.0.0.1:4318/*",
     "https://us.vendoo.co/*",
@@ -87,14 +86,6 @@
       ],
       "js": [
         "content-scripts/depop.js"
-      ]
-    },
-    {
-      "matches": [
-        "https://www.etsy.com/*"
-      ],
-      "js": [
-        "content-scripts/etsy.js"
       ]
     }
   ],

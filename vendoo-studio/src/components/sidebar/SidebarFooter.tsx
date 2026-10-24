@@ -3,16 +3,15 @@ import {
   ArrowLeftIcon,
   BoxIcon,
   ChartColumnIcon,
+  GaugeIcon,
   ListIcon,
   MegaphoneIcon,
   MessageCircleIcon,
-  Rows3Icon,
   SettingsIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UpdateButton } from "../UpdateButton";
-import { VendooImportButton } from "../VendooImportButton";
 import type { WorkspaceView } from "../workspaceCrumbs";
 import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebarStyles";
 
@@ -24,19 +23,19 @@ const FOOTER_PADDING_PX = 8;
 const SIDEBAR_BORDER_PX = 1;
 
 /**
- * The footer buttons in seller-workflow order: home and inventory first, then
- * the day's work (Vendoo sync, sourcing, the send queue), then insight
- * (analytics, marketing), then settings and the updater last, the way T3 Code
- * ends its sidebar footer with settings.
+ * The footer buttons in seller-workflow order: home first, then the day's work
+ * (sourcing, the send queue), then insight (analytics, marketing, plan usage),
+ * then settings and the updater last, the way T3 Code ends its sidebar footer
+ * with settings. The listings above are the inventory; Vendoo sync lives in
+ * Settings → Data and on Analytics.
  */
 export const SIDEBAR_FOOTER_BUTTONS = [
   "assistant",
-  "inventory",
-  "sync",
   "sourcing",
   "queue",
   "analytics",
   "marketing",
+  "usage",
   "settings",
   "update",
 ] as const;
@@ -96,8 +95,8 @@ export function SidebarFooter({
   onOpenAnalytics,
   onOpenMarketing,
   onOpenAssistant,
-  onOpenInventory,
   onOpenSettings,
+  onOpenUsage,
 }: {
   settingsMode: boolean;
   activeView: WorkspaceView;
@@ -108,17 +107,13 @@ export function SidebarFooter({
   onOpenAnalytics: () => void;
   onOpenMarketing: () => void;
   onOpenAssistant: () => void;
-  onOpenInventory: () => void;
   onOpenSettings: () => void;
+  onOpenUsage: () => void;
 }) {
   const buttons: Record<FooterButtonId, ReactNode> = {
     assistant: (
       <FooterButton label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
     ),
-    inventory: (
-      <FooterButton label="Inventory" icon={Rows3Icon} active={activeView === "listings"} onClick={onOpenInventory} />
-    ),
-    sync: <VendooImportButton />,
     sourcing: <FooterButton label="Sourcing" icon={BoxIcon} active={activeView === "sourcing"} onClick={onOpenSourcing} />,
     queue: (
       <FooterButton
@@ -138,6 +133,7 @@ export function SidebarFooter({
     marketing: (
       <FooterButton label="Marketing" icon={MegaphoneIcon} active={activeView === "marketing"} onClick={onOpenMarketing} />
     ),
+    usage: <FooterButton label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
     settings: <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: <UpdateButton />,
   };

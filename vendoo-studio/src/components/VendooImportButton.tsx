@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { confirmDialog } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { Button } from "./ui/button";
 import type { VendooBulkImport } from "../api/types";
 
 const RUNNING_POLL_MS = 1500;
@@ -28,7 +28,7 @@ export function progressLabel(run: VendooBulkImport): string {
 }
 
 /** Sync the whole Vendoo inventory, photos included. */
-export function VendooImportButton({ variant = "sidebar" }: { variant?: "sidebar" | "analytics" }) {
+export function VendooImportButton({ variant }: { variant: "settings" | "analytics" }) {
   const queryClient = useQueryClient();
   const wasRunning = useRef(false);
 
@@ -109,7 +109,7 @@ export function VendooImportButton({ variant = "sidebar" }: { variant?: "sidebar
   if (running && run) {
     const pct = run.total ? Math.min(100, Math.round((run.processed / run.total) * 100)) : 0;
     return (
-      <div className={`vendoo-import is-running${variant === "analytics" ? " analytics-sync-progress" : ""}`} role="status" title={run.current_title || undefined}>
+      <div className="vendoo-import is-running" role="status" title={run.current_title || undefined}>
         <div className="vendoo-import-copy">
           <span className="vendoo-import-label">{progressLabel(run)}</span>
           <span className="vendoo-import-bar" aria-hidden="true">
@@ -137,32 +137,8 @@ export function VendooImportButton({ variant = "sidebar" }: { variant?: "sidebar
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            className={`sidebar-icon-btn sidebar-vendoo-sync-btn${start.isPending ? " is-busy" : ""}`}
-            aria-label="Sync Vendoo data"
-            aria-busy={start.isPending || undefined}
-            disabled={start.isPending}
-            onClick={onClick}
-          />
-        }
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path
-            d="M4 14.9A7 7 0 1115.71 8h1.79a4.5 4.5 0 012.5 8.242"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path d="M12 12v9" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
-          <path d="M8 17l4 4 4-4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </TooltipTrigger>
-      <TooltipPopup side="top">Sync Vendoo data</TooltipPopup>
-    </Tooltip>
+    <Button size="xs" variant="outline" aria-busy={start.isPending || undefined} disabled={start.isPending} onClick={onClick}>
+      {start.isPending ? "Starting sync…" : "Sync from Vendoo"}
+    </Button>
   );
 }

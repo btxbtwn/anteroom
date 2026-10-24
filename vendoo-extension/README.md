@@ -118,7 +118,7 @@ Every permission in `manifest.json` has a caller. Remove a permission when its l
 | `debugger` | Streams the live browser preview into Anteroom through the DevTools protocol. |
 | `system.display` | Places the automation window inside a real display work area. |
 
-Host permissions cover Vendoo, the five marketplaces, and Anteroom on `127.0.0.1:4318` only.
+Host permissions cover Vendoo, eBay, Poshmark, Mercari, Depop, and Anteroom on `127.0.0.1:4318` only. The extension never opens or fills etsy.com; Etsy listings are filled in Vendoo's Etsy section.
 
 ## Development
 
