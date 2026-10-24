@@ -17,7 +17,7 @@ export function DashboardPanel() {
   const valid = Boolean(start && end && start <= end);
   const finance = useQuery({ queryKey: ["ebay", "finances", { start, end }, 0], queryFn: () => api.ebay.read("finances", { start, end, offset: 0 }), enabled: valid, retry: false, staleTime: 30000 });
   const summary = summarizeDisplayedEarnings(valid ? finance.data?.rows || [] : []);
-  const coverage = finance.data ? `First ${finance.data.rows.length}${finance.data.total != null ? ` of ${finance.data.total}` : ""} ${finance.data.total === 1 ? "order" : "orders"} · totals cover these orders only` : "Totals appear when order earnings are available.";
+  const coverage = finance.data ? `First ${finance.data.rows.length}${finance.data.total != null ? ` of ${finance.data.total}` : ""} ${finance.data.total === 1 ? "order" : "orders"} · totals cover these orders only` : "Totals appear when order transactions are available.";
   return <>
     <div className="ebay-dashboard-toolbar">
       <div className="ebay-tab-intro"><p className="ebay-eyebrow">Performance</p><h2>Sales overview</h2><p>Follow your eBay earnings and listing activity.</p></div>
@@ -29,14 +29,14 @@ export function DashboardPanel() {
     {!valid ? <PageNote>Choose a valid start and end date to view this period.</PageNote> : null}
     <div>
       <dl className="ebay-metrics">
-        <div className="ebay-metric"><dt>Order earnings</dt><dd>{displayMoney(summary.earnings)}</dd><p>After eBay expenses and refunds</p></div>
+        <div className="ebay-metric"><dt>Net order proceeds</dt><dd>{displayMoney(summary.earnings)}</dd><p>Recorded credits minus order charges</p></div>
         <div className="ebay-metric"><dt>Item costs</dt><dd>{displayMoney(summary.costs)}</dd><p>Local costs for these orders</p></div>
         <div className="ebay-metric"><dt>Profit after item costs</dt><dd>{displayMoney(summary.profit)}</dd><p>Other business expenses excluded</p></div>
       </dl>
       <p className="text-xs text-muted-foreground mt-3">{coverage}</p>
     </div>
     <div className="ebay-dashboard-grid">
-      <PageSection className="ebay-data-panel" title="Order earnings and profit" description="Missing item costs stay unavailable. View each order’s earnings, fees, and local costs.">
+      <PageSection className="ebay-data-panel" title="Order proceeds and item costs" description="Orders created in the selected dates (UTC), with their latest recorded sales, fees, refunds, and eBay label charges. Missing costs stay unavailable; transfers and other business expenses are excluded.">
         {valid ? <RemoteList key={`finance-${start}-${end}`} section="finances" params={{ start, end }} /> : null}
       </PageSection>
       <PageSection className="ebay-data-panel" title="Payouts" description="Recent payouts reported by eBay.">

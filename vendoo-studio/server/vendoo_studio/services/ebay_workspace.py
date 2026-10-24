@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, NS, segment
+from vendoo_studio.services.ebay_finances import order_proceeds
 from vendoo_studio.services.inventory_analytics import load_rows
 from vendoo_studio.services.relay_sales import listing_id_from_url
 from vendoo_studio.services.vendoo_import import parse_notes
@@ -67,9 +68,11 @@ def page(body: dict, rows: list, offset: int, limit: int = 25) -> dict:
 
 
 def dates(start: date, end: date) -> tuple[str, str]:
-    if end < start or (end - start).days > 90 or end > datetime.now(UTC).date():
+    now = datetime.now(UTC)
+    if end < start or (end - start).days > 90 or end > now.date():
         raise EbayFailure("Choose a date range of up to 90 days ending today or earlier.", 422)
-    return f"{start.isoformat()}T00:00:00.000Z", f"{end.isoformat()}T23:59:59.999Z"
+    last = now.isoformat(timespec="milliseconds").replace("+00:00", "Z") if end == now.date() else f"{end.isoformat()}T23:59:59.999Z"
+    return f"{start.isoformat()}T00:00:00.000Z", last
 
 
 async def traffic(client: EbayClient, db: Session, start: date, end: date, offset: int) -> dict:
@@ -105,8 +108,8 @@ async def traffic(client: EbayClient, db: Session, start: date, end: date, offse
 
 async def finances(client: EbayClient, db: Session, start: date, end: date, offset: int) -> dict:
     first, last = dates(start, end)
-    body = await client.request("GET", "/sell/finances/v1/order_earnings", params={
-        "limit": 10, "offset": offset, "filter": f"orderCreationDate:[{first}..{last}]",
+    body = await client.request("GET", "/sell/fulfillment/v1/order", params={
+        "limit": 10, "offset": offset, "filter": f"creationdate:[{first}..{last}]",
     })
     local = {item.conversation_id: item for item in load_rows(db)}
     bindings = {}
@@ -118,22 +121,22 @@ async def finances(client: EbayClient, db: Session, start: date, end: date, offs
         elif identifier:
             bindings[identifier] = None  # Ambiguous local matches must not invent profit.
     rows = []
-    for earning in body.get("orders", []):
-        summary = earning.get("orderEarningsSummary", {})
-        net = amount(summary.get("orderEarnings"))
-        order = await client.request("GET", f"/sell/fulfillment/v1/order/{segment(earning['orderId'])}")
+    for order in body.get("orders", []):
+        net = await order_proceeds(client, order["orderId"])
         costs = []
         for item in order.get("lineItems", []):
             match = bindings.get(str(item.get("legacyItemId", "")))
-            costs.append(Decimal(str(match.cost)) * int(item["quantity"]) if match and match.cost is not None else None)
+            value = Decimal(str(match.cost)) if match and match.cost is not None else None
+            quantity = item.get("quantity")
+            costs.append(value * quantity if value is not None and value.is_finite() and value >= 0
+                         and isinstance(quantity, int) and not isinstance(quantity, bool) and quantity > 0 else None)
         cost = sum(costs, Decimal(0)) if costs and all(value is not None for value in costs) else None
-        expenses = summary.get("expenses", {})
-        rows.append(row(earning["orderId"], f"Order {earning['orderId']}", subtitle=earning.get("orderCreationDate"),
-                        money=summary.get("orderEarnings"), fields={
-                            "Gross": amount(summary.get("grossAmount")), "Refunds": amount(summary.get("refunds")),
-                            "Expenses": amount(expenses),
+        rows.append(row(order["orderId"], f"Order {order['orderId']}", subtitle=order.get("creationDate"),
+                        money={"currency": "USD", "value": str(net)} if net is not None else None, fields={
+                            "Payment": order.get("orderPaymentStatus"),
+                            "Proceeds": "Recorded order credits minus debits" if net is not None else "Transaction data is incomplete",
                             "Item cost": f"{cost:.2f}" if cost is not None else None,
-                            "Profit": f"{Decimal(net) - cost:.2f}" if net is not None and cost is not None else None,
+                            "Profit": f"{net - cost:.2f}" if net is not None and cost is not None else None,
                         }))
     return page(body, rows, offset, 10)
 

@@ -269,7 +269,8 @@ describe("eBay", () => {
     const start = await relay("/studio/oauth/ebay/start?features=messages,finances", authed(device.token, { method: "POST" }));
     const scope = new URL((await start.json()).authorizeUrl).searchParams.get("scope");
     expect(scope).toContain("commerce.message");
-    expect(scope).toContain("sell.finances.earnings.read");
+    expect(scope).toContain("/sell.finances");
+    expect(scope).not.toContain("sell.finances.earnings.read");
     expect(scope).not.toContain("sell.marketing");
     expect((await relay("/studio/oauth/ebay/start?features=made-up", authed(device.token, { method: "POST" }))).status).toBe(400);
     const research = (operation, params = {}) => relay("/studio/ebay/research", authed(device.token, { method: "POST", body: JSON.stringify({ operation, params }) }));

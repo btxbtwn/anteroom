@@ -67,10 +67,10 @@ class WorkspaceEbay(BaseHTTPRequestHandler):
         elif path == "/sell/analytics/v1/traffic_report":
             body = {"header": {"metrics": [{"key": "LISTING_VIEWS_TOTAL"}]}, "records": [
                 {"dimensionValues": [{"value": ITEM_ID}], "metricValues": [{"value": 30, "applicable": True}]}]}
-        elif path == "/sell/finances/v1/order_earnings":
-            body = {"total": 1, "orders": [{"orderId": "order-1", "orderEarningsSummary": {
-                "grossAmount": {"value": "50.00", "currency": "USD"}, "expenses": {"value": "10.00", "currency": "USD"},
-                "orderEarnings": {"value": "40.00", "currency": "USD"}, "refunds": {"value": "0.00", "currency": "USD"}}}]}
+        elif path == "/sell/finances/v1/transaction":
+            body = {"total": 1, "transactions": [{"transactionId": "sale-1", "transactionType": "SALE", "orderId": "order-1",
+                    "bookingEntry": "CREDIT", "amount": {"value": "40.00", "currency": "USD"},
+                    "totalFeeAmount": {"value": "10.00", "currency": "USD"}}]}
         elif path == "/sell/finances/v1/payout":
             body = {"total": 1, "payouts": [{"payoutId": "p1", "payoutStatus": "SUCCEEDED", "amount": {"value": "40.00", "currency": "USD"}}]}
         elif path == "/sell/marketing/v1/ad_campaign":
