@@ -159,3 +159,20 @@ export async function verifyEtsySignature({ id, timestamp, signatureHeader, rawB
     .map((entry) => (entry.includes(",") ? entry.slice(entry.indexOf(",") + 1) : entry))
     .some((candidate) => timingSafeEqual(candidate, expected));
 }
+
+function base64Url(bytes) {
+  return bytesToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function randomToken(bytes = 32) {
+  return base64Url(crypto.getRandomValues(new Uint8Array(bytes)));
+}
+
+export async function sha256Hex(value) {
+  return bytesToHex(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
+}
+
+// PKCE S256: base64url(SHA-256(verifier)).
+export async function pkceChallenge(verifier) {
+  return base64Url(await crypto.subtle.digest("SHA-256", encoder.encode(verifier)));
+}
