@@ -259,7 +259,7 @@ class ChatGPTCatalogFetchTest(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, *args):
                 return False
 
-            async def get(self, url, params=None, headers=None):
+            async def get(self, url, params=None, headers=None, timeout=None):
                 captured["url"] = url
                 captured["params"] = params
                 captured["headers"] = headers
@@ -501,3 +501,27 @@ class SettingsChatGPTRouteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChatGPTSharedConnectionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_calls_on_the_server_loop_share_one_client(self):
+        from vendoo_studio.providers import chatgpt_codex
+
+        chatgpt_codex.keep_connection_on_this_loop()
+        try:
+            async with chatgpt_codex._http_client() as first:
+                pass
+            async with chatgpt_codex._http_client() as second:
+                pass
+            self.assertIs(first, second)
+            self.assertFalse(first.is_closed)
+        finally:
+            await chatgpt_codex.close_connection()
+        self.assertTrue(first.is_closed)
+
+    async def test_calls_on_another_loop_get_their_own_client(self):
+        from vendoo_studio.providers import chatgpt_codex
+
+        async with chatgpt_codex._http_client() as client:
+            pass
+        self.assertTrue(client.is_closed)

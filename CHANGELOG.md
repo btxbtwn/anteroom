@@ -9,6 +9,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 ## 0.1.313 — 2026-10-24
 
 - Running several listings at once is much lighter on your Mac. Studio no longer re-reads its whole category catalog after every send or sync, opens faster after a restart, and stops re-shrinking the same photos when you regenerate.
+- With Claude or Cursor, Studio keeps their helper programs running between steps instead of starting a fresh one for every step, so many listings can generate together without bogging down your Mac. With ChatGPT, Studio keeps its connection open, so each listing finishes a little sooner.
 
 ## 0.1.312 — 2026-10-24
 

@@ -38,14 +38,48 @@ def _result(text: str, *, is_error: bool = False) -> ResultMessage:
     )
 
 
-def _fake_query(messages, captured: dict):
-    async def query(*, prompt, options):
-        captured["options"] = options
-        captured["turns"] = [turn async for turn in prompt]
-        for message in messages:
+class _FakeClient:
+    """Stands in for a connected ClaudeSDKClient: replays ``messages`` per query."""
+
+    def __init__(self, options, messages, captured: dict):
+        self.options = options
+        self.messages = messages
+        self.captured = captured
+        self.captured["options"] = options
+        self.turns: list = []
+        self.models: list = []
+        self.disconnected = False
+
+    async def query(self, prompt):
+        if isinstance(prompt, str):
+            self.turns.append(prompt)
+        else:
+            self.turns.extend([turn async for turn in prompt])
+        self.captured["turns"] = [turn for turn in self.turns if not isinstance(turn, str)]
+
+    async def receive_response(self):
+        if self.turns and self.turns[-1] == "/clear":
+            yield _result("")
+            return
+        for message in self.messages:
             yield message
 
-    return query
+    async def set_model(self, model):
+        self.models.append(model)
+
+    async def disconnect(self):
+        self.disconnected = True
+
+
+def _fake_query(messages, captured: dict):
+    """A fake ``claude_sessions._connect`` whose clients replay ``messages``."""
+
+    async def connect(options):
+        client = _FakeClient(options, messages, captured)
+        captured.setdefault("clients", []).append(client)
+        return client
+
+    return connect
 
 
 def _collect(provider_call) -> list[tuple[str, str]]:
@@ -56,8 +90,8 @@ def _collect(provider_call) -> list[tuple[str, str]]:
 
 
 class ToClaudeTurnTest(unittest.TestCase):
-    def test_folds_history_into_system_prompt_and_one_user_turn(self):
-        system, blocks = to_claude_turn(
+    def test_folds_history_and_system_messages_into_one_user_turn(self):
+        blocks = to_claude_turn(
             [
                 {"role": "system", "content": "Listing rules."},
                 {"role": "user", "content": [
@@ -67,16 +101,14 @@ class ToClaudeTurnTest(unittest.TestCase):
                 {"role": "assistant", "content": "A jacket."},
                 {"role": "user", "content": "Brand?"},
             ],
-            "Preamble.",
         )
-        self.assertEqual(system, "Preamble.\n\nListing rules.")
         self.assertEqual(
             blocks[0],
             {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}},
         )
         self.assertEqual(
             blocks[1]["text"],
-            "USER:\nWhat is this?\n\nASSISTANT:\nA jacket.\n\nUSER:\nBrand?",
+            "SYSTEM:\nListing rules.\n\nUSER:\nWhat is this?\n\nASSISTANT:\nA jacket.\n\nUSER:\nBrand?",
         )
 
 
@@ -89,7 +121,7 @@ class ClaudeProviderRunTest(unittest.TestCase):
     def test_chat_streams_text_with_no_tools_and_no_user_settings(self):
         captured: dict = {}
         with patch(
-            "claude_agent_sdk.query",
+            "vendoo_studio.providers.claude_sessions._connect",
             _fake_query([_text_delta("Lev"), _text_delta("i's"), _result("Levi's")], captured),
         ):
             chunks = _collect(ClaudeProvider().chat([{"role": "user", "content": "Brand?"}]))
@@ -103,7 +135,7 @@ class ClaudeProviderRunTest(unittest.TestCase):
     def test_web_search_returns_only_the_final_answer(self):
         captured: dict = {}
         with patch(
-            "claude_agent_sdk.query",
+            "vendoo_studio.providers.claude_sessions._connect",
             _fake_query([_text_delta("Let me search."), _result('{"comps": []}')], captured),
         ):
             result = asyncio.run(ClaudeProvider().web_search([{"role": "user", "content": "comps"}]))
@@ -112,7 +144,7 @@ class ClaudeProviderRunTest(unittest.TestCase):
 
     def test_signed_out_run_asks_to_sign_in_again(self):
         with patch(
-            "claude_agent_sdk.query",
+            "vendoo_studio.providers.claude_sessions._connect",
             _fake_query([_result("Not logged in · Please run /login", is_error=True)], {}),
         ):
             with self.assertRaisesRegex(RuntimeError, SIGNED_OUT):
@@ -269,7 +301,7 @@ class ClaudeModelSettingsTest(unittest.TestCase):
         provider = ClaudeProvider()
         self.assertEqual((provider.vision_model, provider.listing_model), ("haiku", "opus"))
         captured: dict = {}
-        with patch("claude_agent_sdk.query", _fake_query([_result("OK")], captured)):
+        with patch("vendoo_studio.providers.claude_sessions._connect", _fake_query([_result("OK")], captured)):
             _collect(provider.chat([{"role": "user", "content": "hi"}]))
         self.assertEqual(captured["options"].model, "opus")
         self.assertEqual(captured["options"].effort, "low")
