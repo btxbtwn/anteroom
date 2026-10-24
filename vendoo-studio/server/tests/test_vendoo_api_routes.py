@@ -755,6 +755,29 @@ class SaveRouteTest(_RouteTest):
         self.assertEqual(res.status_code, 200, res.text)
         self.assertEqual(res.json()["relist_needed"], ["depop"])
 
+    def test_etsy_is_not_asked_to_relist_for_an_item_etsy_does_not_allow(self):
+        """Modern resale: Studio left Etsy's form alone, so no Etsy relist is owed."""
+        conv = ConversationRepo(self.db).get(self.conv.id)
+        conv.notes = merge_notes(conv.notes, {"vendooItemId": "itm1", "vendooRelistPending": ["etsy"]})
+        self.db.commit()
+        item = {
+            "itemID": "itm1",
+            "generalDetails": {"title": "Old title"},
+            "listings": {"ebay": {"status": {"listed": True}}, "etsy": {"status": {"listed": True}}},
+        }
+        res = self.save(item)
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(res.json()["relist_needed"], ["ebay"])
+        notes = json.loads(ConversationRepo(self.db).get(self.conv.id).notes)
+        self.assertEqual(notes["vendooRelistPending"], ["ebay"])
+
+        # The same item made vintage is one Etsy allows, and owes the relist.
+        ListingRepo(self.db).save_revision(self.conv.id, {
+            **LISTING, "etsy_specifics": {"who_made": "someone_else", "when_made": "1990s (Vintage)"},
+        }, source="test")
+        res = self.save(item)
+        self.assertEqual(res.json()["relist_needed"], ["ebay", "etsy"])
+
     def test_remembers_the_marketplaces_across_the_delist(self):
         """Delist Item clears the live flags; the reminder must outlive them."""
         self.bind()

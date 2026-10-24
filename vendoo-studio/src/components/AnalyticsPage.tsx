@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 import { ANALYTICS_RANGES, formatChange, formatDays, formatMoney } from "./analyticsFormat";
 import { marketplaceName } from "./marketplaceNames";
 import { Stat, StatGrid } from "./AnalyticsStat";
+import { EtsyNotAllowed } from "./EtsyNotAllowed";
 import { VendooImportButton } from "./VendooImportButton";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -233,6 +234,8 @@ export function AnalyticsPage({ onOpenListing }: Props) {
               </Panel>
             )}
           </PageSection>
+
+          <EtsyNotAllowed onOpenListing={onOpenListing} />
 
           <PageSection
             aria-label="Oldest active listings"

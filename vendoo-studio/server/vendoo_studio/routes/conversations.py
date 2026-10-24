@@ -76,6 +76,9 @@ class ConversationSummary(BaseModel):
     # The marketplaces that write left on old copy. Kept rather than re-derived
     # so the reminder survives the delist, when the item is live nowhere.
     vendoo_relist_pending: list[str] = []
+    # False for modern resale: Etsy removes those, so Send leaves its form
+    # empty and no reminder asks for an Etsy relist.
+    etsy_eligible: bool = True
 
 
 class ConversationResponse(ConversationSummary):
@@ -593,6 +596,7 @@ def _extras(
         "price": (facet or {}).get("price"),
         "current_revision_id": revision_id,
         "unsent_edits": unsent_edits,
+        "etsy_eligible": (facet or {}).get("etsy_eligible", True),
     }
 
 
@@ -724,6 +728,7 @@ def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
         vendoo_marketplaces=[str(m) for m in marketplaces] if isinstance(marketplaces, list) else [],
         vendoo_listing_urls=_listing_urls(notes),
         unsent_edits=bool(row.get("unsent_edits")),
+        etsy_eligible=bool(row.get("etsy_eligible", True)),
         **_vendoo_dates(notes),
     )
 

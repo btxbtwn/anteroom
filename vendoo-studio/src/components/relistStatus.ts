@@ -24,6 +24,8 @@ export type RelistableListing = {
   vendoo_sold_dates?: Record<string, string>;
   vendoo_form_updated_at?: string | null;
   vendoo_relist_pending?: string[];
+  /** False for modern resale: Studio leaves Etsy's form alone, so no Etsy relist is owed. */
+  etsy_eligible?: boolean | null;
 };
 
 /**
@@ -48,7 +50,7 @@ function timeMs(value?: string | null): number {
  * down and not yet put back. A sold listing is left out: its copy is history,
  * not something to refresh. A marketplace with no listing date at all is left
  * *in* — an unprovable date is the case where a missed relist hurts, so it
- * warns rather than hides.
+ * warns rather than hides. Etsy is left out for an item Etsy does not allow.
  */
 export function marketplacesNeedingRelist(listing: RelistableListing | null | undefined): string[] {
   if (!listing) return [];
@@ -60,6 +62,8 @@ export function marketplacesNeedingRelist(listing: RelistableListing | null | un
   const live = listing.vendoo_marketplaces || [];
   const fallback = timeMs(listing.vendoo_listed_at);
   const candidates = new Set([...live, ...(listing.vendoo_relist_pending || [])]);
+  // Etsy removes modern resale; relisting it there would invite another strike.
+  if (listing.etsy_eligible === false) candidates.delete("etsy");
   return [...candidates]
     .filter((id) => {
       if (sold[id]) return false;

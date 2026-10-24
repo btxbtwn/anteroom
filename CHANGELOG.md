@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.315 — 2026-10-24
+
+- Etsy only allows vintage (20+ years), handmade, craft supplies, and digital items, and it removes modern resale. Send to Vendoo now leaves the Etsy form empty for modern resale items, so Etsy never shows as ready for them in Vendoo, and the listing says "Not sent to Etsy: modern resale items aren't allowed there." Vintage, handmade, supply, and digital items go to Etsy as before.
+- Relist reminders no longer ask you to relist a modern resale item on Etsy.
+- Analytics has a new "Not allowed on Etsy" list: modern resale items still live on Etsy, each with a link to open it there, so you can delist them yourself before Etsy does. Anteroom never delists anything for you.
+- Vintage items now reach Etsy with their real decade. Before, Anteroom sent every item to Vendoo's Etsy form as made in 2020–2026, so a 1990s piece looked brand new to Etsy.
+
 ## 0.1.314 — 2026-10-24
 
 - Running several listings at once is much lighter on your Mac. Anteroom no longer re-reads its whole category catalog after every send or sync, opens faster after a restart, and stops re-shrinking the same photos when you regenerate.

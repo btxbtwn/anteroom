@@ -44,6 +44,7 @@ class EtsyTagSanitizeTests(unittest.TestCase):
         item, _ = build_vendoo_item({
             "title": "Tee",
             "tags": ["#y2k", "pop/art", "women's tee", "graphic_tee!!!"],
+            "etsy_specifics": {"when_made": "1990s (Vintage)"},
         }, None)
         etsy = item["listings"]["etsy"]["marketplaceSpecifics"]
         self.assertEqual(

@@ -29,6 +29,18 @@ describe("marketplacesNeedingRelist", () => {
     })).toEqual(["poshmark"]);
   });
 
+  it("never asks for an Etsy relist of an item Etsy does not allow", () => {
+    const onEtsy: RelistableListing = {
+      ...live,
+      vendoo_marketplaces: ["ebay", "etsy"],
+      vendoo_listed_dates: { ebay: "2026-09-01T00:00:00Z", etsy: "2026-09-01T00:00:00Z" },
+      vendoo_relist_pending: ["etsy"],
+    };
+    expect(marketplacesNeedingRelist(onEtsy)).toEqual(["ebay", "etsy"]);
+    expect(marketplacesNeedingRelist({ ...onEtsy, etsy_eligible: false })).toEqual(["ebay"]);
+    expect(relistStage({ ...onEtsy, vendoo_marketplaces: ["etsy"], etsy_eligible: false })).toBe("none");
+  });
+
   it("stays quiet until Studio has written to Vendoo", () => {
     expect(needsRelist({ ...live, vendoo_form_updated_at: null })).toBe(false);
   });
