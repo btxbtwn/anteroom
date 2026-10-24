@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
+from vendoo_studio.models.etsy_fields import etsy_eligible
 from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
 from vendoo_studio.repositories.queries import ListingRepo, ConversationRepo
 from vendoo_studio.services import price_markdown
@@ -57,6 +58,8 @@ class ListingResponse(BaseModel):
     can_send: bool
     errors: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
+    # False for modern resale, which Send leaves off Etsy.
+    etsy_eligible: bool = True
 
 
 class ValidationResponse(BaseModel):
@@ -120,6 +123,7 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
         can_send=validation.can_send,
         errors=validation.errors,
         warnings=validation.warnings,
+        etsy_eligible=etsy_eligible(listing_data) if listing_data else True,
     )
 
 

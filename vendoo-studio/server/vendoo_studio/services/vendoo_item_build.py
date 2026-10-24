@@ -23,6 +23,7 @@ from copy import deepcopy
 from typing import Any
 
 from vendoo_studio.models.ebay_fields import EBAY_CONDITION_DESCRIPTION
+from vendoo_studio.models.etsy_fields import etsy_eligible
 from vendoo_studio.services.vendoo_categories import (
     _category,
     _resolved_category,
@@ -543,6 +544,16 @@ def _mark_saved(item: dict[str, Any], *, incomplete: bool = False) -> None:
         section["dateLastModified"] = stamp
 
 
+def marketplaces_left_empty(listing: dict[str, Any]) -> frozenset[str]:
+    """Marketplace forms Studio must not fill for this listing.
+
+    Etsy removes modern resale items, and a filled Etsy form shows as ready to
+    list in Vendoo. Left empty, Etsy cannot be picked for the item by mistake;
+    an Update leaves an existing Etsy form as it is (``apply_update_all``).
+    """
+    return frozenset() if etsy_eligible(listing) else frozenset({"etsy"})
+
+
 def build_vendoo_item(
     listing: dict[str, Any],
     schema: dict[str, Any] | None = None,
@@ -564,12 +575,16 @@ def build_vendoo_item(
     plain text because nothing covered it, every value a coded field had no
     option for, and every required field left empty — show those to the seller
     rather than assuming they landed.
+
+    Forms named by ``marketplaces_left_empty`` stay as Vendoo seeds them.
     """
     unresolved: list[dict[str, str]] = []
     by_marketplace = specifics or {}
     general = _general_details(listing, schema, images or [], unresolved)
+    left_out = marketplaces_left_empty(listing)
     listings = {
         mp: _listing_section(mp, listing, general, schema, unresolved, by_marketplace.get(mp))
+        if mp not in left_out else default_listing_section(mp)
         for mp in ALL_MARKETPLACES
     }
     item = {

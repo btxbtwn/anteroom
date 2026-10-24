@@ -74,7 +74,11 @@ LISTING = {
     "poshmark_specifics": {"categoryPath": ["Men", "Jeans", "Straight"], "originalPrice": 90},
     "mercari_specifics": {"categoryPath": ["Men", "Jeans"], "shippingLabel": "USPS Ground Advantage", "smartPricing": True},
     "depop_specifics": {"style": ["Streetwear"], "source": "Preloved"},
-    "etsy_specifics": {"who_made": "someone_else", "materials": ["denim"], "category_specifics": {"Pattern": "Solid"}},
+    # Vintage, so Etsy allows it and Send fills its form.
+    "etsy_specifics": {
+        "who_made": "someone_else", "when_made": "1990s (Vintage)",
+        "materials": ["denim"], "category_specifics": {"Pattern": "Solid"},
+    },
 }
 
 
@@ -281,7 +285,7 @@ class BuildItemTest(unittest.TestCase):
         etsy = listings["etsy"]
         self.assertEqual(etsy["marketplaceSpecifics"]["whoMade"], "someone_else")
         self.assertEqual(etsy["marketplaceSpecifics"]["whatIsIt"], "0")
-        self.assertEqual(etsy["marketplaceSpecifics"]["whenMade"], "2020_2026")
+        self.assertEqual(etsy["marketplaceSpecifics"]["whenMade"], "1990s")
         self.assertEqual(etsy["marketplaceSpecifics"]["materials"], ["denim"])
         self.assertEqual(etsy["categorySpecifics"], {})
         self.assertEqual(etsy["overrides"]["brand"], "Levi's")
@@ -378,7 +382,7 @@ class BuildItemTest(unittest.TestCase):
         item, _ = build_vendoo_item({
             "title": "Tee",
             "tags": tags,
-            "etsy_specifics": {"listing_state": "Draft Listing", "listingState": "draft"},
+            "etsy_specifics": {"listing_state": "Draft Listing", "listingState": "draft", "when_made": "1980s"},
         }, self.schema)
         etsy = item["listings"]["etsy"]["marketplaceSpecifics"]
         self.assertEqual(etsy["listingState"], "active")
@@ -392,13 +396,13 @@ class BuildItemTest(unittest.TestCase):
             "etsy_specifics": {
                 "who_made": "Another company or person",
                 "what_is": "A finished product",
-                "when_made": "2020 - 2026 (Recently)",
+                "when_made": "1990s (Vintage)",
             },
         }, self.schema)
         etsy = item["listings"]["etsy"]["marketplaceSpecifics"]
         self.assertEqual(etsy["whoMade"], "someone_else")
         self.assertEqual(etsy["whatIsIt"], "0")
-        self.assertEqual(etsy["whenMade"], "2020_2026")
+        self.assertEqual(etsy["whenMade"], "1990s")
         self.assertEqual(etsy["listingState"], "active")
         fixed = item["listings"]["ebay"]["marketplaceSpecifics"]["pricingFormatDetails"]["fixedPrice"]
         self.assertTrue(fixed["allowBestOffer"])
@@ -826,7 +830,10 @@ class BuildItemTest(unittest.TestCase):
     def test_string_category_path_in_specifics(self):
         item, _ = build_vendoo_item({
             "title": "Top",
-            "etsy_specifics": {"categoryPath": "Clothing > Women's Clothing > Tops & Tees > Blouses"},
+            "etsy_specifics": {
+                "categoryPath": "Clothing > Women's Clothing > Tops & Tees > Blouses",
+                "when_made": "1970s",
+            },
         })
         self.assertEqual(
             item["listings"]["etsy"]["overrides"]["categoryV2"]["displayPath"],

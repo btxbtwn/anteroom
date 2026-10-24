@@ -6,9 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.315 — 2026-10-24
+## 0.1.316 — 2026-10-24
 
 - New: sale alerts. In Settings → Connections → Sale alerts, connect your eBay account (Etsy once Etsy approves Anteroom's app) and Anteroom hears about a sale the moment it happens, even before Vendoo does. Your Mac shows a notification, and the listing shows which other marketplaces it's still on, with a button to open it in Vendoo and delist it there. Vendoo still does all the listing and delisting.
+
+## 0.1.315 — 2026-10-24
+
+- Etsy only allows vintage (20+ years), handmade, craft supplies, and digital items, and it removes modern resale. Send to Vendoo now leaves the Etsy form empty for modern resale items, so Etsy never shows as ready for them in Vendoo, and the listing says "Not sent to Etsy: modern resale items aren't allowed there." Vintage, handmade, supply, and digital items go to Etsy as before.
+- Relist reminders no longer ask you to relist a modern resale item on Etsy.
+- Analytics has a new "Not allowed on Etsy" list: modern resale items still live on Etsy, each with a link to open it there, so you can delist them yourself before Etsy does. Anteroom never delists anything for you.
+- Vintage items now reach Etsy with their real decade. Before, Anteroom sent every item to Vendoo's Etsy form as made in 2020–2026, so a 1990s piece looked brand new to Etsy.
 
 ## 0.1.314 — 2026-10-24
 

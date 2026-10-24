@@ -8,6 +8,7 @@ sent.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from copy import deepcopy
 from typing import Any
 
@@ -142,6 +143,8 @@ def apply_update_all(
     current: dict[str, Any],
     desired: dict[str, Any],
     schema: dict[str, Any] | None = None,
+    *,
+    leave: Collection[str] = (),
 ) -> dict[str, Any]:
     """Copy general-form values onto marketplace listings, like Vendoo's Update All.
 
@@ -150,17 +153,22 @@ def apply_update_all(
     those copies under ``listings.<mp>`` unless we write them too. Condition is
     remapped through the learned marketplace vocabulary (or cleared) so a
     regenerated listing does not leave the previous tier on eBay/Poshmark/….
+
+    Forms in ``leave`` get nothing written to them, not even Update All's
+    copies: their section is dropped from ``desired`` so no change is found.
     """
     general = desired.get(GENERAL_KEY) if isinstance(desired.get(GENERAL_KEY), dict) else {}
     listings_want = desired.get(LISTINGS_KEY)
     if not isinstance(listings_want, dict):
         listings_want = {}
         desired[LISTINGS_KEY] = listings_want
+    for marketplace in leave:
+        listings_want.pop(marketplace, None)
     listings_have = current.get(LISTINGS_KEY) if isinstance(current.get(LISTINGS_KEY), dict) else {}
     tags = _string_list(general.get("tags"))
     price = general.get("price")
     for marketplace, have_section in listings_have.items():
-        if not isinstance(have_section, dict):
+        if not isinstance(have_section, dict) or marketplace in leave:
             continue
         want_section = listings_want.get(marketplace)
         if not isinstance(want_section, dict):

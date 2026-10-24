@@ -40,13 +40,38 @@ class ListingFacetsTest(unittest.TestCase):
         conv = self.convs.create(title="Nike tee")
         self.listings.save_revision(conv.id, {"title": "Nike tee", "sku": "NIKE-TEE-M", "price": 24.5}, "test")
         facets = self.convs.listing_facets()
-        self.assertEqual(facets[conv.id], {"sku": "NIKE-TEE-M", "price": 24.5})
-        self.assertEqual(self.convs.listing_facet(conv.id), {"sku": "NIKE-TEE-M", "price": 24.5})
+        expected = {"sku": "NIKE-TEE-M", "price": 24.5, "etsy_eligible": False}
+        self.assertEqual(facets[conv.id], expected)
+        self.assertEqual(self.convs.listing_facet(conv.id), expected)
 
     def test_facets_are_empty_without_a_listing(self):
         conv = self.convs.create(title="Bare draft")
         self.assertNotIn(conv.id, self.convs.listing_facets())
-        self.assertEqual(self.convs.listing_facet(conv.id), {"sku": None, "price": None})
+        # Nothing known about the item: no reason to hide Etsy.
+        self.assertEqual(self.convs.listing_facet(conv.id), {"sku": None, "price": None, "etsy_eligible": True})
+
+    def test_facets_read_etsy_eligibility_from_the_listing(self):
+        modern = self.convs.create(title="Modern tee")
+        self.listings.save_revision(modern.id, {"title": "Tee", "etsy_specifics": {
+            "who_made": "Another company or person", "when_made": "2010 - 2019 (Recently)",
+        }}, "test")
+        vintage = self.convs.create(title="90s tee")
+        self.listings.save_revision(vintage.id, {"title": "Tee", "etsy_specifics": {
+            "who_made": "someone_else", "when_made": "1990s",
+        }}, "test")
+        dated_by_ebay = self.convs.create(title="80s tee")
+        self.listings.save_revision(dated_by_ebay.id, {
+            "title": "Tee",
+            "etsy_specifics": {"who_made": "Another company or person"},
+            "ebay_specifics": {"yearManufactured": "1985"},
+        }, "test")
+        facets = self.convs.listing_facets()
+        self.assertFalse(facets[modern.id]["etsy_eligible"])
+        self.assertTrue(facets[vintage.id]["etsy_eligible"])
+        self.assertTrue(facets[dated_by_ebay.id]["etsy_eligible"])
+        self.assertFalse(_conv_response(modern, _extras(None, facets[modern.id])).etsy_eligible)
+        self.assertTrue(_conv_response(vintage, _extras(None, facets[vintage.id])).etsy_eligible)
+        self.assertTrue(_conv_response(modern).etsy_eligible)
 
     def test_response_carries_labels_marketplaces_sku_and_price(self):
         conv = self.convs.create(title="Nike tee")

@@ -500,7 +500,7 @@ async def _write_claimed_draft(
     db, conv, conv_id, item_id, revisions, snapshot, provider, evidence, job, job_repo,
 ):
     from vendoo_studio.services.job_snapshot import save_prepared_revision
-    from vendoo_studio.services.vendoo_item_build import build_vendoo_item
+    from vendoo_studio.services.vendoo_item_build import build_vendoo_item, marketplaces_left_empty
     from vendoo_studio.services.vendoo_item_shape import LISTINGS_KEY
     from vendoo_studio.services.vendoo_item_update import (
         apply_update_all,
@@ -549,7 +549,7 @@ async def _write_claimed_draft(
             item_id=item_id,
             specifics=specifics,
         )
-        apply_update_all(current, desired, schema=schema)
+        apply_update_all(current, desired, schema=schema, leave=marketplaces_left_empty(snapshot))
         updates = changed_fields(current, desired)
         # The general form is saved on its own first, the way Vendoo's own save
         # runs it: anything that save copies down onto the marketplace forms
@@ -612,7 +612,10 @@ async def _write_claimed_draft(
         # Stamped from the write, not from Vendoo's own dateLastModified: the
         # badge clears when a marketplace's listing date passes this stamp,
         # which only a delist-and-relist in Vendoo can do.
-        relist_needed = vendoo_relistable_marketplaces(current)
+        # A form Studio left alone (Etsy, for an item Etsy does not allow)
+        # carries no edit to relist.
+        left_out = marketplaces_left_empty(snapshot)
+        relist_needed = [mp for mp in vendoo_relistable_marketplaces(current) if mp not in left_out]
         # Remembered, not re-derived, because the seller's next step deletes the
         # evidence: once Delist Item runs in Vendoo the item is live nowhere, and
         # a badge that reads the live listings alone would vanish in the middle
@@ -621,7 +624,7 @@ async def _write_claimed_draft(
         pending = pending if isinstance(pending, list) else []
         conv.notes = merge_notes(conv.notes, {
             "vendooFormUpdatedAt": datetime.now(UTC).isoformat(),
-            "vendooRelistPending": sorted({*map(str, pending), *relist_needed}),
+            "vendooRelistPending": sorted({*map(str, pending), *relist_needed} - left_out),
         })
         db.commit()
     synced_revision_id = save_prepared_revision(

@@ -42,6 +42,8 @@ export interface ConversationSummary {
   vendoo_relist_pending?: string[];
   /** Edited here since Studio and Vendoo were last level: Update Vendoo is owed. */
   unsent_edits?: boolean;
+  /** False for modern resale: Etsy removes it, so Send leaves Etsy empty. */
+  etsy_eligible?: boolean;
 }
 
 export interface Conversation extends ConversationSummary {
@@ -124,6 +126,8 @@ export interface ListingResponse {
   can_send: boolean;
   errors: ValidationIssue[];
   warnings: ValidationIssue[];
+  /** False for modern resale: Etsy removes it, so Send leaves Etsy empty. */
+  etsy_eligible?: boolean;
 }
 
 export interface ValidationResult {
@@ -510,6 +514,22 @@ export type SuggestionKind =
 
 export interface SuggestionsResponse {
   suggestions: Suggestion[];
+}
+
+/** An item live on Etsy that Etsy does not allow. Studio never delists it. */
+export interface EtsyNotAllowedItem {
+  conversation_id: string;
+  title: string;
+  when_made: string;
+  who_made: string;
+  listed_at: string | null;
+  etsy_url: string | null;
+  /** The title dates the piece, so When Made may be what is wrong. */
+  title_says_vintage: boolean;
+}
+
+export interface EtsyNotAllowedResponse {
+  items: EtsyNotAllowedItem[];
 }
 
 export type AnalyticsRange = "wtd" | "mtd" | "ytd" | "7d" | "30d" | "90d" | "12m" | "all" | "custom";

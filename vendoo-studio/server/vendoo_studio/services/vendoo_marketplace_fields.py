@@ -136,23 +136,44 @@ def _etsy_what_code(raw: Any) -> str:
     return ETSY_WHAT_CODES.get(_norm(text), "0")
 
 
+# Etsy's when_made codes, which Vendoo's form stores, by Studio's dropdown label.
+_ETSY_WHEN_CODES = {
+    "Made To Order (Not Yet Made)": "made_to_order",
+    "2020 - 2026 (Recently)": "2020_2026",
+    "2010 - 2019 (Recently)": "2010_2019",
+    "2007 - 2009 (Recently)": "2007_2009",
+    "Before 2007 (Vintage)": "before_2007",
+    "2000 - 2006 (Vintage)": "2000_2006",
+    "1990s (Vintage)": "1990s",
+    "1980s (Vintage)": "1980s",
+    "1970s (Vintage)": "1970s",
+    "1960s (Vintage)": "1960s",
+    "1950s (Vintage)": "1950s",
+    "1940s (Vintage)": "1940s",
+    "1930s (Vintage)": "1930s",
+    "1920s (Vintage)": "1920s",
+    "1910s (Vintage)": "1910s",
+    "1900 - 1909 (Vintage)": "1900s",
+    "1800s (Vintage)": "1800s",
+    "1700s (Vintage)": "1700s",
+    "Before 1700 (Vintage)": "before_1700",
+}
+_ETSY_WHEN_CODE_VALUES = frozenset(_ETSY_WHEN_CODES.values())
+
+
 def _etsy_when_code(raw: Any) -> str:
+    """The form's code for a when-made label; a vintage decade stays that decade.
+
+    Anything unreadable falls to the recent bucket, as Vendoo's own form does.
+    """
+    from vendoo_studio.models.etsy_fields import etsy_when_options, resolve_etsy_when
+
     text = _clean(raw) or ""
     if not text:
         return "2020_2026"
-    compact = text.replace(" ", "").replace("-", "_")
-    if re.fullmatch(r"\d{4}_\d{4}", compact):
-        return compact
-    normalized = _norm(text)
-    if "2020" in normalized:
-        return "2020_2026"
-    if "2010" in normalized:
-        return "2010_2019"
-    if "2007" in normalized:
-        return "2007_2009"
-    if "2000" in normalized:
-        return "2000_2006"
-    return "2020_2026"
+    if text in _ETSY_WHEN_CODE_VALUES:
+        return text
+    return _ETSY_WHEN_CODES.get(resolve_etsy_when(text, etsy_when_options()), "2020_2026")
 
 
 def _ebay_brand_label(brand: str) -> str:

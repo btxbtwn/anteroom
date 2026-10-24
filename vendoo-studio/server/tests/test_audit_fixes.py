@@ -160,16 +160,19 @@ class ValidationCasesTest(unittest.TestCase):
                 title_errors = [err for err in result.errors if err["field"] == "title"]
                 self.assertEqual(not title_errors, valid, title_errors)
 
-    def test_modern_blouse_is_not_etsy_eligible(self):
+    def test_modern_blouse_is_left_off_etsy_without_blocking_send(self):
+        # Send leaves Etsy empty for modern resale, so Etsy's own fields
+        # cannot hold the send up; the seller is told why Etsy is skipped.
         result = validate_listing(dict(VALID_LISTING), 5, selected_marketplaces=["etsy"])
-        self.assertFalse(result.can_send)
-        self.assertTrue(any("not Etsy eligible" in item["message"] for item in result.warnings + result.errors))
+        self.assertTrue(result.can_send, result.errors)
+        self.assertFalse([e for e in result.errors if e["field"].startswith("etsy_specifics")])
+        self.assertTrue(any("Not sent to Etsy" in item["message"] for item in result.warnings))
 
-    def test_modern_blouse_fails_etsy_without_etsy_specifics(self):
+    def test_modern_blouse_without_etsy_specifics_is_left_off_etsy(self):
         listing = {key: value for key, value in VALID_LISTING.items() if key != "etsy_specifics"}
         result = validate_listing(listing, 5, selected_marketplaces=["etsy"])
-        self.assertFalse(result.can_send)
-        self.assertTrue(any("not Etsy eligible" in item["message"] for item in result.warnings + result.errors))
+        self.assertTrue(result.can_send, result.errors)
+        self.assertTrue(any("Not sent to Etsy" in item["message"] for item in result.warnings))
 
     def test_etsy_requires_who_what_and_when(self):
         listing = dict(VALID_LISTING)
@@ -217,7 +220,7 @@ class ValidationCasesTest(unittest.TestCase):
         }
         result = validate_listing(listing, 1, selected_marketplaces=["etsy"])
         self.assertTrue(result.can_send, result.errors)
-        self.assertFalse(any("not Etsy eligible" in err["message"] for err in result.errors))
+        self.assertFalse(any("Not sent to Etsy" in item["message"] for item in result.errors + result.warnings))
 
     def test_supported_marketplaces_can_send_without_etsy(self):
         result = validate_listing(
@@ -663,7 +666,7 @@ class ValidationCasesTest(unittest.TestCase):
         listing = dict(VALID_LISTING)
         listing["etsy_specifics"] = {
             **VALID_LISTING["etsy_specifics"],
-            "when_made": "2010 - 2019 (Recently)",
+            "when_made": "1990s (Vintage)",
             "clothingStyle": "Does Not Apply",
             "sleeveLength": "Short sleeve",
             "neckline": "Crew",
@@ -844,7 +847,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
         self.assertEqual(listing["etsy_specifics"]["when_made"], "2010 - 2019 (Recently)")
         self.assertFalse(any("not a current dropdown value" in error["message"] for error in result.errors), result.errors)
-        self.assertTrue(any("not Etsy eligible" in item["message"] for item in result.warnings))
+        self.assertTrue(any("Not sent to Etsy" in item["message"] for item in result.warnings))
 
     def test_unmapped_etsy_when_made_is_coerced_to_a_current_dropdown(self):
         listing = dict(VALID_LISTING)

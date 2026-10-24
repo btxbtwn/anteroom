@@ -42,6 +42,7 @@ import type {
   VendooItemResult,
   MarketplaceForm,
   SuggestionsResponse,
+  EtsyNotAllowedResponse,
   AnalyticsRange,
   InventoryAnalytics,
   MeasurementReadResult,
@@ -214,6 +215,9 @@ export const api = {
   },
   suggestions: {
     list: () => request<SuggestionsResponse>("/suggestions"),
+  },
+  etsy: {
+    notAllowed: () => request<EtsyNotAllowedResponse>("/etsy/not-allowed"),
   },
   analytics: {
     get: (range: AnalyticsRange, custom?: { start: string; end: string }) => {

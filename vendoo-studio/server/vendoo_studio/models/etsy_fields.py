@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Any
 
 from vendoo_studio.models.ebay_fields import (
@@ -408,6 +409,44 @@ def etsy_when_is_modern(when_made: str) -> bool:
     if not when:
         return True
     return any(token in when for token in MODERN_ETSY_WHEN)
+
+
+ETSY_INELIGIBLE_NOTICE = "Not sent to Etsy: modern resale items aren't allowed there"
+_ETSY_HANDMADE_WHO = frozenset({"I did", "A member of my shop"})
+_ETSY_COMMERCIAL_WHO = frozenset({"", "Another company or person"})
+
+
+def etsy_eligible(listing: dict[str, Any] | None) -> bool:
+    """Whether Etsy allows this item at all: handmade, vintage, a supply, or digital.
+
+    Etsy's Creativity Standards remove "unmodified commercially available
+    items": a modern piece made by another company, resold. That is read from
+    the listing's own who/what/when answers — a when-made that is missing or
+    recent, with no maker of the seller's own, is modern resale. Send, relist
+    reminders and the live-on-Etsy report all ask this one question.
+    """
+    payload = listing if isinstance(listing, dict) else {}
+    etsy = as_mapping(payload.get("etsy_specifics")) or {}
+    who = etsy_who_raw(etsy)
+    what = etsy_what_raw(etsy)
+    return _etsy_eligible(
+        who, what, etsy_when_raw(etsy, payload), etsy_listing_type(etsy),
+    )
+
+
+@lru_cache(maxsize=4096)
+def _etsy_eligible(who: str, what: str, when: str, listing_type: str) -> bool:
+    # Cached: the sidebar asks for every listing on each poll, and the answer
+    # depends only on these four strings.
+    dropdown_when = resolve_etsy_when(when, etsy_when_options()) if when else ""
+    if who in _ETSY_HANDMADE_WHO:
+        return True
+    if "digital" in listing_type.lower() or "digital" in what.lower():
+        return True
+    if etsy_when_is_vintage_or_handmade(dropdown_when, who, what):
+        return True
+    modern = not when or etsy_when_is_modern(dropdown_when)
+    return not (who in _ETSY_COMMERCIAL_WHO and modern)
 
 
 def _infer_etsy_sleeve_length(listing: dict | None, etsy: dict | None, ebay: dict | None = None) -> str:
