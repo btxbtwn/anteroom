@@ -31,14 +31,14 @@ from vendoo_studio.models.ebay_fields import (
 )
 from vendoo_studio.models.etsy_fields import (
     ETSY_CATEGORY_OPTIONAL_KEYS,
+    ETSY_INELIGIBLE_NOTICE,
     ETSY_OPTIONAL_DNA_KEYS,
     VALID_ETSY_WHAT,
     VALID_ETSY_WHO,
     ensure_etsy_category_optionals,
     etsy_listing_type,
     etsy_what_raw,
-    etsy_when_is_modern,
-    etsy_when_is_vintage_or_handmade,
+    etsy_eligible,
     etsy_when_options,
     etsy_when_raw,
     etsy_who_raw,
@@ -752,7 +752,16 @@ def validate_listing(
         add_issue(result, "etsy_specifics", "Etsy specifics must be an object")
         etsy = {}
     etsy = etsy or {}
-    if "etsy" in selected_set:
+    if "etsy" in selected_set and not etsy_eligible(payload):
+        # Send leaves the Etsy form empty for these, so nothing on it can
+        # block the send — the seller only needs to know why Etsy is skipped.
+        add_issue(
+            result,
+            "etsy_specifics.when_made",
+            f"{ETSY_INELIGIBLE_NOTICE}. Etsy only takes vintage (20+ years), handmade, craft-supply, or digital items.",
+            warning=True,
+        )
+    elif "etsy" in selected_set:
         who = etsy_who_raw(etsy)
         what = etsy_what_raw(etsy)
         if not who:
@@ -779,18 +788,7 @@ def validate_listing(
         materials = as_list(etsy.get("materials"))
         if len(materials) > 10:
             add_issue(result, "etsy_specifics.materials", "Etsy allows at most 10 materials")
-        handmade = who in {"I did", "A member of my shop"}
-        vintage_or_eligible = etsy_when_is_vintage_or_handmade(dropdown_when, who, what)
         digital_item = "digital" in etsy_listing_type(etsy).lower() or "digital" in what.lower()
-        commercial_maker = who in {"", "Another company or person"}
-        modern_resale = commercial_maker and (not when or etsy_when_is_modern(dropdown_when))
-        if modern_resale and not vintage_or_eligible and not handmade and not digital_item:
-            add_issue(
-                result,
-                "etsy_specifics.when_made",
-                "This modern mass-produced item is not Etsy eligible. Deselect Etsy or use a vintage, handmade, craft-supply, or digital listing.",
-                warning=True,
-            )
         if not digital_item:
             for key in ETSY_CATEGORY_OPTIONAL_KEYS:
                 if key == "pattern":

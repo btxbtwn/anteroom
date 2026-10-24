@@ -919,7 +919,16 @@ async def prepare_listing_fields_for_vendoo(
         listing = copy.deepcopy(resolved.listing)
     else:
         listing = applied
-    specifics, category_unresolved = resolved.specifics, list(resolved.unresolved)
+    from vendoo_studio.services.vendoo_item_build import marketplaces_left_empty
+
+    # A form Send leaves empty (Etsy, for modern resale) has nothing to fill
+    # and nothing to warn about.
+    left_out = marketplaces_left_empty(listing)
+    specifics = {mp: fields for mp, fields in resolved.specifics.items() if mp not in left_out}
+    category_unresolved = [
+        row for row in resolved.unresolved
+        if str(row.get("field") or "").removeprefix("category:") not in left_out
+    ]
     from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
 
     normalize_ebay_sizes(listing)
