@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.320 — 2026-10-24
+
+- The Usage button at the bottom of the sidebar now opens its own Usage page, like Analytics and Marketing, instead of jumping into Settings. Click it again to go back. Usage is no longer a section in Settings.
+
 ## 0.1.319 — 2026-10-24
 
 - Reading measurements from photos with Cursor no longer fails with "database is locked" when several listings are read at once.
