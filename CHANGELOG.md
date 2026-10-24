@@ -6,9 +6,20 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.310 — 2026-10-23
+## 0.1.313 — 2026-10-24
 
 - The app is now called Anteroom, with a new doorway icon. It updates itself as usual and moves to Anteroom.app in Applications. Your listings, photos and settings come along to the new Anteroom data folder, and the Chrome extension keeps working without being loaded again. If you pinned the app to the Dock, pin Anteroom again after the update.
+## 0.1.312 — 2026-10-24
+
+- In Inventory, your open listings now show as tabs in the top bar, so they no longer overlap the title and the listing starts right under the bar.
+
+## 0.1.311 — 2026-10-24
+
+- The top bar now blends into the window like T3 Code's: the listings sidebar, the main pane and the right panel each run to the top edge in their own colour, and the page title sits in the main pane.
+
+## 0.1.310 — 2026-10-23
+
+- Sizing checks no longer flag a listing just because its tag writes the size another way. A tag reading Large, LARGE (12/14), 2X, XXL or X-Large now matches L, 2XL or XL, and photos where no size could be read are no longer counted as a different size. The business assistant's sizing counts shrink to the listings that really disagree.
 
 ## 0.1.309 — 2026-10-22
 

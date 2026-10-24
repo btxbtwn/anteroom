@@ -652,7 +652,21 @@ export function App() {
                 }
               : null
         }
-      />
+      >
+        {activeView === "listings" ? (
+          <OpenListingTabs
+            tabs={listingTabs.tabs.map((tab) => ({
+              id: tab.id,
+              title: conversations?.find((listing) => listing.id === tab.id)?.title || "Untitled listing",
+            }))}
+            selectedId={selectedConvId}
+            onSelect={openListing}
+            onClose={(id) => dispatchListingTab({ type: "close", id })}
+            onCreate={createListing}
+            creating={createConv.isPending}
+          />
+        ) : null}
+      </WorkspaceTopbar>
       <div
         className={`app-content mobile-pane-${mobilePane}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
       >
@@ -761,19 +775,6 @@ export function App() {
               </div>
             ) : null}
           </header>
-          {activeView === "listings" ? (
-            <OpenListingTabs
-              tabs={listingTabs.tabs.map((tab) => ({
-                id: tab.id,
-                title: conversations?.find((listing) => listing.id === tab.id)?.title || "Untitled listing",
-              }))}
-              selectedId={selectedConvId}
-              onSelect={openListing}
-              onClose={(id) => dispatchListingTab({ type: "close", id })}
-              onCreate={createListing}
-              creating={createConv.isPending}
-            />
-          ) : null}
           <div className="workspace-body" id="listing-workspace-panel"
             role={activeView === "listings" && selectedConvId ? "tabpanel" : undefined}
             aria-labelledby={activeView === "listings" && selectedConvId ? `listing-tab-${selectedConvId}` : undefined}

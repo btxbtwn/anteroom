@@ -11,6 +11,18 @@
   position: relative;
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
+  --sidebar-column-width: clamp(var(--sidebar-min-width), var(--sidebar-width), 30vw);
+}
+
+/* Seamless titlebar, as T3 Code: the topbar floats transparent over the
+   columns, and each column runs to the window's top edge in its own colour. */
+@media (min-width: 901px) {
+  .sidebar,
+  .main-panel,
+  .detail-panel,
+  .thread-sidebar {
+    padding-top: var(--workspace-topbar-height);
+  }
 }
 
 .app-content {
@@ -28,7 +40,7 @@
 
 /* App sets --sidebar-width and --sidebar-min-width from the footer's button row. */
 .sidebar {
-  width: clamp(var(--sidebar-min-width), var(--sidebar-width), 30vw);
+  width: var(--sidebar-column-width);
   flex-shrink: 0;
   min-height: 0;
   background: var(--sidebar);
@@ -37,7 +49,6 @@
   flex-direction: column;
   overflow: hidden;
   border-right: 1px solid var(--color-ink-border);
-  padding: 0;
 }
 
 /* The assistant's chats: T3 Code's sidebar surface, docked on the right. */
@@ -51,7 +62,6 @@
   flex-direction: column;
   overflow: hidden;
   border-left: 1px solid var(--color-ink-border);
-  padding: 0;
 }
 
 /* Vertical splitter sitting on the border between two panels. It takes no
