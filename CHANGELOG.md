@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.324 — 2026-10-24
+
+- T3 Code is now credited in the README, and its copyright and license notice is included with the app.
+
 ## 0.1.323 — 2026-10-24
 
 - Keep your ChatGPT sign-in across app updates and restarts, and stay signed in when a temporary connection or service error interrupts session renewal.
