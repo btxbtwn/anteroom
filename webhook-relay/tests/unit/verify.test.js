@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { createHash, createHmac, createSign, generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 
-import { extractEbayEvent, extractEtsyEvent } from "../src/extract.js";
+import { extractEbayEvent, extractEtsyEvent } from "../../src/extract.js";
 import {
   ebayChallengeResponse,
   parseEbaySignatureHeader,
   verifyEbaySignature,
   verifyEtsySignature,
-} from "../src/verify.js";
+} from "../../src/verify.js";
 
 const orderNotice = {
   metadata: { topic: "ORDER_CONFIRMATION", schemaVersion: "1.0", deprecated: false },

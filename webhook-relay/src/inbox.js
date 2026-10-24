@@ -80,6 +80,18 @@ export class Inbox extends DurableObject {
     return this.pending();
   }
 
+  async clear() {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.close(1000, "device removed");
+      } catch {
+        // Already closed.
+      }
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+  }
+
   pending() {
     return this.sql.exec("SELECT COUNT(*) AS n FROM events").one().n;
   }
