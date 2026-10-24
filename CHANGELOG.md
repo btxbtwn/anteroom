@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.326 — 2026-10-24
+
+- See eBay order proceeds and matched item costs using the permissions already available to Anteroom. Grant all workspace permissions together, and load payment disputes correctly.
+
 ## 0.1.325 — 2026-10-24
 
 - Preview eBay offers in Settings → Connections, set a minimum price for each item, and choose to send now or enable automatic offers while Anteroom is running. Offers use live eBay prices, and uncertain sends pause for a Seller Hub check.

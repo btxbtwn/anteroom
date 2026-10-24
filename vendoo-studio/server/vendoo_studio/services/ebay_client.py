@@ -84,7 +84,7 @@ class EbayClient:
             assert_identity(self.seller)
         headers = {"Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
                    "Content-Language": "en-US"}
-        host = APIZ if path.startswith("/sell/finances/") else API
+        host = APIZ if path.startswith(("/sell/finances/", "/sell/fulfillment/v1/payment_dispute")) else API
         if xml is not None:
             headers = {"X-EBAY-API-IAF-TOKEN": token, "X-EBAY-API-CALL-NAME": call,
                        "X-EBAY-API-SITEID": "0", "X-EBAY-API-COMPATIBILITY-LEVEL": "1487",
