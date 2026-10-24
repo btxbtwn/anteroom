@@ -688,11 +688,6 @@ export function App() {
             onOpenAnalytics={openAnalytics}
             onOpenMarketing={openMarketing}
             onOpenAssistant={openAssistant}
-            onOpenInventory={() => {
-              goListings();
-              setMobilePane("workspace");
-              closeMobileSidebar();
-            }}
             onOpenSourcing={openSourcing}
             onOpenMobileNav={() => setMobileNavOpen(true)}
             onOpenQueue={() => togglePage("queue")}
