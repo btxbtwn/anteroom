@@ -16,6 +16,7 @@ function stubApi() {
 function loadWorker() {
   const alarms = [];
   const alarmListeners = [];
+  const messageListeners = [];
   const context = {
     console: { log() {}, error() {}, warn() {} },
     chrome: {
@@ -32,7 +33,7 @@ function loadWorker() {
       runtime: {
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
-        onMessage: { addListener() {} },
+        onMessage: { addListener(fn) { messageListeners.push(fn); } },
         getManifest: () => ({ version: '0.0.0' }),
         reload() {},
         sendMessage() { return Promise.resolve({}); },
@@ -49,7 +50,6 @@ function loadWorker() {
       scripting: stubApi(),
       debugger: stubApi(),
       system: { display: stubApi() },
-      downloads: stubApi(),
     },
     // Timers never fire: tests only call pure helpers, and the worker's
     // reconnect loop must not keep the test process alive.
@@ -78,6 +78,7 @@ function loadWorker() {
       vm.runInContext(fs.readFileSync(path.join(ROOT, file), 'utf8'), context, { filename: file });
     }
   };
+  context.__messageListeners = messageListeners;
   context.__alarms = alarms;
   context.__alarmListeners = alarmListeners;
   vm.createContext(context);

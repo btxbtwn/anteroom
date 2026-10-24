@@ -19,7 +19,6 @@
   window.__vendooStudioBridgeVersion = CONTENT_SCRIPT_VERSION;
 
   const DEBUG = true;
-  let statusBox;
   let runtimeListener = null;
   let sellerSaveWatchCleanup = null;
 
@@ -46,69 +45,16 @@
     ENABLE_PARALLEL: true // Fill non-dependent fields in parallel
   };
 
-  function createStatusBox() {
-      if (document.getElementById('vendoo-debug-box')) {
-          statusBox = document.getElementById('vendoo-debug-box');
-          return;
-      }
-      statusBox = document.createElement('div');
-      statusBox.id = 'vendoo-debug-box';
-      statusBox.style.cssText = `
-          position: fixed;
-          bottom: 10px;
-          left: 10px;
-          width: 400px;
-          height: 350px;
-          background: rgba(0,0,0,0.92);
-          color: #0f0;
-          font-family: monospace;
-          font-size: 11px;
-          padding: 10px;
-          z-index: 99999;
-          overflow-y: auto;
-          border-radius: 5px;
-          user-select: text;
-          pointer-events: auto;
-          white-space: pre-wrap;
-          border: 1px solid #333;
-      `;
-      document.body.appendChild(statusBox);
-  }
-
   function log(msg) {
       if (DEBUG) console.log(`[${PLATFORM}]`, msg);
-      if (statusBox) {
-          const line = document.createElement('div');
-          line.innerText = `> ${msg}`;
-          line.style.marginBottom = '2px';
-          statusBox.appendChild(line);
-          statusBox.scrollTop = statusBox.scrollHeight;
-      }
   }
 
   function error(msg) {
       console.error(`[${PLATFORM}]`, msg);
-      if (statusBox) {
-          const line = document.createElement('div');
-          line.style.color = '#f55';
-          line.style.fontWeight = 'bold';
-          line.innerText = `ERROR: ${msg}`;
-          line.style.marginBottom = '2px';
-          statusBox.appendChild(line);
-          statusBox.scrollTop = statusBox.scrollHeight;
-      }
   }
 
   function warn(msg) {
       console.warn(`[${PLATFORM}]`, msg);
-      if (statusBox) {
-          const line = document.createElement('div');
-          line.style.color = '#ff9800';
-          line.innerText = `WARN: ${msg}`;
-          line.style.marginBottom = '2px';
-          statusBox.appendChild(line);
-          statusBox.scrollTop = statusBox.scrollHeight;
-      }
   }
 
   function sleep(ms) {
@@ -214,21 +160,11 @@
     return /^(d|n\/?a|n\.a\.?|does not apply|none|unknown|-+)$/i.test(String(value || '').trim());
   }
 
-  function markFieldDoesNotApply(el) {
-    if (!el || !(el instanceof Element)) return;
-    const target = el.closest?.('.MuiFormControl-root, .MuiGrid-item, [class*="FormControl"]') || el;
-    if (!(target instanceof HTMLElement)) return;
-    target.style.setProperty('outline', '2px solid #e6a700', 'important');
-    target.style.setProperty('background-color', 'rgba(230, 167, 0, 0.18)', 'important');
-    target.dataset.vendooNotApplicable = '1';
-  }
-
   // The listing keeps "Does Not Apply" so Studio can show the field was
   // answered; the marketplace form gets a blank, never the phrase.
   async function skipDoesNotApply(fieldName, selectorText, value, el) {
     const shown = el ? displayedFieldValue(el) : '';
     if (shown) await clearControl(el);
-    markFieldDoesNotApply(el);
     log(`  ○ ${fieldName}: does not apply (${shown ? 'blanked' : 'left blank'})`);
     recordFill({
       field: fieldName,
@@ -410,7 +346,6 @@
     const controls = document.querySelectorAll('input, textarea, select, [role="combobox"]');
 
     for (const el of controls) {
-      if (el.closest && el.closest('#vendoo-debug-box')) continue;
       const type = String(el.type || '').toLowerCase();
       if (['hidden', 'submit', 'button', 'reset', 'file', 'image'].includes(type)) continue;
       const style = window.getComputedStyle(el);
@@ -5042,50 +4977,6 @@
   }
 
   // ============================================
-  // MAIN FILL FUNCTION
-  // ============================================
-
-  async function fillForm(data, platformName = 'VENDOO') {
-      createStatusBox();
-      const platform = platformName.toUpperCase();
-      log(`🚀 STARTING FILL: ${data.title || '(no title)'} (${platform})`);
-      log(`📍 Page: ${window.location.href}`);
-      
-      const startTime = Date.now();
-      
-      try {
-          switch (platform) {
-              case 'EBAY':
-                  await fillEbayForm(data);
-                  break;
-              case 'ETSY':
-                  await fillEtsyForm(data);
-                  break;
-              case 'POSHMARK':
-                  await fillPoshmarkForm(data);
-                  break;
-              case 'MERCARI':
-                  await fillMercariForm(data);
-                  break;
-              case 'DEPOP':
-                  await fillDepopForm(data);
-                  break;
-              default:
-                  await fillMainForm(data);
-          }
-
-          const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-          log(`✅ === FILL COMPLETE in ${duration}s ===`);
-          chrome.runtime.sendMessage({ type: 'FILL_COMPLETE', platform, duration });
-          
-      } catch (err) {
-          error(`Fill Error: ${err.message}`);
-          console.error(err);
-          chrome.runtime.sendMessage({ type: 'FILL_ERROR', platform: platform, error: err.message });
-      }
-  }
-
-  // ============================================
   // STUDIO AUTOMATION COMMANDS
   // ============================================
 
@@ -6301,7 +6192,6 @@
       const seen = new Set();
       const controls = document.querySelectorAll('input, textarea, select, [role="combobox"]');
       for (const el of controls) {
-          if (el.closest && el.closest('#vendoo-debug-box')) continue;
           const type = String(el.type || '').toLowerCase();
           if (['hidden', 'submit', 'button', 'reset', 'file', 'image'].includes(type)) continue;
           if (!isVisibleElement(el)) continue;
@@ -7136,7 +7026,6 @@
 
   function isInspectableControl(el) {
       if (!el || !el.matches || !el.matches(INSPECT_CONTROL_SELECTOR)) return false;
-      if (el.closest('#vendoo-debug-box')) return false;
       const type = String(el.type || '').toLowerCase();
       if (INSPECT_SKIP_TYPES.has(type)) return false;
       return isVisibleElement(el);
@@ -7211,7 +7100,6 @@
   function controlAtPoint(x, y) {
       for (const el of document.elementsFromPoint(x, y)) {
           if (el === document.documentElement || el === document.body) continue;
-          if (el.closest && el.closest('#vendoo-debug-box')) continue;
           if (isInspectableControl(el)) return el;
           if (el.tagName === 'LABEL' && el.htmlFor) {
               const target = document.getElementById(el.htmlFor);
@@ -7228,7 +7116,7 @@
 
   function describeElementAtPoint(x, y) {
       const el = document.elementsFromPoint(x, y)
-          .find((node) => node !== document.documentElement && node !== document.body && !(node.closest && node.closest('#vendoo-debug-box')));
+          .find((node) => node !== document.documentElement && node !== document.body);
       if (!el) return null;
       const clickable = (el.closest && el.closest('button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="option"], label')) || el;
       const text = String(clickable.innerText || clickable.textContent || clickable.getAttribute('aria-label') || '')
@@ -7303,7 +7191,7 @@
       const seen = new Set();
       for (const el of document.querySelectorAll(INSPECT_CLICKABLE_SELECTOR)) {
           if (controls.length >= INSPECT_MAX_CONTROLS) break;
-          if (el.closest('#vendoo-debug-box') || el.matches('[role="option"]')) continue;
+          if (el.matches('[role="option"]')) continue;
           const text = clickableText(el);
           if (!text || text.length > 60 || seen.has(text.toLowerCase())) continue;
           if (isDangerText(`${text} ${el.getAttribute('aria-label') || ''}`)) continue;
@@ -7326,7 +7214,7 @@
       const target = String(wanted || '').replace(/\s+/g, ' ').trim().toLowerCase();
       if (!target) return { ok: false, error: 'No text to click' };
       const candidates = Array.from(document.querySelectorAll(`${INSPECT_CLICKABLE_SELECTOR}, .MuiAutocomplete-option, .MuiMenuItem-root`))
-          .filter((el) => !el.closest('#vendoo-debug-box') && isEffectivelyVisible(el))
+          .filter((el) => isEffectivelyVisible(el))
           .map((el) => ({ el, text: clickableText(el).toLowerCase() }));
       // "0" must not click "00" just because the longer size starts with 0.
       const numericTarget = /^\d+$/.test(target);
@@ -7578,24 +7466,6 @@
                   formReady: listingFormMarkersPresent(),
                   itemId: extractItemId(),
               });
-              return true;
-          }
-          
-          if (msg.type === 'START_FILL' || msg.type.startsWith('START_')) {
-              let platform = msg.platform || 'VENDOO';
-              if (msg.type === 'START_EBAY') platform = 'EBAY';
-              if (msg.type === 'START_ETSY') platform = 'ETSY';
-              if (msg.type === 'START_POSHMARK') platform = 'POSHMARK';
-              if (msg.type === 'START_MERCARI') platform = 'MERCARI';
-              if (msg.type === 'START_DEPOP') platform = 'DEPOP';
-              
-              log(`Received START_FILL for ${platform}`);
-              
-              setTimeout(() => {
-                  fillForm(msg.data, platform);
-              }, 100);
-
-              sendResponse({ ok: true });
               return true;
           }
       };

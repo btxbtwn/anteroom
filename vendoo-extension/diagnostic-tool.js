@@ -176,19 +176,6 @@
             }, 1000);
         },
         
-        // Check if extension content script is loaded
-        checkExtension: function() {
-            const statusBox = document.getElementById('vendoo-debug-box');
-            if (statusBox) {
-                console.log('%c✓ Extension content script is loaded and running', 'color: #4CAF50; font-weight: bold;');
-                return true;
-            } else {
-                console.log('%c✗ Extension content script NOT loaded', 'color: #f44336; font-weight: bold;');
-                console.log('Try refreshing the Vendoo page and re-opening the extension popup');
-                return false;
-            }
-        },
-        
         // Export current page structure
         exportStructure: function() {
             const structure = {
@@ -329,7 +316,6 @@
     console.log('%cvendooDiagnostics.testFill("Title", "Test Item")', 'color: #9C27B0; font-family: monospace;', '- Test filling a field');
     console.log('%cvendooDiagnostics.findDropdownOptions("Condition")', 'color: #E91E63; font-family: monospace;', '- List dropdown options');
     console.log('%cvendooDiagnostics.getAllDropdownOptions()', 'color: #FF5722; font-family: monospace;', '- EXTRACT ALL dropdown options from eBay (run this!)');
-    console.log('%cvendooDiagnostics.checkExtension()', 'color: #4CAF50; font-family: monospace;', '- Check if extension is loaded');
     console.log('%cvendooDiagnostics.exportStructure()', 'color: #00BCD4; font-family: monospace;', '- Export page structure as JSON');
     console.log('');
     console.log('%c💡 Tip: Run vendooDiagnostics.getAllDropdownOptions() on eBay to see all available values!', 'color: #FF5722; font-weight: bold;');

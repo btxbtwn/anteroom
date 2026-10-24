@@ -97,11 +97,9 @@ See the [Anteroom README](vendoo-studio/README.md) for backups, database migrati
 | [`skills/box-scout/`](skills/box-scout/) | Wholesale clothing box research used by Anteroom's Sourcing workspace. |
 | [`skills/measure-this/`](skills/measure-this/) | Garment measurement extraction from ruler photos, with two reads checked for agreement. |
 
-## Manual extension fallback
+## Chrome extension
 
-For manual JSON filling, load [`vendoo-extension/`](vendoo-extension/) in `chrome://extensions/` (**Developer mode → Load unpacked**), open a Vendoo listing form, and paste the listing JSON into the extension popup. Review the filled form and save the draft.
-
-For Anteroom-managed sends, use the extension folder shown in **Settings → Connections**. Anteroom manages the photos, chat, and fill job. See the [extension README](vendoo-extension/README.md) for popup controls and **Diagnose Page**.
+Load the extension folder shown in **Settings → Connections** in `chrome://extensions/` (**Developer mode → Load unpacked**). The extension pairs automatically and runs in the background. Review listings and approve draft Sends in Anteroom; it owns photos, chat, progress, and diagnostics. See the [extension README](vendoo-extension/README.md) for setup and troubleshooting.
 
 ## Data and privacy
 

@@ -1,22 +1,26 @@
 # Vendoo Extension Architecture & Field Matching
 
 ## Extension Location
-`~/.hermes/vendoo-extension/` — Manifest V3, v0.1.0
+`vendoo-extension/` in this repository — Manifest V3. Anteroom’s packaged copy lives at `~/Library/Application Support/Anteroom/vendoo-extension`.
 
 ## Architecture
 
-```
-popup.html → popup.js (user pastes JSON)
-    → chrome.runtime.sendMessage({ type: 'START_EBAY', data })
-    → background.js (service worker, routes messages)
-    → content-scripts/vendoo.js (injected on Vendoo web tab)
-    → fillEbayForm(data, 'EBAY')
-    → fillDepopForm(data), fillMercariForm(data), etc.
+```text
+Anteroom (seller reviews listing and approves Send)
+    → local WebSocket (job.start)
+    → background.js (service worker, pairs and orchestrates draft jobs)
+    → background/job-steps.js (FILL_GENERAL / FILL_MARKETPLACE)
+    → content-scripts/vendoo.js (Vendoo web tab)
+    → fillMainForm(data) / fillMarketplaceForm(data, platform)
+    → explicit save and audit steps
+    → progress, fill results, and diagnostics back to Anteroom
 ```
 
-**Key insight:** `background.js` line 190 forces `scriptFile = 'content-scripts/vendoo.js'` for ALL fills. The Vendoo web form is always used, even for eBay listings. The separate `ebay.js` content script only runs when navigating directly to `ebay.com/sl/` pages — it's for direct eBay fills, not Vendoo-mediated ones.
+The extension has no popup, on-page debug panel, field highlighting, or manual JSON controls. Pairing and reconnects happen automatically; Anteroom provides the interface. Automation stops at a saved draft.
 
-## Vendoo.js Field Matching (lines ~770-900)
+Anteroom fills marketplaces through Vendoo’s web form. Separate scripts such as `content-scripts/ebay.js` run on the marketplaces’ own pages and are outside the primary Anteroom flow.
+
+## Vendoo.js Field Matching
 
 The `fillEbayForm` function iterates `data.ebay_specifics` and matches JSON keys to form inputs via:
 
