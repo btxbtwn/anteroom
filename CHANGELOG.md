@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.318 — 2026-10-24
+
+- The Inventory and Vendoo sync buttons are gone from the bottom of the sidebar. Sync from Vendoo now lives in Settings → Data (and still on Analytics).
+
 ## 0.1.317 — 2026-10-24
 
 - Grailed categories like Menswear › Outerwear › Light Jackets are saved and reused again instead of being refused as "incompatible" in the logs.

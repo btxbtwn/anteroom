@@ -115,6 +115,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["tutorial", "onboarding", "first run", "chatgpt", "claude", "mimo", "cursor", "brave"],
   },
   {
+    id: "vendoo-sync",
+    title: "Sync from Vendoo",
+    section: "data",
+    targetId: "vendoo-sync",
+    searchTerms: ["vendoo", "sync", "import", "inventory", "resync", "pull", "download"],
+  },
+  {
     id: "backups",
     title: "Backups",
     section: "data",
