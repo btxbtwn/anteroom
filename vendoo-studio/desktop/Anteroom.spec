@@ -136,7 +136,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     # PyInstaller signs every binary and the bundle with this identity; see
-    # scripts/package-macos-app.sh. Unset means PyInstaller's ad-hoc signature.
+    # scripts/package-macos-app.sh, which requires a persistent certificate.
     codesign_identity=os.environ.get("MACOS_SIGNING_IDENTITY") or None,
 )
 coll = COLLECT(

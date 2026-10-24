@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import threading
 
 log = logging.getLogger("vendoo_studio.keychain")
@@ -29,22 +30,17 @@ LEGACY_ACCOUNTS = (KEYRING_ACCOUNT, BRAVE_ACCOUNT, CHATGPT_ACCOUNT, CHATGPT_MODE
 # moment — would hide the secrets still in the old items for good. With it the
 # sweep happens once, so steady-state launches still read a single item.
 MIGRATION_MARKER = "legacy-migrated"
-# The marker also lives beside the data dir. Keychain items are readable by the
-# binary that wrote them, so a re-signed build — every app update — sees no
-# secrets item, concludes none exists, and sweeps the legacy items again. Those
-# hold whatever was there before consolidation, so a key entered since came
-# back as the old one on every restart. A marker the next build can actually
-# read is what stops that.
+# Keep a marker in the data dir as well: if Keychain access becomes unavailable,
+# importing the old items again could restore credentials from before rotation.
 MIGRATION_FLAG_FILE = "keychain-migrated"
 
 _lock = threading.RLock()
-# Accounts this process set or deleted. Only these override what is on disk,
+# Accounts with changes not yet saved. Only these override what is on disk,
 # so a stale cache cannot roll back a secret another process just wrote.
 _touched: set[str] = set()
 _deleted: set[str] = set()
 _store: dict[str, str] | None = None
 _store_readable = False
-_warmed = False
 
 
 def mask_secret(value: str | None) -> str | None:
@@ -88,10 +84,19 @@ def _read_password(account: str) -> str | None:
 
 def _write_password(account: str, value: str) -> bool:
     try:
-        _keyring().set_password(KEYRING_SERVICE, account, value)
+        keyring = _keyring()
+        if sys.platform == "darwin":
+            from keyring.backends.macOS import Keyring
+
+            if isinstance(keyring.get_keyring(), Keyring):
+                from vendoo_studio.services.macos_keychain import set_password
+
+                set_password(KEYRING_SERVICE, account, value)
+                return True
+        keyring.set_password(KEYRING_SERVICE, account, value)
         return True
-    except Exception:
-        log.warning("keychain write failed for %s", account, exc_info=True)
+    except Exception as exc:
+        log.warning("keychain write failed for %s (%s)", account, type(exc).__name__)
         return False
 
 
@@ -153,16 +158,21 @@ def _secrets() -> dict[str, str]:
     """Load the secrets item once, migrating the old per-secret items if needed."""
     global _store, _store_readable
     with _lock:
-        if _store is not None:
+        if _store is not None and _store_readable:
             return _store
         try:
             raw = _read_item(SECRETS_ACCOUNT)
         except _Unavailable:
-            # Never overwrite an item we couldn't read; retry on the next write.
-            _store, _store_readable = {}, False
+            # Never overwrite an item we couldn't read; retry on the next access.
+            if _store is None:
+                _store = {}
+            _store_readable = False
             return _store
         _store_readable = True
-        _store = _parse_store(raw) if raw is not None else {}
+        pending = {k: v for k, v in (_store or {}).items() if k in _touched}
+        _store = {**(_parse_store(raw) if raw is not None else {}), **pending}
+        for account in _deleted:
+            _store.pop(account, None)
         if _store.get(MIGRATION_MARKER) != "1" and not _migration_done_on_disk():
             for account in LEGACY_ACCOUNTS:
                 if account in _store:
@@ -173,8 +183,8 @@ def _secrets() -> dict[str, str]:
                     _touched.add(account)
             _store[MIGRATION_MARKER] = "1"
             _touched.add(MIGRATION_MARKER)
-            _save_store()
-            _record_migration_done()
+            if _save_store():
+                _record_migration_done()
         return _store
 
 
@@ -200,7 +210,11 @@ def _save_store() -> bool:
             if account in _deleted:
                 merged.pop(account, None)
         _store, _store_readable = merged, True
-        return _write_password(SECRETS_ACCOUNT, json.dumps(merged))
+        if not _write_password(SECRETS_ACCOUNT, json.dumps(merged)):
+            return False
+        _touched.clear()
+        _deleted.clear()
+        return True
 
 
 def _get(account: str) -> str | None:
@@ -208,12 +222,12 @@ def _get(account: str) -> str | None:
         return _secrets().get(account)
 
 
-def _set(account: str, value: str) -> None:
+def _set(account: str, value: str) -> bool:
     with _lock:
         _secrets()[account] = value
         _touched.add(account)
         _deleted.discard(account)
-        _save_store()
+        return _save_store()
 
 
 def _delete(account: str) -> None:
@@ -270,8 +284,13 @@ def get_chatgpt_tokens() -> dict | None:
 
 
 def set_chatgpt_tokens(tokens: dict):
-    # The in-memory store keeps the session even if Keychain UI is denied mid-generate.
-    _set(CHATGPT_ACCOUNT, json.dumps(tokens))
+    # Keep rotated tokens in memory if a save fails, but never report a login
+    # as saved when it would disappear on the next restart.
+    if not _set(CHATGPT_ACCOUNT, json.dumps(tokens)):
+        raise RuntimeError(
+            "Could not save the ChatGPT sign-in to macOS Keychain. "
+            "Allow Keychain access and try again before restarting Studio."
+        )
 
 
 def delete_chatgpt_tokens():
@@ -390,27 +409,21 @@ def set_chatgpt_models(
 
 
 def warm_keychain() -> dict[str, bool]:
-    """Load Studio secrets once at launch and rebind the item to this app.
+    """Load Studio secrets at launch without rewriting the credentials item.
 
     Call from the desktop main thread before serving requests so the Keychain
     prompt happens at launch (when someone can click Always Allow), not
     mid-generate from a phone/iPad remote session.
     """
-    global _warmed
     with _lock:
         secrets = _secrets()
-        if not _warmed and secrets and _store_readable:
-            # Re-save so this binary is trusted even if the user clicked Allow
-            # instead of Always Allow.
-            _save_store()
-        _warmed = True
 
     found = {
-        "api_key": bool(get_api_key()),
-        "brave": bool(get_brave_api_key()),
-        "cursor": bool(get_cursor_api_key()),
-        "chatgpt": bool(get_chatgpt_tokens()),
-        "chatgpt_models": bool(get_chatgpt_models()),
+        "api_key": bool(secrets.get(KEYRING_ACCOUNT)),
+        "brave": bool(secrets.get(BRAVE_ACCOUNT)),
+        "cursor": bool(secrets.get(CURSOR_ACCOUNT)),
+        "chatgpt": bool(secrets.get(CHATGPT_ACCOUNT)),
+        "chatgpt_models": bool(secrets.get(CHATGPT_MODELS_ACCOUNT)),
     }
     log.info(
         "keychain warmed api_key=%s brave=%s cursor=%s chatgpt=%s models=%s",

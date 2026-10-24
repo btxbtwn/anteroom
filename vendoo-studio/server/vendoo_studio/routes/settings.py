@@ -105,7 +105,7 @@ def _chatgpt_status() -> ChatGPTStatus:
         email=profile.get("email"),
         plan=profile.get("plan"),
         pending=chatgpt_oauth.pending_login(),
-        error=None if tokens else chatgpt_oauth.login_error(),
+        error=chatgpt_oauth.login_error(),
     )
 
 

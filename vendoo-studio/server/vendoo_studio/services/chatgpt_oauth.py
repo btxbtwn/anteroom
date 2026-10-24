@@ -45,6 +45,7 @@ class PendingLogin:
 
 _pending: PendingLogin | None = None
 _pending_guard = threading.Lock()
+_refresh_lock = asyncio.Lock()
 
 
 def _b64url_json(segment: str) -> dict[str, Any]:
@@ -135,29 +136,55 @@ async def _exchange_code(code: str, verifier: str) -> dict:
 
 
 async def refresh_chatgpt_tokens(force: bool = False) -> dict | None:
-    tokens = get_chatgpt_tokens()
-    if not tokens:
-        return None
-    expires_at = tokens.get("expires_at")
-    if not force and isinstance(expires_at, (int, float)) and expires_at > time.time() + 30:
-        return tokens
-    refresh = tokens.get("refresh_token")
-    if not isinstance(refresh, str) or not refresh:
-        delete_chatgpt_tokens()
-        raise RuntimeError("ChatGPT session expired. Sign in again.")
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            TOKEN_URL,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            content=urlencode({
-                "grant_type": "refresh_token",
-                "refresh_token": refresh,
-                "client_id": CLIENT_ID,
-            }),
-        )
-        if resp.status_code >= 400:
+    # Models, usage and generation can all request credentials together at
+    # launch. Rotate a refresh token only once, then let waiters use the result.
+    before = get_chatgpt_tokens()
+    async with _refresh_lock:
+        tokens = get_chatgpt_tokens()
+        if not tokens:
+            return None
+        expires_at = tokens.get("expires_at")
+        if (
+            (not force or tokens != before)
+            and isinstance(expires_at, (int, float))
+            and expires_at > time.time() + 30
+        ):
+            return tokens
+        refresh = tokens.get("refresh_token")
+        if not isinstance(refresh, str) or not refresh:
             delete_chatgpt_tokens()
             raise RuntimeError("ChatGPT session expired. Sign in again.")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                TOKEN_URL,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                content=urlencode({
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh,
+                    "client_id": CLIENT_ID,
+                }),
+            )
+        current = get_chatgpt_tokens()
+        if current != tokens:
+            # A logout or a new login while the request was in flight wins.
+            return current
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+            except ValueError:
+                body = {}
+            error = body.get("error") if isinstance(body, dict) else None
+            code = error.get("code") if isinstance(error, dict) else error
+            if resp.status_code in (400, 401, 403) and code in (
+                "invalid_grant", "refresh_token_expired", "refresh_token_reused",
+                "refresh_token_invalidated",
+            ):
+                delete_chatgpt_tokens()
+                raise RuntimeError("ChatGPT session expired. Sign in again.")
+            raise RuntimeError(
+                f"Could not refresh ChatGPT session ({resp.status_code}). "
+                "Your saved sign-in has been kept. Try again."
+            )
         payload = _token_payload(resp.json(), tokens)
         set_chatgpt_tokens(payload)
         return payload
