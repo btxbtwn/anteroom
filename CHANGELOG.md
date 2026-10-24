@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.311 — 2026-10-24
+
+- The top bar now blends into the window like T3 Code's: the listings sidebar, the main pane and the right panel each run to the top edge in their own colour, and the page title sits in the main pane.
+
 ## 0.1.310 — 2026-10-23
 
 - Sizing checks no longer flag a listing just because its tag writes the size another way. A tag reading Large, LARGE (12/14), 2X, XXL or X-Large now matches L, 2XL or XL, and photos where no size could be read are no longer counted as a different size. The business assistant's sizing counts shrink to the listings that really disagree.
