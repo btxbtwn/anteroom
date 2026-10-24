@@ -1,6 +1,7 @@
 import asyncio
 import base64
 from io import BytesIO
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -41,6 +42,23 @@ def test_small_photo_and_full_resolution_send_original_bytes(tmp_path):
     assert _encode_image(small).startswith("data:image/png;base64,")
     assert _decoded_size(_encode_image(small)) == (800, 600)
     assert _decoded_size(_encode_image(large, max_side=None)) == (4032, 3024)
+
+
+def test_rotated_photo_is_encoded_upright(tmp_path):
+    path = tmp_path / "rotated.jpg"
+    exif = Image.Exif()
+    exif[0x0112] = 6  # stored sideways; viewers rotate it 90 degrees clockwise
+    Image.new("RGB", (4032, 3024), (200, 30, 30)).save(path, format="JPEG", exif=exif.tobytes())
+
+    assert _decoded_size(_encode_image(str(path))) == (1200, VISION_MAX_SIDE)
+
+
+def test_repeat_encodes_reuse_the_first(tmp_path):
+    path = _photo(tmp_path, (4032, 3024))
+    first = _encode_image(path)
+
+    with patch("vendoo_studio.providers.xiaomi_mimo.Image.open", side_effect=AssertionError("re-encoded")):
+        assert _encode_image(path) == first
 
 
 def test_unreadable_image_falls_back_to_raw_bytes(tmp_path):

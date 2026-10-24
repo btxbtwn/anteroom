@@ -175,6 +175,37 @@ class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(launch.call_count, 1)
         self.assertEqual(fake_agents.create.call_count, 2)
 
+    async def test_a_bridge_idle_too_long_is_closed_not_reused(self):
+        from vendoo_studio.providers import cursor_agent
+
+        provider = CursorProvider(api_key="cursor_test")
+
+        class FakeRun:
+            id = "run-stale"
+
+            def stream(self):
+                yield assistant("ok")
+
+            def wait(self):
+                return MagicMock(status="finished", result="ok", id=self.id)
+
+        old_client, _ = fake_bridge(FakeRun())
+        new_client, _ = fake_bridge(FakeRun())
+        with (
+            patch("cursor_sdk.Client.launch_bridge", side_effect=[old_client, new_client]) as launch,
+            patch("vendoo_studio.providers.cursor_agent.listing_scratch_dir") as scratch,
+        ):
+            scratch.return_value = MagicMock(__str__=lambda self: "/tmp/cursor-scratch")
+            async for _chunk in provider.chat([{"role": "user", "content": "Hi"}], stream=False):
+                pass
+            with patch.object(cursor_agent, "_BRIDGE_IDLE_CLOSE_SEC", -1.0):
+                async for _chunk in provider.chat([{"role": "user", "content": "Hi"}], stream=False):
+                    pass
+
+        self.assertEqual(launch.call_count, 2)
+        old_client.close.assert_called_once()
+        new_client.close.assert_not_called()
+
     async def test_failed_photo_run_reports_cursors_reason(self):
         provider = CursorProvider(api_key="cursor_test")
 

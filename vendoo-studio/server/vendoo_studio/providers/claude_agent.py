@@ -12,6 +12,7 @@ from vendoo_studio.providers.xiaomi_mimo import (
     encode_images,
     unpack_stream_item,
 )
+from vendoo_studio.providers import claude_sessions
 from vendoo_studio.services import claude_auth, live_trace
 from vendoo_studio.services.user_settings import get_claude_models, resolved_claude_models
 
@@ -49,13 +50,14 @@ def _image_block(url: str) -> dict | None:
     return None
 
 
-def to_claude_turn(messages: list[dict], preamble: str) -> tuple[str, list[dict]]:
-    """Fold Studio's chat history into a system prompt and one user turn.
+def to_claude_turn(messages: list[dict]) -> list[dict]:
+    """Fold Studio's chat history into one user turn.
 
     The Agent SDK takes user turns only, so earlier assistant replies ride in
-    the transcript, the way the Cursor provider sends them.
+    the transcript, the way the Cursor provider sends them. System messages
+    lead the turn instead of going into the system prompt: that is fixed when
+    the warm Claude Code process starts and is shared by every call it serves.
     """
-    system = [preamble]
     lines: list[str] = []
     images: list[dict] = []
     for msg in messages:
@@ -77,14 +79,9 @@ def to_claude_turn(messages: list[dict], preamble: str) -> tuple[str, list[dict]
                     if block is not None:
                         images.append(block)
         text = "\n".join(piece for piece in texts if piece)
-        if not text:
-            continue
-        if role == "system":
-            system.append(text)
-        else:
+        if text:
             lines.append(f"{role.upper()}:\n{text}")
-    blocks: list[dict] = [*images, {"type": "text", "text": "\n\n".join(lines) or "Continue."}]
-    return "\n\n".join(system), blocks
+    return [*images, {"type": "text", "text": "\n\n".join(lines) or "Continue."}]
 
 
 async def _single_turn(blocks: list[dict]):
@@ -278,47 +275,54 @@ class ClaudeProvider:
             ResultMessage,
             StreamEvent,
             ToolUseBlock,
-            query,
         )
 
-        system, blocks = to_claude_turn(messages, preamble)
-        options = _isolated_options(
-            model=model,
-            effort=self.effort,
-            system_prompt=system,
-            tools=list(tools or []),
-            allowed_tools=list(tools or []),
-            max_turns=max_turns,
-            include_partial_messages=True,
-        )
+        blocks = to_claude_turn(messages)
+        tool_list = list(tools or [])
+        effort = self.effort
+
+        def make_options(start_model: str | None):
+            return _isolated_options(
+                model=start_model,
+                effort=effort,
+                system_prompt=preamble,
+                tools=tool_list,
+                allowed_tools=tool_list,
+                max_turns=max_turns,
+                include_partial_messages=True,
+            )
+
+        key = (preamble, tuple(tool_list), max_turns, effort)
         stream_text = not tools
         streamed = False
         try:
-            async for message in query(prompt=_single_turn(blocks), options=options):
-                if isinstance(message, StreamEvent):
-                    delta = message.event.get("delta") or {}
-                    if message.event.get("type") != "content_block_delta":
-                        continue
-                    if delta.get("type") == "text_delta" and delta.get("text") and stream_text:
-                        streamed = True
-                        yield StreamChunk(delta["text"], "content")
-                    elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
-                        yield StreamChunk(delta["thinking"], "thinking")
-                elif isinstance(message, AssistantMessage):
-                    for block in message.content:
-                        if isinstance(block, ToolUseBlock) and block.name == "WebSearch":
-                            searched = str(block.input.get("query") or "")
-                            if searched:
-                                live_trace.emit("step", f"Claude searched: {searched}")
-                elif isinstance(message, ResultMessage):
-                    if message.is_error:
-                        detail = (message.result or "").strip() or f"Claude run failed ({message.subtype})"
-                        if _signed_out(detail):
-                            claude_auth.forget_status()
-                            raise RuntimeError(SIGNED_OUT)
-                        raise RuntimeError(detail)
-                    if not streamed and message.result:
-                        yield StreamChunk(message.result, "content")
+            async with claude_sessions.session(key, make_options, model) as client:
+                await client.query(_single_turn(blocks))
+                async for message in client.receive_response():
+                    if isinstance(message, StreamEvent):
+                        delta = message.event.get("delta") or {}
+                        if message.event.get("type") != "content_block_delta":
+                            continue
+                        if delta.get("type") == "text_delta" and delta.get("text") and stream_text:
+                            streamed = True
+                            yield StreamChunk(delta["text"], "content")
+                        elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                            yield StreamChunk(delta["thinking"], "thinking")
+                    elif isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, ToolUseBlock) and block.name == "WebSearch":
+                                searched = str(block.input.get("query") or "")
+                                if searched:
+                                    live_trace.emit("step", f"Claude searched: {searched}")
+                    elif isinstance(message, ResultMessage):
+                        if message.is_error:
+                            detail = (message.result or "").strip() or f"Claude run failed ({message.subtype})"
+                            if _signed_out(detail):
+                                claude_auth.forget_status()
+                                raise RuntimeError(SIGNED_OUT)
+                            raise RuntimeError(detail)
+                        if not streamed and message.result:
+                            yield StreamChunk(message.result, "content")
         except ClaudeSDKError as exc:
             detail = str(exc).strip()
             if _signed_out(detail):

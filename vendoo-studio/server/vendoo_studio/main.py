@@ -71,7 +71,16 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=_prune_event_bloat, name="prune-job-events", daemon=True).start()
     except Exception:
         pass
+    from vendoo_studio.providers import chatgpt_codex, claude_sessions
+
+    claude_sessions.keep_warm_on_this_loop()
+    chatgpt_codex.keep_connection_on_this_loop()
     yield
+    try:
+        await claude_sessions.close_warm_processes()
+        await chatgpt_codex.close_connection()
+    except Exception:
+        pass
     try:
         from vendoo_studio.services.backups import stop_snapshot_timer
         stop_snapshot_timer()

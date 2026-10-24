@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 
@@ -308,6 +311,37 @@ def _messages_to_input(messages: list[dict]) -> tuple[str, list[dict]]:
     return "\n\n".join(instructions), items
 
 
+_shared_http: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
+
+
+def keep_connection_on_this_loop() -> None:
+    """Share one HTTP client, and its open connections, on the server's loop.
+
+    A fresh client per call paid a TLS handshake every time: about 10 ms of
+    CPU and 120 ms of waiting, ten-odd times per listing. A client is tied to
+    the loop it ran on, so calls on any other loop still get their own.
+    """
+    global _shared_http
+    _shared_http = (asyncio.get_running_loop(), httpx.AsyncClient())
+
+
+async def close_connection() -> None:
+    global _shared_http
+    shared, _shared_http = _shared_http, None
+    if shared is not None:
+        await shared[1].aclose()
+
+
+@asynccontextmanager
+async def _http_client() -> AsyncIterator[httpx.AsyncClient]:
+    shared = _shared_http
+    if shared is not None and shared[0] is asyncio.get_running_loop():
+        yield shared[1]
+        return
+    async with httpx.AsyncClient() as client:
+        yield client
+
+
 async def _codex_headers() -> dict[str, str]:
     tokens = await refresh_chatgpt_tokens()
     if not tokens:
@@ -333,11 +367,12 @@ async def fetch_codex_models(*, force: bool = False) -> list[str]:
         return list(_catalog_slugs)
     headers = await _codex_headers()
     headers.pop("Accept", None)
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with _http_client() as client:
         resp = await client.get(
             f"{CODEX_BASE_URL}/models",
             params={"client_version": MODELS_CLIENT_VERSION},
             headers=headers,
+            timeout=20,
         )
     if resp.status_code >= 400:
         raise RuntimeError(_http_error(resp))
@@ -483,11 +518,12 @@ class ChatGPTCodexProvider:
 
     async def _stream(self, messages: list[dict], model: str, **payload_kwargs):
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with _http_client() as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/responses",
                 headers=headers,
+                timeout=300,
                 json=self._payload(messages, model, True, **payload_kwargs),
             ) as resp:
                 if resp.status_code >= 400:
@@ -595,11 +631,12 @@ class ChatGPTCodexProvider:
 
     async def _stream_search(self, messages: list[dict], **payload_kwargs):
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with _http_client() as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/responses",
                 headers=headers,
+                timeout=120,
                 json=self._payload(messages, self.listing_model, True, **payload_kwargs),
             ) as resp:
                 if resp.status_code >= 400:

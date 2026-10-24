@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from pathlib import Path
@@ -205,6 +206,13 @@ def _field_path_tail(value: str) -> str:
 
 
 def field_lookup_key(value: str) -> str:
+    return _field_lookup_key(str(value or ""))
+
+
+# Gap checks compare every listing key against every discovered field, a few
+# hundred thousand calls per listing over a few thousand distinct labels.
+@functools.lru_cache(maxsize=8192)
+def _field_lookup_key(value: str) -> str:
     text = _field_path_tail(value)
     text = re.sub(r"^(ebay|etsy|poshmark|mercari|depop)\s+", "", text, flags=re.IGNORECASE)
     text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)

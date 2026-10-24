@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import json
+import os
 from io import BytesIO
 from typing import NamedTuple
 
@@ -69,19 +71,43 @@ def image_exceeds(path: str, max_side: int | None) -> bool:
 
 
 def _encode_image(path: str, max_side: int | None = VISION_MAX_SIDE) -> str:
-    """Data URL for a vision request; the stored original is never modified."""
+    """Data URL for a vision request; the stored original is never modified.
+
+    One generation sends the same photos several times, and Regenerate sends
+    them again, so encodings are cached. Stored photos are never rewritten
+    (rotating saves a new file), and the size and mtime catch anything else.
+    """
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return _raw_data_url(path)
+    return _encode_image_cached(path, stat.st_mtime_ns, stat.st_size, max_side)
+
+
+# Room for twenty listings generating at once (five-odd photos at two sizes)
+# without evicting each other's photos mid-run. A 1600px encoding is ~0.7 MB.
+@functools.lru_cache(maxsize=160)
+def _encode_image_cached(path: str, _mtime_ns: int, _size: int, max_side: int | None) -> str:
     raw_ok = path.rsplit(".", 1)[-1].lower() in ("jpg", "jpeg", "png", "webp")
     if raw_ok and not image_exceeds(path, max_side):
         return _raw_data_url(path)
     try:
         with Image.open(path) as img:
+            # Shrink before rotating, which would decode and copy every pixel
+            # of the full-size photo. reducing_gap=1.0 lets the JPEG decoder
+            # deliver a half- or quarter-size image straight away: about half
+            # the CPU of a full Lanczos pass, and closer to it (40+ dB) than
+            # the quality-85 JPEG below.
+            if img.mode in ("1", "P"):
+                img = img.convert("RGB")  # resize only filters smoothly in full-color modes
+            if max_side:
+                img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS, reducing_gap=1.0)
             img = ImageOps.exif_transpose(img)
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
-            if max_side:
-                img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
             buf = BytesIO()
-            img.save(buf, format="JPEG", quality=VISION_JPEG_QUALITY, optimize=True)
+            # No optimize=True: it saved 0.5% of the bytes for 2.6x the encode CPU.
+            img.save(buf, format="JPEG", quality=VISION_JPEG_QUALITY)
     except Exception:
         return _raw_data_url(path)
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")

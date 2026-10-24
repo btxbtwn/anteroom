@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import threading
+import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,10 +75,13 @@ def listing_scratch_dir() -> Path:
 
 # One bridge process serves later runs. Launching a new one for every photo
 # pass, category pick, and repair is most of the wait next to ChatGPT, which
-# is a single HTTP call. Two covers category selection and comps running together.
-_BRIDGE_POOL_MAX = 2
+# is a single HTTP call, and costs about 0.3 CPU-s. Several listings generating
+# at once each run a few calls together, so keep enough warm for that. An idle
+# bridge uses no CPU, only memory (about 125 MB), and closes after a while.
+_BRIDGE_POOL_MAX = 8
+_BRIDGE_IDLE_CLOSE_SEC = 180.0
 _bridge_pool_lock = threading.Lock()
-_idle_bridges: list = []
+_idle_bridges: list[tuple[object, float]] = []
 # Lowest reasoning choice per model id. None means the model has no such knob.
 _reasoning_floor: dict[str, tuple[str, str] | None] = {}
 _LOWEST_REASONING = ("none", "minimal", "low")
@@ -86,10 +90,24 @@ _LOWEST_REASONING = ("none", "minimal", "low")
 def reset_cursor_bridges() -> None:
     """Drop idle bridges and the cached reasoning floor. Tests use this."""
     with _bridge_pool_lock:
-        idle = list(_idle_bridges)
+        idle = [client for client, _ in _idle_bridges]
         _idle_bridges.clear()
         _reasoning_floor.clear()
     for client in idle:
+        with contextlib.suppress(Exception):
+            client.close()
+
+
+def _take_stale_bridges() -> list:
+    """Caller holds ``_bridge_pool_lock``; close what this returns outside it."""
+    cutoff = time.monotonic() - _BRIDGE_IDLE_CLOSE_SEC
+    stale = [client for client, since in _idle_bridges if since < cutoff]
+    _idle_bridges[:] = [entry for entry in _idle_bridges if entry[1] >= cutoff]
+    return stale
+
+
+def _close_bridges(clients: list) -> None:
+    for client in clients:
         with contextlib.suppress(Exception):
             client.close()
 
@@ -98,8 +116,11 @@ def _acquire_bridge(scratch: str):
     from cursor_sdk import Client
 
     with _bridge_pool_lock:
-        if _idle_bridges:
-            return _idle_bridges.pop()
+        stale = _take_stale_bridges()
+        client = _idle_bridges.pop()[0] if _idle_bridges else None
+    _close_bridges(stale)
+    if client is not None:
+        return client
     with _patched_bridge_env():
         return Client.launch_bridge(workspace=scratch)
 
@@ -107,16 +128,18 @@ def _acquire_bridge(scratch: str):
 def _settle_bridge(client, handles: dict[str, object]) -> None:
     """Return a healthy bridge to the pool, or close one a cancelled run killed."""
     with _bridge_pool_lock:
+        stale = _take_stale_bridges()
         if handles.get("discard"):
             already = bool(handles.get("closed"))
             handles["closed"] = True
-            _idle_bridges[:] = [item for item in _idle_bridges if item is not client]
+            _idle_bridges[:] = [entry for entry in _idle_bridges if entry[0] is not client]
         elif len(_idle_bridges) < _BRIDGE_POOL_MAX:
-            _idle_bridges.append(client)
-            return
+            _idle_bridges.append((client, time.monotonic()))
+            already = True
         else:
             already = bool(handles.get("closed"))
             handles["closed"] = True
+    _close_bridges(stale)
     if not already:
         with contextlib.suppress(Exception):
             client.close()
@@ -134,7 +157,7 @@ def _abort_bridge(handles: dict[str, object]) -> None:
         already = bool(handles.get("closed"))
         handles["closed"] = True
         if client is not None:
-            _idle_bridges[:] = [item for item in _idle_bridges if item is not client]
+            _idle_bridges[:] = [entry for entry in _idle_bridges if entry[0] is not client]
     if client is not None and not already:
         with contextlib.suppress(Exception):
             client.close()  # type: ignore[union-attr]

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from vendoo_studio.config import PHOTOS_DIR
@@ -341,18 +342,31 @@ def get_activity(conv_id: str, db: Session = Depends(get_db)):
     if run is not None:
         items.append(run.last_status or "Generating listing…")
     items.extend(activity.running(conv_id))
-    for job in db.query(Job).filter(Job.conversation_id == conv_id).all():
-        if job.status in ACTIVE_JOB_STATUSES or completion_running(job.id):
-            items.append(_job_activity_label(job))
+    # Polled about once a second per open listing: read only ids and statuses,
+    # and load a job (and its listing snapshot) only when it is still running.
+    jobs = db.query(Job.id, Job.status).filter(Job.conversation_id == conv_id).all()
+    for job_id, status in jobs:
+        if status in ACTIVE_JOB_STATUSES or completion_running(job_id):
+            job = db.get(Job, job_id)
+            if job is not None:
+                items.append(_job_activity_label(job))
     items = list(dict.fromkeys(items))
 
-    messages = db.query(Message).filter(Message.conversation_id == conv_id)
-    last = messages.order_by(Message.created_at.desc()).first()
+    message_count = (
+        db.query(func.count(Message.id)).filter(Message.conversation_id == conv_id).scalar() or 0
+    )
+    last_id = (
+        db.query(Message.id)
+        .filter(Message.conversation_id == conv_id)
+        .order_by(Message.created_at.desc())
+        .limit(1)
+        .scalar()
+    )
     return ActivityResponse(
         busy=bool(items),
         items=items,
-        message_count=messages.count(),
-        last_message_id=last.id if last else None,
+        message_count=message_count,
+        last_message_id=last_id,
         agents=activity.agents(conv_id),
     )
 
