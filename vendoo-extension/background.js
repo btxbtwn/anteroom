@@ -16,7 +16,6 @@ const EXTENSION_TAB_URLS = [
   'https://poshmark.com/*',
   'https://www.mercari.com/*',
   'https://www.depop.com/*',
-  'https://www.etsy.com/*',
 ];
 
 let ws = null;

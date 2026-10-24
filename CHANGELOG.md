@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.321 — 2026-10-24
+
+- The Chrome extension no longer runs on etsy.com. It never filled Etsy's own site, and Etsy listings still go through Vendoo's Etsy section exactly as before.
+
 ## 0.1.320 — 2026-10-24
 
 - The Usage button at the bottom of the sidebar now opens its own Usage page, like Analytics and Marketing, instead of jumping into Settings. Click it again to go back. Usage is no longer a section in Settings.
