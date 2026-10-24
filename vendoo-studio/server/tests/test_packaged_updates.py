@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -80,6 +81,19 @@ class PackagedUpdateTest(unittest.TestCase):
             ["#42 — Newest change", "#41 — Earlier change"],
         )
 
+    def test_normalize_build_info_reads_this_zips_digest(self):
+        # zip_sha256 is the digest of the zip builds from before the rename
+        # download; this build has to check its own zip against its own digest.
+        info = packaged_updates._normalize_build_info(
+            {
+                "sha": "bbb2222",
+                "zip_sha256": "aa" * 32,
+                "zips": {"Anteroom-macos.zip": "BB" * 32, "List-This-Studio-macos.zip": "aa" * 32},
+            }
+        )
+        self.assertEqual(info["zip_sha256"], "bb" * 32)
+        self.assertIsNone(packaged_updates._normalize_build_info({"sha": "b", "zip_sha256": "aa" * 32})["zip_sha256"])
+
     def test_api_headers_include_optional_token(self):
         with patch.dict(os.environ, {"GITHUB_TOKEN": "secret-token"}, clear=False):
             headers = packaged_updates._headers(api=True)
@@ -107,7 +121,7 @@ class PackagedUpdateTest(unittest.TestCase):
         self.assertEqual(status["remote_sha"], "bbb2222")
         self.assertEqual(
             status["download_url"],
-            "https://github.com/btxbtwn/list-this-vendoo-suite/releases/download/studio-macos/List-This-Studio-macos.zip",
+            "https://github.com/btxbtwn/list-this-vendoo-suite/releases/download/studio-macos/Anteroom-macos.zip",
         )
         self.assertEqual(status["sha256"], "ab" * 32)
         self.assertEqual(status["summary"], "")
@@ -195,20 +209,20 @@ class PackagedUpdateTest(unittest.TestCase):
         self.assertIn("rate limit", message.lower())
 
     def test_extract_app_finds_keepparent_bundle(self):
-        archive = Path(self.tmp.name) / "List-This-Studio-macos.zip"
+        archive = Path(self.tmp.name) / "Anteroom-macos.zip"
         with zipfile.ZipFile(archive, "w") as bundle:
-            bundle.writestr("List This Studio.app/Contents/Info.plist", "plist")
+            bundle.writestr("Anteroom.app/Contents/Info.plist", "plist")
         extracted = packaged_updates._extract_app(archive, Path(self.tmp.name) / "unpacked")
         self.assertTrue(extracted.is_dir())
-        self.assertEqual(extracted.name, "List This Studio.app")
+        self.assertEqual(extracted.name, "Anteroom.app")
 
     def test_extract_app_finds_bundle_next_to_how_to_open(self):
-        archive = Path(self.tmp.name) / "List-This-Studio-macos.zip"
+        archive = Path(self.tmp.name) / "Anteroom-macos.zip"
         with zipfile.ZipFile(archive, "w") as bundle:
             bundle.writestr("How to Open.txt", "open me")
-            bundle.writestr("List This Studio.app/Contents/Info.plist", "plist")
+            bundle.writestr("Anteroom.app/Contents/Info.plist", "plist")
         extracted = packaged_updates._extract_app(archive, Path(self.tmp.name) / "unpacked-guide")
-        self.assertEqual(extracted.name, "List This Studio.app")
+        self.assertEqual(extracted.name, "Anteroom.app")
 
     def test_extract_rejects_traversal_before_ditto(self):
         archive = Path(self.tmp.name) / "unsafe.zip"
@@ -221,7 +235,7 @@ class PackagedUpdateTest(unittest.TestCase):
 
     def test_extract_rejects_escaping_symbolic_links_before_ditto(self):
         archive = Path(self.tmp.name) / "symlink.zip"
-        link = zipfile.ZipInfo("List This Studio.app/Contents/link")
+        link = zipfile.ZipInfo("Anteroom.app/Contents/link")
         link.create_system = 3
         link.external_attr = (stat.S_IFLNK | 0o777) << 16
         with zipfile.ZipFile(archive, "w") as bundle:
@@ -234,7 +248,7 @@ class PackagedUpdateTest(unittest.TestCase):
 
     def test_extract_rejects_absolute_symbolic_links_before_ditto(self):
         archive = Path(self.tmp.name) / "abs-symlink.zip"
-        link = zipfile.ZipInfo("List This Studio.app/Contents/link")
+        link = zipfile.ZipInfo("Anteroom.app/Contents/link")
         link.create_system = 3
         link.external_attr = (stat.S_IFLNK | 0o777) << 16
         with zipfile.ZipFile(archive, "w") as bundle:
@@ -246,11 +260,11 @@ class PackagedUpdateTest(unittest.TestCase):
 
     def test_validate_allows_relative_in_bundle_symbolic_links(self):
         archive = Path(self.tmp.name) / "safe-symlink.zip"
-        link = zipfile.ZipInfo("List This Studio.app/Contents/Frameworks/Python.framework/Versions/Current")
+        link = zipfile.ZipInfo("Anteroom.app/Contents/Frameworks/Python.framework/Versions/Current")
         link.create_system = 3
         link.external_attr = (stat.S_IFLNK | 0o777) << 16
         with zipfile.ZipFile(archive, "w") as bundle:
-            bundle.writestr("List This Studio.app/Contents/Info.plist", "plist")
+            bundle.writestr("Anteroom.app/Contents/Info.plist", "plist")
             bundle.writestr(link, "3.12")
         destination = Path(self.tmp.name) / "safe-symlink-output"
         destination.mkdir()
@@ -259,20 +273,20 @@ class PackagedUpdateTest(unittest.TestCase):
 
     def test_extract_app_accepts_archive_with_relative_symbolic_links(self):
         archive = Path(self.tmp.name) / "safe-symlink-extract.zip"
-        link = zipfile.ZipInfo("List This Studio.app/Contents/Frameworks/Current")
+        link = zipfile.ZipInfo("Anteroom.app/Contents/Frameworks/Current")
         link.create_system = 3
         link.external_attr = (stat.S_IFLNK | 0o777) << 16
         with zipfile.ZipFile(archive, "w") as bundle:
-            bundle.writestr("List This Studio.app/Contents/Info.plist", "plist")
-            bundle.writestr("List This Studio.app/Contents/Frameworks/3.12/marker", "ok")
+            bundle.writestr("Anteroom.app/Contents/Info.plist", "plist")
+            bundle.writestr("Anteroom.app/Contents/Frameworks/3.12/marker", "ok")
             bundle.writestr(link, "3.12")
         extracted = packaged_updates._extract_app(archive, Path(self.tmp.name) / "safe-symlink-extract-output")
-        self.assertEqual(extracted.name, "List This Studio.app")
+        self.assertEqual(extracted.name, "Anteroom.app")
         self.assertTrue((extracted / "Contents" / "Info.plist").is_file())
 
     def test_prepare_app_bundle_makes_launcher_executable(self):
-        app = Path(self.tmp.name) / "List This Studio.app"
-        launcher = app / "Contents" / "MacOS" / "ListThisStudio"
+        app = Path(self.tmp.name) / "Anteroom.app"
+        launcher = app / "Contents" / "MacOS" / "Anteroom"
         launcher.parent.mkdir(parents=True)
         launcher.write_text("#!/bin/sh\n", encoding="utf-8")
         launcher.chmod(0o644)
@@ -280,7 +294,7 @@ class PackagedUpdateTest(unittest.TestCase):
         self.assertTrue(os.access(launcher, os.X_OK))
 
     def test_verify_app_signature_accepts_adhoc_display(self):
-        app = Path(self.tmp.name) / "List This Studio.app"
+        app = Path(self.tmp.name) / "Anteroom.app"
         app.mkdir()
 
         def fake_run(args, capture_output=True, text=True):
@@ -299,7 +313,7 @@ class PackagedUpdateTest(unittest.TestCase):
             packaged_updates._verify_app_signature(app)
 
     def test_verify_app_signature_rejects_unsigned(self):
-        app = Path(self.tmp.name) / "List This Studio.app"
+        app = Path(self.tmp.name) / "Anteroom.app"
         app.mkdir()
 
         def fake_run(args, capture_output=True, text=True):
@@ -320,10 +334,10 @@ class PackagedUpdateTest(unittest.TestCase):
     def test_force_reinstall_downloads_even_when_current(self):
         archive = Path(self.tmp.name) / "payload.zip"
         archive.write_bytes(b"zip-bytes")
-        app = Path(self.tmp.name) / "installed" / "List This Studio.app"
+        app = Path(self.tmp.name) / "installed" / "Anteroom.app"
         (app / "Contents" / "MacOS").mkdir(parents=True)
-        (app / "Contents" / "MacOS" / "List This Studio").write_text("old", encoding="utf-8")
-        new_app = Path(self.tmp.name) / "fresh" / "List This Studio.app"
+        (app / "Contents" / "MacOS" / "Anteroom").write_text("old", encoding="utf-8")
+        new_app = Path(self.tmp.name) / "fresh" / "Anteroom.app"
         (new_app / "Contents" / "MacOS").mkdir(parents=True)
         os.environ["VENDOO_STUDIO_APP_PATH"] = str(app)
         os.environ["VENDOO_STUDIO_DATA_DIR"] = str(Path(self.tmp.name) / "data")
@@ -492,8 +506,8 @@ class PackagedUpdateTest(unittest.TestCase):
 
     def test_replacer_clears_quarantine_before_relaunch(self):
         root = Path(self.tmp.name)
-        app = root / "List This Studio.app"
-        new_app = root / "new" / "List This Studio.app"
+        app = root / "Anteroom.app"
+        new_app = root / "new" / "Anteroom.app"
         (app / "Contents" / "MacOS").mkdir(parents=True)
         os.environ["VENDOO_STUDIO_DATA_DIR"] = str(root / "data")
         script = packaged_updates._write_replacer(app, new_app, 12345)
@@ -507,17 +521,37 @@ class PackagedUpdateTest(unittest.TestCase):
         # Files left over from the old build break the code seal, and Keychain
         # then asks for the password on every launch.
         root = Path(self.tmp.name)
-        app = root / "List This Studio.app"
-        new_app = root / "new" / "List This Studio.app"
+        app = root / "Anteroom.app"
+        new_app = root / "new" / "Anteroom.app"
         (app / "Contents" / "Resources").mkdir(parents=True)
         (app / "Contents" / "Resources" / "stale.js").write_text("old", encoding="utf-8")
         (new_app / "Contents" / "MacOS").mkdir(parents=True)
-        (new_app / "Contents" / "MacOS" / "List This Studio").write_text("new", encoding="utf-8")
+        (new_app / "Contents" / "MacOS" / "Anteroom").write_text("new", encoding="utf-8")
         os.environ["VENDOO_STUDIO_DATA_DIR"] = str(root / "data")
         script = packaged_updates._write_replacer(app, new_app, 999999)
         text = script.read_text(encoding="utf-8").replace("/usr/bin/open ", "/usr/bin/true ")
         subprocess.run(["/bin/bash", "-c", text], check=True)
         self.assertFalse((app / "Contents" / "Resources" / "stale.js").exists())
-        self.assertEqual((app / "Contents" / "MacOS" / "List This Studio").read_text(encoding="utf-8"), "new")
+        self.assertEqual((app / "Contents" / "MacOS" / "Anteroom").read_text(encoding="utf-8"), "new")
         self.assertFalse(app.with_name(f"{app.name}.updating").exists())
         self.assertFalse(app.with_name(f"{app.name}.previous").exists())
+
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("ditto"), "needs macOS ditto")
+    def test_replacer_moves_a_pre_rename_install_to_the_new_name(self):
+        root = Path(self.tmp.name)
+        app = root / "List This Studio.app"
+        new_app = root / "new" / "Anteroom.app"
+        (app / "Contents" / "MacOS").mkdir(parents=True)
+        (app / "Contents" / "MacOS" / "ListThisStudio").write_text("old", encoding="utf-8")
+        (new_app / "Contents" / "MacOS").mkdir(parents=True)
+        (new_app / "Contents" / "MacOS" / "Anteroom").write_text("new", encoding="utf-8")
+        os.environ["VENDOO_STUDIO_DATA_DIR"] = str(root / "data")
+        script = packaged_updates._write_replacer(app, new_app, 999999)
+        text = script.read_text(encoding="utf-8")
+        self.assertIn(f"/usr/bin/open {shlex.quote(str(root / 'Anteroom.app'))}", text)
+        subprocess.run(["/bin/bash", "-c", text.replace("/usr/bin/open ", "/usr/bin/true ")], check=True)
+        self.assertFalse(app.exists())
+        self.assertFalse(app.with_name(f"{app.name}.previous").exists())
+        installed = root / "Anteroom.app"
+        self.assertEqual((installed / "Contents" / "MacOS" / "Anteroom").read_text(encoding="utf-8"), "new")

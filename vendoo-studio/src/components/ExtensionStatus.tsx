@@ -22,8 +22,8 @@ export function extensionConnection(data: ExtensionStatusData | undefined): {
       label: "Outdated",
       tone: "warning",
       detail: [
-        expected ? `This Studio build expects extension ${expected}.` : "This Studio build has a newer extension.",
-        running ? `Chrome is running ${running}.` : "Chrome is not on Studio's copy yet.",
+        expected ? `This Anteroom build expects extension ${expected}.` : "This Anteroom build has a newer extension.",
+        running ? `Chrome is running ${running}.` : "Chrome is not on Anteroom's copy yet.",
         loadPath ? `Load unpacked from ${loadPath}.` : "Load the unpacked folder below.",
         "Connect Chrome reloads that folder so it stays in lockstep.",
       ].join(" "),

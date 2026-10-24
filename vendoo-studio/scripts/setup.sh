@@ -6,7 +6,7 @@ REPO="$(cd "$ROOT/.." && pwd)"
 # shellcheck source=lib.sh
 source "$ROOT/scripts/lib.sh"
 
-echo "List This Studio setup"
+echo "Anteroom setup"
 echo
 
 PYTHON="$(find_python)" || {

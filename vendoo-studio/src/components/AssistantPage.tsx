@@ -43,7 +43,7 @@ function messagesKey(threadId: string) {
 const RECONNECT_MS = 1500;
 const RECONNECT_TRIES = 8;
 const LOST_CONNECTION =
-  "Lost the connection to Studio. If it was still answering, the answer appears here when you come back.";
+  "Lost the connection to Anteroom. If it was still answering, the answer appears here when you come back.";
 /** How an answer points at a listing: `[title](#listing-<id>)`. */
 const LISTING_LINK = /^#listing-([\w-]+)$/;
 
@@ -261,7 +261,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         // The connection may have dropped before Studio ever received the question.
         const saved = queryClient.getQueryData<AssistantMessage[]>(threadKey);
         if (saved && !saved.some((turn) => turn.role === "user" && turn.text === question)) {
-          setError("Could not reach Studio. Check the connection and ask again.");
+          setError("Could not reach Anteroom. Check the connection and ask again.");
           setInput((current) => current || question);
         }
       }
@@ -361,7 +361,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     event.preventDefault();
     const known = queryClient.getQueryData<{ id: string }[]>(["conversations"]);
     if (known && !known.some((listing) => listing.id === id)) {
-      addToast({ type: "warning", title: "That listing is no longer in Studio." });
+      addToast({ type: "warning", title: "That listing is no longer in Anteroom." });
       return;
     }
     onOpenListing(id);

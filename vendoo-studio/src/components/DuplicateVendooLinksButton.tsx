@@ -34,7 +34,7 @@ export function DuplicateVendooLinksButton({ onSelect }: { onSelect: (id: string
         <DialogHeader>
           <DialogTitle>Duplicate Vendoo links</DialogTitle>
           <DialogDescription>
-            Studio listings that share the same Vendoo item. Open a listing to review its link.
+            Anteroom listings that share the same Vendoo item. Open a listing to review its link.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel aria-live="polite">

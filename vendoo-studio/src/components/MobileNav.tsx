@@ -63,7 +63,7 @@ export function MobileNav({
       >
         <div className="flex h-14 shrink-0 items-center gap-1 px-5">
           <SheetTitle className="text-[22px] font-extrabold tracking-[-0.04em]">
-            Vendoo <span className="font-medium text-muted-foreground">Studio</span>
+            Anteroom
           </SheetTitle>
         </div>
         <nav aria-label="Pages" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 pb-3">

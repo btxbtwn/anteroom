@@ -75,7 +75,7 @@ export function ListingBrowserButton({
             variant="ghost"
             size="icon-xs"
             disabled={browserOpen}
-            aria-label="Open the Vendoo draft in Studio"
+            aria-label="Open the Vendoo draft in Anteroom"
             aria-pressed={browserOpen}
             data-pressed={browserOpen ? "" : undefined}
             onClick={() => onOpenBrowser(listingJob.id)}
@@ -85,7 +85,7 @@ export function ListingBrowserButton({
         <Globe2Icon />
       </TooltipTrigger>
       <TooltipPopup side="bottom">
-        Work in the Vendoo draft here: click, type, and point Studio at fields to fill
+        Work in the Vendoo draft here: click, type, and point Anteroom at fields to fill
       </TooltipPopup>
     </Tooltip>
   );

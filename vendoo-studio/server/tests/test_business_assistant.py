@@ -541,7 +541,7 @@ def test_applying_saves_each_listing_as_a_revision_and_skips_what_it_cannot_chan
 
     applied = client.post(f"/api/assistant/messages/{saved['id']}/changes/apply").json()
     assert applied["changes"]["status"] == "applied"
-    assert [item.get("skipped") for item in applied["changes"]["items"]] == [None, None, "It is no longer in Studio."]
+    assert [item.get("skipped") for item in applied["changes"]["items"]] == [None, None, "It is no longer in Anteroom."]
 
     db.expire_all()
     newest = ListingRepo(db).get_revisions(coat)[0]
@@ -566,7 +566,7 @@ def test_a_busy_listing_is_skipped(workspace, monkeypatch):
     _response, saved = propose(client, monkeypatch, changes_reply({"listing": coat, "set": {"asking": 100}}))
     monkeypatch.setattr("vendoo_studio.services.price_markdown.listing_busy", lambda conv_id, db: True)
     applied = client.post(f"/api/assistant/messages/{saved['id']}/changes/apply").json()
-    assert applied["changes"]["items"][0]["skipped"] == "Studio was generating or sending it."
+    assert applied["changes"]["items"][0]["skipped"] == "Anteroom was generating or sending it."
     db.expire_all()
     assert ListingRepo(db).get_revisions(coat)[0].listing_json["price"] == 120
 

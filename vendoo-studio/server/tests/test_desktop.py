@@ -44,13 +44,13 @@ class StudioWindowChromeTest(unittest.TestCase):
         titles = [item.title() for item in menu.itemArray()]
         self.assertEqual(titles, ["Paste"])
 
-    def test_start_kwargs_use_chrome_extension_icon(self):
+    def test_start_kwargs_use_the_app_icon(self):
         with patch.object(desktop, "studio_app_menu", return_value=["menu"]):
             kwargs = desktop.studio_start_kwargs()
-        icon = desktop.extension_app_icon_path()
+        icon = desktop.app_icon_path()
         self.assertIsNotNone(icon)
         self.assertEqual(kwargs["icon"], str(icon))
-        self.assertEqual(icon.name, "icon128.png")
+        self.assertEqual(icon.name, "AppIcon.png")
         self.assertEqual(kwargs["menu"], ["menu"])
 
     def test_studio_app_menu_includes_update_actions(self):
@@ -64,7 +64,7 @@ class StudioWindowChromeTest(unittest.TestCase):
             menus = desktop.studio_app_menu()
         titles = [menu.title for menu in menus]
         self.assertIn("__app__", titles)
-        self.assertIn("Studio", titles)
+        self.assertIn("Anteroom", titles)
         app_menu = next(menu for menu in menus if menu.title == "__app__")
         action_titles = [
             item.title for item in app_menu.items if getattr(item, "title", None)
@@ -109,12 +109,12 @@ class StudioWindowChromeTest(unittest.TestCase):
         reinstall.assert_called_once()
         self.assertTrue(any("Restarting" in str(call.args[0]) for call in notify.call_args_list))
 
-    def test_install_bundle_icon_copies_chrome_extension_png(self):
+    def test_install_bundle_icon_copies_the_app_icon(self):
         with tempfile.TemporaryDirectory() as tmp:
             resources = Path(tmp) / "Resources"
             name = desktop.install_bundle_icon(resources)
             copied = resources / "AppIcon.png"
-            source = desktop.extension_app_icon_path()
+            source = desktop.app_icon_path()
             self.assertTrue(copied.is_file())
             self.assertEqual(copied.read_bytes(), source.read_bytes())
             if (resources / "AppIcon.icns").is_file():
@@ -423,7 +423,7 @@ class WaitForExtensionConnectionTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReapOrphanedBridgesTest(unittest.TestCase):
-    WORKSPACE = "/Users/x/Library/Application Support/List This Studio/cursor-listing-workspace"
+    WORKSPACE = "/Users/x/Library/Application Support/Anteroom/cursor-listing-workspace"
 
     def _run(self, ps_output, killed):
         def fake_kill(pid, sig):

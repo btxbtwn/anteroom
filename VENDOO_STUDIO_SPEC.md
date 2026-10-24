@@ -1,4 +1,4 @@
-# Vendoo Listing Studio Specification
+# Anteroom Specification
 
 ## 1. Objective
 
@@ -15,7 +15,7 @@ Create a purpose-built local web application that lets the user:
 9. Watch progress in the web app, and pull back anything edited in Vendoo.
 
 Clicking **Send to Vendoo** or **Update Vendoo** approves the action directly,
-without a change-preview dialog. Studio prepares the fields, category schemas,
+without a change-preview dialog. Anteroom prepares the fields, category schemas,
 listing revision, item details and photo order before queueing; later edits do
 not rewrite that approval. An update checks the Vendoo draft version before
 writing and stops if it changed. Updates retain Vendoo's existing photos.
@@ -26,7 +26,7 @@ photos stay as they are, and restoration never sends to Vendoo.
 
 The system is local-only, intended for one user, runs one Chrome automation job at a time (additional approved Sends wait in a FIFO queue), and must always stop before publication.
 
-Generation prepares category ids and marketplace fields in the saved Studio
+Generation prepares category ids and marketplace fields in the saved Anteroom
 listing using read-only category/schema requests. Send and Update reuse this
 preparation; price and description edits do not repeat an unchanged field-fill
 pass. Category edits, newly empty fields and changed schemas require a fresh
@@ -59,7 +59,7 @@ The API key previously posted in chat must be rotated. It must not be committed,
 ## 3. System Architecture
 
 ```text
-Vendoo Listing Studio (http://127.0.0.1:4318)
+Anteroom (http://127.0.0.1:4318)
 ├── React frontend
 │   ├── Listing library
 │   ├── Photo workspace
@@ -199,19 +199,19 @@ Mobile and narrow screens use Photos, Chat, Listing, and Automation tabs.
 - Column footers stay independent: sidebar keeps Settings and updates; inspector keeps Send to Vendoo; only the chat column gets a T3-style composer.
 - Chat chrome follows T3 Code: user right, assistant left, no bubble cards. Assistant and user text render as T3-style markdown (GFM tables, headings, lists, inline code). The composer is always visible as a rounded `#111111` pill on `#0a0a0a` with a circular `#346bf1` send control. Empty state keeps Generate Listing when photos exist.
 - Browser preview is a bottom pane in the center column only when the seller opens **Browse draft**. **Send to Vendoo** and **Update Vendoo** run in the background with progress in the editor; they do not open the preview or switch the mobile pane. Collapse the preview when the seller closes it. Do not keep a permanent ~42% split.
-- Browse draft makes the preview interactive, following T3 Code's in-app browser. **Use** forwards pointer, wheel, keyboard, and paste to the Vendoo tab. **Pick**, **Box**, and **Pen** point Studio at fields, and **Missed fields** outlines empty listing fields. Picked fields show as chips in the chat composer. While the draft is open, chat messages go to the fix agent with those fields: it reads the live form, takes one action at a time (Studio's filler first, then clicks and typing), re-reads the form to verify, saves, and replies with the changed values and its steps. It changes only what the seller asked for, skips account settings, pauses when the seller presses, scrolls, or types in the pane, and stops after 24 steps. Input waits while Studio is filling. In the phone layout the pane sends its size and Chrome lays the draft out at that size with touch emulation, a finger on the pane is forwarded as touch (tap, drag to scroll), and **Keyboard** focuses a hidden text box so the phone's keyboard opens and its edits replay on the draft. Fills always run on the desktop layout; the phone layout returns when they finish.
+- Browse draft makes the preview interactive, following T3 Code's in-app browser. **Use** forwards pointer, wheel, keyboard, and paste to the Vendoo tab. **Pick**, **Box**, and **Pen** point Anteroom at fields, and **Missed fields** outlines empty listing fields. Picked fields show as chips in the chat composer. While the draft is open, chat messages go to the fix agent with those fields: it reads the live form, takes one action at a time (Anteroom's filler first, then clicks and typing), re-reads the form to verify, saves, and replies with the changed values and its steps. It changes only what the seller asked for, skips account settings, pauses when the seller presses, scrolls, or types in the pane, and stops after 24 steps. Input waits while Anteroom is filling. In the phone layout the pane sends its size and Chrome lays the draft out at that size with touch emulation, a finger on the pane is forwarded as touch (tap, drag to scroll), and **Keyboard** focuses a hidden text box so the phone's keyboard opens and its edits replay on the draft. Fills always run on the desktop layout; the phone layout returns when they finish.
 - T3 Code blue marks primary actions, selection, and focus; marketplace colors remain sparing.
 - System UI sans handles navigation, controls, and content while the T3 Code mono stack handles measurements, JSON, and technical status.
 - Avoid generic dashboard cards and excessive rounded containers.
 - Persistent status bar for extension and validation state.
 - Fully usable desktop and mobile layouts.
-- Settings → Connections → Remote access enables private Tailscale Serve to the loopback Studio (same process/data as the Mac UI). Copy the HTTPS link for phone browsers on the Tailnet. No native mobile app; Funnel stays off.
+- Settings → Connections → Remote access enables private Tailscale Serve to the loopback Anteroom (same process/data as the Mac UI). Copy the HTTPS link for phone browsers on the Tailnet. No native mobile app; Funnel stays off.
 
 ### Sourcing
 
 - Compare a combined wholesale buy list with supplier-only alternatives using the same purchase budget. Open supplier carts for the seller to review; never purchase or publish automatically.
 - Let sellers set shipping/preparation time and a target selling window. Pass dated window context and recorded sales from comparable calendar periods to sourcing research; show the window and fold historical context into optional details. Follow the canonical seasonal, evidence and selection rules in `skills/box-scout/SKILL.md`.
-- Keep sourcing rules and calculations in `skills/box-scout/`. The Studio service supplies catalog data, model research and saved preferences; it does not maintain a second rule set.
+- Keep sourcing rules and calculations in `skills/box-scout/`. The Anteroom service supplies catalog data, model research and saved preferences; it does not maintain a second rule set.
 - Show dated, linked, AI-reported sold examples, current asking-price comparisons, research recency, purchase costs, operating allowance, estimated profit, break-even sales and a lower-sales sensitivity result. Distinguish validated supplied data from independent source-page verification and measured demand from planning assumptions. Never claim a guaranteed sale or an uncalibrated confidence percentage.
 - Show all checked box variants outside the selected buy list immediately, including when there are no recommendations; do not collapse them or hide same-theme variants. Distinguish available inventory from missing sold evidence and financial exclusions. Explain why each alternative did not qualify using the skill’s decisions. Keep cart links disabled while saved planning preferences differ from the snapshot, including changes made during an ongoing refresh.
 - Store disposable sourcing snapshots and preferences in the local sourcing state file; rebuild obsolete snapshots without losing preferences. No inventory database schema change is needed for this workflow.
@@ -222,7 +222,7 @@ Mobile and narrow screens use Photos, Chat, Listing, and Automation tabs.
 - Search by title, brand, SKU, or job ID.
 - Filter by draft, active, sold, and failed status.
 - Listings wear Vendoo's own Inventory labels — `Draft`, `Active`, `Sold` — taken from the bound item, plus `Failed` for a send that broke. `In progress` shows during MiMo generation or refinement and `Listing` during queued/running Vendoo automation.
-- The label is read-only: Studio reports what Vendoo says and offers no way to set it, so a listing can never claim a state Vendoo does not agree with.
+- The label is read-only: Anteroom reports what Vendoo says and offers no way to set it, so a listing can never claim a state Vendoo does not agree with.
 - Sold listings settle onto the collapsed shelf, so the working list holds what is still sellable.
 - Import the whole Vendoo inventory in one run (sidebar footer), photos included. Items already imported are refreshed only when Vendoo's copy changed, so the run doubles as a sync. A run that reaches the last page also deletes the listings whose Vendoo item is gone, so deleting in Vendoo deletes here; listings never bound to a Vendoo item are left alone, and an inventory that reads as empty deletes nothing.
 - Show last-updated time and completed Vendoo draft link.
@@ -616,7 +616,7 @@ Server-to-extension messages:
 - `browser.act`: agent `click` (by selector, point, or visible text), `type` (focused field only), `press`, `scroll`, and `wait`; the extension refuses publish, list, delist, and delete controls and any action off the open draft
 - `ping`
 
-After a Studio update, the backend copies the bundled extension over the installed copy and sends `extension.reload`. The service worker calls `chrome.runtime.reload()`, then refreshes open marketplace tabs so content scripts pick up the new code.
+After an Anteroom update, the backend copies the bundled extension over the installed copy and sends `extension.reload`. The service worker calls `chrome.runtime.reload()`, then refreshes open marketplace tabs so content scripts pick up the new code.
 
 Extension-to-server messages:
 
@@ -691,7 +691,7 @@ No section is complete when values were merely typed. Completion requires visibl
 - Add the minimum tab permission needed for deterministic tab creation and querying.
 - Add loopback host access for `http://127.0.0.1:4318/*` and the local WebSocket.
 - Keep existing Vendoo and marketplace permissions.
-- Update name, version, and description for Studio integration.
+- Update name, version, and description for Anteroom integration.
 - Do not add `<all_urls>`.
 
 ### `vendoo-extension/background.js`
@@ -720,7 +720,7 @@ sendProgress()
 restoreActiveJob()
 ```
 
-The current `startVendooFill()` assumption that a listing tab already exists must not apply to Studio jobs.
+The current `startVendooFill()` assumption that a listing tab already exists must not apply to Anteroom jobs.
 
 ### `vendoo-extension/content-scripts/vendoo.js`
 
@@ -785,10 +785,10 @@ Structured result example:
 
 ### `vendoo-extension/popup.html` and `popup.js`
 
-- Add Studio connection status.
+- Add Anteroom connection status.
 - Add pairing/unpairing controls.
 - Show active job summary and last error.
-- Add Open Studio action.
+- Add Open Anteroom action.
 - Preserve manual JSON and platform controls as fallback behavior.
 
 ### Documentation
@@ -799,7 +799,7 @@ Update:
 - `vendoo-extension/TROUBLESHOOTING.md`
 - Root `README.md`
 
-Direct marketplace scripts are not part of the primary Studio flow and should remain unchanged unless testing proves a concrete dependency.
+Direct marketplace scripts are not part of the primary Anteroom flow and should remain unchanged unless testing proves a concrete dependency.
 
 ## 13. Save and Audit Requirements
 
@@ -851,9 +851,9 @@ Use a Native Messaging host only if browser-based file assignment is tested and 
 ## 15. Security Requirements
 
 - Bind only to `127.0.0.1`.
-- Optional private Tailscale Serve (Settings → Connections → Remote access) may proxy HTTPS from the Tailnet to that loopback port. Do not enable Tailscale Funnel. Do not bind Studio to `0.0.0.0`.
+- Optional private Tailscale Serve (Settings → Connections → Remote access) may proxy HTTPS from the Tailnet to that loopback port. Do not enable Tailscale Funnel. Do not bind Anteroom to `0.0.0.0`.
 - Store MiMo and Cursor API keys in macOS Keychain.
-- Cursor Listing AI uses the official `cursor-sdk` local agent against an empty scratch workspace under Studio user data (never the product repo). Model default: `composer-2.5`.
+- Cursor Listing AI uses the official `cursor-sdk` local agent against an empty scratch workspace under Anteroom user data (never the product repo). Model default: `composer-2.5`.
 - Redact authorization headers and secrets from logs.
 - Never send the key to React or the extension.
 - Never store the key in SQLite or browser storage.
@@ -876,7 +876,7 @@ Extension logs may include connection state, job ID, step transitions, retries, 
 
 Do not log API keys, pairing tokens, authorization URLs, image bytes, base64 payloads, or full listing content by default.
 
-Each failed job preserves a structured event history viewable in Studio.
+Each failed job preserves a structured event history viewable in Anteroom.
 
 ## 17. Testing Strategy
 
@@ -969,15 +969,15 @@ Live Vendoo smoke test:
 
 ## 19. Relevant Existing Files
 
-- `README.md`: monorepo overview and Studio workflow.
+- `README.md`: monorepo overview and Anteroom workflow.
 - `skills/list-this/SKILL.md`: canonical listing-generation policy.
 - `skills/list-this/references/vendoo_listing_template.md`: JSON and marketplace guidance.
 
 - `skills/list-this/references/vendoo-extension-architecture.md`: current extension architecture.
 - `vendoo-extension/manifest.json`: permissions and extension metadata.
-- `vendoo-extension/background.js`: Studio connection and job orchestration.
+- `vendoo-extension/background.js`: Anteroom connection and job orchestration.
 - `vendoo-extension/content-scripts/vendoo.js`: photo upload and fill/save/audit operations.
-- `vendoo-extension/popup.html`: pairing and Studio status.
+- `vendoo-extension/popup.html`: pairing and Anteroom status.
 - `vendoo-extension/popup.js`: pairing, status, and manual fallback.
 - `vendoo-extension/sample-listing.json`: shared validation and automation fixture.
 - `vendoo-extension/diagnostic-collector.js`: structured failure evidence where applicable.
@@ -1056,7 +1056,7 @@ time zone. Sellers can correct the time zone on historical records.
 ## Ad spend in Marketing
 
 Marketing records spend on Poshmark Promoted Closet and Etsy Ads. Neither
-programme has an API Studio can read and Vendoo does not import ad charges, so
+programme has an API Anteroom can read and Vendoo does not import ad charges, so
 the seller copies each dashboard's figures for a stretch of days: the spend,
 and optionally the clicks, orders, and revenue the dashboard attributes to the
 ads. Entries may overlap and any length works; a week or a month is typical.
@@ -1080,7 +1080,7 @@ removing an entry never writes to a marketplace or to Vendoo.
 
 The Assistant page is a chat about the business as a whole, apart from any
 listing's chat, and it keeps one running conversation of its own. On every
-question Studio builds a fresh brief from its local data and sends it with the
+question Anteroom builds a fresh brief from its local data and sends it with the
 question and the recent turns to the seller's listing provider:
 
 - every listing as one row: id, status, brand, category, size, condition,
@@ -1098,14 +1098,14 @@ budget. Past it the oldest sales and the drafts are left out and the brief says
 how many; the period totals still count them.
 
 **Lookups.** The providers have no tool calling, so the assistant asks for more
-by replying with nothing but one fenced `sql` block. Studio runs that `SELECT`
+by replying with nothing but one fenced `sql` block. Anteroom runs that `SELECT`
 and replies with the rows, up to six times per question, before the answer
 streams; the seller sees only a "Looking up…" status. The query runs against a
 throwaway in-memory SQLite copy built for that question, holding the same rows
 plus each listing's description and full listing JSON, with tables `listings`,
 `price_changes`, `boxes`, `ad_spend`, and `sale_events`. An authorizer allows
 only reads of that copy (no `ATTACH`, `PRAGMA`, or writes), each query has a
-time limit, and results are capped. Studio's real database is never handed to a
+time limit, and results are capped. Anteroom's real database is never handed to a
 query.
 
 **Answers outlive their connection.** An answer runs as a background run in
@@ -1117,7 +1117,7 @@ way. One answer runs at a time; `POST /api/assistant/messages/stop` ends it and
 keeps what was written.
 
 **Links.** An answer names a listing as `[title](#listing-<id>)`; clicking it
-opens that listing in Studio.
+opens that listing in Anteroom.
 
 **Changes.** The assistant can change listings, and only by proposing. When the
 seller asks for a change, or agrees to one it suggested, the answer ends with
@@ -1125,7 +1125,7 @@ one fenced `changes` block: a JSON array of `{"listing": id, "set": {...}}`.
 `set` may hold `asking`, `cost`, `title`, `description`, `brand`, `size`, `sku`,
 `labels` and `box`; condition, colour, category and other marketplace fields
 stay with the listing's own chat. The block never reaches the seller as text.
-Studio checks it against the listings as they are (unknown listings, fields it
+Anteroom checks it against the listings as they are (unknown listings, fields it
 may not set, and values a listing already has are dropped; at most 300
 listings), and stores what is left with the answer in
 `assistant_messages.changes` as a proposal showing each value before and after.
@@ -1148,11 +1148,11 @@ The page draws the proposal as a card under the answer with **Apply** and
 (`POST /api/assistant/messages/{id}/changes/apply`), which saves each listing
 through the listing editor's own save as a new revision with source
 `assistant`, so the listing's revision history can restore it. A listing that
-is gone, or that Studio is generating or sending, is skipped and says why; the
+is gone, or that Anteroom is generating or sending, is skipped and says why; the
 rest apply. A proposal is settled once, and later questions tell the model
 whether it was applied or dismissed.
 
-Applied changes are saved in Studio only. The Assistant never sends, lists,
+Applied changes are saved in Anteroom only. The Assistant never sends, lists,
 delists or publishes, and never calls Vendoo or a marketplace: a listing already
 on Vendoo keeps its old values there until the seller sends it again. Asking a
 question still writes nothing but the conversation and the seller's note.

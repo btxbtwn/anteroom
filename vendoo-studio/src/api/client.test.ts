@@ -41,7 +41,7 @@ describe("Listing action deadlines", () => {
     }).mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, url: "https://web.vendoo.co/app/item/item1", via: "chrome" })));
     vi.stubGlobal("fetch", fetch);
 
-    const first = expect(api.jobs.open("job1")).rejects.toThrow("you do not need to restart Studio");
+    const first = expect(api.jobs.open("job1")).rejects.toThrow("you do not need to restart Anteroom");
     await vi.advanceTimersByTimeAsync(25000);
     await first;
     expect(signal?.aborted).toBe(true);
@@ -70,7 +70,7 @@ describe("Listing action deadlines", () => {
       }),
     );
     vi.stubGlobal("fetch", fetch);
-    const failure = expect(action()).rejects.toThrow("you do not need to restart Studio");
+    const failure = expect(action()).rejects.toThrow("you do not need to restart Anteroom");
     await vi.advanceTimersByTimeAsync(30000);
     await failure;
     expect(fetch).toHaveBeenCalledOnce();

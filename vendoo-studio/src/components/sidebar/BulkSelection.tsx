@@ -49,7 +49,7 @@ export function BulkActionBar({
           type="button"
           variant="outline"
           size="xs"
-          title="Review a lower price for each selected listing. Saves in Studio only; nothing is sent to Vendoo."
+          title="Review a lower price for each selected listing. Saves in Anteroom only; nothing is sent to Vendoo."
           disabled={bulk.running || selectedIds.size === 0}
           onClick={() => setMarkdownIds(eligibleIds.filter((id) => selectedIds.has(id)))}
         >

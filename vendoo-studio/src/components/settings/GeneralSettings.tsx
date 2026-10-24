@@ -33,7 +33,7 @@ function AppearanceSection() {
     <SettingsSection id="appearance" title="Appearance">
       <SettingsRow
         title="Theme"
-        description="Dark matches the Studio workbench. Light inverts the same shell. System follows the OS."
+        description="Dark matches the Anteroom workbench. Light inverts the same shell. System follows the OS."
         control={
           <SettingsSelect<ThemePreference>
             aria-label="Theme"
@@ -104,7 +104,7 @@ function WhatsNewRow() {
     <>
       <SettingsRow
         title="What's new"
-        description="Every change to List This Studio, newest first."
+        description="Every change to Anteroom, newest first."
         control={
           <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
             View changelog

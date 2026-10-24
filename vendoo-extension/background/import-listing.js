@@ -2,7 +2,7 @@
 
 async function importVendooListing(tabId) {
   if (!paired) {
-    return { ok: false, error: 'Studio is not connected' };
+    return { ok: false, error: 'Anteroom is not connected' };
   }
   if (!tabId) {
     return { ok: false, error: 'No active Vendoo tab' };
@@ -47,7 +47,7 @@ async function importVendooListing(tabId) {
   }
   if (!response.ok) {
     const detail = body?.detail;
-    const message = typeof detail === 'string' ? detail : (body?.message || `Studio import failed (${response.status})`);
+    const message = typeof detail === 'string' ? detail : (body?.message || `Anteroom import failed (${response.status})`);
     return { ok: false, error: message };
   }
 

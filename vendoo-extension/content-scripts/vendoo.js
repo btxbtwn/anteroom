@@ -7337,7 +7337,7 @@
               || candidates.find((item) => item.text.startsWith(target))
               || candidates.find((item) => item.text.includes(target)));
       if (!match) return { ok: false, error: `Nothing labeled "${wanted}" is visible` };
-      if (isDangerText(match.text)) return { ok: false, error: `Refused to press "${clickableText(match.el)}". Studio never publishes or deletes listings.` };
+      if (isDangerText(match.text)) return { ok: false, error: `Refused to press "${clickableText(match.el)}". Anteroom never publishes or deletes listings.` };
       match.el.scrollIntoView({ block: 'center', behavior: 'instant' });
       const rect = match.el.getBoundingClientRect();
       return {

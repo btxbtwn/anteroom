@@ -119,7 +119,7 @@ class TailscaleServeTests(unittest.TestCase):
                 with patch.object(ts, "_classify_route", return_value="conflict"):
                     with self.assertRaises(ts.TailscaleServeError) as ctx:
                         ts.disable()
-        self.assertIn("not Studio", str(ctx.exception))
+        self.assertIn("not Anteroom", str(ctx.exception))
 
     def test_dns_name_from_status_json(self):
         payload = {"Self": {"DNSName": "criss-mac-mini-1.tail6c7361.ts.net."}}

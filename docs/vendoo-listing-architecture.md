@@ -111,7 +111,7 @@ works from a content script.
 rather than marketplace ids to scrape. It is how Vendoo's own importer creates
 items in bulk.
 
-### How the create-item form actually saves (the path Studio now uses)
+### How the create-item form actually saves (the path Anteroom now uses)
 
 `create-item-*.js` (a lazy chunk) plus `FirebaseClient.saveItem` in the main
 bundle show the form's own write path for a **new** item. None of it is the
@@ -127,7 +127,7 @@ REST API above:
    envelope `{data: {type: "createItem", payload: {item, subscriptionVersion}}}`,
    same Bearer token.
 4. **Edits** (item already has an id) go straight to Firestore
-   `users/{uid}/items/{itemID}` — not used by Studio.
+   `users/{uid}/items/{itemID}` — not used by Anteroom.
 
 The ID token is in `localStorage["firebase:authUser:<apiKey>:[DEFAULT]"]`
 (`stsTokenManager.accessToken`, refreshable through
@@ -142,7 +142,7 @@ follows `getInitGeneralDetails()` (numbers stored as strings) and every
 status: {notListed: true}, overrides, categorySpecifics, marketplaceSpecifics,
 listingAttemptMessages, sales}` with per-marketplace `marketplaceSpecifics`
 defaults from `getInit<Marketplace>Form()`. `vendoo_item_shape.py` mirrors all of
-these, so an item Studio creates is indistinguishable from a form save.
+these, so an item Anteroom creates is indistinguishable from a form save.
 
 This resolves the `origin: "vendoo"` question: the form path is where that
 origin comes from, so it is native here.
@@ -239,7 +239,7 @@ marketplaceSpecifics  categorySpecifics
 
 **Steps.**
 
-1. **Schema probe.** Add a Studio job that reads N existing items of the user's
+1. **Schema probe.** Add an Anteroom job that reads N existing items of the user's
    own via `GET /api/item/{id}`, unions their shapes, and writes an observed
    schema into the existing catalog index (`vendoo_studio.services.catalog_index`
    already materializes observed schemas — this is a new source, not a new
@@ -266,7 +266,7 @@ Vendoo out.
 that the fragile parts must be data, not code:
 
 - A generic action language (their twelve primitives) executed by a thin extension.
-- Per-marketplace request recipes as **config**, served by Studio's local server,
+- Per-marketplace request recipes as **config**, served by Anteroom's local server,
   not hardcoded in content scripts.
 - A session/token extractor per marketplace (cookie name, storage key, CSRF header).
 - `declarativeNetRequest` rules for `Origin`/`Referer`/CORS, per their `corsRules.json`.
@@ -276,7 +276,7 @@ that the fragile parts must be data, not code:
 
 | | Approach | Draft state? |
 |---|---|---|
-| eBay | Official API, OAuth2, `sell.inventory` bulk endpoints (25/call) — the only clean path; do this server-side in Studio | Yes, unpublished offers |
+| eBay | Official API, OAuth2, `sell.inventory` bulk endpoints (25/call) — the only clean path; do this server-side in Anteroom | Yes, unpublished offers |
 | Etsy | Official API v3, `createDraftListing`, one call per listing | Yes, native drafts |
 | Poshmark | `vm-rest` replay: create post → upload media → *stop before* `status/published` | Yes, if we don't publish |
 | Depop | `webapi.depop.com` replay | Draft support needs verifying |
@@ -329,7 +329,7 @@ Both paths now have a first layer in the tree.
   token refresh), `upload_photo`, `new_item_id`, `subscription`,
   `create_item`, `get_item`, `category_search`. One `job.vendoo_api`
   message carries an ordered op list; the first failure stops it.
-- Routes: `POST /api/jobs/{id}/vendoo-api/probe` (no ids → every item Studio
+- Routes: `POST /api/jobs/{id}/vendoo-api/probe` (no ids → every item Anteroom
   already knows), `POST /api/jobs/{id}/vendoo-api/create` (binds the new item
   to the conversation and job, records unresolved fields and the diff).
 - Still needs a live session to confirm: the callable's exact acceptance of
@@ -354,7 +354,7 @@ Both paths now have a first layer in the tree.
   state, so their `list_item` raises `PublishNotAllowed` unless the job opts
   in explicitly. This implements "decide later" on the invariant without
   blocking the build.
-- Not yet wired: a Studio route/job that chooses a marketplace and calls
+- Not yet wired: an Anteroom route/job that chooses a marketplace and calls
   `list_item`; category/condition/size id resolvers per marketplace (the
   Vendoo `/api/category/search` path from Plan A is the obvious source);
   Mercari persisted-query capture.
@@ -363,7 +363,7 @@ Both paths now have a first layer in the tree.
 
 1. **Plan A now.** It is a strict accuracy improvement, conflicts with nothing,
    and is mostly ordinary mapping code.
-2. **eBay and Etsy official APIs next**, server-side in Studio. Real APIs, real
+2. **eBay and Etsy official APIs next**, server-side in Anteroom. Real APIs, real
    drafts, no ToS exposure, and eBay's bulk endpoints are genuinely good.
 3. **Poshmark / Depop / Mercari replay last, if at all** — and only after the
    invariant and ToS questions above are answered deliberately.

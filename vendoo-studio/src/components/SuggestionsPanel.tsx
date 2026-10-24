@@ -83,7 +83,7 @@ export function SuggestionsPanel({
       variant="ghost"
       size="xs"
       className="mx-2 mt-1 mb-0.5 self-start"
-      title="Review a lower price for each stale listing. Saves in Studio only; nothing is sent to Vendoo."
+      title="Review a lower price for each stale listing. Saves in Anteroom only; nothing is sent to Vendoo."
       onClick={() => setMarkdownIds(staleIds)}
     >
       {markDownStaleLabel(staleIds.length)}

@@ -489,7 +489,7 @@ async def view_box(
     view = BoxView(box_id=str(box.get("id") or ""), title=str(box.get("title") or ""),
                    store=str(box.get("store") or ""), url=box.get("url") or None)
     if not view.url:
-        view.error = "Studio has no product page for this box"
+        view.error = "Anteroom has no product page for this box"
         return view
     fetch_url, headers, kind = page_request(view.url)
     try:

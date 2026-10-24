@@ -5,7 +5,7 @@
 #   ./scripts/restore-db.sh <snapshot.db>           # asks before replacing
 #   ./scripts/restore-db.sh <snapshot.db> --yes     # no prompt
 #
-# Quit Studio first. The current database is snapshotted before it is
+# Quit Anteroom first. The current database is snapshotted before it is
 # replaced, so a restore onto the wrong copy is itself reversible.
 set -euo pipefail
 
@@ -32,7 +32,7 @@ DATABASE="$(PYTHONPATH="$ROOT/server" "$PYTHON" -c 'from vendoo_studio.config im
 # Replacing that file underneath it mixes two databases together.
 PORT="$(PYTHONPATH="$ROOT/server" "$PYTHON" -c 'from vendoo_studio.config import PORT; print(PORT)')"
 if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
-  echo "Studio is running on port ${PORT}. Quit it first, then run this again." >&2
+  echo "Anteroom is running on port ${PORT}. Quit it first, then run this again." >&2
   exit 69
 fi
 
@@ -82,4 +82,4 @@ fi
 rm -f "${DATABASE}-wal" "${DATABASE}-shm"
 mv "$STAGED" "$DATABASE"
 
-echo "Restored. Start Studio and check your listings."
+echo "Restored. Start Anteroom and check your listings."

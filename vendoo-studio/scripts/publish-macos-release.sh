@@ -3,16 +3,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="$(cd "$ROOT/.." && pwd)"
-ZIP="$ROOT/release/List-This-Studio-macos.zip"
+ZIP="$ROOT/release/Anteroom-macos.zip"
+# Builds from before the rename update from this asset; see package-macos-app.sh.
+LEGACY_ZIP="$ROOT/release/List-This-Studio-macos.zip"
 INFO="$ROOT/release/build_info.json"
 TAG="${VENDOO_STUDIO_RELEASE_TAG:-studio-macos}"
-DEFAULT_TITLE="List This Studio (macOS)"
+DEFAULT_TITLE="Anteroom (macOS)"
 GITHUB_REPO="${VENDOO_STUDIO_GITHUB_REPO:-btxbtwn/list-this-vendoo-suite}"
 
-if [[ ! -f "$ZIP" ]]; then
-  echo "Missing $ZIP. Run scripts/package-macos-app.sh first." >&2
-  exit 1
-fi
+for archive in "$ZIP" "$LEGACY_ZIP"; do
+  if [[ ! -f "$archive" ]]; then
+    echo "Missing $archive. Run scripts/package-macos-app.sh first." >&2
+    exit 1
+  fi
+done
 if [[ ! -f "$INFO" ]]; then
   echo "Missing $INFO. Run scripts/package-macos-app.sh first." >&2
   exit 1
@@ -88,13 +92,13 @@ PY
 # refreshes it, so the page can read months old beside a zip built minutes ago.
 # State the build date in the notes, where it is accurate.
 CHANGES="$(python3 -c 'import json,sys; print("\n".join("- [#{number}]({url}) {title}".format(**p) for p in json.loads(sys.argv[1])))' "$PULL_REQUESTS_JSON")"
-NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull requests\n%s\n\nInstall\n1. Unzip List-This-Studio-macos.zip\n2. Move List This Studio.app into Applications\n3. Control-click the app and choose Open (first launch only)\n4. In Settings, sign in with ChatGPT or add a MiMo API key\n5. Click Connect Chrome, load the listing extension once, and sign in to Vendoo\n\nNeeds macOS 13+ and Google Chrome. Listing data stays on this Mac.\n' "${VERSION:-unknown}" "$BUILT_AT" "$SHA" "$REF" "${CHANGES:-- None detected}")
+NOTES=$(printf 'version: %s\nbuilt: %s\nsha: %s\nref: %s\n\nIncluded pull requests\n%s\n\nInstall\n1. Unzip Anteroom-macos.zip\n2. Move Anteroom.app into Applications\n3. Control-click the app and choose Open (first launch only)\n4. In Settings, sign in with ChatGPT or add a MiMo API key\n5. Click Connect Chrome, load the listing extension once, and sign in to Vendoo\n\nNeeds macOS 13+ and Google Chrome. Listing data stays on this Mac.\n' "${VERSION:-unknown}" "$BUILT_AT" "$SHA" "$REF" "${CHANGES:-- None detected}")
 
 if [[ "$RELEASE_EXISTS" == 1 ]]; then
-  gh release upload "$TAG" "$ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
+  gh release upload "$TAG" "$ZIP" "$LEGACY_ZIP" "$INFO" --clobber --repo "$GITHUB_REPO"
   gh release edit "$TAG" --title "$TITLE" --notes "$NOTES" --latest --repo "$GITHUB_REPO"
 else
-  gh release create "$TAG" "$ZIP" "$INFO" \
+  gh release create "$TAG" "$ZIP" "$LEGACY_ZIP" "$INFO" \
     --latest \
     --title "$TITLE" \
     --notes "$NOTES" \

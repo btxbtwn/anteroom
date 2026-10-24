@@ -7,7 +7,7 @@ body:
     attributes:
       label: Component
       options:
-        - Vendoo Listing Studio
+        - Anteroom
         - Chrome extension
         - list-this skills
         - CI / repo hygiene

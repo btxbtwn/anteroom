@@ -27,9 +27,9 @@ export function frontendBuildState(
     title: outdated
       ? [
           `This window is running the ${version} UI${build.short_sha ? ` (${build.short_sha})` : ""}.`,
-          `Studio itself is on ${backend}.`,
+          `Anteroom itself is on ${backend}.`,
           "Reload the page. If it keeps saying stale, the interface did not rebuild after the last update:",
-          "quit and reopen List This Studio; it rebuilds the interface on launch, or reinstall from the latest release.",
+          "quit and reopen Anteroom; it rebuilds the interface on launch, or reinstall from the latest release.",
         ].join(" ")
       : undefined,
   };

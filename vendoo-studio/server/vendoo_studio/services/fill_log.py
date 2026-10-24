@@ -792,7 +792,7 @@ class FillLogService:
                     entry.reason = "Does not apply to this item"
                 elif entry.status == "not_applicable":
                     entry.status = "skipped"
-                    entry.reason = "Saved in Studio; needs Fill on Vendoo"
+                    entry.reason = "Saved in Anteroom; needs Fill on Vendoo"
                 updated += 1
         if updated:
             self._db.commit()

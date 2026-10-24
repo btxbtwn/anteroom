@@ -1074,7 +1074,7 @@ def listing_save_summary(
         if missing or discovered:
             parts = []
             if missing:
-                parts.append(f"{missing} required field(s) still missing in Studio")
+                parts.append(f"{missing} required field(s) still missing in Anteroom")
             if discovered:
                 parts.append("some discovered fields are still empty")
             return (
@@ -1086,7 +1086,7 @@ def listing_save_summary(
     if missing or discovered:
         parts = []
         if missing:
-            parts.append(f"{missing} required field(s) still missing in Studio")
+            parts.append(f"{missing} required field(s) still missing in Anteroom")
         if discovered:
             # No count: Forms and chat would otherwise quote two different
             # numbers for "empty fields" and read as contradicting each other.
@@ -1097,7 +1097,7 @@ def listing_save_summary(
             + ". Review Forms for what still needs chat, then Send when ready."
         )
     return (
-        f"{lead}. Required and discovered Studio fields are filled. "
+        f"{lead}. Required and discovered Anteroom fields are filled. "
         "Review Forms, then Send when the draft looks right."
     )
 

@@ -10,10 +10,10 @@ export const OPTIONS_RULE =
   "When a field lists options, every value you send for it must be copied from that list verbatim "
   + "(same spelling, spacing and capitalization). Anything outside the list — \"Other\", \"Mixed\", "
   + "\"Unknown\" — fails validation again. If nothing in the list fits, send that field with an empty "
-  + "value (\"value\": \"\") to clear whatever is there now, and say why in prose. Studio remembers an explicit blank answer "
+  + "value (\"value\": \"\") to clear whatever is there now, and say why in prose. Anteroom remembers an explicit blank answer "
   + "as reviewed and stops asking for that optional field again. "
   + "If an optional field truly does not apply to the item, also set \"status\": \"not_applicable\" "
-  + "on that row so Studio remembers it and excludes it from Ask chat. Missing evidence or no "
+  + "on that row so Anteroom remembers it and excludes it from Ask chat. Missing evidence or no "
   + "suitable dropdown option alone does not mean a field is not applicable.";
 
 const GENERAL_FIELD_ALIASES: Record<string, string> = {

@@ -18,14 +18,14 @@ class BundleSymlinkTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_flatten_replaces_relative_symlinks(self):
-        app = self.root / "List This Studio.app" / "Contents"
+        app = self.root / "Anteroom.app" / "Contents"
         versions = app / "Frameworks" / "Python.framework" / "Versions"
         real = versions / "3.12"
         real.mkdir(parents=True)
         (real / "Python").write_text("bin", encoding="utf-8")
         current = versions / "Current"
         current.symlink_to("3.12")
-        count = bundle_symlinks.flatten_symlinks(self.root / "List This Studio.app")
+        count = bundle_symlinks.flatten_symlinks(self.root / "Anteroom.app")
         self.assertEqual(count, 1)
         self.assertFalse(current.is_symlink())
         self.assertTrue(current.is_dir())
@@ -42,19 +42,19 @@ class BundleSymlinkTest(unittest.TestCase):
             bundle_symlinks.flatten_symlinks(app)
 
     def test_flattened_tree_zips_without_symlink_members(self):
-        app = self.root / "List This Studio.app" / "Contents" / "MacOS"
+        app = self.root / "Anteroom.app" / "Contents" / "MacOS"
         app.mkdir(parents=True)
-        (app / "List This Studio").write_text("bin", encoding="utf-8")
-        sibling = self.root / "List This Studio.app" / "Contents" / "Resources"
+        (app / "Anteroom").write_text("bin", encoding="utf-8")
+        sibling = self.root / "Anteroom.app" / "Contents" / "Resources"
         sibling.mkdir(parents=True)
         (sibling / "marker").write_text("ok", encoding="utf-8")
-        link = self.root / "List This Studio.app" / "Contents" / "Frameworks"
+        link = self.root / "Anteroom.app" / "Contents" / "Frameworks"
         link.symlink_to("Resources")
-        bundle_symlinks.flatten_symlinks(self.root / "List This Studio.app")
+        bundle_symlinks.flatten_symlinks(self.root / "Anteroom.app")
 
         archive = self.root / "out.zip"
         with zipfile.ZipFile(archive, "w") as zf:
-            base = self.root / "List This Studio.app"
+            base = self.root / "Anteroom.app"
             for path in base.rglob("*"):
                 if path.is_dir():
                     continue
@@ -65,11 +65,11 @@ class BundleSymlinkTest(unittest.TestCase):
 
     def test_assert_zip_has_no_symlinks_fails_on_link_member(self):
         archive = self.root / "linked.zip"
-        link = zipfile.ZipInfo("List This Studio.app/Contents/Current")
+        link = zipfile.ZipInfo("Anteroom.app/Contents/Current")
         link.create_system = 3
         link.external_attr = (stat.S_IFLNK | 0o777) << 16
         with zipfile.ZipFile(archive, "w") as zf:
-            zf.writestr("List This Studio.app/Contents/Info.plist", "plist")
+            zf.writestr("Anteroom.app/Contents/Info.plist", "plist")
             zf.writestr(link, "3.12")
         with self.assertRaises(bundle_symlinks.BundleSymlinkError):
             bundle_symlinks.assert_zip_has_no_symlinks(archive)

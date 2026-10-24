@@ -286,7 +286,7 @@ export function App() {
         ? "Queue"
       : activeView === "sourcing"
         ? "Sourcing"
-        : String(selectedListing?.title || "Vendoo Studio");
+        : String(selectedListing?.title || "Anteroom");
   const assistantThreadTitle = assistantThreads.data?.find((thread) => thread.id === assistantThreadId)?.title ?? null;
   const crumbs = workspaceCrumbs(
     activeView,
@@ -516,7 +516,7 @@ export function App() {
     if (bulk.running) {
       toastManager.add({
         type: "warning",
-        title: "Studio is already working through a batch",
+        title: "Anteroom is already working through a batch",
         description: "Generate these from the sidebar's Regenerate button when it finishes.",
       });
       return;
@@ -828,7 +828,7 @@ export function App() {
                 <Empty className="flex-1 overflow-y-auto">
                   <EmptyHeader>
                     <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
-                    <EmptyDescription>Pick up where Studio suggests, or start a new listing.</EmptyDescription>
+                    <EmptyDescription>Pick up where Anteroom suggests, or start a new listing.</EmptyDescription>
                   </EmptyHeader>
                   <EmptyContent className="max-w-md">
                     <SuggestionsPanel

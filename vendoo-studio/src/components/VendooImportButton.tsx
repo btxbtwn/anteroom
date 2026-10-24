@@ -96,7 +96,7 @@ export function VendooImportButton({ variant = "sidebar" }: { variant?: "sidebar
       [
         "Sync every listing from Vendoo?",
         "",
-        "Studio reads your whole Vendoo inventory and syncs a listing for each item,",
+        "Anteroom reads your whole Vendoo inventory and syncs a listing for each item,",
         "photos and all. Expect it to run for a while and to use real disk space.",
         "Items already imported are only refreshed when they changed in Vendoo,",
         "and a listing whose Vendoo item you deleted is deleted here too.",

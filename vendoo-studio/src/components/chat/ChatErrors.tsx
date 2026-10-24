@@ -7,14 +7,14 @@ import { isResumableGenerateFailure } from "./chatStream";
 function streamErrorHint(activeProbe: Job | undefined, streamText: string): string {
   return activeProbe
     ? isResumableGenerateFailure(streamText || "")
-      ? "Studio is still discovering fields in Chrome. Retry reconnects — use Cancel discovery only if Chrome is stuck."
+      ? "Anteroom is still discovering fields in Chrome. Retry reconnects — use Cancel discovery only if Chrome is stuck."
       : `Active discovery job: ${activeProbe.current_step || activeProbe.status}. Cancel it here if Chrome is stuck, then retry.`
     : /connection dropped/i.test(streamText || "")
-      ? "This is a client/network failure, not a model refusal. Retry resumes the same generate when Studio still has it running."
+      ? "This is a client/network failure, not a model refusal. Retry resumes the same generate when Anteroom still has it running."
       : /timed out during|category selection timed out/i.test(streamText || "")
         ? "The listing model or Chrome step stalled. Retry generate. Cancel discovery only if the Listing tab shows a stuck probe."
       : /HTTP 5\d\d/i.test(streamText || "")
-        ? "Studio hit an internal error before the model answered. Retry; if it keeps failing, check Studio logs or restart Studio."
+        ? "Anteroom hit an internal error before the model answered. Retry; if it keeps failing, check Anteroom logs or restart Anteroom."
         : /HTTP \d+/i.test(streamText || "")
           ? "The generate request was rejected before streaming started. Check Settings (provider sign-in / API key), then retry."
           : "";

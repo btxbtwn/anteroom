@@ -266,7 +266,7 @@ function CheckCard({
             </span>
           </div>
           {check.comps ? (
-            <SourcingDetails summary="Sold listings Studio found">
+            <SourcingDetails summary="Sold listings Anteroom found">
               <SoldCompsCard text={check.comps} />
             </SourcingDetails>
           ) : null}

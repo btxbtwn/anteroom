@@ -60,7 +60,7 @@ export function formatClientStreamError(
       `Error: ${actionLabel} connection dropped${stageBit}.${probeBit} `
       + (probeActive
         ? "Retry reconnects to the same generate — only Cancel discovery if Chrome is stuck."
-        : "Retry to resume. If this keeps happening on mobile, use a stronger connection or desktop Studio.")
+        : "Retry to resume. If this keeps happening on mobile, use a stronger connection or Anteroom on desktop.")
     );
   }
 

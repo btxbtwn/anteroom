@@ -188,8 +188,8 @@ class BatchMarkdownRouteTest(unittest.TestCase):
         self.assertEqual(tee["revision_id"], self.listings.get_revisions(self.tee.id)[0].id)
         self.assertEqual(rows[self.coat.id]["suggested_price"], 108)
         self.assertEqual(rows[empty.id]["skip_reason"], "Listing has no price to drop")
-        self.assertEqual(rows[busy.id]["skip_reason"], "Studio is generating or sending this listing")
-        self.assertEqual(rows["missing"]["skip_reason"], "It is no longer in Studio")
+        self.assertEqual(rows[busy.id]["skip_reason"], "Anteroom is generating or sending this listing")
+        self.assertEqual(rows["missing"]["skip_reason"], "It is no longer in Anteroom")
         self.assertEqual(self.listings.get_revisions(self.tee.id)[0].source, "generation")
 
     def test_apply_saves_price_drop_revisions_and_never_queues_a_send(self):
@@ -251,7 +251,7 @@ class BatchMarkdownRouteTest(unittest.TestCase):
         body = res.json()
         self.assertEqual([row["conversation_id"] for row in body["applied"]], [self.coat.id])
         self.assertEqual(body["skipped"], [
-            {"conversation_id": self.tee.id, "reason": "Studio is generating or sending this listing"},
+            {"conversation_id": self.tee.id, "reason": "Anteroom is generating or sending this listing"},
         ])
 
     def test_empty_batches_are_rejected(self):

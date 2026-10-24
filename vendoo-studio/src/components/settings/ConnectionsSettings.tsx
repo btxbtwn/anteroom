@@ -100,13 +100,13 @@ export function ConnectionsSettings() {
         <ExtensionConnectionRow />
         <SettingsRow
           title="Vendoo in Chrome"
-          description="Connect Chrome opens Vendoo in your everyday Chrome and reloads Studio's listing extension so it matches this build. Send to Vendoo creates or updates a draft over Vendoo's API using that signed-in session."
+          description="Connect Chrome opens Vendoo in your everyday Chrome and reloads Anteroom's listing extension so it matches this build. Send to Vendoo creates or updates a draft over Vendoo's API using that signed-in session."
           control={<ConnectChromeButton className={buttonVariants({ size: "xs", variant: "outline" })} />}
         />
         <SettingsRow
           id="extension-folder"
           title="Listing extension folder"
-          description="Copy this path. In chrome://extensions turn on Developer mode, click Load unpacked, press Control-Shift-G (⌘⇧G) to search for the folder, paste the path, then Open. Studio overwrites this folder on launch so Chrome and Studio stay on the same files."
+          description="Copy this path. In chrome://extensions turn on Developer mode, click Load unpacked, press Control-Shift-G (⌘⇧G) to search for the folder, paste the path, then Open. Anteroom overwrites this folder on launch so Chrome and Anteroom stay on the same files."
         >
           <ExtensionLoadPath compact hideHint />
         </SettingsRow>
@@ -192,7 +192,7 @@ function TailscaleHttpsRow() {
     <SettingsRow
       id="tailscale-https"
       title="Tailscale HTTPS"
-      description="Share this Mac's Studio with your phone over your private Tailnet. Studio stays on 127.0.0.1; Tailscale proxies HTTPS. Funnel stays off."
+      description="Share this Mac's Anteroom with your phone over your private Tailnet. Anteroom stays on 127.0.0.1; Tailscale proxies HTTPS. Funnel stays off."
       control={control}
     >
       {isError ? (
@@ -229,7 +229,7 @@ function TailscaleStatusDetails({
   if (!data.enabled || !data.url) {
     return (
       <SettingsNote>
-        After Enable, open the HTTPS link on any device on your Tailnet — same Studio, same listings.
+        After Enable, open the HTTPS link on any device on your Tailnet — same Anteroom, same listings.
       </SettingsNote>
     );
   }
@@ -251,7 +251,7 @@ function TailscaleStatusDetails({
         </Button>
       </div>
       <SettingsNote>
-        On your phone: Tailscale app signed in → Safari/Chrome → paste this link. You are not running a second Studio.
+        On your phone: Tailscale app signed in → Safari/Chrome → paste this link. You are not running a second copy of Anteroom.
       </SettingsNote>
     </div>
   );

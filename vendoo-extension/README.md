@@ -1,6 +1,6 @@
 # Vendoo Multi-Platform Lister - Chrome Extension MVP
 
-Studio users: **Connect Chrome** in List This Studio opens everyday Chrome. Load this folder unpacked there once (`chrome://extensions/` → Developer mode → Load unpacked). Zip users load `~/Library/Application Support/List This Studio/vendoo-extension`. The steps below are the same load path, plus the manual paste-and-fill popup.
+Anteroom users: **Connect Chrome** in Anteroom opens everyday Chrome. Load this folder unpacked there once (`chrome://extensions/` → Developer mode → Load unpacked). Zip users load `~/Library/Application Support/Anteroom/vendoo-extension`. The steps below are the same load path, plus the manual paste-and-fill popup.
 
 Flow A: Paste JSON → Fill Vendoo first → Sequential fill for eBay/Poshmark/Mercari/Depop/Etsy (draft-only)
 
@@ -111,14 +111,14 @@ Every permission in `manifest.json` has a caller. Remove a permission when its l
 | Permission | Why |
 |---|---|
 | `activeTab` | **Diagnose Page** inspects whatever tab is active when you click it. |
-| `storage` | Keeps the Studio pairing token, the active job, the preview window id, and popup drafts. |
+| `storage` | Keeps the Anteroom pairing token, the active job, the preview window id, and popup drafts. |
 | `scripting` | Injects fill helpers and the diagnostic collector into marketplace tabs. |
 | `downloads` | Saves the **Diagnose Page** JSON report. |
 | `tabs` | Finds, opens, and focuses the Vendoo tab for a fill job. |
-| `debugger` | Streams the live browser preview into Studio through the DevTools protocol. |
+| `debugger` | Streams the live browser preview into Anteroom through the DevTools protocol. |
 | `system.display` | Places the automation window inside a real display work area. |
 
-Host permissions cover Vendoo, the five marketplaces, and Studio on `127.0.0.1:4318` only.
+Host permissions cover Vendoo, the five marketplaces, and Anteroom on `127.0.0.1:4318` only.
 
 ## Development
 

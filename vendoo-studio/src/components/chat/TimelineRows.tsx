@@ -258,7 +258,7 @@ export function AssistantMessageRow({
   return (
     <div className="group/assistant" data-message-role="assistant">
       <div className="relative min-w-0 px-1 py-0.5">
-        <h3 className="sr-only select-none">Studio</h3>
+        <h3 className="sr-only select-none">Anteroom</h3>
         <div data-citation-source={messageId}>
           <ChatMarkdown text={text} isStreaming={streaming} className={CHAT_PROSE_CLASS} />
         </div>

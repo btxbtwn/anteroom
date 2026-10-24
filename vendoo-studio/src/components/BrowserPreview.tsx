@@ -82,7 +82,7 @@ function CloseIcon() {
 
 const TOOLS: { id: Tool; label: string; title: string }[] = [
   { id: "interact", label: "Use", title: "Click, scroll, and type in the Vendoo draft" },
-  { id: "pick", label: "Pick", title: "Click a field to point Studio at it" },
+  { id: "pick", label: "Pick", title: "Click a field to point Anteroom at it" },
   { id: "box", label: "Box", title: "Drag a box around fields" },
   { id: "pen", label: "Pen", title: "Circle fields freehand" },
 ];
@@ -808,7 +808,7 @@ export function BrowserPreview({
             <button
               type="button"
               className="browser-tool"
-              title="Point Studio at every empty field on the page, including ones scrolled out of view"
+              title="Point Anteroom at every empty field on the page, including ones scrolled out of view"
               disabled={!controlsEnabled}
               onClick={() => addFields(missedFields)}
             >
@@ -821,7 +821,7 @@ export function BrowserPreview({
             </button>
           )}
           <span className="browser-tools-status">
-            {automationRunning ? "Studio is filling this draft" : tool === "interact" ? "You are driving" : "Annotating"}
+            {automationRunning ? "Anteroom is filling this draft" : tool === "interact" ? "You are driving" : "Annotating"}
           </span>
         </div>
       )}

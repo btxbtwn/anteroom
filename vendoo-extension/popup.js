@@ -118,10 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (chrome.runtime.lastError) return;
       if (!resp) return;
       if (resp.connected) {
-        studioStatusText.textContent = 'Studio: Connected';
+        studioStatusText.textContent = 'Anteroom: Connected';
         studioStatusText.style.color = '#4caf50';
       } else {
-        studioStatusText.textContent = 'Studio: Disconnected';
+        studioStatusText.textContent = 'Anteroom: Disconnected';
         studioStatusText.style.color = '#999';
       }
       if (resp.active_job_id) {
@@ -152,7 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
         importStudioBtn.disabled = true;
-        showStatus('info', 'Importing listing into Studio...');
+        showStatus('info', 'Importing listing into Anteroom...');
         chrome.runtime.sendMessage({ type: 'IMPORT_VENDOO_LISTING', tabId }, (resp) => {
           importStudioBtn.disabled = false;
           if (chrome.runtime.lastError) {
@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
           const photoNote = resp.photo_count ? ` • ${resp.photo_count} photos` : '';
-          showStatus('success', `${resp.reused ? 'Updated' : 'Imported'} ${resp.listing_title || 'listing'} in Studio${photoNote}`);
+          showStatus('success', `${resp.reused ? 'Updated' : 'Imported'} ${resp.listing_title || 'listing'} in Anteroom${photoNote}`);
           if (Array.isArray(resp.photo_warnings) && resp.photo_warnings.length) {
             log(resp.photo_warnings.join('\n'));
           }

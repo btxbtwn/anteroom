@@ -11,6 +11,8 @@ SPECDIR = Path(SPECPATH)
 STUDIO = SPECDIR.parent
 REPO = STUDIO.parent
 ICON = SPECDIR / "AppIcon.icns"
+# Also set as the Dock icon at runtime; see desktop.app_icon_path.
+APP_ICON_PNG = SPECDIR / "AppIcon.png"
 BUILD_INFO = SPECDIR / "build_info.json"
 VERSION_FILE = STUDIO / "VERSION"
 CHANGELOG_FILE = REPO / "CHANGELOG.md"
@@ -98,6 +100,8 @@ if SEED.is_file():
     datas.append((str(SEED), "data"))
 if BUILD_INFO.is_file():
     datas.append((str(BUILD_INFO), "."))
+if APP_ICON_PNG.is_file():
+    datas.append((str(APP_ICON_PNG), "desktop"))
 if VERSION_FILE.is_file():
     datas.append((str(VERSION_FILE), "."))
 if CHANGELOG_FILE.is_file():
@@ -122,7 +126,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="List This Studio",
+    name="Anteroom",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -139,16 +143,16 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="List This Studio",
+    name="Anteroom",
 )
 app = BUNDLE(
     coll,
-    name="List This Studio.app",
+    name="Anteroom.app",
     icon=str(ICON) if ICON.exists() else None,
     bundle_identifier="local.listthis.studio",
     info_plist={
-        "CFBundleName": "List This Studio",
-        "CFBundleDisplayName": "List This Studio",
+        "CFBundleName": "Anteroom",
+        "CFBundleDisplayName": "Anteroom",
         "CFBundleShortVersionString": "0.1.0",
         "CFBundleVersion": "0.1.0",
         "LSMinimumSystemVersion": "13.0",

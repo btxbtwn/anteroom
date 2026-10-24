@@ -200,7 +200,7 @@ export function bulkRegenerateWarning(count: number): string {
   const each = count === 1 ? "the listing is" : "each listing is";
   return [
     `Rewrite ${noun} from scratch?`,
-    `Chat and every generated field are discarded, then ${each} written again from its photos and item details. Measurements, flaws, COG, labels and notes are kept. Vendoo stays as it is until you send again. Studio rewrites one listing at a time.`,
+    `Chat and every generated field are discarded, then ${each} written again from its photos and item details. Measurements, flaws, COG, labels and notes are kept. Vendoo stays as it is until you send again. Anteroom rewrites one listing at a time.`,
   ].join("\n");
 }
 
