@@ -23,6 +23,16 @@
   .thread-sidebar {
     padding-top: var(--workspace-topbar-height);
   }
+
+  /* The listings view's tab strip spans the main pane and the inspector, so it
+     takes the clearance itself and the panels below it start flush. */
+  .listing-tab-strip {
+    margin-top: var(--workspace-topbar-height);
+  }
+
+  .listing-tab-strip ~ .workspace-body > .panel {
+    padding-top: 0;
+  }
 }
 
 .app-content {

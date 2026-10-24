@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.312 — 2026-10-24
+
+- In Inventory, the open-listing tabs sit below the top bar again instead of overlapping the listing title.
+
 ## 0.1.311 — 2026-10-24
 
 - The top bar now blends into the window like T3 Code's: the listings sidebar, the main pane and the right panel each run to the top edge in their own colour, and the page title sits in the main pane.
