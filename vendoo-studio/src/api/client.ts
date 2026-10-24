@@ -58,6 +58,7 @@ import { readSse } from "./sse";
 import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
+import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
 
 const BASE = "/api";
 
@@ -352,6 +353,23 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prefs),
       }),
+  },
+  directConnections: {
+    status: () => request<DirectConnectionsStatus>("/marketplace-accounts"),
+    connect: (marketplace: DirectMarketplace) =>
+      request<{ authorizeUrl: string }>(`/marketplace-accounts/${marketplace}/connect`, { method: "POST" }),
+    cancel: (marketplace: DirectMarketplace) =>
+      request<OkResponse>(`/marketplace-accounts/${marketplace}/connect`, { method: "DELETE" }),
+    disconnect: (marketplace: DirectMarketplace) =>
+      request<OkResponse>(`/marketplace-accounts/${marketplace}`, { method: "DELETE" }),
+  },
+  marketplaceSales: {
+    list: (options: { state?: MarketplaceSaleState; conversationId?: string } = {}) => {
+      const params = new URLSearchParams({ state: options.state ?? "new" });
+      if (options.conversationId) params.set("conversation_id", options.conversationId);
+      return request<{ sales: MarketplaceSale[] }>(`/marketplace-sales?${params}`);
+    },
+    dismiss: (saleId: string) => request<OkResponse>(`/marketplace-sales/${saleId}/dismiss`, { method: "POST" }),
   },
   vendooApi: {
     listingFields: (convId: string) =>

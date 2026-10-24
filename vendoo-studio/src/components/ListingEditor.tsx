@@ -12,6 +12,7 @@ import { ListingHistory } from "./ListingHistory";
 import { blockerTarget, matchingEditorField } from "./listingChanges";
 import { VendooSyncStatus } from "./VendooSyncStatus";
 import { OpenListingButton } from "./OpenListingButton";
+import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
 import { ETSY_INELIGIBLE_NOTICE } from "./etsyEligibility";
@@ -411,6 +412,15 @@ export function ListingEditor({
           {data?.can_send && !generating && <Badge variant="success">Ready</Badge>}
         </div>
       </div>
+
+      <SoldElsewhereNotice
+        convId={convId}
+        openInVendoo={
+          listingJob ? (
+            <OpenListingButton jobId={listingJob.id} vendooItemId={importedItemId} vendooUrl={importedUrl} />
+          ) : null
+        }
+      />
 
       {!etsyEligible && (marketplaceSettings?.selected ?? ["etsy"]).includes("etsy") && (
         <Alert variant="info" role="status" className="mx-3 mt-2.5 shrink-0">

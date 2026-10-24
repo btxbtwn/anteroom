@@ -18,6 +18,11 @@ BRAVE_ACCOUNT = "brave-search-api-key"
 CURSOR_ACCOUNT = "cursor-api-key"
 CHATGPT_ACCOUNT = "chatgpt-codex-oauth"
 CHATGPT_MODELS_ACCOUNT = "chatgpt-models"
+# This Mac's registration with Anteroom's relay: {"deviceId", "token"}.
+RELAY_DEVICE_ACCOUNT = "relay-device"
+# Direct marketplace sign-ins, by marketplace: {"ebay": {accountId, label,
+# accessToken, refreshToken, expiresAt, refreshExpiresAt}, "etsy": {...}}.
+MARKETPLACE_ACCOUNTS_ACCOUNT = "marketplace-accounts"
 LEGACY_ACCOUNTS = (KEYRING_ACCOUNT, BRAVE_ACCOUNT, CHATGPT_ACCOUNT, CHATGPT_MODELS_ACCOUNT)
 # Set once the legacy sweep has run. Without it a consolidated item written
 # while the Keychain was unreadable — carrying only what was set at that
@@ -271,6 +276,52 @@ def set_chatgpt_tokens(tokens: dict):
 
 def delete_chatgpt_tokens():
     _delete(CHATGPT_ACCOUNT)
+
+
+def _get_json(account: str) -> dict | None:
+    raw = _get(account)
+    try:
+        value = json.loads(raw) if raw else None
+    except Exception:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def get_relay_device() -> dict | None:
+    device = _get_json(RELAY_DEVICE_ACCOUNT)
+    if device and device.get("deviceId") and device.get("token"):
+        return device
+    return None
+
+
+def set_relay_device(device: dict):
+    _set(RELAY_DEVICE_ACCOUNT, json.dumps(device))
+
+
+def delete_relay_device():
+    _delete(RELAY_DEVICE_ACCOUNT)
+
+
+def get_marketplace_accounts() -> dict:
+    return _get_json(MARKETPLACE_ACCOUNTS_ACCOUNT) or {}
+
+
+def set_marketplace_account(marketplace: str, account: dict):
+    with _lock:
+        accounts = get_marketplace_accounts()
+        accounts[marketplace] = account
+        _set(MARKETPLACE_ACCOUNTS_ACCOUNT, json.dumps(accounts))
+
+
+def delete_marketplace_account(marketplace: str):
+    with _lock:
+        accounts = get_marketplace_accounts()
+        if accounts.pop(marketplace, None) is None:
+            return
+        if accounts:
+            _set(MARKETPLACE_ACCOUNTS_ACCOUNT, json.dumps(accounts))
+        else:
+            _delete(MARKETPLACE_ACCOUNTS_ACCOUNT)
 
 
 REASONING_LADDER = ("none", "low", "medium", "high", "xhigh", "max")

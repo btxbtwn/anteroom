@@ -725,7 +725,16 @@ async def list_item(conv_id: str, body: ListRequest, db: Session = Depends(get_d
 
 @router.post("/api/conversations/{conv_id}/vendoo-api/delist")
 async def delist_item(conv_id: str, body: ListRequest, db: Session = Depends(get_db)):
-    """Take this conversation's listings down. Seller-triggered only."""
+    """Take this conversation's listings down. Seller-triggered only.
+
+    Does not delist Vendoo's extension marketplaces. Vendoo's web app delists
+    Mercari, Poshmark, Depop, Grailed, Facebook, Vinted and the rest of its
+    EXTENSION_MARKETPLACES from the browser, through its own extension, and
+    only then marks the item delisted; this backend call never reaches those
+    sites, yet can leave the item marked delisted. Only its API marketplaces
+    (eBay, Etsy, Whatnot, Sellwild, Shopify) are delisted server-side, and that
+    is untested against a live listing. Nothing in Studio calls this route.
+    """
     return await _list_or_delist(conv_id, body, db, delist=True)
 
 

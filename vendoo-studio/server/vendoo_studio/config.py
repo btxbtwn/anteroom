@@ -111,6 +111,10 @@ def ensure_user_data_dirs() -> None:
 adopt_legacy_data_dir()
 ensure_user_data_dirs()
 
+# Anteroom's relay on Cloudflare: eBay and Etsy sale notifications and sign-in.
+# Studio only ever connects out to it.
+RELAY_URL = os.environ.get("VENDOO_STUDIO_RELAY_URL", "https://relay.anteroom.workers.dev").rstrip("/")
+
 HOST = os.environ.get("VENDOO_STUDIO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("VENDOO_STUDIO_PORT", "4318"))
 

@@ -218,6 +218,20 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["categories", "extract", "sync", "taxonomy"],
   },
   {
+    id: "direct-ebay",
+    title: "eBay sale alerts",
+    section: "connections",
+    targetId: "direct-ebay",
+    searchTerms: ["ebay", "sold", "sale", "delist", "connect", "sign in", "notification"],
+  },
+  {
+    id: "direct-etsy",
+    title: "Etsy sale alerts",
+    section: "connections",
+    targetId: "direct-etsy",
+    searchTerms: ["etsy", "sold", "sale", "delist", "connect", "sign in", "notification"],
+  },
+  {
     id: "tailscale-https",
     title: "Tailscale HTTPS",
     section: "connections",
