@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.310 — 2026-10-23
+
+- Sizing checks no longer flag a listing just because its tag writes the size another way. A tag reading Large, LARGE (12/14), 2X, XXL or X-Large now matches L, 2XL or XL, and photos where no size could be read are no longer counted as a different size. The business assistant's sizing counts shrink to the listings that really disagree.
+
 ## 0.1.309 — 2026-10-22
 
 - Studio stops asking for your Keychain password every time it opens. Updates used to leave files from older versions inside the app, so macOS no longer recognised it as the app you had allowed. Updates now replace the app whole. The update that brings this fix is still installed the old way, so you may be asked once more after it.
