@@ -182,3 +182,9 @@ That writes `vendoo-studio/release/Anteroom-macos.zip`. When you intend to publi
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for PR checks and [`AGENTS.md`](AGENTS.md) for product invariants.
 
 CI on pull requests and `main` lints, tests, and builds Anteroom, lints and tests the backend, syntax-checks and unit-tests the extension, validates skill JSON, and scans the tree for secrets. See the [CI workflow](.github/workflows/ci.yml) for the full checks and the [product specification](VENDOO_STUDIO_SPEC.md) for architecture.
+
+## Acknowledgments
+
+Anteroom includes code adapted from [T3 Code](https://github.com/pingdotgg/t3code), including UI components, theme styles, chat controls, and usage-limit helpers. Thanks to T3 Tools Inc. and the T3 Code contributors for making that work available under the MIT license.
+
+The full copyright and license text is in the [third-party notices](vendoo-studio/public/third-party-notices.txt), which are also included in Anteroom app builds. Original attribution comments remain in the adapted source files.
