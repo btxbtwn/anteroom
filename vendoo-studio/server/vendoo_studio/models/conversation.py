@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, UTC
 
-from sqlalchemy import JSON, Column, String, Text, DateTime, Integer, ForeignKey
+from sqlalchemy import JSON, Column, String, Text, DateTime, Integer, ForeignKey, Index
 from sqlalchemy.orm import relationship
 
 from vendoo_studio.database import Base
@@ -38,6 +38,8 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    # Chat history and the activity poll read one listing's messages by time.
+    __table_args__ = (Index("ix_messages_conversation_id_created_at", "conversation_id", "created_at"),)
 
     id = Column(String, primary_key=True, default=new_id)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False)
@@ -57,7 +59,7 @@ class Photo(Base):
     __tablename__ = "photos"
 
     id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False)
+    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
     original_filename = Column(String, nullable=False)
     stored_filename = Column(String, nullable=False)
     mime_type = Column(String, nullable=False)

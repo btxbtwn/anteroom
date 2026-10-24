@@ -8,6 +8,7 @@ import logging
 import re
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,12 @@ _rebuild_running = False
 _INDEX = None
 _INDEX_FINGERPRINT: str | None = None
 _STALE = False
+# When the fingerprint last matched the published index. Every search checks
+# it, and computing it counts 48k category rows, so a match is trusted for a
+# little while. Writers that change the catalog mark it stale, which forces
+# the next search to check again.
+_FINGERPRINT_CHECKED_AT = 0.0
+FINGERPRINT_RECHECK_SEC = 30.0
 # The category leaves are most of the index (tens of thousands of docs) and
 # change only when a category tree syncs. They get an index of their own, kept
 # in memory and saved to disk, so a learned schema or a restart does not pay to
@@ -87,15 +94,17 @@ def catalog_meta_path() -> Path:
 
 
 def mark_catalog_index_stale() -> None:
-    global _STALE
+    global _STALE, _FINGERPRINT_CHECKED_AT
     with _INDEX_LOCK:
         _STALE = True
+        _FINGERPRINT_CHECKED_AT = 0.0
 
 
 def reset_catalog_index_cache() -> None:
     """Drop the in-memory index (tests and forced rebuilds)."""
-    global _INDEX, _INDEX_FINGERPRINT, _STALE, _CATEGORY_INDEX, _CATEGORY_FINGERPRINT
+    global _INDEX, _INDEX_FINGERPRINT, _STALE, _CATEGORY_INDEX, _CATEGORY_FINGERPRINT, _FINGERPRINT_CHECKED_AT
     with _INDEX_LOCK:
+        _FINGERPRINT_CHECKED_AT = 0.0
         _INDEX = None
         _INDEX_FINGERPRINT = None
         _STALE = True
@@ -561,10 +570,21 @@ def ensure_catalog_index(db: Session) -> dict[str, Any]:
     for as long as that build took. Search uses the previous index, or the
     lexical fallback, until the background rebuild publishes.
     """
+    global _FINGERPRINT_CHECKED_AT
+    with _INDEX_LOCK:
+        recently_matched = (
+            not _STALE
+            and _INDEX is not None
+            and time.monotonic() - _FINGERPRINT_CHECKED_AT < FINGERPRINT_RECHECK_SEC
+        )
+    if recently_matched:
+        return {"ok": True, "rebuilt": False}
     fp = fingerprint(db)
     fp_text = json.dumps(fp, sort_keys=True)
     with _INDEX_LOCK:
         needs = _index_needs_rebuild(fp_text)
+        if not needs:
+            _FINGERPRINT_CHECKED_AT = time.monotonic()
     if not needs:
         return {"ok": True, "rebuilt": False, "fingerprint": fp}
     try:

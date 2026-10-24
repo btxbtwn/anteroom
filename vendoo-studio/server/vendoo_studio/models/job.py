@@ -32,7 +32,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(String, primary_key=True, default=new_id)
-    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False)
+    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
     approved_revision_id = Column(String, nullable=False)
     listing_snapshot = Column(JSON, nullable=False)
     status = Column(String, default="queued")

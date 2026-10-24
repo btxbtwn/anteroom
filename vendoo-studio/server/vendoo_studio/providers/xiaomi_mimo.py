@@ -84,8 +84,9 @@ def _encode_image(path: str, max_side: int | None = VISION_MAX_SIDE) -> str:
     return _encode_image_cached(path, stat.st_mtime_ns, stat.st_size, max_side)
 
 
-# Bounded so a long session holds at most a few dozen encoded photos (~0.5 MB each).
-@functools.lru_cache(maxsize=48)
+# Room for twenty listings generating at once (five-odd photos at two sizes)
+# without evicting each other's photos mid-run. A 1600px encoding is ~0.7 MB.
+@functools.lru_cache(maxsize=160)
 def _encode_image_cached(path: str, _mtime_ns: int, _size: int, max_side: int | None) -> str:
     raw_ok = path.rsplit(".", 1)[-1].lower() in ("jpg", "jpeg", "png", "webp")
     if raw_ok and not image_exceeds(path, max_side):
@@ -105,7 +106,8 @@ def _encode_image_cached(path: str, _mtime_ns: int, _size: int, max_side: int | 
             if img.mode not in ("RGB", "L"):
                 img = img.convert("RGB")
             buf = BytesIO()
-            img.save(buf, format="JPEG", quality=VISION_JPEG_QUALITY, optimize=True)
+            # No optimize=True: it saved 0.5% of the bytes for 2.6x the encode CPU.
+            img.save(buf, format="JPEG", quality=VISION_JPEG_QUALITY)
     except Exception:
         return _raw_data_url(path)
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
