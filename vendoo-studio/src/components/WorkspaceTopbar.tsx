@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactElement } from "react";
+import type { MouseEvent, ReactElement, ReactNode } from "react";
 import { PanelLeftCloseIcon, PanelLeftIcon, PanelRightCloseIcon, PanelRightIcon } from "lucide-react";
 import { Toggle } from "./ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -16,6 +16,8 @@ interface Props {
   onToggleSidebar: () => void;
   /** The view's right-hand panel (the listing inspector or the assistant's chats), `null` when it has none. */
   rightPanel: RightPanel | null;
+  /** Replaces the crumbs, as the listings view's open-listing tabs. */
+  children?: ReactNode;
 }
 
 export interface RightPanel {
@@ -70,7 +72,7 @@ function PanelToggle({
  * the window's top edge in their own colours. With the listings sidebar open the
  * toggle sits over the sidebar and the crumbs start 20px into the main pane.
  */
-export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPanel }: Props) {
+export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPanel, children }: Props) {
   return (
     <header className="workspace-topbar absolute inset-x-0 top-0 z-2 flex h-(--workspace-topbar-height) items-center gap-2 pr-2.5 pl-(--topbar-inset) select-none [--topbar-inset:--spacing(3)] max-[900px]:hidden [html.desktop-app_&]:[--topbar-inset:var(--traffic-light-inset)]">
       {/* The pywebview window drags by this layer; controls sit above it. */}
@@ -91,19 +93,26 @@ export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPan
           {sidebarOpen ? <PanelLeftCloseIcon className="size-4" /> : <PanelLeftIcon className="size-4" />}
         </PanelToggle>
       </div>
-      <div
-        className={`relative flex h-7 min-w-0 flex-1 items-center gap-2 text-sm leading-none tracking-tight${sidebarOpen ? " pl-3" : ""}`}
-      >
-        <span className="shrink-0 text-muted-foreground">{crumbs.context}</span>
-        {crumbs.title ? (
-          <>
-            <span className="shrink-0 text-muted-foreground/60" aria-hidden="true">/</span>
-            <span className="min-w-0 truncate font-medium text-foreground" title={crumbs.title}>
-              {crumbs.title}
-            </span>
-          </>
-        ) : null}
-      </div>
+      {children ? (
+        // Empty space beside the children still drags the window.
+        <div className={`pointer-events-none relative flex h-7 min-w-0 flex-1 items-center${sidebarOpen ? " pl-3" : ""}`}>
+          {children}
+        </div>
+      ) : (
+        <div
+          className={`relative flex h-7 min-w-0 flex-1 items-center gap-2 text-sm leading-none tracking-tight${sidebarOpen ? " pl-3" : ""}`}
+        >
+          <span className="shrink-0 text-muted-foreground">{crumbs.context}</span>
+          {crumbs.title ? (
+            <>
+              <span className="shrink-0 text-muted-foreground/60" aria-hidden="true">/</span>
+              <span className="min-w-0 truncate font-medium text-foreground" title={crumbs.title}>
+                {crumbs.title}
+              </span>
+            </>
+          ) : null}
+        </div>
+      )}
       {rightPanel === null ? null : (
         <div className="relative ml-auto flex min-w-0 items-center gap-1">
           <PanelToggle
