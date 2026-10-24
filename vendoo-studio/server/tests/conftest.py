@@ -125,7 +125,6 @@ def _keychain_memory_is_pristine():
     def reset() -> None:
         keychain._store = None
         keychain._store_readable = False
-        keychain._warmed = False
         keychain._touched.clear()
         keychain._deleted.clear()
 

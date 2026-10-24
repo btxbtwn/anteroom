@@ -43,17 +43,33 @@ jobs:
           cache: npm
           cache-dependency-path: vendoo-studio/package-lock.json
       - name: Import signing certificate
+        # PR runners have no signing secrets. Only main produces an installable
+        # release; PRs below check packaging with an ephemeral test certificate.
         env:
           CERT_P12_BASE64: ${{ secrets.MACOS_SIGNING_CERT_P12_BASE64 }}
           CERT_PASSWORD: ${{ secrets.MACOS_SIGNING_CERT_PASSWORD }}
         run: |
           if [[ -z "$CERT_P12_BASE64" ]]; then
-            echo "No signing certificate secret; the app will be ad-hoc signed."
-            exit 0
+            if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+              echo "MACOS_SIGNING_CERT_P12_BASE64 is required to preserve Keychain access across releases." >&2
+              exit 1
+            fi
+            # Exercise certificate signing on PRs without a production key.
+            openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+              -subj "/CN=List This Studio Signing/" \
+              -addext "extendedKeyUsage=codeSigning" \
+              -addext "keyUsage=digitalSignature" \
+              -keyout "$RUNNER_TEMP/signing.key" -out "$RUNNER_TEMP/signing.crt"
+            openssl pkcs12 -export -inkey "$RUNNER_TEMP/signing.key" \
+              -in "$RUNNER_TEMP/signing.crt" -out "$RUNNER_TEMP/signing.p12" \
+              -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -passout pass:
+            rm -f "$RUNNER_TEMP/signing.key" "$RUNNER_TEMP/signing.crt"
+            CERT_PASSWORD=""
+          else
+            echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
           fi
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
-          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 3600 "$KEYCHAIN"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
@@ -72,6 +88,39 @@ jobs:
           "$PYTHON" -m pip install -U pip
           "$PYTHON" -m pip install -e ".[package]"
           ./scripts/package-macos-app.sh
+      - name: Verify native Keychain updates preserve the existing item
+        working-directory: vendoo-studio
+        run: |
+          .venv/bin/python - <<'PY'
+          import uuid
+          from Security import (
+              SecItemAdd, SecItemCopyMatching, SecItemDelete,
+              kSecClass, kSecClassGenericPassword, kSecAttrService,
+              kSecAttrAccount, kSecAttrLabel, kSecReturnAttributes,
+              kSecReturnData, kSecValueData,
+          )
+          from vendoo_studio.services.macos_keychain import set_password
+
+          query = {
+              kSecClass: kSecClassGenericPassword,
+              kSecAttrService: f"vendoo-studio-ci-{uuid.uuid4()}",
+              kSecAttrAccount: "test-only",
+          }
+          try:
+              status, _ = SecItemAdd({
+                  **query, kSecAttrLabel: "preserve-this-label", kSecValueData: b"before",
+              }, None)
+              assert status == 0, status
+              set_password(query[kSecAttrService], query[kSecAttrAccount], "after")
+              status, item = SecItemCopyMatching({
+                  **query, kSecReturnAttributes: True, kSecReturnData: True,
+              }, None)
+              assert status == 0, status
+              assert item[kSecAttrLabel] == "preserve-this-label", "Keychain item was recreated"
+              assert bytes(item[kSecValueData]) == b"after", "Keychain value was not updated"
+          finally:
+              SecItemDelete(query)
+          PY
       - name: Verify update zip symlinks are safe
         working-directory: vendoo-studio
         env:
@@ -107,6 +156,10 @@ jobs:
           echo "$DETAIL"
           if [[ "$DETAIL" == *"not signed at all"* ]]; then
             echo "Packaged app is unsigned." >&2
+            exit 1
+          fi
+          if [[ "$DETAIL" == *"Signature=adhoc"* ]]; then
+            echo "Ad-hoc signing cannot preserve the app's Keychain identity across updates." >&2
             exit 1
           fi
           PYTHON_FW="$APP/Contents/Frameworks/Python.framework/Versions/3.12/Python"

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from vendoo_studio.services import keychain
@@ -34,6 +36,15 @@ class FakeKeyring:
 
 class KeychainTest(unittest.TestCase):
     def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        flag = patch.object(keychain, "_migration_flag_path", return_value=Path(temp.name) / "keychain-migrated")
+        flag.start()
+        self.addCleanup(flag.stop)
+        # These tests use a fake keyring, including on macOS CI.
+        platform = patch.object(keychain.sys, "platform", "linux")
+        platform.start()
+        self.addCleanup(platform.stop)
         self._reset()
 
     def tearDown(self):
@@ -46,7 +57,6 @@ class KeychainTest(unittest.TestCase):
     def _reset():
         keychain._store = None
         keychain._store_readable = False
-        keychain._warmed = False
         # Which accounts a process claims to have changed is per-process state
         # too; leaking it between tests makes one test's writes override
         # another's disk contents.
@@ -140,8 +150,8 @@ class KeychainTest(unittest.TestCase):
         # for. The secrets item itself is re-read before each write so a stale
         # cache cannot roll back another process's newer value.
         self.assertEqual(set(fake.reads), {keychain.SECRETS_ACCOUNT})
-        # warm_keychain re-saves once to rebind the item to this binary.
-        self.assertEqual(fake.writes, [keychain.SECRETS_ACCOUNT])
+        # Reading at launch must preserve the item's ACL and creation date.
+        self.assertEqual(fake.writes, [])
 
     def test_set_and_delete_update_the_one_item(self):
         fake = self.use(FakeKeyring())
@@ -170,7 +180,58 @@ class KeychainTest(unittest.TestCase):
 
         fake.denied.clear()
         keychain.set_brave_api_key("BSA-new")
-        self.assertEqual(fake.store(), {keychain.KEYRING_ACCOUNT: "sk-mimo", keychain.BRAVE_ACCOUNT: "BSA-new"})
+        self.assertEqual(fake.store(), {
+            keychain.KEYRING_ACCOUNT: "sk-mimo", keychain.BRAVE_ACCOUNT: "BSA-new",
+            keychain.MIGRATION_MARKER: "1",
+        })
+
+    def test_denied_launch_read_recovers_without_restarting(self):
+        tokens = {"access_token": "access", "refresh_token": "refresh"}
+        stored = json.dumps({
+            keychain.CHATGPT_ACCOUNT: json.dumps(tokens), keychain.MIGRATION_MARKER: "1",
+        })
+        fake = self.use(FakeKeyring({keychain.SECRETS_ACCOUNT: stored}, denied={keychain.SECRETS_ACCOUNT}))
+        self.assertFalse(keychain.warm_keychain()["chatgpt"])
+        fake.denied.clear()
+        self.assertEqual(keychain.get_chatgpt_tokens(), tokens)
+        self.assertEqual(fake.writes, [])
+
+    def test_failed_token_save_is_reported_and_retained_for_retry(self):
+        self.use(FakeKeyring())
+        tokens = {"access_token": "access", "refresh_token": "rotated"}
+        with patch.object(keychain, "_write_password", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "Could not save the ChatGPT sign-in"):
+                keychain.set_chatgpt_tokens(tokens)
+        self.assertEqual(keychain.get_chatgpt_tokens(), tokens)
+        self.assertIn(keychain.CHATGPT_ACCOUNT, keychain._touched)
+        keychain.set_chatgpt_tokens(tokens)
+        keychain._store = None
+        self.assertEqual(keychain.get_chatgpt_tokens(), tokens)
+
+    def test_macos_uses_nondestructive_writer(self):
+        from keyring.backends.macOS import Keyring
+
+        with (
+            patch.object(keychain.sys, "platform", "darwin"),
+            patch.object(keychain, "_keyring") as keyring_module,
+            patch("vendoo_studio.services.macos_keychain.set_password") as write,
+        ):
+            keyring_module.return_value.get_keyring.return_value = Keyring()
+            self.assertTrue(keychain._write_password(keychain.SECRETS_ACCOUNT, "payload"))
+            keyring_module.return_value.set_password.assert_not_called()
+        write.assert_called_once_with(keychain.KEYRING_SERVICE, keychain.SECRETS_ACCOUNT, "payload")
+
+    def test_macos_keeps_test_writes_in_the_configured_memory_backend(self):
+        fake = FakeKeyring()
+        module = types.SimpleNamespace(get_keyring=lambda: fake, set_password=fake.set_password)
+        with (
+            patch.object(keychain.sys, "platform", "darwin"),
+            patch.object(keychain, "_keyring", return_value=module),
+            patch("vendoo_studio.services.macos_keychain.set_password") as native_write,
+        ):
+            self.assertTrue(keychain._write_password(keychain.SECRETS_ACCOUNT, "test-only"))
+        native_write.assert_not_called()
+        self.assertEqual(fake.items[keychain.SECRETS_ACCOUNT], "test-only")
 
 
 class StaleCacheTest(KeychainTest):
@@ -211,6 +272,16 @@ class StaleCacheTest(KeychainTest):
         keychain.set_api_key("sk-mine")
         self.assertEqual(fake.store()[keychain.KEYRING_ACCOUNT], "sk-mine")
 
+    def test_saved_tokens_are_not_replayed_over_another_process_rotation(self):
+        fake = self.use(FakeKeyring())
+        keychain.set_chatgpt_tokens({"access_token": "old", "refresh_token": "used"})
+        rotated = {"access_token": "new", "refresh_token": "rotated"}
+        fake.items[keychain.SECRETS_ACCOUNT] = json.dumps({
+            **fake.store(), keychain.CHATGPT_ACCOUNT: json.dumps(rotated),
+        })
+        keychain.set_chatgpt_models(reasoning_effort="high")
+        self.assertEqual(json.loads(fake.store()[keychain.CHATGPT_ACCOUNT]), rotated)
+
     def test_a_delete_still_removes_it(self):
         fake = self.use(FakeKeyring({
             keychain.SECRETS_ACCOUNT: json.dumps({
@@ -244,7 +315,6 @@ class ResignedBuildTest(KeychainTest):
         # is the whole point of recording the migration there.
         keychain._store = None
         keychain._store_readable = False
-        keychain._warmed = False
         keychain._touched.clear()
         keychain._deleted.clear()
         second = self.use(FakeKeyring({keychain.KEYRING_ACCOUNT: "sk-from-2-days-ago"}))

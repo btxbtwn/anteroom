@@ -26,6 +26,8 @@ Pushes to `main` that touch Anteroom, the extension, or listing skills also buil
 
 The packaged app does not git-pull. **Check for updates** compares the stamped build SHA against the GitHub release and, if newer, downloads the zip, replaces the `.app`, and relaunches. All Anteroom data stays in `~/Library/Application Support/Anteroom` (listings, photos, drafts, hidden fields, settings, fill logs, logs). API keys remain in macOS Keychain. Settings → Data shows the folder path.
 
+Release builds require `MACOS_SIGNING_IDENTITY` to name the same persistent code-signing certificate across updates. CI imports it from `MACOS_SIGNING_CERT_P12_BASE64` and `MACOS_SIGNING_CERT_PASSWORD`; release packaging fails if the certificate is missing. Ad-hoc signatures change the app's Keychain identity on every build. Moving from an older ad-hoc build may require allowing Keychain access once. Credentials are updated in place and are never rewritten at startup.
+
 The recipient:
 
 1. Unzips the archive and moves **Anteroom** into Applications.

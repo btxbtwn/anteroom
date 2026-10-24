@@ -14,6 +14,13 @@ ZIP="$RELEASE/Anteroom-macos.zip"
 LEGACY_ZIP="$RELEASE/List-This-Studio-macos.zip"
 LEGACY_APP_NAME="List This Studio.app"
 
+SIGN_IDENTITY="${MACOS_SIGNING_IDENTITY:-}"
+if [[ -z "$SIGN_IDENTITY" || "$SIGN_IDENTITY" == "-" ]]; then
+  echo "MACOS_SIGNING_IDENTITY must name a persistent code-signing certificate." >&2
+  echo "Ad-hoc signing changes the app's Keychain identity on every update and loses saved sign-ins." >&2
+  exit 1
+fi
+
 if [[ ! -x "$PYTHON" ]]; then
   echo "Create the Python environment first:" >&2
   echo "  cd $ROOT && python3.12 -m venv .venv && source .venv/bin/activate && pip install -e '.[package]'" >&2
@@ -123,7 +130,6 @@ for pattern in ("*.dist-info", "*.egg-info"):
             removed += 1
 print(f"Removed {removed} package-metadata directories before deep sign")
 PY
-SIGN_IDENTITY="${MACOS_SIGNING_IDENTITY:--}"
 echo "Deep-signing app with identity: $SIGN_IDENTITY"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
 CODESIGN_DV="$(codesign -dv "$APP" 2>&1)" || {
@@ -142,15 +148,12 @@ if ! codesign --verify "$APP" 2>verify.err; then
   fi
   echo "codesign --verify reported a non-fatal warning; continuing."
 fi
-if [[ -n "${MACOS_SIGNING_IDENTITY:-}" ]]; then
-  REQUIREMENT="$(codesign -d -r- "$APP" 2>&1)"
-  echo "$REQUIREMENT"
-  if [[ "$REQUIREMENT" != *"certificate leaf"* ]]; then
-    echo "Signed app has no certificate-based designated requirement." >&2
-    exit 1
-  fi
-else
-  echo "MACOS_SIGNING_IDENTITY is not set; ad-hoc signed (Keychain re-prompts after updates)." >&2
+REQUIREMENT="$(codesign -d -r- "$APP" 2>&1)"
+echo "$REQUIREMENT"
+if [[ "$CODESIGN_DV" == *"Signature=adhoc"* ]] || \
+   [[ "$REQUIREMENT" != *"certificate leaf"* && "$REQUIREMENT" != *"anchor "* ]]; then
+  echo "Signed app has no certificate-based designated requirement." >&2
+  exit 1
 fi
 
 PAYLOAD="$RELEASE/payload"
