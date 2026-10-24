@@ -8,7 +8,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.312 — 2026-10-24
 
-- In Inventory, the open-listing tabs sit below the top bar again instead of overlapping the listing title.
+- In Inventory, your open listings now show as tabs in the top bar, so they no longer overlap the title and the listing starts right under the bar.
 
 ## 0.1.311 — 2026-10-24
 

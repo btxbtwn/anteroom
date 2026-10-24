@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { PlusIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
+import { stopTitlebarDrag } from "./WorkspaceTopbar";
 
 interface Props {
   tabs: { id: string; title: string }[];
@@ -36,8 +37,8 @@ export function OpenListingTabs({ tabs, selectedId, onSelect, onClose, onCreate,
 
   /* Pill tabs after T3 Code's RightPanelTabs (MIT, (c) 2026 T3 Tools Inc.). */
   return (
-    // Phones open one listing at a time from Inventory, so the tab strip is desktop-only.
-    <div className="listing-tab-strip flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 max-[900px]:hidden">
+    // Lives in the window titlebar, which phones don't show: they open one listing at a time.
+    <div className="pointer-events-auto flex min-w-0 items-center gap-1 [-webkit-app-region:no-drag]" onMouseDown={stopTitlebarDrag}>
       <div
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         role={tabs.length ? "tablist" : undefined}
@@ -51,7 +52,7 @@ export function OpenListingTabs({ tabs, selectedId, onSelect, onClose, onCreate,
               role="presentation"
               data-active={active}
               className={cn(
-                "group/tab flex h-6 max-w-60 shrink-0 items-center gap-0.5 rounded-md pr-0.5 pl-2 text-xs max-[900px]:h-8 max-[900px]:max-w-[min(180px,calc((100vw-44px)/2))]",
+                "group/tab flex h-6 max-w-60 shrink-0 items-center gap-0.5 rounded-md pr-0.5 pl-2 text-xs",
                 active ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
               )}
             >
@@ -85,7 +86,7 @@ export function OpenListingTabs({ tabs, selectedId, onSelect, onClose, onCreate,
               </button>
               <button
                 type="button"
-                className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm opacity-0 outline-none group-hover/tab:opacity-100 group-data-[active=true]/tab:opacity-100 hover:bg-muted focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring max-[900px]:size-7 max-[900px]:opacity-100"
+                className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm opacity-0 outline-none group-hover/tab:opacity-100 group-data-[active=true]/tab:opacity-100 hover:bg-muted focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={`Close tab: ${tab.title}`}
                 title="Close tab"
                 tabIndex={active ? 0 : -1}
