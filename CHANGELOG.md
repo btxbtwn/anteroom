@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.317 — 2026-10-24
+
+- Grailed categories like Menswear › Outerwear › Light Jackets are saved and reused again instead of being refused as "incompatible" in the logs.
+
 ## 0.1.316 — 2026-10-24
 
 - A Usage button now sits along the bottom of the sidebar with the other buttons. It opens Settings → Usage, so you can check how much of your plan is left without digging through Settings.
