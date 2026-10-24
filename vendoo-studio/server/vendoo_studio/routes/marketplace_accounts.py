@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
@@ -32,10 +33,19 @@ def get_status():
     return marketplace_accounts.status()
 
 
+class ConnectionRequest(BaseModel):
+    features: list[str] = Field(default_factory=list, max_length=8)
+
+
 @router.post("/api/marketplace-accounts/{marketplace}/connect")
-async def connect(marketplace: str):
+async def connect(marketplace: str, body: ConnectionRequest | None = None):
     try:
-        return await marketplace_accounts.start_sign_in(_marketplace(marketplace))
+        features = body.features if body else []
+        if any(feature not in {"analytics", "finances", "orders", "disputes", "messages", "feedback", "marketing", "listings"} for feature in features):
+            raise HTTPException(422, "Unknown eBay permission group")
+        return await marketplace_accounts.start_sign_in(_marketplace(marketplace), **({"features": features} if features else {}))
+    except HTTPException:
+        raise
     except RelayError as exc:
         raise HTTPException(503 if exc.status in (None, 429, 503) else 502, str(exc)) from exc
     except Exception as exc:  # noqa: BLE001 - offline and the like

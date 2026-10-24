@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.325 — 2026-10-24
+
+- Preview eBay offers in Settings → Connections, set a minimum price for each item, and choose to send now or enable automatic offers while Anteroom is running. Offers use live eBay prices, and uncertain sends pause for a Seller Hub check.
+- Open the eBay workspace for earnings and item costs, traffic, buyer messages, orders, refunds, discounts, ads, listing drafts, and active comps. Review and confirm each account change; publishing remains a separate choice.
+- Find eBay tasks more easily with a clearer dashboard, readable forms, named email audiences, and a separate review screen. Entered details stay in place when you change a listing selection or item specifics.
+
 ## 0.1.324 — 2026-10-24
 
 - T3 Code is now credited in the README, and its copyright and license notice is included with the app.

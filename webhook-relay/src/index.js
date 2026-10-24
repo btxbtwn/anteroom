@@ -1,6 +1,8 @@
 import { Directory } from "./directory.js";
 import {
   ebayAuthorizeUrl,
+  ebayResearch,
+  EBAY_FEATURE_SCOPES,
   ebayConfigured,
   ebayExchangeCode,
   ebayPublicKey,
@@ -179,8 +181,10 @@ async function handleOAuthStart(env, deviceId, marketplace, url) {
   const state = randomToken(24);
   if (marketplace === "ebay") {
     if (!ebayConfigured(env) || !env.EBAY_RUNAME) return json({ error: "eBay sign-in is not configured" }, 503);
+    const features = (url.searchParams.get("features") || "").split(",").filter(Boolean);
+    if (features.some((name) => !Object.hasOwn(EBAY_FEATURE_SCOPES, name))) return json({ error: "unknown eBay permission group" }, 400);
     await directory(env).startSession(state, deviceId, "ebay");
-    return json({ state, authorizeUrl: ebayAuthorizeUrl(env, state) });
+    return json({ state, authorizeUrl: ebayAuthorizeUrl(env, state, features) });
   }
   if (marketplace === "etsy") {
     if (!etsyConfigured(env)) return json({ error: "Etsy sign-in is not configured" }, 503);
@@ -315,6 +319,17 @@ async function handleEtsyProxy(request, env, deviceId, path) {
 async function handleStudio(request, env, url, deviceId) {
   const box = inbox(env, deviceId);
   const { pathname } = url;
+  if (pathname === "/studio/ebay/research" && request.method === "POST") {
+    if (!ebayConfigured(env)) return json({ error: "eBay is not configured" }, 503);
+    const accounts = await directory(env).accountsForDevice(deviceId);
+    if (!accounts.some((account) => account.marketplace === "ebay")) return json({ error: "connect eBay first" }, 403);
+    if (Number(request.headers.get("content-length") ?? 0) > 11100000) return json({ error: "image too large" }, 413);
+    const body = await request.text();
+    if (body.length > 11100000) return json({ error: "image too large" }, 413);
+    let input;
+    try { input = JSON.parse(body); } catch { return json({ error: "invalid research request" }, 400); }
+    return ebayResearch(env, input);
+  }
   if (pathname === "/studio/stream") {
     if (request.headers.get("upgrade") !== "websocket") return json({ error: "expected websocket" }, 426);
     return box.fetch(request);

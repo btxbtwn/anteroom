@@ -22,6 +22,9 @@ ship: eBay's Cert ID and Etsy's shared secret.
   eBay it also subscribes the seller to `ORDER_CONFIRMATION`.
 - **Forwards Etsy API calls** with the app's `x-api-key`, only for Etsy
   accounts linked to the calling device. Nothing is stored.
+- **Forwards public eBay research** for linked devices: active keyword/image
+  search, category suggestions, item specifics, and ad-report metadata. Requests and responses pass
+  through unstored. The shared application token stays inside the relay.
 - **Never acts.** It records that something happened. Marking an item sold or
   delisting stays in Anteroom, and delisting still needs the seller to ask.
 
@@ -44,6 +47,7 @@ ship: eBay's Cert ID and Etsy's shared secret.
 | `GET /studio/accounts` | Anteroom | Linked accounts |
 | `DELETE /studio/accounts/{ebay,etsy}/<id>` | Anteroom | Unlinks one |
 | `DELETE /studio/device` | Anteroom | Removes the device, its links and its inbox |
+| `POST /studio/ebay/research` | Linked Anteroom device | Allowlisted public research; never returns an app token |
 | `* /studio/etsy/v3/application/...` | Anteroom | Etsy API, with `X-Etsy-Authorization: Bearer <Etsy token>` |
 
 `/studio/*` needs `Authorization: Bearer <device token>`. An event can arrive
@@ -68,6 +72,44 @@ macOS Keychain under service `anteroom-relay`.
 | `ETSY_WEBHOOK_SECRET` | `whsec_...` from Etsy's webhook portal |
 
 A marketplace whose secrets are missing answers 503.
+
+## eBay offer permissions
+
+eBay sign-in requests `sell.inventory` for seller-approved offers. Existing
+connections must reconnect after this relay version is deployed to grant it;
+refreshing a token retains its original permissions so sale alerts keep working.
+The relay never sends offers. Anteroom calls eBay directly from the Mac and
+keeps offer rules and send receipts in its local database, without buyer details.
+In Settings → Connections → eBay offers, preview selected US fixed-price
+listings with individual minimum prices before sending or enabling automation.
+Automation checks every 30 minutes while the app is running, with a 24-hour
+cooldown per listing. An uncertain send pauses that listing until the seller
+checks Seller Hub; restarting never retries it.
+
+## eBay workspace permissions
+
+The eBay workspace requests feature groups explicitly with
+`POST /studio/oauth/ebay/start?features=analytics,finances,...`. Supported groups
+are `analytics`, `finances`, `orders`, `disputes`, `messages`, `feedback`,
+`marketing`, and `listings`. Ordinary sign-in requests none of these extra
+groups. Deploy the relay update, then reconnect from the workspace's permission
+picker. Refreshing an existing connection cannot add permissions. eBay may
+require separate seller eligibility or production app approval for each API;
+an unavailable feature leaves the other views usable.
+
+Seller data and writes go directly between the Mac and eBay. The relay research
+endpoint accepts only `categories`, `aspects`, `search`, `image`, and `ad_metadata`, with fixed
+paths and parameter allowlists. It cannot administer notifications or send
+seller actions. Images for public comps pass through without storage. Sold
+comps are not included: eBay's restricted Marketplace Insights API requires
+separate access.
+
+Account changes require a fresh review and explicit confirmation in Anteroom.
+Draft creation stops at an unpublished offer; publishing requires its own
+eBay-specific confirmation. Refunds, marketing, messages, and tracking never
+run on a timer or retry automatically. The local action journal stores only
+account/resource IDs, fingerprints, states, and receipts. An uncertain result
+blocks a repeat until the seller checks eBay and acknowledges it in Activity.
 
 ## Commands
 

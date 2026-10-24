@@ -13,16 +13,30 @@ const HOSTS = {
 
 const APP_SCOPE = "https://api.ebay.com/oauth/api_scope";
 
-// What a seller grants Anteroom: see sales, know who they are, and let the
-// relay subscribe them to sale notifications.
+// Sales, identity, notifications, and seller-approved offers. Offer calls run
+// on the seller's Mac; the relay never sends offers or stores listing data.
 export const EBAY_USER_SCOPES = [
   APP_SCOPE,
   "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+  "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
   "https://api.ebay.com/oauth/api_scope/commerce.notification.subscription",
 ];
 
 export const EBAY_SALE_TOPICS = ["ORDER_CONFIRMATION"];
+
+// Feature grants are opt-in so a restricted feature cannot block ordinary
+// sign-in or sale alerts. A seller can grant each group separately.
+export const EBAY_FEATURE_SCOPES = {
+  analytics: ["sell.analytics.readonly"],
+  finances: ["sell.finances", "sell.finances.earnings.read"],
+  orders: ["sell.fulfillment"],
+  disputes: ["sell.payment.dispute"],
+  messages: ["commerce.message"],
+  feedback: ["commerce.feedback"],
+  marketing: ["sell.marketing"],
+  listings: ["sell.account.readonly"],
+};
 
 const KEY_TTL_MS = 60 * 60 * 1000;
 const publicKeys = new Map();
@@ -63,6 +77,37 @@ export async function ebayAppToken(env) {
   return appToken.value;
 }
 
+// The shared token can administer app-wide notifications. Never return it to a
+// device; forward only these public research operations without storing data.
+export async function ebayResearch(env, input) {
+  const params = input?.params ?? {};
+  if (!params || typeof params !== "object" || Array.isArray(params)) return new Response(null, { status: 400 });
+  const routes = {
+    categories: ["GET", "/commerce/taxonomy/v1/category_tree/0/get_category_suggestions", ["q"]],
+    aspects: ["GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category", ["category_id"]],
+    search: ["GET", "/buy/browse/v1/item_summary/search", ["q", "limit", "offset", "filter"]],
+    image: ["POST", "/buy/browse/v1/item_summary/search_by_image", ["limit", "offset", "filter"]],
+    ad_metadata: ["GET", "/sell/marketing/v1/ad_report_metadata/CAMPAIGN_PERFORMANCE_SUMMARY_REPORT", []],
+  };
+  const selected = Object.hasOwn(routes, input?.operation) ? routes[input.operation] : null;
+  if (!selected || Object.keys(params).some((key) => !selected[2].includes(key))) return new Response(null, { status: 400 });
+  const [method, path] = selected;
+  const url = new URL(hosts(env).api + path);
+  for (const [key, value] of Object.entries(params)) {
+    if (!["string", "number"].includes(typeof value) || String(value).length > 500) return new Response(null, { status: 400 });
+    url.searchParams.set(key, String(value));
+  }
+  if (input.operation === "image" && (typeof input.image !== "string" || input.image.length > 11000000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.image))) return new Response(null, { status: 400 });
+  const response = await fetch(url, {
+    method, redirect: "manual",
+    headers: { authorization: `Bearer ${await ebayAppToken(env)}`, "content-type": "application/json", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
+    ...(method === "POST" ? { body: JSON.stringify({ image: input.image }) } : {}),
+  });
+  // Do not forward provider headers, credentials, or private error echoes.
+  const body = response.ok ? await response.text() : JSON.stringify({ error: "eBay research unavailable" });
+  return new Response(body, { status: response.status >= 300 && response.status < 400 ? 502 : response.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+}
+
 export async function ebayPublicKey(env, kid) {
   const cached = publicKeys.get(kid);
   if (cached && cached.expiresAt > Date.now()) return cached.pem;
@@ -76,12 +121,14 @@ export async function ebayPublicKey(env, kid) {
   return body.key;
 }
 
-export function ebayAuthorizeUrl(env, state) {
+export function ebayAuthorizeUrl(env, state, features = []) {
+  if (features.some((name) => !Object.hasOwn(EBAY_FEATURE_SCOPES, name))) throw new Error("Unknown eBay permission group");
   const url = new URL(`${hosts(env).auth}/oauth2/authorize`);
   url.searchParams.set("client_id", env.EBAY_CLIENT_ID);
   url.searchParams.set("redirect_uri", env.EBAY_RUNAME);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", EBAY_USER_SCOPES.join(" "));
+  const extra = features.flatMap((name) => EBAY_FEATURE_SCOPES[name].map((scope) => `${APP_SCOPE}/${scope}`));
+  url.searchParams.set("scope", [...new Set([...EBAY_USER_SCOPES, ...extra])].join(" "));
   url.searchParams.set("state", state);
   return url.toString();
 }
@@ -94,7 +141,8 @@ export function ebayRefresh(env, refreshToken) {
   return tokenRequest(env, {
     grant_type: "refresh_token",
     refresh_token: refreshToken,
-    scope: EBAY_USER_SCOPES.join(" "),
+    // Refresh the scopes originally granted. New permissions require sign-in;
+    // adding them here would also break sales for existing connections.
   });
 }
 

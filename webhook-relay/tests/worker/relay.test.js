@@ -264,6 +264,34 @@ describe("Etsy", () => {
 });
 
 describe("eBay", () => {
+  it("grants feature groups explicitly and brokers public reads only for authenticated devices", async () => {
+    const device = await register();
+    const start = await relay("/studio/oauth/ebay/start?features=messages,finances", authed(device.token, { method: "POST" }));
+    const scope = new URL((await start.json()).authorizeUrl).searchParams.get("scope");
+    expect(scope).toContain("commerce.message");
+    expect(scope).toContain("sell.finances.earnings.read");
+    expect(scope).not.toContain("sell.marketing");
+    expect((await relay("/studio/oauth/ebay/start?features=made-up", authed(device.token, { method: "POST" }))).status).toBe(400);
+    const research = (operation, params = {}) => relay("/studio/ebay/research", authed(device.token, { method: "POST", body: JSON.stringify({ operation, params }) }));
+    expect((await relay("/studio/ebay/research", { method: "POST" })).status).toBe(401);
+    expect((await research("search", { q: "coat" })).status).toBe(403);
+    await connectEbay(device.token, "seller-public-reads");
+    route("GET", /buy\/browse\/v1\/item_summary\/search/, () => ({ total: 0, itemSummaries: [] }));
+    const result = await research("search", { q: "coat" });
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.text()).not.toContain("app-token");
+    expect((await relay("/studio/ebay/app-token", authed(device.token))).status).toBe(404);
+    expect((await research("/commerce/notification/v1/destination")).status).toBe(400);
+    expect((await research("search", { path: "/commerce/notification/v1/destination" })).status).toBe(400);
+    route("GET", /ad_report_metadata\/CAMPAIGN_PERFORMANCE_SUMMARY_REPORT/, () => ({ dimensionMetadata: [], metricMetadata: [] }));
+    const metadata = await research("ad_metadata");
+    expect(metadata.status).toBe(200);
+    expect(await metadata.text()).not.toContain("app-token");
+    expect((await research("ad_metadata", { path: "/commerce/notification/v1/destination" })).status).toBe(400);
+    expect(calls.filter((call) => call.url.includes("/destination") && call.method === "PUT")).toHaveLength(0);
+  });
+
   it("signs in, subscribes the seller to sales, and routes their orders to their device", async () => {
     const a = await register();
     const b = await register();
@@ -272,6 +300,7 @@ describe("eBay", () => {
     expect(authorize.origin).toBe("https://auth.ebay.com");
     expect(authorize.searchParams.get("redirect_uri")).toBe("test-runame");
     expect(authorize.searchParams.get("scope")).toContain("sell.fulfillment.readonly");
+    expect(authorize.searchParams.get("scope")).toContain("sell.inventory");
 
     const destination = calls.find((c) => c.method === "POST" && c.url.endsWith("/destination"));
     expect(JSON.parse(destination.body).deliveryConfig).toEqual({
