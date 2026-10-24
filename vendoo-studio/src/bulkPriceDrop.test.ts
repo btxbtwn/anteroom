@@ -107,7 +107,7 @@ describe("markdownOutcomes", () => {
       { id: "b", title: "Coat", from: null, to: null, reason: "This listing changed since you reviewed it" },
       { id: "a", title: "Nike tee", from: 48, to: 40, reason: null },
     ]);
-    expect(markdownSummary(outcomes)).toBe("1 price dropped in Studio, 1 not changed");
+    expect(markdownSummary(outcomes)).toBe("1 price dropped in Anteroom, 1 not changed");
     expect(markdownSummary([])).toBe("No prices changed");
   });
 });

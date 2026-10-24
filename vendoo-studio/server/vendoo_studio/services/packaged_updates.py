@@ -24,10 +24,10 @@ GITHUB_API = os.environ.get("VENDOO_STUDIO_GITHUB_API", "https://api.github.com"
 GITHUB_DOWNLOAD = os.environ.get("VENDOO_STUDIO_GITHUB_DOWNLOAD", "https://github.com")
 GITHUB_REPO = os.environ.get("VENDOO_STUDIO_GITHUB_REPO", "btxbtwn/list-this-vendoo-suite")
 RELEASE_TAG = os.environ.get("VENDOO_STUDIO_RELEASE_TAG", "studio-macos")
-ZIP_NAME = "List-This-Studio-macos.zip"
+ZIP_NAME = "Anteroom-macos.zip"
 INFO_NAME = "build_info.json"
 APP_BUNDLE_NAME = f"{APP_NAME}.app"
-USER_AGENT = f"ListThisStudio/{app_version()}"
+USER_AGENT = f"Anteroom/{app_version()}"
 # Download fills this band; verify / extract / codesign take the rest so the
 # meter keeps moving after the last network byte (codesign is often longer).
 DOWNLOAD_PROGRESS_FLOOR = 5.0
@@ -121,7 +121,7 @@ def _rate_limit_message(response: httpx.Response) -> str | None:
 
 
 def fetch_release(client: httpx.Client | None = None) -> dict:
-    """API fallback for older releases that lack zip_sha256 in build_info.json."""
+    """API fallback for releases whose build_info.json has no digest for ZIP_NAME."""
     url = f"{GITHUB_API.rstrip('/')}/repos/{GITHUB_REPO}/releases/tags/{RELEASE_TAG}"
     own_client = client is None
     http = client or httpx.Client(timeout=30.0, headers=_headers(api=True), follow_redirects=True)
@@ -143,7 +143,10 @@ def fetch_release(client: httpx.Client | None = None) -> dict:
 
 def _normalize_build_info(payload: dict) -> dict:
     sha = payload.get("sha")
-    zip_sha = str(payload.get("zip_sha256") or payload.get("sha256") or "").strip().lower()
+    # Digests are keyed by asset name. The top-level zip_sha256 belongs to the
+    # zip that builds from before the rename download, not to ZIP_NAME.
+    zips = payload.get("zips") if isinstance(payload.get("zips"), dict) else {}
+    zip_sha = str(zips.get(ZIP_NAME) or "").strip().lower()
     if zip_sha.startswith("sha256:"):
         zip_sha = zip_sha.split(":", 1)[1].strip().lower()
     title = str(payload.get("title") or payload.get("summary") or "").strip()
@@ -453,7 +456,7 @@ def _extract_app(archive: Path, destination: Path) -> Path:
             raise PackagedUpdateError("Archive contains an unsafe path.")
     matches = [path for path in destination.rglob(APP_BUNDLE_NAME) if path.is_dir()]
     if not matches:
-        raise PackagedUpdateError("The downloaded zip did not contain List This Studio.app.")
+        raise PackagedUpdateError(f"The downloaded zip did not contain {APP_BUNDLE_NAME}.")
     app = min(matches, key=lambda path: len(path.parts))
     _prepare_app_bundle(app, clear_quarantine=False)
     return app
@@ -462,13 +465,16 @@ def _extract_app(archive: Path, destination: Path) -> Path:
 def _write_replacer(app_path: Path, new_app: Path, pid: int) -> Path:
     script = user_data_root() / "updates" / "replace-app.sh"
     script.parent.mkdir(parents=True, exist_ok=True)
+    # Install under the bundle's own name. An app installed before the rename
+    # sits at "List This Studio.app"; this moves it to "Anteroom.app".
+    target = app_path.with_name(new_app.name)
     # Copy beside the installed app and swap it in whole. Copying over the
     # installed bundle merges the two: files the new build dropped stay behind,
     # the code seal no longer matches, and Keychain stops recognising the app,
     # asking for the login password on every launch.
-    staged = app_path.with_name(f"{app_path.name}.updating")
+    staged = target.with_name(f"{target.name}.updating")
     retired = app_path.with_name(f"{app_path.name}.previous")
-    app, staged_q, retired_q = (shlex.quote(str(p)) for p in (app_path, staged, retired))
+    app, target_q, staged_q, retired_q = (shlex.quote(str(p)) for p in (app_path, target, staged, retired))
     script.write_text(
         "\n".join(
             [
@@ -481,9 +487,10 @@ def _write_replacer(app_path: Path, new_app: Path, pid: int) -> Path:
                 f"/usr/bin/xattr -cr {staged_q} || true",
                 f"/bin/chmod -R u+x {staged_q}/Contents/MacOS || true",
                 f"/bin/mv {app} {retired_q}",
-                f"/bin/mv {staged_q} {app}",
+                *([f"/bin/rm -rf {target_q}"] if target != app_path else []),
+                f"/bin/mv {staged_q} {target_q}",
                 f"/bin/rm -rf {retired_q}",
-                f"/usr/bin/open {app}",
+                f"/usr/bin/open {target_q}",
                 "",
             ]
         ),
@@ -517,7 +524,7 @@ def prepare_packaged_update(*, force: bool = False, progress_callback=None) -> d
         raise PackagedUpdateError(f"Cannot replace {app_path} because that app is missing.")
 
     expected_digest = status.get("sha256")
-    staging = Path(tempfile.mkdtemp(prefix="list-this-studio-update-"))
+    staging = Path(tempfile.mkdtemp(prefix="anteroom-update-"))
     archive = staging / ZIP_NAME
     if not expected_digest:
         expected_digest = _resolve_zip_digest({"zip_sha256": None})

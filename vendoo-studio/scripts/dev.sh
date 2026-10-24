@@ -10,7 +10,7 @@ if [[ ! -x .venv/bin/python || ! -d node_modules ]]; then
 fi
 
 if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:4318 -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "Port 4318 is already in use. Quit the other Studio process and try again." >&2
+  echo "Port 4318 is already in use. Quit the other Anteroom process and try again." >&2
   exit 1
 fi
 
@@ -33,8 +33,8 @@ BACKEND_PID=$!
 npm run dev -- --host 127.0.0.1 --port 5173 &
 FRONTEND_PID=$!
 
-echo "Studio backend  http://127.0.0.1:4318"
-echo "Studio frontend http://127.0.0.1:5173"
+echo "Anteroom backend  http://127.0.0.1:4318"
+echo "Anteroom frontend http://127.0.0.1:5173"
 echo "Open the frontend URL. Press Ctrl+C to stop both processes."
 
 if command -v open >/dev/null 2>&1; then

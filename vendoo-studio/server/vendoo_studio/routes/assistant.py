@@ -51,7 +51,7 @@ _answering_thread_id: str | None = None
 # How a listing's revision history names a save the seller applied from here.
 REVISION_SOURCE = "assistant"
 UNREADABLE_CHANGES = (
-    "I could not put those changes in a form Studio can apply, so nothing is waiting for review. Ask me again."
+    "I could not put those changes in a form Anteroom can apply, so nothing is waiting for review. Ask me again."
 )
 
 
@@ -284,12 +284,12 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
     conv_id = item["listing_id"]
     conv = ConversationRepo(db).get(conv_id)
     if conv is None:
-        return "It is no longer in Studio."
+        return "It is no longer in Anteroom."
     if listing_busy(conv_id, db):
-        return "Studio was generating or sending it."
+        return "Anteroom was generating or sending it."
     to_set = item["set"]
     if to_set.get("box") and boxes.get_box(db, to_set["box"]) is None:
-        return "That box is no longer in Studio."
+        return "That box is no longer in Anteroom."
     if any(field != "box" for field in to_set):
         revisions = ListingRepo(db).get_revisions(conv_id)
         if not revisions or not isinstance(revisions[0].listing_json, dict):

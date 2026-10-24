@@ -19,12 +19,12 @@ from vendoo_studio.services.user_settings import get_claude_models, resolved_cla
 log = logging.getLogger("vendoo_studio.claude")
 
 TEXT_ONLY_PREAMBLE = (
-    "You are a product listing assistant for Vendoo Listing Studio. "
+    "You are a product listing assistant for Anteroom. "
     "Reply with assistant text only. "
     "When asked for JSON, return only valid JSON with no markdown fences."
 )
 WEB_SEARCH_PREAMBLE = (
-    "You are a research assistant for Vendoo Listing Studio. Use only web search and "
+    "You are a research assistant for Anteroom. Use only web search and "
     "web fetch. When asked for JSON, return only valid JSON with no markdown fences."
 )
 WEB_TOOLS = ["WebSearch", "WebFetch"]

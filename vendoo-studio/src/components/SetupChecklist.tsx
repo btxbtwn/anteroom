@@ -68,7 +68,7 @@ export function SetupChecklist({
       <div className="flex w-full max-w-md flex-col gap-6">
         <EmptyHeader className="max-w-none">
           <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
-          <EmptyDescription>Three steps and Studio is ready to list.</EmptyDescription>
+          <EmptyDescription>Three steps and Anteroom is ready to list.</EmptyDescription>
         </EmptyHeader>
         <ol className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card text-left shadow-xs/5">
           <Step index={1} done={providerConfigured} label="Sign in with ChatGPT, or add a MiMo or Cursor API key.">

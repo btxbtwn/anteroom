@@ -38,7 +38,7 @@ export function ChangelogDialog({ open, onClose }: { open: boolean; onClose: () 
       <DialogPopup className="max-w-xl">
         <DialogHeader>
           <DialogTitle>What's new</DialogTitle>
-          <DialogDescription>Every change to List This Studio, newest first.</DialogDescription>
+          <DialogDescription>Every change to Anteroom, newest first.</DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-6">
           {isLoading ? (

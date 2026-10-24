@@ -4,7 +4,10 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME = "List This Studio"
+APP_NAME = "Anteroom"
+# The app's name before it became Anteroom, and so the name of the data folder
+# every install made before the rename.
+LEGACY_APP_NAME = "List This Studio"
 BUNDLE_ID = "local.listthis.studio"
 
 
@@ -80,6 +83,23 @@ BACKUPS_DIR = str(user_data_root() / "backups")
 PAIRING_FILE = str(user_data_root() / "pairing_token.txt")
 
 
+def adopt_legacy_data_dir() -> None:
+    """Move a pre-rename data folder to the new name, once.
+
+    The old name is left as a link to the new folder: Chrome remembers the
+    unpacked extension by its absolute path under it, and so do the agent
+    workspaces, so both keep resolving after the move.
+    """
+    if not is_packaged() or os.environ.get("VENDOO_STUDIO_DATA_DIR"):
+        return
+    target = user_data_root()
+    legacy = target.with_name(LEGACY_APP_NAME)
+    if target.exists() or legacy.is_symlink() or not legacy.is_dir():
+        return
+    legacy.rename(target)
+    legacy.symlink_to(APP_NAME, target_is_directory=True)
+
+
 def ensure_user_data_dirs() -> None:
     user_data_root().mkdir(parents=True, exist_ok=True)
     Path(PHOTOS_DIR).mkdir(parents=True, exist_ok=True)
@@ -88,6 +108,7 @@ def ensure_user_data_dirs() -> None:
     Path(BACKUPS_DIR).mkdir(parents=True, exist_ok=True)
 
 
+adopt_legacy_data_dir()
 ensure_user_data_dirs()
 
 HOST = os.environ.get("VENDOO_STUDIO_HOST", "127.0.0.1")

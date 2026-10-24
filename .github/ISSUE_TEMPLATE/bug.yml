@@ -1,5 +1,5 @@
 name: Bug
-description: Something is broken in Studio, the extension, skills, or CI
+description: Something is broken in Anteroom, the extension, skills, or CI
 labels: ["bug"]
 body:
   - type: dropdown
@@ -7,7 +7,7 @@ body:
     attributes:
       label: Component
       options:
-        - Vendoo Listing Studio
+        - Anteroom
         - Chrome extension
         - list-this skills
         - CI / repo hygiene

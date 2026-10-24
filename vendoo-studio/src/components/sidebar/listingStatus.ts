@@ -7,8 +7,8 @@ const STATUS_HINTS: Record<string, string> = {
   active: "Listed on a marketplace, per Vendoo",
   sold: "Sold, per Vendoo",
   failed: "The last send to Vendoo failed",
-  in_progress: "Studio is working on this listing",
-  listing: "Studio is sending this listing to Vendoo",
+  in_progress: "Anteroom is working on this listing",
+  listing: "Anteroom is sending this listing to Vendoo",
 };
 const MARKETPLACE_STATUS_ORDER = [
   "general",

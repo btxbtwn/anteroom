@@ -451,7 +451,7 @@ export const api = {
       requestWithTimeout<Conversation>(`/conversations/${id}/reset`, {
         method: "POST",
         body: JSON.stringify({ keep_inputs: Boolean(opts?.keepInputs) }),
-      }, "Resetting the listing took too long. Check the listing before trying Regenerate again; you do not need to restart Studio."),
+      }, "Resetting the listing took too long. Check the listing before trying Regenerate again; you do not need to restart Anteroom."),
     reorderPhotos: (convId: string, orderedIds: string[]) =>
       request<OkResponse>(`/conversations/${convId}/photos/order`, {
         method: "PATCH",
@@ -535,7 +535,7 @@ export const api = {
       requestWithTimeout<PriceDropApplyResult>(`/conversations/${convId}/price-drop`, {
         method: "POST",
         body: JSON.stringify(body),
-      }, "Saving the price took too long. Check the listing's price before confirming again; you do not need to restart Studio."),
+      }, "Saving the price took too long. Check the listing's price before confirming again; you do not need to restart Anteroom."),
     /** A suggested markdown for each listing, from the seller's own sales. Changes nothing. */
     markdownPreview: (conversationIds: string[]) =>
       request<{ rows: MarkdownPreviewRow[] }>("/price-drop/batch/preview", {
@@ -547,7 +547,7 @@ export const api = {
       requestWithTimeout<MarkdownApplyResult>("/price-drop/batch", {
         method: "POST",
         body: JSON.stringify({ drops }),
-      }, "Saving the prices took too long. Check the listings' prices before applying again; you do not need to restart Studio."),
+      }, "Saving the prices took too long. Check the listings' prices before applying again; you do not need to restart Anteroom."),
   },
 
   jobs: {
@@ -606,7 +606,7 @@ export const api = {
     open: (id: string) =>
       requestWithTimeout<{ ok: boolean; url: string; via: "extension" | "chrome" }>(
         `/jobs/${id}/open`, { method: "POST" },
-        "Opening the listing took too long. Try Open listing again; you do not need to restart Studio.",
+        "Opening the listing took too long. Try Open listing again; you do not need to restart Anteroom.",
         25000,
       ),
     browser: {

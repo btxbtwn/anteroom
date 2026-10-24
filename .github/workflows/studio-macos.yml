@@ -77,7 +77,8 @@ jobs:
         env:
           PYTHON: ${{ github.workspace }}/vendoo-studio/.venv/bin/python
         run: |
-          "$PYTHON" - release/List-This-Studio-macos.zip <<'PY'
+          for archive in release/Anteroom-macos.zip release/List-This-Studio-macos.zip; do
+          "$PYTHON" - "$archive" <<'PY'
           import sys
           import tempfile
           from pathlib import Path
@@ -96,11 +97,12 @@ jobs:
               raise SystemExit(f"Unsafe symlink in release zip: {exc}") from exc
           print("OK: release zip symlinks are safe in-bundle relative links")
           PY
+          done
       - name: Verify packaged app signature
         working-directory: vendoo-studio
         run: |
           set -euo pipefail
-          APP="release/List This Studio.app"
+          APP="release/Anteroom.app"
           DETAIL="$(codesign -dv "$APP" 2>&1)"
           echo "$DETAIL"
           if [[ "$DETAIL" == *"not signed at all"* ]]; then

@@ -16,16 +16,16 @@ from vendoo_studio.services.category_tree_seed import (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Export or import Vendoo Studio category_trees / category_tree_nodes only.",
+        description="Export or import Anteroom category_trees / category_tree_nodes only.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    export_parser = sub.add_parser("export", help="Write a seed from a Studio SQLite DB")
+    export_parser = sub.add_parser("export", help="Write a seed from an Anteroom SQLite DB")
     export_parser.add_argument(
         "--db",
         type=Path,
         default=None,
-        help="Source SQLite path (default: packaged List This Studio DB)",
+        help="Source SQLite path (default: packaged Anteroom DB)",
     )
     export_parser.add_argument(
         "--out",
@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import_parser = sub.add_parser(
         "import",
-        help="Replace category trees in a Studio SQLite DB from the seed",
+        help="Replace category trees in an Anteroom SQLite DB from the seed",
     )
     import_parser.add_argument(
         "--db",

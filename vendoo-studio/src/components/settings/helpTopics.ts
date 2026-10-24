@@ -33,10 +33,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Send to Vendoo and update a draft",
     steps: [
       "Connect Chrome and sign in to Vendoo first (see **Connect Chrome and the extension** below).",
-      "Open the listing and press **Send to Vendoo**. Studio creates a Vendoo draft and links it to the listing.",
+      "Open the listing and press **Send to Vendoo**. Anteroom creates a Vendoo draft and links it to the listing.",
       "After you change a listing, its header shows **Unsent edits**. Press **Update Vendoo** to write the changes onto the same draft; photos already in Vendoo stay. **Discard** puts the listing back to what Vendoo has.",
       "Sends run one at a time. Open **Queue** in the sidebar to see what is waiting or to **Cancel** one.",
-      "Studio never publishes, lists or delists anything on its own: it only saves drafts. When you are ready, press **Open listing** and list the item yourself in Vendoo. If a live listing needs relisting to show your updates, follow the steps in its **Relist to show your updates** box, then press **I've relisted**.",
+      "Anteroom never publishes, lists or delists anything on its own: it only saves drafts. When you are ready, press **Open listing** and list the item yourself in Vendoo. If a live listing needs relisting to show your updates, follow the steps in its **Relist to show your updates** box, then press **I've relisted**.",
     ],
   },
   {
@@ -47,7 +47,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "Several listings: press **Select** above the sidebar list, tick the listings (each needs photos), then press **Regenerate** in the bar at the bottom.",
       "If any have a price, choose **Keep prices**, a drop for each, or **Each listing's suggestion**.",
       "In **Review … listings before rewriting**, check the photos, SKU, COG, labels and measurements, then press **Rewrite**.",
-      "The new copy stays in Studio until you press **Update Vendoo**. To go back, press **History** in the listing header and **Restore this version**.",
+      "The new copy stays in Anteroom until you press **Update Vendoo**. To go back, press **History** in the listing header and **Restore this version**.",
     ],
   },
   {
@@ -67,7 +67,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     steps: [
       "Open **Sourcing** in the sidebar and stay on **Wholesale boxes**.",
       "Set your **Budget**, **Ship to** ZIP and **Minimum return**. **More options** holds your selling pace, fees and cost per sold piece; they follow your own sales unless you type a number.",
-      "Studio lists the boxes worth buying under **Choose a buy list**. Open the store's cart from there and pay on the store's site; Studio never buys for you.",
+      "Anteroom lists the boxes worth buying under **Choose a buy list**. Open the store's cart from there and pay on the store's site; Anteroom never buys for you.",
       "Once you have paid, press **I bought this** on that box. For a box bought elsewhere, press **Add a box** under **Boxes you bought**, fill in the store, box, price, shipping and pieces, and press **Add box**.",
       "When you upload that box's items, pick it in **Box** so each piece carries its share of the cost.",
       "To check a single item before you buy it, use the **Scout an item** tab.",
@@ -98,9 +98,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     id: "help-backups",
     title: "Back up and restore",
     steps: [
-      "Studio backs itself up when it starts, every six hours, and before any update. To make one now, go to Settings → Data and press **Back up now**.",
+      "Anteroom backs itself up when it starts, every six hours, and before any update. To make one now, go to Settings → Data and press **Back up now**.",
       "Set a **Backup folder** that is not on this Mac, such as an external drive or a synced folder, and press **Save**. Every backup and photo is copied there.",
-      "To undo changes on one listing, press **History** in its header, then **Restore this version** and **Confirm restore**. This changes Studio only, not Vendoo.",
+      "To undo changes on one listing, press **History** in its header, then **Restore this version** and **Confirm restore**. This changes Anteroom only, not Vendoo.",
     ],
   },
 ];

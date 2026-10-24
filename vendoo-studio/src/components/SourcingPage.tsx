@@ -68,7 +68,7 @@ export function SourcingPage({ onOpenListing }: Props) {
           <PageHeader
             title="Is it worth buying?"
             description={<>
-              Photograph an item and its tag in the store. Studio identifies it, looks up what it has sold for,
+              Photograph an item and its tag in the store. Anteroom identifies it, looks up what it has sold for,
               and tells you the most worth paying. Nothing is bought or listed.
             </>}
           />
@@ -143,7 +143,7 @@ function BoxSourcing({ onOpenListing }: Props) {
             <EmptyHeader>
               <EmptyMedia variant="icon"><Spinner aria-hidden role={undefined} /></EmptyMedia>
               <EmptyTitle>Getting your first list ready…</EmptyTitle>
-              <EmptyDescription>Studio is reading the suppliers and collecting dated sold listings. Only boxes with enough recent evidence can qualify. This takes a few minutes.</EmptyDescription>
+              <EmptyDescription>Anteroom is reading the suppliers and collecting dated sold listings. Only boxes with enough recent evidence can qualify. This takes a few minutes.</EmptyDescription>
             </EmptyHeader>
           </Empty>
         </Panel>
@@ -352,7 +352,7 @@ function SeasonalContext({ snapshot }: { snapshot: SourcingSnapshot }) {
       {history.groups.map((group) => <PageNote key={`${group.category_path}:${group.item_type}`}>
         {group.category_path}{group.item_type ? ` · ${group.item_type}` : ""}: {group.count} sales · historical median {formatMoney(group.historical_median_price)}
       </PageNote>)}
-    </SourcingDetails> : <PageNote>{history.matching_window_sales} recorded sales in the same calendar windows over the previous three years. No category/type group has the {history.minimum_group_sales} sales needed for personal context yet. Studio can still research seasonal themes.</PageNote>}
+    </SourcingDetails> : <PageNote>{history.matching_window_sales} recorded sales in the same calendar windows over the previous three years. No category/type group has the {history.minimum_group_sales} sales needed for personal context yet. Anteroom can still research seasonal themes.</PageNote>}
   </Panel>;
 }
 
@@ -368,7 +368,7 @@ function Choices({ snapshot, choice, onChoose }: {
       title={hasRecommendations ? "Choose a buy list" : "Browse by supplier"}
       description={hasRecommendations
         ? `Each option uses the same ${formatMoney(snapshot.buy_list.budget)} budget including estimated shipping. Choose one; these are alternatives. Tax is extra.`
-        : "Choose all boxes or a supplier to browse what Studio checked. Recommendations appear when the evidence and cost checks pass."}
+        : "Choose all boxes or a supplier to browse what Anteroom checked. Recommendations appear when the evidence and cost checks pass."}
     >
       {Object.entries(snapshot.calibration ?? {}).map(([store, calibration]) => {
         const note = calibrationNote(storeName(store), calibration);
@@ -435,7 +435,7 @@ function BuyList({
           <EmptyHeader>
             <EmptyMedia variant="icon"><PackageSearchIcon /></EmptyMedia>
             <EmptyTitle>{storeName(choice)} is unavailable</EmptyTitle>
-            <EmptyDescription>Studio couldn’t check this store. Try updating again, or compare the other buy lists.</EmptyDescription>
+            <EmptyDescription>Anteroom couldn’t check this store. Try updating again, or compare the other buy lists.</EmptyDescription>
           </EmptyHeader>
         </Empty>
       </Panel>;
@@ -449,7 +449,7 @@ function BuyList({
               : hasEvidence ? "No recommendations within these settings" : "No recommendations yet — sold evidence is missing"}</EmptyTitle>
             <EmptyDescription>{snapshot.lots.length ? (hasEvidence
               ? `No box passes all the evidence, return and lower-sales checks within ${formatMoney(plan.budget)} including shipping. Of ${boxCount(snapshot.lots.length)}: ${exclusionSummary(plan)}. Browse the boxes below to see what ruled each one out, or change the settings above.`
-              : `Studio found ${boxCount(snapshot.lots.length)}, but has no usable recent sold evidence to estimate their resale. Each theme needs at least 3 distinct comparable sales within 30 days. The boxes are shown below for you to review.`)
+              : `Anteroom found ${boxCount(snapshot.lots.length)}, but has no usable recent sold evidence to estimate their resale. Each theme needs at least 3 distinct comparable sales within 30 days. The boxes are shown below for you to review.`)
               : "This check returned no available boxes for the selected suppliers. Review any supplier errors above."}</EmptyDescription>
             <EmptyDescription className="text-xs">Next automatic check around {clockTime(nextUpdate(snapshot.updated_at))}.</EmptyDescription>
           </EmptyHeader>
@@ -676,7 +676,7 @@ function ResearchEvidence({ lot, onOpenListing }: { lot: SourcingLot; onOpenList
         ? `A mixed box can't be priced by searching for one kind of piece, so this uses the median of everything you sold in the last 90 days. These are your ${data.comps.length} most recent sales.`
         : data.source === "Your sales"
         ? "These are your own recorded sales of this kind of piece."
-        : "Studio read these sold listings from the marketplaces by searching for this kind of piece, leaving out any whose title shows a different garment, a bundle or new with tags. It cannot check brand, era or condition. Review the links before buying."}</PageNote>
+        : "Anteroom read these sold listings from the marketplaces by searching for this kind of piece, leaving out any whose title shows a different garment, a bundle or new with tags. It cannot check brand, era or condition. Review the links before buying."}</PageNote>
       <ul className="divide-y divide-border/50">
         {data.comps.map((comp) => <li key={comp.conversation_id ?? comp.url} className={compRow}>
           {comp.conversation_id
@@ -739,7 +739,7 @@ function StoreProblems({ snapshot }: { snapshot: SourcingSnapshot }) {
 function HowItWorks({ snapshot }: { snapshot: SourcingSnapshot }) {
   const a = snapshot.assumptions;
   return (
-    <SourcingDetails summary="How Studio picks boxes">
+    <SourcingDetails summary="How Anteroom picks boxes">
       <ul className="flex list-disc flex-col gap-2 ps-5 leading-relaxed text-muted-foreground">
         <li>Every {REFRESH_HOURS} hours it reads every box Raghouse, Thrift Vintage Fashion and PaperCrane list. Raghouse Recycle boxes, Thrift Vintage Fashion A/B, B, B/C and C grades and PaperCrane Mixed/As-Is (C) lots are never considered; PaperCrane Cream (A) and Standard (B) lots are covered by its Buyer Protection beyond a 5% or 10% tolerance for unsellable pieces.</li>
         <li>
@@ -760,7 +760,7 @@ function HowItWorks({ snapshot }: { snapshot: SourcingSnapshot }) {
           {" "}Correct a box’s shipping under Boxes you bought once the store charges it, and the estimates follow.
         </li>
         <li>Each supplier also gets its five best boxes judged one at a time, so there are always options to compare even when few boxes pass every check.</li>
-        <li>Studio never buys. The cart buttons only fill a cart for you to check and pay.</li>
+        <li>Anteroom never buys. The cart buttons only fill a cart for you to check and pay.</li>
         <li>Inspect supplier photos and grade notes before buying. Check sale sources against the likely brand, era, condition and garment mix. Confirm final shipping and tax at checkout; a wholesale box is not an inspected set of identical products.</li>
       </ul>
     </SourcingDetails>

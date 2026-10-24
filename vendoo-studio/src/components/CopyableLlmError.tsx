@@ -113,7 +113,7 @@ function replyShape(fields: BlockerField[]): string {
 {"missing_fields":[${missingFieldsJsonExamples(fields)}]}
 \`\`\`
 
-Use marketplace ids and field names exactly as listed. ${OPTIONS_RULE} Studio saves the listing JSON from this reply; filling the live Vendoo draft is a separate step. Do not publish.
+Use marketplace ids and field names exactly as listed. ${OPTIONS_RULE} Anteroom saves the listing JSON from this reply; filling the live Vendoo draft is a separate step. Do not publish.
 `;
 }
 
@@ -143,7 +143,7 @@ export function validationErrorsPrompt(
     .slice(0, 3)
     .map((target) => `{"marketplace":"${target.marketplace}","field":"${target.field}","value":"..."}`);
 
-  return `Fix these Studio validation errors so Send to Vendoo can proceed for "${title}".
+  return `Fix these Anteroom validation errors so Send to Vendoo can proceed for "${title}".
 
 Update EVERY field listed below so the errors clear. Use photo analysis and seller notes. Do not invent unsupported facts.
 For eBay Season intelligently choose exactly one of Spring, Summer, Fall, or Winter from the item (title, fabric, type, photos). Never leave it blank and never use Does Not Apply.
@@ -160,7 +160,7 @@ ${fields.length ? `Fields to fill:\n${fieldLines(fields)}\n\n` : ""}Reply with J
 {"missing_fields":[${examples.join(",") || '{"marketplace":"ebay","field":"Season","value":"..."}'}]}
 \`\`\`
 
-Use marketplace ids and field names that match the errors. Studio saves the listing JSON from this reply; filling the live Vendoo draft is a separate step.
+Use marketplace ids and field names that match the errors. Anteroom saves the listing JSON from this reply; filling the live Vendoo draft is a separate step.
 `;
 }
 
@@ -179,7 +179,7 @@ export function jobErrorPrompt(
       : compactBlockerFields(parseFieldsFromErrorText(detail), forms);
   })();
   if (fields.length) {
-    return `Fix this Studio job / verification error for "${title}".
+    return `Fix this Anteroom job / verification error for "${title}".
 
 Job error:
 ${detail}
@@ -192,7 +192,7 @@ ${fieldLines(fields)}
 
 ${replyShape(fields)}`;
   }
-  return `Fix this Studio job / verification error for "${title}".
+  return `Fix this Anteroom job / verification error for "${title}".
 
 Job error:
 ${detail}
@@ -237,7 +237,7 @@ export function completionBlockerPrompt(
         ];
     return `Estimate packaged shipping weight for "${title}" so verification can continue.
 
-Studio supplies package dimensions from Settings. From photos, seller notes, item type, size, materials, and research, infer a realistic packaged weight. Do not ask clarifying questions.
+Anteroom supplies package dimensions from Settings. From photos, seller notes, item type, size, materials, and research, infer a realistic packaged weight. Do not ask clarifying questions.
 
 Pause reason:
 ${detail}

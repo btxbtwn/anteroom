@@ -128,7 +128,7 @@ Reply with JSON in this exact shape:
 {"missing_fields":[{"marketplace":"general","field":"SKU","value":"..."}]}
 \`\`\`
 
-Use the marketplace ids and field names exactly as listed. Studio updates the listing JSON and Forms/Fields UI when this reply finishes; filling the live Vendoo draft is a separate step.
+Use the marketplace ids and field names exactly as listed. Anteroom updates the listing JSON and Forms/Fields UI when this reply finishes; filling the live Vendoo draft is a separate step.
 
 ${OPTIONS_RULE}
 
@@ -204,7 +204,7 @@ Reply with JSON in this exact shape:
 {"missing_fields":[{"marketplace":"ebay","field":"Brand","value":"..."}]}
 \`\`\`
 
-Use the marketplace ids and field names exactly as listed. Studio updates the listing JSON and Forms/Fields UI when this reply finishes; filling the live Vendoo draft is a separate step.
+Use the marketplace ids and field names exactly as listed. Anteroom updates the listing JSON and Forms/Fields UI when this reply finishes; filling the live Vendoo draft is a separate step.
 
 ${OPTIONS_RULE}
 

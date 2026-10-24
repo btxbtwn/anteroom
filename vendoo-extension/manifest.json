@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Vendoo Listing Studio Bridge",
+  "name": "Anteroom Bridge",
   "version": "0.2.35",
   "minimum_chrome_version": "116",
-  "description": "Connect Vendoo Listing Studio to automate marketplace listing drafts",
+  "description": "Connect Anteroom to automate marketplace listing drafts",
   "permissions": [
     "activeTab",
     "alarms",

@@ -10,10 +10,10 @@ describe("installConfirmationMessage", () => {
       short_sha: "abc1234",
     });
     expect(message.split("\n")[0]).toBe(
-      "Install “Prompt to pull when Vendoo is saved” and restart List This Studio?",
+      "Install “Prompt to pull when Vendoo is saved” and restart Anteroom?",
     );
     expect(message).toContain("Build abc1234");
-    expect(message).not.toContain("List This Studio (macOS)");
+    expect(message).not.toContain("Anteroom (macOS)");
   });
 
   it("falls back to the sha when there is no summary", () => {
@@ -22,7 +22,7 @@ describe("installConfirmationMessage", () => {
       packaged: true,
       short_sha: "deadbeef",
     });
-    expect(message.split("\n")[0]).toBe("Install update deadbeef and restart List This Studio?");
+    expect(message.split("\n")[0]).toBe("Install update deadbeef and restart Anteroom?");
   });
 
   it("shows every PR included in a packaged update", () => {

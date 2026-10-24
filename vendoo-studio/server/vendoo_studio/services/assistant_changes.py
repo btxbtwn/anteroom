@@ -175,7 +175,7 @@ def history_note(changes: dict[str, Any] | None) -> str:
     )
     if len(proposed) > HISTORY_CHARS:
         proposed = f"{proposed[:HISTORY_CHARS]}… (cut short)"
-    return f"\n\n(Studio note: this reply proposed changes to {len(items)} listings. {state} Proposed: {proposed})"
+    return f"\n\n(Anteroom note: this reply proposed changes to {len(items)} listings. {state} Proposed: {proposed})"
 
 
 def _differences(before: dict, after: dict) -> list[dict[str, Any]]:

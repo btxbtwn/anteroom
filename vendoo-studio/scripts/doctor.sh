@@ -11,7 +11,7 @@ ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; FAILED=1; }
 warn() { printf '  warn  %s\n' "$1"; }
 
-echo "List This Studio doctor"
+echo "Anteroom doctor"
 echo
 
 if PYTHON="$(find_python)"; then
@@ -74,7 +74,7 @@ else
   bad "Google Chrome not found. Install it from https://www.google.com/chrome"
 fi
 
-DB="${VENDOO_STUDIO_DATA_DIR:-$HOME/Library/Application Support/List This Studio}/vendoo_studio.db"
+DB="${VENDOO_STUDIO_DATA_DIR:-$HOME/Library/Application Support/Anteroom}/vendoo_studio.db"
 if [[ -f "$DB" ]]; then
   ok "Database ($(du -h "$DB" | cut -f1)) at $DB"
   if command -v sqlite3 >/dev/null 2>&1; then
@@ -84,11 +84,11 @@ if [[ -f "$DB" ]]; then
        FROM dbstat GROUP BY name ORDER BY SUM(pgsize) DESC LIMIT 5;" 2>/dev/null || true
   fi
 else
-  warn "No database yet at $DB. It is created the first time Studio starts."
+  warn "No database yet at $DB. It is created the first time Anteroom starts."
 fi
 
 if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:4318 -sTCP:LISTEN >/dev/null 2>&1; then
-  bad "Port 4318 is already in use. Quit the other Studio process before starting a new one."
+  bad "Port 4318 is already in use. Quit the other Anteroom process before starting a new one."
 else
   ok "Port 4318 is free"
 fi

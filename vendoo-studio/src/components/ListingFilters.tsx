@@ -212,7 +212,7 @@ export function ListingFilters({
             <FilterRow
               checked={filters.needsRelist}
               count={needsRelistCount}
-              title="Live listings still showing the copy from before Studio's last update — delist and relist them in Vendoo"
+              title="Live listings still showing the copy from before Anteroom's last update — delist and relist them in Vendoo"
               glyph={<Dot tone="warning" />}
               label="Needs relist"
               onSelect={() => onChange({ ...filters, needsRelist: !filters.needsRelist })}
@@ -220,7 +220,7 @@ export function ListingFilters({
             <FilterRow
               checked={filters.unsent}
               count={unsentCount}
-              title="Edited in Studio since Vendoo last had this listing — press Update Vendoo"
+              title="Edited in Anteroom since Vendoo last had this listing — press Update Vendoo"
               glyph={<Dot tone="info" />}
               label="Unsent edits"
               onSelect={() => onChange({ ...filters, unsent: !filters.unsent })}

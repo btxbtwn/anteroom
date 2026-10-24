@@ -131,7 +131,7 @@ class BundledImportsTest(unittest.TestCase):
 
         root = Path(__file__).resolve().parents[3]
         script = root / "skills" / "measure-this" / "scripts" / "ruler.py"
-        spec = (root / "vendoo-studio" / "desktop" / "ListThisStudio.spec").read_text()
+        spec = (root / "vendoo-studio" / "desktop" / "Anteroom.spec").read_text()
         needed = set()
         for node in ast.walk(ast.parse(script.read_text())):
             if isinstance(node, ast.Import):
@@ -143,7 +143,7 @@ class BundledImportsTest(unittest.TestCase):
                     needed.add(node.module)
         third_party = {name for name in needed if name.split(".")[0] not in _sys.stdlib_module_names}
         missing = sorted(name for name in third_party if f'"{name}"' not in spec)
-        self.assertEqual(missing, [], "add these to hiddenimports in desktop/ListThisStudio.spec")
+        self.assertEqual(missing, [], "add these to hiddenimports in desktop/Anteroom.spec")
 
 
 class ReadSavedMeasurementsRouteTest(unittest.TestCase):

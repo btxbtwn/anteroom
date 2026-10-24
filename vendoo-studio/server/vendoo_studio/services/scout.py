@@ -87,7 +87,7 @@ async def run_check(check_id: str) -> None:
             try:
                 evidence, analysis = require_photo_analysis(await analyze_photos_with_tag_retry(provider, paths))
             except PhotoAnalysisError as exc:
-                raise RuntimeError("Studio couldn't make out the item. Try a clearer photo of the tag.") from exc
+                raise RuntimeError("Anteroom couldn't make out the item. Try a clearer photo of the tag.") from exc
             check.analysis = analysis
             check.title = sold_comps_query(item_fields(analysis, evidence)) or None
             db.commit()

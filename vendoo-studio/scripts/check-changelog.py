@@ -73,7 +73,7 @@ def main() -> None:
     newest, body = entries[0]
     if newest != version:
         fail(
-            f"the newest entry is {newest}, but Studio is on {version}.\n"
+            f"the newest entry is {newest}, but Anteroom is on {version}.\n"
             f"Add a '## {version} — <YYYY-MM-DD>' section at the top describing the change."
         )
     if not body:

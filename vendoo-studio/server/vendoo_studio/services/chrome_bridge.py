@@ -185,7 +185,7 @@ def install_bundled_extension() -> bool:
     source = extension_source_dir()
     if not (source / "manifest.json").is_file():
         raise ChromeBridgeError(
-            "The Vendoo Chrome extension is missing from this app. Re-download List This Studio."
+            "The Vendoo Chrome extension is missing from this app. Re-download Anteroom."
         )
     destination = installed_extension_dir()
     destination.parent.mkdir(parents=True, exist_ok=True)

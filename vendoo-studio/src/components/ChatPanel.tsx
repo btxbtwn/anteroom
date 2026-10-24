@@ -201,7 +201,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
   const composerPlaceholder = busy
     ? "Queue a follow-up…"
     : browser
-    ? "Tell Studio what to fix in the Vendoo draft..."
+    ? "Tell Anteroom what to fix in the Vendoo draft..."
     : !hasPhotos
     ? "Upload photos to begin"
     : awaitingSellerAnswers

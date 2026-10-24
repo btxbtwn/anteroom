@@ -144,7 +144,7 @@ async function fetchStudioPairingToken() {
   if (!resp.ok) throw new Error(`pairing-token HTTP ${resp.status}`);
   const data = await resp.json();
   const token = String(data?.token || '').trim();
-  if (!token || token === 'direct') throw new Error('Studio returned an invalid pairing token');
+  if (!token || token === 'direct') throw new Error('Anteroom returned an invalid pairing token');
   await setPairingToken(token);
   return token;
 }

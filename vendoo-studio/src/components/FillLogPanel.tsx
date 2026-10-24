@@ -471,7 +471,7 @@ export function FillLogPanel({
                   <div className="pr-empty">
                     <p>
                       {selectedForm.liveStatus
-                        ? `Vendoo status: ${selectedForm.liveStatus}. Studio doesn’t fill this marketplace yet.`
+                        ? `Vendoo status: ${selectedForm.liveStatus}. Anteroom doesn’t fill this marketplace yet.`
                         : "No fields to show for this marketplace."}
                     </p>
                   </div>

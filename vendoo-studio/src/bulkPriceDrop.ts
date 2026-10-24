@@ -107,7 +107,7 @@ export function markdownSummary(outcomes: readonly MarkdownOutcome[]): string {
   const saved = outcomes.filter((outcome) => outcome.reason === null).length;
   const failed = outcomes.length - saved;
   const parts: string[] = [];
-  if (saved) parts.push(`${saved} ${saved === 1 ? "price" : "prices"} dropped in Studio`);
+  if (saved) parts.push(`${saved} ${saved === 1 ? "price" : "prices"} dropped in Anteroom`);
   if (failed) parts.push(`${failed} not changed`);
   return parts.join(", ") || "No prices changed";
 }

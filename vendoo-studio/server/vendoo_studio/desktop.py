@@ -16,25 +16,32 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from vendoo_studio.config import BASE_DIR, HOST, PORT, extension_source_dir, frontend_dist_dir, is_frozen
+from vendoo_studio.config import (
+    BASE_DIR,
+    HOST,
+    PORT,
+    frontend_dist_dir,
+    is_frozen,
+    resource_root,
+)
 from vendoo_studio.version import app_version
 
 CHANNELS = {
     "production": {
-        "app_name": "List This Studio",
+        "app_name": "Anteroom",
         "bundle_id": "local.listthis.studio",
-        "executable": "ListThisStudio",
+        "executable": "Anteroom",
         "port": "4318",
         "ref": "main",
-        "log": "ListThisStudio.log",
+        "log": "Anteroom.log",
     },
     "staging": {
-        "app_name": "List This Studio Staging",
+        "app_name": "Anteroom Staging",
         "bundle_id": "local.listthis.studio.staging",
-        "executable": "ListThisStudioStaging",
+        "executable": "AnteroomStaging",
         "port": "4319",
         "ref": "staging",
-        "log": "ListThisStudioStaging.log",
+        "log": "AnteroomStaging.log",
     },
 }
 
@@ -124,7 +131,7 @@ def pick_python() -> str:
         if python_is_supported(candidate):
             return candidate
     raise RuntimeError(
-        "Python 3.12 or newer is required. Install it with Homebrew (`brew install python@3.12`) and reopen List This Studio."
+        f"Python 3.12 or newer is required. Install it with Homebrew (`brew install python@3.12`) and reopen {APP_NAME}."
     )
 
 
@@ -132,7 +139,7 @@ def require_command(name: str) -> str:
     path = shutil.which(name)
     if not path:
         raise RuntimeError(
-            f"{name} is not installed. Install Node.js from https://nodejs.org then reopen List This Studio."
+            f"{name} is not installed. Install Node.js from https://nodejs.org then reopen {APP_NAME}."
             if name == "npm"
             else f"{name} was not found on PATH."
         )
@@ -148,7 +155,7 @@ def setup_logging() -> None:
     sys.stderr = handle
 
 
-def splash_html(message: str = "Starting List This Studio…") -> str:
+def splash_html(message: str = f"Starting {APP_NAME}…") -> str:
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -392,7 +399,7 @@ def studio_app_menu():
         # macOS only: items under the app name in the system menu bar.
         Menu("__app__", app_items),
         Menu(
-            "Studio",
+            APP_NAME,
             [
                 MenuAction("Check for Updates…", menu_check_for_updates),
                 MenuAction("Update and Restart…", menu_update_and_restart),
@@ -406,7 +413,7 @@ def studio_app_menu():
 def ensure_venv() -> Path:
     python = venv_python()
     if not python.exists():
-        notify("Installing List This Studio. This can take a minute on first launch.")
+        notify(f"Installing {APP_NAME}. This can take a minute on first launch.")
         creator = pick_python()
         subprocess.run([creator, "-m", "venv", str(BASE_DIR / ".venv")], check=True)
         subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
@@ -418,7 +425,7 @@ def ensure_venv() -> Path:
         text=True,
     )
     if probe.returncode != 0:
-        notify("Updating List This Studio Python packages…")
+        notify(f"Updating {APP_NAME} Python packages…")
         subprocess.run([str(python), "-m", "pip", "install", "-e", ".[desktop]"], cwd=str(BASE_DIR), check=True)
     return python
 
@@ -589,7 +596,7 @@ def ensure_frontend() -> None:
         return
     if is_frozen():
         if not index.exists():
-            raise RuntimeError("The listing UI is missing from this app. Re-download List This Studio.")
+            raise RuntimeError(f"The listing UI is missing from this app. Re-download {APP_NAME}.")
         # Nothing to rebuild from inside a packaged app; the status bar flags it.
         print(f"warning: packaged interface looks stale: {reason}", flush=True)
         return
@@ -800,13 +807,13 @@ def shlex_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def extension_app_icon_path() -> Path | None:
-    path = extension_source_dir() / "icons" / "icon128.png"
+def app_icon_path() -> Path | None:
+    path = resource_root() / "desktop" / "AppIcon.png"
     return path if path.is_file() else None
 
 
 def install_bundle_icon(resources: Path) -> str | None:
-    source = extension_app_icon_path()
+    source = app_icon_path()
     if source is None:
         return None
     resources.mkdir(parents=True, exist_ok=True)
@@ -842,7 +849,7 @@ def studio_window_kwargs() -> dict:
 
 
 def studio_start_kwargs() -> dict:
-    icon = extension_app_icon_path()
+    icon = app_icon_path()
     kwargs: dict = {"menu": studio_app_menu()}
     if icon is not None:
         kwargs["icon"] = str(icon)
@@ -1097,7 +1104,7 @@ def _set_macos_app_name() -> None:
 
 
 def _set_macos_app_icon() -> None:
-    icon = extension_app_icon_path()
+    icon = app_icon_path()
     if icon is None:
         return
     try:
@@ -1293,12 +1300,12 @@ def main(argv: list[str] | None = None) -> int:
     if "--install-staging" in args:
         path = install_macos_app(channel_name="staging")
         print(f"Installed {path}")
-        print("Open it from Spotlight or Applications: List This Studio Staging")
+        print(f"Open it from Spotlight or Applications: {CHANNELS['staging']['app_name']}")
         return 0
     if "--install" in args:
         path = install_macos_app(channel_name="production")
         print(f"Installed {path}")
-        print("Open it from Spotlight or Applications: List This Studio")
+        print(f"Open it from Spotlight or Applications: {CHANNELS['production']['app_name']}")
         return 0
     setup_logging()
     reexec_in_venv_if_needed()

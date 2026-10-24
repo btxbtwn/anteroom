@@ -248,7 +248,7 @@ def test_boxes_that_could_not_be_seen_are_labelled_not_viewed(public_dns):
     assert len(parts) == 2 and all(part["type"] == "image_url" for part in parts)
     assert "Box raghouse:1 (Big box, Raghouse): VIEWED — images 1-2: #1 photo 1 of 2; #2 photo 2 of 2" in text
     assert "Box raghouse:9 (Gone box, Raghouse): NOT VIEWED — the product page could not be read (HTTP 404)" in text
-    assert "Box tvf:3 (No page, TVF): NOT VIEWED — Studio has no product page for this box" in text
+    assert "Box tvf:3 (No page, TVF): NOT VIEWED — Anteroom has no product page for this box" in text
     assert "x: NOT VIEWED" in text
 
 

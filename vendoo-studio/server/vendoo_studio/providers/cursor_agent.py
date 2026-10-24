@@ -25,12 +25,12 @@ log = logging.getLogger("vendoo_studio.cursor")
 
 DEFAULT_MODEL = DEFAULT_CURSOR_MODEL
 TEXT_ONLY_PREAMBLE = (
-    "You are a product listing assistant for Vendoo Listing Studio. "
+    "You are a product listing assistant for Anteroom. "
     "Reply with assistant text only. Do not edit files, run shell commands, or use tools. "
     "When asked for JSON, return only valid JSON with no markdown fences."
 )
 WEB_SEARCH_PREAMBLE = (
-    "You are a research assistant for Vendoo Listing Studio. Use only web search and "
+    "You are a research assistant for Anteroom. Use only web search and "
     "web fetch. Do not edit files or run shell commands. "
     "When asked for JSON, return only valid JSON with no markdown fences."
 )

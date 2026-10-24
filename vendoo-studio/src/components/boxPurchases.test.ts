@@ -59,9 +59,9 @@ describe("bought boxes", () => {
 
   it("explains how real sales moved the estimates", () => {
     expect(calibrationNote("Raghouse", { factor: null, sales: 2, needed: 5 }))
-      .toBe("Raghouse: 2 sales from bought boxes so far. Studio starts adjusting its estimates after 3 more.");
+      .toBe("Raghouse: 2 sales from bought boxes so far. Anteroom starts adjusting its estimates after 3 more.");
     expect(calibrationNote("Raghouse", { factor: 0.82, sales: 12, needed: 5 }))
-      .toBe("Raghouse: your 12 sales sold for 82% of what Studio estimated, so its Raghouse prices are set to 82%.");
+      .toBe("Raghouse: your 12 sales sold for 82% of what Anteroom estimated, so its Raghouse prices are set to 82%.");
   });
 
   it("treats a box with the same link from the last two weeks as already bought", () => {

@@ -629,7 +629,7 @@ def all_sales_price(sales: list[AnalyticsItem], now: datetime) -> dict | None:
             "url": "", "conversation_id": item.conversation_id, "title": item.title[:200],
             "sold_at": item.sold_at.date().isoformat(), "price": float(item.sold_price),
             "marketplace": item.marketplace, "currency": "USD",
-            "snippet": f"Your sale on {item.marketplace}, recorded in Studio.",
+            "snippet": f"Your sale on {item.marketplace}, recorded in Anteroom.",
         } for item in newest],
     }
 
@@ -648,7 +648,7 @@ def own_evidence(sales: list[AnalyticsItem], themes: set[str]) -> dict[str, list
                 "url": "", "conversation_id": item.conversation_id, "title": item.title[:200],
                 "sold_at": item.sold_at.date().isoformat(), "price": float(item.sold_price),
                 "marketplace": item.marketplace, "currency": "USD",
-                "snippet": f"Your sale on {item.marketplace}, recorded in Studio.",
+                "snippet": f"Your sale on {item.marketplace}, recorded in Anteroom.",
             } for item in sorted(matches, key=lambda item: item.sold_at, reverse=True)]
     return evidence
 
