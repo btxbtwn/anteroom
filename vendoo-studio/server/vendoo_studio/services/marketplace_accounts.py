@@ -110,13 +110,13 @@ async def _wait_for_sign_in(pending: PendingSignIn) -> None:
         pending.done = True
 
 
-async def start_sign_in(marketplace: str) -> dict:
+async def start_sign_in(marketplace: str, features: list[str] | None = None) -> dict:
     """Open the marketplace's sign-in page; finish in the background."""
     _check(marketplace)
     previous = _pending.pop(marketplace, None)
     if previous and previous.task and not previous.task.done():
         previous.task.cancel()
-    resp = await relay_request("POST", f"/studio/oauth/{marketplace}/start")
+    resp = await relay_request("POST", f"/studio/oauth/{marketplace}/start", **({"params": {"features": ",".join(features)}} if features else {}))
     if resp.status_code == 503:
         raise RelayError(f"{NAMES[marketplace]} sign-in isn't set up on Anteroom's relay yet.", 503)
     if resp.status_code != 200:
@@ -197,6 +197,11 @@ async def access_token(marketplace: str) -> str:
         raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
     if resp.status_code != 200:
         raise RelayError(f"Could not refresh the {NAMES[marketplace]} sign-in ({resp.status_code}).", resp.status_code)
+    current = get_marketplace_accounts().get(marketplace)
+    if not current or any(current.get(key) != account.get(key) for key in ("accountId", "connectedAt", "refreshToken")):
+        # Disconnect or a new sign-in during the request revokes this refresh.
+        # Never recreate the connection using a response for its old grant.
+        raise SignInRequired(f"The {NAMES[marketplace]} connection changed. Sign in again.")
     tokens = resp.json().get("tokens") or {}
     now = time.time()
     account = {

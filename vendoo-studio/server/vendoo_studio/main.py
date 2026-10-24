@@ -8,11 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
-from vendoo_studio.database import init_db
+from vendoo_studio.database import init_db, SessionLocal
 from vendoo_studio.static_files import FrontendFiles
 from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports
 from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, browser, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
+from vendoo_studio.routes import ebay_offers
+from vendoo_studio.routes import ebay
 
 
 @asynccontextmanager
@@ -52,7 +54,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
-        from vendoo_studio.database import SessionLocal
         from vendoo_studio.services.maintenance import prune_event_bloat
         import logging
         import threading
@@ -78,9 +79,16 @@ async def lifespan(app: FastAPI):
         pass
     from vendoo_studio.providers import chatgpt_codex, claude_sessions
 
+    from vendoo_studio.services import ebay_offers as offer_service
+    offer_service.start()
+    from vendoo_studio.services.ebay_actions import recover as recover_ebay_actions
+    with SessionLocal() as db:
+        recover_ebay_actions(db)
+
     claude_sessions.keep_warm_on_this_loop()
     chatgpt_codex.keep_connection_on_this_loop()
     yield
+    await offer_service.stop()
     try:
         await claude_sessions.close_warm_processes()
         await chatgpt_codex.close_connection()
@@ -136,6 +144,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(health.router)
 app.include_router(marketplace_accounts.router)
+app.include_router(ebay_offers.router)
+app.include_router(ebay.router)
 app.include_router(conversations.router)
 app.include_router(photos.router)
 app.include_router(measurements.router)

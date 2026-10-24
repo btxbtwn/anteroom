@@ -12,6 +12,7 @@ import { MarketplaceLogo } from "../MarketplaceLogo";
 import { Button, buttonVariants } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+import { EbayOffersSettings } from "./EbayOffersSettings";
 
 function CategoryTreesRow() {
   const queryClient = useQueryClient();
@@ -98,7 +99,7 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
   {
     id: "ebay",
     name: "eBay",
-    what: "Tells Anteroom the moment something sells on eBay, so you can delist it everywhere else.",
+    what: "Connect eBay for sale alerts and seller-approved offers to interested buyers.",
   },
   {
     id: "etsy",
@@ -198,7 +199,7 @@ function DirectConnectionsSection() {
       ))}
       <SettingsRow
         title="How it works"
-        description="Vendoo still lists everything. Connecting an account only lets Anteroom hear about sales: eBay and Etsy notify Anteroom's relay, and this Mac picks the sale up. When something sells, the listing shows which other marketplaces to delist, and nothing is delisted until you choose. The relay keeps only IDs, never buyer details."
+        description="eBay and Etsy notify Anteroom's relay when something sells, and this Mac picks the sale up. The listing shows which other marketplaces to delist, and nothing is delisted until you choose. eBay also grants offer permissions; sending offers requires a separate approval below. The relay keeps only IDs, never buyer details."
         status={
           anyConnected ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -232,6 +233,7 @@ export function ConnectionsSettings() {
         <CategoryTreesRow />
       </SettingsSection>
       <DirectConnectionsSection />
+      <EbayOffersSettings />
       <SettingsSection id="remote-access" title="Remote access">
         <TailscaleHttpsRow />
       </SettingsSection>

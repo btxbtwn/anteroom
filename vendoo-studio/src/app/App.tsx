@@ -65,6 +65,8 @@ const AssistantPage = lazy(loadAssistantPage);
 const loadMarketingPage = () =>
   import("../components/MarketingPage").then((module) => ({ default: module.MarketingPage }));
 const MarketingPage = lazy(loadMarketingPage);
+const loadEbayPage = () => import("../components/ebay/EbayPage").then((module) => ({ default: module.EbayPage }));
+const EbayPage = lazy(loadEbayPage);
 const loadUsagePage = () =>
   import("../components/UsagePage").then((module) => ({ default: module.UsagePage }));
 const UsagePage = lazy(loadUsagePage);
@@ -73,7 +75,7 @@ const loadSourcingPage = () =>
 const SourcingPage = lazy(loadSourcingPage);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
-const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketingPage, loadUsagePage, loadSourcingPage];
+const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketingPage, loadUsagePage, loadSourcingPage, loadEbayPage];
 const pageLoading = (
   <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading">
     <Spinner className="size-5 text-muted-foreground" />
@@ -283,6 +285,8 @@ export function App() {
       ? "Analytics"
       : activeView === "marketing"
         ? "Marketing"
+      : activeView === "ebay"
+        ? "eBay"
       : activeView === "usage"
         ? "Usage"
       : activeView === "assistant"
@@ -337,7 +341,7 @@ export function App() {
   };
 
   // Analytics, Marketing, Usage, Sourcing and the Queue toggle back to whichever of home or inventory was open.
-  const togglePage = (view: "analytics" | "marketing" | "usage" | "sourcing" | "queue") => {
+  const togglePage = (view: "analytics" | "marketing" | "usage" | "sourcing" | "queue" | "ebay") => {
     setMobilePane("workspace");
     if (activeView === view) {
       setActiveView(shell.current);
@@ -348,6 +352,7 @@ export function App() {
   };
   const openAnalytics = () => togglePage("analytics");
   const openMarketing = () => togglePage("marketing");
+  const openEbay = () => togglePage("ebay");
   const openAssistant = () => goAssistant();
   const openProviders = () => {
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
@@ -691,6 +696,7 @@ export function App() {
             onOpenUsage={openUsage}
             onOpenAnalytics={openAnalytics}
             onOpenMarketing={openMarketing}
+            onOpenEbay={openEbay}
             onOpenAssistant={openAssistant}
             onOpenSourcing={openSourcing}
             onOpenMobileNav={() => setMobileNavOpen(true)}
@@ -803,6 +809,10 @@ export function App() {
               ) : activeView === "marketing" ? (
                 <Suspense fallback={pageLoading}>
                   <MarketingPage onOpenListing={openListing} />
+                </Suspense>
+              ) : activeView === "ebay" ? (
+                <Suspense fallback={pageLoading}>
+                  <EbayPage />
                 </Suspense>
               ) : activeView === "usage" ? (
                 <Suspense fallback={pageLoading}>

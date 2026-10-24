@@ -71,7 +71,7 @@ export function privacyPage() {
 <h2>What it does not keep</h2>
 <ul>
   <li>Buyer names, addresses, emails or messages.</li>
-  <li>Prices, payments, listing text or photos. When Anteroom talks to Etsy, the relay adds Anteroom's app key and passes the request straight through without saving it.</li>
+  <li>Prices, payments, listing text or photos. Etsy API calls and public eBay research (including image searches) pass through without being saved. App credentials stay inside the relay.</li>
 </ul>
 
 <h2>Sharing</h2>

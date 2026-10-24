@@ -59,6 +59,8 @@ import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
+import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
+import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
 
 const BASE = "/api";
 
@@ -353,6 +355,43 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prefs),
       }),
+  },
+  ebay: {
+    read: (section: string, params: Record<string, string | number> = {}) =>
+      request<EbayPageData>(`/ebay/read/${section}?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),
+    listing: (id: string) => request<EbayListing>(`/ebay/listing/${encodeURIComponent(id)}`),
+    preview: (kind: string, payload: EbayPayload) => request<EbayReview>("/ebay/actions/preview", {
+      method: "POST", body: JSON.stringify({ kind, payload }),
+    }),
+    confirm: (id: string, kind: string, payload: EbayPayload) => request<EbayResult>("/ebay/actions/confirm", {
+      method: "POST", body: JSON.stringify({ id, kind, payload, confirm: true }),
+    }),
+    checked: (id: string) => request<OkResponse>(`/ebay/actions/${encodeURIComponent(id)}/checked`, {
+      method: "POST", body: JSON.stringify({ confirm: true }),
+    }),
+    grant: (features: string[]) => request<{ authorizeUrl: string }>("/marketplace-accounts/ebay/connect", {
+      method: "POST", body: JSON.stringify({ features }),
+    }),
+    imageSearch: (data: string, mime: string, offset = 0) => request<EbayPageData>(`/ebay/research/image?offset=${offset}`, {
+      method: "POST", body: JSON.stringify({ data, mime }),
+    }),
+  },
+  ebayOffers: {
+    status: () => request<EbayOffersStatus>("/ebay-offers"),
+    preview: (selections: EbayOfferSelection[], discountPercent: number) =>
+      request<{ offers: EbayOffer[] }>("/ebay-offers/preview", {
+        method: "POST", body: JSON.stringify({ selections, discount_percent: discountPercent }),
+      }),
+    send: (attemptIds: string[]) => request<{ offers: EbayOffer[] }>("/ebay-offers/send", {
+      method: "POST", body: JSON.stringify({ attempt_ids: attemptIds, confirm: true }),
+    }),
+    enable: (attemptIds: string[]) => request<OkResponse>("/ebay-offers/enable", {
+      method: "POST", body: JSON.stringify({ attempt_ids: attemptIds, confirm: true }),
+    }),
+    pause: (ruleId?: string) => request<OkResponse>(ruleId ? `/ebay-offers/rules/${ruleId}/pause` : "/ebay-offers/pause", { method: "POST" }),
+    checked: (attemptId: string) => request<OkResponse>(`/ebay-offers/attempts/${attemptId}/checked`, {
+      method: "POST", body: JSON.stringify({ confirm: true }),
+    }),
   },
   directConnections: {
     status: () => request<DirectConnectionsStatus>("/marketplace-accounts"),

@@ -8,6 +8,7 @@ import {
   MegaphoneIcon,
   MessageCircleIcon,
   SettingsIcon,
+  StoreIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -35,6 +36,7 @@ export const SIDEBAR_FOOTER_BUTTONS = [
   "queue",
   "analytics",
   "marketing",
+  "ebay",
   "usage",
   "settings",
   "update",
@@ -94,6 +96,7 @@ export function SidebarFooter({
   onOpenSourcing,
   onOpenAnalytics,
   onOpenMarketing,
+  onOpenEbay,
   onOpenAssistant,
   onOpenSettings,
   onOpenUsage,
@@ -106,6 +109,7 @@ export function SidebarFooter({
   onOpenSourcing: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketing: () => void;
+  onOpenEbay: () => void;
   onOpenAssistant: () => void;
   onOpenSettings: () => void;
   onOpenUsage: () => void;
@@ -133,6 +137,7 @@ export function SidebarFooter({
     marketing: (
       <FooterButton label="Marketing" icon={MegaphoneIcon} active={activeView === "marketing"} onClick={onOpenMarketing} />
     ),
+    ebay: <FooterButton label="eBay" icon={StoreIcon} active={activeView === "ebay"} onClick={onOpenEbay} />,
     usage: <FooterButton label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
     settings: <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: <UpdateButton />,
