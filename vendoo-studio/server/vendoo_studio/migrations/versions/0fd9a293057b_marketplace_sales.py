@@ -1,7 +1,7 @@
 """marketplace sales reported through Anteroom's relay
 
-Sales eBay and Etsy report directly, waiting for the seller to delist the
-item elsewhere or dismiss them.
+Sales eBay and Etsy report directly, shown on the listing until the seller
+has delisted it elsewhere and marks it done.
 
 Revision ID: 0fd9a293057b
 Revises: d3f6a2c81e94
@@ -29,7 +29,6 @@ def upgrade() -> None:
     sa.Column('quantity', sa.Integer(), nullable=True),
     sa.Column('conversation_id', sa.String(), nullable=True),
     sa.Column('state', sa.String(), nullable=False),
-    sa.Column('delisted_from', sa.JSON(), nullable=True),
     sa.Column('sold_at', sa.DateTime(), nullable=True),
     sa.Column('received_at', sa.DateTime(), nullable=False),
     sa.Column('resolved_at', sa.DateTime(), nullable=True),

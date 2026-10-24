@@ -22,7 +22,7 @@ export interface DirectConnectionsStatus {
   };
 }
 
-export type MarketplaceSaleState = "new" | "delisted" | "dismissed";
+export type MarketplaceSaleState = "new" | "dismissed";
 
 /** A sale eBay or Etsy reported directly, waiting for the seller. */
 export interface MarketplaceSale {
@@ -38,5 +38,6 @@ export interface MarketplaceSale {
   title: string | null;
   /** Marketplaces Vendoo says the item is still listed on. */
   listedElsewhere: string[];
-  delistedFrom: { marketplaces: string[]; result: unknown } | null;
+  /** The item in Vendoo, where the seller delists it. */
+  vendooUrl: string | null;
 }

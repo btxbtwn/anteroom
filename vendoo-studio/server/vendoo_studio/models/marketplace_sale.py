@@ -1,17 +1,17 @@
 """Sales a marketplace reported directly, through Anteroom's relay.
 
 Vendoo stays the record of what is listed where. These rows are the faster
-signal: "this sold on eBay a moment ago", waiting for the seller to delist it
-elsewhere or dismiss it. Nothing here delists on its own.
+signal: "this sold on eBay a moment ago", shown on the listing until the
+seller has delisted it elsewhere in Vendoo and marks it done.
 """
 from __future__ import annotations
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import new_id, utcnow
 
-SALE_STATES = ("new", "delisted", "dismissed")
+SALE_STATES = ("new", "dismissed")
 
 
 class MarketplaceSale(Base):
@@ -33,8 +33,6 @@ class MarketplaceSale(Base):
     # The Studio listing it matched, by the listing URL Vendoo reported.
     conversation_id = Column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
     state = Column(String, nullable=False, default="new")
-    # Marketplaces the seller asked Vendoo to delist from, and its reply.
-    delisted_from = Column(JSON, nullable=True)
     sold_at = Column(DateTime, nullable=True)
     received_at = Column(DateTime, nullable=False, default=utcnow)
     resolved_at = Column(DateTime, nullable=True)

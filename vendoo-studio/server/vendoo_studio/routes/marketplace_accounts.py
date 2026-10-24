@@ -1,14 +1,14 @@
 """Direct marketplace connections and the sales they report.
 
-Delisting stays seller-triggered: ``/delist`` needs the marketplaces named and
-``confirm``, and goes through the same Vendoo path as the listing editor.
+A reported sale only tells the seller where the item is still listed. There is
+no delist here: Vendoo's server-side delist does not reach Poshmark, Mercari or
+Depop (see ``vendoo_api.delist_item``), so the seller delists in Vendoo.
 """
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
@@ -16,7 +16,7 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.services import marketplace_accounts
 from vendoo_studio.services.relay_client import RelayError
-from vendoo_studio.services.vendoo_import import parse_notes
+from vendoo_studio.services.vendoo_import import parse_notes, vendoo_binding
 
 router = APIRouter(tags=["marketplace-accounts"])
 
@@ -77,7 +77,7 @@ def _sale_out(sale: MarketplaceSale, conv: Conversation | None) -> dict:
         "conversationId": sale.conversation_id,
         "title": conv.title if conv else None,
         "listedElsewhere": _other_marketplaces(conv, sale.marketplace),
-        "delistedFrom": sale.delisted_from,
+        "vendooUrl": vendoo_binding(conv.notes).get("vendooUrl") if conv else None,
     }
 
 
@@ -108,31 +108,3 @@ def dismiss_sale(sale_id: str, db: Session = Depends(get_db)):
     sale.resolved_at = datetime.now(UTC).replace(tzinfo=None)
     db.commit()
     return {"ok": True}
-
-
-class DelistRequest(BaseModel):
-    """The seller names where to delist and confirms, in the same call."""
-    marketplaces: list[str] = Field(min_length=1, max_length=15)
-    confirm: bool = False
-
-
-@router.post("/api/marketplace-sales/{sale_id}/delist")
-async def delist_elsewhere(sale_id: str, body: DelistRequest, db: Session = Depends(get_db)):
-    from vendoo_studio.routes.vendoo_api import ListRequest, _list_or_delist
-
-    sale = _get_sale(db, sale_id)
-    if not sale.conversation_id:
-        raise HTTPException(409, "This sale isn't matched to a listing, so there is nothing to delist from here.")
-    if any(mp.strip().lower() == sale.marketplace for mp in body.marketplaces):
-        raise HTTPException(400, f"It sold on {marketplace_accounts.NAMES[sale.marketplace]}; delist it from the others.")
-    reply = await _list_or_delist(
-        sale.conversation_id,
-        ListRequest(marketplaces=body.marketplaces, confirm=body.confirm),
-        db,
-        delist=True,
-    )
-    sale.state = "delisted"
-    sale.delisted_from = {"marketplaces": reply["marketplaces"], "result": reply.get("result")}
-    sale.resolved_at = datetime.now(UTC).replace(tzinfo=None)
-    db.commit()
-    return {"ok": True, "result": reply.get("result"), "marketplaces": reply["marketplaces"]}

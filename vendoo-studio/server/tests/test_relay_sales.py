@@ -148,32 +148,14 @@ class SalesRoutesTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/marketplace-sales").json()["sales"], [])
         self.assertEqual(len(self.client.get("/api/marketplace-sales?state=dismissed").json()["sales"]), 1)
 
-    def test_delist_needs_named_marketplaces_and_confirm(self):
-        self.assertEqual(self.client.post(f"/api/marketplace-sales/{self.sale_id}/delist", json={"marketplaces": []}).status_code, 422)
-        with mock.patch("vendoo_studio.services.vendoo_create.run_ops") as run_ops:
-            response = self.client.post(f"/api/marketplace-sales/{self.sale_id}/delist", json={"marketplaces": ["poshmark"]})
-            self.assertEqual(response.status_code, 400)
-            run_ops.assert_not_called()
+    def test_there_is_no_delist_from_a_sale(self):
+        """Vendoo's server delist leaves Poshmark, Mercari and Depop up, so none is offered."""
+        response = self.client.post(f"/api/marketplace-sales/{self.sale_id}/delist", json={"marketplaces": ["poshmark"], "confirm": True})
+        self.assertIn(response.status_code, (404, 405))
 
-    def test_delist_refuses_the_marketplace_it_sold_on(self):
-        response = self.client.post(f"/api/marketplace-sales/{self.sale_id}/delist", json={"marketplaces": ["ebay"], "confirm": True})
-        self.assertEqual(response.status_code, 400)
-
-    def test_delist_goes_through_vendoo_and_resolves_the_sale(self):
-        async def fake_run_ops(job, ops):
-            self.assertEqual(ops, [{"op": "delist_item", "item_id": "v-tee", "marketplaces": ["poshmark", "mercari"]}])
-            return {"results": [{"op": "delist_item", "result": {"ok": True}}]}
-
-        with mock.patch("vendoo_studio.services.vendoo_create.run_ops", side_effect=fake_run_ops):
-            response = self.client.post(
-                f"/api/marketplace-sales/{self.sale_id}/delist",
-                json={"marketplaces": ["Poshmark", "mercari"], "confirm": True},
-            )
-        self.assertEqual(response.status_code, 200, response.text)
-        self.db.expire_all()
-        sale = self.db.get(MarketplaceSale, self.sale_id)
-        self.assertEqual(sale.state, "delisted")
-        self.assertEqual(sale.delisted_from["marketplaces"], ["poshmark", "mercari"])
+    def test_a_sale_links_to_its_vendoo_item(self):
+        sale = self.client.get("/api/marketplace-sales").json()["sales"][0]
+        self.assertEqual(sale["vendooUrl"], "https://web.vendoo.co/app/item/v-tee")
 
 
 class FakeResponse:

@@ -366,12 +366,6 @@ export const api = {
       return request<{ sales: MarketplaceSale[] }>(`/marketplace-sales?${params}`);
     },
     dismiss: (saleId: string) => request<OkResponse>(`/marketplace-sales/${saleId}/dismiss`, { method: "POST" }),
-    /** Seller-triggered: names the marketplaces and confirms in the same call. */
-    delist: (saleId: string, marketplaces: string[]) =>
-      request<{ ok: boolean; marketplaces: string[]; result: unknown }>(`/marketplace-sales/${saleId}/delist`, {
-        method: "POST",
-        body: JSON.stringify({ marketplaces, confirm: true }),
-      }),
   },
   vendooApi: {
     listingFields: (convId: string) =>

@@ -406,7 +406,14 @@ export function ListingEditor({
         </div>
       </div>
 
-      <SoldElsewhereNotice convId={convId} />
+      <SoldElsewhereNotice
+        convId={convId}
+        openInVendoo={
+          listingJob ? (
+            <OpenListingButton jobId={listingJob.id} vendooItemId={importedItemId} vendooUrl={importedUrl} />
+          ) : null
+        }
+      />
 
       {relistMarketplaces.length > 0 && (
         <Alert
