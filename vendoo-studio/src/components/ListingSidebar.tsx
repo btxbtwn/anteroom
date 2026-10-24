@@ -60,6 +60,7 @@ interface Props {
   onSelect: (id: string) => void;
   onDelete: (id: string, title: string) => void;
   onOpenSettings: () => void;
+  onOpenUsage: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketing: () => void;
   onOpenAssistant: () => void;
@@ -87,6 +88,7 @@ export function ListingSidebar({
   onSelect,
   onDelete,
   onOpenSettings,
+  onOpenUsage,
   onOpenAnalytics,
   onOpenMarketing,
   onOpenAssistant,
@@ -442,6 +444,7 @@ export function ListingSidebar({
         onOpenAssistant={onOpenAssistant}
         onOpenInventory={onOpenInventory}
         onOpenSettings={onOpenSettings}
+        onOpenUsage={onOpenUsage}
       />
       <BulkSelectionDialogs selection={selection} />
     </aside>

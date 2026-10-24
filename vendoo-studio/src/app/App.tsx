@@ -344,14 +344,16 @@ export function App() {
   const openAnalytics = () => togglePage("analytics");
   const openMarketing = () => togglePage("marketing");
   const openAssistant = () => goAssistant();
-  const openProviders = () => {
+  const openSettingsSection = (section: SettingsSectionId) => {
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
-    setSettingsSection("providers");
+    setSettingsSection(section);
     setSettingsTargetId(null);
     setActiveView("settings");
     setMobilePane("workspace");
     closeMobileSidebar();
   };
+  const openProviders = () => openSettingsSection("providers");
+  const openUsage = () => openSettingsSection("usage");
   const openSourcing = () => togglePage("sourcing");
 
   const openListing = (id: string) => {
@@ -682,6 +684,7 @@ export function App() {
             onSelect={openListing}
             onDelete={(id) => deleteConv.mutate(id)}
             onOpenSettings={openSettings}
+            onOpenUsage={openUsage}
             onOpenAnalytics={openAnalytics}
             onOpenMarketing={openMarketing}
             onOpenAssistant={openAssistant}

@@ -3,6 +3,7 @@ import {
   ArrowLeftIcon,
   BoxIcon,
   ChartColumnIcon,
+  GaugeIcon,
   ListIcon,
   MegaphoneIcon,
   MessageCircleIcon,
@@ -26,7 +27,7 @@ const SIDEBAR_BORDER_PX = 1;
 /**
  * The footer buttons in seller-workflow order: home and inventory first, then
  * the day's work (Vendoo sync, sourcing, the send queue), then insight
- * (analytics, marketing), then settings and the updater last, the way T3 Code
+ * (analytics, marketing, plan usage), then settings and the updater last, the way T3 Code
  * ends its sidebar footer with settings.
  */
 export const SIDEBAR_FOOTER_BUTTONS = [
@@ -37,6 +38,7 @@ export const SIDEBAR_FOOTER_BUTTONS = [
   "queue",
   "analytics",
   "marketing",
+  "usage",
   "settings",
   "update",
 ] as const;
@@ -98,6 +100,7 @@ export function SidebarFooter({
   onOpenAssistant,
   onOpenInventory,
   onOpenSettings,
+  onOpenUsage,
 }: {
   settingsMode: boolean;
   activeView: WorkspaceView;
@@ -110,6 +113,7 @@ export function SidebarFooter({
   onOpenAssistant: () => void;
   onOpenInventory: () => void;
   onOpenSettings: () => void;
+  onOpenUsage: () => void;
 }) {
   const buttons: Record<FooterButtonId, ReactNode> = {
     assistant: (
@@ -138,6 +142,7 @@ export function SidebarFooter({
     marketing: (
       <FooterButton label="Marketing" icon={MegaphoneIcon} active={activeView === "marketing"} onClick={onOpenMarketing} />
     ),
+    usage: <FooterButton label="Usage" icon={GaugeIcon} onClick={onOpenUsage} />,
     settings: <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: <UpdateButton />,
   };
