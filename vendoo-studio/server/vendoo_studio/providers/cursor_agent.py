@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import re
+import shutil
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -82,6 +84,12 @@ _BRIDGE_POOL_MAX = 8
 _BRIDGE_IDLE_CLOSE_SEC = 180.0
 _bridge_pool_lock = threading.Lock()
 _idle_bridges: list[tuple[object, float]] = []
+# Each bridge's own agent store, removed when the bridge closes. Left to its
+# default, every bridge on the workspace shares one SQLite file under
+# ~/.cursor/projects, and a bridge opening it while another writes fails with
+# "database is locked" (bulk measurement reads, listings generating together).
+# Studio never resumes a Cursor agent, so nothing in a store outlives its bridge.
+_bridge_stores: dict[object, str] = {}
 # Lowest reasoning choice per model id. None means the model has no such knob.
 _reasoning_floor: dict[str, tuple[str, str] | None] = {}
 _LOWEST_REASONING = ("none", "minimal", "low")
@@ -93,9 +101,7 @@ def reset_cursor_bridges() -> None:
         idle = [client for client, _ in _idle_bridges]
         _idle_bridges.clear()
         _reasoning_floor.clear()
-    for client in idle:
-        with contextlib.suppress(Exception):
-            client.close()
+    _close_bridges(idle)
 
 
 def _take_stale_bridges() -> list:
@@ -106,23 +112,65 @@ def _take_stale_bridges() -> list:
     return stale
 
 
+def _close_bridge(client) -> None:
+    with contextlib.suppress(Exception):
+        client.close()
+    with _bridge_pool_lock:
+        store = _bridge_stores.pop(client, None)
+    if store is not None:
+        shutil.rmtree(store, ignore_errors=True)
+
+
 def _close_bridges(clients: list) -> None:
     for client in clients:
-        with contextlib.suppress(Exception):
-            client.close()
+        _close_bridge(client)
+
+
+def _local_options(scratch: str, store: str):
+    from cursor_sdk import LocalAgentOptions
+
+    return LocalAgentOptions(cwd=scratch, setting_sources=[], store={"type": "jsonl", "root_dir": store})
+
+
+def _launch_bridge(scratch: str):
+    from cursor_sdk import Client
+
+    store = tempfile.mkdtemp(prefix="cursor-store-")
+    try:
+        with _patched_bridge_env():
+            client = Client.launch_bridge(workspace=scratch, local=_local_options(scratch, store))
+    except BaseException:
+        shutil.rmtree(store, ignore_errors=True)
+        raise
+    with _bridge_pool_lock:
+        _bridge_stores[client] = store
+    return client
+
+
+def _bridge_local(client, scratch: str):
+    """Agent options for a run on ``client``, bound to that bridge's own store."""
+    with _bridge_pool_lock:
+        store = _bridge_stores[client]
+    return _local_options(scratch, store)
+
+
+@contextlib.contextmanager
+def _one_off_bridge(scratch: str) -> Iterator[object]:
+    client = _launch_bridge(scratch)
+    try:
+        yield client
+    finally:
+        _close_bridge(client)
 
 
 def _acquire_bridge(scratch: str):
-    from cursor_sdk import Client
-
     with _bridge_pool_lock:
         stale = _take_stale_bridges()
         client = _idle_bridges.pop()[0] if _idle_bridges else None
     _close_bridges(stale)
     if client is not None:
         return client
-    with _patched_bridge_env():
-        return Client.launch_bridge(workspace=scratch)
+    return _launch_bridge(scratch)
 
 
 def _settle_bridge(client, handles: dict[str, object]) -> None:
@@ -141,8 +189,7 @@ def _settle_bridge(client, handles: dict[str, object]) -> None:
             handles["closed"] = True
     _close_bridges(stale)
     if not already:
-        with contextlib.suppress(Exception):
-            client.close()
+        _close_bridge(client)
 
 
 def _abort_bridge(handles: dict[str, object]) -> None:
@@ -159,8 +206,7 @@ def _abort_bridge(handles: dict[str, object]) -> None:
         if client is not None:
             _idle_bridges[:] = [entry for entry in _idle_bridges if entry[0] is not client]
     if client is not None and not already:
-        with contextlib.suppress(Exception):
-            client.close()  # type: ignore[union-attr]
+        _close_bridge(client)
 
 
 def uvloop_safe_subprocess_env(source: Mapping[str, object] | None = None) -> dict[str, str]:
@@ -350,7 +396,7 @@ class CursorProvider:
         Raises RuntimeError with a user-facing message on failure so Settings can
         show the real Cursor/SDK error instead of a generic "Connection failed".
         """
-        from cursor_sdk import Client, CursorAgentError, CursorSDKError
+        from cursor_sdk import CursorAgentError, CursorSDKError
 
         if not self.api_key:
             raise RuntimeError("Cursor API key is empty.")
@@ -358,9 +404,8 @@ class CursorProvider:
         scratch = str(listing_scratch_dir())
 
         def _probe() -> list:
-            with _patched_bridge_env():
-                with Client.launch_bridge(workspace=scratch) as client:
-                    return list(client.list_models(api_key=self.api_key))
+            with _one_off_bridge(scratch) as client:
+                return list(client.list_models(api_key=self.api_key))
 
         try:
             # Sync bridge uses subprocess.Popen, which tolerates PathLike env
@@ -382,12 +427,9 @@ class CursorProvider:
 
     def list_models(self) -> list:
         """Return the account's model catalog for Settings (sync; call from a worker thread)."""
-        from cursor_sdk import Client
-
         scratch = str(listing_scratch_dir())
-        with _patched_bridge_env():
-            with Client.launch_bridge(workspace=scratch) as client:
-                models = list(client.list_models(api_key=self.api_key))
+        with _one_off_bridge(scratch) as client:
+            models = list(client.list_models(api_key=self.api_key))
         return [item for item in models if isinstance(getattr(item, "id", None), str) and item.id.strip()]
 
     async def analyze_photos(
@@ -508,11 +550,7 @@ class CursorProvider:
         preamble: str = TEXT_ONLY_PREAMBLE,
         lowest: bool = False,
     ):
-        from cursor_sdk import (
-            CursorAgentError,
-            LocalAgentOptions,
-            UserMessage,
-        )
+        from cursor_sdk import CursorAgentError, UserMessage
 
         selected = (model or self.listing_model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
         prompt, images = _flatten_messages(messages, preamble)
@@ -549,7 +587,7 @@ class CursorProvider:
                     {"tools": list(tools or ())},
                     model=model_selection(selected, lowest=lowest),
                     api_key=self.api_key,
-                    local=LocalAgentOptions(cwd=scratch, setting_sources=[]),
+                    local=_bridge_local(client, scratch),
                 ) as agent:
                     status_notes: list[str] = []
 

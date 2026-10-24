@@ -175,6 +175,49 @@ class CursorProviderTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(launch.call_count, 1)
         self.assertEqual(fake_agents.create.call_count, 2)
 
+    async def test_each_bridge_keeps_its_own_agent_store(self):
+        # Bridges sharing Cursor's default SQLite store fail with "database is
+        # locked" when two open it at once (bulk measurement reads).
+        from vendoo_studio.providers import cursor_agent
+
+        provider = CursorProvider(api_key="cursor_test")
+
+        class FakeRun:
+            id = "run-store"
+
+            def stream(self):
+                yield assistant("ok")
+
+            def wait(self):
+                return MagicMock(status="finished", result="ok", id=self.id)
+
+        first, first_agents = fake_bridge(FakeRun())
+        second, second_agents = fake_bridge(FakeRun())
+        with (
+            patch("cursor_sdk.Client.launch_bridge", side_effect=[first, second]) as launch,
+            patch("vendoo_studio.providers.cursor_agent.listing_scratch_dir") as scratch,
+        ):
+            scratch.return_value = MagicMock(__str__=lambda self: "/tmp/cursor-scratch")
+            # Hold the first bridge busy so the second run launches its own.
+            first_bridge = cursor_agent._acquire_bridge("/tmp/cursor-scratch")
+            async for _chunk in provider.chat([{"role": "user", "content": "Hi"}], stream=False):
+                pass
+            cursor_agent._settle_bridge(first_bridge, {})
+            async for _chunk in provider.chat([{"role": "user", "content": "Hi"}], stream=False):
+                pass
+
+        stores = [call.kwargs["local"].store for call in launch.call_args_list]
+        self.assertEqual([store["type"] for store in stores], ["jsonl", "jsonl"])
+        roots = [store["root_dir"] for store in stores]
+        self.assertNotEqual(roots[0], roots[1])
+        # Runs use the store of the bridge they ran on.
+        self.assertEqual(second_agents.create.call_args.kwargs["local"].store["root_dir"], roots[1])
+        self.assertEqual(first_agents.create.call_args.kwargs["local"].store["root_dir"], roots[0])
+        self.assertTrue(all(Path(root).is_dir() for root in roots))
+
+        cursor_agent.reset_cursor_bridges()
+        self.assertFalse(any(Path(root).exists() for root in roots))
+
     async def test_a_bridge_idle_too_long_is_closed_not_reused(self):
         from vendoo_studio.providers import cursor_agent
 
