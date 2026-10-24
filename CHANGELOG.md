@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.316 — 2026-10-24
+
+- A Usage button now sits along the bottom of the sidebar with the other buttons. It opens Settings → Usage, so you can check how much of your plan is left without digging through Settings.
+
 ## 0.1.315 — 2026-10-24
 
 - Etsy only allows vintage (20+ years), handmade, craft supplies, and digital items, and it removes modern resale. Send to Vendoo now leaves the Etsy form empty for modern resale items, so Etsy never shows as ready for them in Vendoo, and the listing says "Not sent to Etsy: modern resale items aren't allowed there." Vintage, handmade, supply, and digital items go to Etsy as before.
