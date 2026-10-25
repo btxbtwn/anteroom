@@ -15,7 +15,6 @@ import { OpenListingButton } from "./OpenListingButton";
 import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
-import { ETSY_INELIGIBLE_NOTICE } from "./etsyEligibility";
 import {
   joinMarketplaces,
   marketplacesNeedingRelist,
@@ -30,8 +29,7 @@ import {
 import { withDropdownOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
-import { DelistActions } from "./DelistActions";
-import { NativeMarketplaceActions } from "./NativeMarketplaceActions";
+import { MarketplacesSection } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
 import { fetchVendooItemLive, VENDOO_ITEM_STALE_MS, vendooItemQueryKey } from "../api/vendooItemQuery";
@@ -415,8 +413,6 @@ export function ListingEditor({
         </div>
       </div>
 
-      <NativeMarketplaceActions key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle} disabled={generating} />
-      <DelistActions key={`delist-${convId}`} convId={convId} title={listingTitle} disabled={generating} />
       <SoldElsewhereNotice
         convId={convId}
         openInVendoo={
@@ -426,19 +422,6 @@ export function ListingEditor({
         }
       />
 
-      {!etsyEligible && (marketplaceSettings?.selected ?? ["etsy"]).includes("etsy") && (
-        <Alert variant="info" role="status" className="mx-3 mt-2.5 shrink-0">
-          <AlertTitle>{ETSY_INELIGIBLE_NOTICE}</AlertTitle>
-          <AlertDescription>
-            <p>
-              Etsy only takes vintage (20+ years), handmade, craft-supply, or digital items.
-              {(conversation?.vendoo_marketplaces || []).includes("etsy") && !conversation?.vendoo_sold_dates?.etsy
-                ? " This item is still live on Etsy — delist it there yourself."
-                : ""}
-            </p>
-          </AlertDescription>
-        </Alert>
-      )}
 
       {relistMarketplaces.length > 0 && (
         <Alert
@@ -502,6 +485,8 @@ export function ListingEditor({
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pt-3 pb-3">
         {reviewTab === "input" ? (
           <>
+            <MarketplacesSection key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
+              disabled={generating} etsyEligible={etsyEligible} />
             <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
             <ItemDetails convId={convId} />
           </>
@@ -524,7 +509,7 @@ export function ListingEditor({
                   )}
                   onClick={() => { setFieldTarget(null); setEditTab(tab); }}
                 >
-                  {tab === "json" ? "JSON" : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  {tab === "json" ? "JSON" : tab === "general" ? "General" : marketplaceName(tab)}
                 </button>
               ))}
             </div>

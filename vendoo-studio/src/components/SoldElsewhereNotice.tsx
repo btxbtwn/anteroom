@@ -46,8 +46,7 @@ function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; openInVendo
         </p>
         {sale.listedElsewhere.length ? (
           <p className="text-xs">
-            To take it down, open it in Vendoo, choose <strong>Delist</strong>, and pick {elsewhere}. Vendoo's own
-            Delist is what reaches Poshmark, Mercari and Depop.
+            Take it down under <strong>Marketplaces</strong> below: select {elsewhere} and choose <strong>Delist selected…</strong>.
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
