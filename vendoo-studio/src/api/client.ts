@@ -916,6 +916,12 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ zip }),
       }),
+    ebayInventoryLocation: () => request<{ location: string }>("/settings/ebay-inventory-location"),
+    setEbayInventoryLocation: (location: string) =>
+      request<{ ok: boolean; location: string }>("/settings/ebay-inventory-location", {
+        method: "PUT",
+        body: JSON.stringify({ location }),
+      }),
     hiddenFields: (conversationId?: string) =>
       request<{
         always: { marketplace: string; field: string; label: string }[];

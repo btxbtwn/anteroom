@@ -25,6 +25,7 @@ describe("searchSettings", () => {
     for (const item of SETTINGS_SEARCH_ITEMS) expect(isSettingsSectionId(item.section)).toBe(true);
     expect(SETTINGS_NAV_ITEMS.map((item) => item.id)).toEqual(["general", "listings", "assistant", "providers", "connections", "data", "logs", "help"]);
     expect(searchSettings("api logs").map((item) => item.id)).toEqual(["vendoo-api-logs"]);
+    expect(searchSettings("inventory location").map((item) => item.id)).toEqual(["ebay-inventory-location"]);
     expect(searchSettings("automatic offers")).toEqual([]);
     expect(isSettingsSectionId("billing")).toBe(false);
   });

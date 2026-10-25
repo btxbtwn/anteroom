@@ -102,7 +102,9 @@ def seed_probe_general_fields(snapshot: dict, notes: str | None = None) -> dict:
     if not str(out.get("title") or "").strip():
         out["title"] = "Draft listing"
     if not str(out.get("zipCode") or out.get("zip_code") or "").strip():
-        out["zipCode"] = "70125"
+        from vendoo_studio.services.user_settings import get_ebay_inventory_location
+
+        out["zipCode"] = get_ebay_inventory_location()
     if out.get("quantity") in (None, ""):
         out["quantity"] = 1
     return out

@@ -193,6 +193,7 @@ class CreateTest(_NoExtraMapping):
                 {"op": "get_item", "ok": True, "item_id": "NEWid1234567890abcde", "item": {
                     "itemID": "NEWid1234567890abcde",
                     "generalDetails": {"title": "Levi's 501", "description": "Classic", "price": 48,
+                                       "zipCode": "70125",
                                        "condition": {"value": "v_pre_owned_good", "displayName": "Pre-Owned - Good"}},
                 }},
             ]},

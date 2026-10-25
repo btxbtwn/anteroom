@@ -116,6 +116,9 @@ export function normalizeLookupKey(value: string): string {
     "when was it made": "when made",
     "who made it": "who made",
     "starting price": "starting price",
+    "inventory location": "zip code",
+    "item location": "zip code",
+    "shipping location": "zip code",
     "return payed by": "return paid by",
   };
   const key = String(value || "")
@@ -160,6 +163,9 @@ const FIELD_NAME_ALIASES: Record<string, string> = {
   color: "primary color",
   zipcode: "zip code",
   zip: "zip code",
+  "inventory location": "zip code",
+  "item location": "zip code",
+  "shipping location": "zip code",
   "who made it": "who made",
   whomade: "who made",
   "what is": "what is it",
@@ -190,7 +196,16 @@ export function normalizeFieldName(value: string): string {
   return FIELD_NAME_ALIASES[key] || key;
 }
 
+export function isInventoryLocationField(field: DraftField | string): boolean {
+  const label = typeof field === "string" ? field : field.label;
+  const key = typeof field === "string" ? field : field.key;
+  return normalizeLookupKey(label) === "zip code" || normalizeFieldName(label) === "zip code"
+    || normalizeLookupKey(key) === "zip code" || normalizeFieldName(key) === "zip code"
+    || normalizeFieldName(key.split(".").pop() || key) === "zip code";
+}
+
 export function fieldMatchKey(field: DraftField): string {
+  if (isInventoryLocationField(field)) return "zip code";
   return normalizeFieldName(field.label) || normalizeFieldName(field.key.split(".").pop() || field.key);
 }
 

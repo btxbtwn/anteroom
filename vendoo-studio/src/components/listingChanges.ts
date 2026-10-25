@@ -33,6 +33,11 @@ export function fieldLabel(path: string): string {
     .join(" · ");
 }
 
+/** The eBay ships-from choice lives in Settings → Connections, not on a listing form. */
+export function isEbayInventoryLocationEdit(field: string): boolean {
+  return field === "settings.ebay.merchant_location_key";
+}
+
 export function blockerTarget(field: string): { reviewTab: "input" | "forms"; tab: string; field: string } {
   if (field === "photos") return { reviewTab: "input", tab: "general", field };
   const marketplace = field.match(/^([a-z]+)_specifics(?:\.|$)/)?.[1];

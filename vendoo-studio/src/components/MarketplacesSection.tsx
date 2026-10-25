@@ -50,6 +50,7 @@ export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): str
 }
 
 function fieldLabel(field: string): string {
+  if (field === "settings.ebay.merchant_location_key") return "Inventory location";
   const last = field.split(".").pop() || field;
   return last.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }

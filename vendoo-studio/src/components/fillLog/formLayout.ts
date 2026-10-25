@@ -74,7 +74,7 @@ const FORM_LAYOUTS: Record<string, SectionSpec[]> = {
         { keys: ["primary color"], label: "Primary Color", always: true },
         { keys: ["secondary color"], label: "Secondary Color", always: true },
         { keys: ["sku"], label: "SKU", always: true },
-        { keys: ["zip code"], label: "Zip Code", always: true },
+        { keys: ["zip code"], label: "Inventory location", always: true },
         { keys: ["quantity"], label: "Quantity" },
       ],
     },
@@ -130,6 +130,7 @@ const FORM_LAYOUTS: Record<string, SectionSpec[]> = {
     {
       label: "Shipping & returns",
       fields: [
+        { keys: ["zip code"], label: "Inventory location", always: true },
         { keys: ["shipping"], label: "Shipping" },
         { keys: ["returns"], label: "Returns" },
       ],

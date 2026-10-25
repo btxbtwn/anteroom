@@ -15,6 +15,7 @@ import { ConnectChromeButton } from "../ConnectChromeButton";
 import { ExtensionLoadPath } from "../ExtensionLoadPath";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { Button, buttonVariants } from "../ui/button";
+import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
@@ -221,6 +222,7 @@ export function DirectConnectionRow({
       ) : null}
       {error && !account?.pending ? <SettingsNote tone="error">{error}</SettingsNote> : null}
       {marketplace.id === "etsy" && account?.connected ? <EtsyListingDefaults /> : null}
+      {marketplace.id === "ebay" ? <EbayInventoryLocationRow /> : null}
       {marketplace.id === "ebay" && account?.connected ? <EbayListingDefaults /> : null}
     </SettingsRow>
   );
@@ -273,6 +275,53 @@ function EtsyListingDefaults() {
       </div>
       {profiles.error || save.error ? <SettingsNote tone="error">{(save.error || profiles.error)?.message}</SettingsNote>
         : <SettingsNote>New Etsy listings use these profiles, with the package weight and size from each listing.</SettingsNote>}
+    </div>
+  );
+}
+
+function EbayInventoryLocationRow() {
+  const queryClient = useQueryClient();
+  const { data, error, isPending } = useQuery({
+    queryKey: ["settings-ebay-inventory-location"],
+    queryFn: api.settings.ebayInventoryLocation,
+  });
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? data?.location ?? "";
+  const dirty = value !== (data?.location ?? "");
+  const save = useMutation({
+    mutationFn: (location: string) => api.settings.setEbayInventoryLocation(location),
+    onSuccess: (payload) => {
+      queryClient.setQueryData(["settings-ebay-inventory-location"], { location: payload.location });
+      setDraft(null);
+    },
+  });
+
+  return (
+    <div id="ebay-inventory-location" className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <Input
+          size="sm"
+          className="w-52"
+          aria-label="eBay inventory location"
+          placeholder="70125"
+          value={isPending ? "" : value}
+          disabled={isPending}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <Button
+          size="sm"
+          disabled={isPending || !value.trim() || !dirty || save.isPending}
+          onClick={() => save.mutate(value.trim())}
+        >
+          {save.isPending ? <Spinner /> : null}
+          {save.isPending ? "Saving" : "Save"}
+        </Button>
+      </div>
+      <SettingsNote>
+        ZIP code or place name eBay uses as the ship-from location. Anteroom writes it on the general form and on eBay for every listing.
+      </SettingsNote>
+      {error ? <SettingsNote tone="error">{(error as Error).message || "Could not load inventory location"}</SettingsNote> : null}
+      {save.error ? <SettingsNote tone="error">{(save.error as Error).message}</SettingsNote> : null}
     </div>
   );
 }

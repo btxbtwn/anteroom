@@ -834,7 +834,7 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
 def apply_send_readiness_fixes(listing: dict) -> bool:
     """Deterministic fixes so generated listings clear common Send blockers."""
     from vendoo_studio.models.validation import normalize_listing_dropdowns
-    from vendoo_studio.services.user_settings import package_dimensions_string
+    from vendoo_studio.services.user_settings import get_ebay_inventory_location, package_dimensions_string
 
     if not isinstance(listing, dict):
         return False
@@ -853,6 +853,9 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
         changed = True
     if not str(listing.get("package_dimensions_in") or "").strip():
         listing["package_dimensions_in"] = package_dimensions_string()
+        changed = True
+    if not str(listing.get("zipCode") or listing.get("zip_code") or "").strip():
+        listing["zipCode"] = get_ebay_inventory_location()
         changed = True
     return changed
 
@@ -1226,9 +1229,10 @@ def persist_generated_listing(
     # Dimensions are a seller preference, not a model inference. Start every
     # generated listing from the saved default; an explicit per-listing value
     # in Item Details may override it below.
-    from vendoo_studio.services.user_settings import package_dimensions_string
+    from vendoo_studio.services.user_settings import get_ebay_inventory_location, package_dimensions_string
 
     listing["package_dimensions_in"] = package_dimensions_string()
+    listing["zipCode"] = get_ebay_inventory_location()
     apply_send_readiness_fixes(listing)
     revisions = ListingRepo(db).get_revisions(conv_id)
     if revisions:
