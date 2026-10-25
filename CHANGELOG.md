@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.345 — 2026-10-24
+
+- Listing fields are grouped into sections — Pricing, Condition, Item, Size & fit, Color & material, Shipping, Inventory and More details — each showing how many are filled. Required fields come first.
+
 ## 0.1.344 — 2026-10-24
 
 - Settings → Connections opens on Marketplaces. Each marketplace has Detect sales. Turn it off to stop new sale notices there. Nothing is taken down until you choose.
