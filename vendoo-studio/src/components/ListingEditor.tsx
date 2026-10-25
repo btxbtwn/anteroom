@@ -578,7 +578,7 @@ function StructuredEditor({
   const fields = React.useMemo(
     () =>
       withDropdownOptions(
-        schemaFieldsForTab(forms?.forms, tab) ?? getFieldsForTab(listing, tab),
+        fieldsForMarketplaceForm(listing, tab, forms?.forms),
         tab,
         dropdownOptions?.forms,
       ),
@@ -676,6 +676,63 @@ function StructuredEditor({
       </div>
     </div>
   );
+}
+
+const SHARED_FORM_FIELDS: EditorField[] = [
+  { key: "title", label: "Title" },
+  { key: "description", label: "Description" },
+  { key: "price", label: "Price", type: "number" },
+  { key: "brand", label: "Brand" },
+  { key: "condition", label: "Condition" },
+  { key: "primaryColor", label: "Primary Color" },
+  { key: "secondaryColor", label: "Secondary Color" },
+  { key: "quantity", label: "Quantity", type: "number" },
+  { key: "size", label: "Size" },
+  { key: "sku", label: "SKU" },
+  { key: "category_path", label: "Category" },
+];
+
+const PACKAGE_FORM_FIELDS: EditorField[] = [
+  { key: "weight_oz", label: "Package Weight (oz)", type: "number" },
+  { key: "package_dimensions_in", label: "Package Dimensions (LxWxH in)" },
+];
+
+const PACKAGE_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "sellwild"]);
+
+function fieldIdentity(field: EditorField): string {
+  return field.label.replace(/\s*\*$/, "").trim().toLowerCase();
+}
+
+/** First occurrence wins, unless a later row is the one with a choice list. */
+function mergeEditorFields(fields: EditorField[]): EditorField[] {
+  const index = new Map<string, number>();
+  const out: EditorField[] = [];
+  for (const field of fields) {
+    const key = fieldIdentity(field);
+    const at = index.get(key);
+    if (at == null) {
+      index.set(key, out.length);
+      out.push(field);
+      continue;
+    }
+    if (!out[at].options?.length && field.options?.length) out[at] = field;
+  }
+  return out;
+}
+
+/** Every field that marketplace submits, shared listing values first, then its own. */
+export function fieldsForMarketplaceForm(
+  listing: ListingData | undefined,
+  tab: string,
+  forms: MarketplaceForm[] | undefined,
+): EditorField[] {
+  const own = getFieldsForTab(listing, tab);
+  if (tab === "general") return own;
+  const schema = schemaFieldsForTab(forms, tab);
+  const shared = PACKAGE_MARKETPLACES.has(tab)
+    ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
+    : SHARED_FORM_FIELDS;
+  return mergeEditorFields([...shared, ...own, ...(schema ?? [])]);
 }
 
 /** Fields for this tab from Vendoo's own schema, or null when it has none. */
