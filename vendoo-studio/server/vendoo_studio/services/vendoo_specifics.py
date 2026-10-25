@@ -280,25 +280,51 @@ def scale_key(category_id: Any, key: str) -> str:
     return f"{category_id}_{key}_scale"
 
 
-def encode_scaled(spec: FieldSpec, value: Any) -> tuple[str, str, bool]:
+def encode_scaled(spec: FieldSpec, value: Any, department: Any = None) -> tuple[str, str, bool]:
     """Resolve a value against a scaled field's scales.
 
     Returns ``(scale_id, code, resolved)``. Scales are searched for one that
     actually offers the value, so "M" lands on US Juniors rather than on
     whichever scale happens to be first.
+
+    Poshmark's kids sizes tell boys from girls only by scale: "XL" is on both
+    US Girls and US Boys, so the listing's department picks which is read
+    first. A kids tag like "XL (18/20)" is matched whole, then as "XL".
     """
     text = str(value or "").strip()
     if not text:
         return "", "", True
-    for scale_id, scale in spec.scales.items():
-        code = _labelled_code(scale.get("options") or {}, text)
-        if code is not None:
-            return scale_id, code, True
-    for scale_id, scale in spec.scales.items():
-        code = _coded(scale.get("options") or {}, text)
-        if code is not None:
-            return scale_id, code, True
+    scales = _scales_for_department(spec.scales, department)
+    base = _PARENTHETICAL.sub(" ", text).strip()
+    for candidate in dict.fromkeys(part for part in (text, base) if part):
+        for scale_id, scale in scales:
+            code = _labelled_code(scale.get("options") or {}, candidate)
+            if code is not None:
+                return scale_id, code, True
+        for scale_id, scale in scales:
+            code = _coded(scale.get("options") or {}, candidate)
+            if code is not None:
+                return scale_id, code, True
     return "", "", False
+
+
+_PARENTHETICAL = re.compile(r"\s*\([^)]*\)\s*")
+
+
+def _scales_for_department(
+    scales: dict[str, dict[str, Any]], department: Any,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Scales in search order: those named for the department come first."""
+    wanted = {word.rstrip("s") for word in _norm(department).split()} - {"", "unisex", "kid", "adult"}
+    if not wanted:
+        return list(scales.items())
+
+    def named_for_department(item: tuple[str, dict[str, Any]]) -> bool:
+        scale_id, scale = item
+        words = _norm(f"{scale_id} {scale.get('display') or ''}").split()
+        return any(word.rstrip("s") in wanted for word in words)
+
+    return sorted(scales.items(), key=lambda item: not named_for_department(item))
 
 
 def _labelled_code(options: dict[str, str], text: str) -> str | None:

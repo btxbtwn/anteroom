@@ -13,6 +13,28 @@ def syncing() -> bool:
     return _task is not None and not _task.done()
 
 
+def product_type_slugs(category_ids) -> list[str]:
+    """Depop leaf ids are ``department_product-type``. The form stores the suffix."""
+    slugs: set[str] = set()
+    for category_id in category_ids:
+        text = str(category_id or "").strip()
+        if not text:
+            continue
+        slug = text.split("_", 1)[1].strip() if "_" in text else text
+        if slug:
+            slugs.add(slug)
+    return sorted(slugs)
+
+
+def depop_product_types(db) -> list[str]:
+    rows = (
+        db.query(CategoryTreeNode.category_id)
+        .filter(CategoryTreeNode.marketplace == "depop", CategoryTreeNode.is_leaf.is_(True))
+        .all()
+    )
+    return product_type_slugs(category_id for (category_id,) in rows)
+
+
 async def read_children(marketplace: str, parent_id: str = "__root") -> dict:
     from vendoo_studio.routes.extension import extension_manager
     request_id = "tree:" + uuid.uuid4().hex

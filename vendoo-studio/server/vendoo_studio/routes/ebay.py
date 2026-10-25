@@ -164,3 +164,4 @@ def checked(action_id: str, body: Checked, db: Session = Depends(get_db)):
         return {"ok": True}
     except (EbayFailure, SignInRequired) as exc:
         raise failure(exc) from exc
+

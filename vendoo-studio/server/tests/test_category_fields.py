@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from vendoo_studio.main import app
 from vendoo_studio.services import category_fields
+from vendoo_studio.services.category_tree import product_type_slugs
 from vendoo_studio.services.vendoo_specifics import normalize_specifics
 
 RAW = {
@@ -98,6 +99,14 @@ class CategoryFieldsCacheTest(unittest.TestCase):
             "marketplace": "ebay", "category_id": "never-fetched",
         })
         self.assertEqual(res.status_code, 404)
+
+
+class DepopProductTypeTest(unittest.TestCase):
+    def test_leaf_ids_become_unique_sorted_product_types(self):
+        self.assertEqual(
+            product_type_slugs(["kidswear_jackets", "menswear_jackets", "womenswear_crop-top", " ", "books"]),
+            ["books", "crop-top", "jackets"],
+        )
 
 
 class DropdownOptionsRouteTest(unittest.TestCase):
@@ -237,6 +246,18 @@ class NumberedSizeCodesTest(unittest.TestCase):
         self.assertEqual(encode_scaled(size, "32"), ("plus", "32", True))
         self.assertEqual(encode_scaled(size, "32Plus"), ("plus", "32Plus", True))
         self.assertEqual(encode_scaled(size, "22"), ("", "", False))
+
+    def test_a_kids_size_lands_on_the_departments_scale(self):
+        # Poshmark tells boys from girls only by the size scale.
+        from vendoo_studio.services.vendoo_specifics import FieldSpec, encode_scaled
+
+        size = FieldSpec("size", display="Size", scales={
+            "girls": {"display": "US Girls", "options": {"XLG": "XL", "16G": "16"}},
+            "boys": {"display": "US Boys", "options": {"XLB": "XL", "18B": "18"}},
+        })
+        self.assertEqual(encode_scaled(size, "XL (18/20)", "Boys"), ("boys", "XLB", True))
+        self.assertEqual(encode_scaled(size, "XL", "Girls"), ("girls", "XLG", True))
+        self.assertEqual(encode_scaled(size, "XL", "Unisex"), ("girls", "XLG", True))
 
 
 class SchemaFeedsTheGapFillerTest(unittest.TestCase):

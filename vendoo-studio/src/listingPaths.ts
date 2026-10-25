@@ -82,10 +82,30 @@ export function resolveSpecificsKey(
   return labelToJsonKey(schemaKey) || schemaKey;
 }
 
+/** Text for one form control. A group of values is not text, so it never becomes "[object Object]". */
+export function formFieldText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim() === "[object Object]" ? "" : value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(formFieldText).filter((part) => part.trim()).join(", ");
+  if (typeof value === "object") return "";
+  const text = String(value);
+  return text === "[object Object]" ? "" : text;
+}
+
+function editorValuePresent(value: unknown): boolean {
+  if (value == null) return false;
+  if (typeof value === "string") return value.trim() !== "" && value.trim() !== "[object Object]";
+  if (typeof value === "number" || typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return formFieldText(value).trim() !== "";
+}
+
 /** Read a Forms-tab field, matching schema labels to camelCase listing keys. */
 export function getListingEditorValue(listing: ListingData | undefined, path: string): unknown {
   const direct = getNestedValue(listing, path);
-  if (direct != null && String(direct).trim() !== "") return direct;
+  if (editorValuePresent(direct)) return direct;
   const parts = path.split(".");
   if (parts.length === 2 && parts[0].endsWith("_specifics")) {
     const specifics = listing?.[parts[0]];

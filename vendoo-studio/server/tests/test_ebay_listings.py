@@ -290,6 +290,26 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.fields[0]["field"], "ebay_specifics.category_specifics.Card Condition")
         self.assertIsNone(ebay_listings.card_condition(LISTING, "15687"))
 
+    async def test_the_shipping_policy_chosen_in_settings_is_used_when_there_are_several(self):
+        client = Client(policies=3)
+        self.defaults = {"fulfillment_policy_id": "f2"}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"])
+        offer = next(call for call in client.calls if call[:2] == ("POST", "/sell/inventory/v1/offer"))
+        self.assertEqual(offer[2]["body"]["listingPolicies"]["fulfillmentPolicyId"], "f2")
+        self.assertEqual(offer[2]["body"]["listingPolicies"]["paymentPolicyId"], "p1")
+
+    async def test_a_saved_policy_no_longer_on_the_account_lists_nothing(self):
+        client = Client(policies=2)
+        self.defaults = {"fulfillment_policy_id": "gone"}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
+        self.assertFalse(result["ok"])
+        self.assertIn("Settings", result["error"])
+        self.assertFalse(any(call[0] == "PUT" for call in client.calls))
+
     async def test_update_rewrites_the_live_offer_and_does_not_publish_another(self):
         self.binding.update(ebay_offer_id="offer-1", ebay_listing_id="123456789012", listing_id="123456789012",
                             ebay_images=[{"photo_id": "p1", "checksum": ebay_listings._photo_checksum(self.photo),

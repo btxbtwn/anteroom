@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cloneListing,
+  formFieldText,
   getListingEditorValue,
   getNestedValue,
   labelToJsonKey,
@@ -8,6 +9,16 @@ import {
   setListingEditorValue,
   setNestedValue,
 } from "./listingPaths";
+
+describe("formFieldText", () => {
+  it("never renders a group of values as [object Object]", () => {
+    expect(formFieldText({ autoAcceptPrice: 15, minimumOfferPrice: 13 })).toBe("");
+    expect(formFieldText("[object Object]")).toBe("");
+    expect(formFieldText(["Sportswear", { method: "buyer" }])).toBe("Sportswear");
+    expect(formFieldText(15)).toBe("15");
+    expect(formFieldText(["Kids", "Coats and jackets", "Jackets"])).toBe("Kids, Coats and jackets, Jackets");
+  });
+});
 
 describe("getNestedValue", () => {
   it("reads dotted paths through nested objects", () => {

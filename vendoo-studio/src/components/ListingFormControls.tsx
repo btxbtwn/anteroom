@@ -6,6 +6,7 @@
 import { ChevronDownIcon } from "lucide-react";
 import type * as React from "react";
 import { cn } from "../lib/utils";
+import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "./ui/combobox";
 import { toggleVariants } from "./ui/toggle";
 
 /** A tab strip in T3's segmented-control look; keeps tablist/tab roles. */
@@ -122,5 +123,46 @@ export function NativeSelect({
         className="pointer-events-none absolute end-2.5 top-1/2 size-3.5 -translate-y-1/2 text-icon-muted opacity-80"
       />
     </span>
+  );
+}
+
+/** A dropdown you can type into. A value the list does not contain stays visible. */
+export function SearchableSelect({
+  id,
+  fieldKey,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  fieldKey: string;
+  value: string;
+  options: string[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const items = value && !options.includes(value) ? [value, ...options] : options;
+  return (
+    <Combobox<string>
+      items={items}
+      value={value || null}
+      disabled={disabled}
+      onValueChange={(next) => onChange(next ?? "")}
+    >
+      <ComboboxInput
+        id={id}
+        data-listing-field={fieldKey}
+        placeholder="Search"
+        showClear={Boolean(value) && !disabled}
+        disabled={disabled}
+      />
+      <ComboboxPopup>
+        <ComboboxEmpty>No matches.</ComboboxEmpty>
+        <ComboboxList>
+          {(item: string) => <ComboboxItem key={item} value={item}>{item}</ComboboxItem>}
+        </ComboboxList>
+      </ComboboxPopup>
+    </Combobox>
   );
 }

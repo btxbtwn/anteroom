@@ -190,6 +190,12 @@ def _contract(result: dict) -> dict:
     }
 
 
+def _depop_draft_gone(result: dict) -> bool:
+    """Depop's own words when the saved draft was deleted."""
+    text = f"{result.get('error') or ''} {result.get('marketplace_message') or ''}"
+    return "could not find draft" in text.lower()
+
+
 def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
     """The record's new fields for one step's result."""
     reason = str(result.get("error") or "").strip()
@@ -197,7 +203,8 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
         url = None
         if marketplace != "sellwild" and action in {"save_draft", "publish"}:
             url = draft_url(marketplace, str(result.get("draft_url") or ""))
-            if record.get("draft_url") and url != record["draft_url"]:
+            replaced = marketplace == "depop" and result.get("draft_replaced") is True
+            if record.get("draft_url") and url != record["draft_url"] and not replaced:
                 raise NativeMarketplaceError(502, "Chrome answered for a different draft. Check the native listing.")
         expected = "draft" if action == "save_draft" else "published"
         state = result.get("state")
@@ -226,7 +233,9 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
             # A refused update leaves the live listing in place. Another Update is the seller's choice.
             return {"state": "published", **contract, "error": reason or "Could not update the live listing."}
         values = {**contract, "error": reason or "Could not finish."}
-        if marketplace in {"depop", "etsy"} and result.get("draft_url"):
+        if marketplace == "depop" and _depop_draft_gone(result):
+            values["draft_url"] = None
+        elif marketplace in {"depop", "etsy"} and result.get("draft_url"):
             candidate = draft_url(marketplace, result["draft_url"])
             if record.get("draft_url") and candidate != record["draft_url"]:
                 raise NativeMarketplaceError(502, "Chrome answered for a different marketplace draft.")
@@ -568,6 +577,10 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
             record = await _execute_step(db, job, conv_id, marketplace, step, options)
             if step == "save_draft" and not (record.get("state") == "draft" and not record.get("error") and record.get("draft_url")):
                 break
+            # A confirmed List found the saved draft deleted. Save a new one, then list that, in this same job.
+            if (marketplace == "depop" and step == "publish" and "save_draft" not in steps
+                    and _depop_draft_gone(record)):
+                steps.extend(["save_draft", "publish"])
     except NativeMarketplaceError:
         # A newer action owns the record; leave it as that action wrote it.
         pass
