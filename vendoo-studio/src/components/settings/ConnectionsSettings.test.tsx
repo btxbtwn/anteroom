@@ -29,10 +29,21 @@ beforeEach(() => {
 });
 
 describe("Connections settings", () => {
-  it("keeps the eBay sign-in and points offers at the eBay marketplace tab", () => {
+  it("groups every marketplace at the top with a sale detection switch", () => {
     const html = renderToStaticMarkup(<ConnectionsSettings />);
-    expect(html).toContain("Sale alerts");
+    const marketplaces = html.indexOf('id="marketplaces"');
+    const vendoo = html.indexOf('id="connections"');
+    expect(marketplaces).toBeGreaterThanOrEqual(0);
+    expect(marketplaces).toBeLessThan(vendoo);
+    const section = html.slice(marketplaces, vendoo);
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild"]) {
+      expect(section).toContain(name);
+      expect(section).toContain(`Sale detection for ${name}`);
+    }
+    expect(section).toContain("Detect sales");
+    expect(section).toContain("Where the sign-in lives");
     expect(html).toContain("Marketplaces → eBay → Offers");
+    expect(html).not.toContain("Chrome sign-in");
     expect(html).not.toContain("ebay-offers");
     expect(html).not.toContain("Automatic offers check every 30 minutes");
   });

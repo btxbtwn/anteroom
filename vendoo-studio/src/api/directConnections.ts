@@ -24,10 +24,16 @@ export interface DirectConnectionsStatus {
 
 export type MarketplaceSaleState = "new" | "dismissed";
 
-/** A sale eBay or Etsy reported directly, waiting for the seller. */
+export interface SaleDetectionStatus {
+  ok: boolean;
+  enabled: Record<string, boolean>;
+  checks: Record<string, string>;
+}
+
+/** A sale a marketplace reported, waiting for the seller. */
 export interface MarketplaceSale {
   id: string;
-  marketplace: DirectMarketplace;
+  marketplace: string;
   orderId: string;
   listingId: string | null;
   quantity: number | null;

@@ -28,13 +28,20 @@ log = logging.getLogger("vendoo_studio.relay_sales")
 LISTING_URL_ID = {
     "ebay": re.compile(r"ebay\.[a-z.]+/itm/(?:[^/?#]+/)?(\d{6,})", re.I),
     "etsy": re.compile(r"etsy\.com/(?:[a-z-]+/)?listing/(\d+)", re.I),
+    "poshmark": re.compile(r"poshmark\.com/listing/(?:[^/?#]+-)?([a-f0-9]{24})(?:[/?#]|$)", re.I),
+    "mercari": re.compile(r"mercari\.com/(?:us/)?item/(m\d{8,14})(?:[/?#]|$)", re.I),
+    "depop": re.compile(r"depop\.com/.*/(\d{5,12})(?:[/?#]|$)", re.I),
+    "sellwild": re.compile(r"sellwild\.com/product/(\d{1,12})(?:[/?#]|$)", re.I),
 }
 
 
 def listing_id_from_url(marketplace: str, url: str | None) -> str | None:
     pattern = LISTING_URL_ID.get(marketplace)
     match = pattern.search(url or "") if pattern else None
-    return match.group(1) if match else None
+    if not match:
+        return None
+    found = match.group(1)
+    return found.lower() if marketplace == "poshmark" else found
 
 
 def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conversation | None:
@@ -47,8 +54,11 @@ def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conve
         urls = notes.get("vendooListingUrls") or {}
         marks = notes.get("marketplaceMarks") or {}
         mark = marks.get(marketplace) if isinstance(marks, dict) else None
+        native = notes.get("nativeMarketplaceDrafts") or {}
+        binding = native.get(marketplace) if isinstance(native, dict) else None
         linked = [urls.get(marketplace) if isinstance(urls, dict) else None,
-                  mark.get("url") if isinstance(mark, dict) and mark.get("state") == "listed" else None]
+                  mark.get("url") if isinstance(mark, dict) and mark.get("state") == "listed" else None,
+                  binding.get("listing_url") if isinstance(binding, dict) else None]
         if any(listing_id_from_url(marketplace, url) == listing_id for url in linked):
             return conv
     return None
@@ -179,6 +189,10 @@ async def handle_event(
             from vendoo_studio.services.marketplace_accounts import forget_deleted_ebay_account
 
             forget_deleted_ebay_account(_first(event.get("ids") or {}, "userId"))
+        return []
+    from vendoo_studio.services.user_settings import sale_detection_enabled
+
+    if not sale_detection_enabled(str(source)):
         return []
     if source == "ebay":
         lines = ebay_lines(event)

@@ -32,7 +32,14 @@ from vendoo_studio.services.relay_client import RelayError, relay_request
 log = logging.getLogger("vendoo_studio.marketplace_accounts")
 
 MARKETPLACES = ("ebay", "etsy")
-NAMES = {"ebay": "eBay", "etsy": "Etsy"}
+NAMES = {
+    "ebay": "eBay",
+    "etsy": "Etsy",
+    "depop": "Depop",
+    "poshmark": "Poshmark",
+    "mercari": "Mercari",
+    "sellwild": "Sellwild",
+}
 SIGN_IN_TIMEOUT_S = 10 * 60
 POLL_INTERVAL_S = 2
 # Refresh a little before the marketplace says the token expires.

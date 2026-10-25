@@ -653,6 +653,38 @@ def set_listing_formulas(*, title: object = None, description: object = None) ->
     return get_listing_formulas()
 
 
+SALE_DETECTION_KEY = "sale_detection"
+SALE_DETECTION_MARKETS = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild")
+
+
+def get_sale_detection() -> dict[str, bool]:
+    """Whether each marketplace should record a sale. Missing means on."""
+    raw = read_settings().get(SALE_DETECTION_KEY)
+    stored = raw if isinstance(raw, dict) else {}
+    return {
+        market: stored.get(market) is not False
+        for market in SALE_DETECTION_MARKETS
+    }
+
+
+def sale_detection_enabled(marketplace: str) -> bool:
+    return get_sale_detection().get(marketplace, True)
+
+
+def set_sale_detection(marketplace: str, enabled: bool) -> dict[str, bool]:
+    if marketplace not in SALE_DETECTION_MARKETS:
+        raise ValueError("Unknown marketplace")
+
+    def mutator(payload: dict) -> None:
+        current = payload.get(SALE_DETECTION_KEY)
+        stored = dict(current) if isinstance(current, dict) else {}
+        stored[marketplace] = bool(enabled)
+        payload[SALE_DETECTION_KEY] = stored
+
+    update_settings(mutator)
+    return get_sale_detection()
+
+
 BUSINESS_NOTE_KEY = "business_note"
 MAX_BUSINESS_NOTE_CHARS = 4000
 

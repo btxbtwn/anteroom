@@ -995,3 +995,34 @@ def delete_error_logs():
 
     clear()
     return {"ok": True}
+
+
+class SaleDetectionConfig(BaseModel):
+    marketplace: str
+    enabled: bool
+
+
+def _sale_detection_status() -> dict:
+    from vendoo_studio.services.chrome_sales import check_errors
+    from vendoo_studio.services.user_settings import get_sale_detection
+
+    return {"ok": True, "enabled": get_sale_detection(), "checks": check_errors()}
+
+
+@router.get("/sale-detection")
+def get_sale_detection_route():
+    return _sale_detection_status()
+
+
+@router.put("/sale-detection")
+def put_sale_detection(body: SaleDetectionConfig):
+    from vendoo_studio.services.chrome_sales import clear_check_error
+    from vendoo_studio.services.user_settings import set_sale_detection
+
+    try:
+        set_sale_detection(body.marketplace, body.enabled)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not body.enabled:
+        clear_check_error(body.marketplace)
+    return _sale_detection_status()

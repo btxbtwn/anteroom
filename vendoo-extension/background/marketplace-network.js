@@ -5,7 +5,7 @@ function ensureMarketplaceRequestContext() {
     // Scope the web client's request context to this extension's Depop,
     // Mercari and Sellwild API calls. Ordinary browsing and requests from other extensions are untouched.
     marketplaceNetworkReady = chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [17001, 17002, 17003],
+      removeRuleIds: [17001, 17002, 17003, 17004],
       addRules: [{ id: 17002, priority: 1,
         action: { type: 'modifyHeaders', requestHeaders: [
           { header: 'Origin', operation: 'set', value: 'https://www.mercari.com' },
@@ -25,8 +25,15 @@ function ensureMarketplaceRequestContext() {
           { header: 'Origin', operation: 'set', value: 'https://sellwild.com' },
           { header: 'Referer', operation: 'set', value: 'https://sellwild.com/sell' },
         ] },
-        condition: { regexFilter: '^https://sellwild\\.com/api/(auth/session|addresses|listings/create|listings/\\d+/confirm-photos|seller/listings/bulk-status)$',
+        condition: { regexFilter: '^https://sellwild\\.com/api/(auth/session|addresses|listings/create|listings/\\d+|listings/\\d+/confirm-photos|seller/listings/bulk-status)$',
           initiatorDomains: [chrome.runtime.id], resourceTypes: ['xmlhttprequest'], requestMethods: ['get', 'post'] },
+      }, { id: 17004, priority: 1,
+        action: { type: 'modifyHeaders', requestHeaders: [
+          { header: 'Origin', operation: 'set', value: 'https://www.depop.com' },
+          { header: 'Referer', operation: 'set', value: 'https://www.depop.com/sellinghub/' },
+        ] },
+        condition: { regexFilter: '^https://webapi\\.depop\\.com/api/v1/receipts/',
+          initiatorDomains: [chrome.runtime.id], resourceTypes: ['xmlhttprequest'], requestMethods: ['get'] },
       }],
     });
   }

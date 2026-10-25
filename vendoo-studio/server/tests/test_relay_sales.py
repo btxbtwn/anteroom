@@ -55,6 +55,10 @@ class ListingUrlTest(unittest.TestCase):
         self.assertEqual(relay_sales.listing_id_from_url("etsy", "https://www.etsy.com/uk/listing/987654"), "987654")
         self.assertIsNone(relay_sales.listing_id_from_url("ebay", ""))
         self.assertIsNone(relay_sales.listing_id_from_url("poshmark", "https://poshmark.com/listing/x"))
+        self.assertEqual(
+            relay_sales.listing_id_from_url("poshmark", "https://poshmark.com/listing/Vintage-Tee-66F0AABBCCDDEEFF00112233"),
+            "66f0aabbccddeeff00112233",
+        )
 
 
 class RecordSalesTest(unittest.TestCase):
@@ -109,6 +113,15 @@ class RecordSalesTest(unittest.TestCase):
     def test_other_events_are_acknowledged_without_a_sale(self):
         self.assertEqual(self.handle({"source": "etsy", "eventType": "listing.updated", "ids": {}}), [])
         self.assertEqual(self.handle({"source": "ebay", "eventType": "MARKETPLACE_ACCOUNT_DELETION", "ids": {"userId": ["x"]}}), [])
+
+    def test_sale_detection_off_skips_the_sale(self):
+        from vendoo_studio.services import user_settings
+
+        user_settings.set_sale_detection("ebay", False)
+        try:
+            self.assertEqual(self.handle(_ebay_event()), [])
+        finally:
+            user_settings.set_sale_detection("ebay", True)
 
 
 class SalesRoutesTest(unittest.TestCase):

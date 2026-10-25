@@ -57,7 +57,7 @@ import type {
 import { readSse } from "./sse";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
-import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
+import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
 import type { EtsyDraftOptions, NativeDraft, NativeDrafts, NativeMarketplace, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
@@ -746,6 +746,12 @@ export const api = {
   },
 
   settings: {
+    saleDetection: () => request<SaleDetectionStatus>("/settings/sale-detection"),
+    setSaleDetection: (marketplace: string, enabled: boolean) =>
+      request<SaleDetectionStatus>("/settings/sale-detection", {
+        method: "PUT",
+        body: JSON.stringify({ marketplace, enabled }),
+      }),
     provider: () => request<ProviderStatus>("/settings/provider"),
     setProvider: (apiKey: string) =>
       request<OkResponse>("/settings/provider", {
