@@ -318,7 +318,7 @@ function EbayInventoryLocationRow() {
         </Button>
       </div>
       <SettingsNote>
-        ZIP code or place name eBay uses as the ship-from location. Anteroom writes it on the general form and on eBay for every listing.
+        ZIP code eBay ships from. Anteroom writes it on every listing, and creates the eBay inventory location from a 5-digit ZIP when eBay does not have one yet.
       </SettingsNote>
       {error ? <SettingsNote tone="error">{(error as Error).message || "Could not load inventory location"}</SettingsNote> : null}
       {save.error ? <SettingsNote tone="error">{(save.error as Error).message}</SettingsNote> : null}

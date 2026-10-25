@@ -26,7 +26,7 @@ LISTING = {
 
 
 class Client:
-    def __init__(self, policies=1, aspects=None, conditions=None):
+    def __init__(self, policies=1, aspects=None, conditions=None, locations=None):
         self.policies = policies
         self.conditions = conditions
         self.calls = []
@@ -35,6 +35,8 @@ class Client:
         self.items = {}
         self.uploads = 0
         self.publish_failure = None
+        self.locations = locations
+        self.location_conflict = False
 
     async def request(self, method, path, **kwargs):
         self.calls.append((method, path, kwargs))
@@ -61,8 +63,17 @@ class Client:
             return {"paymentPolicies": [{"paymentPolicyId": "p1", "name": "Pay", "marketplaceId": "EBAY_US"}]}
         if path.endswith("/return_policy"):
             return {"returnPolicies": [{"returnPolicyId": "r1", "name": "Return", "marketplaceId": "EBAY_US"}]}
-        if path == "/sell/inventory/v1/location":
-            return {"locations": [{"merchantLocationKey": "home", "name": "Home", "merchantLocationStatus": "ENABLED"}]}
+        if path == "/sell/inventory/v1/location" and method == "GET":
+            rows = self.locations
+            if rows is None:
+                rows = [{"merchantLocationKey": "home", "name": "Home", "merchantLocationStatus": "ENABLED"}]
+            return {"locations": rows}
+        if method == "POST" and path.startswith("/sell/inventory/v1/location/"):
+            if self.location_conflict:
+                raise EbayFailure("eBay returned HTTP 409.", 409)
+            key = path.rsplit("/", 1)[-1]
+            self.locations = [{"merchantLocationKey": key, "name": key, "merchantLocationStatus": "ENABLED"}]
+            return {}
         if path.endswith("create_image_from_file"):
             self.uploads += 1
             return {"imageUrl": f"https://i.ebayimg.com/images/g/test{self.uploads}/s-l1600.jpg"}
@@ -179,6 +190,66 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2 shipping policies", result["error"])
         self.assertTrue(result["safe_to_retry"])
         self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls))
+
+    def test_a_saved_zip_is_the_postal_code_ebay_stores(self):
+        with patch("vendoo_studio.services.user_settings.get_ebay_inventory_location", return_value="70125"):
+            self.assertEqual(ebay_listings._ship_from_postal_code(), "70125")
+        with patch("vendoo_studio.services.user_settings.get_ebay_inventory_location", return_value="70125-1234"):
+            self.assertEqual(ebay_listings._ship_from_postal_code(), "70125")
+        with patch("vendoo_studio.services.user_settings.get_ebay_inventory_location", return_value="New Orleans"):
+            self.assertIsNone(ebay_listings._ship_from_postal_code())
+
+    async def test_no_inventory_location_is_created_from_the_saved_zip(self):
+        client = Client(locations=[])
+        with patch.object(ebay_listings, "_ship_from_postal_code", return_value="70125"), \
+             patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(client.offers["offer-1"]["merchantLocationKey"], "zip-70125")
+        created = [call for call in client.calls if call[0] == "POST" and call[1].startswith("/sell/inventory/v1/location/")]
+        self.assertEqual(created[0][1], "/sell/inventory/v1/location/zip-70125")
+        self.assertEqual(created[0][2]["body"]["location"]["address"], {"postalCode": "70125", "country": "US"})
+        self.assertEqual(created[0][2]["body"]["merchantLocationStatus"], "ENABLED")
+
+    async def test_a_place_name_does_not_create_an_inventory_location(self):
+        client = Client(locations=[])
+        with patch.object(ebay_listings, "_ship_from_postal_code", return_value=None), \
+             patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "missing_fields")
+        self.assertEqual(result["fields"][0]["field"], "settings.ebay.merchant_location_key")
+        self.assertIn("5-digit ZIP", result["error"])
+        self.assertFalse(any(call[0] == "POST" and "/location/" in call[1] for call in client.calls))
+
+    async def test_a_location_without_a_status_is_already_enabled(self):
+        client = Client(locations=[{"merchantLocationKey": "warehouse", "name": "Warehouse"}])
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(client.offers["offer-1"]["merchantLocationKey"], "warehouse")
+        self.assertFalse(any(call[0] == "POST" and "/location/" in call[1] for call in client.calls))
+
+    async def test_creating_the_same_zip_again_uses_that_location(self):
+        client = Client(locations=[])
+        client.location_conflict = True
+        with patch.object(ebay_listings, "_ship_from_postal_code", return_value="70125"), \
+             patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(client.offers["offer-1"]["merchantLocationKey"], "zip-70125")
+
+    async def test_a_disabled_location_is_replaced_by_the_saved_zip(self):
+        client = Client(locations=[{"merchantLocationKey": "old", "name": "Old", "merchantLocationStatus": "DISABLED"}])
+        with patch.object(ebay_listings, "_ship_from_postal_code", return_value="70125"), \
+             patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(client.offers["offer-1"]["merchantLocationKey"], "zip-70125")
 
     async def test_several_shipping_policies_use_the_stored_default(self):
         client = Client(policies=3)
