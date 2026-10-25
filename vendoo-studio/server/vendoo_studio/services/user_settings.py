@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Literal
@@ -38,6 +39,7 @@ DEFAULT_CURSOR_MODEL = "composer-2.5"
 AUTO_CURSOR_MODEL = "auto"
 DEFAULT_SETTLED_SHELF_EXPANDED = True
 PACKAGE_DIMENSIONS_KEY = "package_dimensions_in"
+SHIPS_FROM_ZIP_KEY = "ships_from_zip"
 DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
 DEFAULT_THEME: Literal["dark", "light", "system"] = "dark"
 
@@ -84,6 +86,24 @@ def set_package_dimensions(*, length: object, width: object, height: object) -> 
 
     update_settings(mutator)
     return dimensions
+
+
+def get_ships_from_zip() -> str:
+    """The five-digit ZIP the seller ships from; empty until they set it."""
+    raw = str(read_settings().get(SHIPS_FROM_ZIP_KEY) or "").strip()
+    return raw if re.fullmatch(r"\d{5}", raw) else ""
+
+
+def set_ships_from_zip(value: object) -> str:
+    text = str(value or "").strip()
+    if text and not re.fullmatch(r"\d{5}", text):
+        raise ValueError("A ZIP code is five digits.")
+
+    def mutator(payload: dict) -> None:
+        payload[SHIPS_FROM_ZIP_KEY] = text
+
+    update_settings(mutator)
+    return text
 
 
 def package_dimensions_string() -> str:

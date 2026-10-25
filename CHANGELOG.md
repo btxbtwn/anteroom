@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.350 — 2026-10-25
+
+- Poshmark, Mercari, and Depop sizes, brands, and shipping now come from the options on your signed-in account. A size that does not belong in that category, such as an adult size on a kids' listing, stops the listing before anything is created.
+- Mercari and Depop use the ZIP you set in Settings → Listings as the ships-from address.
+
 ## 0.1.349 — 2026-10-25
 
 - Each marketplace form shows only its own fields, once each, under the names the marketplace uses. Fields from another marketplace no longer linger after switching tabs, and a marketplace's own category shows as its Category.

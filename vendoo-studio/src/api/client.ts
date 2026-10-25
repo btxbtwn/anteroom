@@ -878,6 +878,12 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(dimensions),
       }),
+    shipsFromZip: () => request<{ zip: string }>("/settings/ships-from-zip"),
+    setShipsFromZip: (zip: string) =>
+      request<{ ok: boolean; zip: string }>("/settings/ships-from-zip", {
+        method: "PUT",
+        body: JSON.stringify({ zip }),
+      }),
     hiddenFields: (conversationId?: string) =>
       request<{
         always: { marketplace: string; field: string; label: string }[];
