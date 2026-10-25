@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdSpendEntry } from "../api/adSpend";
 import type { InventoryAnalytics } from "../api/types";
 import { EtsyMarketingPanel } from "./etsy/EtsyWorkspace";
+import { ChannelMarketing } from "./channel/ChannelWorkspace";
 import { AdSpend } from "./AdSpend";
 import { SaleCalendar } from "./SaleCalendar";
 import { DiscountSuggestions } from "./DiscountSuggestions";
@@ -18,7 +19,7 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 /** The page reads only stale stock and ad totals from the analytics payload. */
-type MarketingData = Pick<InventoryAnalytics, "stale" | "ads">;
+type MarketingData = Pick<InventoryAnalytics, "stale" | "ads"> & Partial<Pick<InventoryAnalytics, "marketplaces">>;
 
 const data: MarketingData = {
   stale: [
@@ -91,9 +92,29 @@ describe("MarketplacesPage", () => {
     expect(html).not.toContain("Promoted Closet");
   });
 
+  it("lays out Poshmark, Depop, and Sellwild like eBay, with a sales dashboard", () => {
+    setup({ ...data, marketplaces: [
+      { id: "depop", label: "depop", count: 3, revenue: 120, profit: 70, profit_known: 2, fees_known: 2, revenue_known: 3,
+        days_known: 3, average_price: 40, median_days: 12, margin: 58 },
+    ] });
+    for (const id of ["poshmark", "depop", "sellwild"] as const) {
+      const html = renderToStaticMarkup(<MarketplacePanel marketplace={id} onOpenListing={vi.fn()} />);
+      expect(html).toContain('class="ebay-workspace"');
+      expect(html).toContain("Sales channel");
+      expect(html).toContain('class="ebay-navigation"');
+      for (const title of ["Dashboard", "Marketing"]) expect(html).toContain(`${title}</button>`);
+      expect(html).toContain("Sales overview");
+    }
+    const depop = renderToStaticMarkup(<MarketplacePanel marketplace="depop" onOpenListing={vi.fn()} />);
+    expect(depop).toContain("$120");
+    expect(depop).toContain("$40 average sale");
+    expect(depop).toContain("2 of 3 sales have a recorded cost");
+    expect(depop).toContain("Typical time to sell: 12 days");
+  });
+
   it("keeps the existing Poshmark spend history accessible", () => {
     setup(data, [adEntry]);
-    const html = renderToStaticMarkup(<MarketplacePanel marketplace="poshmark" onOpenListing={vi.fn()} />);
+    const html = renderToStaticMarkup(<ChannelMarketing marketplace="poshmark" onOpenListing={vi.fn()} />);
     expect(html).toContain("Promoted Closet");
     expect(html).toContain("60 clicks · 1 order · $45 sales · 3× ROAS");
     expect(html).not.toContain("Upload Etsy Ads CSV");

@@ -45,6 +45,7 @@
   --color-mercari: #8290FF;
   --color-depop: #FF6B6B;
   --color-etsy: #F08A5D;
+  --color-sellwild: #9DBF3A;
 
   --color-message-user: var(--message-surface);
   --color-message-user-text: var(--contrast-message-foreground);
