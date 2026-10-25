@@ -3338,6 +3338,11 @@
         seenAny = true;
         for (const btn of buttons) {
           clickedEls.add(btn);
+          if (typeof globalThis.vendooUpdateAllButtons.copiesGeneralSize === 'function'
+              && globalThis.vendooUpdateAllButtons.copiesGeneralSize(btn)) {
+            log('Leaving Size as set on each marketplace');
+            continue;
+          }
           try {
             btn.scrollIntoView({ block: 'center', behavior: 'instant' });
           } catch (_) { /* detached */ }
@@ -4224,6 +4229,18 @@
       return value == null ? '' : String(value).trim();
   }
 
+  // Depop can offer a different size than the tag. The tag stays the general
+  // size; Depop keeps the seller's choice, so Other is not filled back as XL.
+  function marketplaceSizeValue(marketplace, data) {
+      if (marketplace === 'depop') {
+          const specifics = data && data.depop_specifics;
+          const specific = specifics && typeof specifics === 'object' ? specifics.size : '';
+          const text = specific == null ? '' : String(specific).trim();
+          if (text) return text;
+      }
+      return listingSizeValue(data);
+  }
+
   function listingTagValues(data) {
       const raw = data?.tags;
       if (!raw) return [];
@@ -4332,7 +4349,7 @@
   }
 
   async function fillMarketplaceSize(marketplace, data, preferredSelector = '') {
-      const size = listingSizeValue(data);
+      const size = marketplaceSizeValue(marketplace, data);
       const attempts = size ? 8 : 1;
       let el = null;
       for (let attempt = 0; attempt < attempts; attempt++) {
@@ -5738,7 +5755,7 @@
               ['quantity', ['#listings\\.depop\\.overrides\\.quantity'], ['Quantity'], data?.quantity],
               ['source', ['#listings\\.depop\\.marketplaceSpecifics\\.source'], ['Source'], data?.depop_specifics?.source],
               ['age', ['#listings\\.depop\\.marketplaceSpecifics\\.age'], ['Age'], data?.depop_specifics?.age],
-              ['size', ['#listings\\.depop\\.overrides\\.size'], ['Size'], data?.size || data?.depop_specifics?.size],
+              ['size', ['#listings\\.depop\\.overrides\\.size'], ['Size'], data?.depop_specifics?.size || data?.size],
               ['parcelSize', ['#listings\\.depop\\.marketplaceSpecifics\\.parcelSize'], ['Parcel Size'], data?.depop_specifics?.parcel_size || data?.depop_specifics?.parcelSize],
           ],
       };

@@ -149,10 +149,13 @@ def update_listing(conv_id: str, body: ListingUpdate, db: Session = Depends(get_
     from vendoo_studio.services.listing_evidence import explicit_changes, record_correction
 
     previous = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
-    changes = explicit_changes(previous.listing_json if previous else {}, body.listing)
+    previous_json = previous.listing_json if previous and isinstance(previous.listing_json, dict) else {}
+    changes = explicit_changes(previous_json, body.listing)
     sanitize_listing_sizes(body.listing)
     # The seller's size input is the source of truth; the title follows it.
-    align_size_fields(body.listing)
+    # A Depop size that already differed stays, unless it was a copy of the
+    # previous general size and that general size is what changed.
+    align_size_fields(body.listing, previous_size=None if previous_json.get("size") is None else str(previous_json.get("size")))
     normalize_listing_dropdowns(body.listing)
     validation = validate_listing(body.listing, photo_count, require_photos=True)
 
