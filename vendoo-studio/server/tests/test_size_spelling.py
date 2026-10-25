@@ -3,7 +3,7 @@
 import pytest
 
 from vendoo_studio.models.ebay_fields import ebay_size_for_type
-from vendoo_studio.models.sizes import letter_size
+from vendoo_studio.models.sizes import letter_size, size_choice
 from vendoo_studio.models.validation import validate_listing
 from vendoo_studio.services.direct_preflight import _unresolved
 from vendoo_studio.services.listing_generate import align_size_fields
@@ -65,3 +65,32 @@ def test_a_required_field_left_empty_is_not_called_a_refused_choice():
                                         {"field": "ebay:Color", "value": ""}]}}
     messages = [item["message"] for item in _unresolved(snapshot, "ebay")]
     assert messages == ["Size “Huge” is not one of eBay's choices, so it is left empty.", "eBay needs Color, and it is empty."]
+
+
+CHOICES = ["2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "One Size", "28", "30"]
+
+
+@pytest.mark.parametrize(("size", "choice"), [
+    ("XXL", "2XL"), ("2X", "2XL"), ("xl", "XL"), ("OS", "One Size"), ("one-size", "One Size"),
+    ("x-large", "XL"), ("XL (18/20)", "XL"), ("30", "30"), ("32", None), ("Huge", None),
+])
+def test_a_size_is_found_among_the_marketplaces_choices(size, choice):
+    assert size_choice(size, CHOICES) == choice
+
+
+def test_a_kids_range_matches_only_the_same_range_or_a_plain_letter():
+    assert size_choice("XL (18/20)", ["XL (18/20)", "XL"]) == "XL (18/20)"
+    assert size_choice("XL (18/20)", ["L", "XL (14/16)"]) is None
+
+
+def test_the_ebay_form_takes_the_size_from_its_categorys_own_choices():
+    from vendoo_studio.services.category_fields import save_fields
+
+    save_fields("ebay", "990001", {"Size": FieldSpec("Size", display="Size", selection_only=True,
+                                                     options={label: label for label in CHOICES})})
+    listing = {"title": "Nike OS Cap", "brand": "Nike", "size": "OS",
+               "marketplace_category_ids": {"ebay": "990001"}, "ebay_specifics": {"size": "OS"}}
+    align_size_fields(listing)
+    assert listing["ebay_specifics"]["size"] == "One Size"
+    result = validate_listing(listing, require_photos=False, selected_marketplaces=["ebay"])
+    assert not any(issue["field"] == "ebay_specifics.size" for issue in [*result.errors, *result.warnings])

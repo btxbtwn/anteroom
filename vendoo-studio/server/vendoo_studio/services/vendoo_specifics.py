@@ -439,14 +439,11 @@ def _encode_one(spec: FieldSpec, text: str) -> str | None:
 
 
 def _same_size_code(options: dict[str, str], text: str) -> str | None:
-    """The one option that is ``text`` spelled the marketplace's way: Depop's XXL is eBay's 2XL."""
-    from vendoo_studio.models.sizes import letter_size
+    """The option that is ``text`` spelled the marketplace's way: Depop's XXL is eBay's 2XL, OS is One Size."""
+    from vendoo_studio.models.sizes import size_choice
 
-    wanted = letter_size(text)
-    if not wanted:
-        return None
-    same = [code for code, display in options.items() if letter_size(display) == wanted]
-    return same[0] if len(same) == 1 else None
+    label = size_choice(text, options.values())
+    return next((code for code, display in options.items() if display == label), None) if label else None
 
 
 def _other_option(spec: FieldSpec) -> str | None:

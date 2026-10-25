@@ -662,11 +662,11 @@ def validate_listing(
                         "eBay Fabric Weight must be a number greater than 0 with at most 1 decimal place",
                     )
         ebay_size = text_value(ebay.get("size"))
-        from vendoo_studio.models.ebay_fields import ebay_size_for_type
         from vendoo_studio.models.sizes import size_key
+        from vendoo_studio.services.listing_generate import ebay_size as ebay_spelling
 
-        expected_ebay_size = ebay_size_for_type(size, ebay_optional_raw(ebay, "sizeType") or payload.get("sizeType"))
-        if size and ebay_size and size_key(ebay_size) != size_key(expected_ebay_size):
+        expected_ebay_size = ebay_spelling(payload, ebay, size) if size else ""
+        if size and ebay_size and ebay_size != expected_ebay_size and size_key(ebay_size) != size_key(expected_ebay_size):
             add_issue(result, "ebay_specifics.size", "eBay size must match the general size")
         care = text_value(ebay.get("garmentCare"))
         if care and evidence_unknown(description, "care tag is not shown", "garment care", "unverified"):
