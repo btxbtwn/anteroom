@@ -9,21 +9,17 @@ import { Stat, StatGrid } from "./AnalyticsStat";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Textarea } from "./ui/textarea";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import { EmptyRow, FormError, FormField, PageNote, PageSection, Panel, RowList } from "./WorkspacePage";
 
-const MARKETS: AdMarketplace[] = ["poshmark", "etsy"];
 const PROGRAMS: Record<AdMarketplace, string> = { poshmark: "Promoted Closet", etsy: "Etsy Ads" };
 const ADS_QUERY_KEY = ["ad-spend"];
 
 /**
- * Poshmark Promoted Closet and Etsy Ads, set against what sold. Neither shares
- * its figures with Vendoo, so the seller copies each dashboard for the dates
- * it covers; the totals follow the sales period picked here.
+ * One marketplace’s recorded ad spend, set against its sales in the selected period.
  */
-export function AdSpend() {
+export function AdSpend({ marketplace }: { marketplace: AdMarketplace }) {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: ADS_QUERY_KEY, queryFn: api.adSpend.list });
   const [range, setRange] = useState<AnalyticsRange>("12m");
@@ -32,7 +28,9 @@ export function AdSpend() {
     queryFn: () => api.analytics.get(range),
     placeholderData: keepPreviousData,
   });
-  const ads = totals.data?.ads;
+  const entries = query.data?.filter(entry => entry.marketplace === marketplace);
+  const marketTotals = totals.data?.ads.marketplaces.find(market => market.id === marketplace);
+
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ADS_QUERY_KEY }),
     queryClient.invalidateQueries({ queryKey: ["analytics"] }),
@@ -55,9 +53,11 @@ export function AdSpend() {
       aria-label="Ads"
       title="Ads"
       actions={editing == null ? <>
-        <Button variant="outline" size="xs" disabled={uploadCsv.isPending} onClick={() => csvInput.current?.click()}>
-          {uploadCsv.isPending ? "Importing…" : "Upload Etsy Ads CSV"}
-        </Button>
+        {marketplace === "etsy" ? (
+          <Button variant="outline" size="xs" disabled={uploadCsv.isPending} onClick={() => csvInput.current?.click()}>
+            {uploadCsv.isPending ? "Importing…" : "Upload Etsy Ads CSV"}
+          </Button>
+        ) : null}
         <Button variant="outline" size="xs" onClick={() => setEditing("new")}>Add ad spend</Button>
       </> : null}
     >
@@ -73,12 +73,9 @@ export function AdSpend() {
         }}
       />
       <PageNote>
-        Poshmark Promoted Closet and Etsy Ads don't share their numbers with Vendoo. Copy what each dashboard shows
-        for a week or a month: the spend, and if you like the clicks, orders, and sales it credits to the ads.
-      </PageNote>
-      <PageNote>
-        For Etsy Ads, download the stats CSV from Etsy and upload it instead of typing it in. Each day with activity
-        becomes an entry, and uploading a newer export replaces those days.
+        {marketplace === "etsy"
+          ? "Download the Etsy Ads stats CSV and upload it here. Each day with activity becomes an entry; a newer export replaces those days. You can also record figures from your dashboard."
+          : "Copy Promoted Closet spend from your Poshmark dashboard for a week or a month. You can include clicks, orders, and sales credited to the ads."}
       </PageNote>
       {uploadCsv.isSuccess ? (
         <PageNote role="status" className="text-foreground">
@@ -93,13 +90,14 @@ export function AdSpend() {
       {editing != null ? (
         <AdSpendForm
           key={editing === "new" ? "new" : editing.id}
+          marketplace={marketplace}
           entry={editing === "new" ? null : editing}
           onClose={() => setEditing(null)}
           onSaved={async () => { await refresh(); setEditing(null); }}
         />
       ) : null}
 
-      {query.data?.length ? (
+      {entries?.length ? (
         <ToggleGroup
           aria-label="Ad spend period"
           className="flex-wrap"
@@ -112,29 +110,25 @@ export function AdSpend() {
           {ANALYTICS_RANGES.map((item) => <Toggle key={item.id} value={item.id}>{item.label}</Toggle>)}
         </ToggleGroup>
       ) : null}
-      {ads && ads.marketplaces.length > 0 ? (
+      {marketTotals ? (
         <StatGrid>
-          <Stat label="Ad spend" value={formatMoney(ads.spend)} hint="Spread evenly over the days each entry covers" />
-          <Stat
-            label="Business profit after ads"
-            value={ads.profit_after_ads == null ? "—" : formatMoney(ads.profit_after_ads)}
-            negative={ads.profit_after_ads != null && ads.profit_after_ads < 0}
-            hint={ads.profit == null || ads.profit_after_ads == null
-              ? "Record sale prices and costs to see profit"
-              : `${formatMoney(ads.profit)} profit on every marketplace, less ${formatMoney(ads.spend)} of ads`}
-          />
-          {ads.marketplaces.map((market) => <MarketStat key={market.id} market={market} />)}
+          <MarketStat market={marketTotals} />
+          <Stat label={`${marketplaceName(marketplace)} profit after ads`}
+            value={marketTotals.profit_after_ads == null ? "—" : formatMoney(marketTotals.profit_after_ads)}
+            negative={marketTotals.profit_after_ads != null && marketTotals.profit_after_ads < 0}
+            hint={marketTotals.profit == null ? "Record sale prices and costs to see profit"
+              : `${formatMoney(marketTotals.profit)} marketplace profit, less ${formatMoney(marketTotals.spend)} of ads`} />
         </StatGrid>
       ) : null}
 
       {query.isError ? <FormError>{(query.error as Error).message}</FormError> : null}
       {totals.isError ? <FormError>{(totals.error as Error).message}</FormError> : null}
       {remove.isError ? <FormError>{remove.error.message}</FormError> : null}
-      {query.data?.length === 0 && editing == null ? <EmptyRow>No ad spend recorded yet.</EmptyRow> : null}
-      {query.data?.length && ads?.marketplaces.length === 0 ? <EmptyRow>No ad spend in this period.</EmptyRow> : null}
-      {query.data?.length ? (
+      {entries?.length === 0 && editing == null ? <EmptyRow>No ad spend recorded yet.</EmptyRow> : null}
+      {Boolean(entries?.length) && !marketTotals ? <EmptyRow>No ad spend in this period.</EmptyRow> : null}
+      {entries?.length ? (
         <RowList>
-          {query.data.map((entry) => (
+          {entries.map((entry) => (
             <li key={entry.id} className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-sm">
               {/* basis-56 lets the figures wrap under the name on a phone instead of crushing it. */}
               <span className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
@@ -178,15 +172,16 @@ function MarketStat({ market }: { market: AdMarketplaceTotals }) {
 }
 
 function AdSpendForm({
+  marketplace,
   entry,
   onClose,
   onSaved,
 }: {
+  marketplace: AdMarketplace;
   entry: AdSpendEntry | null;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const [market, setMarket] = useState<AdMarketplace>(entry?.marketplace ?? "poshmark");
   const [start, setStart] = useState(entry?.start_date ?? "");
   const [end, setEnd] = useState(entry?.end_date ?? "");
   const [spend, setSpend] = useState(entry ? String(entry.spend) : "");
@@ -205,7 +200,7 @@ function AdSpendForm({
     setError("");
     if (end < start) { setError("End date must be on or after the start date."); return; }
     save.mutate({
-      marketplace: market,
+      marketplace,
       start_date: start,
       end_date: end,
       spend: Number(spend),
@@ -225,16 +220,7 @@ function AdSpendForm({
         </div>
         <fieldset className="flex min-w-0 flex-col gap-4" disabled={save.isPending}>
           <div className="grid grid-cols-1 gap-3 @lg/page:grid-cols-2 @3xl/page:grid-cols-4">
-            <FormField label="Ads">
-              <Select value={market} onValueChange={(value) => setMarket(value as AdMarketplace)}>
-                <SelectTrigger autoFocus>
-                  <SelectValue>{marketplaceName(market)} {PROGRAMS[market]}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup>
-                  {MARKETS.map((value) => <SelectItem key={value} value={value}>{marketplaceName(value)} {PROGRAMS[value]}</SelectItem>)}
-                </SelectPopup>
-              </Select>
-            </FormField>
+
             <FormField label="Start date"><Input nativeInput type="date" required value={start} onChange={(e) => setStart(e.target.value)} /></FormField>
             <FormField label="End date (inclusive)"><Input nativeInput type="date" required min={start} value={end} onChange={(e) => setEnd(e.target.value)} /></FormField>
             <FormField label="Spend ($)"><Input nativeInput type="number" required min={0} step="0.01" value={spend} onChange={(e) => setSpend(e.target.value)} /></FormField>

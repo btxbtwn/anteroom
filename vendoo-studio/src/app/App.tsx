@@ -43,8 +43,9 @@ import {
   type BulkUploadDefaults,
   type BulkUploadItem,
 } from "../bulkPhotoUpload";
+import type { Marketplace } from "../components/MarketplacesPage";
+import { marketplaceName } from "../components/marketplaceNames";
 import { ThemeSync } from "../components/ThemeSync";
-import { QueuePage } from "../components/QueuePage";
 
 import { OpenListingTabs } from "../components/OpenListingTabs";
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
@@ -62,11 +63,9 @@ const AnalyticsPage = lazy(loadAnalyticsPage);
 const loadAssistantPage = () =>
   import("../components/AssistantPage").then((module) => ({ default: module.AssistantPage }));
 const AssistantPage = lazy(loadAssistantPage);
-const loadMarketingPage = () =>
-  import("../components/MarketingPage").then((module) => ({ default: module.MarketingPage }));
-const MarketingPage = lazy(loadMarketingPage);
-const loadMarketplacePage = () => import("../components/MarketplacePage").then((module) => ({ default: module.MarketplacePage }));
-const MarketplacePage = lazy(loadMarketplacePage);
+const loadMarketplacesPage = () =>
+  import("../components/MarketplacesPage").then((module) => ({ default: module.MarketplacesPage }));
+const MarketplacesPage = lazy(loadMarketplacesPage);
 const loadUsagePage = () =>
   import("../components/UsagePage").then((module) => ({ default: module.UsagePage }));
 const UsagePage = lazy(loadUsagePage);
@@ -75,7 +74,7 @@ const loadSourcingPage = () =>
 const SourcingPage = lazy(loadSourcingPage);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
-const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketingPage, loadUsagePage, loadSourcingPage, loadMarketplacePage];
+const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketplacesPage, loadUsagePage, loadSourcingPage];
 const pageLoading = (
   <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading">
     <Spinner className="size-5 text-muted-foreground" />
@@ -120,7 +119,7 @@ export function App() {
   const clearListingWorkspace = (id: string) => dispatchListingTab({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
   const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
-  const [marketplace, setMarketplace] = useState<"ebay" | "etsy" | null>(null);
+  const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
   /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
   const shell = useRef<"listings" | "assistant">(listingFromUrl ? "listings" : "assistant");
   const viewBeforeSettings = useRef<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
@@ -284,16 +283,12 @@ export function App() {
     ? SETTINGS_SECTION_LABELS[settingsSection]
     : activeView === "analytics"
       ? "Analytics"
-      : activeView === "marketing"
-        ? "Marketing"
       : activeView === "marketplaces"
-        ? (marketplace === "ebay" ? "eBay" : marketplace === "etsy" ? "Etsy" : "Marketplaces")
+        ? marketplaceName(marketplace)
       : activeView === "usage"
         ? "Usage"
       : activeView === "assistant"
         ? (assistantThreads.data?.find((thread) => thread.id === assistantThreadId)?.title || "Assistant")
-      : activeView === "queue"
-        ? "Queue"
       : activeView === "sourcing"
         ? "Sourcing"
         : String(selectedListing?.title || "Anteroom");
@@ -302,7 +297,7 @@ export function App() {
     activeView,
     SETTINGS_SECTION_LABELS[settingsSection],
     activeView === "listings" ? selectedListing : null,
-    activeView === "assistant" ? assistantThreadTitle : activeView === "marketplaces" ? (marketplace === "ebay" ? "eBay" : marketplace === "etsy" ? "Etsy" : null) : null,
+    activeView === "assistant" ? assistantThreadTitle : activeView === "marketplaces" ? marketplaceName(marketplace) : null,
   );
   // The sidebar overlays the workspace on mobile and the editor is its own pane
   // there, so the desktop collapse states only apply to the desktop layout.
@@ -341,8 +336,8 @@ export function App() {
     closeMobileSidebar();
   };
 
-  // Analytics, Marketing, Usage, Sourcing and the Queue toggle back to whichever of home or inventory was open.
-  const togglePage = (view: "analytics" | "marketing" | "usage" | "sourcing" | "queue" | "marketplaces") => {
+  // Analytics, Marketplaces, Usage and Sourcing toggle back to whichever of home or inventory was open.
+  const togglePage = (view: "analytics" | "marketplaces" | "usage" | "sourcing") => {
     setMobilePane("workspace");
     if (activeView === view) {
       setActiveView(shell.current);
@@ -352,16 +347,7 @@ export function App() {
     closeMobileSidebar();
   };
   const openAnalytics = () => togglePage("analytics");
-  const openMarketing = () => togglePage("marketing");
   const openMarketplaces = () => togglePage("marketplaces");
-  const openMarketplaceConnections = () => {
-    viewBeforeSettings.current = "marketplaces";
-    setSettingsSection("connections");
-    setSettingsTargetId(null);
-    setActiveView("settings");
-    setMobilePane("workspace");
-    closeMobileSidebar();
-  };
   const openAssistant = () => goAssistant();
   const openProviders = () => {
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
@@ -523,10 +509,6 @@ export function App() {
   };
 
   const bulk = useBulkRegenerate((id) => activeView === "listings" && selectedConvId === id);
-  const queueCount = (queue.data?.jobs.filter((j) => ACTIVE_JOB_STATUSES.has(j.status)).length ?? 0)
-    + (queue.data?.work.filter((w) => !bulk.pendingIds.includes(w.conversation_id)).length ?? 0)
-    + bulk.pendingIds.length;
-
   // Bulk-uploaded drafts already carry their SKUs and measurements, so they generate straight away.
   const generateBatch = async (uploaded: BulkListingUploadResult[]) => {
     const listings = uploaded
@@ -704,13 +686,10 @@ export function App() {
             onOpenSettings={openSettings}
             onOpenUsage={openUsage}
             onOpenAnalytics={openAnalytics}
-            onOpenMarketing={openMarketing}
             onOpenMarketplaces={openMarketplaces}
             onOpenAssistant={openAssistant}
             onOpenSourcing={openSourcing}
             onOpenMobileNav={() => setMobileNavOpen(true)}
-            onOpenQueue={() => togglePage("queue")}
-            queueCount={queueCount}
             onCloseSettings={closeSettings}
             onSettingsSectionChange={handleSettingsSectionChange}
             onSettingsSearchResult={handleSettingsSearchResult}
@@ -807,21 +786,13 @@ export function App() {
                     onOpenSetupGuide={() => setSetupGuideOpen(true)}
                   />
                 </Suspense>
-              ) : activeView === "queue" ? (
-                <QueuePage data={queue.data} loading={queue.isPending} error={queue.error}
-                  bulk={bulk} titles={new Map((conversations ?? []).map((c) => [c.id, c.title || "Untitled listing"]))}
-                  onOpenListing={openListing} />
               ) : activeView === "analytics" ? (
                 <Suspense fallback={pageLoading}>
                   <AnalyticsPage onOpenListing={openListing} />
                 </Suspense>
-              ) : activeView === "marketing" ? (
-                <Suspense fallback={pageLoading}>
-                  <MarketingPage onOpenListing={openListing} />
-                </Suspense>
               ) : activeView === "marketplaces" ? (
                 <Suspense fallback={pageLoading}>
-                  <MarketplacePage selected={marketplace} onSelect={setMarketplace} onOpenListing={openListing} onOpenConnections={openMarketplaceConnections} />
+                  <MarketplacesPage marketplace={marketplace} onMarketplaceChange={setMarketplace} onOpenListing={openListing} />
                 </Suspense>
               ) : activeView === "usage" ? (
                 <Suspense fallback={pageLoading}>
@@ -1045,7 +1016,6 @@ export function App() {
           open={mobileNavOpen}
           onOpenChange={setMobileNavOpen}
           activeView={activeView}
-          queueCount={queueCount}
           onNavigate={navigateMobile}
         />
       ) : null}

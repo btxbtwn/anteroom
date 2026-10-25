@@ -52,6 +52,26 @@ upload stops creation, and the saved draft is still read back for verification.
 - The extension runs without its own interface. Anteroom owns review, approved Sends, progress, and diagnostics.
 - One automation job runs at a time. Additional Send to Vendoo approvals enqueue and start when the current job finishes, fails, or is cancelled.
 
+### Marketplace workspace
+
+The sidebar and mobile navigation have one **Marketplaces** entry. Inside it,
+eBay contains its seller workspace and API marketing controls; Etsy contains
+its connected shop dashboard, orders, listings, and a Marketing tab for the
+local sale calendar and Etsy Ads CSV imports.
+Existing Poshmark ad records and Depop/Sellwild sale calendars remain available
+in their respective marketplace views. Calendars and ad totals show only the
+selected marketplace. Saving a local sale plan does not apply a marketplace
+promotion. Inventory-wide discount suggestions live in **Analytics**.
+
+Etsy reads shop details, paginated receipts, and listings through the existing
+relay and Keychain connection. Its dashboard shows current shop counts and
+paid order totals for the newest displayed page in the chosen UTC date range;
+currencies stay separate, and totals include shipping and tax before refunds
+and fees. Order and listing views support filters and pagination. Buyer names,
+addresses, messages, and credentials are excluded from responses, and these
+workspace reads are not persisted. Etsy account changes during a read discard
+its result. This workspace has no publish, delist, refund, or shipment actions.
+
 ### Security Decision
 
 The API key previously posted in chat must be rotated. It must not be committed, written to SQLite, included in logs, returned to the frontend, or sent to the extension. The replacement key will be entered through the application's local Settings page.

@@ -1,5 +1,5 @@
 /*
- * Page layout for Studio's full-width pages (Queue, Analytics, Marketing,
+ * Page layout for Studio's full-width pages (Marketplaces, Analytics,
  * Sourcing). The container, section header and grouped panel follow T3 Code's
  * WorkspacePageContainer, SettingsSection and SettingsGroup
  * (https://github.com/pingdotgg/t3code, MIT License, (c) 2026 T3 Tools Inc.).

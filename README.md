@@ -26,6 +26,8 @@ We plan to roll out direct listing from Anteroom to **Depop, eBay, Etsy, Poshmar
 
 Edits to an existing listing have two separate steps: **Update Vendoo** writes the Vendoo form, and a delist/relist in Vendoo updates the live marketplace copy. Anteroom tracks unsent edits and listings that still need a relist. See the [existing-listing workflow](vendoo-studio/README.md#editing-something-that-is-already-listed).
 
+Open **Marketplaces** for each marketplace’s tools, sales planning, and ad history. eBay’s API marketing controls live under eBay; Etsy has a shop dashboard, orders, listings, and a Marketing tab for its sale calendar and ad CSV imports. Inventory-wide discount suggestions are in **Analytics**.
+
 ## Inside Anteroom
 
 | Workspace | What you can do |

@@ -3,8 +3,6 @@ import {
   BoxIcon,
   ChartColumnIcon,
   GaugeIcon,
-  ListIcon,
-  MegaphoneIcon,
   MenuIcon,
   MessageCircleIcon,
   Rows3Icon,
@@ -15,16 +13,14 @@ import { cn } from "../lib/utils";
 import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import type { WorkspaceView } from "./workspaceCrumbs";
 
-export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "queue" | "analytics" | "marketing" | "usage" | "settings" | "marketplaces";
+export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "analytics" | "usage" | "settings" | "marketplaces";
 
 /** Same order as the desktop sidebar footer: home and inventory, the day's work, insight, settings. */
 const ITEMS: { id: MobileNavTarget; label: string; icon: ComponentType<{ className?: string }> }[] = [
   { id: "assistant", label: "Assistant", icon: MessageCircleIcon },
   { id: "listings", label: "Inventory", icon: Rows3Icon },
   { id: "sourcing", label: "Sourcing", icon: BoxIcon },
-  { id: "queue", label: "Queue", icon: ListIcon },
   { id: "analytics", label: "Analytics", icon: ChartColumnIcon },
-  { id: "marketing", label: "Marketing", icon: MegaphoneIcon },
   { id: "marketplaces", label: "Marketplaces", icon: StoreIcon },
   { id: "usage", label: "Usage", icon: GaugeIcon },
   { id: "settings", label: "Settings", icon: SettingsIcon },
@@ -49,13 +45,11 @@ export function MobileNav({
   open,
   onOpenChange,
   activeView,
-  queueCount,
   onNavigate,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   activeView: WorkspaceView;
-  queueCount: number;
   onNavigate: (target: MobileNavTarget) => void;
 }) {
   return (
@@ -87,11 +81,6 @@ export function MobileNav({
               >
                 <Icon className="size-5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{label}</span>
-                {id === "queue" && queueCount ? (
-                  <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground" aria-label={`${queueCount} in the queue`}>
-                    {queueCount}
-                  </span>
-                ) : null}
               </button>
             );
           })}

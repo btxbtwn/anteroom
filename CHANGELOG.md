@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.328 — 2026-10-25
+
+- Removed the Queue page from navigation. Approved Sends still wait their turn and save drafts in the background; progress stays visible on each listing.
+- Replaced the separate Marketing tab with marketplace-specific tools, sale calendars, and ad history. Inventory discount suggestions are in Analytics.
+- Added an Etsy dashboard under Marketplaces with live shop metrics, orders, shipping status, and listings. Etsy sales planning and ad imports are in its Marketing tab.
+
 ## 0.1.327 — 2026-10-24
 
 - Choose eBay or Etsy from the Marketplaces hub. Keep eBay draft details when switching channels, and open Etsy sale alerts and Shop Manager from one place.

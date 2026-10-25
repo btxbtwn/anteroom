@@ -7,6 +7,7 @@ import { cn } from "../lib/utils";
 import { ANALYTICS_RANGES, formatChange, formatDays, formatMoney } from "./analyticsFormat";
 import { marketplaceName } from "./marketplaceNames";
 import { Stat, StatGrid } from "./AnalyticsStat";
+import { DiscountSuggestions } from "./DiscountSuggestions";
 import { EtsyNotAllowed } from "./EtsyNotAllowed";
 import { VendooImportButton } from "./VendooImportButton";
 import { Input } from "./ui/input";
@@ -200,6 +201,8 @@ export function AnalyticsPage({ onOpenListing }: Props) {
             </StatGrid>
             {data.inventory.undated_count > 0 ? <PageNote>{data.inventory.undated_count} active {data.inventory.undated_count === 1 ? "listing has" : "listings have"} no list date and cannot be aged.</PageNote> : null}
           </PageSection>
+
+          <DiscountSuggestions listings={data.stale} onOpenListing={onOpenListing} />
 
           <PageSection
             aria-label="Active listings"
