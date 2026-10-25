@@ -6,6 +6,12 @@ marketplace where the item sold is never touched. Nothing here runs on a
 timer, a queue, or a retry: each call names its marketplaces and carries the
 seller's confirmation. Deleting is safe to repeat, because every marketplace
 step reads the listing first and reports one that is already gone as deleted.
+
+The seller can also correct what Anteroom knows: mark a marketplace listed
+(with its link), sold, or not listed. A mark changes only Anteroom's record,
+never the marketplace, and stands until the marketplace reports something
+newer: a sale after a "listed" mark, or a different listing after a "not
+listed" one.
 """
 from __future__ import annotations
 
@@ -55,15 +61,40 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def _sold_on(db: Session, conv_id: str, notes: dict) -> set[str]:
-    sold = {row.marketplace for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id)}
+def _time(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _sold_on(db: Session, conv_id: str, notes: dict) -> dict[str, datetime | None]:
+    """Where the item sold, and when that was last reported (None when unknown)."""
+    sold: dict[str, datetime | None] = {}
+
+    def add(marketplace: str, when) -> None:
+        stamp, known = _time(when), sold.get(marketplace)
+        sold[marketplace] = max(filter(None, (stamp, known)), default=None)
+
+    for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id):
+        add(row.marketplace, row.received_at)
     sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
     if sale.get("marketplace"):
-        sold.add(str(sale["marketplace"]).lower())
+        add(str(sale["marketplace"]).lower(), None)
     dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
     sold_by = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
-    sold.update(str(name).lower() for name, when in sold_by.items() if when)
+    for name, when in sold_by.items():
+        if when:
+            add(str(name).lower(), when)
     return sold
+
+
+def _notes_dict(notes: dict, key: str) -> dict:
+    value = notes.get(key)
+    return value if isinstance(value, dict) else {}
 
 
 def listings(db: Session, conv_id: str) -> dict:
@@ -72,35 +103,85 @@ def listings(db: Session, conv_id: str) -> dict:
     if not conv:
         raise DelistError(404, "Conversation not found")
     notes = parse_notes(conv.notes)
-    urls = notes.get("vendooListingUrls") if isinstance(notes.get("vendooListingUrls"), dict) else {}
-    native = notes.get("nativeMarketplaceDrafts") if isinstance(notes.get("nativeMarketplaceDrafts"), dict) else {}
-    delists = notes.get("marketplaceDelists") if isinstance(notes.get("marketplaceDelists"), dict) else {}
+    urls = _notes_dict(notes, "vendooListingUrls")
+    native = _notes_dict(notes, "nativeMarketplaceDrafts")
+    delists = _notes_dict(notes, "marketplaceDelists")
+    marks = _notes_dict(notes, "marketplaceMarks")
     sold = _sold_on(db, conv_id, notes)
     result = {}
     for marketplace in MARKETPLACES:
         binding = native.get(marketplace) if isinstance(native.get(marketplace), dict) else {}
+        mark = marks.get(marketplace) if isinstance(marks.get(marketplace), dict) else {}
         candidates = [(binding.get("listing_url"), "anteroom"), (urls.get(marketplace), "vendoo")]
+        if mark.get("state") == "listed":
+            candidates.insert(0, (mark.get("url"), "seller"))
         url, source = next(((u, s) for u, s in candidates if listing_id(marketplace, u)), (None, None))
-        record = delists.get(marketplace) if isinstance(delists.get(marketplace), dict) else {}
-        if not url and not record:
+        item_id = listing_id(marketplace, url)
+        if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):
             continue
-        item_id = listing_id(marketplace, url) or record.get("listing_id")
+        sold_here = marketplace in sold
+        if mark.get("state") == "listed":
+            reported, marked = sold.get(marketplace), _time(mark.get("at"))
+            sold_here = bool(reported and marked and reported > marked)
+        elif mark.get("state") == "sold":
+            sold_here = True
+        record = delists.get(marketplace) if isinstance(delists.get(marketplace), dict) else {}
+        if not url and not record and not sold_here:
+            continue
+        item_id = item_id or record.get("listing_id")
         # A newer listing than the one deleted is live again.
         if record and item_id and record.get("listing_id") != item_id:
             record = {}
         result[marketplace] = {"url": url or record.get("url"), "listing_id": item_id, "source": source,
-                               "sold_here": marketplace in sold, "state": record.get("state") or "live",
+                               "sold_here": sold_here, "state": record.get("state") or "live",
                                "error": record.get("error"), "at": record.get("at")}
     return result
 
 
-def _record(db: Session, conv_id: str, marketplace: str, value: dict) -> None:
+def _store(db: Session, conv_id: str, key: str, marketplace: str, value: dict | None) -> None:
     conv = ConversationRepo(db).get(conv_id)
     db.refresh(conv)
-    delists = parse_notes(conv.notes).get("marketplaceDelists")
-    delists = delists if isinstance(delists, dict) else {}
-    conv.notes = merge_notes(conv.notes, {"marketplaceDelists": {**delists, marketplace: value}})
+    current = _notes_dict(parse_notes(conv.notes), key)
+    current = {name: entry for name, entry in current.items() if name != marketplace}
+    conv.notes = merge_notes(conv.notes, {key: {**current, **({marketplace: value} if value else {})}})
     db.commit()
+
+
+def _record(db: Session, conv_id: str, marketplace: str, value: dict) -> None:
+    _store(db, conv_id, "marketplaceDelists", marketplace, value)
+
+
+MARKS = ("listed", "sold", "not_listed")
+
+
+def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None = None) -> dict:
+    """Record what the seller says about one marketplace. The marketplace itself is not touched."""
+    if marketplace not in MARKETPLACES or state not in MARKS:
+        raise DelistError(400, "Name a marketplace and what to mark it as.")
+    if _running.locked():
+        raise DelistError(409, "A delist is running. Wait for it to finish.")
+    known = listings(db, conv_id).get(marketplace) or {}
+    # Full precision: a sale reported later in the same second must still count as newer.
+    value: dict = {"state": state, "at": datetime.now(UTC).isoformat()}
+    if state == "listed":
+        clean = str(url or "").strip()
+        item_id = listing_id(marketplace, clean)
+        if not item_id:
+            raise DelistError(400, f"Paste the {marketplace.title()} listing link, as it appears in the browser's address bar.")
+        value.update(url=clean, listing_id=item_id)
+    else:
+        value.update(url=known.get("url"), listing_id=known.get("listing_id"))
+    conv = ConversationRepo(db).get(conv_id)
+    binding = _notes_dict(_notes_dict(parse_notes(conv.notes), "nativeMarketplaceDrafts"), marketplace)
+    if binding.get("state") in {"saving", "publishing", "unknown"}:
+        raise DelistError(409, f"Check the {marketplace.title()} result first; Anteroom is still waiting to confirm it.")
+    if state == "not_listed" and binding.get("state") in {"published", "pending_review"}:
+        _store(db, conv_id, "nativeMarketplaceDrafts", marketplace, None)
+    _store(db, conv_id, "marketplaceMarks", marketplace, value)
+    # Marking listed or not listed starts the record over; a sale keeps how the listing ended.
+    if state != "sold":
+        _store(db, conv_id, "marketplaceDelists", marketplace, None)
+    return listings(db, conv_id)
 
 
 async def _delete_ebay(item_id: str) -> dict:

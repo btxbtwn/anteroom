@@ -1,17 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, ExternalLinkIcon, MinusCircleIcon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, XCircleIcon } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { api } from "../api/client";
-import type { DelistMarketplace, MarketplaceListing, MarketplaceListings } from "../api/marketplaceListings";
+import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, SellwildOptions } from "../api/nativeMarketplaces";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
 import { InspectorSection } from "./ListingFormControls";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
-import { Checkbox } from "./ui/checkbox";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "./ui/combobox";
 import { Input } from "./ui/input";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
 
@@ -109,7 +109,7 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
   const [draftLinks, setDraftLinks] = useState<Partial<Record<NativeMarketplace, string>>>({});
   const [changingSellwild, setChangingSellwild] = useState(false);
   const [sellwildPick, setSellwildPick] = useState<{ categoryId?: number; conditionId?: number }>({});
-  const [picked, setPicked] = useState<Marketplace[]>([]);
+  const [linking, setLinking] = useState<{ marketplace: Marketplace; url: string } | null>(null);
 
   const etsyCreating = etsyEligible && !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
   const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
@@ -147,8 +147,18 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
   const delist = useMutation({
     mutationFn: (marketplaces: Marketplace[]) => api.marketplaceListings.delist(convId, marketplaces),
     retry: false,
-    onSuccess: (data) => { queryClient.setQueryData(liveKey, data); setPicked([]); },
+    onSuccess: (data) => queryClient.setQueryData(liveKey, data),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: liveKey }),
+  });
+  const mark = useMutation({
+    mutationFn: ({ marketplace, state, url }: { marketplace: Marketplace; state: MarketplaceMark; url?: string }) =>
+      api.marketplaceListings.mark(convId, marketplace, state, url),
+    retry: false,
+    onSuccess: (data) => { queryClient.setQueryData(liveKey, data); setLinking(null); },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      void queryClient.invalidateQueries({ queryKey: nativeKey });
+    },
   });
 
   async function listNow(marketplace: NativeMarketplace) {
@@ -171,30 +181,39 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
     if (approved) delist.mutate(marketplaces);
   }
 
-  const busy = disabled || action.isPending || delist.isPending || native.isPending || native.isError;
+  const busy = disabled || action.isPending || delist.isPending || mark.isPending || native.isPending || native.isError;
   const statuses = ORDER.map((marketplace) => rowStatus(marketplace, listings[marketplace],
     NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined, revisionId, etsyEligible));
   const removable = ORDER.filter((marketplace) => deletable(listings[marketplace]));
   const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
-  const chosen = picked.filter((marketplace) => removable.includes(marketplace));
+
+  const unconfirmed = (marketplace: Marketplace) => NATIVE.has(marketplace)
+    && ["saving", "publishing", "unknown"].includes(drafts[marketplace as NativeMarketplace]?.state ?? "");
+  function listable(marketplace: Marketplace, status: Status): boolean {
+    if (!NATIVE.has(marketplace) || unconfirmed(marketplace)) return false;
+    if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || listings[marketplace]?.listing_id) return false;
+    if (marketplace === "etsy" && !etsyEligible) return false;
+    // A sold item is not listed anywhere else.
+    return !soldSomewhere;
+  }
+  function draftChanged(m: NativeMarketplace): boolean {
+    const draft = drafts[m];
+    return draft?.state === "draft" && (draft.revision_id !== revisionId || (m === "sellwild" && sellwildChoiceChanged));
+  }
 
   function actions(marketplace: Marketplace, status: Status): ReactNode {
-    if (!NATIVE.has(marketplace)) return null;
     const m = marketplace as NativeMarketplace;
-    const draft = drafts[m];
-    const pending = action.isPending && action.variables?.marketplace === m;
-    if (draft && ["saving", "publishing", "unknown"].includes(draft.state)) {
+    if (unconfirmed(marketplace)) {
       return <Button size="xs" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check result</Button>;
     }
-    if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || live.data?.[marketplace]?.listing_id) return null;
-    if (m === "etsy" && !etsyEligible) return null;
-    // A sold item is not listed anywhere else.
-    if (soldSomewhere) return null;
+    if (!listable(marketplace, status)) return null;
+    const draft = drafts[m];
+    const pending = action.isPending && action.variables?.marketplace === m;
     if (ONE_STEP.has(marketplace)) {
       return <Button size="xs" variant="outline" disabled={busy} onClick={() => void listNow(m)}>{pending ? "Listing…" : "List…"}</Button>;
     }
     const local = m === "sellwild";
-    const changed = draft?.state === "draft" && (draft.revision_id !== revisionId || (local && sellwildChoiceChanged));
+    const changed = draftChanged(m);
     const etsyBlocked = m === "etsy" && !draft?.draft_url && !etsyReady;
     const sellwildBlocked = local && (!sellwildCategory || !sellwildCondition);
     return (
@@ -204,6 +223,51 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
         </Button>
         <Button size="xs" variant="outline" disabled={busy || draft?.state !== "draft" || changed} onClick={() => void publish(m)}>Publish…</Button>
       </>
+    );
+  }
+
+  function rowMenu(marketplace: Marketplace, status: Status): ReactNode {
+    const name = marketplaceName(marketplace);
+    const m = marketplace as NativeMarketplace;
+    const entry = listings[marketplace];
+    const canList = listable(marketplace, status);
+    const canDelist = deletable(entry);
+    return (
+      <Menu>
+        <MenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`${name} actions`} disabled={busy} />}>
+          <EllipsisIcon />
+        </MenuTrigger>
+        <MenuPopup align="end" width="content">
+          {canList && (ONE_STEP.has(marketplace)
+            ? <MenuItem onClick={() => void listNow(m)}>List…</MenuItem>
+            : <MenuItem disabled={drafts[m]?.state !== "draft" || draftChanged(m)} onClick={() => void publish(m)}>Publish…</MenuItem>)}
+          {canDelist && <MenuItem variant="destructive" onClick={() => void runDelist([marketplace])}>Delist…</MenuItem>}
+          {(canList || canDelist) && <MenuSeparator />}
+          <MenuItem disabled={unconfirmed(marketplace)}
+            onClick={() => setLinking({ marketplace, url: entry?.source === "seller" ? entry.url ?? "" : "" })}>Mark as listed…</MenuItem>
+          {!entry?.sold_here && <MenuItem disabled={unconfirmed(marketplace)} onClick={() => mark.mutate({ marketplace, state: "sold" })}>Mark as sold</MenuItem>}
+          {(entry || status.tone === "live") && (
+            <MenuItem disabled={unconfirmed(marketplace)} onClick={() => mark.mutate({ marketplace, state: "not_listed" })}>Mark as not listed</MenuItem>
+          )}
+        </MenuPopup>
+      </Menu>
+    );
+  }
+
+  function linkForm(marketplace: Marketplace): ReactNode {
+    if (linking?.marketplace !== marketplace) return null;
+    const name = marketplaceName(marketplace);
+    const url = linking.url.trim();
+    return (
+      <form className="flex items-center gap-2" onSubmit={(event) => {
+        event.preventDefault();
+        if (url) mark.mutate({ marketplace, state: "listed", url });
+      }}>
+        <Input size="compact" autoFocus aria-label={`${name} listing link`} placeholder={`Paste the ${name} listing link`}
+          value={linking.url} onChange={(event) => setLinking({ marketplace, url: event.target.value })} />
+        <Button type="submit" size="xs" variant="outline" disabled={busy || !url}>{mark.isPending ? "Saving…" : "Save link"}</Button>
+        <Button type="button" size="xs" variant="ghost" onClick={() => { setLinking(null); mark.reset(); }}>Cancel</Button>
+      </form>
     );
   }
 
@@ -247,15 +311,11 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
         {ORDER.map((marketplace, index) => {
           const status = statuses[index];
           const name = marketplaceName(marketplace);
-          const canRemove = removable.includes(marketplace);
           const extra = settings(marketplace);
+          const link = linkForm(marketplace);
           const draft = NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined;
           return (
-            <li key={marketplace} aria-label={name} className="grid grid-cols-[1rem_5rem_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1.5 py-1.5">
-              {canRemove
-                ? <Checkbox className="mt-1" aria-label={`Select ${name} to delist`} checked={chosen.includes(marketplace)} disabled={busy}
-                    onCheckedChange={(next) => setPicked(next === true ? [...picked, marketplace] : picked.filter((m) => m !== marketplace))} />
-                : <span aria-hidden />}
+            <li key={marketplace} aria-label={name} className="grid grid-cols-[5rem_minmax(0,1fr)_auto] items-start gap-x-2.5 gap-y-1.5 py-1.5">
               <span className="flex min-h-6 items-center truncate font-medium text-foreground">{name}</span>
               <div className="flex min-h-6 min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                 <span role="status" className="flex min-w-0 items-center gap-1.5 text-muted-foreground [&>a]:ms-1.5">
@@ -266,8 +326,10 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
                 </span>
                 <span className="ms-auto flex shrink-0 items-center gap-1.5">{actions(marketplace, status)}</span>
               </div>
-              {(status.detail || extra || (draft?.state === "unknown" && !draft.draft_url && !ONE_STEP.has(marketplace) && marketplace !== "sellwild")) && (
-                <div className="col-start-3 flex min-w-0 flex-col gap-1.5">
+              {rowMenu(marketplace, status)}
+              {(status.detail || extra || link || (draft?.state === "unknown" && !draft.draft_url && !ONE_STEP.has(marketplace) && marketplace !== "sellwild")) && (
+                <div className="col-start-2 flex min-w-0 flex-col gap-1.5">
+                  {link}
                   {status.detail && <p className={cn(status.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
                     role={status.tone === "failed" ? "alert" : undefined}>{status.detail}</p>}
                   {extra}
@@ -286,17 +348,15 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
           );
         })}
       </ul>
-      {removable.length > 0 && (
-        <div className="flex flex-wrap items-center justify-end gap-2 pt-1 text-xs">
-          <span className="me-auto text-muted-foreground">{chosen.length ? `${chosen.length} selected` : "Select listings to delist them"}</span>
-          <Button size="xs" variant="destructive-outline" disabled={busy || !chosen.length} onClick={() => void runDelist(chosen)}>
-            {delist.isPending ? "Delisting…" : chosen.length ? `Delist selected (${chosen.length})…` : "Delist selected…"}
+      {removable.length > 1 && (
+        <div className="flex justify-end pt-1 text-xs">
+          <Button size="xs" variant="destructive-outline" disabled={busy} onClick={() => void runDelist(removable)}>
+            {delist.isPending ? "Delisting…" : "Delist everywhere…"}
           </Button>
-          <Button size="xs" variant="destructive-outline" disabled={busy} onClick={() => void runDelist(removable)}>Delist everywhere…</Button>
         </div>
       )}
-      {(native.error || live.error || action.error || delist.error) && (
-        <p role="alert" className="text-destructive-foreground text-xs">{(action.error || delist.error || native.error || live.error)?.message}</p>
+      {(native.error || live.error || action.error || delist.error || mark.error) && (
+        <p role="alert" className="text-destructive-foreground text-xs">{(mark.error || action.error || delist.error || native.error || live.error)?.message}</p>
       )}
     </InspectorSection>
   );

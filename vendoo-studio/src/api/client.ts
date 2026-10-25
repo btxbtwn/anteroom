@@ -58,7 +58,7 @@ import { readSse } from "./sse";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
-import type { DelistMarketplace, MarketplaceListings } from "./marketplaceListings";
+import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
 import type { EtsyDraftOptions, NativeDraft, NativeDrafts, NativeMarketplace, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -406,6 +406,10 @@ export const api = {
     delist: (convId: string, marketplaces: DelistMarketplace[]) =>
       request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/delist`, {
         method: "POST", body: JSON.stringify({ marketplaces, confirm: true }),
+      }),
+    mark: (convId: string, marketplace: DelistMarketplace, state: MarketplaceMark, url?: string) =>
+      request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/${marketplace}/mark`, {
+        method: "POST", body: JSON.stringify({ state, ...(url ? { url } : {}) }),
       }),
   },
   nativeMarketplaces: {
