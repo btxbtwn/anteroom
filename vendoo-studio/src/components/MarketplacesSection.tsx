@@ -107,15 +107,14 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
   const drafts: NativeDrafts = native.data ?? {};
   const listings: MarketplaceListings = live.data ?? {};
   const [draftLinks, setDraftLinks] = useState<Partial<Record<NativeMarketplace, string>>>({});
-  const [shippingProfile, setShippingProfile] = useState("");
-  const [processingProfile, setProcessingProfile] = useState("");
-  const [packed, setPacked] = useState({ weight: "", length: "", width: "", height: "" });
+  const [changingSellwild, setChangingSellwild] = useState(false);
   const [sellwildPick, setSellwildPick] = useState<{ categoryId?: number; conditionId?: number }>({});
   const [picked, setPicked] = useState<Marketplace[]>([]);
 
-  const etsyNeedsProfiles = etsyEligible && !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
-  const profiles = useQuery({ queryKey: ["etsy-listing-profiles"], queryFn: () => api.etsy.listingProfiles(),
-    enabled: etsyNeedsProfiles && !native.isPending, staleTime: 60_000, retry: false });
+  const etsyCreating = etsyEligible && !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
+  const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
+    enabled: etsyCreating, staleTime: 60_000, retry: false });
+  const etsyReady = Boolean(etsyDefaults.data?.shipping_profile_id && etsyDefaults.data?.readiness_state_id);
   const sellwildOpen = !listings.sellwild?.listing_id && !["published", "pending_review"].includes(drafts.sellwild?.state ?? "");
   const sellwildOptions = useQuery({ queryKey: ["sellwild-options", convId, revisionId], queryFn: () => api.nativeMarketplaces.sellwildOptions(convId),
     enabled: sellwildOpen, staleTime: 60_000, retry: false });
@@ -124,18 +123,15 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
   const sellwildCondition = sellwildPick.conditionId ?? savedSellwild?.sellwild_condition_id ?? sellwildOptions.data?.suggested.condition_id ?? undefined;
   const sellwildChoiceChanged = savedSellwild?.state === "draft"
     && (savedSellwild.sellwild_category_id !== sellwildCategory || savedSellwild.sellwild_condition_id !== sellwildCondition);
-  const calculated = profiles.data?.shipping.find((profile) => profile.id === shippingProfile)?.is_calculated;
-  const packageReady = Object.values(packed).every((value) => Number(value) > 0 && Number.isFinite(Number(value)));
 
   const action = useMutation({
     mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: "draft" | "publish" | "check" | "list"; draftUrl?: string }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
       if (!revisionId) throw new Error("Generate a listing first.");
       if (kind === "list") return api.nativeMarketplaces.list(convId, marketplace, revisionId);
-      if (kind === "draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId,
-        marketplace === "etsy" ? { shippingProfileId: shippingProfile, readinessStateId: processingProfile,
-          ...(calculated ? { package: { item_weight: Number(packed.weight), item_length: Number(packed.length),
-            item_width: Number(packed.width), item_height: Number(packed.height), item_weight_unit: "oz", item_dimensions_unit: "in" } } : {}) } : undefined,
+      // Etsy uses the shop defaults from Settings and the listing's package; Sellwild uses
+      // the category and condition Anteroom worked out unless the seller changed them.
+      if (kind === "draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId, undefined,
         marketplace === "sellwild" && sellwildCategory && sellwildCondition ? { categoryId: sellwildCategory, conditionId: sellwildCondition } : undefined);
       const draft = drafts[marketplace];
       if (!draft || (marketplace !== "sellwild" && !draft.draft_url)) throw new Error("Save a draft first.");
@@ -179,6 +175,7 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
   const statuses = ORDER.map((marketplace) => rowStatus(marketplace, listings[marketplace],
     NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined, revisionId, etsyEligible));
   const removable = ORDER.filter((marketplace) => deletable(listings[marketplace]));
+  const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
   const chosen = picked.filter((marketplace) => removable.includes(marketplace));
 
   function actions(marketplace: Marketplace, status: Status): ReactNode {
@@ -191,12 +188,14 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
     }
     if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || live.data?.[marketplace]?.listing_id) return null;
     if (m === "etsy" && !etsyEligible) return null;
+    // A sold item is not listed anywhere else.
+    if (soldSomewhere) return null;
     if (ONE_STEP.has(marketplace)) {
       return <Button size="xs" variant="outline" disabled={busy} onClick={() => void listNow(m)}>{pending ? "Listing…" : "List…"}</Button>;
     }
     const local = m === "sellwild";
     const changed = draft?.state === "draft" && (draft.revision_id !== revisionId || (local && sellwildChoiceChanged));
-    const etsyBlocked = m === "etsy" && !draft?.draft_url && (!shippingProfile || !processingProfile || (calculated && !packageReady));
+    const etsyBlocked = m === "etsy" && !draft?.draft_url && !etsyReady;
     const sellwildBlocked = local && (!sellwildCategory || !sellwildCondition);
     return (
       <>
@@ -209,51 +208,36 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
   }
 
   function settings(marketplace: Marketplace): ReactNode {
-    if (marketplace === "etsy" && etsyNeedsProfiles && !drafts.etsy?.draft_url) {
+    if (marketplace === "etsy" && etsyCreating && etsyDefaults.isSuccess && !etsyReady) {
+      return <p className="text-muted-foreground">Choose Etsy's default shipping and processing profiles in Settings → Connections.</p>;
+    }
+    if (marketplace !== "sellwild" || !sellwildOpen || !sellwildOptions.data) return null;
+    const category = sellwildOptions.data.categories.find((option) => option.id === sellwildCategory);
+    const condition = sellwildOptions.data.conditions.find((option) => option.id === sellwildCondition);
+    if (category && condition && !changingSellwild) {
       return (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={shippingProfile || null} onValueChange={(value) => setShippingProfile(value || "")} disabled={busy || !profiles.data?.shipping.length}
-              items={profiles.data?.shipping.map((profile) => ({ value: profile.id, label: profile.title }))}>
-              <SelectTrigger size="compact" className="w-48" aria-label="Etsy shipping profile"><SelectValue placeholder="Shipping profile" /></SelectTrigger>
-              <SelectPopup>{profiles.data?.shipping.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.title}</SelectItem>)}</SelectPopup>
-            </Select>
-            <Select value={processingProfile || null} onValueChange={(value) => setProcessingProfile(value || "")} disabled={busy || !profiles.data?.processing.length}
-              items={profiles.data?.processing.map((profile) => ({ value: profile.id, label: profile.title }))}>
-              <SelectTrigger size="compact" className="w-48" aria-label="Etsy processing profile"><SelectValue placeholder="Processing profile" /></SelectTrigger>
-              <SelectPopup>{profiles.data?.processing.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.title}</SelectItem>)}</SelectPopup>
-            </Select>
-          </div>
-          {calculated && <div className="flex flex-wrap items-end gap-2">
-            {([["weight", "Weight (oz)"], ["length", "Length (in)"], ["width", "Width (in)"], ["height", "Height (in)"]] as const).map(([key, label]) =>
-              <label key={key} className="grid gap-1 text-muted-foreground">{label}<Input size="compact" className="w-24" type="number" min="0.01" step="any"
-                disabled={busy} value={packed[key]} onChange={(event) => setPacked({ ...packed, [key]: event.target.value })} /></label>)}
-          </div>}
-          {profiles.error ? <p className="text-destructive">{profiles.error.message}</p>
-            : !shippingProfile || !processingProfile ? <p className="text-muted-foreground">Choose both profiles to save a draft.</p>
-            : calculated && !packageReady ? <p className="text-muted-foreground">Calculated postage needs the packed weight and size.</p> : null}
-        </>
+        <p className="text-muted-foreground">
+          {category.label} · {condition.label}
+          <button type="button" className="ms-2 text-foreground/80 hover:text-foreground hover:underline" disabled={busy}
+            onClick={() => setChangingSellwild(true)}>Change</button>
+        </p>
       );
     }
-    if (marketplace === "sellwild" && sellwildOpen && sellwildOptions.data) {
-      return (
-        <>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="min-w-40 flex-1 basis-0"><SellwildCategory options={sellwildOptions.data.categories} value={sellwildCategory} disabled={busy}
-              onChange={(categoryId) => setSellwildPick({ ...sellwildPick, categoryId })} /></div>
-            <Select value={sellwildCondition ? String(sellwildCondition) : null} disabled={busy}
-              onValueChange={(value) => setSellwildPick({ ...sellwildPick, conditionId: value ? Number(value) : undefined })}
-              items={sellwildOptions.data.conditions.map((option) => ({ value: String(option.id), label: option.label }))}>
-              <SelectTrigger size="compact" className="w-36" aria-label="Sellwild condition"><SelectValue placeholder="Condition" /></SelectTrigger>
-              <SelectPopup>{sellwildOptions.data.conditions.map((option) => <SelectItem key={option.id} value={String(option.id)}>{option.label}</SelectItem>)}</SelectPopup>
-            </Select>
-          </div>
-          <p className="text-muted-foreground">{!sellwildCategory || !sellwildCondition ? "Choose a category and condition to save."
-            : "Sellwild has no drafts. Publish needs a package weight and size, and a ship-from address on Sellwild."}</p>
-        </>
-      );
-    }
-    return null;
+    return (
+      <>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-40 flex-1 basis-0"><SellwildCategory options={sellwildOptions.data.categories} value={sellwildCategory} disabled={busy}
+            onChange={(categoryId) => setSellwildPick({ ...sellwildPick, categoryId })} /></div>
+          <Select value={sellwildCondition ? String(sellwildCondition) : null} disabled={busy}
+            onValueChange={(value) => setSellwildPick({ ...sellwildPick, conditionId: value ? Number(value) : undefined })}
+            items={sellwildOptions.data.conditions.map((option) => ({ value: String(option.id), label: option.label }))}>
+            <SelectTrigger size="compact" className="w-36" aria-label="Sellwild condition"><SelectValue placeholder="Condition" /></SelectTrigger>
+            <SelectPopup>{sellwildOptions.data.conditions.map((option) => <SelectItem key={option.id} value={String(option.id)}>{option.label}</SelectItem>)}</SelectPopup>
+          </Select>
+        </div>
+        {(!category || !condition) && <p className="text-muted-foreground">Anteroom couldn't match this item to Sellwild. Choose a category and condition.</p>}
+      </>
+    );
   }
 
   const summaryText = summary(statuses);

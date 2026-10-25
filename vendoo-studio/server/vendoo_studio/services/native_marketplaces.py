@@ -243,10 +243,15 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
                 db.refresh(job)
                 return job.status in ACTIVE_JOB_STATUSES and _bindings(conv).get(marketplace, {}).get("job_id") == job.id
 
+            from vendoo_studio.services import user_settings
+
+            defaults = user_settings.get_etsy_listing_defaults()
+            package = body.etsy_package.model_dump() if body.etsy_package else listing_package(snapshot)
             result = await etsy_listings.execute(action, snapshot, photos, binding, record, active,
                                                  confirm=isinstance(body, PublishRequest) and body.confirm is True,
-                                                 shipping_profile_id=body.shipping_profile_id, readiness_state_id=body.readiness_state_id,
-                                                 package=body.etsy_package.model_dump() if body.etsy_package else None)
+                                                 shipping_profile_id=body.shipping_profile_id or defaults.get("shipping_profile_id"),
+                                                 readiness_state_id=body.readiness_state_id or defaults.get("readiness_state_id"),
+                                                 package=package)
             return _apply_result(db, conv, marketplace, binding, result)
         result = await browser_bridge.request(job, "marketplace.execute", {
             "marketplace": marketplace, "action": action, "confirm": action in {"publish", "list"},
@@ -278,6 +283,21 @@ async def save_draft(conv_id: str, marketplace: Marketplace, body: DraftRequest,
         raise NativeMarketplaceError(502, UNKNOWN) from exc
 
 
+def listing_package(snapshot: dict) -> dict | None:
+    """Etsy's packed weight (oz) and size (in) from the listing's own package fields."""
+    import re
+
+    try:
+        ounces = float(snapshot.get("weight_lb") or 0) * 16 + float(snapshot.get("weight_oz") or 0)
+    except (TypeError, ValueError):
+        return None
+    sides = [float(side) for side in re.findall(r"\d+(?:\.\d+)?", str(snapshot.get("package_dimensions_in") or ""))]
+    if ounces <= 0 or len(sides) != 3 or min(sides) <= 0:
+        return None
+    return {"item_weight": round(ounces, 2), "item_length": sides[0], "item_width": sides[1], "item_height": sides[2],
+            "item_weight_unit": "oz", "item_dimensions_unit": "in"}
+
+
 @cache
 def sellwild_catalog() -> dict:
     """Sellwild's own categories and conditions. Vendoo's Sellwild IDs are retired there."""
@@ -288,37 +308,79 @@ def sellwild_catalog() -> dict:
     return json.loads((skills_dir() / "list-this" / "references" / "sellwild-native-catalog.json").read_text(encoding="utf-8"))
 
 
+# Marketplace and general category words that name the same Sellwild leaf.
+_SELLWILD_SYNONYMS = {"tee": "shirt", "tshirt": "shirt", "tees": "shirt", "blouse": "top", "tank": "top", "cami": "top",
+                      "jumper": "sweater", "sweatshirt": "sweater", "cardigan": "sweater", "pullover": "sweater",
+                      "vest": "jacket", "gilet": "jacket", "parka": "coat", "trouser": "pant", "legging": "activewear",
+                      "sneaker": "sneaker", "trainer": "sneaker", "bag": "handbag", "purse": "handbag"}
+
+
 def _sellwild_words(text: str) -> set[str]:
     import re
 
-    return {word[:-1] if len(word) > 3 and word.endswith("s") else word for word in re.findall(r"[a-z0-9]+", text.lower())}
+    text = re.sub(r"\b(short|long|3/4)[ -]sleeves?\b", " ", text.lower()).replace("t-shirt", "tshirt")
+    words = set()
+    for word in re.findall(r"[a-z0-9]+", text):
+        word = word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+        words.add(_SELLWILD_SYNONYMS.get(word, word))
+    return words
+
+
+def _sellwild_text_sources(listing: dict) -> list[str]:
+    """Where the listing already says what it is, most specific first."""
+    import re
+
+    poshmark = ((listing.get("marketplace_category_objects") or {}).get("poshmark") or {}).get("displayPath") or []
+    depop = str((listing.get("marketplace_category_ids") or {}).get("depop") or "")
+    # eBay's top level names every clothing branch; it says nothing about the item.
+    general = re.sub(r"clothing,? shoes (&|and) accessories", " ", str(listing.get("category_path") or ""), flags=re.I)
+    return [" ".join(map(str, poshmark[1:])), depop.split("_", 1)[-1].replace("-", " "),
+            " ".join(general.replace(">", "/").split("/")[-2:]), str(listing.get("title") or "")]
 
 
 def suggest_sellwild(listing: dict) -> dict:
-    """A starting choice the seller confirms; never sent without their save."""
+    """Sellwild's own category and condition, worked out from what the listing already says."""
     import re
 
     catalog = sellwild_catalog()
-    path = (listing.get("marketplace_category_objects") or {}).get("sellwild") or {}
-    group = str((path.get("displayPath") or [""])[0] or "").lower()
-    text = " ".join(str(listing.get(key) or "") for key in ("title", "category_path"))
-    words = _sellwild_words(text if isinstance(text, str) else "")
-    best, score = None, 0
-    for option in catalog["categories"]:
-        parent, _, leaf = option["label"].partition(" > ")
-        if group and parent.lower() != group:
-            continue
-        terms = _sellwild_words(leaf.replace("&", " ").replace(",", " "))
-        hits = len(terms & words)
-        if hits > score:
-            best, score = option["id"], hits
+    ids = {option["id"] for option in catalog["categories"]}
+    specifics = listing.get("sellwild_specifics") if isinstance(listing.get("sellwild_specifics"), dict) else {}
+    explicit = specifics.get("nativeCategoryId")
+    category_id = int(explicit) if str(explicit or "").isdigit() and int(explicit) in ids else None
+    poshmark = ((listing.get("marketplace_category_objects") or {}).get("poshmark") or {}).get("displayPath") or []
+    everything = " ".join([str(listing.get("category_path") or ""), " ".join(map(str, poshmark)),
+                           str((listing.get("marketplace_category_ids") or {}).get("depop") or "")]).lower()
+    if category_id is None and re.search(r"\bbaby\b|infant|newborn", everything):
+        category_id = 66
+    elif category_id is None and re.search(r"\bkids?\b|kidswear|\bboys?\b|\bgirls?\b", everything):
+        category_id = 246
+    # Vendoo's (retired) Sellwild category still names the right top-level group.
+    vendoo_group = str((((listing.get("marketplace_category_objects") or {}).get("sellwild") or {}).get("displayPath") or [""])[0] or "")
+    clothing = bool(re.search(r"clothing|menswear|womenswear|\bmen\b|\bwomen\b|shoes|accessories", everything))
+    group = vendoo_group or ("Fashion" if clothing else "")
+    if category_id is None:
+        for text in _sellwild_text_sources(listing):
+            words = _sellwild_words(text)
+            best, score = None, 0
+            for option in catalog["categories"]:
+                parent, _, leaf = option["label"].partition(" > ")
+                if group and parent != group:
+                    continue
+                hits = len(_sellwild_words(leaf.replace("&", " ").replace(",", " ")) & words)
+                if hits > score:
+                    best, score = option["id"], hits
+            if best is not None:
+                category_id = best
+                break
+    native_condition = specifics.get("nativeConditionId")
     condition = str(listing.get("condition") or "").lower()
-    condition_id = (1 if re.search(r"poor|major flaw", condition)
+    condition_id = (int(native_condition) if str(native_condition or "") in {"1", "2", "3", "4", "5"}
+                    else 1 if re.search(r"poor|major flaw", condition)
                     else 4 if re.search(r"new without tags|nwot|like new", condition)
                     else 3 if re.search(r"new with defects|imperfection", condition)
                     else 5 if re.search(r"new with tags|nwt|brand new|^new\b", condition)
                     else 2 if re.search(r"pre-owned|used|good|fair|excellent", condition) else None)
-    return {"category_id": best, "condition_id": condition_id}
+    return {"category_id": category_id, "condition_id": condition_id}
 
 
 def sellwild_options(conv_id: str, db: Session) -> dict:
@@ -341,10 +403,13 @@ def save_local_sellwild_draft(conv_id: str, body: DraftRequest, db: Session):
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
     catalog = sellwild_catalog()
+    automatic = suggest_sellwild(snapshot)
+    body = body.model_copy(update={"sellwild_category_id": body.sellwild_category_id or automatic["category_id"],
+                                   "sellwild_condition_id": body.sellwild_condition_id or automatic["condition_id"]})
     if body.sellwild_category_id not in {option["id"] for option in catalog["categories"]}:
-        raise NativeMarketplaceError(400, "Choose a Sellwild category.")
+        raise NativeMarketplaceError(400, "Anteroom couldn't match a Sellwild category for this item. Choose one with Change.")
     if body.sellwild_condition_id not in {option["id"] for option in catalog["conditions"]}:
-        raise NativeMarketplaceError(400, "Choose a Sellwild condition.")
+        raise NativeMarketplaceError(400, "Anteroom couldn't match a Sellwild condition for this item. Choose one with Change.")
     with start_gate():
         db.refresh(conv)
         previous = _bindings(conv).get("sellwild", {})

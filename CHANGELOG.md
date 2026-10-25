@@ -10,6 +10,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 ## 0.1.334 — 2026-10-24
 
 - Listing and delisting now live in one **Marketplaces** section at the top of a listing's Input tab. Each marketplace has one row with a clear status (Not listed, Draft saved, Live, Sold here, Deleted) and only the actions that apply, with delist checkboxes on live listings. Etsy and Sellwild settings, errors and the Etsy eligibility note appear in their own row instead of long explanations and banners. Sellwild's categories are searchable, and the Forms tab starts straight at the fields.
+- Nothing to fill in to list: Sellwild's category and condition come from the listing itself (its Poshmark, Depop and general categories, title and condition), shown in the row with **Change** if you want another. Etsy uses default shipping and processing profiles you choose once in Settings → Connections, with each listing's own package weight and size. A sold item is no longer offered for listing elsewhere.
 
 ## 0.1.333 — 2026-10-25
 

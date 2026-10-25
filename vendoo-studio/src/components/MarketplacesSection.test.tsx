@@ -19,6 +19,7 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
     : queryKey[0] === "sellwild-options" ? { data: { ...SELLWILD, suggested }, isPending: false }
+    : queryKey[0] === "etsy-listing-defaults" ? { data: {}, isSuccess: true, isPending: false }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, error: null, variables: { marketplace: "depop", kind: "draft" } });
   return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible} />);
@@ -67,12 +68,23 @@ describe("marketplaces section", () => {
     expect(html).not.toContain("Publish…");
   });
 
-  it("needs a Sellwild category and condition before saving", () => {
-    expect(enabledButton(row(render({}), "Sellwild"), "Save")).toBe(true);
-    const html = row(render({}, {}, { suggested: { category_id: null, condition_id: 2 } }), "Sellwild");
-    expect(disabledButton(html, "Save")).toBe(true);
-    expect(html).toContain("Choose a category and condition to save.");
-    expect(html).toContain('aria-label="Sellwild category"');
+  it("uses Sellwild's matched category and condition, with Change to override", () => {
+    const html = row(render({}), "Sellwild");
+    expect(html).toContain("Fashion &gt; Coats &amp; Jackets · Gently Used");
+    expect(html).toContain(">Change</button>");
+    expect(html).not.toContain('aria-label="Sellwild category"');
+    expect(enabledButton(html, "Save")).toBe(true);
+    const unmatched = row(render({}, {}, { suggested: { category_id: null, condition_id: 2 } }), "Sellwild");
+    expect(disabledButton(unmatched, "Save")).toBe(true);
+    expect(unmatched).toContain('aria-label="Sellwild category"');
+    expect(unmatched).toContain("couldn&#x27;t match");
+  });
+
+  it("asks for Etsy's shop defaults in Settings instead of per listing", () => {
+    const html = row(render({}), "Etsy");
+    expect(html).not.toContain("Shipping profile");
+    expect(html).toContain("Settings → Connections");
+    expect(disabledButton(html, "Save draft")).toBe(true);
   });
 
   it("explains Etsy ineligibility in its own row, with no actions", () => {
@@ -89,6 +101,12 @@ describe("marketplaces section", () => {
     expect(row(html, "eBay")).not.toContain("to delist");
     expect(html).toContain("Delist everywhere…");
     expect(disabledButton(html, "Delist selected…")).toBe(true);
+  });
+
+  it("offers no new listings once the item sold somewhere", () => {
+    const html = render({}, { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } });
+    expect(row(html, "Mercari")).not.toContain("Save draft");
+    expect(row(html, "Sellwild")).not.toContain(">Save<");
   });
 
   it("shows a failed delist with its reason", () => {

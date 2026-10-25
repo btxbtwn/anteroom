@@ -81,6 +81,31 @@ class NativeMarketplacesTest(unittest.TestCase):
             result = self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id, **extra})
             self.assertEqual(result.status_code, 400, extra)
 
+    def test_sellwild_saves_with_the_listing_own_category_when_none_is_chosen(self):
+        listing = {**LISTING, "title": "Levi's 501 jeans", "condition": "Pre-Owned - Good",
+                   "marketplace_category_objects": {"poshmark": {"displayPath": ["Men", "Jeans", "Straight"]}}}
+        rev = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        result = self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": rev.id})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual((result.json()["sellwild_category_id"], result.json()["sellwild_condition_id"]), (273, 2))
+
+    def test_sellwild_match_prefers_marketplace_categories_and_ignores_sleeve_words(self):
+        from vendoo_studio.services.native_marketplaces import suggest_sellwild
+
+        tee = {"title": "Graphic tee", "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts",
+               "marketplace_category_objects": {"poshmark": {"displayPath": ["Men", "Shirts", "Tees - Short Sleeve"]}}}
+        self.assertEqual(suggest_sellwild(tee)["category_id"], 270)
+        self.assertEqual(suggest_sellwild({"title": "Kids hoodie", "category_path": "Clothing, Shoes & Accessories > Kids > Boys"})["category_id"], 246)
+        self.assertEqual(suggest_sellwild({"title": "Jacket", "sellwild_specifics": {"nativeCategoryId": 269}})["category_id"], 269)
+
+    def test_etsy_uses_shop_defaults_and_the_listing_package(self):
+        from vendoo_studio.services.native_marketplaces import listing_package
+
+        self.assertEqual(listing_package({"weight_lb": 1, "weight_oz": 4, "package_dimensions_in": "13x10x3"}),
+                         {"item_weight": 20.0, "item_length": 13.0, "item_width": 10.0, "item_height": 3.0,
+                          "item_weight_unit": "oz", "item_dimensions_unit": "in"})
+        self.assertIsNone(listing_package({"weight_oz": 0, "package_dimensions_in": "13x10x3"}))
+
     def test_sellwild_options_suggest_from_the_listing(self):
         listing = {**LISTING, "title": "Vintage Patagonia fleece jacket", "condition": "Pre-Owned - Good",
                    "marketplace_category_objects": {"sellwild": {"displayPath": ["Fashion", "Mens Clothing"]}}}

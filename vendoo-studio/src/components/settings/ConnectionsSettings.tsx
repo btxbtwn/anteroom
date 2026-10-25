@@ -10,6 +10,7 @@ import { ConnectChromeButton } from "../ConnectChromeButton";
 import { ExtensionLoadPath } from "../ExtensionLoadPath";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { Button, buttonVariants } from "../ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 import { EbayOffersSettings } from "./EbayOffersSettings";
@@ -177,7 +178,46 @@ export function DirectConnectionRow({
         </SettingsNote>
       ) : null}
       {error && !account?.pending ? <SettingsNote tone="error">{error}</SettingsNote> : null}
+      {marketplace.id === "etsy" && account?.connected ? <EtsyListingDefaults /> : null}
     </SettingsRow>
+  );
+}
+
+/** The shop profiles every new Etsy listing uses, chosen once instead of per listing. */
+function EtsyListingDefaults() {
+  const queryClient = useQueryClient();
+  const profiles = useQuery({ queryKey: ["etsy-listing-profiles"], queryFn: () => api.etsy.listingProfiles(), staleTime: 60_000, retry: false });
+  const defaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(), retry: false });
+  const save = useMutation({
+    mutationFn: (next: { shipping: string; processing: string }) => api.etsy.setListingDefaults(next.shipping, next.processing),
+    onSuccess: (data) => queryClient.setQueryData(["etsy-listing-defaults"], data),
+  });
+  const shipping = defaults.data?.shipping_profile_id ?? "";
+  const processing = defaults.data?.readiness_state_id ?? "";
+  const choose = (next: { shipping?: string; processing?: string }) => {
+    const value = { shipping: next.shipping ?? shipping, processing: next.processing ?? processing };
+    if (value.shipping && value.processing) save.mutate(value);
+    else queryClient.setQueryData(["etsy-listing-defaults"], { shipping_profile_id: value.shipping || undefined, readiness_state_id: value.processing || undefined });
+  };
+  const disabled = !profiles.data || save.isPending;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Select value={shipping || null} onValueChange={(value) => choose({ shipping: value || "" })} disabled={disabled}
+          items={profiles.data?.shipping.map((profile) => ({ value: profile.id, label: profile.title }))}>
+          <SelectTrigger size="compact" className="w-52" aria-label="Default Etsy shipping profile"><SelectValue placeholder="Shipping profile" /></SelectTrigger>
+          <SelectPopup>{profiles.data?.shipping.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.title}</SelectItem>)}</SelectPopup>
+        </Select>
+        <Select value={processing || null} onValueChange={(value) => choose({ processing: value || "" })} disabled={disabled}
+          items={profiles.data?.processing.map((profile) => ({ value: profile.id, label: profile.title }))}>
+          <SelectTrigger size="compact" className="w-52" aria-label="Default Etsy processing profile"><SelectValue placeholder="Processing profile" /></SelectTrigger>
+          <SelectPopup>{profiles.data?.processing.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.title}</SelectItem>)}</SelectPopup>
+        </Select>
+        {save.isPending ? <Spinner /> : null}
+      </div>
+      {profiles.error || save.error ? <SettingsNote tone="error">{(save.error || profiles.error)?.message}</SettingsNote>
+        : <SettingsNote>New Etsy listings use these profiles, with the package weight and size from each listing.</SettingsNote>}
+    </div>
   );
 }
 
