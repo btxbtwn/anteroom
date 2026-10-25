@@ -30,6 +30,7 @@ import {
 import { withDropdownOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
+import { DelistActions } from "./DelistActions";
 import { NativeMarketplaceActions } from "./NativeMarketplaceActions";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
@@ -415,6 +416,7 @@ export function ListingEditor({
       </div>
 
       <NativeMarketplaceActions key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle} disabled={generating} />
+      <DelistActions key={`delist-${convId}`} convId={convId} title={listingTitle} disabled={generating} />
       <SoldElsewhereNotice
         convId={convId}
         openInVendoo={

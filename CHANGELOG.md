@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+
+## 0.1.332 — 2026-10-24
+
+- Delist an item from its marketplaces in **Live listings** on the listing. Pick marketplaces, or choose **Delist everywhere**, and confirm. Anteroom deletes the listing on Etsy, Poshmark, Mercari and Depop, ends it on eBay (eBay has no delete), and delists it on Sellwild. It works for items listed through Vendoo too, and never touches the marketplace where the item sold. No marketplace tab opens.
 ## 0.1.331 — 2026-10-25
 
 - Poshmark, Depop, Sellwild and Etsy now look like the eBay tab: the same heading, tab bar, and cards, each in its own marketplace color. Poshmark, Depop and Sellwild get a Dashboard with your sales, revenue and profit for any dates, and a Marketing tab.
