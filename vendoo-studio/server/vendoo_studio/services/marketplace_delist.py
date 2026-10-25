@@ -15,18 +15,19 @@ listed" one.
 """
 from __future__ import annotations
 
-import asyncio
 import re
 from datetime import UTC, datetime
-from types import SimpleNamespace
 
 import httpx
 from sqlalchemy.orm import Session
 
+from vendoo_studio.models.marketplace_listing import UNSETTLED_STATES
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import browser_bridge, marketplace_accounts
-from vendoo_studio.services.api_job_lock import start_gate
+from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
+from vendoo_studio.services.listing_result import scrub
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
 MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild")
@@ -41,9 +42,6 @@ LISTING_ID = {
     "depop": re.compile(r"^https://www\.depop\.com/products/([a-z0-9][a-z0-9-]{0,200})/?(?:[?#]|$)"),
     "sellwild": re.compile(r"^https://sellwild\.com/product/(\d+)(?:/|$)"),
 }
-
-_running = asyncio.Lock()
-
 
 class DelistError(RuntimeError):
     def __init__(self, status_code: int, detail: str):
@@ -104,7 +102,7 @@ def listings(db: Session, conv_id: str) -> dict:
         raise DelistError(404, "Conversation not found")
     notes = parse_notes(conv.notes)
     urls = _notes_dict(notes, "vendooListingUrls")
-    native = _notes_dict(notes, "nativeMarketplaceDrafts")
+    native = MarketplaceListingRepo(db).for_conversation(conv_id)
     delists = _notes_dict(notes, "marketplaceDelists")
     marks = _notes_dict(notes, "marketplaceMarks")
     sold = _sold_on(db, conv_id, notes)
@@ -134,7 +132,8 @@ def listings(db: Session, conv_id: str) -> dict:
             record = {}
         result[marketplace] = {"url": url or record.get("url"), "listing_id": item_id, "source": source,
                                "sold_here": sold_here, "state": record.get("state") or "live",
-                               "error": record.get("error"), "at": record.get("at")}
+                               "error": record.get("error"), "marketplace_message": record.get("marketplace_message"),
+                               "at": record.get("at")}
     return result
 
 
@@ -155,10 +154,13 @@ MARKS = ("listed", "sold", "not_listed")
 
 
 def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None = None) -> dict:
-    """Record what the seller says about one marketplace. The marketplace itself is not touched."""
+    """Record what the seller says about one marketplace. The marketplace itself is not touched.
+
+    A mark also settles an unconfirmed direct listing: the seller has looked.
+    """
     if marketplace not in MARKETPLACES or state not in MARKS:
         raise DelistError(400, "Name a marketplace and what to mark it as.")
-    if _running.locked():
+    if any(str(job.current_step or "") == "native_delist" and job.conversation_id == conv_id for job in JobRepo(db).get_running()):
         raise DelistError(409, "A delist is running. Wait for it to finish.")
     known = listings(db, conv_id).get(marketplace) or {}
     # Full precision: a sale reported later in the same second must still count as newer.
@@ -171,12 +173,23 @@ def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | Non
         value.update(url=clean, listing_id=item_id)
     else:
         value.update(url=known.get("url"), listing_id=known.get("listing_id"))
-    conv = ConversationRepo(db).get(conv_id)
-    binding = _notes_dict(_notes_dict(parse_notes(conv.notes), "nativeMarketplaceDrafts"), marketplace)
-    if binding.get("state") in {"saving", "publishing", "unknown"}:
-        raise DelistError(409, f"Check the {marketplace.title()} result first; Anteroom is still waiting to confirm it.")
-    if state == "not_listed" and binding.get("state") in {"published", "pending_review"}:
-        _store(db, conv_id, "nativeMarketplaceDrafts", marketplace, None)
+    records = MarketplaceListingRepo(db)
+    record = records.get(conv_id, marketplace)
+    if record.get("job_id") and api_job_is_live(record["job_id"]):
+        raise DelistError(409, f"The {marketplace.title()} action is still running. Wait for it to finish.")
+    cleared = {"error": None, "error_code": None, "error_fields": None, "marketplace_message": None, "retry_after": None,
+               "etsy_pending_write": None}
+    if state == "not_listed" and record.get("state") in {*UNSETTLED_STATES, "published", "pending_review"}:
+        from vendoo_studio.services.native_marketplaces import _resting_state
+
+        # Not live: keep the marketplace IDs so a new List reuses them, drop the link.
+        records.save(conv_id, marketplace, {**cleared, "state": _resting_state(marketplace, record), "listing_url": None,
+                                            "listing_id": None, "revision_id": None})
+    elif state != "not_listed" and record.get("state") in UNSETTLED_STATES:
+        records.save(conv_id, marketplace, {**cleared, "state": "published",
+                                            **({"listing_url": value["url"]} if state == "listed" else {})})
+    if record.get("job_id") and record.get("state") in UNSETTLED_STATES and JobRepo(db).get(record["job_id"]):
+        JobRepo(db).add_event(record["job_id"], "native_marked", None, {"marketplace": marketplace, "mark": state})
     _store(db, conv_id, "marketplaceMarks", marketplace, value)
     # Marking listed or not listed starts the record over; a sale keeps how the listing ended.
     if state != "sold":
@@ -216,6 +229,14 @@ async def _delete_etsy(item_id: str) -> dict:
     return {"ok": True, "state": "deleted"}
 
 
+def _marketplace_message(marketplace: str, exc: Exception) -> str | None:
+    if marketplace == "etsy":
+        from vendoo_studio.services.etsy_listings import marketplace_message
+
+        return marketplace_message(exc)
+    return scrub(getattr(exc, "marketplace_message", None))
+
+
 def _failure_text(marketplace: str, exc: Exception) -> str:
     from vendoo_studio.services.etsy_listings import _error_text
 
@@ -227,7 +248,8 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
 
 
 async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
-    from vendoo_studio.routes.extension import extension_manager
+    """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile."""
+    from vendoo_studio.routes.extension import extension_manager, schedule_advance_job_queue
 
     names = list(dict.fromkeys(str(m).strip().lower() for m in marketplaces if str(m or "").strip()))
     if confirm is not True:
@@ -243,30 +265,47 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
             raise DelistError(409, f"This item sold on {name}. That listing is never deleted.")
     if BROWSER_MARKETPLACES & set(names) and not extension_manager.connected:
         raise DelistError(409, "Connect Chrome first.")
-    if _running.locked():
-        raise DelistError(409, "Another delist is running. Wait for it to finish.")
-    async with _running:
-        with start_gate():
-            if JobRepo(db).get_active():
-                raise DelistError(409, "Another automation job is queued or running. Wait for it to finish.")
+    repo = JobRepo(db)
+    listing = ListingRepo(db).get_current(conv_id)
+    with start_gate():
+        if repo.get_active():
+            raise DelistError(409, "Another automation job is queued or running. Wait for it to finish.")
+        job = repo.create(conv_id, listing.current_revision_id if listing else "", {"delist": names},
+                          status="dispatched", current_step="native_delist")
+        claim_api_job(job.id)
+    failed = False
+    try:
         for name in names:
             entry = known[name]
             base = {"listing_id": entry["listing_id"], "url": entry["url"], "at": _now()}
             _record(db, conv_id, name, {**base, "state": "deleting"})
+            repo.add_event(job.id, "native_progress", "native_delist", {"marketplace": name, "step": "delist", "label": "Delisting"})
             try:
                 if name == "ebay":
                     result = await _delete_ebay(entry["listing_id"])
                 elif name == "etsy":
                     result = await _delete_etsy(entry["listing_id"])
                 else:
-                    result = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.delete", {
+                    result = await browser_bridge.request(job, "marketplace.delete", {
                         "marketplace": name, "listing_id": entry["listing_id"], "confirm": True,
                     }, timeout=90)
                 if result.get("ok") is True and result.get("state") == "deleted":
                     _record(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()})
                 else:
+                    failed = True
                     _record(db, conv_id, name, {**base, "state": "failed", "at": _now(),
-                                               "error": str(result.get("error") or "The marketplace did not confirm the delete.")[:300]})
+                                               "error": str(result.get("error") or "The marketplace did not confirm the delete.")[:300],
+                                               "marketplace_message": scrub(result.get("marketplace_message"))})
             except Exception as exc:  # noqa: BLE001 - recorded per marketplace for the seller
-                _record(db, conv_id, name, {**base, "state": "failed", "at": _now(), "error": _failure_text(name, exc)[:300]})
+                failed = True
+                _record(db, conv_id, name, {**base, "state": "failed", "at": _now(), "error": _failure_text(name, exc)[:300],
+                                           "marketplace_message": _marketplace_message(name, exc)})
+        repo.update_status(job.id, "failed" if failed else "completed", "native_delist",
+                           error="A delist did not finish." if failed else None)
+    except BaseException:
+        repo.update_status(job.id, "failed", "native_delist", error="The delist stopped before it finished.")
+        raise
+    finally:
+        release_api_job(job.id)
+        schedule_advance_job_queue()
     return listings(db, conv_id)

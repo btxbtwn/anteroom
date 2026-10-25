@@ -401,6 +401,12 @@ async def cancel_conversation_jobs(db: Session, conv_id: str) -> int:
         cancel_completion(job.id)
         if job.status not in ACTIVE_JOB_STATUSES:
             continue
+        if str(job.current_step or "").startswith("native_"):
+            from vendoo_studio.services import native_marketplaces
+
+            # Stops at its next safe point; the record says what happened.
+            await native_marketplaces.cancel_job(db, job)
+            continue
         job.status = "cancelled"
         job.current_step = None
         db.commit()
@@ -457,6 +463,12 @@ async def reset_conversation(
     conv = repo.get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
+    from vendoo_studio.services.native_marketplaces import running_marketplace
+
+    busy = running_marketplace(db, conv_id)
+    if busy:
+        # The marketplace record outlives Clear; the action writing it has to finish first.
+        raise HTTPException(409, f"Wait for the {busy} listing to finish, or cancel it, before clearing.")
 
     from vendoo_studio.repositories.queries import JobRepo, ListingRepo
     from vendoo_studio.services.streaming import stop_generation
@@ -507,7 +519,8 @@ async def reset_conversation(
     # Stop Chrome fill/repair before the wipe deletes the job rows.
     await cancel_conversation_jobs(db, conv_id)
 
-    wipe_contents(db, conv_id, keep_photos=keep_inputs)
+    # Marketplace records survive Clear and Regenerate, with the jobs they name.
+    wipe_contents(db, conv_id, keep_photos=keep_inputs, keep_marketplace_listings=True)
     db.expire_all()
     conv = repo.get(conv_id)
     if not conv:

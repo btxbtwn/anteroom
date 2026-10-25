@@ -459,7 +459,7 @@ export function ListingEditor({
       )}
 
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
-        disabled={generating} etsyEligible={etsyEligible} ids={tabs}
+        disabled={generating} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         onSelect={(id) => {
           setFieldTarget(null);

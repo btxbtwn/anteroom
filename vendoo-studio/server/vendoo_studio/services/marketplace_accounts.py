@@ -187,50 +187,110 @@ class SignInRequired(RuntimeError):
     pass
 
 
-async def access_token(marketplace: str) -> str:
-    """A current access token, refreshed through the relay when it is about to expire."""
+_refresh_locks: dict[tuple[asyncio.AbstractEventLoop, str], asyncio.Lock] = {}
+
+
+def _refresh_lock(marketplace: str) -> asyncio.Lock:
+    """One refresh per marketplace at a time. Etsy rotates its refresh token, so
+    a second refresh sent with the old one would sign the seller out."""
+    loop = asyncio.get_running_loop()
+    lock = _refresh_locks.get((loop, marketplace))
+    if lock is None:
+        for key in [key for key in _refresh_locks if key[0] is not loop]:
+            del _refresh_locks[key]
+        lock = _refresh_locks[(loop, marketplace)] = asyncio.Lock()
+    return lock
+
+
+def relay_refused(resp) -> bool:
+    """The relay itself refused this Mac, as opposed to the marketplace refusing the seller."""
+    if resp.status_code != 401:
+        return False
+    try:
+        return resp.json() == {"error": "unauthorized"}
+    except ValueError:
+        return False
+
+
+RELAY_REFUSED = "Anteroom's relay did not recognize this Mac. Quit and reopen Anteroom, then try again."
+
+
+def _fresh(account: dict, rejected: str | None) -> bool:
+    expires_at = account.get("expiresAt")
+    return bool(expires_at and expires_at - REFRESH_MARGIN_S > time.time() and account.get("accessToken") != rejected)
+
+
+async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
+    """A current access token, refreshed through the relay when it is about to expire.
+
+    ``rejected`` is a token the marketplace just refused: refresh even though it
+    has not expired, unless another caller already replaced it.
+    """
     account = get_marketplace_accounts().get(_check(marketplace))
     if not account or not account.get("accessToken"):
         raise SignInRequired(f"{NAMES[marketplace]} isn't connected.")
-    expires_at = account.get("expiresAt")
-    if expires_at and expires_at - REFRESH_MARGIN_S > time.time():
+    if _fresh(account, rejected):
         return account["accessToken"]
-    if not account.get("refreshToken"):
-        raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
-    resp = await relay_request(
-        "POST", f"/studio/oauth/{marketplace}/refresh", json_body={"refreshToken": account["refreshToken"]},
-    )
-    if resp.status_code == 401:
-        raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
-    if resp.status_code != 200:
-        raise RelayError(f"Could not refresh the {NAMES[marketplace]} sign-in ({resp.status_code}).", resp.status_code)
-    current = get_marketplace_accounts().get(marketplace)
-    if not current or any(current.get(key) != account.get(key) for key in ("accountId", "connectedAt", "refreshToken")):
-        # Disconnect or a new sign-in during the request revokes this refresh.
-        # Never recreate the connection using a response for its old grant.
-        raise SignInRequired(f"The {NAMES[marketplace]} connection changed. Sign in again.")
-    tokens = resp.json().get("tokens") or {}
-    now = time.time()
-    account = {
-        **account,
-        "accessToken": tokens.get("accessToken"),
-        # eBay keeps its refresh token; Etsy issues a new one each time.
-        "refreshToken": tokens.get("refreshToken") or account["refreshToken"],
-        "expiresAt": now + tokens["expiresIn"] if tokens.get("expiresIn") else None,
-    }
-    set_marketplace_account(marketplace, account)
-    return account["accessToken"]
+    async with _refresh_lock(marketplace):
+        # Whoever held the lock may have refreshed already; use what it stored.
+        account = get_marketplace_accounts().get(marketplace)
+        if not account or not account.get("accessToken"):
+            raise SignInRequired(f"{NAMES[marketplace]} isn't connected.")
+        if _fresh(account, rejected):
+            return account["accessToken"]
+        if not account.get("refreshToken"):
+            raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
+        resp = await relay_request(
+            "POST", f"/studio/oauth/{marketplace}/refresh", json_body={"refreshToken": account["refreshToken"]},
+        )
+        if relay_refused(resp):
+            raise RelayError(RELAY_REFUSED, 401)
+        if resp.status_code == 401:
+            raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
+        if resp.status_code != 200:
+            raise RelayError(f"Could not refresh the {NAMES[marketplace]} sign-in ({resp.status_code}).", resp.status_code)
+        current = get_marketplace_accounts().get(marketplace)
+        if not current or any(current.get(key) != account.get(key) for key in ("accountId", "connectedAt", "refreshToken")):
+            # Disconnect or a new sign-in during the request revokes this refresh.
+            # Never recreate the connection using a response for its old grant.
+            raise SignInRequired(f"The {NAMES[marketplace]} connection changed. Sign in again.")
+        tokens = resp.json().get("tokens") or {}
+        now = time.time()
+        account = {
+            **account,
+            "accessToken": tokens.get("accessToken"),
+            # eBay keeps its refresh token; Etsy issues a new one each time.
+            "refreshToken": tokens.get("refreshToken") or account["refreshToken"],
+            "expiresAt": now + tokens["expiresIn"] if tokens.get("expiresIn") else None,
+        }
+        set_marketplace_account(marketplace, account)
+        return account["accessToken"]
 
 
 async def etsy_api(method: str, path: str, **kwargs: Any):
-    """Call Etsy's API (``path`` under /v3/application/) through the relay."""
+    """Call Etsy's API (``path`` under /v3/application/) through the relay.
+
+    A 401 from Etsy means the call was refused before it ran, so it is sent once
+    more with a refreshed token.
+    """
+    async def send(token: str):
+        for upload in (kwargs.get("files") or {}).values():
+            handle = upload[1] if isinstance(upload, tuple) else None
+            if hasattr(handle, "seek"):
+                handle.seek(0)
+        return await relay_request(
+            method,
+            f"/studio/etsy/v3/application/{path.lstrip('/')}",
+            headers={"X-Etsy-Authorization": f"Bearer {token}"},
+            **kwargs,
+        )
+
     token = await access_token("etsy")
-    resp = await relay_request(
-        method,
-        f"/studio/etsy/v3/application/{path.lstrip('/')}",
-        headers={"X-Etsy-Authorization": f"Bearer {token}"},
-        **kwargs,
-    )
+    resp = await send(token)
+    if resp.status_code == 401 and not relay_refused(resp):
+        resp = await send(await access_token("etsy", rejected=token))
+    if relay_refused(resp):
+        raise RelayError(RELAY_REFUSED, 401)
     if resp.status_code == 401:
         raise SignInRequired("Sign in to Etsy again.")
     resp.raise_for_status()

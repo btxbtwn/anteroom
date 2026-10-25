@@ -147,14 +147,47 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.assertEqual(self.client.post(f"{self.base}/vinted/mark", json={"state": "sold"}).status_code, 400)
         self.assertEqual(self.client.post(f"{self.base}/ebay/mark", json={"state": "gone"}).status_code, 400)
 
-    def test_marking_not_listed_clears_a_published_draft_and_waits_for_unconfirmed_ones(self):
-        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {}, "nativeMarketplaceDrafts": {
-            "depop": {"state": "published", "listing_url": URLS["depop"]}, "mercari": {"state": "unknown", "job_id": "j1"}}})
+    def test_marks_settle_unconfirmed_records_and_wait_only_for_a_running_one(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+        from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
+
+        records = MarketplaceListingRepo(self.db)
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {}})
         self.db.commit()
-        self.assertEqual(self.client.post(f"{self.base}/mercari/mark", json={"state": "not_listed"}).status_code, 409)
+        records.save(self.conv.id, "depop", {"state": "published", "listing_url": URLS["depop"]})
+        records.save(self.conv.id, "mercari", {"state": "unknown", "job_id": "j1", "draft_url": "https://www.mercari.com/sell/draft/x/"})
+        records.save(self.conv.id, "poshmark", {"state": "publishing", "job_id": "j2"})
         self.assertNotIn("depop", self.client.post(f"{self.base}/depop/mark", json={"state": "not_listed"}).json())
-        self.db.refresh(self.conv)
-        self.assertEqual(set(parse_notes(self.conv.notes)["nativeMarketplaceDrafts"]), {"mercari"})
+        self.assertEqual(records.get(self.conv.id, "depop")["state"], "not_saved")
+        # The seller looked: an unconfirmed Mercari listing that is not there goes back to its draft.
+        self.assertEqual(self.client.post(f"{self.base}/mercari/mark", json={"state": "not_listed"}).status_code, 200)
+        self.assertEqual(records.get(self.conv.id, "mercari")["state"], "draft")
+        claim_api_job("j2")
+        try:
+            self.assertEqual(self.client.post(f"{self.base}/poshmark/mark", json={"state": "sold"}).status_code, 409)
+        finally:
+            release_api_job("j2")
+        listed = self.client.post(f"{self.base}/poshmark/mark", json={"state": "listed", "url": URLS["poshmark"]})
+        self.assertEqual(listed.json()["poshmark"]["listing_id"], "6aae234280cb08338a8cb591")
+        self.assertEqual(records.get(self.conv.id, "poshmark")["state"], "published")
+
+    def test_delist_holds_the_automation_slot_and_keeps_the_marketplace_message(self):
+        from vendoo_studio.repositories.queries import JobRepo
+
+        seen = []
+
+        async def delete(job, kind, payload, timeout):
+            seen.append([j.current_step for j in JobRepo(self.db).get_running()])
+            return {"ok": False, "error": "Mercari did not delete it.", "marketplace_message": "Item is in a transaction. token=abc"}
+
+        self.bridge.side_effect = delete
+        result = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()
+        self.assertEqual(seen, [["native_delist"]])
+        self.assertEqual(result["mercari"]["state"], "failed")
+        self.assertEqual(result["mercari"]["marketplace_message"], "Item is in a transaction. token=[redacted]")
+        self.assertFalse(JobRepo(self.db).get_running())
+        JobRepo(self.db).create(self.conv.id, "r", {}, status="dispatched", current_step="vendoo_api_create")
+        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["ebay"], "confirm": True}).status_code, 409)
 
     def test_browser_marketplaces_need_chrome(self):
         with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):

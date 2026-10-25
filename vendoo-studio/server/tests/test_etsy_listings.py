@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import io
 import tempfile
@@ -17,8 +18,9 @@ from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
-from vendoo_studio.services import etsy_listings, relay_client
+from vendoo_studio.services import etsy_listings, native_marketplaces, relay_client
 
 LISTING = {"title": "Private api check - do not publish", "description": "Private draft check.", "price": 12,
            "marketplace_category_ids": {"etsy": 482}, "etsy_specifics": {
@@ -31,7 +33,8 @@ class EtsyListingsTest(unittest.TestCase):
     def setUp(self):
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         Base.metadata.create_all(engine)
-        self.db = sessionmaker(bind=engine)()
+        self.sessions = sessionmaker(bind=engine)
+        self.db = self.sessions()
         app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title=LISTING["title"])
@@ -51,10 +54,18 @@ class EtsyListingsTest(unittest.TestCase):
         self.inventory = None
         self.failure = None
         self.calculated = False
+        self.uploaded = 0
+        self.other_drafts = []
         self.api = self.enterContext(patch.object(etsy_listings.marketplace_accounts, "etsy_api", side_effect=self.request))
+        self.enterContext(patch("vendoo_studio.database.SessionLocal", self.sessions))
+        self.enterContext(patch("vendoo_studio.services.user_settings.get_etsy_listing_defaults", return_value={}))
+        self.launched = []
+        self.enterContext(patch.object(native_marketplaces, "_launch", self.launched.append))
         self.base = f"/api/conversations/{self.conv.id}/native-marketplaces/etsy"
 
     def tearDown(self):
+        for coro in self.launched:
+            coro.close()
         app.dependency_overrides.clear()
         self.db.close()
 
@@ -70,8 +81,15 @@ class EtsyListingsTest(unittest.TestCase):
                                  "profile_type": "calculated" if self.calculated else "manual"}]}
         if path.endswith("/readiness-state-definitions"):
             return {"results": [{"readiness_state_id": 88, "readiness_state": "ready_to_ship", "processing_days_display_label": "1-2 days"}]}
+        if method == "GET" and path == "shops/123/listings":
+            drafts = [self.remote] if self.remote and self.remote["state"] == "draft" else []
+            return {"results": copy.deepcopy(drafts + self.other_drafts)}
         if method == "GET":
             return copy.deepcopy(self.inventory if path.endswith("/inventory") else self.remote)
+        if method == "DELETE":
+            image_id = int(path.rsplit("/", 1)[-1])
+            self.remote["images"] = [image for image in self.remote["images"] if image["listing_image_id"] != image_id]
+            return {}
         if method == "PUT":
             self.inventory = copy.deepcopy(data)
             for product in self.inventory["products"]:
@@ -80,7 +98,8 @@ class EtsyListingsTest(unittest.TestCase):
             self.remote["price"] = self.inventory["products"][0]["offerings"][0]["price"]
             return copy.deepcopy(self.inventory)
         if path.endswith("/images"):
-            image = {"listing_image_id": 1000 + len(self.remote["images"]), "rank": int(data["rank"])}
+            self.uploaded += 1
+            image = {"listing_image_id": 1000 + self.uploaded, "rank": int(data["rank"])}
             self.remote["images"].append(image)
             return image
         if method == "POST":
@@ -94,13 +113,32 @@ class EtsyListingsTest(unittest.TestCase):
                 "price": copy.deepcopy(self.remote["price"]), "quantity": 1, "is_enabled": True, "readiness_state_id": 88}]}]}
         return copy.deepcopy(self.remote)
 
-    def save(self):
-        result = self.client.post(self.base + "/draft", json={"revision_id": self.rev.id})
-        self.assertEqual(result.status_code, 200, result.text)
-        return result.json()
+    # --- helpers -----------------------------------------------------------------
 
-    def publish(self, **changes):
-        return self.client.post(self.base + "/publish", json={"revision_id": self.rev.id, "draft_url": URL, "confirm": True, **changes})
+    def list(self, **extra):
+        """List on Etsy through the route, running its background job to the end."""
+        response = self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True, **extra})
+        self.assertEqual(response.status_code, 200, response.text)
+        while self.launched:
+            asyncio.run(self.launched.pop(0))
+        self.db.expire_all()
+        return self.record()
+
+    def record(self):
+        return MarketplaceListingRepo(self.db).get(self.conv.id, "etsy")
+
+    def execute(self, action, binding, photos=None, **kwargs):
+        """One Etsy step straight through the service, the way a List job runs it."""
+        def record(values):
+            binding.update(values)
+
+        photos = photos if photos is not None else ConversationRepo(self.db).get_photos(self.conv.id)
+        return asyncio.run(etsy_listings.execute(action, copy.deepcopy(LISTING) if "snapshot" not in kwargs else kwargs.pop("snapshot"),
+                                                 photos, binding, record, lambda: True, confirm=True,
+                                                 shipping_profile_id="99", readiness_state_id="88", **kwargs))
+
+    def writes(self):
+        return [c for c in self.calls if c[0] != "GET"]
 
     def test_non_vintage_when_made_is_a_year_range(self):
         made = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "who_made": "I did", "when_made": "Made To Order (Not Yet Made)"}}
@@ -110,111 +148,180 @@ class EtsyListingsTest(unittest.TestCase):
         vintage = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "1990s (Vintage)"}}
         self.assertEqual(etsy_listings.draft_fields(vintage, creating=True)["when_made"], "1990s")
 
-    def test_new_draft_uses_official_api_and_uploads_all_photos_without_chrome(self):
-        saved = self.save()
-        self.assertEqual(saved["state"], "draft")
-        self.assertEqual(saved["transport"], "etsy_api")
-        self.assertEqual(saved["draft_url"], URL)
-        self.assertEqual(len(saved["etsy_image_ids"]), 2)
+    def test_list_creates_uploads_and_activates_in_one_job_without_chrome(self):
+        record = self.list()
+        self.assertEqual(record["state"], "published", record)
+        self.assertEqual(record["listing_url"], "https://www.etsy.com/listing/123456")
+        self.assertEqual(record["draft_url"], URL)
+        self.assertEqual(len(record["etsy_image_ids"]), 2)
         created = next(c[2] for c in self.calls if c[0] == "POST" and c[1].endswith("/listings"))
         self.assertEqual(created["price"], "12.00")
         self.assertEqual(created["who_made"], "someone_else")
         self.assertEqual(created["when_made"], "1990s")
         self.assertEqual(created["should_auto_renew"], "false")
-        self.assertTrue(all("state" not in c[2] for c in self.calls))
         self.assertEqual(sum(c[3] for c in self.calls), 2)
-        self.assertNotIn("never-expose", str(saved))
+        self.assertEqual(self.calls[-1], ("PATCH", "shops/123/listings/123456", {"state": "active"}, False))
+        self.assertNotIn("never-expose", str(record))
         self.bridge.assert_not_called()
-        self.assertEqual(JobRepo(self.db).list_all()[0].status, "completed")
+        job = JobRepo(self.db).get(record["job_id"])
+        self.assertEqual((job.status, job.current_step), ("completed", "native_etsy_publish"))
+        count = len(self.calls)
+        self.assertEqual(self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
+        self.assertEqual(len(self.calls), count)
 
-    def test_update_keeps_native_photos_and_checks_new_price(self):
-        self.save()
+    def test_an_ineligible_item_is_refused_before_any_job_or_write(self):
+        modern = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "2020 - 2026"}}
+        self.rev = ListingRepo(self.db).save_revision(self.conv.id, modern, "user")
+        response = self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Etsy only allows vintage (20+ years), handmade or craft supplies", response.text)
+        self.assertFalse(self.calls)
+        self.assertFalse(JobRepo(self.db).list_all())
+        result = self.execute("save_draft", {}, snapshot=modern)
+        self.assertEqual(result["error"], etsy_listings.NOT_ELIGIBLE)
+        self.assertFalse(self.writes())
+
+    def test_saving_an_existing_draft_keeps_native_photos_and_checks_new_price(self):
+        binding = {}
+        self.assertEqual(self.execute("save_draft", binding)["state"], "draft")
         self.calls.clear()
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 13}, "user")
-        saved = self.save()
-        self.assertEqual(saved["revision_id"], self.rev.id)
+        result = self.execute("save_draft", binding, snapshot={**LISTING, "price": 13})
+        self.assertEqual(result["state"], "draft", result)
         self.assertEqual([c[0] for c in self.calls], ["GET", "GET", "PUT", "PATCH", "GET", "GET"])
         self.assertNotIn("price", next(c[2] for c in self.calls if c[0] == "PATCH"))
         inventory = next(c[2] for c in self.calls if c[0] == "PUT")
         self.assertEqual(inventory["products"][0]["sku"], "keep-sku")
         self.assertEqual(inventory["products"][0]["offerings"][0], {"price": 13.0, "quantity": 1, "is_enabled": True, "readiness_state_id": 88})
-        self.assertEqual(self.remote["price"]["amount"], 1300)
         self.assertEqual(len(self.remote["images"]), 2)
 
-    def test_publish_requires_confirmation_current_revision_and_same_draft(self):
-        self.save()
+    def test_changed_photos_are_resynced_on_the_same_draft(self):
+        binding = {}
+        self.execute("save_draft", binding)
+        photos = ConversationRepo(self.db).get_photos(self.conv.id)
+        Path(self.temp, "test-2.jpg").write_bytes(b"new image")
+        added = ConversationRepo(self.db).add_photo(self.conv.id, "test-2.jpg", "test-2.jpg", "image/jpeg", 9)
+        kept = [photos[1], added]
         self.calls.clear()
-        for changes, status in [({"confirm": False}, 400), ({"revision_id": "stale"}, 409), ({"draft_url": URL + "9"}, 409)]:
-            self.assertEqual(self.publish(**changes).status_code, status)
-        self.assertFalse(self.calls)
-
-    def test_publish_is_one_confirmed_activation_and_cannot_run_twice(self):
-        self.save()
+        result = self.execute("save_draft", binding, photos=kept)
+        self.assertEqual(result["state"], "draft", result)
+        self.assertEqual([c[:2] for c in self.writes()], [("PATCH", "shops/123/listings/123456"),
+                                                           ("DELETE", "shops/123/listings/123456/images/1001"),
+                                                           ("POST", "shops/123/listings/123456/images")])
+        self.assertEqual(set(binding["etsy_image_ids"]), {photos[1].id, added.id})
+        self.assertEqual(binding["etsy_photo_ids"], [photos[1].id, added.id])
+        self.assertTrue(binding["etsy_photos_complete"])
         self.calls.clear()
-        published = self.publish()
-        self.assertEqual(published.json()["state"], "published", published.text)
-        self.assertEqual(self.calls[-1], ("PATCH", "shops/123/listings/123456", {"state": "active"}, False))
-        count = len(self.calls)
-        self.assertEqual(self.publish().status_code, 409)
-        self.assertEqual(len(self.calls), count)
+        self.execute("save_draft", binding, photos=kept)
+        self.assertFalse(any(c[3] for c in self.calls))
 
     def test_update_changes_the_live_listing_and_does_not_create_another(self):
-        self.save()
-        self.assertEqual(self.publish().json()["state"], "published")
+        self.assertEqual(self.list()["state"], "published")
         self.calls.clear()
         self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "title": "Updated tee", "price": 13}, "user")
-        updated = self.client.post(self.base + "/update", json={"revision_id": self.rev.id, "confirm": True})
-        self.assertEqual(updated.status_code, 200, updated.text)
-        self.assertEqual(updated.json()["state"], "published")
-        self.assertEqual(updated.json()["listing_url"], "https://www.etsy.com/listing/123456")
+        response = self.client.post(self.base + "/update", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        while self.launched:
+            asyncio.run(self.launched.pop(0))
+        self.db.expire_all()
+        updated = self.record()
+        self.assertEqual(updated["state"], "published", updated)
+        self.assertEqual(updated["listing_url"], "https://www.etsy.com/listing/123456")
         self.assertNotIn(("POST", "shops/123/listings"), [(c[0], c[1]) for c in self.calls])
         self.assertFalse(any(c[2].get("state") for c in self.calls))
         self.assertEqual(self.remote["title"], "Updated tee")
-        self.assertEqual(self.remote["state"], "active")
-        self.assertEqual(self.publish().status_code, 409)
 
     def test_changed_remote_fields_or_shop_cannot_be_published(self):
-        self.save()
+        binding = {}
+        self.execute("save_draft", binding)
         for changes in [{"title": "Changed"}, {"shop_id": 999}]:
             previous = copy.deepcopy(self.remote)
             self.remote.update(changes)
             self.calls.clear()
-            self.assertNotEqual(self.publish().json()["state"], "published")
-            self.assertTrue(all(c[0] == "GET" for c in self.calls))
+            self.assertFalse(self.execute("publish", dict(binding))["ok"])
+            self.assertFalse(self.writes())
             self.remote = previous
 
-    def test_lost_publish_reply_is_read_only_on_check_and_never_replayed(self):
-        self.save()
+    def test_a_lost_activation_is_checked_in_the_same_job_and_never_replayed(self):
         def lost(method, path):
-            if method == "PATCH":
+            if method == "PATCH" and self.remote["state"] == "draft" and len(self.remote["images"]) == 2:
                 self.remote["state"] = "active"
                 return httpx.ReadTimeout("lost response")
         self.failure = lost
-        self.assertEqual(self.publish().json()["state"], "unknown")
-        before = len(self.calls)
-        self.assertEqual(self.publish().status_code, 409)
-        self.assertEqual(len(self.calls), before)
-        self.calls.clear()
-        self.failure = None
-        checked = self.client.post(self.base + "/check")
-        self.assertEqual(checked.json()["state"], "published", checked.text)
-        self.assertTrue(all(c[0] == "GET" for c in self.calls))
+        record = self.list()
+        # The lost reply was read back while the job still held the slot.
+        self.assertEqual(record["state"], "published", record)
+        self.assertEqual(sum(c[2] == {"state": "active"} for c in self.calls), 1)
 
-    def test_lost_create_reply_blocks_duplicate_creation(self):
-        self.failure = lambda method, path: httpx.ReadTimeout("lost create") if method == "POST" else None
-        self.assertEqual(self.save()["state"], "unknown")
-        before = len(self.calls)
-        r = self.client.post(self.base + "/draft", json={"revision_id": self.rev.id})
-        self.assertEqual(r.status_code, 409)
-        self.assertEqual(len(self.calls), before)
-        self.client.post(self.base + "/check")
-        self.assertEqual(len(self.calls), before)
-
-    def test_rejected_authorization_can_be_reconnected_without_an_unknown_create(self):
-        self.failure = lambda method, path: etsy_listings.marketplace_accounts.SignInRequired("Reconnect Etsy") if method == "POST" else None
-        self.assertEqual(self.save()["state"], "not_saved")
+    def test_a_timed_out_activation_that_reads_back_as_a_draft_can_be_listed_again(self):
+        self.failure = lambda method, path: httpx.ReadTimeout("lost activation") if method == "PATCH" and self.remote["images"] else None
+        record = self.list()
+        self.assertEqual(record["state"], "draft", record)
+        self.assertIn("List again to publish it", record["error"])
         self.failure = None
-        self.assertEqual(self.save()["state"], "draft")
+        self.assertEqual(self.list()["state"], "published")
+
+    def test_a_lost_create_reply_is_found_among_the_shop_drafts(self):
+        def lost(method, path):
+            if method == "POST" and path == "shops/123/listings":
+                self.failure = None
+                self.remote = {**self.calls[-1][2], "listing_id": 123456, "shop_id": 123, "state": "draft", "images": []}
+                self.inventory = {"products": [{"sku": "", "property_values": [], "offerings": [{
+                    "price": {"amount": 1200, "divisor": 100, "currency_code": "USD"}, "quantity": 1, "is_enabled": True}]}]}
+                self.remote["price"] = {"amount": 1200, "divisor": 100, "currency_code": "USD"}
+                return httpx.ReadTimeout("lost create")
+        self.failure = lost
+        record = self.list()
+        # Check found the draft by its title: the record has its link, nothing was created twice.
+        self.assertEqual(record["draft_url"], URL)
+        self.assertEqual(record["state"], "draft", record)
+        self.assertEqual(sum(c[0] == "POST" and c[1] == "shops/123/listings" for c in self.calls), 1)
+        self.assertEqual(self.list()["state"], "published")
+        self.assertEqual(sum(c[0] == "POST" and c[1] == "shops/123/listings" for c in self.calls), 1)
+
+    def test_a_create_that_never_landed_is_safe_to_list_again(self):
+        self.failure = lambda method, path: httpx.ReadTimeout("lost create") if method == "POST" and path == "shops/123/listings" else None
+        record = self.list()
+        self.assertEqual(record["state"], "not_saved", record)
+        self.assertIn("no draft from this listing", record["error"])
+
+    def test_several_matching_drafts_stay_unconfirmed(self):
+        self.other_drafts = [{"listing_id": 1, "shop_id": 123, "title": LISTING["title"], "state": "draft"},
+                             {"listing_id": 2, "shop_id": 123, "title": LISTING["title"], "state": "draft"}]
+        self.failure = lambda method, path: httpx.ReadTimeout("lost create") if method == "POST" and path == "shops/123/listings" else None
+        record = self.list()
+        self.assertEqual((record["state"], record["error_code"]), ("unknown", "uncertain"))
+        self.assertIn("2 drafts", record["error"])
+
+    def test_rejected_authorization_is_signed_out_without_an_unknown_create(self):
+        self.failure = lambda method, path: etsy_listings.marketplace_accounts.SignInRequired("Sign in to Etsy again.") if method == "POST" else None
+        record = self.list()
+        self.assertEqual((record["state"], record["error_code"]), ("not_saved", "signed_out"))
+        self.failure = None
+        self.assertEqual(self.list()["state"], "published")
+
+    def test_rate_limits_say_when_to_try_again_and_keep_etsys_words(self):
+        def limited(method, path):
+            if method == "POST":
+                response = httpx.Response(429, headers={"retry-after": "30"}, json={"error": "Too many requests"},
+                                          request=httpx.Request(method, "https://api.etsy.com/"))
+                return httpx.HTTPStatusError("limited", request=response.request, response=response)
+        self.failure = limited
+        record = self.list()
+        self.assertEqual((record["state"], record["error_code"]), ("not_saved", "rate_limited"))
+        self.assertEqual(record["marketplace_message"], "Too many requests")
+        self.assertTrue(record["retry_after"])
+
+    def test_a_refused_listing_keeps_etsys_message_verbatim(self):
+        def refused(method, path):
+            if method == "POST" and path == "shops/123/listings":
+                response = httpx.Response(400, json={"error": "Oh dear, you cannot sell this item on Etsy"},
+                                          request=httpx.Request(method, "https://api.etsy.com/"))
+                return httpx.HTTPStatusError("refused", request=response.request, response=response)
+        self.failure = refused
+        record = self.list()
+        self.assertEqual((record["state"], record["error_code"]), ("not_saved", "rejected"))
+        self.assertEqual(record["marketplace_message"], "Oh dear, you cannot sell this item on Etsy")
+        self.assertNotIn("Oh dear", record["error"])
 
     def test_rejected_photo_resumes_same_draft_without_duplicate_images(self):
         def reject(method, path):
@@ -222,46 +329,34 @@ class EtsyListingsTest(unittest.TestCase):
                 response = httpx.Response(400, request=httpx.Request(method, "https://api.etsy.com/"))
                 return httpx.HTTPStatusError("rejected", request=response.request, response=response)
         self.failure = reject
-        saved = self.save()
-        self.assertEqual(saved["state"], "draft")
-        self.assertIsNone(saved["revision_id"])
+        record = self.list()
+        self.assertEqual(record["state"], "draft")
+        self.assertIsNone(record.get("revision_id"))
         self.assertEqual(len(self.remote["images"]), 1)
         self.failure = None
-        saved = self.save()
-        self.assertEqual(saved["revision_id"], self.rev.id)
+        self.assertEqual(self.list()["state"], "published")
         self.assertEqual(len(self.remote["images"]), 2)
         self.assertEqual(sum(c[0] == "POST" and c[1] == "shops/123/listings" for c in self.calls), 1)
 
-    def test_uncertain_activation_still_showing_a_draft_is_not_retryable(self):
-        self.save()
-        self.failure = lambda method, path: httpx.ReadTimeout("lost activation") if method == "PATCH" else None
-        self.assertEqual(self.publish().json()["state"], "unknown")
-        self.failure = None
-        self.assertEqual(self.client.post(self.base + "/check").json()["state"], "unknown")
-        self.assertEqual(self.publish().status_code, 409)
-
     def test_lost_last_photo_receipt_can_be_verified_without_reuploading(self):
+        binding = {"action": "save_draft"}
+
         def lost(method, path):
             if path.endswith("/images") and len(self.remote["images"]) == 1:
-                self.remote["images"].append({"listing_image_id": 1001, "rank": 2})
+                self.remote["images"].append({"listing_image_id": 1002, "rank": 2})
                 return httpx.ReadTimeout("lost photo receipt")
         self.failure = lost
-        self.assertEqual(self.save()["state"], "unknown")
+        result = self.execute("save_draft", binding)
+        self.assertEqual(result["error_code"], "uncertain")
         self.failure = None
         self.calls.clear()
-        checked = self.client.post(self.base + "/check")
-        self.assertEqual(checked.json()["state"], "draft", checked.text)
-        self.assertTrue(checked.json()["etsy_photos_complete"])
-        self.assertIsNone(checked.json()["etsy_pending_write"])
-        self.assertTrue(self.calls)
+        checked = asyncio.run(etsy_listings.check(LISTING, binding, binding["draft_url"]))
+        self.assertEqual(checked["state"], "draft", checked)
         self.assertTrue(all(c[0] == "GET" for c in self.calls))
-        self.calls.clear()
-        self.assertEqual(self.save()["state"], "draft")
-        self.assertFalse(any(c[3] for c in self.calls))
 
     def test_disconnected_account_fails_before_a_job_or_write(self):
         with patch.object(etsy_listings, "get_marketplace_accounts", return_value={}):
-            r = self.client.post(self.base + "/draft", json={"revision_id": self.rev.id})
+            r = self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(r.status_code, 409)
         self.assertFalse(self.calls)
         self.assertFalse(JobRepo(self.db).list_all())
@@ -274,52 +369,55 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertNotIn("never-expose", r.text)
 
     def test_another_shops_shipping_profile_cannot_create_a_draft(self):
-        r = self.client.post(self.base + "/draft", json={"revision_id": self.rev.id, "shipping_profile_id": "999"})
-        self.assertEqual(r.json()["state"], "not_saved", r.text)
-        self.assertFalse(any(c[0] != "GET" for c in self.calls))
+        record = self.list(shipping_profile_id="999")
+        self.assertEqual(record["state"], "not_saved", record)
+        self.assertFalse(self.writes())
 
     def test_new_draft_requires_an_explicit_shipping_profile(self):
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "etsy_specifics": {
-            key: value for key, value in LISTING["etsy_specifics"].items() if key != "shipping_profile_id"}}, "user")
-        self.assertEqual(self.save()["state"], "not_saved")
-        self.assertFalse(any(c[0] != "GET" for c in self.calls))
+        result = asyncio.run(etsy_listings.execute("save_draft", {**LISTING, "etsy_specifics": {
+            key: value for key, value in LISTING["etsy_specifics"].items() if key != "shipping_profile_id"}},
+            ConversationRepo(self.db).get_photos(self.conv.id), {}, lambda values: None, lambda: True))
+        self.assertEqual(result["safe_to_retry"], True)
+        self.assertIn("shipping profile", result["error"])
+        self.assertFalse(self.writes())
 
     def test_calculated_shipping_requires_explicit_positive_package_measurements(self):
         self.calculated = True
-        self.assertEqual(self.save()["state"], "not_saved")
-        self.assertFalse(any(c[0] != "GET" for c in self.calls))
+        self.assertEqual(self.list()["state"], "not_saved")
+        self.assertFalse(self.writes())
         package = {"item_weight": 8, "item_weight_unit": "oz", "item_length": 12, "item_width": 9, "item_height": 1, "item_dimensions_unit": "in"}
-        r = self.client.post(self.base + "/draft", json={"revision_id": self.rev.id, "etsy_package": {**package, "item_weight": 0}})
+        r = self.client.post(self.base + "/list", json={"revision_id": self.rev.id, "confirm": True, "etsy_package": {**package, "item_weight": 0}})
         self.assertEqual(r.status_code, 422)
-        r = self.client.post(self.base + "/draft", json={"revision_id": self.rev.id, "etsy_package": package})
-        self.assertEqual(r.json()["state"], "draft", r.text)
+        self.assertEqual(self.list(etsy_package=package)["state"], "published")
         created = next(c[2] for c in self.calls if c[0] == "POST" and c[1].endswith("/listings"))
         self.assertEqual(created["item_weight"], "8.0")
         self.assertEqual(created["item_dimensions_unit"], "in")
 
     def test_variation_prices_are_preserved_instead_of_flattened(self):
-        self.save()
+        binding = {}
+        self.execute("save_draft", binding)
         self.inventory["products"].append(copy.deepcopy(self.inventory["products"][0]))
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 13}, "user")
         self.calls.clear()
-        saved = self.save()
-        self.assertNotEqual(saved["revision_id"], self.rev.id)
+        result = self.execute("save_draft", binding, snapshot={**LISTING, "price": 13})
+        self.assertFalse(result["ok"])
         self.assertTrue(all(c[0] == "GET" for c in self.calls))
 
     def test_price_recovery_uses_inventory_when_listing_summary_is_stale(self):
-        self.save()
-        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 13}, "user")
+        binding = {"action": "save_draft"}
+        self.execute("save_draft", binding)
+
         def lost(method, path):
             if method == "PUT":
                 self.inventory["products"][0]["offerings"][0]["price"]["amount"] = 1300
                 return httpx.ReadTimeout("lost price receipt")
         self.failure = lost
-        self.assertEqual(self.save()["state"], "unknown")
+        changed = {**LISTING, "price": 13}
+        self.assertEqual(self.execute("save_draft", binding, snapshot=changed)["error_code"], "uncertain")
         self.assertEqual(self.remote["price"]["amount"], 1200)
         self.failure = None
         self.calls.clear()
-        checked = self.client.post(self.base + "/check")
-        self.assertEqual(checked.json()["state"], "draft", checked.text)
+        checked = asyncio.run(etsy_listings.check(changed, binding, URL))
+        self.assertEqual(checked["state"], "draft", checked)
         self.assertTrue(all(c[0] == "GET" for c in self.calls))
 
     def test_invalid_or_ineligible_details_never_create_a_listing(self):
@@ -327,17 +425,26 @@ class EtsyListingsTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 etsy_listings.draft_fields({**LISTING, **changes}, creating=True)
 
+    def test_missing_details_name_the_fields_to_fix(self):
+        result = self.execute("save_draft", {}, snapshot={**LISTING, "marketplace_category_ids": {}})
+        self.assertEqual(result["error_code"], "missing_fields")
+        self.assertEqual(result["fields"][0]["field"], "marketplace_category_ids.etsy")
+
     def test_a_recent_item_can_still_be_prepared_for_etsy(self):
         fields = etsy_listings.draft_fields({**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "2010 - 2019 (Recently)"}}, creating=True)
         self.assertEqual(fields["when_made"], "2010_2019")
 
-    def test_validation_errors_show_field_names_without_raw_response_data(self):
-        response = httpx.Response(400, json={"error": "shipping_profile_id is required; never-expose"},
+    def test_validation_errors_name_fields_in_our_words_and_keep_etsys_scrubbed(self):
+        response = httpx.Response(400, json={"error": "shipping_profile_id is required; token=never-expose"},
                                   request=httpx.Request("POST", "https://api.etsy.com/"))
         error = httpx.HTTPStatusError("never-expose", request=response.request, response=response)
         message = etsy_listings._error_text(error)
         self.assertIn("shipping_profile_id", message)
         self.assertNotIn("never-expose", message)
+        result = etsy_listings._failure(error, safe=True)
+        self.assertEqual(result["error_code"], "missing_fields")
+        self.assertEqual(result["fields"][0]["field"], "etsy_specifics.shipping_profile_id")
+        self.assertEqual(result["marketplace_message"], "shipping_profile_id is required; token=[redacted]")
 
 
 class RelayMultipartTest(unittest.IsolatedAsyncioTestCase):

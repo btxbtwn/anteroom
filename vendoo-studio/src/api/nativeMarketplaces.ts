@@ -1,20 +1,28 @@
 export type NativeMarketplace = "ebay" | "poshmark" | "mercari" | "depop" | "etsy" | "sellwild";
-export interface EtsyDraftOptions {
-  shippingProfileId?: string;
-  readinessStateId?: string;
-  package?: { item_weight: number; item_length: number; item_width: number; item_height: number;
-    item_weight_unit: "oz"; item_dimensions_unit: "in" };
-}
+/** What the marketplace's refusal was, so the section can offer the one action that fixes it. */
+export type NativeErrorCode = "signed_out" | "challenge" | "rate_limited" | "missing_fields" | "rejected" | "schema_drift" | "network" | "uncertain";
+export interface NativeErrorField { field: string; message: string }
+/** One item's direct listing on one marketplace, as Anteroom recorded it. */
 export interface NativeDraft {
   state: "not_saved" | "saving" | "publishing" | "updating" | "unknown" | "draft" | "published" | "pending_review";
+  action?: "save_draft" | "publish" | "list" | "update";
   storage?: "local";
   sellwild_category_id?: number;
   sellwild_condition_id?: number;
   draft_url?: string;
   listing_url?: string;
-  revision_id: string | null;
+  revision_id?: string | null;
   job_id?: string;
   error?: string | null;
+  error_code?: NativeErrorCode | null;
+  error_fields?: NativeErrorField[] | null;
+  /** The marketplace's own words, shown beside Anteroom's. */
+  marketplace_message?: string | null;
+  /** ISO time before which a rate-limited List should wait. */
+  retry_after?: string | null;
+  /** True while a List, Update or Check job is running in this Studio. */
+  running?: boolean;
+  progress?: { step: string; label: string; index: number; total: number } | null;
 }
 export type NativeDrafts = Partial<Record<NativeMarketplace, NativeDraft>>;
 export interface SellwildChoice { categoryId: number; conditionId: number }

@@ -299,6 +299,7 @@ def schedule_advance_job_queue() -> None:
 
 
 _saved_item_syncs: set[asyncio.Task] = set()
+_reconnect_tasks: set[asyncio.Task] = set()
 
 
 def _schedule_saved_item_sync(conv_id: str) -> None:
@@ -881,7 +882,12 @@ async def extension_websocket(ws: WebSocket):
                     extension_manager.paired = True
                     from vendoo_studio.repositories.queries import JobRepo
                     _resume_interrupted_sends(JobRepo(db), JobRepo(db).requeue_interrupted())
-                    await dispatch_queued_jobs()
+                    from vendoo_studio.services.native_marketplaces import reconcile_then_dispatch
+
+                    # Read unconfirmed direct listings before a queued Send takes
+                    # Chrome. Off this loop: the checks wait on replies it reads.
+                    _reconnect_tasks.add(task := asyncio.create_task(reconcile_then_dispatch()))
+                    task.add_done_callback(_reconnect_tasks.discard)
                     # Warm label names in the background so Item Details can rename
                     # opaque chips without blocking the handshake.
                     asyncio.create_task(_warm_label_catalog())

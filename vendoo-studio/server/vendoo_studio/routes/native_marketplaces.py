@@ -1,16 +1,22 @@
-"""Native marketplace draft and seller-confirmed publish endpoints."""
+"""Direct marketplace List, Update, Check, Reset and Cancel endpoints."""
 from __future__ import annotations
 
 from collections.abc import Awaitable
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.services import native_marketplaces as native
-from vendoo_studio.services.native_marketplaces import CheckRequest, DraftRequest, InspectionMarketplace, InspectRequest, Marketplace, PublishRequest
+from vendoo_studio.services.native_marketplaces import CheckRequest, InspectionMarketplace, InspectRequest, ListRequest, Marketplace
 
 router = APIRouter(prefix="/api/conversations/{conv_id}/native-marketplaces", tags=["native-marketplaces"])
+
+
+class ResetRequest(BaseModel):
+    """The seller confirms they looked on the marketplace themselves."""
+    confirm: bool = False
 
 
 async def _reply(call: Awaitable[dict]) -> dict:
@@ -20,17 +26,16 @@ async def _reply(call: Awaitable[dict]) -> dict:
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
-@router.get("")
-def status(conv_id: str, db: Session = Depends(get_db)):
+def _sync(call, *args):
     try:
-        return native.status(conv_id, db)
+        return call(*args)
     except native.NativeMarketplaceError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 
 
-@router.post("/{marketplace}/draft")
-async def save_draft(conv_id: str, marketplace: Marketplace, body: DraftRequest, db: Session = Depends(get_db)):
-    return await _reply(native.save_draft(conv_id, marketplace, body, db))
+@router.get("")
+def status(conv_id: str, db: Session = Depends(get_db)):
+    return _sync(native.status, conv_id, db)
 
 
 @router.post("/{marketplace}/inspect")
@@ -39,28 +44,32 @@ async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: I
 
 
 @router.post("/{marketplace}/list")
-async def list_now(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session = Depends(get_db)):
+async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db)):
     return await _reply(native.list_now(conv_id, marketplace, body, db))
 
 
 @router.post("/{marketplace}/update")
-async def update_live(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session = Depends(get_db)):
+async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db)):
     return await _reply(native.update_live(conv_id, marketplace, body, db))
 
 
-@router.post("/{marketplace}/publish")
-async def publish(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session = Depends(get_db)):
-    return await _reply(native.publish(conv_id, marketplace, body, db))
+@router.post("/{marketplace}/cancel")
+async def cancel(conv_id: str, marketplace: Marketplace, db: Session = Depends(get_db)):
+    return await _reply(native.cancel(conv_id, marketplace, db))
 
 
 @router.get("/sellwild/options")
 def sellwild_options(conv_id: str, db: Session = Depends(get_db)):
-    try:
-        return native.sellwild_options(conv_id, db)
-    except native.NativeMarketplaceError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+    return _sync(native.sellwild_options, conv_id, db)
 
 
 @router.post("/{marketplace}/check")
 async def check_result(conv_id: str, marketplace: Marketplace, body: CheckRequest | None = None, db: Session = Depends(get_db)):
     return await _reply(native.check_result(conv_id, marketplace, db, body))
+
+
+@router.post("/{marketplace}/reset")
+def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Session = Depends(get_db)):
+    if body.confirm is not True:
+        raise HTTPException(400, "Confirm that you checked the marketplace yourself.")
+    return _sync(native.reset, conv_id, marketplace, db)

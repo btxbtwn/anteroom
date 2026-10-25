@@ -732,6 +732,13 @@ async def cancel_job(job_id: str, db: Session = Depends(get_db)):
     # left to stop. Answer with the job as it stands instead of an error.
     if job.status in {"completed", "cancelled"}:
         return _job_response(job)
+    if str(job.current_step or "").startswith("native_"):
+        from vendoo_studio.services import native_marketplaces
+
+        # A direct listing stops at its next safe point and keeps the slot until
+        # the marketplace or Chrome has answered; its own worker ends the job.
+        await native_marketplaces.cancel_job(db, job)
+        return _job_response(job)
 
     job.status = "cancelled"
     job.current_step = None

@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.347 — 2026-10-25
+
+- List on a marketplace now runs in the background with its progress shown in the Marketplaces section, and Cancel stops it before it publishes. A queued Send to Vendoo waits until Chrome has finished, instead of failing because Chrome was still busy.
+- What Anteroom knows about each marketplace listing is kept on its own, so Clear, Regenerate or an older open window can no longer erase it.
+- When a result is unconfirmed, Anteroom checks it by itself after a lost reply, on startup and when Chrome reconnects. Nothing is ever listed by that check. If it still can't tell, look on the marketplace and choose “I checked it myself” or a Mark option.
+- A refused eBay listing can be listed again without making a second one: the same item and offer are reused, eBay's own message is shown, and its general color, size and department now fill eBay's item specifics. Missing fields get Edit links and an Ask chat button.
+- Etsy explains up front when an item isn't vintage, handmade or a craft supply, finds a draft whose reply was lost, retries an activation that didn't happen, and keeps its photos in step when you change them.
+
 ## 0.1.346 — 2026-10-25
 
 - Listing directly on Poshmark, Mercari, Depop and Sellwild is sturdier: a slow or busy marketplace is asked again only when nothing could be listed twice, a stopped Poshmark listing cleans up its unlisted post, and Mercari no longer needs a reconnect when its sign-in refreshes.

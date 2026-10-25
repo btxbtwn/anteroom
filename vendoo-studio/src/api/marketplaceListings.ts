@@ -6,6 +6,8 @@ export interface MarketplaceListing {
   sold_here: boolean;
   state: "live" | "deleting" | "deleted" | "failed";
   error?: string | null;
+  /** The marketplace's own words when a delist failed. */
+  marketplace_message?: string | null;
   at?: string | null;
 }
 /** The seller's correction to what Anteroom knows; it never changes the marketplace. */

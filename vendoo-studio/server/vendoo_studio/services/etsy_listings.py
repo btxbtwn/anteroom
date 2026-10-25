@@ -1,7 +1,8 @@
 """Official Etsy API listing operations, through the existing secret-holding relay.
 
 No browser session, background publishing, or automatic write retries. Persist
-each accepted ID before the next write; checks only read the saved listing.
+each accepted ID before the next write; checks only read the shop. A check
+finds a draft whose create reply was lost by its title among the shop's drafts.
 """
 from __future__ import annotations
 
@@ -16,11 +17,15 @@ import httpx
 
 from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.models.etsy_fields import (
-    etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
+    etsy_eligible, etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
 )
 from vendoo_studio.services import marketplace_accounts
 from vendoo_studio.services.keychain import get_marketplace_accounts
+from vendoo_studio.services.listing_result import ListingProblem, failure, missing, retry_after_seconds, scrub
 from vendoo_studio.services.relay_client import RelayError
+
+
+NOT_ELIGIBLE = "Etsy only allows vintage (20+ years), handmade or craft supplies. This item doesn't qualify."
 
 
 def connected_shop_id() -> str:
@@ -72,7 +77,7 @@ def _price(value) -> Decimal:
                 return rounded
     except (InvalidOperation, ValueError):
         pass
-    raise ValueError("Set a positive Etsy price before listing.")
+    raise missing("Set a positive Etsy price before listing.", "price")
 
 
 def _remote_price(remote: dict) -> Decimal:
@@ -95,7 +100,8 @@ def _matches(remote: dict, snapshot: dict) -> bool:
 def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     title, description = str(snapshot.get("title") or ""), str(snapshot.get("description") or "")
     if not title.strip() or not description.strip():
-        raise ValueError("Add an Etsy title and description before listing.")
+        raise missing("Add an Etsy title and description before listing.",
+                      *[name for name, value in (("title", title), ("description", description)) if not value.strip()])
     fields = {"title": title, "description": description, "price": str(_price(snapshot.get("price")))}
     if not creating:
         return fields
@@ -110,10 +116,12 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
             "2007 - 2009": "2007_2009", "2000 - 2006": "2000_2006", "Before 2007": "before_2007",
             "1900 - 1909": "1900s", "Before 1700": "before_1700"}.get(label, label)
     if not who or what is None or not re.fullmatch(r"made_to_order|2020_2026|2010_2019|2007_2009|2000_2006|before_2007|19[0-9]0s|1800s|1700s|before_1700", when):
-        raise ValueError("Complete Etsy's who made it, what is it, and when made details before listing.")
+        raise missing("Complete Etsy's who made it, what is it, and when made details before listing.",
+                      *[f"etsy_specifics.{name}" for name, value in (("who_made", who), ("what_is", what), ("when_made", when))
+                        if value is None or (name == "when_made" and not re.fullmatch(r"made_to_order|2020_2026|2010_2019|2007_2009|2000_2006|before_2007|19[0-9]0s|1800s|1700s|before_1700", when))])
     category = str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
     if not re.fullmatch(r"[1-9]\d*", category):
-        raise ValueError("Choose a verified Etsy category before listing.")
+        raise missing("Choose a verified Etsy category before listing.", "marketplace_category_ids.etsy")
     fields.update(quantity="1", who_made=who, when_made=when, is_supply=str(what).lower(),
                   taxonomy_id=category, type="physical", should_auto_renew="false")
     # Only use explicit seller-selected IDs. Shipping and processing can also be
@@ -154,44 +162,139 @@ def _success(remote: dict) -> dict:
             **({"listing_url": f"https://www.etsy.com/listing/{item_id}"} if remote["state"] == "active" else {})}
 
 
+# Etsy's request field names, and where each lives on the listing.
+_FIELD_PATHS = {"shipping_profile_id": "etsy_specifics.shipping_profile_id", "readiness_state_id": "etsy_specifics.readiness_state_id",
+                "return_policy_id": "etsy_specifics.return_policy_id", "taxonomy_id": "marketplace_category_ids.etsy",
+                "who_made": "etsy_specifics.who_made", "when_made": "etsy_specifics.when_made", "is_supply": "etsy_specifics.what_is",
+                "price": "price", "quantity": "quantity", "title": "title", "description": "description", "image": "photos"}
+
+
+def _etsy_messages(exc: httpx.HTTPStatusError) -> str:
+    try:
+        body = exc.response.json()
+    except (ValueError, AttributeError):
+        return ""
+
+    def messages_for(value):
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list):
+            return [message for item in value for message in messages_for(item)]
+        if isinstance(value, dict):
+            return [message for key in ("error", "message", "error_msg", "error_message", "error_description", "errors", "detail")
+                    for message in messages_for(value.get(key))]
+        return []
+
+    return "; ".join(str(value) for value in messages_for(body))
+
+
+def marketplace_message(exc: Exception) -> str | None:
+    """What Etsy itself said, scrubbed. None when Etsy did not answer."""
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return None
+    said = _etsy_messages(exc)
+    if not said:
+        heading = re.search(r"<(?:title|h1)[^>]*>([^<]+)</(?:title|h1)>", exc.response.text or "", re.I)
+        said = heading[1] if heading else f"HTTP {exc.response.status_code} {exc.response.reason_phrase or ''}"
+    return scrub(said)
+
+
+def _named_fields(message: str) -> list[str]:
+    return [name for name in _FIELD_PATHS if re.search(rf"\b{re.escape(name)}\b", message)]
+
+
 def _error_text(exc: Exception) -> str:
     if isinstance(exc, httpx.HTTPStatusError):
-        # Never include request headers, URLs with credentials, or raw response bodies.
-        body = None
-        try:
-            body = exc.response.json()
-            def messages_for(value):
-                if isinstance(value, str):
-                    return [value]
-                if isinstance(value, list):
-                    return [message for item in value for message in messages_for(item)]
-                if isinstance(value, dict):
-                    return [message for key in ("error", "message", "error_msg", "error_message", "error_description", "errors", "detail")
-                            for message in messages_for(value.get(key))]
-                return []
-            messages = messages_for(body)
-            message = "; ".join(str(value) for value in messages)
-        except (ValueError, AttributeError):
-            message = ""
-        if not message and exc.response.status_code == 400:
-            heading = re.search(r"<(?:title|h1)[^>]*>([^<]+)</(?:title|h1)>", exc.response.text, re.I)
-            message = heading[1] if heading else "Etsy rejected these draft details without a validation message. Review the title and required fields."
-        fields = [name for name in ("shipping_profile_id", "readiness_state_id", "return_policy_id", "taxonomy_id",
-                                   "who_made", "when_made", "is_supply", "price", "quantity", "title", "description", "image")
-                  if re.search(rf"\b{re.escape(name)}\b", message)]
+        # Our own words only: Etsy's text goes beside them as marketplace_message.
+        status = exc.response.status_code
+        if status == 429:
+            return "Etsy is limiting requests right now. Wait a moment, then List again."
+        message = _etsy_messages(exc)
+        fields = _named_fields(message)
         detail = f"Check Etsy fields: {', '.join(fields)}." if fields else "Review the Etsy draft fields and connection."
-        if not fields and exc.response.status_code == 400 and message:
-            # Etsy's validation error is intended for the seller. Keep only that
-            # string, strip URLs and token-shaped text, and bound its length.
-            safe = re.sub(r"https?://\S+", "[URL]", message)
-            safe = re.sub(r"[A-Za-z0-9._~+/=-]{24,}", "[redacted]", safe)
-            detail = " ".join(safe.split())[:240]
-        return f"Etsy rejected the request (HTTP {exc.response.status_code}). {detail}"
+        if not fields and status == 400:
+            detail = "Etsy refused these listing details. Its reason is below."
+        return f"Etsy rejected the request (HTTP {status}). {detail}"
     if isinstance(exc, httpx.HTTPError):
         return "Etsy's API did not confirm the request. Check the result before trying again."
     if isinstance(exc, (ValueError, marketplace_accounts.SignInRequired, RelayError)):
         return str(exc)
     return "Could not confirm the Etsy API action. Check its result before trying again."
+
+
+def _failure(exc: Exception, *, safe: bool, **extra) -> dict:
+    """The contract result for an exception. Not safe means a write may have landed."""
+    said = marketplace_message(exc) or getattr(exc, "marketplace_message", None)
+    text = _error_text(exc)
+    if not safe:
+        return failure(text, "uncertain", safe=False, marketplace_message=said, **extra)
+    if isinstance(exc, ListingProblem):
+        return failure(text, exc.code, safe=True, fields=exc.fields, marketplace_message=said, **extra)
+    if isinstance(exc, marketplace_accounts.SignInRequired):
+        return failure(text, "signed_out", safe=True, **extra)
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 429:
+            return failure(text, "rate_limited", safe=True, marketplace_message=said,
+                           retry_after_s=retry_after_seconds(exc.response.headers.get("retry-after")), **extra)
+        fields = _named_fields(_etsy_messages(exc))
+        if status == 400 and fields:
+            return failure(text, "missing_fields", safe=True, marketplace_message=said,
+                           fields=[{"field": _FIELD_PATHS[name], "message": f"Etsy refused {name}."} for name in fields], **extra)
+        return failure(text, "rejected", safe=True, marketplace_message=said, **extra)
+    if isinstance(exc, (RelayError, httpx.TransportError)):
+        return failure(text, "network", safe=True, **extra)
+    return failure(text, "rejected", safe=True, **extra)
+
+
+async def find_draft(shop_id: str, snapshot: dict) -> str | None:
+    """The edit link of the shop's one draft with this listing's title, when a create reply was lost."""
+    found = await marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/listings", params={
+        "state": "draft", "limit": 100, "sort_on": "created", "sort_order": "desc"})
+    title = str(snapshot.get("title") or "")
+    matches = [str(item.get("listing_id")) for item in found.get("results") or []
+               if html.unescape(str(item.get("title") or "")) == title and str(item.get("shop_id")) == shop_id]
+    if len(matches) > 1:
+        raise ValueError(f"Etsy has {len(matches)} drafts titled like this listing. Delete the extras in Etsy, then use “I checked it myself”.")
+    return edit_url(matches[0]) if matches else None
+
+
+async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: list, binding: dict,
+                       record: Callable[[dict], None]) -> None:
+    """Make the Etsy listing's photos the item's photos: upload new ones, remove dropped ones.
+
+    Every image ID is saved as Etsy confirms it, so a retry never uploads a photo twice.
+    """
+    wanted = [photo.id for photo in photos]
+    if binding.get("etsy_photo_ids") is None and remote.get("images"):
+        # Photos Anteroom did not upload (a pasted listing): leave them alone.
+        return
+    if binding.get("etsy_photos_complete") and binding.get("etsy_photo_ids") == wanted:
+        return
+    images = {str(key): str(value) for key, value in (binding.get("etsy_image_ids") or {}).items()}
+    observed = {str(image.get("listing_image_id")) for image in remote.get("images") or []}
+    if observed != set(images.values()):
+        raise ValueError("Etsy has draft photos Anteroom has not confirmed. Check the listing in Etsy before another upload.")
+    record({"etsy_photo_ids": wanted, "etsy_photos_complete": False})
+    for photo_id in [key for key in images if key not in wanted]:
+        await write("DELETE", f"shops/{shop_id}/listings/{item_id}/images/{images[photo_id]}", "photo")
+        images.pop(photo_id)
+        record({"etsy_image_ids": dict(images), "etsy_pending_write": None})
+    for rank, photo in enumerate(photos, start=1):
+        if photo.id in images:
+            continue
+        path = (Path(PHOTOS_DIR) / photo.stored_filename).resolve()
+        if not path.is_relative_to(Path(PHOTOS_DIR).resolve()) or not path.is_file():
+            raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos")
+        with path.open("rb") as image:
+            uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
+                                   data={"rank": str(rank)}, files={"image": (path.name, image, photo.mime_type)}, timeout=60)
+        image_id = str(uploaded.get("listing_image_id") or "")
+        if not re.fullmatch(r"[1-9]\d*", image_id):
+            raise ValueError("Etsy did not confirm a photo ID. Check the draft before another upload.")
+        images[photo.id] = image_id
+        record({"etsy_image_ids": dict(images), "etsy_pending_write": None})
+    record({"etsy_photos_complete": True})
 
 
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
@@ -204,7 +307,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         shop_id = connected_shop_id()
         if binding.get("etsy_shop_id") and binding["etsy_shop_id"] != shop_id:
             raise ValueError("This Etsy draft belongs to a different connected shop.")
-        record({"transport": "etsy_api", "etsy_shop_id": shop_id})
+        record({"etsy_shop_id": shop_id})
 
         async def write(method: str, path: str, kind: str, **kwargs):
             nonlocal attempted, rejected
@@ -242,6 +345,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 record({"etsy_pending_write": None})
             await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
             record({"etsy_pending_write": None})
+            await _sync_photos(write, shop_id, item_id, remote, photos, binding, record)
             remote = await _read(shop_id, item_id)
             if remote.get("state") != "active" or not _matches(remote, snapshot):
                 raise ValueError("Etsy has not confirmed the update on the live listing. Check it before trying again.")
@@ -252,6 +356,10 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 raise ValueError("Confirm listing on Etsy.")
             item_id = listing_id(binding.get("draft_url"))
             remote = await _read(shop_id, item_id)
+            if remote.get("state") == "active" and _matches(remote, snapshot):
+                # An earlier activation finished after its reply was lost.
+                record({"etsy_pending_write": None})
+                return _success(remote)
             if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images"):
                 raise ValueError("Etsy did not accept this listing's fields or photos.")
             remote = await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "publish", data={"state": "active"})
@@ -264,6 +372,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
 
         if action != "save_draft":
             raise ValueError("Unsupported Etsy API action.")
+        if not etsy_eligible(snapshot):
+            # Etsy refuses modern resale outright; nothing is sent.
+            raise ValueError(NOT_ELIGIBLE)
         creating = not binding.get("draft_url")
         fields = draft_fields(snapshot, creating=creating)
         if creating:
@@ -286,7 +397,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             if package:
                 fields.update({key: str(value) for key, value in package.items()})
             if not 1 <= len(photos) <= 20:
-                raise ValueError("Choose between one and twenty Etsy photos.")
+                raise missing("Choose between one and twenty Etsy photos.", "photos")
             remote = await write("POST", f"shops/{shop_id}/listings", "create", data=fields)
             item_id = str(remote.get("listing_id") or "")
             if str(remote.get("shop_id")) != shop_id or remote.get("state") != "draft":
@@ -299,13 +410,6 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             remote = await _read(shop_id, item_id)
             if remote.get("state") != "draft":
                 raise ValueError("This Etsy listing is no longer a private draft.")
-            if binding.get("etsy_photo_ids") and not binding.get("etsy_photos_complete"):
-                if binding["etsy_photo_ids"] != [p.id for p in photos]:
-                    raise ValueError("Finish the original Etsy draft photos before changing this draft's photo selection.")
-                known = {str(value) for value in (binding.get("etsy_image_ids") or {}).values()}
-                observed = {str(image.get("listing_image_id")) for image in remote.get("images") or []}
-                if observed != known:
-                    raise ValueError("Etsy has unconfirmed draft photos. Check the native draft before another upload.")
             # updateListing has no price parameter. Price is an inventory write;
             # preserve quantity, SKU, properties and processing for this product.
             inventory = remote.get("_inventory") or {}
@@ -316,21 +420,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 record({"etsy_pending_write": None})
             await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
             record({"etsy_pending_write": None})
-        if binding.get("etsy_photo_ids") and not binding.get("etsy_photos_complete"):
-            for rank, photo in enumerate(photos, start=1):
-                if photo.id in binding.get("etsy_image_ids", {}):
-                    continue
-                path = (Path(PHOTOS_DIR) / photo.stored_filename).resolve()
-                if not path.is_relative_to(Path(PHOTOS_DIR).resolve()) or not path.is_file():
-                    raise ValueError("An Etsy photo is missing from Anteroom. Restore it before continuing.")
-                with path.open("rb") as image:
-                    uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
-                                           data={"rank": str(rank)}, files={"image": (path.name, image, photo.mime_type)}, timeout=60)
-                image_id = str(uploaded.get("listing_image_id") or "")
-                if not re.fullmatch(r"[1-9]\d*", image_id):
-                    raise ValueError("Etsy did not confirm a photo ID. Check the draft before another upload.")
-                record({"etsy_image_ids": {**binding.get("etsy_image_ids", {}), photo.id: image_id}, "etsy_pending_write": None})
-            record({"etsy_photos_complete": True})
+        await _sync_photos(write, shop_id, item_id, remote, photos, binding, record)
         remote = await _read(shop_id, item_id)
         if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images"):
             raise ValueError("Etsy did not retain the private draft fields and photos. Check its result.")
@@ -338,31 +428,41 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             raise ValueError("Etsy did not retain every draft photo. Check its result.")
         return _success(remote)
     except Exception as exc:
-        return {"ok": False, "safe_to_retry": not attempted or rejected, "error": _error_text(exc),
-                **({"draft_url": binding["draft_url"]} if binding.get("draft_url") else {})}
+        return _failure(exc, safe=not attempted or rejected,
+                        **({"draft_url": binding["draft_url"]} if binding.get("draft_url") else {}))
 
 
 async def check(snapshot: dict, binding: dict, candidate: str | None) -> dict:
+    """Read the shop for this action's result. Never writes."""
     try:
         shop_id = connected_shop_id()
         if binding.get("etsy_shop_id") and binding["etsy_shop_id"] != shop_id:
             raise ValueError("This Etsy draft belongs to a different connected shop.")
+        found = not candidate
+        if found:
+            candidate = await find_draft(shop_id, snapshot)
+            if not candidate:
+                # The draft is created first; with no draft, nothing reached Etsy.
+                return {"ok": False, "safe_to_retry": True, "error": "Etsy has no draft from this listing. List again."}
         remote = await _read(shop_id, listing_id(candidate))
         if binding["action"] in {"publish", "update"}:
             if remote.get("state") == "active" and _matches(remote, snapshot):
                 return _success(remote)
-            # A draft read is not proof that a timed-out activation cannot finish.
-            waiting = "the update" if binding["action"] == "update" else "activation"
-            raise ValueError(f"Etsy has not confirmed {waiting}. Check the native account; do not repeat it.")
+            if binding["action"] == "publish" and remote.get("state") == "draft":
+                # Activation is one state change: still a draft means it did not happen.
+                return {"ok": False, "safe_to_retry": True, "draft_url": candidate,
+                        "error": "Etsy kept this listing as a draft. List again to publish it."}
+            raise ValueError("Etsy has not confirmed the update. Check the live listing; do not repeat it.")
         if remote.get("state") != "draft":
             raise ValueError("The Etsy item is no longer a private draft. Check the native listing.")
         expected = binding.get("etsy_photo_ids")
         complete = bool(remote.get("images")) and (not expected or len(remote["images"]) == len(expected))
         if _matches(remote, snapshot) and complete:
             return _success(remote)
-        if not binding.get("etsy_pending_write"):
+        if not binding.get("etsy_pending_write") or found:
+            # Found by title after a lost create: nothing after the create can have run.
             return {"ok": False, "safe_to_retry": True, "draft_url": candidate,
                     "error": "This Etsy listing is incomplete. List again to finish the same one."}
         raise ValueError("Etsy's draft write is unconfirmed. Review its fields and photos before another attempt.")
     except Exception as exc:
-        return {"ok": False, "error": _error_text(exc)}
+        return _failure(exc, safe=False, **({"draft_url": candidate} if candidate else {}))
