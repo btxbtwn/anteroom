@@ -164,7 +164,6 @@ function depopFieldNeeds(field) {
 const DEPOP_MAX_DESCRIPTION = 1000;
 const DEPOP_MAX_HASHTAGS = 5;
 const DEPOP_PHOTO_HOSTS = ['.s3.amazonaws.com', '.s3-accelerate.amazonaws.com'];
-const DEPOP_ATTRIBUTES_URL = 'https://api.depop.com/api/v3/attributes/';
 const DEPOP_WEBAPI = 'https://webapi.depop.com';
 
 function depopBaseDescription(listing) {
@@ -184,14 +183,25 @@ function depopDescription(listing) {
 
 const depopName = entry => String(entry?.name_i18n?.['en-US'] ?? entry?.name ?? entry?.title ?? entry?.id ?? '');
 
-// Depop's taxonomy (departments, product types, size sets, attributes and
-// brands), read from the seller's Chrome: Depop serves it to browsers only.
-// Needs a live check: the brand list's key and shape inside this document.
+// Depop's taxonomy. The partner host api.depop.com/api/v3/attributes/ answers
+// 403 "not authorized" without a partner token, so a direct list never starts.
+// The listing site itself splits the same document across two public reads:
+// categories, brands and attributes, then the category size sets.
 async function depopAttributes(deadline) {
   return await marketplaceCatalog('depop:attributes', () => marketplaceCatalogRead('depop', 'category and size list', async () => {
-    const { data } = await marketplaceFetch(DEPOP_ATTRIBUTES_URL, { marketplace: 'depop', step: 'catalog', headers: { Accept: 'application/json' },
-      deadline, timeoutMs: 30000 });
-    if (!['department', 'group', 'size_sets', 'category_size_mapping', 'generic_attributes'].every(key => Array.isArray(data?.[key]))) {
+    const read = async path => {
+      const { data } = await marketplaceFetch(`${DEPOP_WEBAPI}${path}`, {
+        marketplace: 'depop', step: 'catalog', credentials: 'omit',
+        headers: { Accept: 'application/json' }, deadline, timeoutMs: 30000,
+      });
+      return data && typeof data === 'object' ? data : {};
+    };
+    const [attributes, sizes] = await Promise.all([
+      read('/presentation/api/v1/attributes/'),
+      read('/presentation/api/v1/attributes/categories/size-mapping/'),
+    ]);
+    const data = { ...attributes, category_size_mapping: sizes.category_size_mapping, size_sets: sizes.size_sets };
+    if (!['department', 'group', 'size_sets', 'category_size_mapping', 'generic_attributes'].every(key => Array.isArray(data[key]))) {
       throw marketplaceError('Depop\'s category list changed.', { code: 'schema_drift' });
     }
     return data;
