@@ -336,7 +336,14 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
     snapshot, photos = await _preflight(db, conv_id, marketplace, body)
     if not photos:
         raise NativeMarketplaceError(400, "Add photos before updating the live listing." if kind == "update" else "Add photos before listing.")
-    found = direct_preflight.gaps(snapshot, marketplace, _context(db, conv_id, marketplace, body))
+    from vendoo_studio.services.chrome_catalog import apply_direct_ids, apply_preview, live_preview, remember_direct_categories
+
+    preview = await live_preview(snapshot) if marketplace in {"poshmark", "depop"} else None
+    if preview and apply_direct_ids(snapshot, preview.get("categories") or {}):
+        remember_direct_categories(db, ListingRepo(db).get_revision(body.revision_id), snapshot.get("direct_category_ids") or {})
+    found = apply_preview(
+        direct_preflight.gaps(snapshot, marketplace, _context(db, conv_id, marketplace, body)), preview, marketplace,
+    )
     if direct_preflight.blocking(found):
         return _refuse(db, conv_id, marketplace, direct_preflight.refusal(marketplace, found))
     if marketplace == "sellwild" and kind == "list":
@@ -406,24 +413,42 @@ def _refuse(db: Session, conv_id: str, marketplace: str, result: dict) -> dict:
     return stored
 
 
-def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None,
-              sellwild_condition_id: int | None = None) -> dict:
-    """What each marketplace still needs before List, read before the seller clicks. Writes nothing."""
+async def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None,
+                    sellwild_condition_id: int | None = None) -> dict:
+    """What each marketplace still needs before List. A resolved Poshmark or Depop category is saved."""
     conv = _conversation(db, conv_id)
     listing = ListingRepo(db).get_current(conv_id)
     revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
     if not revision or not isinstance(revision.listing_json, dict):
         return {"revision_id": None, "marketplaces": {}}
+    from vendoo_studio.services.chrome_catalog import (
+        apply_direct_ids, apply_preview, ensure_catalogs, live_preview, preview_categories,
+        remember_direct_categories, resolved_from_catalogs,
+    )
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
     from vendoo_studio.services.native_form import attach_form
 
     prepared = prepare_listing_snapshot(db, conv, copy.deepcopy(revision.listing_json))
+    preview = await live_preview(prepared)
+    categories = preview_categories(preview)
+    if not {"poshmark", "depop"}.issubset(categories):
+        try:
+            offline = resolved_from_catalogs(prepared, await ensure_catalogs())
+        except Exception:  # noqa: BLE001 - the rest of the check still runs
+            offline = {}
+        for key, value in offline.items():
+            categories.setdefault(key, value)
+    if apply_direct_ids(prepared, categories):
+        remember_direct_categories(db, revision, prepared.get("direct_category_ids") or {})
     body = ListRequest(revision_id=revision.id, sellwild_category_id=sellwild_category_id,
                        sellwild_condition_id=sellwild_condition_id)
     out = {}
     for marketplace in NAMES:
-        found = direct_preflight.gaps(attach_form(copy.deepcopy(prepared), marketplace), marketplace,
-                                      _context(db, conv_id, marketplace, body))
+        found = apply_preview(
+            direct_preflight.gaps(attach_form(copy.deepcopy(prepared), marketplace), marketplace,
+                                  _context(db, conv_id, marketplace, body)),
+            preview, marketplace,
+        )
         out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found}
     return {"revision_id": revision.id, "marketplaces": out}
 

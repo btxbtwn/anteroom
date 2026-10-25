@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.366 — 2026-10-25
+
+- Before you press List, Anteroom holds it off when Poshmark does not offer that size, or when the Depop parcel is not one Depop ships.
+- Regenerating a listing saves Poshmark's and Depop's own category on it. Send to Vendoo still uses Vendoo's categories.
+
 ## 0.1.365 — 2026-10-25
 
 - Listing on eBay uses the ZIP saved under Settings → Connections → eBay as the inventory location when eBay does not have one yet.

@@ -79,6 +79,28 @@ class NativeMarketplacesTest(unittest.TestCase):
     def status(self):
         return self.client.get(self.base).json()
 
+    def test_a_poshmark_size_and_a_saved_category_are_settled_before_list(self):
+        preview = {
+            "ok": True,
+            "categories": {"poshmark": "dept/shirts/tees", "depop": "menswear_tshirts"},
+            "gaps": {
+                "poshmark": [{"field": "size", "message": "Poshmark needs a size Poshmark offers in this category.", "blocking": True}],
+                "depop": [{"field": "depop_specifics.parcelSize", "message": 'Depop does not offer "Medium" as a parcel size.', "blocking": True}],
+            },
+            "parcels_checked": True,
+        }
+        with patch("vendoo_studio.services.chrome_catalog.live_preview", new=AsyncMock(return_value=preview)), \
+             patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=AsyncMock(return_value={})):
+            body = self.client.get(f"{self.base}/preflight").json()
+        self.assertFalse(body["marketplaces"]["poshmark"]["ready"])
+        self.assertFalse(body["marketplaces"]["depop"]["ready"])
+        self.db.expire_all()
+        saved = ListingRepo(self.db).get_revision(self.rev.id).listing_json
+        self.assertEqual(saved["direct_category_ids"]["poshmark"], "dept/shirts/tees")
+        self.assertEqual(saved["direct_category_ids"]["depop"], "menswear_tshirts")
+        self.assertEqual(saved["marketplace_category_ids"]["poshmark"], LISTING["marketplace_category_ids"]["poshmark"])
+        self.assertEqual(saved["marketplace_category_ids"]["depop"], LISTING["marketplace_category_ids"]["depop"])
+
     def record(self, platform):
         return MarketplaceListingRepo(self.db).get(self.conv.id, platform)
 
