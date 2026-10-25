@@ -346,10 +346,49 @@ async def _policies(client: EbayClient, kind: str) -> list[dict]:
             if policy.get("marketplaceId") in (None, "EBAY_US") and policy.get(f"{kind}PolicyId")]
 
 
+def _location_enabled(item: dict) -> bool:
+    """eBay enables a new location by default and may omit that status on the list."""
+    if not item.get("merchantLocationKey"):
+        return False
+    status = str(item.get("merchantLocationStatus") or "ENABLED").strip().upper()
+    return status == "ENABLED"
+
+
 async def _locations(client: EbayClient) -> list[dict]:
     body = await client.request("GET", "/sell/inventory/v1/location", params={"limit": "100"})
     return [{"id": str(item["merchantLocationKey"]), "title": str(item.get("name") or item["merchantLocationKey"])[:200]}
-            for item in body.get("locations", []) if item.get("merchantLocationStatus") == "ENABLED" and item.get("merchantLocationKey")]
+            for item in body.get("locations", []) if isinstance(item, dict) and _location_enabled(item)]
+
+
+def _ship_from_postal_code() -> str | None:
+    """The saved inventory location when it is a US ZIP eBay can store."""
+    from vendoo_studio.services.user_settings import get_ebay_inventory_location
+
+    match = re.fullmatch(r"(\d{5})(?:-\d{4})?", get_ebay_inventory_location())
+    return match.group(1) if match else None
+
+
+async def _create_ship_from_location(client: EbayClient) -> dict:
+    """Make the eBay inventory location from the ZIP in Settings → Connections → eBay."""
+    postal = _ship_from_postal_code()
+    if not postal:
+        raise missing(
+            "eBay has no inventory location. Enter a 5-digit ZIP under Settings → Connections → eBay.",
+            "settings.ebay.merchant_location_key",
+        )
+    key = f"zip-{postal}"
+    try:
+        await client.request("POST", f"/sell/inventory/v1/location/{segment(key)}", body={
+            "name": postal,
+            "merchantLocationStatus": "ENABLED",
+            "locationTypes": ["WAREHOUSE"],
+            "location": {"address": {"postalCode": postal, "country": "US"}},
+        })
+    except EbayFailure as exc:
+        # The same ZIP was already created. Listing can use that key.
+        if exc.status != 409:
+            raise
+    return {"id": key, "title": postal}
 
 
 async def listing_profiles(client: EbayClient | None = None) -> dict[str, list[dict]]:
@@ -376,11 +415,17 @@ def _pick(options: list[dict], chosen: str | None, kind: str, setting: str) -> s
 async def listing_choices(client: EbayClient) -> dict[str, str]:
     profiles = await listing_profiles(client)
     defaults = get_ebay_listing_defaults()
-    return {"fulfillmentPolicyId": _pick(profiles["fulfillment"], defaults.get("fulfillment_policy_id"), "shipping policy", "fulfillment_policy_id"),
-            "paymentPolicyId": _pick(profiles["payment"], defaults.get("payment_policy_id"), "payment policy", "payment_policy_id"),
-            "returnPolicyId": _pick(profiles["return"], defaults.get("return_policy_id"), "return policy", "return_policy_id"),
-            "merchantLocationKey": _pick(profiles["locations"], defaults.get("merchant_location_key"),
-                                         "inventory location", "merchant_location_key")}
+    chosen = {
+        "fulfillmentPolicyId": _pick(profiles["fulfillment"], defaults.get("fulfillment_policy_id"), "shipping policy", "fulfillment_policy_id"),
+        "paymentPolicyId": _pick(profiles["payment"], defaults.get("payment_policy_id"), "payment policy", "payment_policy_id"),
+        "returnPolicyId": _pick(profiles["return"], defaults.get("return_policy_id"), "return policy", "return_policy_id"),
+    }
+    locations = profiles["locations"]
+    if not locations:
+        locations = [await _create_ship_from_location(client)]
+    chosen["merchantLocationKey"] = _pick(locations, defaults.get("merchant_location_key"),
+                                          "inventory location", "merchant_location_key")
+    return chosen
 
 
 def best_offer_terms(form: dict, price: str) -> dict:
