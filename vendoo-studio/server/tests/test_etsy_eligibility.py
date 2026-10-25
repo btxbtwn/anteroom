@@ -44,6 +44,10 @@ class EtsyEligibleTest(unittest.TestCase):
         # Vendoo's code, as an import brings it back.
         self.assertFalse(etsy_eligible(listing({"who_made": "someone_else", "when_made": "made_to_order"})))
 
+    def test_non_vintage_wording_is_not_treated_as_vintage(self):
+        self.assertFalse(etsy_eligible(listing({"who_made": "someone_else", "when_made": "non-vintage"})))
+        self.assertFalse(etsy_eligible(listing({"who_made": "someone_else", "when_made": "not vintage"})))
+
     def test_unknown_age_and_maker_is_treated_as_modern_resale(self):
         self.assertFalse(etsy_eligible(listing()))
         self.assertFalse(etsy_eligible({}))
@@ -136,7 +140,7 @@ class EtsyWhenCodeTest(unittest.TestCase):
             "2000 - 2006 (Vintage)": "2000_2006",
             "1900 - 1909 (Vintage)": "1900s",
             "Before 1700 (Vintage)": "before_1700",
-            "Made To Order (Not Yet Made)": "made_to_order",
+            "Made To Order (Not Yet Made)": "2010_2019",
             "2010 - 2019 (Recently)": "2010_2019",
             "2020_2026": "2020_2026",
             "": "2020_2026",

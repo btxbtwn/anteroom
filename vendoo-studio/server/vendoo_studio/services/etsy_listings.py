@@ -16,7 +16,7 @@ import httpx
 
 from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.models.etsy_fields import (
-    etsy_when_options, is_etsy_digital_listing, resolve_etsy_when,
+    etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
 )
 from vendoo_studio.services import marketplace_accounts
 from vendoo_studio.services.keychain import get_marketplace_accounts
@@ -104,7 +104,7 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     details = snapshot.get("etsy_specifics") or {}
     who = {"I did": "i_did", "A member of my shop": "collective", "Another company or person": "someone_else"}.get(details.get("who_made"))
     what = {"A finished product": False, "A supply or tool to make things": True}.get(details.get("what_is"))
-    when = resolve_etsy_when(str(details.get("when_made") or ""), etsy_when_options())
+    when = etsy_when_to_store(str(details.get("when_made") or ""), snapshot, etsy_when_options())
     label = re.sub(r"\s*\([^)]*\)\s*$", "", when).strip()
     when = {"Made To Order": "made_to_order", "2020 - 2026": "2020_2026", "2010 - 2019": "2010_2019",
             "2007 - 2009": "2007_2009", "2000 - 2006": "2000_2006", "Before 2007": "before_2007",

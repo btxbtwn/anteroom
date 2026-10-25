@@ -997,13 +997,17 @@
 
       const value = String(rawValue).trim();
       const normalizedValue = normalizeText(value);
+          // "non-vintage" contains "vintage", but it is the opposite of a vintage decade.
+          if (/\b(?:non|not)\s+vintage\b|\bnonvintage\b/.test(normalizedValue)) {
+              return '2010 - 2019 (Recently)';
+          }
           const unknownTokens = ['unknown', 'does not apply', 'n/a', 'not sure', 'not shown'];
           if (unknownTokens.some((token) => normalizedValue === token || normalizedValue.includes(token))) {
-              return '';
+              return '2010 - 2019 (Recently)';
           }
           const explicitMappings = [
-          ['made to order', 'Made To Order (Not Yet Made)'],
-          ['not yet made', 'Made To Order (Not Yet Made)'],
+          ['made to order', '2010 - 2019 (Recently)'],
+          ['not yet made', '2010 - 2019 (Recently)'],
           ['2020 - 2026', '2020 - 2026 (Recently)'],
           ['2020s', '2020 - 2026 (Recently)'],
           ['2010 - 2019', '2010 - 2019 (Recently)'],
@@ -5714,7 +5718,7 @@
               ['quantity', ['#listings\\.etsy\\.overrides\\.quantity'], ['Quantity'], data?.quantity],
               ['whoMade', ['#listings\\.etsy\\.marketplaceSpecifics\\.whoMade'], ['Who made it', 'Who made'], data?.etsy_specifics?.who_made || data?.etsy_specifics?.whoMade],
               ['whatIsIt', ['#listings\\.etsy\\.marketplaceSpecifics\\.whatIsIt'], ['What Is It', 'What is it'], data?.etsy_specifics?.what_is || data?.etsy_specifics?.whatIsIt],
-              ['whenMade', ['#listings\\.etsy\\.marketplaceSpecifics\\.whenMade'], ['When Was It Made', 'When Made'], data?.etsy_specifics?.when_made || data?.etsy_specifics?.whenMade],
+              ['whenMade', ['#listings\\.etsy\\.marketplaceSpecifics\\.whenMade'], ['When Was It Made', 'When Made'], normalizeEtsyWhenMade(data?.etsy_specifics?.when_made || data?.etsy_specifics?.whenMade)],
               ['listingType', ['#listings\\.etsy\\.marketplaceSpecifics\\.listingType'], ['Listing Type'], data?.etsy_specifics?.listing_type || data?.etsy_specifics?.listingType],
               ['renewalOption', ['#listings\\.etsy\\.marketplaceSpecifics\\.renewalOption'], ['Renewal options', 'Renewal Option'], data?.etsy_specifics?.renewal_option || data?.etsy_specifics?.renewalOption],
               ['listingState', ['#listings\\.etsy\\.marketplaceSpecifics\\.listingState'], ['Listing State'],

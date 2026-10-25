@@ -873,6 +873,30 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(result.can_send, result.errors)
         self.assertFalse(any(err["field"].startswith("ebay_specifics.unitQuantity") for err in result.errors))
 
+    def test_non_vintage_when_made_selects_a_year_range(self):
+        listing = dict(VALID_LISTING)
+        listing["etsy_specifics"] = {
+            "who_made": "I did",
+            "what_is": "A finished product",
+            "when_made": "Made To Order (Not Yet Made)",
+        }
+        result = validate_listing(listing, 5, selected_marketplaces=["etsy"])
+        self.assertEqual(listing["etsy_specifics"]["when_made"], "2010 - 2019 (Recently)")
+        self.assertTrue(result.can_send, result.errors)
+
+        listing["etsy_specifics"]["when_made"] = "non-vintage"
+        validate_listing(listing, 5, selected_marketplaces=["etsy"])
+        self.assertEqual(listing["etsy_specifics"]["when_made"], "2010 - 2019 (Recently)")
+
+        listing["etsy_specifics"]["when_made"] = "1990s"
+        validate_listing(listing, 5, selected_marketplaces=["etsy"])
+        self.assertEqual(listing["etsy_specifics"]["when_made"], "1990s (Vintage)")
+
+        listing["etsy_specifics"]["when_made"] = "Made To Order"
+        listing["ebay_specifics"] = {**listing["ebay_specifics"], "yearManufactured": "1994"}
+        validate_listing(listing, 5, selected_marketplaces=["etsy"])
+        self.assertEqual(listing["etsy_specifics"]["when_made"], "1990s (Vintage)")
+
     def test_etsy_when_made_falls_back_to_ebay_year(self):
         listing = dict(VALID_LISTING)
         listing["ebay_specifics"] = {
