@@ -46,10 +46,13 @@ async function recoverNativeMarketplace(context) {
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
   if (!['poshmark', 'mercari', 'depop', 'sellwild'].includes(p.marketplace)
-      || !({ sellwild: ['publish'], poshmark: ['list'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action)) {
+      || !({ sellwild: ['publish'], poshmark: ['list', 'update'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action)) {
     return { ok: false, safe_to_retry: true, error: 'Unsupported marketplace action.' };
   }
   if (p.action === 'list' && p.confirm !== true) return { ok: false, safe_to_retry: true, error: 'Confirm listing on this marketplace.' };
+  if (p.action === 'update' && (p.confirm !== true || !/^[a-f0-9]{24}$/.test(String(p.listing_id || '')))) {
+    return { ok: false, safe_to_retry: true, error: 'Confirm updating the live Poshmark listing.' };
+  }
   if (p.action === 'publish' && (p.confirm !== true || (p.marketplace !== 'sellwild' && !nativeDraftUrl(p.marketplace, p.draft_url)))) {
     return { ok: false, safe_to_retry: true, error: 'Confirm publishing an existing native draft.' };
   }
@@ -99,7 +102,7 @@ async function handleNativeMarketplaceMessage(msg) {
   activeNativeOperation = { id: operationId, tabId: null, cancelled: false };
   try {
     const context = { marketplace: msg.payload.marketplace, action: msg.payload.action, draft_url: msg.payload.draft_url,
-      local_draft_id: msg.payload.local_draft_id, revision_id: msg.payload.revision_id,
+      listing_id: msg.payload.listing_id, local_draft_id: msg.payload.local_draft_id, revision_id: msg.payload.revision_id,
       operation_id: operationId };
     await chrome.storage.local.set({ [key]: { finished: false, context } });
     const result = await runNativeMarketplace(msg);

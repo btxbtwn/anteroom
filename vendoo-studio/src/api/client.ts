@@ -432,6 +432,10 @@ export const api = {
         method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true,
           ...(sellwild ? { sellwild_category_id: sellwild.categoryId, sellwild_condition_id: sellwild.conditionId } : {}) }),
       }),
+    update: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
+      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/update`, {
+        method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true }),
+      }),
     publish: (convId: string, marketplace: NativeMarketplace, revisionId: string, draftUrl?: string) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/publish`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId, draft_url: draftUrl, confirm: true }),
