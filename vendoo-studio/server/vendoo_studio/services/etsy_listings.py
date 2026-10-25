@@ -261,7 +261,30 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
         found.append(gap("title", f"{reason}, so Etsy gets: {fields['title']}", blocking=False))
     if seeded_leaf(context.db, "etsy", fields["taxonomy_id"]) is False:
         found.append(gap("marketplace_category_ids.etsy", "That Etsy category has subcategories. Choose the most specific one."))
+    found.extend(_cached_property_gaps(snapshot))
     return found
+
+
+def _cached_property_gaps(snapshot: dict) -> list[dict]:
+    """Required Etsy category properties from the cached live schema. No cache means List still checks them."""
+    from vendoo_studio.services.category_fields import load_rows
+    from vendoo_studio.services.direct_categories import direct_category_id
+    from vendoo_studio.services.marketplace_schemas import ETSY_PROPERTIES
+
+    category = direct_category_id(snapshot, "etsy") or str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
+    if not re.fullmatch(r"[1-9]\d*", category):
+        return []
+    try:
+        rows = load_rows(ETSY_PROPERTIES, category)
+    except Exception:  # noqa: BLE001 - a closed database only means the live check at List remains
+        return []
+    if not rows:
+        return []
+    try:
+        property_values(snapshot, rows)
+    except ListingProblem as exc:
+        return [gap(item["field"], item["message"]) for item in exc.fields or []]
+    return []
 
 
 # --- category properties ----------------------------------------------------------

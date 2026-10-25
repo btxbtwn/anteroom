@@ -307,6 +307,15 @@ test('a full Mercari clothing listing sends its category, size, brand, label, pa
   assert.match(asked[0], /\/api\/rest\/v1\/brand\/mercari\?search=Nike&matchValue=true$/);
 });
 
+test('a stored Mercari category is the one that is listed, and the Vendoo id stays put', () => {
+  const { c } = worker();
+  const listing = clothing();
+  listing.direct_category_ids = { mercari: '2001' };
+  listing.marketplace_category_ids = { mercari: '1934' };
+  assert.deepEqual(JSON.parse(JSON.stringify(c.mercariCategory(listing))), { id: 2001, parent: false });
+  assert.equal(listing.marketplace_category_ids.mercari, '1934');
+});
+
 test('Mercari sizes come from the category and never cross a fit the listing names', () => {
   const { c } = worker();
   const size = (listing, sizes = BOYS_SIZES) => JSON.parse(JSON.stringify(c.mercariSize({ ...listing, form: { aspects: {}, sizes } }, 1934)));

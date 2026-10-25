@@ -51,8 +51,11 @@ const MERCARI_SHIPPING_PAYER = { SELLER: 2, BUYER: 1 };
 // Mercari's prepaid labels stop at 50 lb.
 const MERCARI_MAX_LABEL_OZ = 800;
 
-// The leaf Studio resolved for the listing's Mercari breadcrumb.
+// The leaf a direct list sends. A stored Mercari category id wins. Otherwise
+// the id is the one Vendoo has, and a parent of that tree is still too broad.
 function mercariCategory(listing) {
+  const direct = String(listing.direct_category_ids?.mercari ?? '');
+  if (/^\d{1,6}$/.test(direct)) return { id: Number(direct), parent: false };
   const resolved = listing.form?.overrides?.categoryV2;
   const id = resolved?.id ?? listing.marketplace_category_ids?.mercari ?? listing.mercari_specifics?.categoryId;
   if (!/^\d{1,6}$/.test(String(id ?? ''))) return null;

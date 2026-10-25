@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.364 — 2026-10-25
+
+- Sellwild lists Pre-Owned Excellent as Like New and Pre-Owned Good as Good.
+- A direct list uses Poshmark's or Depop's own category when Vendoo's id is out of date. Send to Vendoo still uses Vendoo's categories.
+- Before you press List, Anteroom says when Poshmark will round the price, list one item, or leave a color off. It holds List off for a missing Depop parcel, a Mercari category that still has subcategories, and a required eBay or Etsy field it already knows.
+
 ## 0.1.363 — 2026-10-25
 
 - Set eBay's inventory location under Settings → Connections → eBay. Edit inventory location opens that setting, and Anteroom writes the ZIP or place on the general form and on eBay.

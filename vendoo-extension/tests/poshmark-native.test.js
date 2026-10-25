@@ -323,6 +323,21 @@ test('Vendoo\'s coded Poshmark size wins over the size text', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(c.poshmarkSize(kids, custom, { kids: true }).size)), { id: 'Fits 10-12', display: 'Fits 10-12' });
 });
 
+test('a direct Poshmark category is used, and a stale id falls back to the live names', () => {
+  const { c } = setup();
+  const liveId = 'a'.repeat(24);
+  const stale = 'b'.repeat(24);
+  const catalog = { catalog: { departments: [{ id: DEPT, display: 'Men', categories: [{ id: SHIRTS, display: 'Shirts',
+    category_features: [{ id: liveId, display: 'Tees - Short Sleeve' }] }] }] } };
+  const stored = { direct_category_ids: { poshmark: `${DEPT}/${SHIRTS}/${liveId}` },
+    marketplace_category_objects: { poshmark: { path: [DEPT, SHIRTS, stale] } } };
+  assert.equal(c.poshmarkCategory(catalog, stored).leaf, liveId);
+  assert.deepEqual(stored.marketplace_category_objects.poshmark.path, [DEPT, SHIRTS, stale]);
+  const named = { marketplace_category_objects: { poshmark: { path: [stale, stale, stale],
+    displayPath: ['Men', 'Shirts', 'Tees - Short Sleeve'] } } };
+  assert.equal(c.poshmarkCategory(catalog, named).leaf, liveId);
+});
+
 test('a Global & Traditional Wear leaf skips the grouping id', () => {
   const { c } = setup();
   const catalog = { catalog: { departments: [{ id: DEPT, display: 'Men', categories: [{ id: 'k'.repeat(24), display: 'Kurtas', size_sets: [] }] }] } };

@@ -28,7 +28,7 @@ from vendoo_studio.services.listing_result import failure
 
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild"}
 RULE_MODULES = ("vendoo_studio.services.ebay_listings", "vendoo_studio.services.etsy_listings",
-                "vendoo_studio.services.sellwild_listing")
+                "vendoo_studio.services.sellwild_listing", "vendoo_studio.services.chrome_listing")
 
 
 @dataclass
