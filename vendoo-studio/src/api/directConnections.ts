@@ -28,6 +28,8 @@ export interface SaleDetectionStatus {
   ok: boolean;
   enabled: Record<string, boolean>;
   checks: Record<string, string>;
+  /** When a sale is recorded, delist the other marketplaces. Off unless the seller turns it on. */
+  autodelist: boolean;
 }
 
 /** A sale a marketplace reported, waiting for the seller. */
