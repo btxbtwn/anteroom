@@ -38,6 +38,8 @@ Expand **Marketplace drafts** in a listing to send directly to Poshmark, Mercari
 
 After an interrupted response, use **Check result** or paste the saved draft link. Checking only reads the saved result. Save a changed Anteroom revision again before publishing it.
 
+**Delist** lives in **Live listings** on each listing. It lists every marketplace listing Anteroom knows for the item, including Vendoo's links, and removes the ones you pick after a confirmation: deleted on Etsy (official API), Poshmark, Mercari and Depop, ended on eBay (Trading API `EndFixedPriceItem`; eBay has no delete), and delisted on Sellwild (its only seller removal). Each step reads the listing first, so a listing already gone counts as delisted and a delist is safe to repeat. The marketplace where the item sold is never touched, and nothing delists on its own.
+
 Sellwild has no drafts, so Sellwild drafts stay in Anteroom. Choose a Sellwild category and condition (Anteroom suggests both from the listing), then **Save in Anteroom**. This works without Chrome and sends nothing to Sellwild. **Publish…** requires a separate confirmation. It then creates the listing once from the Bridge with your Sellwild session, without opening a tab: it uploads the photos and activates the listing, the same three steps Sellwild's own sell page takes. Publishing needs a package weight and `package_dimensions_in`, and a ship-from address saved on Sellwild. If Sellwild holds the listing for moderation, Anteroom shows **In review**. If a reply is lost after the listing was created, Anteroom shows its Sellwild ID and never creates it again.
 
 ## Inside Anteroom

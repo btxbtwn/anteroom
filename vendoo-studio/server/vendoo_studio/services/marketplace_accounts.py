@@ -227,7 +227,8 @@ async def etsy_api(method: str, path: str, **kwargs: Any):
     if resp.status_code == 401:
         raise SignInRequired("Sign in to Etsy again.")
     resp.raise_for_status()
-    return resp.json()
+    # Deletes answer 204 with no body.
+    return resp.json() if resp.content else {}
 
 
 async def read_etsy_receipt(shop_id: str, receipt_id: str) -> dict:

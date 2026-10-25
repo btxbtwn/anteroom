@@ -59,6 +59,7 @@ import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
+import type { DelistMarketplace, MarketplaceListings } from "./marketplaceListings";
 import type { EtsyDraftOptions, NativeDraft, NativeDrafts, NativeMarketplace, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -409,6 +410,13 @@ export const api = {
       request<OkResponse>(`/marketplace-accounts/${marketplace}/connect`, { method: "DELETE" }),
     disconnect: (marketplace: DirectMarketplace) =>
       request<OkResponse>(`/marketplace-accounts/${marketplace}`, { method: "DELETE" }),
+  },
+  marketplaceListings: {
+    get: (convId: string) => request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings`),
+    delist: (convId: string, marketplaces: DelistMarketplace[]) =>
+      request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/delist`, {
+        method: "POST", body: JSON.stringify({ marketplaces, confirm: true }),
+      }),
   },
   nativeMarketplaces: {
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
