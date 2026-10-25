@@ -1,8 +1,19 @@
 // Depop content script
 // Fills the Depop listing form (draft only)
 
+// Depop has no title. Buyers only see the description.
+function depopDescription(data) {
+  return String((data && data.description) || '').trim();
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { depopDescription };
+}
+
 (function() {
   'use strict';
+
+  if (typeof document === 'undefined') return;
 
   const PLATFORM = 'depop';
   
@@ -239,10 +250,7 @@
     try {
       await new Promise(r => setTimeout(r, 2000));
 
-      // Depop uses description as primary text (no separate title)
-      // Combine title and description
-      const fullDesc = data.title + (data.description ? '\n\n' + data.description : '');
-      fillField(SELECTORS.description, fullDesc);
+      fillField(SELECTORS.description, depopDescription(data));
 
       // Price
       fillField(SELECTORS.price, data.price?.toString());

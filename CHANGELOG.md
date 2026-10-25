@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.374 — 2026-10-25
+
+- Depop listings use the description only. The title is no longer repeated at the top.
+
 ## 0.1.373 — 2026-10-25
 
 - Turn off Send to Vendoo in Settings → Listings → Vendoo to hide the button under every listing when you list without Vendoo.
