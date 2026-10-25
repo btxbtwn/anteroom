@@ -908,6 +908,7 @@ class UiPrefsConfig(BaseModel):
     restore_labels: list[str] | None = None
     forget_label: str | None = None
     model_favorites: list[dict] | None = None
+    vendoo_enabled: bool | None = None
 
 
 @router.get("/ui")
@@ -932,6 +933,7 @@ def put_ui_prefs(config: UiPrefsConfig):
             theme=config.theme,
             listing_names=config.listing_names,
             model_favorites=config.model_favorites,
+            vendoo_enabled=config.vendoo_enabled,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

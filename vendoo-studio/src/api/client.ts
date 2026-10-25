@@ -993,6 +993,7 @@ export const api = {
         theme: "dark" | "light" | "system";
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
+        vendoo_enabled: boolean;
       }>("/settings/ui"),
     setUi: (body: {
       recent_vendoo_labels?: string[];
@@ -1003,6 +1004,7 @@ export const api = {
       restore_labels?: string[];
       forget_label?: string;
       model_favorites?: ModelFavorite[];
+      vendoo_enabled?: boolean;
     }) =>
       request<{
         ok: boolean;
@@ -1012,6 +1014,7 @@ export const api = {
         theme: "dark" | "light" | "system";
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
+        vendoo_enabled: boolean;
       }>("/settings/ui", { method: "PUT", body: JSON.stringify(body) }),
     formulas: () =>
       request<{

@@ -30,6 +30,34 @@ function orderedSelection(
   return available.map((item) => item.id).filter((id) => chosen.has(id));
 }
 
+function VendooSection() {
+  const queryClient = useQueryClient();
+  const { data, isPending } = useQuery({
+    queryKey: ["settings-ui"],
+    queryFn: api.settings.ui,
+  });
+  const mutation = useMutation({
+    mutationFn: (enabled: boolean) => api.settings.setUi({ vendoo_enabled: enabled }),
+    onSuccess: (payload) => queryClient.setQueryData(["settings-ui"], payload),
+  });
+  return (
+    <SettingsSection id="vendoo" title="Vendoo">
+      <SettingsRow
+        title="Send to Vendoo"
+        description="Shows the Send to Vendoo button under each listing. Turn off to list without Vendoo."
+        control={
+          <Switch
+            checked={data?.vendoo_enabled ?? true}
+            disabled={isPending || mutation.isPending}
+            aria-label="Send to Vendoo"
+            onCheckedChange={(checked) => mutation.mutate(checked)}
+          />
+        }
+      />
+    </SettingsSection>
+  );
+}
+
 function MarketplacesSection() {
   const queryClient = useQueryClient();
   const { data, isPending, isError, error } = useQuery({
@@ -408,6 +436,7 @@ function ListingFormulasSection() {
 export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   return (
     <>
+      <VendooSection />
       <MarketplacesSection />
       <PackageDimensionsSection />
       <HiddenFieldsSection />
