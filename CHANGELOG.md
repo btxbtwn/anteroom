@@ -7,6 +7,10 @@ file: Settings → General → About → What's new.
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 
+## 0.1.336 — 2026-10-24
+
+- A listing now opens like Vendoo: the marketplaces run down the left, and the form for the one you select is on the right. **General** is the photos and the shared fields. Each marketplace keeps its status, and List, Publish, Delist and Mark as listed sit with that marketplace's form. The Input and Forms tabs are gone. The listing panel starts wider so the form has room beside the list, and you can drag it wider.
+
 ## 0.1.335 — 2026-10-24
 
 - Each marketplace in the **Marketplaces** section now has its own **⋯** menu: List or Publish, Delist, and Mark as listed, sold or not listed. Marking changes only what Anteroom records, never the marketplace, so you can fix a listing Anteroom got wrong. Mark as listed asks for the listing link; Anteroom then treats that listing as live there, can delist it, and matches eBay and Etsy sales to it. The delist checkboxes are gone; Delist everywhere stays when more than one listing is live.
