@@ -95,6 +95,36 @@ def _notes_dict(notes: dict, key: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _current_listing(marketplace: str, anteroom_url, vendoo_url, mark: dict) -> tuple[str | None, str | None]:
+    """The listing link that names this marketplace's listing now, and who reported it."""
+    candidates = [(anteroom_url, "anteroom"), (vendoo_url, "vendoo")]
+    if mark.get("state") == "listed":
+        candidates.insert(0, (mark.get("url"), "seller"))
+    return next(((url, source) for url, source in candidates if listing_id(marketplace, url)), (None, None))
+
+
+def removed_marketplaces(notes: dict, anteroom_urls: dict[str, str]) -> list[str]:
+    """Marketplaces where Anteroom deleted the listing, or the seller marked it not listed.
+
+    Vendoo is never told about a direct delist, so its record keeps calling the
+    item listed there. A newer listing than the one removed counts as live again.
+    """
+    urls = _notes_dict(notes, "vendooListingUrls")
+    delists = _notes_dict(notes, "marketplaceDelists")
+    marks = _notes_dict(notes, "marketplaceMarks")
+    removed = []
+    for marketplace in MARKETPLACES:
+        mark = marks.get(marketplace) if isinstance(marks.get(marketplace), dict) else {}
+        record = delists.get(marketplace) if isinstance(delists.get(marketplace), dict) else {}
+        url, _source = _current_listing(marketplace, anteroom_urls.get(marketplace), urls.get(marketplace), mark)
+        item_id = listing_id(marketplace, url)
+        if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):
+            removed.append(marketplace)
+        elif record.get("state") == "deleted" and (not item_id or item_id == record.get("listing_id")):
+            removed.append(marketplace)
+    return removed
+
+
 def listings(db: Session, conv_id: str) -> dict:
     """Each marketplace listing Anteroom knows for this item, and what Delist would do."""
     conv = ConversationRepo(db).get(conv_id)
@@ -110,10 +140,7 @@ def listings(db: Session, conv_id: str) -> dict:
     for marketplace in MARKETPLACES:
         binding = native.get(marketplace) if isinstance(native.get(marketplace), dict) else {}
         mark = marks.get(marketplace) if isinstance(marks.get(marketplace), dict) else {}
-        candidates = [(binding.get("listing_url"), "anteroom"), (urls.get(marketplace), "vendoo")]
-        if mark.get("state") == "listed":
-            candidates.insert(0, (mark.get("url"), "seller"))
-        url, source = next(((u, s) for u, s in candidates if listing_id(marketplace, u)), (None, None))
+        url, source = _current_listing(marketplace, binding.get("listing_url"), urls.get(marketplace), mark)
         item_id = listing_id(marketplace, url)
         if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):
             continue
