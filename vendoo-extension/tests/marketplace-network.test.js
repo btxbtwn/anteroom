@@ -31,6 +31,7 @@ test('Depop request context is limited to this extension and the supported API p
   assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/users/me/settings/shipping/'));
   assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/shipping/providers/depop/?ids=USPS'));
   assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/attributes/'));
+  assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/attributes/categories/size-mapping/'));
   assert.equal(receiptsTarget.test('https://webapi.depop.com/api/payments/'), false);
 });
 

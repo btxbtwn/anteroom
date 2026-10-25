@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { loadWorker, call, reply } = require('./worker-context');
 const DRAFT = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
 const listing = { title: 'Test', description: 'Private draft', price: 12 };
-// Depop's taxonomy in the shape its taxonomy guide documents (api/v3/attributes).
+// Depop's taxonomy, as the listing site splits it: attributes, then size sets.
 const ATTRIBUTES = {
   department: [{ id: 'menswear' }, { id: 'womenswear' }, { id: 'kidswear' }, { id: 'everything-else' }],
   group: [{ id: 'tops', department: ['menswear', 'womenswear', 'kidswear'], product_types: [
@@ -36,7 +36,20 @@ function withCatalog(c, { attributes = [200, ATTRIBUTES], addresses = [200, [{ i
   const reads = [];
   c.fetch = async (url, options = {}) => {
     const { hostname, pathname } = new URL(url);
-    if (hostname === 'api.depop.com' && pathname === '/api/v3/attributes/') { reads.push('attributes'); return reply(...attributes); }
+    if (hostname === 'api.depop.com') throw new Error(`Depop partner host must not be called: ${url}`);
+    if (hostname === 'webapi.depop.com' && pathname === '/presentation/api/v1/attributes/') {
+      reads.push('attributes');
+      const [status, body] = attributes;
+      if (status !== 200 || !body || typeof body !== 'object') return reply(status, body);
+      const { category_size_mapping, size_sets, ...rest } = body;
+      return reply(200, rest);
+    }
+    if (hostname === 'webapi.depop.com' && pathname === '/presentation/api/v1/attributes/categories/size-mapping/') {
+      reads.push('sizes');
+      const [status, body] = attributes;
+      if (status !== 200 || !body || typeof body !== 'object') return reply(status, body);
+      return reply(200, { category_size_mapping: body.category_size_mapping, size_sets: body.size_sets });
+    }
     if (pathname === '/api/v1/addresses/') { reads.push('addresses'); return reply(...addresses); }
     if (pathname === '/api/v1/shipping-providers/') { reads.push('providers'); return reply(...providers); }
     return original(url, options);
