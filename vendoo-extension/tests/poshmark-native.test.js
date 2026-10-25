@@ -229,7 +229,7 @@ test('Poshmark requests from this extension carry its own Origin and Referer', a
   const updates = [];
   c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
   await c.ensureMarketplaceRequestContext();
-  const rule = updates[0].addRules.find(value => value.id === 17004);
+  const rule = updates[0].addRules.find(value => value.id === 17005);
   assert.deepEqual([...rule.condition.initiatorDomains], ['test-extension-id']);
   const target = new RegExp(rule.condition.regexFilter);
   for (const url of ['https://poshmark.com/vm-rest/posts/x', 'https://poshmark.com/api/posts/x/media/scratch', 'https://poshmark.com/create-listing']) assert.ok(target.test(url), url);

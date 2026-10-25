@@ -6,11 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.343 — 2026-10-25
+## 0.1.346 — 2026-10-25
 
 - Listing directly on Poshmark, Mercari, Depop and Sellwild is sturdier: a slow or busy marketplace is asked again only when nothing could be listed twice, a stopped Poshmark listing cleans up its unlisted post, and Mercari no longer needs a reconnect when its sign-in refreshes.
 - When a marketplace refuses, Anteroom says why in plain words and shows the marketplace's own message: signed out, a bot check, too many requests, or the exact fields it still needs (such as Depop's brand or parcel size).
 - Depop descriptions are kept within Depop's 1,000-character limit.
+## 0.1.345 — 2026-10-24
+
+- Listing fields are grouped into sections — Pricing, Condition, Item, Size & fit, Color & material, Shipping, Inventory and More details — each showing how many are filled. Required fields come first.
+
+## 0.1.344 — 2026-10-24
+
+- Settings → Connections opens on Marketplaces. Each marketplace has Detect sales. Turn it off to stop new sale notices there. Nothing is taken down until you choose.
+
+## 0.1.343 — 2026-10-24
+
+- Delist everywhere ends the eBay listing. Mercari and Depop stay marked delisted when those sites have already taken the item down.
 
 ## 0.1.342 — 2026-10-24
 

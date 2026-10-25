@@ -324,7 +324,7 @@ export function App() {
   const openChromeSignIn = () => {
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
     setSettingsSection("connections");
-    setSettingsTargetId("chrome-sign-in");
+    setSettingsTargetId("marketplaces");
     setActiveView("settings");
     setMobilePane("workspace");
     setMobileSidebarOpen(false);

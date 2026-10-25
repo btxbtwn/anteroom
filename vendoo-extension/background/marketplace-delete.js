@@ -32,8 +32,10 @@ async function deleteMercari(id, deadline) {
   const data = await mercariRequest({ operationName: 'UpdateItemStatusMutation', variables: { input: { id, status: 'cancel' } },
     extensions: { persistedQuery: { version: 1, sha256Hash: '55bd4e7d2bc2936638e1451da3231e484993635d7603431d1a2978e3d59656f8' } } },
   { deadline, operationName: 'UpdateItemStatusMutation' });
+  // cancel / admin_cancel is the item status once it is gone. A delete that
+  // just succeeded answers status OK instead of repeating the item status.
   const status = String(data.updateItemStatus?.status || '');
-  if (!['cancel', 'admin_cancel'].includes(status)) {
+  if (!['cancel', 'admin_cancel'].includes(status) && status.toUpperCase() !== 'OK') {
     throw marketplaceError('Mercari did not confirm the delete.', { marketplace_message: status ? `status ${status}` : '' });
   }
   return { ok: true, state: 'deleted' };
@@ -59,11 +61,17 @@ async function deleteDepop(slug, deadline) {
   const id = String(product.id || '');
   if (!/^\d{1,15}$/.test(id)) throw marketplaceError('Depop did not return this listing\'s ID.', { code: 'schema_drift' });
   await call('DELETE', `/presentation/api/v1/products/${id}/`, 'delete');
-  const after = await call('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, 'read-back');
-  if (after && !String(after.status || '').toUpperCase().includes('DELETED')) {
-    throw marketplaceError('Depop has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false });
+  // Depop's read lags the delete: the slug can still look on sale for a moment.
+  const removed = product => !product || String(product.status || '').toUpperCase().includes('DELETED');
+  let after = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    after = await call('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, 'read-back');
+    if (removed(after)) return { ok: true, state: 'deleted' };
+    if (attempt < 2) await marketplaceSleep(700);
   }
-  return { ok: true, state: 'deleted' };
+  const left = String(after?.status || '').toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 40);
+  throw marketplaceError('Depop has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false,
+    marketplace_message: left ? `status ${left}` : '' });
 }
 
 async function deleteSellwild(id, deadline) {

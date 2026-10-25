@@ -55,7 +55,8 @@ import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
-import { FieldLabel, NativeSelect } from "./ListingFormControls";
+import { FieldLabel, InspectorSection, NativeSelect } from "./ListingFormControls";
+import { groupFieldsIntoSections } from "./listingFieldSections";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
@@ -586,57 +587,69 @@ function StructuredEditor({
     onChange(updated);
   };
 
-  const generalFields = fields.filter((f) => ["title", "description", "category_path"].includes(f.key));
-  const gridFields = fields.filter((f) => !["title", "description", "category_path"].includes(f.key));
+  const sections = groupFieldsIntoSections(fields);
+  const control = (f: EditorField) => {
+    const id = `listing-field-${f.key}`;
+    if (f.key === "description") {
+      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={local[f.key] || ""} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />;
+    }
+    if (f.options?.length) {
+      return (
+        <NativeSelect
+          id={id}
+          data-listing-field={f.key}
+          value={local[f.key] || ""}
+          onChange={(e) => commitField(f.key, e.target.value)}
+        >
+          <option value="">—</option>
+          {local[f.key]
+            && !f.options.some((option) => option === local[f.key]) ? (
+            <option value={local[f.key]}>{local[f.key]} (current)</option>
+          ) : null}
+          {f.options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </NativeSelect>
+      );
+    }
+    return (
+      <Input
+        nativeInput
+        id={id}
+        data-listing-field={f.key}
+        type={f.type || "text"}
+        readOnly={f.locked}
+        value={local[f.key] || ""}
+        onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }}
+        onBlur={() => handleBlur(f.key)}
+      />
+    );
+  };
+  // Long text and the category path need the full row.
+  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category";
 
   return (
-    <div ref={formRef} className="flex flex-col gap-3">
-      {generalFields.map((f) => (
-        <div key={f.key} className="min-w-0">
-          <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
-          {f.key === "description" ? (
-            <Textarea id={`listing-field-${f.key}`} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={local[f.key] || ""} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />
-          ) : (
-            <Input nativeInput id={`listing-field-${f.key}`} data-listing-field={f.key} type={f.type || "text"} value={local[f.key] || ""} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />
-          )}
-        </div>
-      ))}
-
-      <div className="grid min-w-0 grid-cols-2 gap-3 max-[900px]:grid-cols-1">
-        {gridFields.map((f) => (
-          <div key={f.key} className={cn("min-w-0", f.label === "Category" && "col-span-full")}>
-            <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
-            {f.options?.length ? (
-              <NativeSelect
-                id={`listing-field-${f.key}`}
-                data-listing-field={f.key}
-                value={local[f.key] || ""}
-                onChange={(e) => commitField(f.key, e.target.value)}
-              >
-                <option value="">—</option>
-                {local[f.key]
-                  && !f.options.some((option) => option === local[f.key]) ? (
-                  <option value={local[f.key]}>{local[f.key]} (current)</option>
-                ) : null}
-                {f.options.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </NativeSelect>
-            ) : (
-              <Input
-                nativeInput
-                id={`listing-field-${f.key}`}
-                data-listing-field={f.key}
-                type={f.type || "text"}
-                readOnly={f.locked}
-                value={local[f.key] || ""}
-                onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }}
-                onBlur={() => handleBlur(f.key)}
-              />
-            )}
-          </div>
-        ))}
-      </div>
+    <div ref={formRef} className="flex flex-col">
+      {sections.map((section) => {
+        const filled = section.fields.filter((f) => (local[f.key] || "").trim() !== "").length;
+        return (
+          <InspectorSection
+            key={section.id}
+            title={section.title}
+            titleId={`listing-section-${tab}-${section.id}`}
+            meta={section.id === "listing" ? null : `${filled} of ${section.fields.length} filled`}
+          >
+            <div className="grid min-w-0 grid-cols-2 gap-3 max-[900px]:grid-cols-1">
+              {section.fields.map((f) => (
+                <div key={f.key} className={cn("min-w-0", fullWidth(f) && "col-span-full")}>
+                  <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
+                  {control(f)}
+                </div>
+              ))}
+            </div>
+          </InspectorSection>
+        );
+      })}
     </div>
   );
 }

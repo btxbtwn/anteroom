@@ -9,6 +9,7 @@ const jwt = `x.${Buffer.from(JSON.stringify({ user_id: USER })).toString('base64
 function worker(routes) {
   const c = loadWorker();
   c.AbortSignal = AbortSignal;
+  c.setTimeout = (fn) => { fn(); return 0; };
   c.chrome.cookies = { get: async ({ name }) => ({ jwt: { value: jwt }, access_token: { value: 'private-token' } })[name] };
   c.chrome.declarativeNetRequest = { updateSessionRules: async () => {} };
   c.atob = atob;
@@ -60,6 +61,8 @@ test('Mercari delete sends its own Delete status and checks the reply', async ()
   const { c } = worker({ 'POST www.mercari.com/v1/api': (n, options) => { bodies.push(JSON.parse(options.body)); return [200, { data: { updateItemStatus: { status: 'cancel' } } }]; } });
   assert.equal((await c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true })).state, 'deleted');
   assert.deepEqual(bodies[0].variables, { input: { id: 'm70565754838', status: 'cancel' } });
+  const ok = worker({ 'POST www.mercari.com/v1/api': [200, { data: { updateItemStatus: { status: 'OK' } } }] });
+  assert.equal((await ok.c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true })).state, 'deleted');
   const other = worker({ 'POST www.mercari.com/v1/api': [200, { data: { updateItemStatus: { status: 'trading' } } }] });
   const refused = await other.c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true });
   assert.equal(refused.ok, false);
@@ -91,6 +94,12 @@ test('Depop delete resolves the slug, refuses sold items, and confirms', async (
   const sold = worker({ [`GET ${slug}`]: [200, { id: 123456789, status: 'PURCHASED' }] });
   assert.equal((await sold.c.runMarketplaceDelete({ marketplace: 'depop', listing_id: 'shop-tee-136d', confirm: true })).ok, false);
   assert.ok(!sold.requests.some(r => r.startsWith('DELETE')));
+  const lagging = worker({
+    [`GET ${slug}`]: n => [n < 3 ? 200 : 404, { id: 123456789, status: 'ONSALE' }],
+    'DELETE webapi.depop.com/presentation/api/v1/products/123456789/': [204, {}],
+  });
+  assert.equal((await lagging.c.runMarketplaceDelete({ marketplace: 'depop', listing_id: 'shop-tee-136d', confirm: true })).state, 'deleted');
+  assert.equal(lagging.requests.filter(request => request.startsWith('GET')).length, 3);
 });
 
 test('Sellwild delists through its own seller action and explains skips', async () => {

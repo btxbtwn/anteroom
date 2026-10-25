@@ -18,6 +18,11 @@ test('Depop request context is limited to this extension and the supported API p
     assert.equal(target.test(url), false);
   }
   assert.ok(rule.action.requestHeaders.every(header => ['origin', 'referer'].includes(header.header.toLowerCase())));
+  const receipts = updates[0].addRules.find(value => value.id === 17004);
+  const receiptsTarget = new RegExp(receipts.condition.regexFilter);
+  assert.ok(receiptsTarget.test('https://webapi.depop.com/api/v1/receipts/?role=seller&limit=24'));
+  assert.equal(target.test('https://webapi.depop.com/api/v1/receipts/?role=seller'), false);
+  assert.equal(receiptsTarget.test('https://webapi.depop.com/api/payments/'), false);
 });
 
 test('Mercari request context covers only its GraphQL and session endpoints from this extension', async () => {
@@ -52,7 +57,7 @@ test('Depop\'s accelerated photo bucket gets its web referrer, for this extensio
   const updates = [];
   c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
   await c.ensureMarketplaceRequestContext();
-  const rule = updates[0].addRules.find(value => value.id === 17005);
+  const rule = updates[0].addRules.find(value => value.id === 17006);
   assert.deepEqual([...rule.condition.requestMethods], ['put']);
   assert.deepEqual([...rule.condition.initiatorDomains], ['test-extension-id']);
   const target = new RegExp(rule.condition.regexFilter);

@@ -45,6 +45,7 @@ importScripts('background/sellwild-native.js');
 importScripts('background/native-marketplaces.js');
 importScripts('background/marketplace-delete.js');
 importScripts('background/marketplace-sessions.js');
+importScripts('background/marketplace-sales.js');
 importScripts('background/marketplace-inspection.js');
 
 function log(msg) {
@@ -602,6 +603,11 @@ async function handleStudioMessage(msg) {
 
     case 'marketplace.sessions': {
       await handleMarketplaceSessions(msg);
+      break;
+    }
+
+    case 'marketplace.sales': {
+      await handleMarketplaceSales(msg);
       break;
     }
 
