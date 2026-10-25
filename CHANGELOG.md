@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.331 — 2026-10-25
+
+- Poshmark, Depop, Sellwild and Etsy now look like the eBay tab: the same heading, tab bar, and cards, each in its own marketplace color. Poshmark, Depop and Sellwild get a Dashboard with your sales, revenue and profit for any dates, and a Marketing tab.
+
 ## 0.1.330 — 2026-10-24
 
 - Publish to Sellwild without opening a tab. Pick a Sellwild category and condition in **Marketplace drafts** (Anteroom suggests both), save in Anteroom, then confirm **Publish…**. Anteroom creates the listing with your signed-in Sellwild account, uploads the photos and activates it, once. It needs a package weight and size, and a ship-from address saved on Sellwild.

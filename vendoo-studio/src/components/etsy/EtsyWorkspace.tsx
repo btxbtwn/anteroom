@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { Tabs } from "@base-ui/react/tabs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, ExternalLinkIcon, RefreshCwIcon, Settings2Icon } from "lucide-react";
 import { api } from "../../api/client";
 import { AdSpend } from "../AdSpend";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { SaleCalendar } from "../SaleCalendar";
+import { WorkspaceTabs } from "../ebay/WorkspaceTabs";
+import "../ebay/ebay.css";
 import { DirectConnectionRow } from "../settings/ConnectionsSettings";
-import { PageError, PageNote, Panel } from "../WorkspacePage";
+import { PageError, PageNote } from "../WorkspacePage";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
@@ -38,53 +39,44 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
       && (Date.parse(end) - Date.parse(start)) / 86400000 <= 366),
   };
 
-  return <div className="flex min-w-0 flex-col gap-6">
-    <header className="flex flex-wrap items-start justify-between gap-4">
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Sales channel</p>
-        <div className="flex items-center gap-3"><MarketplaceLogo id="etsy" label="Etsy" size={28} /><h2 className="text-2xl font-semibold tracking-tight">Etsy</h2></div>
-        <p className="text-sm text-muted-foreground">Your shop, orders, listings, and marketing.</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {connected ? <span className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs"><CheckCircle2Icon className="size-3.5 text-success-foreground" />{account?.label || "Connected"}</span> : null}
-        {connected ? <Button variant="ghost" size="sm" aria-label="Refresh Etsy" onClick={() => void queryClient.invalidateQueries({ queryKey: ["etsy-workspace"] })}><RefreshCwIcon />Refresh</Button> : null}
-        <Button variant="outline" size="sm" onClick={() => setConnectionOpen(true)}><Settings2Icon />{connected ? "Connection" : account?.pending ? "Finish sign-in" : "Connect Etsy"}</Button>
+  return <div className="ebay-workspace" data-marketplace="etsy">
+    <header className="ebay-page-heading">
+      <div><p className="ebay-eyebrow mb-3">Sales channel</p>
+        <div className="flex items-center gap-3"><MarketplaceLogo id="etsy" label="Etsy" size={28} /><h2>Etsy</h2></div>
+        <p>Your shop, orders, listings, and marketing.</p></div>
+      <div className="ebay-connection">
+        {connected ? <span className="ebay-status"><CheckCircle2Icon aria-hidden="true" />{account?.label || "Connected"}</span> : null}
+        {connected ? <Button variant="ghost" aria-label="Refresh Etsy" onClick={() => void queryClient.invalidateQueries({ queryKey: ["etsy-workspace"] })}><RefreshCwIcon />Refresh</Button> : null}
+        <Button variant="outline" onClick={() => setConnectionOpen(true)}><Settings2Icon />{connected ? "Connection" : account?.pending ? "Finish sign-in" : "Connect Etsy"}</Button>
       </div>
     </header>
     {connection.error ? <PageError message={connection.error.message} /> : null}
-    <Tabs.Root value={tab} onValueChange={(value) => setTab(value as Tab)}>
-      <Tabs.List aria-label="Etsy workspace" className="mb-6 grid grid-cols-4 gap-1 border-b border-border">
-        {TABS.map((item) => <Tabs.Tab key={item} value={item} disabled={!connected && (item === "Orders" || item === "Listings")}
-          className="min-h-11 cursor-pointer rounded-t-md border-b-2 border-transparent px-1 py-2 text-xs font-medium sm:px-2 sm:text-sm text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-50 data-[active]:border-orange-600 data-[active]:text-foreground">
-          {item}
-        </Tabs.Tab>)}
-      </Tabs.List>
-      <Tabs.Panel value={tab}>
-        <div className="flex min-w-0 flex-col gap-6">
-          {tab === "Marketing" ? <EtsyMarketingPanel onOpenListing={onOpenListing} /> : !connected ? (
-            <Panel divided={false} className="space-y-3 p-5">
-              <h3 className="font-medium">{connection.isPending ? "Checking your connection…" : "Connect your Etsy shop"}</h3>
-              <p className="text-sm text-muted-foreground">Connect Etsy to see live shop details, orders, and listings.</p>
-              {!connection.isPending ? <Button onClick={() => setConnectionOpen(true)}>Connect Etsy</Button> : null}
-            </Panel>
-          ) : <>
-            {tab !== "Listings" ? <>
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div><h3 className="text-lg font-semibold">{tab === "Dashboard" ? "Shop overview" : "Shop orders"}</h3><p className="mt-1 text-xs text-muted-foreground">Order creation dates in UTC.</p></div>
-                <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
-                  <label className="space-y-1">From<Input nativeInput type="date" aria-label="Etsy orders from" min="2000-01-01" max={end} value={start} onChange={(event) => setStart(event.target.value)} /></label>
-                  <label className="space-y-1">To<Input nativeInput type="date" aria-label="Etsy orders to" min={start} max={today} value={end} onChange={(event) => setEnd(event.target.value)} /></label>
-                </div>
+    <WorkspaceTabs label="Etsy workspace" main items={TABS} value={tab} onChange={(value) => setTab(value as Tab)}
+      disabled={connected ? [] : ["Orders", "Listings"]}>
+      <div className="ebay-tab-content" key={tab}>
+        {tab === "Marketing" ? <EtsyMarketingPanel onOpenListing={onOpenListing} /> : !connected ? (
+          <div className="ebay-data-panel space-y-4">
+            <h2>{connection.isPending ? "Checking your connection…" : "Connect your Etsy shop"}</h2>
+            <p className="text-muted-foreground">Connect Etsy to see live shop details, orders, and listings.</p>
+            {!connection.isPending ? <Button onClick={() => setConnectionOpen(true)}>Connect Etsy</Button> : null}
+          </div>
+        ) : <>
+          {tab !== "Listings" ? <>
+            <div className="ebay-dashboard-toolbar">
+              <div className="ebay-tab-intro"><p className="ebay-eyebrow">{tab === "Dashboard" ? "Performance" : "Orders"}</p><h2>{tab === "Dashboard" ? "Shop overview" : "Shop orders"}</h2><p>Order creation dates in UTC.</p></div>
+              <div className="ebay-date-range">
+                <label>From<Input nativeInput type="date" aria-label="Etsy orders from" min="2000-01-01" max={end} value={start} onChange={(event) => setStart(event.target.value)} /></label>
+                <label>To<Input nativeInput type="date" aria-label="Etsy orders to" min={start} max={today} value={end} onChange={(event) => setEnd(event.target.value)} /></label>
               </div>
-              {!period.valid ? <PageNote>Choose valid dates through today, up to one year at a time.</PageNote> : null}
-            </> : null}
-            {tab === "Dashboard" ? <><EtsyDashboard shop={shop.data} shopError={shop.error} scope={scope} period={period} onOpenOrders={() => setTab("Orders")} /><EtsySaleAlerts onOpenListing={onOpenListing} /></>
-              : tab === "Orders" ? <EtsyOrders scope={scope} period={period} />
-                : <EtsyListings scope={scope} onOpenListing={onOpenListing} />}
-          </>}
-        </div>
-      </Tabs.Panel>
-    </Tabs.Root>
+            </div>
+            {!period.valid ? <PageNote>Choose valid dates through today, up to one year at a time.</PageNote> : null}
+          </> : null}
+          {tab === "Dashboard" ? <><EtsyDashboard shop={shop.data} shopError={shop.error} scope={scope} period={period} onOpenOrders={() => setTab("Orders")} /><EtsySaleAlerts onOpenListing={onOpenListing} /></>
+            : tab === "Orders" ? <EtsyOrders scope={scope} period={period} />
+              : <EtsyListings scope={scope} onOpenListing={onOpenListing} />}
+        </>}
+      </div>
+    </WorkspaceTabs>
     <Dialog open={connectionOpen} onOpenChange={setConnectionOpen}>
       <DialogPopup className="sm:max-w-xl">
         <DialogHeader><DialogTitle>Etsy connection</DialogTitle><DialogDescription>Use your connected Etsy shop for live shop details, orders, listings, and sale alerts.</DialogDescription></DialogHeader>
@@ -98,7 +90,7 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
 export function EtsyMarketingPanel({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   return <>
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div><h3 className="text-lg font-semibold">Sales and advertising</h3><p className="mt-1 text-sm text-muted-foreground">Plan sales here, set them up in Etsy, and import your Etsy Ads results.</p></div>
+      <div className="ebay-tab-intro"><h2>Sales and advertising</h2><p>Plan sales here, set them up in Etsy, and import your Etsy Ads results.</p></div>
       <a className="inline-flex items-center gap-1 text-sm underline" href="https://www.etsy.com/your/shops/me/advertising" target="_blank" rel="noreferrer">Open Etsy Ads<ExternalLinkIcon className="size-3.5" /></a>
     </div>
     <SaleCalendar marketplace="etsy" onOpenListing={onOpenListing} />
