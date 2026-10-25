@@ -55,13 +55,12 @@ upload stops creation, and the saved draft is still read back for verification.
 ### Marketplace workspace
 
 The sidebar and mobile navigation have one **Marketplaces** entry. Inside it,
-eBay contains its seller workspace and API marketing controls; Etsy contains
-its connected shop dashboard, orders, listings, and a Marketing tab for the
-local sale calendar and Etsy Ads CSV imports.
-Existing Poshmark ad records and Depop/Sellwild sale calendars remain available
-in their respective marketplace views. Calendars and ad totals show only the
-selected marketplace. Saving a local sale plan does not apply a marketplace
-promotion. Inventory-wide discount suggestions live in **Analytics**.
+eBay contains its seller workspace and a Marketing tab, because eBay's
+marketing has a real API behind it. Etsy contains its connected shop
+dashboard, orders, and listings. Poshmark, Depop, and Sellwild show a sales
+dashboard only. No marketplace other than eBay has a Marketing tab. The eBay
+sale calendar shows only eBay. Saving a local sale plan does not apply a
+marketplace promotion. Inventory-wide discount suggestions live in **Analytics**.
 
 Etsy reads shop details, paginated receipts, and listings through the existing
 relay and Keychain connection. Its dashboard shows current shop counts and
@@ -1039,7 +1038,7 @@ Version 1 is complete when the user can:
 
 ## Sale calendar in Marketing
 
-The calendar stores local promotion plans and records for eBay, Depop, Etsy, and Sellwild.
+The calendar in eBay's Marketing tab stores local promotion plans and records for eBay.
 A plan covers every active listing on its marketplace, because the seller runs
 sales shop-wide, and two sales on one marketplace cannot overlap. Effective fees
 and seller-paid shipping start from that marketplace's sales over the last year.
@@ -1070,28 +1069,14 @@ events that covered all marketplaces keep that scope. Their dates are retained,
 and UTC is explicitly flagged as assumed because the earlier schema stored no
 time zone. Sellers can correct the time zone on historical records.
 
-## Ad spend in Marketing
+## Ad spend
 
-Marketing records spend on Poshmark Promoted Closet and Etsy Ads. Neither
-programme has an API Anteroom can read and Vendoo does not import ad charges, so
-the seller copies each dashboard's figures for a stretch of days: the spend,
-and optionally the clicks, orders, and revenue the dashboard attributes to the
-ads. Entries may overlap and any length works; a week or a month is typical.
-
-Etsy Ads can instead be uploaded as the stats CSV Etsy exports. Each day with
-activity becomes a one-day Etsy entry, and a later upload replaces the entries
-an earlier upload wrote for the days it covers. Entries the seller typed are
-never replaced; the upload says when one covers the same days, so the spend is
-not counted twice.
-
-Each entry's spend, clicks, orders, and attributed revenue are spread evenly
-over its days, so a sales period carries only the share of an entry that falls
-inside it. Totals per programme show spend, return on ad spend (attributed
-revenue ÷ spend), cost per click, and spend as a share of every recorded sale
-on that marketplace in the period, with or without ads. Profit after ads is the
+Studio no longer has a screen for recording Poshmark Promoted Closet or Etsy
+Ads spend. Entries recorded earlier stay in the database and still count in
+Analytics and the business assistant: each entry's spend, clicks, orders, and
+attributed revenue are spread evenly over its days, and profit after ads is the
 period's profit on sales with a recorded cost, less all ad spend in the period.
-Figures the seller left blank stay unknown and never read as zero. Saving or
-removing an entry never writes to a marketplace or to Vendoo.
+Figures left blank stay unknown and never read as zero.
 
 ## Business assistant
 

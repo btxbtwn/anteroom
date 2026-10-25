@@ -47,7 +47,8 @@ describe("EtsyWorkspace", () => {
   it("shows the connected shop dashboard, seller tabs, and live metrics", () => {
     const html = renderToStaticMarkup(<EtsyWorkspace onOpenListing={vi.fn()} />);
     expect(html).toContain('aria-label="Etsy workspace"');
-    for (const title of ["Dashboard", "Orders", "Listings", "Marketing"]) expect(html).toContain(`${title}</button>`);
+    for (const title of ["Dashboard", "Orders", "Listings"]) expect(html).toContain(`${title}</button>`);
+    expect(html).not.toContain("Marketing</button>");
     expect(html).toContain("VintageFinds");
     expect(html).toContain("Active listings");
     expect(html).toContain("$35.00");

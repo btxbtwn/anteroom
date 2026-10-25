@@ -1,10 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AdSpendEntry } from "../api/adSpend";
 import type { InventoryAnalytics } from "../api/types";
-import { EtsyMarketingPanel } from "./etsy/EtsyWorkspace";
-import { ChannelMarketing } from "./channel/ChannelWorkspace";
-import { AdSpend } from "./AdSpend";
 import { SaleCalendar } from "./SaleCalendar";
 import { DiscountSuggestions } from "./DiscountSuggestions";
 import { MarketplacesPage, MarketplacePanel } from "./MarketplacesPage";
@@ -18,7 +14,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ setQueryData: vi.fn(), invalidateQueries: vi.fn() }),
 }));
 
-/** The page reads only stale stock and ad totals from the analytics payload. */
+/** The page reads only stale stock and sales totals from the analytics payload. */
 type MarketingData = Pick<InventoryAnalytics, "stale" | "ads"> & Partial<Pick<InventoryAnalytics, "marketplaces">>;
 
 const data: MarketingData = {
@@ -35,19 +31,13 @@ const data: MarketingData = {
   ads: { spend: 0, profit: 50, profit_after_ads: 50, marketplaces: [] },
 };
 
-const adEntry: AdSpendEntry = {
-  id: "posh-week", marketplace: "poshmark", start_date: "2026-09-01", end_date: "2026-09-07",
-  spend: 15, clicks: 60, orders: 1, revenue: 45, notes: "", roas: 3, cost_per_click: 0.25,
-};
-
-function setup(payload: MarketingData = data, adEntries: AdSpendEntry[] = [], calendar: SaleCalendarData = {
+function setup(payload: MarketingData = data, calendar: SaleCalendarData = {
   events: [], patterns: [], items: [], timezone: "UTC",
 }) {
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false, isSuccess: false, isError: false });
   useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) =>
     queryKey[0] === "sale-calendar"
       ? { data: calendar, isError: false }
-      : queryKey[0] === "ad-spend" ? { data: adEntries, isError: false }
       : queryKey[0] === "direct-connections" ? { data: { accounts: {
           ebay: { connected: false }, etsy: { connected: true, label: "My Etsy shop" },
         } }, isError: false }
@@ -79,20 +69,13 @@ describe("MarketplacesPage", () => {
   it("opens Etsy’s seller dashboard with its own marketplace tools", () => {
     const html = renderToStaticMarkup(<MarketplacePanel marketplace="etsy" onOpenListing={vi.fn()} />);
     expect(html).toContain("My Etsy shop");
-    for (const title of ["Dashboard", "Orders", "Listings", "Marketing"]) expect(html).toContain(`${title}</button>`);
-    expect(html).not.toContain("Promoted Closet");
+    for (const title of ["Dashboard", "Orders", "Listings"]) expect(html).toContain(`${title}</button>`);
+    expect(html).not.toContain("Marketing</button>");
+    expect(html).not.toContain("Sale calendar");
     expect(html).not.toContain("Schedule store email");
   });
 
-  it("keeps the sale calendar and Etsy Ads CSV in Etsy marketing", () => {
-    const html = renderToStaticMarkup(<EtsyMarketingPanel onOpenListing={vi.fn()} />);
-    expect(html).toContain("Sale calendar");
-    expect(html).toContain("Upload Etsy Ads CSV");
-    expect(html).toContain('accept=".csv,text/csv"');
-    expect(html).not.toContain("Promoted Closet");
-  });
-
-  it("lays out Poshmark, Depop, and Sellwild like eBay, with a sales dashboard", () => {
+  it("shows Poshmark, Depop, and Sellwild as a sales dashboard with no marketing tab", () => {
     setup({ ...data, marketplaces: [
       { id: "depop", label: "depop", count: 3, revenue: 120, profit: 70, profit_known: 2, fees_known: 2, revenue_known: 3,
         days_known: 3, average_price: 40, median_days: 12, margin: 58 },
@@ -101,8 +84,8 @@ describe("MarketplacesPage", () => {
       const html = renderToStaticMarkup(<MarketplacePanel marketplace={id} onOpenListing={vi.fn()} />);
       expect(html).toContain('class="ebay-workspace"');
       expect(html).toContain("Sales channel");
-      expect(html).toContain('class="ebay-navigation"');
-      for (const title of ["Dashboard", "Marketing"]) expect(html).toContain(`${title}</button>`);
+      expect(html).not.toContain("Marketing</button>");
+      expect(html).not.toContain("Promoted Closet");
       expect(html).toContain("Sales overview");
     }
     const depop = renderToStaticMarkup(<MarketplacePanel marketplace="depop" onOpenListing={vi.fn()} />);
@@ -110,53 +93,6 @@ describe("MarketplacesPage", () => {
     expect(depop).toContain("$40 average sale");
     expect(depop).toContain("2 of 3 sales have a recorded cost");
     expect(depop).toContain("Typical time to sell: 12 days");
-  });
-
-  it("keeps the existing Poshmark spend history accessible", () => {
-    setup(data, [adEntry]);
-    const html = renderToStaticMarkup(<ChannelMarketing marketplace="poshmark" onOpenListing={vi.fn()} />);
-    expect(html).toContain("Promoted Closet");
-    expect(html).toContain("60 clicks · 1 order · $45 sales · 3× ROAS");
-    expect(html).not.toContain("Upload Etsy Ads CSV");
-  });
-});
-
-describe("marketplace ad spend", () => {
-  it("shows the empty state for this marketplace even when another has entries", () => {
-    setup(data, [adEntry]);
-    const html = renderToStaticMarkup(<AdSpend marketplace="etsy" />);
-    expect(html).toContain("No ad spend recorded yet.");
-    expect(html).not.toContain('aria-label="Ad spend period"');
-    expect(html).not.toContain("60 clicks");
-  });
-
-  it("keeps the period picker when this marketplace has no spend in the selected period", () => {
-    setup(data, [adEntry]);
-    const html = renderToStaticMarkup(<AdSpend marketplace="poshmark" />);
-    expect(html).toContain('aria-label="Ad spend period"');
-    expect(html).toContain("No ad spend in this period.");
-    expect(html).not.toContain("No ad spend recorded yet.");
-  });
-
-  it("shows only the selected marketplace’s entries, sales, and profit", () => {
-    setup({
-      ...data,
-      ads: {
-        spend: 40, profit: 50, profit_after_ads: 10,
-        marketplaces: [
-          { id: "poshmark", entries: 1, spend: 15, clicks: 60, orders: 1, revenue: 45, roas: 3,
-            cost_per_click: 0.25, sales_revenue: 80, spend_percent: 18.8, profit: 30, profit_after_ads: 15 },
-          { id: "etsy", entries: 1, spend: 25, clicks: null, orders: null, revenue: null, roas: null,
-            cost_per_click: null, sales_revenue: 0, spend_percent: null, profit: null, profit_after_ads: null },
-        ],
-      },
-    }, [adEntry, { ...adEntry, id: "etsy-week", marketplace: "etsy", spend: 25, notes: "Etsy entry" }]);
-    const html = renderToStaticMarkup(<AdSpend marketplace="poshmark" />);
-    expect(html).toContain("3× return on ad spend · $0.25 a click · 18.8% of $80 Poshmark sales · $15 Poshmark profit after ads");
-    expect(html).toContain("$30 marketplace profit, less $15 of ads");
-    expect(html).not.toContain("Etsy entry");
-    expect(html).not.toContain("Business profit after ads");
-    expect(html).not.toContain("$40");
   });
 });
 
@@ -167,7 +103,7 @@ describe("marketplace sale calendar", () => {
       start_date: "2026-09-01", end_date: "2026-09-07", timezone: "UTC", notes: "",
       discount_percent: 25, fee_percent: 10, shipping_cost: 0, minimum_profit: 0, items: [], result: null,
     });
-    setup(data, [], {
+    setup(data, {
       timezone: "UTC", events: [event("etsy"), event("ebay")], items: [],
       patterns: ["etsy", "ebay"].map((id) => ({
         marketplace: id as "etsy" | "ebay", weeks: 0, sales: 0, history_start: "2026-09-01", history_end: "2026-09-03",

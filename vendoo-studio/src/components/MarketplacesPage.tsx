@@ -23,7 +23,7 @@ export function MarketplacesPage({ marketplace, onMarketplaceChange, onOpenListi
   const ebay = connection.data?.accounts.ebay;
   return (
     <FormDraftProvider key={`${ebay?.label}-${ebay?.connectedAt}`}><WorkspacePage width="expanded">
-      <PageHeader title="Marketplaces" description="Manage each marketplace’s listings, sales, and marketing in one place." />
+      <PageHeader title="Marketplaces" description="Manage each marketplace’s listings and sales in one place." />
       <Tabs.Root value={marketplace} onValueChange={(value) => onMarketplaceChange(value as Marketplace)}>
         <Tabs.List aria-label="Marketplaces" className="mb-7 flex flex-wrap gap-1 border-b border-border">
           {MARKETPLACES.map((id) => <Tabs.Tab key={id} value={id} style={{ "--tab-brand": `var(--color-${id})` } as CSSProperties}
@@ -45,5 +45,5 @@ export function MarketplacePanel({ marketplace, onOpenListing }: {
 }) {
   if (marketplace === "ebay") return <EbayWorkspace onOpenListing={onOpenListing} />;
   if (marketplace === "etsy") return <EtsyWorkspace onOpenListing={onOpenListing} />;
-  return <ChannelWorkspace marketplace={marketplace} onOpenListing={onOpenListing} />;
+  return <ChannelWorkspace marketplace={marketplace} />;
 }
