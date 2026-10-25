@@ -242,20 +242,15 @@ def comps_formula_price(comps_text: str | None) -> tuple[float | None, int | Non
 
 
 def apply_price_to_listing(listing: dict, new_price: float) -> dict:
-    """Copy listing with updated price; keep Poshmark original at the higher was-price."""
+    """Copy listing with the new price. Poshmark original price stays 0."""
     updated = copy.deepcopy(listing)
-    old = listing_price(updated)
     target = whole_dollars(new_price)
     updated["price"] = target
     specifics = updated.get("poshmark_specifics")
     if not isinstance(specifics, dict):
         specifics = {}
         updated["poshmark_specifics"] = specifics
-    try:
-        original = float(specifics.get("originalPrice") or 0)
-    except (TypeError, ValueError):
-        original = 0.0
-    specifics["originalPrice"] = whole_dollars(max(original, old or 0, target))
+    specifics["originalPrice"] = 0
     return updated
 
 

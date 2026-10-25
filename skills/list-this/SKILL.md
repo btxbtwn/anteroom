@@ -378,7 +378,7 @@ Before outputting ANY listing, verify:
 - [ ] **Petite size normalized:** petite codes such as `PS` are mapped using exact platform-supported values instead of being flattened to plain small
 - [ ] **Depop specifics populated:** source, age, style, type, fit, material, occasion, and size_grouping when supportable
 - [ ] **Etsy specifics populated:** who_made, what_is, when_made, materials, tags
-- [ ] **Poshmark specifics populated:** originalPrice (if known)
+- [ ] **Poshmark specifics populated:** originalPrice is 0
 - [ ] **Depop specifics populated:** source, age, style (3 items)
 - [ ] **All marketplace fields:** Reference `vendoo_listing_template.md` for complete field list
 
@@ -402,7 +402,7 @@ Before outputting ANY listing, verify:
 - Vintage items need a vintage year range, and only when the age is supported
 
 **Poshmark:**
-- Original price helps buyers see discount
+- Original price is always 0
 - 3 Style Tags maximum
 - NWT toggle for new items
 

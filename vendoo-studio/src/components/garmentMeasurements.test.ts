@@ -91,6 +91,7 @@ describe("parseItemDetails and notesWithItemDetails", () => {
       vendooLabels: "Bin 2",
       cog: "4",
       sku: "",
+      poshmarkOriginalPrice: "0",
     });
   });
 });

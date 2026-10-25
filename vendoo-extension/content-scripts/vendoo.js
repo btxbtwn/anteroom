@@ -4406,9 +4406,7 @@
       await fillMarketplaceSize('poshmark', data);
       recordGeneralTagsInherited('Style Tags');
       
-      if (data.poshmark_specifics) {
-          await fillTextField('#listings\\.poshmark\\.marketplaceSpecifics\\.originalPrice', data.poshmark_specifics.originalPrice, 'Original Price');
-      }
+      await fillTextField('#listings\\.poshmark\\.marketplaceSpecifics\\.originalPrice', 0, 'Original Price');
       
   }
 

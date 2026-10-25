@@ -1173,17 +1173,11 @@ def persist_generated_listing(
         asking = _asking_price(seller)
         if asking:
             listing["price"] = asking
-        posh_raw = str(seller.get("poshmarkOriginalPrice") or "").strip()
-        try:
-            posh = float(posh_raw) if posh_raw else 0.0
-        except ValueError:
-            posh = 0.0
-        if posh > 0:
-            specifics = listing.get("poshmark_specifics")
-            if not isinstance(specifics, dict):
-                specifics = {}
-            specifics["originalPrice"] = posh
-            listing["poshmark_specifics"] = specifics
+        specifics = listing.get("poshmark_specifics")
+        if not isinstance(specifics, dict):
+            specifics = {}
+        specifics["originalPrice"] = 0
+        listing["poshmark_specifics"] = specifics
     ListingRepo(db).save_revision(conv_id, listing, source=source)
 
     if announce:

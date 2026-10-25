@@ -3,7 +3,7 @@
 Regenerate throws away the listing and generates a new one from the photos and
 Item Details. Anything the seller typed into Item Details survives that on its
 own, but the facts that only ever lived on the listing — SKU, package size,
-Poshmark original price, Vendoo's cost of goods, labels and internal notes on
+Vendoo's cost of goods, labels and internal notes on
 an imported item, the asking price, and the measurements and flaws written into
 the description — would be lost. Carrying them into Item Details first puts them
 back in front of the generator as seller-provided facts.
@@ -90,19 +90,6 @@ def _money(value: Any) -> str:
     return f"{amount:.2f}" if amount > 0 else ""
 
 
-def _poshmark_original(listing: dict) -> str:
-    specifics = listing.get("poshmark_specifics")
-    if not isinstance(specifics, dict):
-        return ""
-    try:
-        amount = float(specifics.get("originalPrice"))
-    except (TypeError, ValueError):
-        return ""
-    if amount <= 0:
-        return ""
-    return str(int(amount)) if amount == int(amount) else f"{amount:.2f}"
-
-
 def carryover_updates(listing: dict | None, notes: dict) -> dict[str, str]:
     """Item Details updates that keep ``listing``'s seller facts alive.
 
@@ -129,12 +116,6 @@ def carryover_updates(listing: dict | None, notes: dict) -> dict[str, str]:
         listing_pkg = str(listing.get("package_dimensions_in") or "").strip()
         if listing_pkg and listing_pkg != DEFAULT_PACKAGE_DIMENSIONS:
             updates["packageDimensions"] = listing_pkg
-
-    notes_posh = str(notes.get("poshmarkOriginalPrice") or "").strip()
-    if not notes_posh or notes_posh == "0":
-        posh = _poshmark_original(listing)
-        if posh:
-            updates["poshmarkOriginalPrice"] = posh
 
     if not str(notes.get("vendooLabels") or "").strip():
         labels = listing.get("labels")
