@@ -494,5 +494,26 @@ class VendooImportRouteTest(unittest.TestCase):
         self.assertIsNone(row["vendoo_sold_at"])
 
 
+def test_a_depop_other_saved_on_vendoo_is_read_back_as_other():
+    listing = listing_from_vendoo({
+        "generalDetails": {
+            "title": "Columbia XL (18/20) Outdoors Hooded Windbreaker",
+            "size": {"option": {"label": "XL (18/20)", "value": "XL (18/20)"}},
+        },
+        "listings": {
+            "depop": {
+                "overrides": {
+                    "size": {
+                        "option": {"label": "Other", "value": "21"},
+                        "scale": {"label": "Kids", "value": "kids"},
+                    },
+                },
+            },
+        },
+    }, None)
+    assert listing["size"] == "XL (18/20)"
+    assert listing["depop_specifics"]["size"] == "Other"
+
+
 if __name__ == "__main__":
     unittest.main()

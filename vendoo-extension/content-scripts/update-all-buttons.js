@@ -43,6 +43,28 @@
     return target;
   }
 
+  function fieldLabelForUpdateAll(el) {
+    let node = el && el.parentElement;
+    for (let depth = 0; depth < 6 && node; depth++) {
+      const labels = [];
+      for (const child of node.children || []) {
+        const tag = String(child.tagName || '').toLowerCase();
+        if (tag === 'label' || tag === 'legend') labels.push(child);
+      }
+      if (labels.length === 1) {
+        return normalizeLabel(labels[0].innerText || labels[0].textContent || '').replace(/\s*\*$/, '');
+      }
+      node = node.parentElement;
+    }
+    return '';
+  }
+
+  // Size on Depop is not the tag. Update All on the general Size field copies
+  // XL onto that form and undoes Other.
+  function copiesGeneralSize(el) {
+    return fieldLabelForUpdateAll(el) === 'size';
+  }
+
   function selectUpdateAllButtons(nodes) {
     const seen = new Set();
     const out = [];
@@ -62,6 +84,8 @@
     isArmed,
     isUpdateAllControl,
     clickableUpdateAllTarget,
+    fieldLabelForUpdateAll,
+    copiesGeneralSize,
     selectUpdateAllButtons,
   };
   root.vendooUpdateAllButtons = api;
