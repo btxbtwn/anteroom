@@ -38,6 +38,7 @@ importScripts('background/sold-listings.js');
 importScripts('browser-session.js');
 importScripts('background/depop-native.js');
 importScripts('background/marketplace-fetch.js');
+importScripts('background/marketplace-catalog.js');
 importScripts('background/mercari-native.js');
 importScripts('background/marketplace-network.js');
 importScripts('background/poshmark-native.js');

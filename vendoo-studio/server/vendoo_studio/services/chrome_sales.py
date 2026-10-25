@@ -1,48 +1,47 @@
 """Notice sales on marketplaces that sign in through Chrome.
 
-eBay and Etsy push a sale through the relay. Depop and Poshmark are read from
-the seller's own recent sales, and Mercari and Sellwild from listings Anteroom
-already knows. The extension returns listing and order IDs only. Nothing here
-delists.
+eBay and Etsy push a sale through the relay. For the others the extension
+reads the seller's sold list, or the live closet, in a few requests however
+many listings are still up. Shops take turns, and the gap before the next
+check is between four and twelve minutes. Anteroom sends every listing it still has live
+there. A sold item counts only when Anteroom still has it live on that
+marketplace, so a sale Anteroom already knows, or one it never listed, is not
+reported. The extension returns listing IDs only. Delisting the other
+marketplaces happens only when the seller turned that option on.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 import time
 from types import SimpleNamespace
 
-from vendoo_studio.services.relay_sales import listing_id_from_url, record_sale
+from vendoo_studio.services.relay_sales import record_sale
 from vendoo_studio.services.user_settings import sale_detection_enabled
 
 log = logging.getLogger("vendoo_studio.chrome_sales")
 
-CHROME_MARKETS = ("depop", "poshmark", "mercari", "sellwild")
-# Markets whose seller page lists recent sales in one read.
-FEED_MARKETS = frozenset({"depop", "poshmark"})
+CHROME_MARKETS = ("poshmark", "mercari", "depop", "sellwild")
 POLL_INTERVAL_S = 30
-DUE_AFTER_S = 300
-BATCH = 15
+MIN_GAP_S = 4 * 60
+MAX_GAP_S = 12 * 60
+MAX_CHECKED = 5000
+MAX_REPORTED = 40
 
+# Matches the IDs marketplace_delist reads from each listing link.
 _LISTING_ID = {
     "poshmark": re.compile(r"^[a-f0-9]{24}$"),
-    "depop": re.compile(r"^\d{5,12}$"),
-    "mercari": re.compile(r"^m\d{8,14}$"),
-    "sellwild": re.compile(r"^\d{1,12}$"),
+    "mercari": re.compile(r"^m\d{6,}$"),
+    "depop": re.compile(r"^[a-z0-9][a-z0-9-]{0,200}$"),
+    "sellwild": re.compile(r"^\d{1,15}$"),
 }
-_ORDER_ID = {
-    "poshmark": re.compile(r"^[a-f0-9]{24}$"),
-    "depop": re.compile(r"^\d{1,20}$"),
-    "mercari": re.compile(r"^m\d{8,14}$"),
-    "sellwild": re.compile(r"^\d{1,12}$"),
-}
-_HOST = {"mercari": "mercari.com", "sellwild": "sellwild.com"}
+_HOST = {"poshmark": "poshmark.com", "mercari": "mercari.com", "depop": "depop.com", "sellwild": "sellwild.com"}
 
 _task: asyncio.Task | None = None
-_last: dict[str, float] = {}
+_next: dict[str, float] = {}
 _errors: dict[str, str] = {}
-_cursor: dict[str, int] = {}
 
 
 def check_errors() -> dict[str, str]:
@@ -53,83 +52,62 @@ def clear_check_error(marketplace: str) -> None:
     _errors.pop(marketplace, None)
 
 
-def normalize_sales(marketplace: str, raw: object) -> list[tuple[str, str]]:
-    """Keep listing and order IDs that match this marketplace. Drop everything else."""
+def arm_next(marketplace: str, now: float) -> float:
+    """The next check for this shop, somewhere between four and twelve minutes out."""
+    due = now + random.uniform(MIN_GAP_S, MAX_GAP_S)
+    _next[marketplace] = due
+    return due
+
+
+def normalize_sales(marketplace: str, raw: object) -> list[str]:
+    """Keep listing IDs that match this marketplace. Drop everything else."""
     if marketplace not in _LISTING_ID or not isinstance(raw, dict) or raw.get("ok") is not True:
         return []
     sales = raw.get("sales")
     if not isinstance(sales, list):
         return []
-    listing_re, order_re = _LISTING_ID[marketplace], _ORDER_ID[marketplace]
-    found: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-    for item in sales[:40]:
-        if not isinstance(item, dict):
-            continue
-        listing = item.get("listing_id")
-        order = item.get("order_id") or listing
-        if not isinstance(listing, str) or not isinstance(order, str):
-            continue
-        if not listing_re.fullmatch(listing) or not order_re.fullmatch(order):
-            continue
-        key = (order, listing)
-        if key in seen:
-            continue
-        seen.add(key)
-        found.append(key)
+    pattern = _LISTING_ID[marketplace]
+    found: list[str] = []
+    for item in sales[:MAX_REPORTED]:
+        listing = item.get("listing_id") if isinstance(item, dict) else None
+        if isinstance(listing, str) and pattern.fullmatch(listing) and listing not in found:
+            found.append(listing)
     return found
 
 
-def listing_ids_to_check(marketplace: str) -> list[str]:
-    """Known Mercari or Sellwild listing IDs, a few at a time."""
-    from vendoo_studio.database import SessionLocal
+def live_listing_ids(marketplace: str, *, session_factory=None) -> list[str]:
+    """Listing IDs Anteroom has live on this marketplace: not sold, delisted or marked not listed."""
     from vendoo_studio.models.conversation import Conversation
-    from vendoo_studio.services.vendoo_import import parse_notes
+    from vendoo_studio.services.marketplace_delist import listings
 
-    host = _HOST.get(marketplace)
-    if not host:
-        return []
-    with SessionLocal() as db:
-        rows = db.query(Conversation.notes).filter(Conversation.notes.contains(host)).all()
+    if session_factory is None:
+        from vendoo_studio.database import SessionLocal
+
+        session_factory = SessionLocal
     found: list[str] = []
-    seen: set[str] = set()
-    for (notes,) in rows:
-        parsed = parse_notes(notes) if isinstance(notes, str) else {}
-        urls: list[str] = []
-        reported = parsed.get("vendooListingUrls") or {}
-        if isinstance(reported, dict) and isinstance(reported.get(marketplace), str):
-            urls.append(reported[marketplace])
-        native = parsed.get("nativeMarketplaceDrafts") or {}
-        if isinstance(native, dict):
-            binding = native.get(marketplace)
-            if isinstance(binding, dict) and isinstance(binding.get("listing_url"), str):
-                urls.append(binding["listing_url"])
-        for url in urls:
-            listing_id = listing_id_from_url(marketplace, url)
-            if listing_id and listing_id not in seen:
-                seen.add(listing_id)
+    with session_factory() as db:
+        rows = db.query(Conversation.id).filter(Conversation.notes.contains(_HOST[marketplace])).all()
+        for (conv_id,) in rows:
+            entry = listings(db, conv_id).get(marketplace) or {}
+            listing_id = entry.get("listing_id")
+            if listing_id and entry.get("state") == "live" and not entry.get("sold_here") and listing_id not in found:
                 found.append(listing_id)
-    if not found:
-        return []
-    start = _cursor.get(marketplace, 0) % len(found)
-    _cursor[marketplace] = start + BATCH
-    ordered = found[start:] + found[:start]
-    return ordered[:BATCH]
+    return found
 
 
-def record_reported_sales(marketplace: str, pairs: list[tuple[str, str]], *, session_factory=None) -> list[str]:
-    """Store each sold line once. Returns the new sale IDs."""
+def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_factory=None) -> list[str]:
+    """Store each sold listing once. Returns the new sale IDs."""
     if session_factory is None:
         from vendoo_studio.database import SessionLocal
 
         session_factory = SessionLocal
     created: list[str] = []
     with session_factory() as db:
-        for order_id, listing_id in pairs:
+        for listing_id in listing_ids:
             sale = record_sale(
                 db,
                 marketplace=marketplace,
-                order_id=order_id,
+                order_id=listing_id,
                 line_id=listing_id,
                 listing_id=listing_id,
                 quantity=None,
@@ -142,13 +120,14 @@ def record_reported_sales(marketplace: str, pairs: list[tuple[str, str]], *, ses
 
 async def check_marketplace(marketplace: str) -> None:
     from vendoo_studio.services import browser_bridge
-    from vendoo_studio.services.marketplace_accounts import _notify_sales
+    from vendoo_studio.services.marketplace_accounts import announce_sales
 
     if marketplace not in CHROME_MARKETS or not sale_detection_enabled(marketplace):
         clear_check_error(marketplace)
         return
-    listing_ids = [] if marketplace in FEED_MARKETS else await asyncio.to_thread(listing_ids_to_check, marketplace)
-    if marketplace not in FEED_MARKETS and not listing_ids:
+    live = await asyncio.to_thread(live_listing_ids, marketplace)
+    listing_ids = live[:MAX_CHECKED]
+    if not listing_ids:
         clear_check_error(marketplace)
         return
     try:
@@ -156,7 +135,7 @@ async def check_marketplace(marketplace: str) -> None:
             SimpleNamespace(id=None),
             "marketplace.sales",
             {"marketplace": marketplace, "listing_ids": listing_ids},
-            timeout=40,
+            timeout=90,
         )
     except browser_bridge.BrowserBridgeError:
         return
@@ -166,32 +145,32 @@ async def check_marketplace(marketplace: str) -> None:
         _errors[marketplace] = "Couldn't check sales. Sign in again in Chrome if this keeps happening."
         return
     clear_check_error(marketplace)
-    pairs = normalize_sales(marketplace, raw)
-    if not pairs:
+    sold = [listing_id for listing_id in normalize_sales(marketplace, raw) if listing_id in live]
+    if not sold:
         return
-    created = await asyncio.to_thread(record_reported_sales, marketplace, pairs)
+    created = await asyncio.to_thread(record_reported_sales, marketplace, sold)
     if not created:
         return
-    try:
-        await asyncio.to_thread(_notify_sales, created)
-    except Exception:  # noqa: BLE001 - a missed banner must not drop the recorded sale
-        log.debug("could not show the sale notification", exc_info=True)
+    await announce_sales(created)
 
 
 async def check_due() -> None:
+    """Check one shop. The others wait for their own turn, on uneven gaps."""
     now = time.time()
     for marketplace in CHROME_MARKETS:
         if not sale_detection_enabled(marketplace):
             clear_check_error(marketplace)
+            _next.pop(marketplace, None)
             continue
-        if now - _last.get(marketplace, 0) < DUE_AFTER_S:
+        if _next.get(marketplace, 0) > now:
             continue
-        _last[marketplace] = now
+        arm_next(marketplace, now)
         try:
             await check_marketplace(marketplace)
         except Exception:  # noqa: BLE001 - one marketplace must not stop the others
             log.debug("could not check %s sales", marketplace, exc_info=True)
             _errors[marketplace] = "Couldn't check sales. Sign in again in Chrome if this keeps happening."
+        return
 
 
 async def _watch() -> None:

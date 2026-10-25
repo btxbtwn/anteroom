@@ -23,6 +23,7 @@
     "https://www.mercari.com/*",
     "https://www.depop.com/*",
     "https://webapi.depop.com/*",
+    "https://api.depop.com/*",
     "https://*.s3.amazonaws.com/*",
     "https://*.s3-accelerate.amazonaws.com/*",
     "https://www.etsy.com/*",

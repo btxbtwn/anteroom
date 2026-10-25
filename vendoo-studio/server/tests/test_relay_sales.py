@@ -16,7 +16,8 @@ from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.queries import ConversationRepo
-from vendoo_studio.services import keychain, marketplace_accounts, relay_client, relay_sales
+from vendoo_studio.services import keychain, marketplace_accounts, relay_client, relay_sales, user_settings
+from vendoo_studio.services.marketplace_delist import DelistError
 
 
 def _engine():
@@ -308,6 +309,68 @@ class StreamTest(unittest.TestCase):
 
         through = asyncio.run(relay_client._process([{"seq": 1}, {"seq": 2}, {"seq": 3}], handle))
         self.assertEqual(through, 1)
+
+
+class AutodelistOptionTest(unittest.TestCase):
+    def setUp(self):
+        self.Session = sessionmaker(bind=_engine())
+        with self.Session() as db:
+            self.tee = _listing(db, "tee", {
+                "ebay": "https://www.ebay.com/itm/1234567890",
+                "etsy": "https://www.etsy.com/listing/555",
+                "poshmark": "https://poshmark.com/listing/abc",
+            }).id
+        user_settings.set_autodelist(False)
+
+    def tearDown(self):
+        user_settings.set_autodelist(False)
+
+    def handle(self, event):
+        async def read_receipt(shop_id, receipt_id):
+            return {}
+
+        return asyncio.run(relay_sales.handle_event(event, session_factory=self.Session, read_etsy_receipt=read_receipt))
+
+    def test_off_does_not_delist(self):
+        created = self.handle(_ebay_event())
+        called = []
+
+        async def fake_delist(*args, **kwargs):
+            called.append(args)
+
+        with mock.patch("vendoo_studio.services.marketplace_delist.delist", fake_delist):
+            notes = asyncio.run(marketplace_accounts.autodelist_for_sales(created, session_factory=self.Session))
+        self.assertEqual(notes, {})
+        self.assertEqual(called, [])
+
+    def test_on_delists_the_other_live_marketplaces_and_not_the_one_that_sold(self):
+        user_settings.set_autodelist(True)
+        created = self.handle(_ebay_event())
+        seen = {}
+
+        async def fake_delist(db, conv_id, markets, confirm):
+            seen["call"] = (conv_id, list(markets), confirm)
+            return {name: {"state": "deleted"} for name in markets}
+
+        with mock.patch("vendoo_studio.services.marketplace_delist.delist", fake_delist):
+            notes = asyncio.run(marketplace_accounts.autodelist_for_sales(created, session_factory=self.Session))
+        self.assertEqual(seen["call"], (self.tee, ["etsy"], True))
+        self.assertEqual(notes[created[0]], "Delisted from Etsy.")
+
+    def test_a_delist_that_cannot_start_is_reported_once(self):
+        user_settings.set_autodelist(True)
+        created = self.handle(_ebay_event())
+
+        calls = []
+
+        async def fake_delist(db, conv_id, markets, confirm):
+            calls.append(markets)
+            raise DelistError(409, "Connect Chrome first.")
+
+        with mock.patch("vendoo_studio.services.marketplace_delist.delist", fake_delist):
+            notes = asyncio.run(marketplace_accounts.autodelist_for_sales(created, session_factory=self.Session))
+        self.assertEqual(len(calls), 1)
+        self.assertIn("Connect Chrome first.", notes[created[0]])
 
 
 if __name__ == "__main__":

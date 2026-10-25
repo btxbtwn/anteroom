@@ -27,8 +27,9 @@ from vendoo_studio.services.listing_result import ListingProblem, failure, missi
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 from vendoo_studio.services.relay_client import RelayError
 from vendoo_studio.services.native_form import vendoo_form
-from vendoo_studio.services import user_settings
-from vendoo_studio.services.user_settings import get_package_dimensions
+from vendoo_studio.services import marketplace_schemas
+from vendoo_studio.services.direct_preflight import Context, gap, requirement, seeded_leaf
+from vendoo_studio.services.user_settings import get_ebay_listing_defaults, get_package_dimensions
 from vendoo_studio.services.vendoo_specifics import is_not_applicable
 
 _SKIP = {
@@ -37,24 +38,63 @@ _SKIP = {
     "shippingpolicyid", "paymentpolicyid", "returnspolicyid", "returnpolicyid",
     "shippingservice", "paymentmethod", "paypalemail", "acceptreturns",
     "returnpayedby", "returnwithin", "returnrefundmethod", "statusitem", "shipping",
+    # Not aspects: the condition has its own field, product identifiers go on the product.
+    "condition", "upc", "ean", "isbn", "epid",
 }
+# Studio's keys whose eBay aspect name the camelCase spelling does not give.
+_ASPECT_NAMES = {
+    "countryoforigin": "Country/Region of Manufacture", "countryofmanufacture": "Country/Region of Manufacture",
+    "countryregionofmanufacture": "Country/Region of Manufacture", "performanceactivity": "Performance/Activity",
+    "mpn": "MPN", "manufacturerpartnumber": "MPN",
+}
+_PRODUCT_IDS = {"upc": "upc", "ean": "ean", "isbn": "isbn"}
+TITLE_MAX = 80
+PRODUCT_DESCRIPTION_MAX = 4000
+LISTING_DESCRIPTION_MAX = 500000
+MAX_PHOTOS = 24
+MAX_ASPECT_VALUES = 30
+# Studio's conditions as eBay's apparel grades, which is where eBay keeps the
+# Pre-owned Excellent/Good/Fair ladder (condition IDs 2990/3000/3010).
 _CONDITION = (
-    (r"poor|major flaw", "USED_ACCEPTABLE"),
-    (r"fair|acceptable", "USED_ACCEPTABLE"),
-    (r"very good", "USED_VERY_GOOD"),
-    (r"excellent|like new|nwot|new without", "USED_EXCELLENT"),
-    (r"good|pre-owned|preowned|used", "USED_GOOD"),
+    (r"defect|imperfection", "NEW_WITH_DEFECTS"),
+    (r"new without|new other|nwot|without (tags|box)", "NEW_OTHER"),
     (r"new with tags|nwt|brand new|^new\b", "NEW"),
+    (r"excellent|like new", "PRE_OWNED_EXCELLENT"),
+    (r"fair|poor|major flaw|acceptable", "PRE_OWNED_FAIR"),
+    (r"good|pre-owned|preowned|used", "USED_EXCELLENT"),
 )
+CONDITION_IDS = {
+    "NEW": "1000", "NEW_OTHER": "1500", "NEW_WITH_DEFECTS": "1750", "LIKE_NEW": "2750",
+    "PRE_OWNED_EXCELLENT": "2990", "USED_EXCELLENT": "3000", "PRE_OWNED_FAIR": "3010",
+    "USED_VERY_GOOD": "4000", "USED_GOOD": "5000", "USED_ACCEPTABLE": "6000", "FOR_PARTS_OR_NOT_WORKING": "7000",
+}
 
 
 def ebay_condition(listing: dict) -> str:
     specifics = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
-    text = str(specifics.get("condition") or listing.get("condition") or "").lower()
+    text = str(specifics.get("condition") or listing.get("condition") or "").strip()
+    if text.upper() in CONDITION_IDS:
+        return text.upper()
     for pattern, code in _CONDITION:
-        if re.search(pattern, text) and not ("without" in text and code == "NEW"):
+        if re.search(pattern, text.lower()):
             return code
-    return "USED_GOOD"
+    return "USED_EXCELLENT"
+
+
+async def _check_condition(client: EbayClient, category_id: str, condition: str) -> None:
+    """Refuse a condition this category does not take, when eBay says which ones it does.
+
+    Without that answer the listing goes ahead and eBay's own refusal explains it.
+    """
+    try:
+        policy = await marketplace_schemas.ebay_conditions(client, category_id)
+    except EbayFailure:
+        return
+    allowed = {item["id"]: item["label"] for item in policy["conditions"]}
+    if allowed and CONDITION_IDS[condition] not in allowed:
+        names = ", ".join(name for name in allowed.values() if name)
+        message = f"eBay does not take this condition in this category. Choose one of: {names}."
+        raise ListingProblem(message, "missing_fields", fields=[{"field": "condition", "message": message}])
 
 
 def item_key(conversation_id: str) -> str:
@@ -72,6 +112,8 @@ def ebay_sku(listing: dict, binding: dict, conversation_id: str) -> str:
 
 
 def _aspect_name(key: str) -> str:
+    if _aspect_key(key) in _ASPECT_NAMES:
+        return _ASPECT_NAMES[_aspect_key(key)]
     if " " in key or (key[:1].isupper() and not re.search(r"[A-Z]", key[1:])):
         return key
     spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", key)
@@ -117,11 +159,77 @@ def ebay_aspects(listing: dict, form: dict) -> dict[str, list[str]]:
     nested = specifics.get("category_specifics")
     if isinstance(nested, dict):
         for key, value in nested.items():
-            add(str(key), value)
+            if _aspect_key(str(key)) not in _PRODUCT_IDS:
+                add(_ASPECT_NAMES.get(_aspect_key(str(key)), str(key)), value)
     add("Brand", (form.get("overrides") or {}).get("brand"))
     for name, keys in _GENERAL_ASPECTS.items():
         add(name, next((listing.get(key) for key in keys if str(listing.get(key) or "").strip()), None))
     return aspects
+
+
+def product_ids(listing: dict) -> dict[str, list[str]]:
+    """UPC, EAN and ISBN for eBay's product, where eBay reads them (not as aspects)."""
+    specifics = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    nested = specifics.get("category_specifics") if isinstance(specifics.get("category_specifics"), dict) else {}
+    out: dict[str, list[str]] = {}
+    for source in (specifics, nested, listing):
+        for key, value in source.items():
+            name = _PRODUCT_IDS.get(_aspect_key(str(key)))
+            if name and name not in out and str(value or "").strip():
+                # eBay's own words for an item with no identifier.
+                out[name] = ["Does not apply"] if is_not_applicable(value) else _aspect_values(value)
+    return out
+
+
+def ebay_title(listing: dict) -> str:
+    """eBay's 80 characters, cut at a whole word. The pre-flight says when it is cut."""
+    text = " ".join(str(listing.get("title") or "").split())
+    if len(text) <= TITLE_MAX:
+        return text
+    cut = text[:TITLE_MAX + 1]
+    return (cut.rsplit(" ", 1)[0] if " " in cut else text[:TITLE_MAX]).rstrip(" -,|/")
+
+
+def _short_description(text: str) -> str:
+    """The product's copy of the description (eBay keeps 4000 characters there; the listing keeps all of it)."""
+    if len(text) <= PRODUCT_DESCRIPTION_MAX:
+        return text
+    cut = text[:PRODUCT_DESCRIPTION_MAX]
+    return cut.rsplit(" ", 1)[0] if " " in cut else cut
+
+
+# Trading-card leaves, where eBay grades a card with condition descriptors.
+CARD_CATEGORIES = frozenset({"183050", "183454", "261328"})
+_GRADERS = {"psa": "275010", "bccg": "275011", "bvg": "275012", "bgs": "275013", "csg": "275014", "cgc": "275015",
+            "sgc": "275016", "ksa": "275017", "gma": "275018", "hga": "275019", "isa": "2750110", "pca": "2750111",
+            "gsg": "2750112", "pgs": "2750113", "mnt": "2750114", "tag": "2750115", "rare": "2750116", "rcg": "2750117",
+            "other": "2750123"}
+# Grade 10 is 275020, 9.5 is 275021 … 1 is 2750218.
+_GRADES = {format(10 - step / 2, "g"): f"27502{step}" for step in range(19)} | {"authentic": "2750219"}
+_CARD_CONDITIONS = {"near mint or better": "400010", "near mint": "400010", "excellent": "400011", "very good": "400012",
+                    "poor": "400013", "lightly played": "400015", "moderately played": "400016", "heavily played": "400017"}
+
+
+def card_condition(listing: dict, category_id: str) -> tuple[str, list[dict]] | None:
+    """eBay's condition and descriptors for a trading card, or None outside the card categories."""
+    if category_id not in CARD_CATEGORIES:
+        return None
+    specifics = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    nested = specifics.get("category_specifics") if isinstance(specifics.get("category_specifics"), dict) else {}
+    said = {_aspect_key(str(key)): str(value or "").strip() for source in (specifics, nested) for key, value in source.items()
+            if not isinstance(value, (dict, list))}
+    grader = _GRADERS.get(_aspect_key(said.get("professionalgrader", "")))
+    grade = _GRADES.get(said.get("grade", "").lower().replace("gem mint", "").strip())
+    if grader and grade:
+        descriptors = [{"name": "27501", "values": [grader]}, {"name": "27502", "values": [grade]}]
+        if said.get("certificationnumber"):
+            descriptors.append({"name": "27503", "additionalInfo": said["certificationnumber"][:30]})
+        return "LIKE_NEW", descriptors
+    ungraded = _CARD_CONDITIONS.get(said.get("cardcondition", "").lower())
+    if ungraded:
+        return "USED_VERY_GOOD", [{"name": "40001", "values": [ungraded]}]
+    raise missing("eBay needs the card's condition (Near Mint or Better, Excellent, Very Good or Poor), "
+                  "or its professional grader and grade.", "ebay_specifics.category_specifics.Card Condition")
 
 
 def ebay_category_id(listing: dict) -> str:
@@ -144,9 +252,9 @@ def package_ounces(listing: dict, form: dict) -> str:
     if ounces <= 0:
         ounces = total((form.get("overrides") or {}).get("weight") or {})
     if ounces <= 0:
-        ounces = 16
+        raise missing("Enter the packed weight before listing on eBay.", "weight_oz")
     if ounces > 2400:
-        raise ValueError("Enter a packaged weight of at most 2400 ounces.")
+        raise missing("Enter a packaged weight of at most 2400 ounces.", "weight_oz")
     return str(int(ounces)) if ounces == int(ounces) else f"{ounces:.2f}".rstrip("0").rstrip(".")
 
 
@@ -225,103 +333,146 @@ def _published(offer: dict, record: Callable[[dict], None]) -> dict | None:
     return None
 
 
-_POLICY_LABELS = {"fulfillment": "shipping", "payment": "payment", "return": "return"}
-_DEFAULTS_HINT = "Choose the one new listings use in Settings → Connections → eBay, then List again."
+POLICY_LABELS = {"fulfillment": "shipping", "payment": "payment", "return": "return"}
 
 
 async def _policies(client: EbayClient, kind: str) -> list[dict]:
     body = await client.request("GET", f"/sell/account/v1/{kind}_policy", params={"marketplace_id": "EBAY_US"})
-    return [policy for policy in body.get(f"{kind}Policies", []) if policy.get("marketplaceId") in (None, "EBAY_US")]
+    return [{"id": str(policy[f"{kind}PolicyId"]), "title": str(policy.get("name") or "Untitled")[:200]}
+            for policy in body.get(f"{kind}Policies", [])
+            if policy.get("marketplaceId") in (None, "EBAY_US") and policy.get(f"{kind}PolicyId")]
 
 
 async def _locations(client: EbayClient) -> list[dict]:
-    body = await client.request("GET", "/sell/inventory/v1/location", params={"limit": "20"})
-    return [item for item in body.get("locations", []) if item.get("merchantLocationStatus") == "ENABLED"]
+    body = await client.request("GET", "/sell/inventory/v1/location", params={"limit": "100"})
+    return [{"id": str(item["merchantLocationKey"]), "title": str(item.get("name") or item["merchantLocationKey"])[:200]}
+            for item in body.get("locations", []) if item.get("merchantLocationStatus") == "ENABLED" and item.get("merchantLocationKey")]
 
 
-def _choose(ids: list[str], chosen: str | None, what: str) -> str:
-    """The account's only option, or the one the seller chose in Settings."""
+async def listing_profiles(client: EbayClient | None = None) -> dict[str, list[dict]]:
+    """The account's business policies and enabled locations, names and IDs only."""
+    client = client or await EbayClient.connect()
+    return {"fulfillment": await _policies(client, "fulfillment"), "payment": await _policies(client, "payment"),
+            "return": await _policies(client, "return"), "locations": await _locations(client)}
+
+
+def _pick(options: list[dict], chosen: str | None, kind: str, setting: str) -> str:
+    """The seller's stored choice, else the account's only one. Several and no choice: ask."""
+    ids = [option["id"] for option in options]
+    if chosen in ids:
+        return chosen
     if len(ids) == 1:
         return ids[0]
     if not ids:
-        raise ValueError(f"eBay has no {what} on this account. Add one on eBay, then List again.")
-    if chosen in ids:
-        return chosen
-    raise ListingProblem(f"eBay has {len(ids)} {what}s on this account. {_DEFAULTS_HINT}")
+        raise missing(f"Add an eBay {kind} in eBay before listing.", f"settings.ebay.{setting}")
+    plural = kind.replace("policy", "policies").replace("location", "locations")
+    raise missing(f"This eBay account has {len(ids)} {plural}. Choose the one new listings use in Settings → Connections.",
+                  f"settings.ebay.{setting}")
 
 
-async def _only(client: EbayClient, kind: str) -> str:
-    ids = [str(policy[f"{kind}PolicyId"]) for policy in await _policies(client, kind)]
-    chosen = user_settings.get_ebay_listing_defaults().get(f"{kind}_policy_id")
-    return _choose(ids, chosen, f"{_POLICY_LABELS[kind]} policy")
+async def listing_choices(client: EbayClient) -> dict[str, str]:
+    profiles = await listing_profiles(client)
+    defaults = get_ebay_listing_defaults()
+    return {"fulfillmentPolicyId": _pick(profiles["fulfillment"], defaults.get("fulfillment_policy_id"), "shipping policy", "fulfillment_policy_id"),
+            "paymentPolicyId": _pick(profiles["payment"], defaults.get("payment_policy_id"), "payment policy", "payment_policy_id"),
+            "returnPolicyId": _pick(profiles["return"], defaults.get("return_policy_id"), "return policy", "return_policy_id"),
+            "merchantLocationKey": _pick(profiles["locations"], defaults.get("merchant_location_key"),
+                                         "inventory location", "merchant_location_key")}
 
 
-async def _location(client: EbayClient) -> str:
-    keys = [str(item["merchantLocationKey"]) for item in await _locations(client)]
-    chosen = user_settings.get_ebay_listing_defaults().get("merchant_location_key")
-    return _choose(keys, chosen, "enabled inventory location")
-
-
-async def listing_options() -> dict[str, list[dict]]:
-    """Policy and location names for Settings; nothing else from the account."""
-    client = await EbayClient.connect()
-    out: dict[str, list[dict]] = {}
-    for kind in ("fulfillment", "payment", "return"):
-        out[kind] = [{"id": str(p[f"{kind}PolicyId"]), "name": str(p.get("name") or "Untitled")[:200]}
-                     for p in await _policies(client, kind)]
-    out["location"] = [{"id": str(item["merchantLocationKey"]),
-                        "name": str(item.get("name") or item["merchantLocationKey"])[:200]}
-                       for item in await _locations(client)]
-    return out
+def best_offer_terms(form: dict, price: str) -> dict:
+    """Best Offer with the Vendoo path's floors: accept at list - $2, decline under list - $4."""
+    fixed = ((form.get("specifics") or {}).get("pricingFormatDetails") or {}).get("fixedPrice") or {}
+    terms: dict = {"bestOfferEnabled": True}
+    for key, name in (("acceptOffersOfAtLeast", "autoAcceptPrice"), ("declineOffersLowerThan", "autoDeclinePrice")):
+        try:
+            amount = Decimal(str(fixed.get(key) or ""))
+        except ArithmeticError:
+            continue
+        if 0 < amount < Decimal(price):
+            terms[name] = {"value": format(amount.quantize(Decimal("0.01")), "f"), "currency": "USD"}
+    return terms
 
 
 async def _complete_aspects(client: EbayClient, category_id: str, aspects: dict[str, list[str]]) -> dict[str, list[str]]:
-    """The listing's aspects under eBay's own names and values for this category.
+    """The listing's aspects, matched against eBay's own for this leaf (``marketplace_schemas``).
 
-    Names and choices match eBay's case-insensitively. Every required aspect
-    still missing is reported at once, as fields the seller (or chat) can fill.
+    Only eBay's aspects are sent, under its exact names: a value is matched
+    loosely to eBay's spelling, a multi-value aspect is split into its values,
+    and a single-value one keeps its first. Every required aspect still missing
+    or invalid is reported at once, under eBay's name, as fields the seller (or
+    chat) can fill.
     """
-    catalog = await client.request(
-        "GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category",
-        params={"category_id": category_id}, app=True,
-    )
-    completed = dict(aspects)
+    try:
+        schema = await marketplace_schemas.ebay_aspects(client, category_id)
+    except EbayFailure as exc:
+        if exc.code == "rejected" and exc.status in {400, 404}:
+            raise missing("eBay does not list items in that category. Choose a current, most specific eBay category.",
+                          "marketplace_category_ids.ebay") from exc
+        raise
+    given = {_aspect_key(name): values for name, values in aspects.items()}
+    completed: dict[str, list[str]] = {}
     problems: list[tuple[str, str]] = []
-    for aspect in catalog.get("aspects", []):
-        name = aspect.get("localizedAspectName") or ""
-        if not name:
-            continue
-        allowed = [item.get("localizedValue") for item in aspect.get("aspectValues") or [] if item.get("localizedValue")]
-        constraint = aspect.get("aspectConstraint") or {}
-        required = bool(constraint.get("aspectRequired"))
-        same = next((key for key in completed if key != name and _aspect_key(key) == _aspect_key(name)), None)
-        if same and not completed.get(name):
-            completed[name] = completed.pop(same)
-        values = completed.get(name) or []
-        if constraint.get("aspectMode") == "SELECTION_ONLY" and values:
-            choices = {str(choice).casefold(): choice for choice in allowed}
-            matched = [choices.get(str(value).casefold()) for value in values]
-            if all(matched):
-                values = matched
-            elif required:
-                problems.append((name, f"Choose a valid eBay value for {name}."))
+    for field in schema:
+        name = field["name"]
+        allowed = [value["label"] for value in field["values"]]
+        values = list(given.get(_aspect_key(name)) or [])
+        values = _split_values(values, allowed)[:MAX_ASPECT_VALUES] if field["multi"] else values[:1]
+        if field["mode"] == "selection" and values:
+            matched = [_choice(value, allowed) for value in values]
+            if not all(matched) and field["required"]:
+                problems.append((name, f"Choose one of eBay's values for {name}."))
                 continue
+            # eBay would refuse the whole listing over an optional value it does not offer.
+            values = [value for value in matched if value]
+        limit = field.get("max_length")
+        if limit and any(len(value) > limit for value in values):
+            if field["required"]:
+                problems.append((name, f"eBay takes at most {limit} characters for {name}."))
+                continue
+            values = [value for value in values if len(value) <= limit]
+        if field["required"] and not values:
+            unknown = next((choice for choice in allowed if choice.casefold() == "does not apply"), None)
+            if unknown:
+                values = [unknown]
             else:
-                # eBay would refuse the whole listing over an optional value it does not offer.
-                values = [value for value in matched if value]
-            if values:
-                completed[name] = values
-            else:
-                completed.pop(name, None)
-        if required and not values and "Does Not Apply" in allowed:
-            values = completed[name] = ["Does Not Apply"]
-        if required and not values:
-            problems.append((name, f"eBay needs {name}."))
+                problems.append((name, f"eBay needs {name}."))
+                continue
+        if values:
+            completed[name] = values
     if problems:
         raise ListingProblem(" ".join(message for _, message in problems), "missing_fields",
                              fields=[{"field": f"ebay_specifics.category_specifics.{name}", "message": message}
                                      for name, message in problems])
     return completed
+
+
+def _loose(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text).casefold())
+
+
+def _choice(value: str, allowed: list[str]) -> str | None:
+    """eBay's own spelling of the value: same letters, then singular, then the one choice that contains it."""
+    wanted = _loose(value)
+    if not wanted:
+        return None
+    for same in (lambda choice: _loose(choice) == wanted, lambda choice: _loose(choice).rstrip("s") == wanted.rstrip("s")):
+        hit = next((choice for choice in allowed if same(choice)), None)
+        if hit:
+            return hit
+    near = [choice for choice in allowed if wanted in _loose(choice) or (len(_loose(choice)) > 3 and _loose(choice) in wanted)]
+    return near[0] if len(near) == 1 else None
+
+
+def _split_values(values: list[str], allowed: list[str]) -> list[str]:
+    """One value per item for a multi-value aspect: "Floral, Spring" is two themes unless eBay offers it whole."""
+    out: list[str] = []
+    for value in values:
+        parts = [value] if (allowed and _choice(value, allowed)) else re.split(r"\s*(?:[,;/|]|\s&\s|\sand\s)\s*", value)
+        for part in parts:
+            if part.strip() and part.strip().casefold() not in {item.casefold() for item in out}:
+                out.append(part.strip())
+    return out
 
 
 def _photo_upload(photo) -> dict:
@@ -381,17 +532,48 @@ def _listing_url(listing_id: str) -> str:
 
 
 def _listing_fields(snapshot: dict, form: dict) -> dict:
-    title = str(snapshot.get("title") or "").strip()[:80]
-    description = str(snapshot.get("description") or "").strip()[:4000]
+    title = ebay_title(snapshot)
+    description = str(snapshot.get("description") or "").strip()
     if not title or not description:
         raise missing("Add an eBay title and description before listing.", *[name for name, value in (("title", title), ("description", description)) if not value])
-    quantity = int(snapshot.get("quantity") or 1)
+    if len(description) > LISTING_DESCRIPTION_MAX:
+        raise missing("eBay descriptions are at most 500,000 characters. Shorten it.", "description")
+    try:
+        quantity = int(str(snapshot.get("quantity") or 1).strip())
+    except ValueError:
+        quantity = 0
     if not 1 <= quantity <= 10000:
         raise missing("Enter an eBay quantity from 1 to 10000.", "quantity")
-    return {"title": title, "description": description, "quantity": quantity,
-            "price": dollars(money_cents(str(snapshot.get("price")))), "category_id": ebay_category_id(snapshot),
-            "condition": ebay_condition(snapshot),
+    try:
+        price = dollars(money_cents(str(snapshot.get("price"))))
+    except (ValueError, ArithmeticError) as exc:
+        raise missing("Set a positive eBay price before listing.", "price") from exc
+    category_id = ebay_category_id(snapshot)
+    condition, descriptors = card_condition(snapshot, category_id) or (ebay_condition(snapshot), [])
+    return {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
+            "condition": condition, "condition_descriptors": descriptors,
             "condition_description": str((form.get("specifics") or {}).get("conditionDescription") or EBAY_CONDITION_DESCRIPTION)}
+
+
+@requirement("ebay")
+def requirements(snapshot: dict, context: Context) -> list[dict]:
+    """What eBay would refuse, read from the listing alone. Aspects, policies and conditions are checked live at List."""
+    form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
+    found: list[dict] = []
+    for check in (lambda: _listing_fields(snapshot, form), lambda: package_ounces(snapshot, form)):
+        try:
+            check()
+        except ListingProblem as exc:
+            found += [gap(item["field"], item["message"]) for item in exc.fields or []]
+        except ValueError as exc:
+            found.append(gap("listing", str(exc)))
+    title = " ".join(str(snapshot.get("title") or "").split())
+    if len(title) > TITLE_MAX:
+        found.append(gap("title", f"eBay titles are at most {TITLE_MAX} characters, so eBay gets: {ebay_title(snapshot)}", blocking=False))
+    category = str((snapshot.get("marketplace_category_ids") or {}).get("ebay") or "")
+    if seeded_leaf(context.db, "ebay", category) is False:
+        found.append(gap("marketplace_category_ids.ebay", "That eBay category has subcategories. Choose the most specific one."))
+    return found
 
 
 async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict) -> dict:
@@ -418,23 +600,35 @@ async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict) 
     return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}
 
 
+def _dimensions(snapshot: dict) -> dict:
+    """The listing's own package (Item Details), else the box in Settings."""
+    sides = re.findall(r"\d+(?:\.\d+)?", str(snapshot.get("package_dimensions_in") or ""))
+    if len(sides) == 3 and min(float(side) for side in sides) > 0:
+        return {"length": float(sides[0]), "width": float(sides[1]), "height": float(sides[2]), "unit": "INCH"}
+    return {**get_package_dimensions(), "unit": "INCH"}
+
+
 def _inventory_body(fields: dict, aspects: dict, image_urls: list[str], snapshot: dict, form: dict) -> dict:
     weight = Decimal(package_ounces(snapshot, form))
-    return {
+    body = {
         "condition": fields["condition"],
         "conditionDescription": fields["condition_description"],
         "availability": {"shipToLocationAvailability": {"quantity": fields["quantity"]}},
-        "product": {"title": fields["title"], "description": fields["description"], "imageUrls": image_urls, "aspects": aspects},
+        "product": {"title": fields["title"], "description": _short_description(fields["description"]),
+                    "imageUrls": image_urls, "aspects": aspects, **product_ids(snapshot)},
         "packageWeightAndSize": {
             "weight": {"value": format(weight, "f"), "unit": "OUNCE"},
-            "dimensions": {**get_package_dimensions(), "unit": "INCH"},
+            "dimensions": _dimensions(snapshot),
         },
     }
+    if fields.get("condition_descriptors"):
+        body["conditionDescriptors"] = fields["condition_descriptors"]
+    return body
 
 
 def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) -> dict:
     return {
-        "sku": sku, "marketplaceId": "EBAY_US", "format": "FIXED_PRICE",
+        "sku": sku, "marketplaceId": "EBAY_US", "format": "FIXED_PRICE", "listingDuration": "GTC",
         "includeCatalogProductDetails": False, "categoryId": fields["category_id"],
         "availableQuantity": fields["quantity"],
         "pricingSummary": {"price": {"value": fields["price"], "currency": "USD"}},
@@ -453,8 +647,8 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
     try:
         if not active():
             raise ValueError("The eBay update stopped. Check its result before trying again.")
-        if not 1 <= len(photos) <= 12:
-            raise missing("Choose between one and twelve eBay photos.", "photos")
+        if not 1 <= len(photos) <= MAX_PHOTOS:
+            raise missing(f"Choose between one and {MAX_PHOTOS} eBay photos.", "photos")
         client = await EbayClient.connect()
         form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
@@ -469,6 +663,7 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         if offer.get("status") != "PUBLISHED" or current_id != listing_id:
             raise ValueError("This eBay offer is not the live listing. Check eBay before updating it.")
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
+        await _check_condition(client, fields["category_id"], fields["condition"])
         sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
         if not sku:
             raise ValueError("eBay did not return this listing's SKU. Check eBay before updating it.")
@@ -502,13 +697,14 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             raise ValueError("Confirm listing on eBay.")
         if not active():
             raise ValueError("The eBay listing stopped before it started.")
-        if not 1 <= len(photos) <= 12:
-            raise missing("Choose between one and twelve eBay photos.", "photos")
+        if not 1 <= len(photos) <= MAX_PHOTOS:
+            raise missing(f"Choose between one and {MAX_PHOTOS} eBay photos.", "photos")
         client = await EbayClient.connect()
         form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
-        fulfillment, payment, returns, location = await _only(client, "fulfillment"), await _only(client, "payment"), await _only(client, "return"), await _location(client)
+        await _check_condition(client, fields["category_id"], fields["condition"])
+        choices = await listing_choices(client)
         sku = ebay_sku(snapshot, binding, conversation_id)
         if not binding.get("ebay_inventory_written") and sku != item_key(conversation_id):
             # The seller's own SKU may already name another item on eBay. Never overwrite it.
@@ -525,9 +721,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         record({"ebay_sku": sku, "ebay_inventory_written": True})
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
                              body=_inventory_body(fields, aspects, image_urls, snapshot, form))
-        body = _offer_body(sku, fields, location, {
-            "fulfillmentPolicyId": fulfillment, "paymentPolicyId": payment, "returnPolicyId": returns,
-            "bestOfferTerms": {"bestOfferEnabled": True},
+        body = _offer_body(sku, fields, choices["merchantLocationKey"], {
+            "fulfillmentPolicyId": choices["fulfillmentPolicyId"], "paymentPolicyId": choices["paymentPolicyId"],
+            "returnPolicyId": choices["returnPolicyId"], "bestOfferTerms": best_offer_terms(form, fields["price"]),
         })
         offer_id = str(binding.get("ebay_offer_id") or "")
         if offer_id:
@@ -578,7 +774,7 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
 
 
 async def _check_update(client: EbayClient, binding: dict, snapshot: dict) -> dict:
-    title = str(snapshot.get("title") or "").strip()[:80]
+    title = ebay_title(snapshot)
     expected = dollars(money_cents(str(snapshot.get("price"))))
     offer_id = str(binding.get("ebay_offer_id") or "")
     listing_id = str(binding.get("listing_id") or binding.get("ebay_listing_id") or "")

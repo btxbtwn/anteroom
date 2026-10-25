@@ -50,6 +50,22 @@ class SlimPayloadTest(unittest.TestCase):
             "statuses": {"ebay": "LISTED"},
         })
 
+    def test_direct_listing_status_is_kept(self):
+        payload = slim_vendoo_draft_payload(
+            item={
+                "listings": {"ebay": {"status": {"notListed": True}, "overrides": {"price": "10"}}},
+                "externalListings": {
+                    "poshmark": {"status": {"listed": True}, "listingURL": "https://poshmark.com/listing/x"},
+                },
+            },
+        )
+        self.assertEqual(payload, {
+            "item": {
+                "listings": {"ebay": {"status": {"notListed": True}}},
+                "externalListings": {"poshmark": {"status": {"listed": True}}},
+            },
+        })
+
     def test_an_item_with_nothing_to_report_says_nothing(self):
         payload = slim_vendoo_draft_payload(item={"generalDetails": {"title": "Tee"}})
         self.assertEqual(payload, {})

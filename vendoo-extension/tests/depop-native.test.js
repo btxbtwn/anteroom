@@ -3,6 +3,46 @@ const assert = require('node:assert/strict');
 const { loadWorker, call, reply } = require('./worker-context');
 const DRAFT = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
 const listing = { title: 'Test', description: 'Private draft', price: 12 };
+// Depop's taxonomy in the shape its taxonomy guide documents (api/v3/attributes).
+const ATTRIBUTES = {
+  department: [{ id: 'menswear' }, { id: 'womenswear' }, { id: 'kidswear' }, { id: 'everything-else' }],
+  group: [{ id: 'tops', department: ['menswear', 'womenswear', 'kidswear'], product_types: [
+    { id: 'tshirts', attribute_ids: ['material', 'occasion', 'body-fit'] }] },
+  { id: 'bottoms', department: ['menswear', 'womenswear', 'kidswear'], product_types: [{ id: 'jeans', attribute_ids: ['bottom-fit', 'material'] }] },
+  { id: 'dresses', department: ['womenswear'], product_types: [{ id: 'dresses', attribute_ids: [] }] }],
+  generic_attributes: [
+    { id: 'material', max_selection: 3, is_mandatory: false, attributes: [{ id: 'cotton', name_i18n: { 'en-US': 'Cotton' } }, { id: 'polyester', name_i18n: { 'en-US': 'Polyester' } }] },
+    { id: 'occasion', max_selection: 1, is_mandatory: false, attributes: [{ id: 'casual', name_i18n: { 'en-US': 'Casual' } }, { id: 'party', name_i18n: { 'en-US': 'Party' } }] },
+    { id: 'body-fit', max_selection: 1, is_mandatory: false, attributes: [{ id: 'petite', name_i18n: { 'en-US': 'Petite' } }, { id: 'plus-size', name_i18n: { 'en-US': 'Plus size' } }] },
+    { id: 'bottom-fit', max_selection: 1, is_mandatory: true, attributes: [{ id: 'skinny', name_i18n: { 'en-US': 'Skinny' } }] }],
+  category_size_mapping: [{ department: 'menswear', group: 'tops', product_type: 'tshirts', size_set_by_region: { US: 12, GB: 13 } },
+    { department: 'womenswear', group: 'tops', product_type: 'tshirts', size_set_by_region: { US: 22 } },
+    { department: 'kidswear', group: 'tops', product_type: 'tshirts', size_set_by_region: { US: 32 } },
+    { department: 'womenswear', group: 'dresses', product_type: 'dresses' }],
+  size_sets: [{ id: 12, sizes: [{ id: 4, name_i18n: { 'en-US': 'M' } }, { id: 6, name_i18n: { 'en-US': 'XL' } }, { id: 7, name_i18n: { 'en-US': 'XXL' } }] },
+    { id: 22, sizes: [{ id: 3, name_i18n: { 'en-US': 'S' } }, { id: 4, name_i18n: { 'en-US': 'M' } }] },
+    { id: 32, sizes: [{ id: 14, name_i18n: { 'en-US': '12 years' } }, { id: 15, name_i18n: { 'en-US': 'XL' } }] }],
+  brand: [{ id: 'nike', name: 'Nike' }, { id: 'other', name: 'Other' }],
+};
+const FULL = { ...listing, brand: 'Nike', size: '2XL', condition: 'Pre-Owned - Good', primaryColor: 'Multicolor', tags: ['vintage tee', 'Y2K'],
+  depop_specifics: { parcelSize: 'Medium', material: ['Cotton'], occasion: ['Casual', 'Party'] },
+  form: { overrides: { condition: 'used_good', brand: 'Nike', categoryV2: { id: 'menswear_tshirts', path: ['menswear', 'menswear_tops', 'menswear_tshirts'] } },
+    specifics: { style: ['casual'] }, aspects: {}, ships_from_zip: '70115' } };
+
+// Answers Depop's catalog and the seller's shipping reads; other requests go on.
+function withCatalog(c, { attributes = [200, ATTRIBUTES], addresses = [200, [{ id: 41, postal_code: '70115' }, { id: 42, postal_code: '10001' }]],
+  providers = [200, [{ id: 'USPS', parcelSizes: [{ id: 'small', title: 'Extra small' }, { id: 'medium', title: 'Medium' }] }]] } = {}) {
+  const original = c.fetch;
+  const reads = [];
+  c.fetch = async (url, options = {}) => {
+    const { hostname, pathname } = new URL(url);
+    if (hostname === 'api.depop.com' && pathname === '/api/v3/attributes/') { reads.push('attributes'); return reply(...attributes); }
+    if (pathname === '/api/v1/addresses/') { reads.push('addresses'); return reply(...addresses); }
+    if (pathname === '/api/v1/shipping-providers/') { reads.push('providers'); return reply(...providers); }
+    return original(url, options);
+  };
+  return reads;
+}
 
 function page() {
   const c = loadWorker();
@@ -38,6 +78,22 @@ test('Depop draft writes the same colour, condition, and option codes Vendoo wou
   assert.deepEqual(body.style, ['casual', 'retro']);
   assert.deepEqual(body.age, ['modern']);
   assert.equal(body.source, undefined);
+});
+
+test('Depop keeps its own condition slugs and maps Studio labels the way Vendoo does', () => {
+  const c = loadWorker();
+  for (const slug of ['brand_new', 'used_like_new', 'used_excellent', 'used_good', 'used_fair']) assert.equal(c.depopCondition(slug), slug);
+  const labels = { 'New With Tags/Box': 'brand_new', 'New Without Tags/Box': 'used_like_new', 'New With Imperfections': 'used_good',
+    'Pre-Owned - Excellent': 'used_excellent', 'Pre-Owned - Good': 'used_good', 'Pre-Owned - Fair': 'used_fair',
+    'Poor (Major flaws)': 'used_fair', 'Like New': 'used_like_new', New: 'brand_new', '': '' };
+  for (const [label, slug] of Object.entries(labels)) assert.equal(c.depopCondition(label), slug, label);
+});
+
+test('Depop draft sends the slug Studio already chose', async () => {
+  const { c, requests, payload } = page();
+  payload.listing = { ...listing, condition: 'New Without Tags/Box', form: { overrides: { condition: 'used_like_new' }, specifics: {} } };
+  await c.depopApiAction('save', payload);
+  assert.equal(JSON.parse(requests.find(request => request.method === 'PUT').body).condition, 'used_like_new');
 });
 
 test('Depop draft updates preserve photos and never call the publish endpoint', async () => {
@@ -121,7 +177,8 @@ function newDraft({ photoAnswer } = {}) {
     }
     return reply(200, { id: 555, description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [] });
   };
-  const msg = { job_id: 'job-1', payload: { action: 'save_draft', operation_id: 'abc123', listing,
+  withCatalog(c);
+  const msg = { job_id: 'job-1', payload: { action: 'save_draft', operation_id: 'abc123', listing: FULL,
     photos: [{ id: 'p1', mime_type: 'image/jpeg' }] } };
   return { c, requests, msg };
 }
@@ -172,7 +229,7 @@ test('a deleted Depop draft is replaced once and the missing link is not kept', 
   const created = 'https://www.depop.com/sellinghub/drafts/edit/newdraft1/';
   const { c, requests, msg } = newDraft();
   msg.payload.draft_url = gone;
-  const kept = { id: 'newdraft1', description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 9 }] };
+  let kept = { id: 'newdraft1', description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 9 }] };
   c.fetch = async (url, options = {}) => {
     const { pathname } = new URL(url);
     requests.push({ method: options.method, pathname });
@@ -180,8 +237,13 @@ test('a deleted Depop draft is replaced once and the missing link is not kept', 
       return reply(404, { message: 'Could not find draft with id: 123456' });
     }
     if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/') return reply(201, { id: 'newdraft1' });
+    if (options.method === 'PUT') {
+      const body = JSON.parse(options.body);
+      kept = { ...kept, ...body, pictures: (body.pictures || []).map(id => ({ id })) };
+    }
     return reply(200, kept);
   };
+  withCatalog(c);
   const result = await c.runDepopNative(msg);
   assert.equal(result.ok, true);
   assert.equal(result.draft_url, created);
@@ -202,7 +264,8 @@ test('Depop updates and reads an existing private draft without any tab or page 
   c.chrome.tabs = new Proxy({}, { get: () => () => { assert.fail('No marketplace tabs'); } });
   c.chrome.scripting = { executeScript: () => { assert.fail('No page execution'); } };
   c.chrome.storage.local.get = async () => ({});
-  const result = await c.runDepopNative({ payload: { ...payload, operation_id: 'abc123' } });
+  withCatalog(c);
+  const result = await c.runDepopNative({ payload: { ...payload, listing: FULL, operation_id: 'abc123' } });
   assert.equal(result.ok, true);
   assert.equal(result.state, 'draft');
 });

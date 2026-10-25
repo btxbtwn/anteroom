@@ -6,7 +6,6 @@ import { StatusDot } from "../StatusDot";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
 import type { DirectAccountStatus, DirectMarketplace } from "../../api/directConnections";
-import type { EbayListingDefaults, EbayListingOptions } from "../../api/ebay";
 import {
   EXTENSION_SESSION_NAMES,
   chromeSessionPresentation,
@@ -227,62 +226,29 @@ export function DirectConnectionRow({
   );
 }
 
-const EBAY_DEFAULT_CHOICES: { kind: keyof EbayListingOptions; key: keyof EbayListingDefaults; label: string }[] = [
-  { kind: "fulfillment", key: "fulfillment_policy_id", label: "Shipping policy" },
-  { kind: "payment", key: "payment_policy_id", label: "Payment policy" },
-  { kind: "return", key: "return_policy_id", label: "Return policy" },
-  { kind: "location", key: "merchant_location_key", label: "Location" },
-];
-
-/** The eBay policies new listings use, chosen once when the account has more than one. */
-function EbayListingDefaults() {
-  const queryClient = useQueryClient();
-  const options = useQuery({ queryKey: ["ebay-listing-options"], queryFn: () => api.ebay.listingOptions(), staleTime: 60_000, retry: false });
-  const defaults = useQuery({ queryKey: ["ebay-listing-defaults"], queryFn: () => api.ebay.listingDefaults(), retry: false });
-  const save = useMutation({
-    mutationFn: (next: EbayListingDefaults) => api.ebay.setListingDefaults(next),
-    onSuccess: (data) => queryClient.setQueryData(["ebay-listing-defaults"], data),
-  });
-  const choices = EBAY_DEFAULT_CHOICES.filter(({ kind }) => (options.data?.[kind].length ?? 0) > 1);
-  if (options.isSuccess && !choices.length) return null;
-  const disabled = !options.data || save.isPending;
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        {choices.map(({ kind, key, label }) => {
-          const items = options.data?.[kind] ?? [];
-          return (
-            <Select key={key} value={defaults.data?.[key] || null} disabled={disabled}
-              onValueChange={(value) => save.mutate({ ...defaults.data, [key]: value || "" })}
-              items={items.map((option) => ({ value: option.id, label: option.name }))}>
-              <SelectTrigger size="compact" className="w-52" aria-label={`Default eBay ${label.toLowerCase()}`}><SelectValue placeholder={label} /></SelectTrigger>
-              <SelectPopup>{items.map((option) => <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>)}</SelectPopup>
-            </Select>
-          );
-        })}
-        {save.isPending ? <Spinner /> : null}
-      </div>
-      {options.error || save.error ? <SettingsNote tone="error">{(save.error || options.error)?.message}</SettingsNote>
-        : <SettingsNote>Your eBay account has more than one of these. New eBay listings use the ones chosen here.</SettingsNote>}
-    </div>
-  );
-}
-
 /** The shop profiles every new Etsy listing uses, chosen once instead of per listing. */
 function EtsyListingDefaults() {
   const queryClient = useQueryClient();
   const profiles = useQuery({ queryKey: ["etsy-listing-profiles"], queryFn: () => api.etsy.listingProfiles(), staleTime: 60_000, retry: false });
   const defaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(), retry: false });
   const save = useMutation({
-    mutationFn: (next: { shipping: string; processing: string }) => api.etsy.setListingDefaults(next.shipping, next.processing),
+    mutationFn: (next: { shipping: string; processing: string; returns: string }) =>
+      api.etsy.setListingDefaults(next.shipping, next.processing, next.returns),
     onSuccess: (data) => queryClient.setQueryData(["etsy-listing-defaults"], data),
   });
   const shipping = defaults.data?.shipping_profile_id ?? "";
   const processing = defaults.data?.readiness_state_id ?? "";
-  const choose = (next: { shipping?: string; processing?: string }) => {
-    const value = { shipping: next.shipping ?? shipping, processing: next.processing ?? processing };
-    if (value.shipping && value.processing) save.mutate(value);
-    else queryClient.setQueryData(["etsy-listing-defaults"], { shipping_profile_id: value.shipping || undefined, readiness_state_id: value.processing || undefined });
+  const returns = defaults.data?.return_policy_id ?? "";
+  const choose = (next: { shipping?: string; processing?: string; returns?: string }) => {
+    const value = {
+      shipping: next.shipping ?? shipping, processing: next.processing ?? processing, returns: next.returns ?? returns,
+    };
+    if (value.shipping && value.processing && value.returns) save.mutate(value);
+    else queryClient.setQueryData(["etsy-listing-defaults"], {
+      shipping_profile_id: value.shipping || undefined,
+      readiness_state_id: value.processing || undefined,
+      return_policy_id: value.returns || undefined,
+    });
   };
   const disabled = !profiles.data || save.isPending;
   return (
@@ -298,10 +264,61 @@ function EtsyListingDefaults() {
           <SelectTrigger size="compact" className="w-52" aria-label="Default Etsy processing profile"><SelectValue placeholder="Processing profile" /></SelectTrigger>
           <SelectPopup>{profiles.data?.processing.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.title}</SelectItem>)}</SelectPopup>
         </Select>
+        <Select value={returns || null} onValueChange={(value) => choose({ returns: value || "" })} disabled={disabled}
+          items={profiles.data?.returns.map((profile) => ({ value: profile.id, label: profile.title }))}>
+          <SelectTrigger size="compact" className="w-52" aria-label="Default Etsy return policy"><SelectValue placeholder="Return policy" /></SelectTrigger>
+          <SelectPopup>{profiles.data?.returns.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.title}</SelectItem>)}</SelectPopup>
+        </Select>
         {save.isPending ? <Spinner /> : null}
       </div>
       {profiles.error || save.error ? <SettingsNote tone="error">{(save.error || profiles.error)?.message}</SettingsNote>
         : <SettingsNote>New Etsy listings use these profiles, with the package weight and size from each listing.</SettingsNote>}
+    </div>
+  );
+}
+
+const EBAY_DEFAULTS = [
+  ["fulfillment", "fulfillment_policy_id", "eBay shipping policy"],
+  ["payment", "payment_policy_id", "eBay payment policy"],
+  ["return", "return_policy_id", "eBay return policy"],
+  ["locations", "merchant_location_key", "eBay ships-from location"],
+] as const;
+
+/** Shown only when the account has more than one policy or location. One is used automatically. */
+function EbayListingDefaults() {
+  const queryClient = useQueryClient();
+  const profiles = useQuery({ queryKey: ["ebay-listing-profiles"], queryFn: () => api.ebay.listingProfiles(), staleTime: 60_000, retry: false });
+  const defaults = useQuery({ queryKey: ["ebay-listing-defaults"], queryFn: () => api.ebay.listingDefaults(), retry: false });
+  const save = useMutation({
+    mutationFn: (next: Partial<Record<(typeof EBAY_DEFAULTS)[number][1], string>>) => api.ebay.setListingDefaults(next),
+    onSuccess: (data) => queryClient.setQueryData(["ebay-listing-defaults"], data),
+  });
+  const several = EBAY_DEFAULTS.filter(([kind]) => (profiles.data?.[kind].length ?? 0) > 1);
+  if (!profiles.error && several.length === 0) return null;
+  const current = (key: (typeof EBAY_DEFAULTS)[number][1]) => defaults.data?.[key] ?? "";
+  const choose = (key: (typeof EBAY_DEFAULTS)[number][1], value: string) => {
+    if (!value) return;
+    const next: Partial<Record<(typeof EBAY_DEFAULTS)[number][1], string>> = {};
+    for (const [, name] of EBAY_DEFAULTS) {
+      const chosen = name === key ? value : current(name);
+      if (chosen) next[name] = chosen;
+    }
+    save.mutate(next);
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {several.map(([kind, key, label]) => (
+          <Select key={key} value={current(key) || null} onValueChange={(value) => choose(key, value || "")} disabled={save.isPending}
+            items={profiles.data?.[kind].map((option) => ({ value: option.id, label: option.title }))}>
+            <SelectTrigger size="compact" className="w-52" aria-label={label}><SelectValue placeholder={label} /></SelectTrigger>
+            <SelectPopup>{profiles.data?.[kind].map((option) => <SelectItem key={option.id} value={option.id}>{option.title}</SelectItem>)}</SelectPopup>
+          </Select>
+        ))}
+        {save.isPending ? <Spinner /> : null}
+      </div>
+      {profiles.error || save.error ? <SettingsNote tone="error">{(save.error || profiles.error)?.message}</SettingsNote>
+        : several.length > 0 ? <SettingsNote>New eBay listings use the policy and location you choose here.</SettingsNote> : null}
     </div>
   );
 }
@@ -404,6 +421,10 @@ function MarketplaceSection() {
       api.settings.setSaleDetection(marketplace, enabled),
     onSuccess: (data) => queryClient.setQueryData(["sale-detection"], data),
   });
+  const saveAutodelist = useMutation({
+    mutationFn: (autodelist: boolean) => api.settings.setSaleAutodelist(autodelist),
+    onSuccess: (data) => queryClient.setQueryData(["sale-detection"], data),
+  });
   const chromeReady = Boolean(extension.data?.connected);
   const accounts = direct.data?.accounts;
   const relay = direct.data?.relay;
@@ -446,7 +467,7 @@ function MarketplaceSection() {
       <SettingsRow
         id="sale-detection"
         title="Sale detection"
-        description="Turn Detect sales on for a marketplace to hear when something sells there. The listing shows where else it is listed, and nothing is delisted until you choose. eBay and Etsy send the sale themselves. Depop, Poshmark, Mercari, and Sellwild are checked with the account signed in to Chrome. Anteroom keeps only the listing and order IDs."
+        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark and Sellwild closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
         status={
           listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -459,6 +480,24 @@ function MarketplaceSection() {
         }
       >
         {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+      </SettingsRow>
+      <SettingsRow
+        id="sale-autodelist"
+        title="Delist the other marketplaces"
+        description="When something sells, take it off the other marketplaces where Anteroom still has it listed. The place it sold stays as it is. This stays off until you turn it on. If a delist can't finish, the sale notice says so and you can delist from the item."
+        control={
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Switch
+              size="sm"
+              checked={detection.data?.autodelist === true}
+              disabled={saveAutodelist.isPending}
+              aria-label="Delist the other marketplaces when something sells"
+              onCheckedChange={(checked) => saveAutodelist.mutate(checked)}
+            />
+          </span>
+        }
+      >
+        {saveAutodelist.error ? <SettingsNote tone="error">{saveAutodelist.error.message}</SettingsNote> : null}
       </SettingsRow>
     </SettingsSection>
   );

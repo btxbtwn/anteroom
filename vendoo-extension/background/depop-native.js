@@ -3,19 +3,24 @@
 
 const DEPOP_COLOURS = new Set(['black', 'grey', 'white', 'brown', 'tan', 'cream', 'yellow', 'red', 'burgundy', 'pink', 'purple', 'blue', 'navy', 'green', 'khaki', 'orange', 'silver', 'gold', 'multi']);
 
+const DEPOP_CONDITIONS = new Set(['brand_new', 'used_like_new', 'used_excellent', 'used_good', 'used_fair']);
+
+// Studio's form already carries Depop's own slug; a plain label is mapped the way Vendoo maps it.
 function depopCondition(value) {
-  const text = String(value || '').toLowerCase();
-  if (!text) return '';
+  const text = String(value || '').trim().toLowerCase();
+  if (DEPOP_CONDITIONS.has(text)) return text;
+  if (/defect|imperfection/.test(text)) return 'used_good';
   if (/fair|poor/.test(text)) return 'used_fair';
   if (/excellent/.test(text)) return 'used_excellent';
   if (/like new|nwot|new without/.test(text)) return 'used_like_new';
-  if (/brand new|nwt|new with tags/.test(text) && !/without/.test(text)) return 'brand_new';
+  if (/brand new|nwt|new with tags|^new\b/.test(text)) return 'brand_new';
   if (/good|pre-owned|preowned|used/.test(text)) return 'used_good';
   return '';
 }
 
 function depopColour(value) {
-  const name = String(value || '').trim().toLowerCase().replace('gray', 'grey').replace('beige', 'tan');
+  const name = String(value || '').trim().toLowerCase().replace('gray', 'grey').replace('beige', 'tan')
+    .replace(/^multi[- ]?colou?r(?:ed)?$/, 'multi');
   return DEPOP_COLOURS.has(name) ? name : '';
 }
 
@@ -141,10 +146,185 @@ function depopFieldNeeds(field) {
 
 // Depop's own limit for the description, which carries the title too.
 const DEPOP_MAX_DESCRIPTION = 1000;
+const DEPOP_MAX_HASHTAGS = 5;
 const DEPOP_PHOTO_HOSTS = ['.s3.amazonaws.com', '.s3-accelerate.amazonaws.com'];
+const DEPOP_ATTRIBUTES_URL = 'https://api.depop.com/api/v3/attributes/';
+const DEPOP_WEBAPI = 'https://webapi.depop.com';
 
+function depopBaseDescription(listing) {
+  return [String(listing?.title || '').trim(), String(listing?.description || '').trim()].filter(Boolean).join('\n\n');
+}
+
+// Title, description, then up to five of the listing's tags as hashtags,
+// the way Vendoo writes them, as many as fit Depop's limit.
 function depopDescription(listing) {
-  return [String(listing?.title || ''), String(listing?.description || '')].filter(Boolean).join('\n\n').slice(0, DEPOP_MAX_DESCRIPTION);
+  let text = depopBaseDescription(listing).slice(0, DEPOP_MAX_DESCRIPTION);
+  const tags = listingTags(listing).map(tag => tag.replace(/[^A-Za-z0-9]+/g, '').toLowerCase()).filter(Boolean);
+  const chosen = [...new Set(tags)].slice(0, DEPOP_MAX_HASHTAGS).map(tag => `#${tag}`);
+  while (chosen.length && `${text}\n\n${chosen.join(' ')}`.length > DEPOP_MAX_DESCRIPTION) chosen.pop();
+  if (chosen.length && !/#\w/.test(text)) text = `${text}\n\n${chosen.join(' ')}`;
+  return text;
+}
+
+const depopName = entry => String(entry?.name_i18n?.['en-US'] ?? entry?.name ?? entry?.title ?? entry?.id ?? '');
+
+// Depop's taxonomy (departments, product types, size sets, attributes and
+// brands), read from the seller's Chrome: Depop serves it to browsers only.
+// Needs a live check: the brand list's key and shape inside this document.
+async function depopAttributes(deadline) {
+  return await marketplaceCatalog('depop:attributes', () => marketplaceCatalogRead('depop', 'category and size list', async () => {
+    const { data } = await marketplaceFetch(DEPOP_ATTRIBUTES_URL, { marketplace: 'depop', step: 'catalog', headers: { Accept: 'application/json' },
+      deadline, timeoutMs: 30000 });
+    if (!['department', 'group', 'size_sets', 'category_size_mapping', 'generic_attributes'].every(key => Array.isArray(data?.[key]))) {
+      throw marketplaceError('Depop\'s category list changed.', { code: 'schema_drift' });
+    }
+    return data;
+  }));
+}
+
+async function depopBearer() {
+  const cookie = await chrome.cookies.get({ url: 'https://www.depop.com/', name: 'access_token' });
+  if (!cookie?.value) throw marketplaceError('Sign in to Depop in Chrome first. No tab will be opened automatically.', { code: 'signed_out' });
+  return `Bearer ${decodeURIComponent(cookie.value)}`;
+}
+
+// One signed-in read for the seller's own shipping options.
+async function depopAccountRead(path, what, deadline) {
+  return await marketplaceCatalogRead('depop', what, async () => {
+    const { data } = await marketplaceFetch(`${DEPOP_WEBAPI}${path}`, { marketplace: 'depop', step: 'catalog', credentials: 'omit',
+      headers: { Accept: 'application/json', Authorization: await depopBearer() }, deadline });
+    return data;
+  }, { signedIn: true });
+}
+
+// The leaf's department and product type. A live Vendoo hit names the product
+// type in its extras; a tree leaf is ``<department>_<product type>`` under a
+// ``<department>_<group>`` parent, checked against Depop's own list.
+function depopCategory(listing, attributes) {
+  const resolved = listing.form?.overrides?.categoryV2 || listing.marketplace_category_objects?.depop;
+  const leaf = String(resolved?.id || '');
+  const chain = Array.isArray(resolved?.path) ? resolved.path.map(String) : [];
+  const department = String(chain[0] || leaf.split('_')[0] || '');
+  if (!leaf || !attributes.department.some(entry => entry.id === department)) return null;
+  const parent = chain.length > 2 ? chain[chain.length - 2] : '';
+  const candidates = [resolved?.extras?.productType, parent && leaf.startsWith(`${parent}_`) ? leaf.slice(parent.length + 1) : '',
+    leaf.startsWith(`${department}_`) ? leaf.slice(department.length + 1) : ''].filter(Boolean).map(String);
+  for (const productType of candidates) {
+    const group = attributes.group.find(entry => (!Array.isArray(entry.department) || entry.department.includes(department))
+      && (entry.product_types || []).some(type => type.id === productType));
+    if (group) {
+      const type = group.product_types.find(entry => entry.id === productType);
+      return { leaf, department, group: group.id, productType, attributeIds: type.attribute_ids || [] };
+    }
+  }
+  return null;
+}
+
+// The US size set for the product type and the listing's size inside it.
+function depopSize(listing, category, attributes) {
+  const mapping = attributes.category_size_mapping.find(entry => entry.department === category.department && entry.product_type === category.productType);
+  const setId = mapping?.size_set_by_region?.US;
+  if (setId == null) return { none: true };
+  const set = attributes.size_sets.find(entry => String(entry.id) === String(setId));
+  if (!set) return { problem: 'a size Depop offers for this category' };
+  const sizes = set.sizes || [];
+  const coded = String(listing.form?.aspects?.[`${category.leaf}_size`] ?? '').trim();
+  if (coded && sizes.some(size => String(size.id) === coded)) return { set: Number(set.id), id: Number(coded) };
+  const wanted = String(listing.size || '').trim();
+  if (!wanted) return { problem: 'a size' };
+  const found = matchSize(wanted, sizes.map(size => ({ size, keys: sizeEntryKeys([depopName(size)]) })));
+  return found.length ? { set: Number(set.id), id: Number(found[0].size.id) } : { problem: 'a size Depop offers for this category' };
+}
+
+// Depop's brand id. A brand Depop does not list goes as Depop's own "Other",
+// which is what Depop does with a brand it cannot match.
+function depopBrand(listing, attributes) {
+  const brands = Array.isArray(attributes.brand) ? attributes.brand : Array.isArray(attributes.brands) ? attributes.brands : null;
+  if (!brands) return null;
+  const wanted = String(listing.form?.overrides?.brand || listing.brand || '').trim();
+  const key = marketplaceNameKey(wanted);
+  const match = key && key !== 'other' && brands.find(entry => marketplaceNameKey(depopName(entry)) === key || marketplaceNameKey(entry?.id) === key);
+  const other = brands.find(entry => ['other', 'unbranded'].includes(String(entry?.id).toLowerCase()) || marketplaceNameKey(depopName(entry)) === 'other');
+  return String((match || other)?.id ?? '') || null;
+}
+
+const DEPOP_FIT_ATTRIBUTE = { petite: 'petite', plus: 'plussize', 'big_&_tall': 'tall', maternity: 'maternity' };
+
+// Material, occasion and body fit as Depop's attribute value ids, limited to
+// the attributes this product type has and to each one's maximum.
+function depopAttributeValues(listing, category, attributes) {
+  const specifics = listing.depop_specifics || {};
+  const asList = value => (Array.isArray(value) ? value : String(value || '').split(',')).map(item => String(item).trim()).filter(Boolean);
+  const fit = DEPOP_FIT_ATTRIBUTE[listingSizeFit(listing)];
+  const wanted = { material: asList(specifics.material), occasion: asList(specifics.occasion), 'body-fit': fit ? [fit] : [] };
+  const values = {};
+  const missing = [];
+  for (const id of category.attributeIds) {
+    const attribute = attributes.generic_attributes.find(entry => entry.id === id);
+    if (!attribute) continue;
+    const options = (attribute.attributes || []).filter(option => option.status !== 'inactive');
+    const ids = [...new Set((wanted[id] || []).map(label => options.find(option => marketplaceNameKey(depopName(option)) === marketplaceNameKey(label)
+      || marketplaceNameKey(option.id) === marketplaceNameKey(label))?.id).filter(Boolean))];
+    const chosen = ids.slice(0, Math.max(1, Number(attribute.max_selection) || 1));
+    if (chosen.length) values[id] = chosen;
+    else if (attribute.is_mandatory) missing.push({ field: id, needs: `a ${depopName(attribute).toLowerCase() || id}` });
+  }
+  return { values, missing };
+}
+
+// The seller's ship-from address: the one at the Ships from ZIP in Settings,
+// else their only one, else the one Depop marks as default.
+function depopAddress(listing, data) {
+  const list = Array.isArray(data) ? data : data?.addresses || data?.objects || data?.data || [];
+  const zip = String(listing.form?.ships_from_zip || '').trim();
+  const byZip = zip && list.filter(entry => String(entry?.postal_code ?? entry?.postalCode ?? entry?.zip ?? '').slice(0, 5) === zip);
+  const chosen = byZip?.length === 1 ? byZip[0] : list.length === 1 ? list[0]
+    : list.find(entry => entry?.is_default === true || entry?.default === true || entry?.primary === true);
+  return chosen?.id != null ? chosen.id : null;
+}
+
+// Every Depop id the draft needs, read before the draft is created.
+// Needs a live check: the draft's own key names for department, group, size
+// (variant_set + variants) and each shipping_methods entry.
+async function depopResolvedFields(payload) {
+  const listing = payload.listing || {};
+  const missing = [];
+  const base = depopBaseDescription(listing);
+  if (!base) missing.push({ field: 'description', needs: 'a description' });
+  if (base.length > DEPOP_MAX_DESCRIPTION) missing.push({ field: 'description', needs: `a title and description of ${DEPOP_MAX_DESCRIPTION} characters or fewer together` });
+  if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(base)) missing.push({ field: 'description', needs: 'a description without an email address' });
+  if (!(Number(listing.price) >= 1)) missing.push({ field: 'price_amount', needs: 'a price of $1 or more' });
+  if (!depopCondition(listing.form?.overrides?.condition || listing.condition)) missing.push({ field: 'condition', needs: 'a condition' });
+  const attributes = await depopAttributes(payload.deadline);
+  const category = depopCategory(listing, attributes);
+  const fields = {};
+  if (!category) missing.push({ field: 'product_type', needs: 'a Depop category' });
+  else {
+    Object.assign(fields, { department: category.department, group: category.group, product_type: category.productType,
+      is_kids: category.department === 'kidswear' });
+    const size = depopSize(listing, category, attributes);
+    if (size.problem) missing.push({ field: 'size', needs: size.problem });
+    else if (!size.none) Object.assign(fields, { variant_set: size.set, variants: { [size.id]: 1 } });
+    const extra = depopAttributeValues(listing, category, attributes);
+    if (Object.keys(extra.values).length) fields.attributes = extra.values;
+    missing.push(...extra.missing);
+  }
+  const brand = depopBrand(listing, attributes);
+  if (brand) fields.brand = brand;
+  else missing.push({ field: 'brand', needs: 'a brand from Depop\'s list' });
+  const parcelLabel = String(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size || '').trim();
+  if (!parcelLabel) missing.push({ field: 'parcel_size', needs: 'a parcel size' });
+  if (missing.length) throw marketplaceMissing('depop', missing);
+  const addressId = depopAddress(listing, await depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', payload.deadline));
+  const providers = await depopAccountRead(`/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD&itemCost=${encodeURIComponent(String(listing.price))}`,
+    'parcel sizes', payload.deadline);
+  const parcels = (Array.isArray(providers) ? providers : providers?.objects || []).flatMap(provider => provider?.parcelSizes || provider?.parcel_sizes || []);
+  const parcel = parcels.find(entry => marketplaceNameKey(entry?.title) === marketplaceNameKey(parcelLabel));
+  if (addressId == null) missing.push({ field: 'address', needs: 'a ship-from address (set your Ships from ZIP in Settings → Listings)' });
+  if (!parcel?.id) missing.push({ field: 'parcel_size', needs: `a parcel size Depop offers (it has no "${parcelLabel}")` });
+  if (missing.length) throw marketplaceMissing('depop', missing);
+  fields.shipping_methods = [{ ship_from_address_id: addressId, shipping_provider_id: 'USPS', parcel_size_id: String(parcel.id), payer: 'buyer' }];
+  return fields;
 }
 
 function depopDraftMatches(draft, listing) {
@@ -173,9 +353,7 @@ async function depopApiAction(action, payload) {
       const publishWrite = action === 'publish' && payload.action === 'publish' && payload.confirm === true
         && method === 'POST' && path === '/presentation/api/v1/drafts/products/';
       if (!allowedRead && !draftWrite && !publishWrite) throw marketplaceError('Unsupported Depop action.');
-      const cookie = await chrome.cookies.get({ url: 'https://www.depop.com/', name: 'access_token' });
-      if (!cookie?.value) throw marketplaceError('Sign in to Depop in Chrome first. No tab will be opened automatically.', { code: 'signed_out' });
-      const headers = { Accept: 'application/json', Authorization: `Bearer ${decodeURIComponent(cookie.value)}`, ...extraHeaders };
+      const headers = { Accept: 'application/json', Authorization: await depopBearer(), ...extraHeaders };
       if (method !== 'GET') {
         headers['Content-Type'] = 'application/json';
         if (publishWrite) headers['Depop-Session-Id'] = '';
@@ -254,7 +432,11 @@ async function depopApiAction(action, payload) {
       draft.price_amount = String(payload.listing.price ?? existing.price_amount ?? '');
       draft.price_currency ||= 'USD';
       draft.pictures = payload.uploaded_photo_ids || (existing.pictures || []).map(photo => photo.id);
-      Object.assign(draft, depopFormFields(payload.listing), await depopListingFields(request, payload.listing, payload.deadline));
+      Object.assign(draft, depopFormFields(payload.listing), payload.depop_fields || {});
+      // A direct save has no precomputed fields. Fill category, brand, location, and shipping here.
+      if (!payload.depop_fields) Object.assign(draft, await depopListingFields(request, payload.listing, payload.deadline));
+      // Depop takes a quantity or a size set, never both.
+      if (draft.variant_set != null) delete draft.quantity;
       await request('PUT', path, draft);
       const saved = await request('GET', path);
       if (!depopDraftMatches(saved, payload.listing) || saved.pictures?.length !== draft.pictures.length) throw new Error('Depop did not keep this listing\'s fields and photos.');
@@ -342,6 +524,7 @@ async function runDepopNative(msg, recovery = false) {
       }
     };
     if (payload.action === 'save_draft') {
+      if (!recovery) payload.depop_fields = await depopResolvedFields(payload);
       if (recovery) {
         if (!payload.draft_url) {
           const found = await depopAction('find', payload);

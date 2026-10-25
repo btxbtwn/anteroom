@@ -15,11 +15,11 @@ function ensureMarketplaceRequestContext() {
       removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006],
       addRules: [
         marketplaceHeaderRule(17001, { Origin: 'https://www.depop.com', Referer: 'https://www.depop.com/sellinghub/drafts/' },
-          '^https://webapi\\.depop\\.com/(presentation/api/v1/(drafts|pictures|products)/|api/v3/drafts/products/)', ['get', 'post', 'put', 'delete']),
+          '^https://webapi\\.depop\\.com/(presentation/api/v1/(drafts|pictures|products)/|presentation/api/v1/shops/\\d+/products/by-status/sold/|api/v3/drafts/products/)', ['get', 'post', 'put', 'delete']),
         marketplaceHeaderRule(17002, { Origin: 'https://www.mercari.com', Referer: 'https://www.mercari.com/sell/' },
           '^https://www\\.mercari\\.com/v1/(api|initialize)$', ['get', 'post']),
         marketplaceHeaderRule(17003, { Origin: 'https://sellwild.com', Referer: 'https://sellwild.com/sell' },
-          '^https://sellwild\\.com/api/(auth/session|addresses|listings/create|listings/\\d+|listings/\\d+/confirm-photos|seller/listings/bulk-status)$', ['get', 'post']),
+          '^https://sellwild\\.com/api/(auth/session|addresses|listings/create|listings/\\d+|listings/\\d+/confirm-photos|seller/listings/bulk-status|search/listings)(\\?|$)', ['get', 'post']),
         marketplaceHeaderRule(17004, { Origin: 'https://www.depop.com', Referer: 'https://www.depop.com/sellinghub/' },
           '^https://webapi\\.depop\\.com/api/v1/receipts/', ['get']),
         marketplaceHeaderRule(17005, { Origin: 'https://poshmark.com', Referer: 'https://poshmark.com/create-listing' },

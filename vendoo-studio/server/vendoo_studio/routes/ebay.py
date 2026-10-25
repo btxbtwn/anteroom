@@ -1,10 +1,11 @@
 """eBay workspace: direct reads and separately reviewed account changes."""
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
@@ -56,6 +57,56 @@ async def listing(listing_id: str):
         return await ebay_actions.owned_listing(await EbayClient.connect(), listing_id)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
+
+
+_EBAY_DEFAULT = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+
+
+class EbayListingDefaults(BaseModel):
+    """A blank field means the account has one of that kind, so nothing to store."""
+
+    fulfillment_policy_id: str | None = None
+    payment_policy_id: str | None = None
+    return_policy_id: str | None = None
+    merchant_location_key: str | None = None
+
+    @field_validator("fulfillment_policy_id", "payment_policy_id", "return_policy_id", "merchant_location_key", mode="before")
+    @classmethod
+    def blank_means_unset(cls, value: object) -> object:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        if isinstance(value, str) and _EBAY_DEFAULT.fullmatch(value):
+            return value
+        raise ValueError("Choose a policy or location from the connected eBay account.")
+
+
+@router.get("/listing-profiles")
+async def listing_profiles():
+    """Business policy and location names and IDs only."""
+    try:
+        return await ebay_listings.listing_profiles()
+    except (EbayFailure, SignInRequired, httpx.HTTPError) as exc:
+        raise failure(exc) from exc
+
+
+@router.get("/listing-defaults")
+def get_listing_defaults():
+    return user_settings.get_ebay_listing_defaults()
+
+
+@router.put("/listing-defaults")
+async def put_listing_defaults(body: EbayListingDefaults):
+    """Chosen once in Settings, for accounts with several policies or locations. Only the account's own are kept."""
+    try:
+        profiles = await ebay_listings.listing_profiles()
+    except (EbayFailure, SignInRequired, httpx.HTTPError) as exc:
+        raise failure(exc) from exc
+    for name, kind in (("fulfillment_policy_id", "fulfillment"), ("payment_policy_id", "payment"),
+                       ("return_policy_id", "return"), ("merchant_location_key", "locations")):
+        value = getattr(body, name)
+        if value and value not in {option["id"] for option in profiles[kind]}:
+            raise HTTPException(400, "Choose policies and a location from the connected eBay account.")
+    return user_settings.set_ebay_listing_defaults(body.model_dump())
 
 
 @router.post("/research/image")
@@ -114,38 +165,3 @@ def checked(action_id: str, body: Checked, db: Session = Depends(get_db)):
     except (EbayFailure, SignInRequired) as exc:
         raise failure(exc) from exc
 
-
-@router.get("/listing-options")
-async def listing_options():
-    """Policy and location names only, for choosing the listing defaults."""
-    try:
-        return await ebay_listings.listing_options()
-    except Exception as exc:
-        raise failure(exc) from None
-
-
-class EbayListingDefaults(BaseModel):
-    fulfillment_policy_id: str = Field(default="", max_length=200)
-    payment_policy_id: str = Field(default="", max_length=200)
-    return_policy_id: str = Field(default="", max_length=200)
-    merchant_location_key: str = Field(default="", max_length=200)
-
-
-@router.get("/listing-defaults")
-def get_listing_defaults():
-    return user_settings.get_ebay_listing_defaults()
-
-
-@router.put("/listing-defaults")
-async def put_listing_defaults(body: EbayListingDefaults):
-    """Saved once in Settings; only the connected account's own policies are accepted."""
-    try:
-        options = await ebay_listings.listing_options()
-    except Exception as exc:
-        raise failure(exc) from None
-    choices = body.model_dump()
-    for kind, key in (("fulfillment", "fulfillment_policy_id"), ("payment", "payment_policy_id"),
-                      ("return", "return_policy_id"), ("location", "merchant_location_key")):
-        if choices[key] and choices[key] not in {option["id"] for option in options[kind]}:
-            raise HTTPException(400, "Choose policies from the connected eBay account.")
-    return user_settings.set_ebay_listing_defaults(choices)

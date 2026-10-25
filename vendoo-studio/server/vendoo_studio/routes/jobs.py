@@ -220,16 +220,24 @@ def get_marketplace_statuses(job_ids: str = Query(""), db: Session = Depends(get
         item = cached.get("item") if isinstance(cached.get("item"), dict) else {}
         form = cached.get("form") if isinstance(cached.get("form"), dict) else {}
         listings = item.get("listings") if isinstance(item.get("listings"), dict) else {}
+        external = item.get("externalListings") if isinstance(item.get("externalListings"), dict) else {}
+        item_out: dict = {
+            "listings": {
+                marketplace: {"status": listing.get("status")}
+                for marketplace, listing in listings.items()
+                if isinstance(listing, dict)
+            },
+        }
+        if external:
+            item_out["externalListings"] = {
+                marketplace: {"status": listing.get("status")}
+                for marketplace, listing in external.items()
+                if isinstance(listing, dict)
+            }
         result[job_id] = {
             "statuses": cached.get("statuses"),
             "form": {"statuses": form.get("statuses")},
-            "item": {
-                "listings": {
-                    marketplace: {"status": listing.get("status")}
-                    for marketplace, listing in listings.items()
-                    if isinstance(listing, dict)
-                },
-            },
+            "item": item_out,
         }
     return result
 

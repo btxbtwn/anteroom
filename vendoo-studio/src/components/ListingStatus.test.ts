@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listedFromImport, statusHint } from "./sidebar/listingStatus";
+import { listedFromImport, marketplaceStatusesFromDraft, statusHint } from "./sidebar/listingStatus";
 
 describe("statusHint", () => {
   it("says where each Vendoo label comes from", () => {
@@ -43,5 +43,38 @@ describe("listedFromImport", () => {
 
   it("has nothing to say for a listing that was never imported", () => {
     expect(listedFromImport({})).toEqual([]);
+  });
+});
+
+describe("marketplaceStatusesFromDraft", () => {
+  it("shows a direct listing as listed when the nav says not listed", () => {
+    const rows = marketplaceStatusesFromDraft({
+      statuses: {
+        ebay: "NOT LISTED",
+        etsy: "NOT LISTED",
+        poshmark: "NOT LISTED",
+        mercari: "NOT LISTED",
+        depop: "NOT LISTED",
+        sellwild: "NOT LISTED",
+      },
+      item: {
+        listings: {
+          ebay: { status: { notListed: true } },
+          mercari: { status: { listed: true } },
+        },
+        externalListings: {
+          poshmark: { status: { listed: true } },
+          sellwild: { status: { listed: true } },
+        },
+      },
+    });
+    expect(rows.filter((row) => row.id !== "general").map((row) => [row.id, row.status])).toEqual([
+      ["ebay", "NOT LISTED"],
+      ["etsy", "NOT LISTED"],
+      ["poshmark", "LISTED"],
+      ["mercari", "LISTED"],
+      ["depop", "NOT LISTED"],
+      ["sellwild", "LISTED"],
+    ]);
   });
 });

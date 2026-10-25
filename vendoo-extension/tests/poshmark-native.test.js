@@ -21,6 +21,10 @@ const LISTING = { title: 'Vintage tee', description: 'Soft cotton tee', price: 1
   form: { specifics: { originalPrice: 55 } },
   poshmark_specifics: { originalPrice: 30, styleTags: ['Casual', 'Retro', 'Streetwear', 'Extra'], smartSellMinimumPrice: 12 } };
 
+const BRANDS = { data: [{ type: 'brand', brand_id: 'd'.repeat(24), brand_name: 'Hanes' }, { type: 'brand', brand_id: 'e'.repeat(24), brand_name: 'Hanes Her Way' }] };
+const STYLE_TAGS = { data: ['Casual', 'Retro', 'Streetwear', 'Vintage'] };
+const CATALOG_READS = ['GET /vm-rest/meta/catalog_v2', 'GET /vm-rest/searches/brands/suggested', 'GET /vm-rest/meta/style_tags/top'];
+const savedPost = requests => requests.find(r => r.method === 'POST' && r.path === `/vm-rest/posts/${POST}`).body.post;
 const PAGE = `<html><script>window.__INITIAL_STATE__={"csrftoken":"page-csrf","userCookies":{"userInfo":{"uid":"${USER}"}}};</script></html>`;
 const page = () => response(200, PAGE, { 'content-type': 'text/html' });
 
@@ -44,6 +48,8 @@ function setup({ publishAnswer = [200, {}], status = 'published' } = {}) {
     const reply = response;
     if (path === '/create-listing') return page();
     if (path === '/vm-rest/meta/catalog_v2') return reply(200, CATALOG);
+    if (path === '/vm-rest/searches/brands/suggested') return reply(200, BRANDS);
+    if (path === '/vm-rest/meta/style_tags/top') return reply(200, STYLE_TAGS);
     if (method === 'POST' && path === `/vm-rest/users/${USER}/posts`) return reply(200, { data: { id: POST, status: 'draft' } });
     if (path.endsWith('/media/scratch')) return reply(200, { data: { id: `${'c'.repeat(23)}${photo++}` } });
     if (method === 'PUT' && path.endsWith('/status/published')) return reply(...publishAnswer);
@@ -59,13 +65,14 @@ test('Poshmark lists in one step with every field, no draft save, no tab', async
   const { c, msg, requests, journal } = setup();
   const result = JSON.parse(JSON.stringify(await c.runPoshmarkApi(msg)));
   assert.deepEqual(result, { ok: true, state: 'published', listing_url: `https://poshmark.com/listing/${POST}` });
-  assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), ['GET /vm-rest/meta/catalog_v2', 'GET /create-listing', `POST /vm-rest/users/${USER}/posts`,
+  assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), [...CATALOG_READS, 'GET /create-listing', `POST /vm-rest/users/${USER}/posts`,
     `POST /api/posts/${POST}/media/scratch`, `POST /api/posts/${POST}/media/scratch`, `POST /vm-rest/posts/${POST}`,
     `PUT /vm-rest/posts/${POST}/status/published`, `GET /vm-rest/posts/${POST}`]);
   assert.ok(!requests.some(r => r.path.endsWith('/status/user_draft')));
   assert.ok(requests.filter(r => r.method !== 'GET').every(r => r.headers['X-XSRF-TOKEN'] === 'page-csrf'));
   assert.ok(requests.filter(r => r.method === 'GET').every(r => !('X-XSRF-TOKEN' in r.headers)));
-  const post = requests[5].body.post;
+  const post = savedPost(requests);
+  assert.equal(post.brand, 'Hanes');
   assert.deepEqual(post.catalog, { department: DEPT, category: SHIRTS, category_features: [TEES] });
   assert.equal(post.inventory.size_quantities[0].size_id, 'M');
   assert.deepEqual(post.inventory.size_quantities[0].size_set_tags, ['standard']);
@@ -91,6 +98,8 @@ test('an update writes the live Poshmark post and does not create or publish ano
     const reply = response;
     if (path === '/create-listing') return page();
     if (path === '/vm-rest/meta/catalog_v2') return reply(200, CATALOG);
+    if (path === '/vm-rest/searches/brands/suggested') return reply(200, BRANDS);
+    if (path === '/vm-rest/meta/style_tags/top') return reply(200, STYLE_TAGS);
     if (path.endsWith('/media/scratch')) return reply(200, { data: { id: 'c'.repeat(24) } });
     if (method === 'POST' && path === `/vm-rest/posts/${POST}`) { saved = true; return reply(200, { data: {} }); }
     if (method === 'GET' && path === `/vm-rest/posts/${POST}`) {
@@ -101,15 +110,34 @@ test('an update writes the live Poshmark post and does not create or publish ano
   };
   msg.payload.action = 'update';
   msg.payload.listing_id = POST;
+  msg.payload.listing = { ...LISTING, price: 17.6 };
   const result = JSON.parse(JSON.stringify(await c.runPoshmarkApi(msg)));
   assert.deepEqual(result, { ok: true, state: 'published', listing_url: `https://poshmark.com/listing/${POST}` });
-  assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), ['GET /vm-rest/posts/' + POST, 'GET /vm-rest/meta/catalog_v2', 'GET /create-listing',
+  assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), ['GET /vm-rest/posts/' + POST, ...CATALOG_READS, 'GET /create-listing',
     `POST /api/posts/${POST}/media/scratch`, `POST /api/posts/${POST}/media/scratch`, `POST /vm-rest/posts/${POST}`, `GET /vm-rest/posts/${POST}`]);
   const post = requests.find(r => r.method === 'POST' && r.path === `/vm-rest/posts/${POST}`).body.post;
   assert.equal(post.inventory.size_quantity_revision, 3);
   assert.equal(post.title, 'Vintage tee');
   assert.equal(post.original_price_amount.val, '0');
   assert.ok(!requests.some(r => r.path.includes('/users/') || r.path.endsWith('/status/published') || r.method === 'DELETE'));
+});
+
+test('Poshmark gets whole dollars, rounded the way Vendoo rounds', async () => {
+  const { c, msg, requests } = setup();
+  msg.payload.listing = { ...LISTING, price: 17.5 };
+  assert.equal((await c.runPoshmarkApi(msg)).ok, true);
+  assert.equal(savedPost(requests).price_amount.val, '18');
+  assert.equal(c.poshmarkPrice({ price: 19.49 }), 19);
+  assert.equal(c.poshmarkPrice({ price: 19.99, poshmark_specifics: { poshmarkPrice: '24.5' } }), 25);
+});
+
+test('Poshmark conditions use its own codes and never drop a plain New', () => {
+  const { c } = setup();
+  const labels = { 'New With Tags/Box': 'nwt', 'New Without Tags/Box': 'uln', 'New With Imperfections': 'ug',
+    'Pre-Owned - Excellent': 'uln', 'Pre-Owned - Good': 'ug', 'Pre-Owned - Fair': 'uf', 'Poor (Major flaws)': 'uf',
+    New: 'nwt', 'Brand new': 'nwt', 'Pre-owned': 'ug', Mint: null };
+  for (const [label, code] of Object.entries(labels)) assert.equal(c.poshmarkCondition({ condition: label }), code, label);
+  assert.equal(c.poshmarkCondition({ condition: 'Pre-Owned - Good', form: { overrides: { condition: 'uf' } } }), 'uf');
 });
 
 test('big sizes are found in the Big & Tall set', () => {
@@ -121,8 +149,8 @@ test('big sizes are found in the Big & Tall set', () => {
   assert.equal(c.poshmarkSize(category, { size: '40R' }), null);
 });
 
-test('missing category, size, price or confirmation stops before creating anything', async () => {
-  for (const change of [{ marketplace_category_objects: {} }, { size: '40R' }, { price: 2 }, { description: '' }]) {
+test('missing category, size, price, condition or confirmation stops before creating anything', async () => {
+  for (const change of [{ marketplace_category_objects: {} }, { size: '40R' }, { price: 2 }, { description: '' }, { condition: '' }]) {
     const { c, msg, requests } = setup();
     msg.payload.listing = { ...LISTING, ...change };
     const result = await c.runPoshmarkApi(msg);
@@ -249,4 +277,99 @@ test('a Poshmark validation refusal names what is missing and removes the unlist
   assert.equal(result.marketplace_message, 'Please select a brand.');
   assert.deepEqual(JSON.parse(JSON.stringify(result.fields)), [{ field: 'ValidationError', message: 'Please select a brand.' }]);
   assert.equal(requests.at(-1).method, 'DELETE');
+});
+
+// A slice of Poshmark's live catalog_v2 (read 2026-10-25).
+const LIVE = require('./fixtures/poshmark-catalog.json');
+const liveCategory = (department, name) => {
+  const dept = LIVE.catalog.departments.find(entry => entry.display === department);
+  return { dept, category: dept.categories.find(entry => entry.display === name) };
+};
+
+test('Poshmark sizes stay inside the department, gender and fit the listing names', () => {
+  const { c } = setup();
+  const kids = liveCategory('Kids', 'Shirts & Tops').category;
+  const size = (category, listing, kidsDept = false) => {
+    const found = c.poshmarkSize(category, listing, { kids: kidsDept });
+    return found?.size ? `${found.size.id}:${found.set.tags[0]}` : found?.problem || null;
+  };
+  // The seller's boys' XL (18/20) once landed in a girls' size.
+  assert.equal(size(kids, { size: 'XL (18/20)', department: 'Boys' }, true), 'XLB:boys');
+  assert.equal(size(kids, { size: 'XL', category_path: 'Clothing > Kids > Girls > Tops' }, true), 'XLG:girls');
+  assert.match(size(kids, { size: 'XL (18/20)' }, true), /boys' or girls'/);
+  assert.equal(size(kids, { size: '6-9 Months', department: 'Girls' }, true), '6-9MB:baby');
+  const tops = liveCategory('Women', 'Tops').category;
+  assert.equal(size(tops, { size: 'M', sizeType: 'Petite' }), 'MP:petite');
+  assert.equal(size(tops, { size: 'Medium' }), 'M:standard');
+  assert.equal(size(tops, { size: '2XL' }), 'XXL:plus');
+  assert.equal(size(tops, { size: '2X', sizeType: 'Plus' }), '2X:plus');
+  assert.match(size(tops, { size: 'L', sizeType: 'Big & Tall' }), /no Big & Tall sizes/);
+  assert.equal(size(tops, { size: 'L/XL' }), null);
+  const shirts = liveCategory('Men', 'Shirts').category;
+  assert.equal(size(shirts, { size: '2XL' }), 'XXL:big_&_tall');
+  assert.equal(size(shirts, { size: 'Large' }), 'L:standard');
+  const jeans = liveCategory('Men', 'Jeans').category;
+  assert.equal(size(jeans, { size: '32x30' }), '32:standard');
+  assert.equal(size(jeans, { size: 'W38 L32', sizeType: 'Big & Tall' }), '38BT:big_&_tall');
+  assert.equal(size(liveCategory('Women', 'Jeans').category, { size: 'US 10' }), '10:standard');
+});
+
+test('Vendoo\'s coded Poshmark size wins over the size text', () => {
+  const { c } = setup();
+  const kids = liveCategory('Kids', 'Shirts & Tops').category;
+  const listing = { size: 'XL', form: { aspects: { [`${kids.id}_size`]: 'XLB', [`${kids.id}_size_scale`]: 'boys' } } };
+  assert.equal(c.poshmarkSize(kids, listing, { kids: true }).size.id, 'XLB');
+  const custom = { form: { aspects: { [`${kids.id}_size`]: 'Fits 10-12', [`${kids.id}_size_scale`]: 'customSize' } } };
+  assert.deepEqual(JSON.parse(JSON.stringify(c.poshmarkSize(kids, custom, { kids: true }).size)), { id: 'Fits 10-12', display: 'Fits 10-12' });
+});
+
+test('a Global & Traditional Wear leaf skips the grouping id', () => {
+  const { c } = setup();
+  const catalog = { catalog: { departments: [{ id: DEPT, display: 'Men', categories: [{ id: 'k'.repeat(24), display: 'Kurtas', size_sets: [] }] }] } };
+  const listing = { form: { overrides: { categoryV2: { path: [DEPT, `group:${DEPT}:global_&_traditional_wear`, 'k'.repeat(24)] } } } };
+  assert.deepEqual(JSON.parse(JSON.stringify(c.poshmarkCategory(catalog, listing).catalog)),
+    { department: DEPT, category: 'k'.repeat(24), category_features: [] });
+});
+
+test('a kids listing with no gender stops before anything is written and names the size', async () => {
+  const kids = liveCategory('Kids', 'Shirts & Tops');
+  const { c, msg, requests } = setup();
+  const original = c.fetch;
+  c.fetch = async (url, options = {}) => (new URL(url).pathname === '/vm-rest/meta/catalog_v2' ? response(200, LIVE) : original(url, options));
+  msg.payload.listing = { ...LISTING, size: 'XL (18/20)', marketplace_category_objects: { poshmark: { path: [kids.dept.id, kids.category.id] } } };
+  const result = await c.runPoshmarkApi(msg);
+  assert.equal(result.error_code, 'missing_fields');
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(result.fields[0].field, 'size');
+  assert.match(result.fields[0].message, /boys' or girls'/);
+  assert.ok(!requests.some(r => r.method !== 'GET'));
+});
+
+test('Poshmark brand, style tags, certification and limits follow Poshmark\'s own catalog', async () => {
+  const { c, msg, requests } = setup();
+  msg.payload.listing = { ...LISTING, brand: 'hanes', tags: ['vintage', 'casual', 'not#ok', 'graphic'],
+    poshmark_specifics: { ...LISTING.poshmark_specifics, styleTags: [] } };
+  assert.equal((await c.runPoshmarkApi(msg)).ok, true);
+  const post = savedPost(requests);
+  assert.equal(post.brand, 'Hanes');
+  assert.deepEqual(post.style_tags, ['Vintage', 'Casual']);
+  assert.ok(requests.some(r => r.method === 'PUT' && r.path.endsWith('/status/published')));
+  const { c: other, msg: second, requests: none } = setup();
+  second.payload.listing = { ...LISTING, description: 'x'.repeat(1501) };
+  const refused = await other.runPoshmarkApi(second);
+  assert.equal(refused.error_code, 'missing_fields');
+  assert.ok(!none.some(r => r.method !== 'GET'));
+});
+
+test('a Poshmark catalog that cannot be read stops safely and says why', async () => {
+  for (const [answer, code] of [[[403, '<html>Forbidden</html>', { 'content-type': 'text/html' }], 'challenge'],
+    [[503, {}], 'network'], [[429, {}, { 'retry-after': '30' }], 'rate_limited'], [[200, { data: { nope: true } }], 'schema_drift']]) {
+    const { c, msg, requests } = setup();
+    const original = c.fetch;
+    c.fetch = async (url, options = {}) => (new URL(url).pathname === '/vm-rest/meta/catalog_v2' ? response(...answer) : original(url, options));
+    const result = await c.runPoshmarkApi(msg);
+    assert.equal(result.error_code, code, code);
+    assert.equal(result.safe_to_retry, true);
+    assert.ok(!requests.some(r => r.method !== 'GET'));
+  }
 });

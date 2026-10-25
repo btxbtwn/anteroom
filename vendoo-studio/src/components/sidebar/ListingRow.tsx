@@ -9,6 +9,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
+import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
 import { listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, statusHint } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 
@@ -17,7 +18,6 @@ const HOVER_STATUS_DELAY_MS = 280;
 function canHover() {
   return typeof window === "undefined" || !window.matchMedia || window.matchMedia("(hover: hover)").matches;
 }
-const LISTED_LIVE_STATUSES = new Set(["LISTED", "SOLD"]);
 
 export function ListingRow({
   listing,
@@ -87,7 +87,12 @@ export function ListingRow({
     queryFn: async () => {
       const data = await api.jobs.vendooItem(jobId || "", { cacheOnly: true });
       if (data?.ok && (data.item || data.form || data.statuses)) {
-        queryClient.setQueryData(["vendoo-item", jobId], data);
+        const existing = queryClient.getQueryData(["vendoo-item", jobId]) as { item?: { generalDetails?: unknown } } | undefined;
+        // The hover peek is the slim status cache. Writing it over the fields
+        // panel's full item drops the listing records the status is read from.
+        if (!existing?.item?.generalDetails) {
+          queryClient.setQueryData(["vendoo-item", jobId], data);
+        }
       }
       return data;
     },
@@ -99,12 +104,10 @@ export function ListingRow({
     retry: 0,
   });
 
-  const fullDraft = (
-    peekQuery.data?.ok && peekQuery.dataUpdatedAt >= cachedDraftQuery.dataUpdatedAt
-      ? peekQuery.data
-      : cachedDraftQuery.data || (peekQuery.data?.ok ? peekQuery.data : undefined)
-  ) as Record<string, unknown> | undefined;
-  const draft = fullDraft || statusDraft;
+  const draft = useMemo(
+    () => mergeStatusDrafts(cachedDraftQuery.data, peekQuery.data, statusDraft),
+    [cachedDraftQuery.data, peekQuery.data, statusDraft],
+  );
   const marketplaceStatuses = useMemo(
     () => marketplaceStatusesFromDraft(draft, visibleMarketplaces),
     [draft, visibleMarketplaces],
@@ -118,7 +121,7 @@ export function ListingRow({
   );
   const draftRows = marketplaceStatuses.filter((row) => row.id !== "general");
   const listedMarketplaces = draftRows.length
-    ? draftRows.filter((row) => LISTED_LIVE_STATUSES.has(row.status))
+    ? draftRows.filter((row) => statusIsListed(row.status))
     : importedRows;
   const popupStatuses = marketplaceStatuses.length ? marketplaceStatuses : importedRows;
   // "active" alone would read as done. These listings are live on copy older
@@ -404,7 +407,7 @@ export function ListingRow({
           style={{ top: popupPos.top, left: popupPos.left }}
           role="tooltip"
         >
-          <div className="mb-1.5 px-0.5 text-3xs font-semibold tracking-wider text-muted-foreground uppercase">Vendoo status</div>
+          <div className="mb-1.5 px-0.5 text-3xs font-semibold tracking-wider text-muted-foreground uppercase">Listing status</div>
           {loadingStatus ? (
             <div className="px-0.5 py-1 text-2xs text-muted-foreground">Reading…</div>
           ) : popupStatuses.length ? (

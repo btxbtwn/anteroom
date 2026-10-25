@@ -6,6 +6,44 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.355 — 2026-10-25
+
+- You can turn on Delist the other marketplaces in Settings → Connections. When something sells, Anteroom takes it off the other places it is still listed. The marketplace it sold on is left alone. This stays off until you turn it on.
+
+## 0.1.354 — 2026-10-25
+
+- The listing status on a thread shows where the item is actually live, including listings you already had on a marketplace, instead of saying not listed for all of them.
+
+## 0.1.353 — 2026-10-25
+
+- Choosing an eBay shipping policy in Settings → Connections saves that choice. Payment, returns, and the ships-from location stay automatic when the account has only one of each.
+
+## 0.1.352 — 2026-10-25
+
+- Detect sales checks your whole shop, including closets with hundreds of listings. Depop and Mercari are read from your sales. Poshmark and Sellwild compare the live closet with what Anteroom still has listed. The shops take turns a few times an hour, with an uneven gap between checks. You hear once when something sells, and only for items Anteroom still shows as listed there.
+
+## 0.1.351 — 2026-10-25
+
+- Before List, the Marketplaces section shows what eBay, Etsy, and Sellwild still need, with Edit and Ask chat, and List stays off until those are filled.
+- Etsy listings include tags, materials, the category's own properties, and the return policy you choose in Settings → Connections.
+- eBay item specifics use eBay's exact field names for that category. When the account has more than one shipping, payment, or return policy, or more than one location, you choose which one new listings use in Settings → Connections.
+
+## 0.1.350 — 2026-10-25
+
+- Poshmark, Mercari, and Depop sizes, brands, and shipping now come from the options on your signed-in account. A size that does not belong in that category, such as an adult size on a kids' listing, stops the listing before anything is created.
+- Mercari and Depop use the ZIP you set in Settings → Listings as the ships-from address.
+
+## 0.1.349 — 2026-10-25
+
+- Each marketplace form shows only its own fields, once each, under the names the marketplace uses. Fields from another marketplace no longer linger after switching tabs, and a marketplace's own category shows as its Category.
+
+## 0.1.348 — 2026-10-25
+
+- eBay now gets the condition you picked: New with imperfections, Pre-owned Excellent, Good and Fair each list as eBay's own clothing grade instead of all becoming "Good". If a category doesn't take that condition, Anteroom says so and lists nothing.
+- Depop keeps the condition you picked, so Brand new and Like new no longer go missing or drop to Used - Good.
+- Poshmark gets a whole-dollar price, rounded like Vendoo does, and a plain "New" is no longer dropped. An item with no condition stops before anything is listed.
+- Etsy's "when made" ranges follow the year, so listings keep working after January 1.
+
 ## 0.1.347 — 2026-10-25
 
 - List on a marketplace now runs in the background with its progress shown in the Marketplaces section, and Cancel stops it before it publishes. A queued Send to Vendoo waits until Chrome has finished, instead of failing because Chrome was still busy.
@@ -19,6 +57,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 - Listing directly on Poshmark, Mercari, Depop and Sellwild is sturdier: a slow or busy marketplace is asked again only when nothing could be listed twice, a stopped Poshmark listing cleans up its unlisted post, and Mercari no longer needs a reconnect when its sign-in refreshes.
 - When a marketplace refuses, Anteroom says why in plain words and shows the marketplace's own message: signed out, a bot check, too many requests, or the exact fields it still needs (such as Depop's brand or parcel size).
 - Depop descriptions are kept within Depop's 1,000-character limit.
+
 ## 0.1.345 — 2026-10-24
 
 - Listing fields are grouped into sections — Pricing, Condition, Item, Size & fit, Color & material, Shipping, Inventory and More details — each showing how many are filled. Required fields come first.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Literal
@@ -38,6 +39,7 @@ DEFAULT_CURSOR_MODEL = "composer-2.5"
 AUTO_CURSOR_MODEL = "auto"
 DEFAULT_SETTLED_SHELF_EXPANDED = True
 PACKAGE_DIMENSIONS_KEY = "package_dimensions_in"
+SHIPS_FROM_ZIP_KEY = "ships_from_zip"
 DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
 DEFAULT_THEME: Literal["dark", "light", "system"] = "dark"
 
@@ -84,6 +86,24 @@ def set_package_dimensions(*, length: object, width: object, height: object) -> 
 
     update_settings(mutator)
     return dimensions
+
+
+def get_ships_from_zip() -> str:
+    """The five-digit ZIP the seller ships from; empty until they set it."""
+    raw = str(read_settings().get(SHIPS_FROM_ZIP_KEY) or "").strip()
+    return raw if re.fullmatch(r"\d{5}", raw) else ""
+
+
+def set_ships_from_zip(value: object) -> str:
+    text = str(value or "").strip()
+    if text and not re.fullmatch(r"\d{5}", text):
+        raise ValueError("A ZIP code is five digits.")
+
+    def mutator(payload: dict) -> None:
+        payload[SHIPS_FROM_ZIP_KEY] = text
+
+    update_settings(mutator)
+    return text
 
 
 def package_dimensions_string() -> str:
@@ -146,40 +166,42 @@ def update_settings(mutator) -> dict:
 
 
 ETSY_LISTING_DEFAULTS_KEY = "etsy_listing_defaults"
+ETSY_LISTING_DEFAULT_FIELDS = ("shipping_profile_id", "readiness_state_id", "return_policy_id")
+EBAY_LISTING_DEFAULTS_KEY = "ebay_listing_defaults"
+EBAY_LISTING_DEFAULT_FIELDS = ("fulfillment_policy_id", "payment_policy_id", "return_policy_id", "merchant_location_key")
+
+
+def _listing_defaults(key: str, names: tuple[str, ...], pattern: str) -> dict[str, str]:
+    value = read_settings().get(key)
+    value = value if isinstance(value, dict) else {}
+    return {name: value[name] for name in names if isinstance(value.get(name), str) and re.fullmatch(pattern, value[name])}
+
+
+def _set_listing_defaults(key: str, values: dict[str, str]) -> None:
+    def mutator(payload: dict) -> None:
+        payload[key] = {name: value for name, value in values.items() if value}
+
+    update_settings(mutator)
 
 
 def get_etsy_listing_defaults() -> dict[str, str]:
-    """The shop's shipping and processing profiles every new Etsy listing uses."""
-    value = read_settings().get(ETSY_LISTING_DEFAULTS_KEY)
-    value = value if isinstance(value, dict) else {}
-    return {key: str(value[key]) for key in ("shipping_profile_id", "readiness_state_id")
-            if isinstance(value.get(key), str) and value[key].isdigit()}
+    """The shop's shipping, processing and return profiles every new Etsy listing uses."""
+    return _listing_defaults(ETSY_LISTING_DEFAULTS_KEY, ETSY_LISTING_DEFAULT_FIELDS, r"\d+")
 
 
-def set_etsy_listing_defaults(*, shipping_profile_id: str, readiness_state_id: str) -> dict[str, str]:
-    def mutator(payload: dict) -> None:
-        payload[ETSY_LISTING_DEFAULTS_KEY] = {"shipping_profile_id": shipping_profile_id, "readiness_state_id": readiness_state_id}
-
-    update_settings(mutator)
+def set_etsy_listing_defaults(*, shipping_profile_id: str, readiness_state_id: str, return_policy_id: str) -> dict[str, str]:
+    _set_listing_defaults(ETSY_LISTING_DEFAULTS_KEY, {"shipping_profile_id": shipping_profile_id,
+                                                     "readiness_state_id": readiness_state_id, "return_policy_id": return_policy_id})
     return get_etsy_listing_defaults()
 
 
-EBAY_LISTING_DEFAULTS_KEY = "ebay_listing_defaults"
-EBAY_LISTING_DEFAULT_KEYS = ("fulfillment_policy_id", "payment_policy_id", "return_policy_id", "merchant_location_key")
-
-
 def get_ebay_listing_defaults() -> dict[str, str]:
-    """The eBay policies and location new listings use when the account has several."""
-    value = read_settings().get(EBAY_LISTING_DEFAULTS_KEY)
-    value = value if isinstance(value, dict) else {}
-    return {key: value[key] for key in EBAY_LISTING_DEFAULT_KEYS if isinstance(value.get(key), str) and value[key]}
+    """The business policies and inventory location new eBay listings use when the account has several."""
+    return _listing_defaults(EBAY_LISTING_DEFAULTS_KEY, EBAY_LISTING_DEFAULT_FIELDS, r"[A-Za-z0-9_.:-]{1,64}")
 
 
-def set_ebay_listing_defaults(choices: dict[str, str]) -> dict[str, str]:
-    def mutator(payload: dict) -> None:
-        payload[EBAY_LISTING_DEFAULTS_KEY] = {key: choices[key] for key in EBAY_LISTING_DEFAULT_KEYS if choices.get(key)}
-
-    update_settings(mutator)
+def set_ebay_listing_defaults(values: dict[str, str]) -> dict[str, str]:
+    _set_listing_defaults(EBAY_LISTING_DEFAULTS_KEY, {name: values.get(name) or "" for name in EBAY_LISTING_DEFAULT_FIELDS})
     return get_ebay_listing_defaults()
 
 
@@ -702,6 +724,22 @@ def set_sale_detection(marketplace: str, enabled: bool) -> dict[str, bool]:
 
     update_settings(mutator)
     return get_sale_detection()
+
+
+AUTODELIST_KEY = "sale_autodelist"
+
+
+def autodelist_enabled() -> bool:
+    """The seller asked Anteroom to delist the other marketplaces after a sale. Off unless saved."""
+    return read_settings().get(AUTODELIST_KEY) is True
+
+
+def set_autodelist(enabled: bool) -> bool:
+    def mutator(payload: dict) -> None:
+        payload[AUTODELIST_KEY] = bool(enabled)
+
+    update_settings(mutator)
+    return autodelist_enabled()
 
 
 BUSINESS_NOTE_KEY = "business_note"

@@ -122,7 +122,8 @@ class Draft(Input):
     category_id: str = Field(pattern=r"^\d{1,15}$")
     price: str = Field(max_length=20)
     quantity: int = Field(default=1, strict=True, ge=1, le=10000)
-    condition: Literal["NEW", "NEW_OTHER", "USED_EXCELLENT", "USED_VERY_GOOD", "USED_GOOD", "USED_ACCEPTABLE"]
+    condition: Literal["NEW", "NEW_OTHER", "NEW_WITH_DEFECTS", "PRE_OWNED_EXCELLENT", "USED_EXCELLENT",
+                       "PRE_OWNED_FAIR", "USED_VERY_GOOD", "USED_GOOD", "USED_ACCEPTABLE"]
     image_urls: list[str] = Field(min_length=1, max_length=12)
     aspects: dict[str, list[str]] = Field(default_factory=dict)
     fulfillment_policy_id: str = Field(min_length=1, max_length=200)
@@ -517,15 +518,14 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
                 raise
         else:
             raise EbayFailure("This SKU already exists on eBay. Choose a new SKU to avoid overwriting it.", 409)
-        aspects = await client.request("GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category",
-                                       params={"category_id": data["category_id"]}, app=True)
-        for aspect in aspects.get("aspects", []):
-            values = data["aspects"].get(aspect["localizedAspectName"], [])
-            constraint = aspect.get("aspectConstraint", {})
-            if constraint.get("aspectRequired") and not values:
-                raise EbayFailure(f"Add required item specific: {aspect['localizedAspectName']}.", 422)
-            if constraint.get("aspectMode") == "SELECTION_ONLY" and any(v not in {a["localizedValue"] for a in aspect.get("aspectValues", [])} for v in values):
-                raise EbayFailure(f"Choose a valid value for {aspect['localizedAspectName']}.", 422)
+        from vendoo_studio.services.marketplace_schemas import ebay_aspects
+
+        for aspect in await ebay_aspects(client, data["category_id"]):
+            values = data["aspects"].get(aspect["name"], [])
+            if aspect["required"] and not values:
+                raise EbayFailure(f"Add required item specific: {aspect['name']}.", 422)
+            if aspect["mode"] == "selection" and any(v not in {a["label"] for a in aspect["values"]} for v in values):
+                raise EbayFailure(f"Choose a valid value for {aspect['name']}.", 422)
         from vendoo_studio.services.user_settings import get_package_dimensions
         package = get_package_dimensions()
         operation("PUT", f"/sell/inventory/v1/inventory_item/{segment(data['sku'])}", {

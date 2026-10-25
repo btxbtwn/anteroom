@@ -512,11 +512,12 @@ def vendoo_listed_marketplaces(item: dict | None, form: dict | None = None) -> l
     Sold counts as listed: Vendoo keeps a sold listing on the marketplace it
     sold from, and the Inventory filters still match it there. An item Vendoo
     delisted after the sale keeps only its sale record, so that record's
-    marketplace stands in for the listing flag it cleared.
+    marketplace stands in for the listing flag it cleared. A listing the seller
+    already had on the marketplace (``externalListings``) counts the same way.
     """
     merged = _merge_payloads(form, item)
     live: set[str] = set()
-    for name, listing in _listing_entries(merged, external=False):
+    for name, listing in _listing_entries(merged, external=True):
         status = listing.get("status") if isinstance(listing.get("status"), dict) else {}
         if status.get("listed") is True or status.get("sold") is True or status.get("shipped") is True:
             live.add(VENDOO_MARKETPLACE_ALIASES.get(name, name))
@@ -536,7 +537,7 @@ def vendoo_listing_urls(item: dict | None, form: dict | None = None) -> dict[str
     """
     merged = _merge_payloads(form, item)
     urls: dict[str, str] = {}
-    for name, listing in _listing_entries(merged, external=False):
+    for name, listing in _listing_entries(merged, external=True):
         status = listing.get("status") if isinstance(listing.get("status"), dict) else {}
         if not (status.get("listed") is True or status.get("sold") is True or status.get("shipped") is True):
             continue

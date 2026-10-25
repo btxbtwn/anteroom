@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -36,6 +36,13 @@ def _sync(call, *args):
 @router.get("")
 def status(conv_id: str, db: Session = Depends(get_db)):
     return _sync(native.status, conv_id, db)
+
+
+@router.get("/preflight")
+def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
+              sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db)):
+    """What each marketplace still needs before List. Reads only."""
+    return _sync(native.preflight, conv_id, db, sellwild_category_id, sellwild_condition_id)
 
 
 @router.post("/{marketplace}/inspect")

@@ -27,7 +27,8 @@ URLS = {"mercari": "https://www.mercari.com/sell/draft/testNativeDraft/",
 LIVE = {"mercari": "https://www.mercari.com/us/item/m123456789/", "depop": None}
 POSH_URL = "https://poshmark.com/listing/6adc371572e62463d992ffef"
 SELLWILD_URL = "https://sellwild.com/product/123/test"
-LISTING = {"title": "ANTEROOM DRAFT CHECK - DO NOT PUBLISH", "description": "Private test draft.", "price": 12}
+LISTING = {"title": "ANTEROOM DRAFT CHECK - DO NOT PUBLISH", "description": "Private test draft.", "price": 12,
+           "weight_oz": 8, "package_dimensions_in": "12x9x2", "marketplace_category_ids": {"ebay": "11450"}}
 SELLWILD = {"sellwild_category_id": 272, "sellwild_condition_id": 2}
 
 
@@ -191,8 +192,13 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     def test_sellwild_needs_a_category_and_condition(self):
         for extra in ({"sellwild_category_id": 183, "sellwild_condition_id": 2}, {"sellwild_category_id": 272, "sellwild_condition_id": 9}):
-            self.assertEqual(self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **extra}).status_code, 400)
+            response = self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **extra})
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            self.assertFalse(body["running"])
+            self.assertEqual(body["error_code"], "missing_fields")
         self.bridge.assert_not_called()
+        self.assertFalse(self.launched)
 
     def test_sellwild_match_prefers_marketplace_categories_and_ignores_sleeve_words(self):
         tee = {"title": "Graphic tee", "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts",

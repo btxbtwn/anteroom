@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from functools import lru_cache
 from typing import Any
 
@@ -258,6 +259,44 @@ def etsy_when_options() -> list[str]:
     forms = (dropdown_options().get("forms") or {}).get("etsy") or {}
     values = forms.get("whenMade") or []
     return [str(item) for item in values if str(item).strip()]
+
+
+def etsy_when_made_codes(today: date | None = None) -> tuple[str, ...]:
+    """Etsy's when_made values this year.
+
+    Etsy moves its newest ranges every year so that vintage stays 20 years old:
+    in 2026 they are 2020_2026, 2007_2009, before_2007 and 2000_2006.
+    """
+    year = (today or date.today()).year
+    return ("made_to_order", f"2020_{year}", "2010_2019", f"{year - 19}_2009", f"before_{year - 19}",
+            f"2000_{year - 20}", *(f"19{decade}0s" for decade in range(9, -1, -1)), "1800s", "1700s", "before_1700")
+
+
+def etsy_when_made_code(label: str, today: date | None = None) -> str:
+    """Etsy's when_made value for a dropdown label, moved onto this year's ranges, or "" when there is none."""
+    text = re.sub(r"\s*\([^)]*\)\s*$", "", str(label or "")).strip().lower()
+    codes = etsy_when_made_codes(today)
+    span = re.fullmatch(r"(\d{4})\s*[-_]\s*(\d{4})", text)
+    before = re.fullmatch(r"before[ _](\d{4})", text)
+    if text == "made to order":
+        code = "made_to_order"
+    elif span and span[1] == "2020":
+        code = codes[1]
+    elif span and span[1] == "2000":
+        code = codes[5]
+    elif span and span[2] == "2009" and span[1] > "2000":
+        code = codes[3]
+    elif span and span[1] == "1900":
+        code = "1900s"
+    elif span:
+        code = f"{span[1]}_{span[2]}"
+    elif before and before[1] > "1700":
+        code = codes[4]
+    elif before:
+        code = f"before_{before[1]}"
+    else:
+        code = text
+    return code if code in codes else ""
 
 
 def _normalize_when_text(text: str) -> str:

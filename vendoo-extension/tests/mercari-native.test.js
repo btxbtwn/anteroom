@@ -270,3 +270,82 @@ test('a lost reply after the Mercari publish is never retried, and recovery uses
   const confirmed = await c.runMercariNative(publish(), true);
   assert.equal(confirmed.state, 'published');
 });
+
+// Boys tops & t-shirts > Boys (4+), from Mercari's size master (read 2026-10-25).
+const BOYS_SIZES = [[101, 'XS (4-5)', 'XS'], [102, 'S (6-7)', 'S'], [103, 'M (8)', 'M'], [104, 'L (10-12)', 'L'],
+  [105, 'XL (14-16)', 'XL'], [168, '2XL (18)', '2XL'], [169, 'One Size', 'One Size']].map(([id, name, title]) => ({ id, name, title, group: 83 }));
+const MEN_TOP_SIZES = [[11, 'L (42-44)', 'L', 20], [12, 'XL (46-48)', 'XL', 20], [13, 'XXL (50-52)', 'XXL', 20], [342, 'XL', 'XL', 21],
+  [346, 'Big 2X', 'Big 2X', 22]].map(([id, name, title, group]) => ({ id, name, title, group }));
+const clothing = extra => ({ title: 'Boys graphic tee', description: 'Soft cotton tee', price: 18.4, brand: 'Nike', size: 'XL (18/20)',
+  condition: 'Pre-Owned - Good', weight_lb: 0, weight_oz: 7, ...extra,
+  form: { overrides: { condition: '3', brand: 'Nike', categoryV2: { id: '1934', path: ['3', '1885', '1934'], hasChildren: false } },
+    specifics: { shipping: { payerId: 1, carrierId: 2508, location: '70115', deliveryMethod: 'mercari_shipping' } },
+    aspects: {}, sizes: BOYS_SIZES, ships_from_zip: '70115', ...extra?.form } });
+
+function withVendooBrand(c, journal, answer) {
+  journal.vendoo_session = { uid: 'u1', refresh_token: 'private-refresh', access_token: 'private-vendoo', expiration_time: Date.now() + 3600000 };
+  const original = c.fetch;
+  const asked = [];
+  c.fetch = async (url, options = {}) => {
+    if (String(url).startsWith('https://api.web.vendoo.co/')) { asked.push(String(url)); return reply(...answer); }
+    return original(url, options);
+  };
+  return asked;
+}
+
+test('a full Mercari clothing listing sends its category, size, brand, label, payer and ZIP', async () => {
+  const { c, requests, journal, setDraft } = worker();
+  setDraft({ name: 'Boys graphic tee', description: 'Soft cotton tee', price: 1800, itemCondition: { id: 3 }, photos: [{ id: 'i1' }, { id: 'i2' }] });
+  const asked = withVendooBrand(c, journal, [200, [{ value: '5813', label: 'Nike' }]]);
+  const result = await c.runMercariNative(message({ listing: clothing() }));
+  assert.equal(result.ok, true);
+  const common = requests.find(r => r.body.operationName === 'addDraftItemMutation').body.variables.input.common;
+  assert.deepEqual(JSON.parse(JSON.stringify(common)), { name: 'Boys graphic tee', isAutoPriceDrop: false, description: 'Soft cotton tee',
+    price: 1800, categoryId: 1934, conditionId: 3, sizeId: 105,
+    shipping: { payerId: 1, zipCode: '70115', dimensions: {}, weight: { weight: 7 } }, shippingClassIds: [2508], brandId: 5813,
+    imageIds: ['i1', 'i2'] });
+  assert.match(asked[0], /\/api\/rest\/v1\/brand\/mercari\?search=Nike&matchValue=true$/);
+});
+
+test('Mercari sizes come from the category and never cross a fit the listing names', () => {
+  const { c } = worker();
+  const size = (listing, sizes = BOYS_SIZES) => JSON.parse(JSON.stringify(c.mercariSize({ ...listing, form: { aspects: {}, sizes } }, 1934)));
+  assert.deepEqual(size({ size: 'XL (18/20)' }), { id: 105 });
+  assert.deepEqual(size({ size: '2XL' }), { id: 168 });
+  assert.deepEqual(size({ size: 'XL' }, MEN_TOP_SIZES), { id: 12 });
+  assert.match(size({ size: 'XL', sizeType: 'Big & Tall' }, MEN_TOP_SIZES).problem, /XL \(46-48\) or XL/);
+  assert.deepEqual(size({ size: 'L/XL' }), { problem: 'a size Mercari offers in this category' });
+  assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: { '1934_Size': '103' }, sizes: BOYS_SIZES } }, 1934))), { id: 103 });
+  assert.deepEqual(size({ size: 'M' }, []), { none: 'none' });
+});
+
+test('a Mercari listing Mercari would refuse stops before any upload and names each field', async () => {
+  for (const [listing, field] of [[clothing({ size: 'L/XL' }), 'sizeId'], [clothing({ price: 2400 }), 'price'], [clothing({ price: 0.4 }), 'price'],
+    [clothing({ description: 'x'.repeat(1001) }), 'description'], [clothing({ weight_lb: 51 }), 'weight'],
+    [clothing({ form: { overrides: { condition: '3', categoryV2: { id: '1885', hasChildren: true } } } }), 'categoryId']]) {
+    const { c, requests } = worker();
+    const result = await c.runMercariNative(message({ listing }));
+    assert.equal(result.error_code, 'missing_fields', field);
+    assert.equal(result.safe_to_retry, true);
+    assert.ok(result.fields.some(entry => entry.field === field), field);
+    assert.equal(requests.length, 0, field);
+  }
+});
+
+test('a brand Vendoo\'s Mercari index cannot place is left for Mercari\'s own check', async () => {
+  const { c, requests, journal } = worker();
+  withVendooBrand(c, journal, [503, {}]);
+  await c.runMercariNative(message({ listing: clothing() }));
+  const common = requests.find(r => r.body.operationName === 'addDraftItemMutation').body.variables.input.common;
+  assert.equal(common.brandId, undefined);
+});
+
+test('a Mercari draft input it no longer accepts is reported as a form change, safe to retry', async () => {
+  const { c } = worker({ respond: op => (op === 'addDraftItemMutation'
+    ? { errors: [{ message: 'Field "sizeId" is not defined by type "DraftItemCommonInput".', extensions: { code: 'GRAPHQL_VALIDATION_FAILED' } }] }
+    : { uploadDraftItemImage: { images: [{ id: 'i1' }] } }) });
+  const result = await c.runMercariNative(message({ listing: clothing() }));
+  assert.equal(result.error_code, 'schema_drift');
+  assert.equal(result.safe_to_retry, true);
+  assert.match(result.marketplace_message, /sizeId/);
+});

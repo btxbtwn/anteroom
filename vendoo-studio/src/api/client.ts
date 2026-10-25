@@ -59,10 +59,10 @@ import { AssistantRefused, type AssistantMemory, type AssistantMessage, type Ass
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
-import type { EbayListing, EbayListingDefaults, EbayListingOptions, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
+import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -228,11 +228,17 @@ export const api = {
       request<EtsyOrders>(`/etsy/orders?${new URLSearchParams({ ...params, offset: String(params.offset) })}`),
     listings: (state: EtsyListingState, offset: number) =>
       request<EtsyPage<EtsyListing>>(`/etsy/listings?${new URLSearchParams({ state, offset: String(offset) })}`),
-    listingProfiles: () => request<{ shipping: { id: string; title: string; is_calculated: boolean }[]; processing: { id: string; title: string }[] }>("/etsy/listing-profiles"),
-    listingDefaults: () => request<{ shipping_profile_id?: string; readiness_state_id?: string }>("/etsy/listing-defaults"),
-    setListingDefaults: (shippingProfileId: string, readinessStateId: string) =>
-      request<{ shipping_profile_id?: string; readiness_state_id?: string }>("/etsy/listing-defaults", {
-        method: "PUT", body: JSON.stringify({ shipping_profile_id: shippingProfileId, readiness_state_id: readinessStateId }),
+    listingProfiles: () => request<{
+      shipping: { id: string; title: string; is_calculated: boolean }[];
+      processing: { id: string; title: string }[];
+      returns: { id: string; title: string }[];
+    }>("/etsy/listing-profiles"),
+    listingDefaults: () => request<{ shipping_profile_id?: string; readiness_state_id?: string; return_policy_id?: string }>("/etsy/listing-defaults"),
+    setListingDefaults: (shippingProfileId: string, readinessStateId: string, returnPolicyId: string) =>
+      request<{ shipping_profile_id?: string; readiness_state_id?: string; return_policy_id?: string }>("/etsy/listing-defaults", {
+        method: "PUT", body: JSON.stringify({
+          shipping_profile_id: shippingProfileId, readiness_state_id: readinessStateId, return_policy_id: returnPolicyId,
+        }),
       }),
   },
   analytics: {
@@ -360,11 +366,6 @@ export const api = {
     read: (section: string, params: Record<string, string | number> = {}) =>
       request<EbayPageData>(`/ebay/read/${section}?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),
     listing: (id: string) => request<EbayListing>(`/ebay/listing/${encodeURIComponent(id)}`),
-    listingOptions: () => request<EbayListingOptions>("/ebay/listing-options"),
-    listingDefaults: () => request<EbayListingDefaults>("/ebay/listing-defaults"),
-    setListingDefaults: (defaults: EbayListingDefaults) => request<EbayListingDefaults>("/ebay/listing-defaults", {
-      method: "PUT", body: JSON.stringify(defaults),
-    }),
     preview: (kind: string, payload: EbayPayload) => request<EbayReview>("/ebay/actions/preview", {
       method: "POST", body: JSON.stringify({ kind, payload }),
     }),
@@ -380,6 +381,20 @@ export const api = {
     imageSearch: (data: string, mime: string, offset = 0) => request<EbayPageData>(`/ebay/research/image?offset=${offset}`, {
       method: "POST", body: JSON.stringify({ data, mime }),
     }),
+    listingProfiles: () => request<{
+      fulfillment: { id: string; title: string }[];
+      payment: { id: string; title: string }[];
+      return: { id: string; title: string }[];
+      locations: { id: string; title: string }[];
+    }>("/ebay/listing-profiles"),
+    listingDefaults: () => request<{
+      fulfillment_policy_id?: string; payment_policy_id?: string; return_policy_id?: string; merchant_location_key?: string;
+    }>("/ebay/listing-defaults"),
+    setListingDefaults: (defaults: {
+      fulfillment_policy_id?: string; payment_policy_id?: string; return_policy_id?: string; merchant_location_key?: string;
+    }) => request<{
+      fulfillment_policy_id?: string; payment_policy_id?: string; return_policy_id?: string; merchant_location_key?: string;
+    }>("/ebay/listing-defaults", { method: "PUT", body: JSON.stringify(defaults) }),
   },
   ebayOffers: {
     status: () => request<EbayOffersStatus>("/ebay-offers"),
@@ -425,6 +440,13 @@ export const api = {
   },
   nativeMarketplaces: {
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
+    preflight: (convId: string, sellwild?: { categoryId?: number; conditionId?: number }) => {
+      const params = new URLSearchParams();
+      if (sellwild?.categoryId) params.set("sellwild_category_id", String(sellwild.categoryId));
+      if (sellwild?.conditionId) params.set("sellwild_condition_id", String(sellwild.conditionId));
+      const query = params.toString();
+      return request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight${query ? `?${query}` : ""}`);
+    },
     sellwildOptions: (convId: string) => request<SellwildOptions>(`/conversations/${convId}/native-marketplaces/sellwild/options`),
     list: (convId: string, marketplace: NativeMarketplace, revisionId: string, sellwild?: SellwildChoice) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/list`, {
@@ -753,6 +775,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ marketplace, enabled }),
       }),
+    setSaleAutodelist: (autodelist: boolean) =>
+      request<SaleDetectionStatus>("/settings/sale-detection", {
+        method: "PUT",
+        body: JSON.stringify({ autodelist }),
+      }),
     provider: () => request<ProviderStatus>("/settings/provider"),
     setProvider: (apiKey: string) =>
       request<OkResponse>("/settings/provider", {
@@ -882,6 +909,12 @@ export const api = {
       request<{ ok: boolean; length: number; width: number; height: number }>("/settings/package-dimensions", {
         method: "PUT",
         body: JSON.stringify(dimensions),
+      }),
+    shipsFromZip: () => request<{ zip: string }>("/settings/ships-from-zip"),
+    setShipsFromZip: (zip: string) =>
+      request<{ ok: boolean; zip: string }>("/settings/ships-from-zip", {
+        method: "PUT",
+        body: JSON.stringify({ zip }),
       }),
     hiddenFields: (conversationId?: string) =>
       request<{

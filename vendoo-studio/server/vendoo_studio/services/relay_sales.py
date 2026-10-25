@@ -30,7 +30,7 @@ LISTING_URL_ID = {
     "etsy": re.compile(r"etsy\.com/(?:[a-z-]+/)?listing/(\d+)", re.I),
     "poshmark": re.compile(r"poshmark\.com/listing/(?:[^/?#]+-)?([a-f0-9]{24})(?:[/?#]|$)", re.I),
     "mercari": re.compile(r"mercari\.com/(?:us/)?item/(m\d{8,14})(?:[/?#]|$)", re.I),
-    "depop": re.compile(r"depop\.com/.*/(\d{5,12})(?:[/?#]|$)", re.I),
+    "depop": re.compile(r"depop\.com/products/([a-z0-9][a-z0-9-]{0,200})(?:[/?#]|$)"),
     "sellwild": re.compile(r"sellwild\.com/product/(\d{1,12})(?:[/?#]|$)", re.I),
 }
 

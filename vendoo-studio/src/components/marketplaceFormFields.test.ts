@@ -93,6 +93,68 @@ describe("marketplace form fields", () => {
     }
   });
 
+  it("gives each listing value one row when the schema labels it differently", () => {
+    const depopListing = {
+      ...listing,
+      depop_specifics: { productType: "jackets", parcelSize: "Medium", sizeType: "Regular" },
+    };
+    const depopSchema: MarketplaceForm[] = [{
+      marketplace: "depop",
+      category_id: "kids-jackets",
+      known: true,
+      fields: ["productType", "parcelSize", "sizeType"].map((key) => ({
+        key,
+        label: key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase()),
+        value: "",
+        required: false,
+        multi: false,
+        selection_only: false,
+        options: key === "parcelSize" ? ["Small", "Medium", "Large"] : [],
+      })),
+    }];
+    const fields = fieldsForMarketplaceForm(depopListing, "depop", depopSchema);
+    const keys = fields.map((field) => field.key.toLowerCase());
+    // React keys rows by field key; a repeat leaves rows from the previous tab on screen.
+    expect(new Set(keys).size).toBe(keys.length);
+    const parcel = fields.filter((field) => field.key === "depop_specifics.parcelSize");
+    expect(parcel).toHaveLength(1);
+    expect(parcel[0].options).toEqual(["Small", "Medium", "Large"]);
+  });
+
+  it("names fields the way the marketplace does, not by their listing keys", () => {
+    const depopListing = {
+      ...listing,
+      depop_specifics: {
+        productType: "jackets",
+        parcel_size: "Medium",
+        category_path: "Kids,Coats and jackets,Jackets",
+        category_id: "123",
+      },
+      etsy_specifics: { whoMade: "Another company or person" },
+    };
+    const depopSchema: MarketplaceForm[] = [{
+      marketplace: "depop",
+      category_id: "kids-jackets",
+      known: true,
+      fields: [{
+        key: "productType", label: "Product type", value: "", required: true,
+        multi: false, selection_only: false, options: [],
+      }],
+    }];
+    const fields = fieldsForMarketplaceForm(depopListing, "depop", depopSchema);
+    const labels = fields.map((field) => field.label);
+    expect(labels).toContain("Product type *");
+    expect(labels.filter((label) => label.toLowerCase() === "parcel size")).toEqual(["Parcel Size"]);
+    expect(labels.some((label) => /[a-z][A-Z]|_/.test(label))).toBe(false);
+    // Depop's own category replaces the shared one, and its id is not a form field.
+    const category = fields.filter((field) => field.label === "Category");
+    expect(category.map((field) => field.key)).toEqual(["depop_specifics.category_path"]);
+    expect(labels).not.toContain("Category id");
+
+    const etsy = fieldsForMarketplaceForm(depopListing, "etsy", undefined);
+    expect(etsy.find((field) => field.key === "etsy_specifics.whoMade")?.label).toBe("Who Made It?");
+  });
+
   it("leaves General as its own field list", () => {
     const labels = fieldsForMarketplaceForm(listing, "general", schema).map((field) => field.label);
     expect(labels.filter((label) => label === "Title")).toHaveLength(1);
