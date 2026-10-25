@@ -193,7 +193,62 @@ function PackageDimensionsSection() {
         {draft && !valid ? <SettingsNote tone="error">Use whole inches from 1 to 120.</SettingsNote> : null}
         {saveMutation.isError ? <SettingsNote tone="error">{(saveMutation.error as Error).message}</SettingsNote> : null}
       </SettingsRow>
+      <ShipsFromZipRow />
     </SettingsSection>
+  );
+}
+
+function ShipsFromZipRow() {
+  const queryClient = useQueryClient();
+  const { data, error, isPending } = useQuery({
+    queryKey: ["settings-ships-from-zip"],
+    queryFn: api.settings.shipsFromZip,
+  });
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? data?.zip ?? "";
+  const valid = value === "" || /^\d{5}$/.test(value);
+  const saveMutation = useMutation({
+    mutationFn: (zip: string) => api.settings.setShipsFromZip(zip),
+    onSuccess: (payload) => {
+      queryClient.setQueryData(["settings-ships-from-zip"], { zip: payload.zip });
+      setDraft(null);
+    },
+  });
+
+  return (
+    <SettingsRow
+      title="Ships from ZIP"
+      description="Mercari and Depop use it as the ships-from address when Anteroom lists there directly."
+    >
+      {isPending ? (
+        <LoadingNote>Loading ZIP</LoadingNote>
+      ) : error ? (
+        <SettingsNote tone="error">{(error as Error).message || "Could not load the ZIP"}</SettingsNote>
+      ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          <Input
+            size="sm"
+            className="w-24"
+            inputMode="numeric"
+            maxLength={5}
+            aria-label="Ships from ZIP"
+            value={value}
+            aria-invalid={!valid ? true : undefined}
+            onChange={(event) => setDraft(event.target.value.trim())}
+          />
+          <Button
+            size="sm"
+            disabled={!valid || value === (data?.zip ?? "") || saveMutation.isPending}
+            onClick={() => saveMutation.mutate(value)}
+          >
+            {saveMutation.isPending ? <Spinner /> : null}
+            {saveMutation.isPending ? "Saving" : "Save ZIP"}
+          </Button>
+        </div>
+      )}
+      {!valid ? <SettingsNote tone="error">A ZIP code is five digits.</SettingsNote> : null}
+      {saveMutation.isError ? <SettingsNote tone="error">{(saveMutation.error as Error).message}</SettingsNote> : null}
+    </SettingsRow>
   );
 }
 

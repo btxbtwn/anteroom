@@ -40,6 +40,10 @@ class MarketplacesConfig(BaseModel):
     selected: list[str]
 
 
+class ShipsFromZipConfig(BaseModel):
+    zip: str = ""
+
+
 class PackageDimensionsConfig(BaseModel):
     length: int
     width: int
@@ -553,6 +557,23 @@ def set_package_dimensions(config: PackageDimensionsConfig):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, **dimensions}
+
+
+@router.get("/ships-from-zip")
+def get_ships_from_zip():
+    from vendoo_studio.services.user_settings import get_ships_from_zip as load_zip
+
+    return {"zip": load_zip()}
+
+
+@router.put("/ships-from-zip")
+def set_ships_from_zip(config: ShipsFromZipConfig):
+    from vendoo_studio.services.user_settings import set_ships_from_zip as save_zip
+
+    try:
+        return {"ok": True, "zip": save_zip(config.zip)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/hidden-fields")

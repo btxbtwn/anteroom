@@ -5,19 +5,68 @@
 const POSHMARK = 'https://poshmark.com';
 const POSHMARK_QUERY = 'app_version=2.55&pm_version=2026.43.00';
 const POSHMARK_CONDITIONS = new Set(['nwt', 'uln', 'ug', 'uf']);
-let poshmarkCatalog = null;
+const POSHMARK_STYLE_TAG = /^[A-Za-z0-9\-, ']{1,25}$/;
 
+// Poshmark's public catalog: departments, categories, size sets and colours.
 async function poshmarkCatalogData(deadline) {
-  if (!poshmarkCatalog) {
+  return await marketplaceCatalog('poshmark:catalog', () => marketplaceCatalogRead('poshmark', 'category list', async () => {
     const { data } = await marketplaceFetch(`${POSHMARK}/vm-rest/meta/catalog_v2`, { marketplace: 'poshmark', step: 'catalog',
       credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 30000 });
     const catalog = data.data || data;
     if (!Array.isArray(catalog?.catalog?.departments)) {
-      throw marketplaceError('Poshmark\'s category list changed. Anteroom needs an update before listing there.', { code: 'schema_drift' });
+      throw marketplaceError('Poshmark\'s category list changed.', { code: 'schema_drift' });
     }
-    poshmarkCatalog = catalog;
+    return catalog;
+  }));
+}
+
+// Poshmark's own style tags. Free text is accepted too, so a failed read
+// only means the listing's tags go as the seller wrote them.
+async function poshmarkStyleTags(deadline) {
+  try {
+    return await marketplaceCatalog('poshmark:style_tags', async () => {
+      const { data } = await marketplaceFetch(`${POSHMARK}/vm-rest/meta/style_tags/top?${POSHMARK_QUERY}`, { marketplace: 'poshmark',
+        step: 'style-tags', credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 10000 });
+      return Array.isArray(data.data) ? data.data.map(String) : [];
+    });
+  } catch (error) {
+    marketplaceLog('poshmark', 'style-tags', { error_code: error.code || 'failed' });
+    return [];
   }
-  return poshmarkCatalog;
+}
+
+// Poshmark's own spelling of the brand (brand search, read 2026-10-25). Brand
+// is a free string on a post, so a brand Poshmark does not know, or a failed
+// search, keeps the seller's spelling.
+async function poshmarkBrand(listing, deadline) {
+  const wanted = String(listing.form?.overrides?.brand || listing.poshmark_specifics?.poshmarkBrand || listing.brand || '').trim();
+  if (!wanted || /^(?:unbranded|no brand|none|other|n\/a)$/i.test(wanted)) return '';
+  try {
+    const brands = await marketplaceCatalog(`poshmark:brand:${marketplaceNameKey(wanted)}`, async () => {
+      const { data } = await marketplaceFetch(`${POSHMARK}/vm-rest/searches/brands/suggested?query=${encodeURIComponent(wanted)}&count=10&${POSHMARK_QUERY}`,
+        { marketplace: 'poshmark', step: 'brand', credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 10000 });
+      return Array.isArray(data.data) ? data.data : [];
+    });
+    const match = brands.find(entry => marketplaceNameKey(entry?.brand_name) === marketplaceNameKey(wanted));
+    return match ? String(match.brand_name) : wanted;
+  } catch (error) {
+    marketplaceLog('poshmark', 'brand', { error_code: error.code || 'failed' });
+    return wanted;
+  }
+}
+
+// Up to three style tags: the seller's Poshmark tags, else the listing's tags
+// Poshmark already has, in its spelling, else the first three tags, which
+// Poshmark takes as free text (Vendoo sends them the same way).
+function poshmarkPostStyleTags(listing, known) {
+  const valid = values => values.map(tag => String(tag).trim()).filter(tag => POSHMARK_STYLE_TAG.test(tag));
+  const byKey = new Map(known.map(tag => [marketplaceNameKey(tag), tag]));
+  const spelled = tag => byKey.get(marketplaceNameKey(tag)) || tag;
+  const own = valid(Array.isArray(listing.poshmark_specifics?.styleTags) ? listing.poshmark_specifics.styleTags : []);
+  if (own.length) return [...new Set(own.map(spelled))].slice(0, 3);
+  const general = valid(listingTags(listing));
+  const matched = [...new Set(general.map(tag => byKey.get(marketplaceNameKey(tag))).filter(Boolean))];
+  return (matched.length ? matched : [...new Set(general)]).slice(0, 3);
 }
 
 // The signed-in account from Poshmark's jwt cookie, checked before any request.
@@ -114,58 +163,100 @@ function poshmarkPrice(listing) {
   return Math.round(Number(listing?.poshmark_specifics?.poshmarkPrice || listing?.price));
 }
 
+// The post's catalog from the leaf's id chain. Studio resolves the chain from
+// the category tree; Poshmark's "Global & Traditional Wear" is a grouping in
+// that tree, not a catalog level, so its id is skipped.
 function poshmarkCategory(catalog, listing) {
-  const ids = listing.marketplace_category_objects?.poshmark?.path;
-  if (!Array.isArray(ids) || ids.length < 2) return null;
+  const chain = listing.form?.overrides?.categoryV2?.path || listing.marketplace_category_objects?.poshmark?.path;
+  const ids = (Array.isArray(chain) ? chain : []).map(String).filter(id => !id.startsWith('group:'));
+  if (ids.length < 2 || ids.length > 3) return null;
   const department = catalog.catalog.departments.find(entry => entry.id === ids[0]);
   const category = department?.categories.find(entry => entry.id === ids[1]);
   if (!category) return null;
   const feature = ids[2] && ids[2] !== ids[1] ? category.category_features?.find(entry => entry.id === ids[2]) : null;
   if (ids[2] && ids[2] !== ids[1] && !feature) return null;
-  return { department, category, catalog: { department: department.id, category: category.id, category_features: feature ? [feature.id] : [] } };
+  return { department, category, leaf: feature ? feature.id : category.id,
+    catalog: { department: department.id, category: category.id, category_features: feature ? [feature.id] : [] } };
 }
 
-// A size within the category's own size sets. The seller's size scale picks
-// the set when Anteroom has it; otherwise the first set with an exact match.
-function poshmarkSize(category, listing) {
+const POSHMARK_FIT_LABELS = { petite: 'Petite', plus: 'Plus', 'big_&_tall': 'Big & Tall', maternity: 'Maternity', juniors: 'Juniors' };
+
+// A size inside the category's own size sets, as { set, size } or { problem }.
+// Vendoo's coded size (``<leaf>_size`` with its ``_scale`` set tag) wins.
+// Otherwise the seller's size is matched only inside the sets their listing
+// allows: a kids' size inside the boys' or girls' set the listing names, a
+// fit (Petite, Plus, Big & Tall...) inside that set. Nothing crosses them.
+function poshmarkSize(category, listing, { kids = false, leaf = category.id } = {}) {
   const specifics = listing.poshmark_specifics || {};
-  const wanted = String(specifics[`${category.id}Size`] || specifics.size || listing.size || '').trim();
-  const scale = String(specifics[`${category.id}SizeScale`] || '').trim();
+  const aspects = listing.form?.aspects || {};
   const sets = category.size_sets || [];
   const sizesOf = set => set.size_systems?.us?.sizes || [];
   const all = sets.flatMap(set => sizesOf(set).map(size => ({ set, size })));
   if (all.length && all.every(entry => entry.size.id === 'OS')) return { ...all[0], quantity: true };
+  const coded = String(aspects[`${leaf}_size`] ?? '').trim();
+  const codedScale = String(aspects[`${leaf}_size_scale`] ?? '').trim();
+  if (coded && codedScale === 'customSize') return { set: { tags: [] }, size: { id: coded, display: coded } };
+  if (coded) {
+    const found = all.find(entry => entry.size.id === coded && (!codedScale || entry.set.tags?.includes(codedScale)));
+    if (found) return found;
+  }
+  const wanted = String(specifics[`${category.id}Size`] || specifics.size || listing.size || '').trim();
   if (!wanted) return null;
-  const variants = [wanted, wanted.replace(/\s*\(.*\)\s*$/, '')].map(value => value.toLowerCase());
-  const matches = entry => [entry.size.id, entry.size.short, entry.size.display].some(value => variants.includes(String(value || '').toLowerCase()));
-  const ordered = scale ? [...all.filter(entry => entry.set.tags?.includes(scale)), ...all] : all;
-  return ordered.find(matches) || null;
+  const tagged = tag => sets.filter(set => set.tags?.includes(tag));
+  const scale = String(specifics[`${category.id}SizeScale`] || '').trim() || codedScale;
+  let groups;
+  if (scale) {
+    groups = [tagged(scale)];
+  } else if (kids && sets.some(set => set.tags?.includes('boys') || set.tags?.includes('girls'))) {
+    const gender = listingKidsGender(listing);
+    if (!gender) return { problem: 'whether this is a boys\' or girls\' size' };
+    groups = [tagged(gender), tagged('baby')];
+  } else {
+    const fit = listingSizeFit(listing);
+    if (fit) {
+      if (!tagged(fit).length) return { problem: `a size from a set Poshmark offers here (it has no ${POSHMARK_FIT_LABELS[fit] || fit} sizes in this category)` };
+      groups = [tagged(fit)];
+    } else {
+      const standard = tagged('standard');
+      // Past the standard range, Poshmark keeps larger sizes in Plus or Big & Tall.
+      groups = standard.length ? [standard, [...tagged('plus'), ...tagged('big_&_tall')]] : [sets];
+    }
+  }
+  for (const group of groups) {
+    const entries = group.flatMap(set => sizesOf(set).map(size => ({ set, size,
+      keys: sizeEntryKeys([size.id, size.short, size.display], { petite: set.tags?.includes('petite') }) })));
+    const found = matchSize(wanted, entries);
+    if (found.length) return { set: found[0].set, size: found[0].size };
+  }
+  return null;
 }
 
-function poshmarkPostFields(catalog, listing) {
+function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {}) {
   const missing = [];
   const category = poshmarkCategory(catalog, listing);
   if (!category) missing.push({ field: 'category', needs: 'a Poshmark category' });
-  const size = category ? poshmarkSize(category.category, listing) : null;
-  if (category && !size) missing.push({ field: 'size', needs: 'a size Poshmark offers in this category' });
+  const size = category ? poshmarkSize(category.category, listing, { kids: category.department.display === 'Kids', leaf: category.leaf }) : null;
+  if (category && !size?.size) missing.push({ field: 'size', needs: size?.problem || 'a size Poshmark offers in this category' });
   const condition = poshmarkCondition(listing);
   if (!condition) missing.push({ field: 'condition', needs: 'a condition' });
   const price = poshmarkPrice(listing);
   if (!(price >= 3)) missing.push({ field: 'price', needs: 'a price of $3 or more' });
   const title = String(listing.title || '').trim();
   if (!title) missing.push({ field: 'title', needs: 'a title' });
-  if (!String(listing.description || '').trim()) missing.push({ field: 'description', needs: 'a description' });
+  if (title.length > 80) missing.push({ field: 'title', needs: 'a title of 80 characters or fewer' });
+  const description = String(listing.description || '').trim();
+  if (!description) missing.push({ field: 'description', needs: 'a description' });
+  if (description.length > 1500) missing.push({ field: 'description', needs: 'a description of 1500 characters or fewer' });
   if (missing.length) throw marketplaceMissing('poshmark', missing);
   const colorNames = new Set((catalog.colors || []).map(color => color.name));
   const colors = [listing.poshmark_specifics?.poshmarkColor || listing.primaryColor, listing.secondaryColor]
     .map(value => ({ Grey: 'Gray', Beige: 'Tan' })[value] || value).filter(value => colorNames.has(value));
   const smart = listing.form?.specifics?.smartSell;
-  const minimum = Number(smart?.enabled && smart.minPrice) || Number(listing.poshmark_specifics?.smartSellMinimumPrice || listing.poshmark_specifics?.smartSell?.minimumPrice || 0);
-  const sku = String(listing.sku || listing.poshmark_specifics?.poshmarkSku || '').trim();
-  const cost = Number(listing.poshmark_specifics?.costPrice || listing.costPrice || 0);
-  const brand = listing.form?.overrides?.brand || listing.poshmark_specifics?.poshmarkBrand || listing.brand;
+  const minimum = Math.round(Number(smart?.enabled && smart.minPrice) || Number(listing.poshmark_specifics?.smartSellMinimumPrice || listing.poshmark_specifics?.smartSell?.minimumPrice || 0));
+  const sku = String(listing.sku || listing.poshmark_specifics?.poshmarkSku || '').trim().slice(0, 50);
+  const cost = Math.round(Number(listing.poshmark_specifics?.costPrice || listing.costPrice || 0));
   return {
-    title: title.slice(0, 80), description: String(listing.description).slice(0, 1500),
+    title, description,
     catalog: category.catalog,
     inventory: { status: 'available', multi_item: false, size_quantity_revision: 0, size_quantities: [{
       size_id: size.size.id, size_obj: size.size, size_system: 'us', quantity_available: 1, quantity_sold: 0,
@@ -173,14 +264,22 @@ function poshmarkPostFields(catalog, listing) {
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
     original_price_amount: { val: '0', currency_code: 'USD', currency_symbol: '$' },
     condition,
-    ...(brand ? { brand: String(brand) } : {}),
+    ...(brand ? { brand } : {}),
     colors: [...new Set(colors)].slice(0, 2),
-    style_tags: (Array.isArray(listing.poshmark_specifics?.styleTags) ? listing.poshmark_specifics.styleTags : []).slice(0, 3).map(String),
+    style_tags: styleTags,
     offer_auto_actions_v2_enabled: minimum > 0 && minimum < price,
     offer_auto_actions_min_price_amount: minimum > 0 && minimum < price ? { val: String(minimum), currency_code: 'USD' } : null,
     ...(sku || cost > 0 ? { seller_private_info: { ...(sku ? { sku } : {}),
       ...(cost > 0 ? { cost_price_amount: { val: String(cost), currency_code: 'USD' } } : {}) } } : {}),
   };
+}
+
+// Every catalog read the post needs, before anything is written.
+async function poshmarkPreparedPost(listing, deadline) {
+  const catalog = await poshmarkCatalogData(deadline);
+  const brand = await poshmarkBrand(listing, deadline);
+  const styleTags = poshmarkPostStyleTags(listing, await poshmarkStyleTags(deadline));
+  return poshmarkPostFields(catalog, listing, { brand, styleTags });
 }
 
 function poshmarkListingUrl(id) {
@@ -202,7 +301,7 @@ async function updatePoshmarkPost(msg, recovery = false) {
   const key = `native_operation_${p.operation_id}`;
   let stage = 'prepare';
   const matches = post => post.status === 'published'
-    && marketplaceText(post.title) === marketplaceText(String(p.listing?.title || '').trim().slice(0, 80))
+    && marketplaceText(post.title) === marketplaceText(String(p.listing?.title || '').trim())
     && String(post.price_amount?.val) === String(poshmarkPrice(p.listing));
   try {
     if (!/^[a-f0-9]{24}$/.test(id) || (p.confirm !== true && !recovery)) {
@@ -219,7 +318,7 @@ async function updatePoshmarkPost(msg, recovery = false) {
       return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id) };
     }
     poshmarkPhotoCount(p.photos);
-    const post = poshmarkPostFields(await poshmarkCatalogData(deadline), p.listing || {});
+    const post = await poshmarkPreparedPost(p.listing || {}, deadline);
     post.inventory.size_quantity_revision = Number(existing.inventory?.size_quantity_revision) || 0;
     client.csrf = await poshmarkCsrf(deadline);
     const ids = [];
@@ -260,7 +359,7 @@ async function runPoshmarkApi(msg, recovery = false) {
     if (p.confirm !== true) return marketplaceFailure(marketplaceError('Confirm listing on Poshmark.'), true);
     poshmarkPhotoCount(p.photos);
     const account = await poshmarkAccount();
-    const post = poshmarkPostFields(await poshmarkCatalogData(deadline), p.listing || {});
+    const post = await poshmarkPreparedPost(p.listing || {}, deadline);
     client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
 
     stage = 'creating';
@@ -275,7 +374,8 @@ async function runPoshmarkApi(msg, recovery = false) {
     await client.call('POST', `/vm-rest/posts/${created}`, { post: { ...post, cover_shot: { id: ids[0] }, pictures: ids.slice(1).map(id => ({ id })) } },
       { step: 'save', what: 'the listing details' });
     stage = 'publishing';
-    await client.call('PUT', `/vm-rest/posts/${created}/status/published`, {}, { step: 'publish', what: 'to list it' });
+    // Poshmark's own editor certifies the listing when it publishes.
+    await client.call('PUT', `/vm-rest/posts/${created}/status/published?user_certified=true`, {}, { step: 'publish', what: 'to list it' });
     stage = 'published';
     const published = await client.call('GET', `/vm-rest/posts/${created}`, undefined, { step: 'read-back' });
     if (published.status !== 'published') throw new Error('Poshmark has not confirmed the listing.');
