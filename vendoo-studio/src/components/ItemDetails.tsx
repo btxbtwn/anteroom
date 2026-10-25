@@ -362,7 +362,7 @@ export function ItemDetails({ convId }: Props) {
 
   return (
     <div className="@container relative flex min-w-0 flex-col">
-      <InspectorSection title="Notes & Labels" titleId={`item-section-listing-${convId}`}>
+      <InspectorSection title="Notes & Labels" titleId={`item-section-listing-${convId}`} className="gap-2">
         <div>
           <FieldLabel htmlFor={`item-sku-${convId}`}>SKU</FieldLabel>
           <Input nativeInput id={`item-sku-${convId}`} {...f("sku")} autoComplete="off" spellCheck={false} placeholder="Optional" />
@@ -372,8 +372,8 @@ export function ItemDetails({ convId }: Props) {
           <Textarea
             id={`item-notes-${convId}`}
             value={details.sellerNotes}
-            placeholder="Flaws, provenance, sizing quirks, or other seller notes"
-            rows={3}
+            placeholder="Provenance, sizing quirks, or anything the description should mention"
+            rows={2}
             onChange={(e) => scheduleSave({ ...details, sellerNotes: e.target.value })}
           />
         </div>
@@ -383,7 +383,7 @@ export function ItemDetails({ convId }: Props) {
             id={`item-flaws-${convId}`}
             size="sm"
             value={details.knownFlaws}
-            placeholder="Flaws to keep in the description, e.g. small stain near hem"
+            placeholder="Stains, holes, or wear to mention in the description"
             rows={2}
             onChange={(e) => scheduleSave({ ...details, knownFlaws: e.target.value })}
           />

@@ -233,7 +233,11 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     <InspectorSection
       data-photo-tray=""
       title="Photos"
-      meta={`${photos?.length || 0} photos${canReorder ? (touchScreen ? " · tap one to reorder" : " · drag to reorder") : touchScreen ? "" : " · or drop them anywhere"}`}
+      meta={(() => {
+        const count = photos?.length || 0;
+        if (count === 0) return touchScreen ? undefined : "Drop photos anywhere";
+        return `${count} ${count === 1 ? "photo" : "photos"}`;
+      })()}
       actions={
         <>
           <Button variant="outline" size="xs" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
