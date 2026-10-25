@@ -38,6 +38,11 @@ async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: I
     return await _reply(native.inspect_page(conv_id, marketplace, body, db))
 
 
+@router.post("/{marketplace}/list")
+async def list_now(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session = Depends(get_db)):
+    return await _reply(native.list_now(conv_id, marketplace, body, db))
+
+
 @router.post("/{marketplace}/publish")
 async def publish(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session = Depends(get_db)):
     return await _reply(native.publish(conv_id, marketplace, body, db))

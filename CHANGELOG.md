@@ -7,6 +7,10 @@ file: Settings → General → About → What's new.
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 
+
+## 0.1.333 — 2026-10-24
+
+- List on Poshmark in one step. In **Marketplace drafts**, choose **List…** on Poshmark and confirm: Anteroom creates the live listing with its category, size, condition, brand, colors, style tags, original price and Smart Sell minimum, without a Poshmark draft and without opening a tab. A listing Poshmark refuses is removed so you can fix it and try again.
 ## 0.1.332 — 2026-10-24
 
 - Delist an item from its marketplaces in **Live listings** on the listing. Pick marketplaces, or choose **Delist everywhere**, and confirm. Anteroom deletes the listing on Etsy, Poshmark, Mercari and Depop, ends it on eBay (eBay has no delete), and delists it on Sellwild. It works for items listed through Vendoo too, and never touches the marketplace where the item sold. No marketplace tab opens.

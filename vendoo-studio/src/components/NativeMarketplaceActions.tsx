@@ -31,9 +31,10 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
   const calculated = profiles.data?.shipping.find((profile) => profile.id === shippingProfile)?.is_calculated;
   const packageReady = Object.values(packed).every((value) => Number(value) > 0 && Number.isFinite(Number(value)));
   const action = useMutation({
-    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: "draft" | "publish" | "check"; draftUrl?: string }) => {
+    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: "draft" | "publish" | "check" | "list"; draftUrl?: string }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
       if (!revisionId) throw new Error("Generate a listing first.");
+      if (kind === "list") return api.nativeMarketplaces.list(convId, marketplace, revisionId);
       if (kind === "draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId,
         marketplace === "etsy" ? { shippingProfileId: shippingProfile, readinessStateId: processingProfile,
           ...(calculated ? { package: { item_weight: Number(packed.weight), item_length: Number(packed.length),
@@ -49,6 +50,15 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
       void queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
     },
   });
+
+  async function listNow(marketplace: NativeMarketplace) {
+    const name = marketplaceName(marketplace);
+    const approved = await confirmDialog(
+      `List “${title}” on ${name}?\nThis creates a live ${name} listing from the saved title, description, price, photos, category, size, condition, brand and colors.`,
+      { confirmLabel: `List on ${name}` },
+    );
+    if (approved) action.mutate({ marketplace, kind: "list" });
+  }
 
   async function publish(marketplace: NativeMarketplace, draft: NativeDraft) {
     const name = marketplaceName(marketplace);
@@ -71,6 +81,7 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
         const uncertain = draft && ["saving", "publishing", "unknown"].includes(draft.state);
         const published = draft?.state === "published" || draft?.state === "pending_review";
         const local = marketplace === "sellwild";
+        const oneStep = marketplace === "poshmark";
         const changed = draft?.state === "draft" && (draft.revision_id !== revisionId || (local && sellwildChanged));
         const busy = disabled || action.isPending || !revisionId || status.isPending || status.isError;
         return (
@@ -100,19 +111,22 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
               <SelectTrigger size="compact" className="w-36" aria-label="Sellwild condition"><SelectValue placeholder="Condition" /></SelectTrigger>
               <SelectPopup>{sellwildOptions.data?.conditions.map((option) => <SelectItem key={option.id} value={String(option.id)}>{option.label}</SelectItem>)}</SelectPopup>
             </Select>}
-            <Button size="xs" variant="outline" disabled={busy || uncertain || published || (local && (!sellwildCategory || !sellwildCondition)) || (marketplace === "etsy" && !draft?.draft_url && (!shippingProfile || !processingProfile || (calculated && !packageReady)))}
+            {oneStep && <Button size="xs" variant="outline" disabled={busy || uncertain || published} onClick={() => void listNow(marketplace)}>
+              {action.isPending && action.variables.marketplace === marketplace ? "Listing…" : published ? "Listed" : "List…"}
+            </Button>}
+            {!oneStep && <Button size="xs" variant="outline" disabled={busy || uncertain || published || (local && (!sellwildCategory || !sellwildCondition)) || (marketplace === "etsy" && !draft?.draft_url && (!shippingProfile || !processingProfile || (calculated && !packageReady)))}
               onClick={() => action.mutate({ marketplace, kind: "draft" })}>
               {action.isPending && action.variables.marketplace === marketplace && action.variables.kind === "draft" ? "Saving…" : local ? "Save in Anteroom" : changed ? "Save changes" : "Save draft"}
-            </Button>
-            {(published ? draft.listing_url : draft?.draft_url) && <a className="underline" href={published ? draft.listing_url : draft?.draft_url} target="_blank" rel="noopener noreferrer">{published ? "View listing" : "Open draft"}</a>}
-            <Button size="xs" variant="outline"
+            </Button>}
+            {(published ? draft.listing_url : !oneStep && draft?.draft_url) && <a className="underline" href={published ? draft.listing_url : draft?.draft_url} target="_blank" rel="noopener noreferrer">{published ? "View listing" : "Open draft"}</a>}
+            {!oneStep && <Button size="xs" variant="outline"
               disabled={busy || draft?.state !== "draft" || changed}
               onClick={() => draft && void publish(marketplace, draft)}>
               {draft?.state === "pending_review" ? "In review" : published ? "Published" : "Publish…"}
-            </Button>
+            </Button>}
             {uncertain && <Button size="xs" variant="ghost" disabled={action.isPending}
               onClick={() => action.mutate({ marketplace, kind: "check" })}>Check result</Button>}
-            {uncertain && !draft.draft_url && !local && <div className="flex basis-full items-center gap-2">
+            {uncertain && !draft.draft_url && !local && !oneStep && <div className="flex basis-full items-center gap-2">
               <Input className="h-7 text-xs" aria-label={`Saved ${marketplaceName(marketplace)} draft link`}
                 placeholder="Or paste the saved draft link from Chrome" value={draftLinks[marketplace] || ""}
                 onChange={(event) => setDraftLinks({ ...draftLinks, [marketplace]: event.target.value })} />

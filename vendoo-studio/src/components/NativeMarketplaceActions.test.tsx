@@ -34,13 +34,23 @@ describe("direct marketplace listing controls", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it.each([
-    ["poshmark", "Poshmark"], ["mercari", "Mercari"], ["depop", "Depop"],
+    ["mercari", "Mercari"], ["depop", "Depop"],
   ] as const)("keeps %s publication disabled until a draft is saved", (marketplace: NativeMarketplace, name: string) => {
     expect(publishDisabled(row(render({}), name))).toBe(true);
     const ready = row(render({ [marketplace]: { state: "draft", revision_id: "current", draft_url: "https://example.test/draft" } }), name);
     expect(ready).toContain("Draft saved.");
     expect(ready).toContain("Open draft");
     expect(publishDisabled(ready)).toBe(false);
+  });
+
+  it("lists on Poshmark in one step, with no draft controls", () => {
+    const html = row(render({}), "Poshmark");
+    expect(html).toMatch(/<button[^>]*>List…<\/button>/);
+    expect(html).not.toContain("Save draft");
+    expect(html).not.toContain("Publish…");
+    const listed = row(render({ poshmark: { state: "published", revision_id: "current", listing_url: "https://poshmark.com/listing/abc" } }), "Poshmark");
+    expect(listed).toContain("View listing");
+    expect(listed).toMatch(/<button[^>]*disabled=""[^>]*>Listed<\/button>/);
   });
 
   it("explains why edits must be saved before publication", () => {
@@ -75,16 +85,18 @@ describe("direct marketplace listing controls", () => {
   it("blocks writes when the saved marketplace state could not be loaded", () => {
     const html = render({}, new Error("Could not load saved marketplace drafts."));
     expect(html).toContain("Could not load saved marketplace drafts.");
-    for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild"]) {
+    for (const name of ["Mercari", "Depop", "Sellwild"]) {
       expect(publishDisabled(row(html, name))).toBe(true);
       expect(row(html, name)).toMatch(/<button[^>]*disabled=""[^>]*>Save (?:draft|in Anteroom)<\/button>/);
     }
+    expect(row(html, "Poshmark")).toMatch(/<button[^>]*disabled=""[^>]*>List…<\/button>/);
   });
 
   it("blocks another marketplace action while one is submitting", () => {
-    const html = render({ poshmark: { state: "draft", revision_id: "current" } }, null, true);
-    for (const name of ["Poshmark", "Mercari", "Depop", "Sellwild"]) {
+    const html = render({ mercari: { state: "draft", revision_id: "current" } }, null, true);
+    for (const name of ["Mercari", "Depop", "Sellwild"]) {
       expect(publishDisabled(row(html, name))).toBe(true);
     }
+    expect(row(html, "Poshmark")).toMatch(/<button[^>]*disabled=""[^>]*>List(?:ing)?…<\/button>/);
   });
 });
