@@ -10,7 +10,7 @@ import { SendProgress, sendProgressLabel } from "./SendProgress";
 import { ListingBlockers } from "./ListingBlockers";
 import { ListingHistory } from "./ListingHistory";
 import { blockerTarget, isEbayInventoryLocationEdit, matchingEditorField } from "./listingChanges";
-import { VendooSyncStatus } from "./VendooSyncStatus";
+import { ListingSyncStatus } from "./ListingSyncStatus";
 import { OpenListingButton } from "./OpenListingButton";
 import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -371,7 +371,7 @@ export function ListingEditor({
             }}
           />
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
-          <VendooSyncStatus
+          <ListingSyncStatus
             convId={convId}
             bound={Boolean(listingJob?.vendoo_item_id || importedItemId)}
           />

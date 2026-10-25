@@ -59,7 +59,7 @@ import { AssistantRefused, type AssistantMemory, type AssistantMessage, type Ass
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -440,6 +440,7 @@ export const api = {
   },
   nativeMarketplaces: {
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
+    sync: (convId: string) => request<NativeSync>(`/conversations/${convId}/native-marketplaces/sync`, { method: "POST" }),
     preflight: (convId: string, sellwild?: { categoryId?: number; conditionId?: number }) => {
       const params = new URLSearchParams();
       if (sellwild?.categoryId) params.set("sellwild_category_id", String(sellwild.categoryId));

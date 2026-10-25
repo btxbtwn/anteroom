@@ -25,6 +25,11 @@ export interface NativeDraft {
   progress?: { step: string; label: string; index: number; total: number } | null;
 }
 export type NativeDrafts = Partial<Record<NativeMarketplace, NativeDraft>>;
+/** What Sync checked on each marketplace with a direct listing. */
+export interface NativeSync {
+  checked_at: string;
+  marketplaces: Partial<Record<NativeMarketplace, { ok: boolean; error: string | null }>>;
+}
 export interface PreflightGap { field: string; message: string; blocking: boolean }
 export interface NativePreflight {
   revision_id: string | null;
