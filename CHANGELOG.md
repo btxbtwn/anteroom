@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.358 — 2026-10-25
+
+- Depop uses Other when a brand is missing or not on Depop's list.
+- Generated descriptions stay within the shortest marketplace limit, so Mercari, Poshmark, and Depop can take the same description.
+
 ## 0.1.357 — 2026-10-25
 
 - A boys size such as XL (18/20) stays on Poshmark's boys scale.
