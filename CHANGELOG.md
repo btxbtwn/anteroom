@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.359 — 2026-10-25
+
+- When Mercari, Depop, Poshmark, or Sellwild signs you out, Anteroom asks you to sign in. Sign in opens that shop in Chrome.
+
 ## 0.1.358 — 2026-10-25
 
 - Depop uses Other when a brand is missing or not on Depop's list.
