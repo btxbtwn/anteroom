@@ -9,13 +9,31 @@ function marketplaceHeaderRule(id, headers, regexFilter, requestMethods) {
 // Scope each web client's request context to this extension's own Depop,
 // Mercari, Poshmark and Sellwild API calls. Ordinary browsing and requests
 // from other extensions are untouched. A failed setup is tried again next time.
+// One short pattern per rule. Chrome rejects a regexFilter whose compiled
+// form is over 2KB, and one alternation covering every Depop path did that,
+// which stopped every direct Depop call before it was sent.
+const DEPOP_PAGE_HEADERS = { Origin: 'https://www.depop.com', Referer: 'https://www.depop.com/sellinghub/drafts/' };
+const DEPOP_PAGE_METHODS = ['get', 'post', 'put', 'delete'];
+const DEPOP_PAGE_RULES = [
+  [17001, '^https://webapi\\.depop\\.com/presentation/api/v1/attributes/'],
+  [17011, '^https://webapi\\.depop\\.com/presentation/api/v1/drafts/'],
+  [17012, '^https://webapi\\.depop\\.com/presentation/api/v1/pictures/'],
+  [17013, '^https://webapi\\.depop\\.com/presentation/api/v1/products/'],
+  [17014, '^https://webapi\\.depop\\.com/presentation/api/v1/addresses/'],
+  [17015, '^https://webapi\\.depop\\.com/presentation/api/v1/users/'],
+  [17016, '^https://webapi\\.depop\\.com/presentation/api/v1/shipping/'],
+  [17017, '^https://webapi\\.depop\\.com/presentation/api/v1/shops/\\d+/products/by-status/sold/'],
+  [17018, '^https://webapi\\.depop\\.com/api/v1/addresses/'],
+  [17019, '^https://webapi\\.depop\\.com/api/v1/shipping-providers/'],
+  [17020, '^https://webapi\\.depop\\.com/api/v3/drafts/products/'],
+];
+
 function ensureMarketplaceRequestContext() {
   if (!marketplaceNetworkReady) {
     marketplaceNetworkReady = chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006],
+      removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020],
       addRules: [
-        marketplaceHeaderRule(17001, { Origin: 'https://www.depop.com', Referer: 'https://www.depop.com/sellinghub/drafts/' },
-          '^https://webapi\\.depop\\.com/(presentation/api/v1/(drafts|pictures|products|attributes|addresses|users|shipping)/|presentation/api/v1/shops/\\d+/products/by-status/sold/|api/v1/(addresses|shipping-providers)/|api/v3/drafts/products/)', ['get', 'post', 'put', 'delete']),
+        ...DEPOP_PAGE_RULES.map(([id, regexFilter]) => marketplaceHeaderRule(id, DEPOP_PAGE_HEADERS, regexFilter, DEPOP_PAGE_METHODS)),
         marketplaceHeaderRule(17002, { Origin: 'https://www.mercari.com', Referer: 'https://www.mercari.com/sell/' },
           '^https://www\\.mercari\\.com/v1/(api|initialize)$', ['get', 'post']),
         marketplaceHeaderRule(17003, { Origin: 'https://sellwild.com', Referer: 'https://sellwild.com/sell' },
