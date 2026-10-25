@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.375 — 2026-10-25
+## 0.1.376 — 2026-10-25
 
 - List on Vinted uploads the item on Vinted when you confirm it. Send does not list it, and it does not save a Vinted draft.
+
+## 0.1.375 — 2026-10-25
+
+- Depop listings use the description only. The title is no longer repeated at the top.
 
 ## 0.1.374 — 2026-10-25
 

@@ -160,18 +160,18 @@ function depopFieldNeeds(field) {
   return DEPOP_FIELD_NEEDS[field] || String(field).replace(/[_-]+/g, ' ').trim() || 'more details';
 }
 
-// Depop's own limit for the description, which carries the title too.
+// Depop has no title. The description is the only text buyers see.
 const DEPOP_MAX_DESCRIPTION = 1000;
 const DEPOP_MAX_HASHTAGS = 5;
 const DEPOP_PHOTO_HOSTS = ['.s3.amazonaws.com', '.s3-accelerate.amazonaws.com'];
 const DEPOP_WEBAPI = 'https://webapi.depop.com';
 
 function depopBaseDescription(listing) {
-  return [String(listing?.title || '').trim(), String(listing?.description || '').trim()].filter(Boolean).join('\n\n');
+  return String(listing?.description || '').trim();
 }
 
-// Title, description, then up to five of the listing's tags as hashtags,
-// the way Vendoo writes them, as many as fit Depop's limit.
+// The description, then up to five of the listing's tags as hashtags,
+// as many as fit Depop's limit. The title is not included.
 function depopDescription(listing) {
   let text = depopBaseDescription(listing).slice(0, DEPOP_MAX_DESCRIPTION);
   const tags = listingTags(listing).map(tag => tag.replace(/[^A-Za-z0-9]+/g, '').toLowerCase()).filter(Boolean);
@@ -351,7 +351,7 @@ async function depopResolvedFields(payload) {
   const missing = [];
   const base = depopBaseDescription(listing);
   if (!base) missing.push({ field: 'description', needs: 'a description' });
-  if (base.length > DEPOP_MAX_DESCRIPTION) missing.push({ field: 'description', needs: `a title and description of ${DEPOP_MAX_DESCRIPTION} characters or fewer together` });
+  if (base.length > DEPOP_MAX_DESCRIPTION) missing.push({ field: 'description', needs: `a description of ${DEPOP_MAX_DESCRIPTION} characters or fewer` });
   if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(base)) missing.push({ field: 'description', needs: 'a description without an email address' });
   if (!(Number(listing.price) >= 1)) missing.push({ field: 'price_amount', needs: 'a price of $1 or more' });
   if (!depopCondition(listing.form?.overrides?.condition || listing.condition)) missing.push({ field: 'condition', needs: 'a condition' });
