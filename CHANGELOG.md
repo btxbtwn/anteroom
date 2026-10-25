@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.371 — 2026-10-25
+
+- After Depop posts, View opens the public Depop page.
+
 ## 0.1.370 — 2026-10-25
 
 - Listing on Depop no longer asks you to check Depop yourself when Depop has already answered. If the save is refused, press List again.
