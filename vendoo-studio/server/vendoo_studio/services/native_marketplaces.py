@@ -23,6 +23,8 @@ class NativeMarketplaceError(RuntimeError):
 
 Marketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
 InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
+# Marketplaces that list in one seller-confirmed step, with no marketplace draft.
+ONE_STEP = frozenset({"poshmark"})
 UNKNOWN = "The result is unconfirmed. Check the result before trying again; this action will not be retried."
 
 
@@ -78,8 +80,7 @@ def draft_url(marketplace: str, value: str) -> str:
 
     parsed = urlparse(value)
     pattern, host = (
-        (r"/edit-listing/[a-f0-9]{24}/?", "poshmark.com") if marketplace == "poshmark"
-        else (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
+        (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
         else (r"/sellinghub/drafts/edit/[A-Za-z0-9_-]{1,80}/?", "www.depop.com") if marketplace == "depop"
         else (r"/sell/draft/[A-Za-z0-9_-]+/", "www.mercari.com")
     )
@@ -119,17 +120,17 @@ def _apply_result(db: Session, conv, marketplace: str, binding: dict, result: di
     updated = {**binding, "state": "unknown", "error": f"{reason} {UNKNOWN}".strip()}
     # Retry only after a confirmed rejection or proof no write happened.
     if result.get("ok") is True:
-        url = None if marketplace == "sellwild" else draft_url(marketplace, str(result.get("draft_url") or ""))
-        if binding.get("draft_url") and url != binding["draft_url"]:
+        url = None if marketplace == "sellwild" or action == "list" else draft_url(marketplace, str(result.get("draft_url") or ""))
+        if url and binding.get("draft_url") and url != binding["draft_url"]:
             raise NativeMarketplaceError(502, "Chrome answered for a different draft. Check the native listing.")
-        expected = "published" if action == "publish" else "draft"
+        expected = "published" if action in {"publish", "list"} else "draft"
         state = result.get("state")
         matches = state == expected or (marketplace == "sellwild" and action == "publish" and state == "pending_review")
         if matches:
             updated.update(state=state, error=None)
             if marketplace == "etsy":
                 updated.update(etsy_pending_write=None, etsy_photos_complete=True)
-            if marketplace != "sellwild":
+            if url:
                 updated["draft_url"] = url
             public = urlparse(str(result.get("listing_url") or ""))
             if public.scheme == "https" and public.netloc == {"poshmark": "poshmark.com", "mercari": "www.mercari.com", "depop": "www.depop.com", "etsy": "www.etsy.com", "sellwild": "sellwild.com"}[marketplace]:
@@ -138,8 +139,8 @@ def _apply_result(db: Session, conv, marketplace: str, binding: dict, result: di
                     if not re.fullmatch(r"/product/\d+/[a-z0-9-]+", public.path):
                         raise NativeMarketplaceError(502, "Chrome returned an invalid Sellwild listing link.")
                 updated["listing_url"] = f"https://{public.netloc}{public.path}"
-            elif marketplace == "sellwild" and action == "publish":
-                raise NativeMarketplaceError(502, "Chrome did not return the Sellwild listing link.")
+            elif (marketplace == "sellwild" and action == "publish") or action == "list":
+                raise NativeMarketplaceError(502, "Chrome did not return the listing link.")
     elif result.get("safe_to_retry") is True:
         recovered_url = binding.get("draft_url")
         if marketplace in {"depop", "etsy"} and action == "save_draft" and result.get("draft_url"):
@@ -197,13 +198,20 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
             raise NativeMarketplaceError(409, UNKNOWN)
         if binding.get("state") in {"published", "pending_review"}:
             raise NativeMarketplaceError(409, "This draft has already been published.")
-        if action == "publish":
+        if action == "list":
+            if not isinstance(body, PublishRequest) or body.confirm is not True:
+                raise NativeMarketplaceError(400, f"Confirm listing on {marketplace}.")
+            if not photos:
+                raise NativeMarketplaceError(400, "Add photos before listing.")
+        elif action == "publish":
             if not isinstance(body, PublishRequest) or body.confirm is not True:
                 raise NativeMarketplaceError(400, f"Confirm publishing to {marketplace}.")
             if (binding.get("state") != "draft" or binding.get("draft_url") != body.draft_url
                     or binding.get("revision_id") != body.revision_id):
                 raise NativeMarketplaceError(409, "Save this revision as a draft and review it before publishing.")
-        if marketplace == "sellwild":
+        if action == "list":
+            pass
+        elif marketplace == "sellwild":
             if binding.get("state") != "draft" or binding.get("revision_id") != body.revision_id:
                 raise NativeMarketplaceError(409, "Save this revision in Anteroom first.")
             if binding.get("photo_ids") != [p.id for p in photos]:
@@ -241,7 +249,7 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
                                                  package=body.etsy_package.model_dump() if body.etsy_package else None)
             return _apply_result(db, conv, marketplace, binding, result)
         result = await browser_bridge.request(job, "marketplace.execute", {
-            "marketplace": marketplace, "action": action, "confirm": action == "publish",
+            "marketplace": marketplace, "action": action, "confirm": action in {"publish", "list"},
             "operation_id": job.id, "draft_url": binding.get("draft_url"), "listing": snapshot,
             "local_draft_id": binding.get("local_draft_id"), "revision_id": body.revision_id,
             "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
@@ -260,6 +268,8 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
 
 
 async def save_draft(conv_id: str, marketplace: Marketplace, body: DraftRequest, db: Session):
+    if marketplace in ONE_STEP:
+        raise NativeMarketplaceError(409, f"{marketplace.title()} lists in one step. Use List.")
     if marketplace == "sellwild":
         return save_local_sellwild_draft(conv_id, body, db)
     try:
@@ -349,7 +359,21 @@ def save_local_sellwild_draft(conv_id: str, body: DraftRequest, db: Session):
     return binding
 
 
+async def list_now(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session):
+    """Create a live listing in one seller-confirmed step. Never queued or retried."""
+    if marketplace not in ONE_STEP:
+        raise NativeMarketplaceError(409, f"{marketplace.title()} does not list in one step yet. Save a draft first.")
+    if body.confirm is not True:
+        raise NativeMarketplaceError(400, f"Confirm listing on {marketplace}.")
+    try:
+        return await _run(conv_id, marketplace, body, "list", db)
+    except browser_bridge.BrowserBridgeError as exc:
+        raise NativeMarketplaceError(502, UNKNOWN) from exc
+
+
 async def publish(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session):
+    if marketplace in ONE_STEP:
+        raise NativeMarketplaceError(409, f"{marketplace.title()} lists in one step. Use List.")
     if body.confirm is not True:
         raise NativeMarketplaceError(400, f"Confirm publishing to {marketplace}.")
     try:

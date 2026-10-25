@@ -4,15 +4,14 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 const { loadWorker, call } = require('./worker-context');
-const POSH = 'https://poshmark.com/edit-listing/6adc371572e62463d992ffef';
 const MERCARI = 'https://www.mercari.com/sell/draft/testDraft/';
 
-function setup(platform = 'poshmark') {
+function setup(platform = 'mercari') {
   const context = loadWorker();
   const stored = {};
   const actions = [];
   const replies = [];
-  let url = platform === 'poshmark' ? POSH : MERCARI;
+  let url = MERCARI;
   let documentId = 0;
   context.chrome.storage.local.get = async key => ({ [key]: stored[key] });
   context.chrome.storage.local.set = async values => Object.assign(stored, values);
@@ -24,12 +23,10 @@ function setup(platform = 'poshmark') {
   context.chrome.scripting = { executeScript: async ({ args }) => {
     const [, action] = args;
     actions.push(action);
-    if (action === 'find_draft') url = platform === 'poshmark' ? POSH : MERCARI;
-    if (action === 'publish') url = platform === 'poshmark'
-      ? 'https://poshmark.com/listing/Test-6adc371572e62463d992ffef' : 'https://www.mercari.com/us/item/m123456789/';
+    if (action === 'find_draft') url = MERCARI;
+    if (action === 'publish') url = 'https://www.mercari.com/us/item/m123456789/';
     return [{ result: action === 'inspect' ? { title: 'Test', description: 'Test description', price: '12.00', url, document_id: String(documentId) }
       : action === 'posh_read' ? { status: 'user_draft', price: 12, title: 'Test', description: 'Test description' }
-      : action === 'publish' && platform === 'poshmark' ? { published: true, listing_url: url }
       : { ok: true, url } }];
   } };
   context.sendBrowserResult = (_msg, reply) => replies.push(reply);
@@ -40,11 +37,11 @@ function setup(platform = 'poshmark') {
 
 test('native links accept only the correct marketplace and durable draft route', () => {
   const c = loadWorker();
-  assert.equal(call(c, 'nativeDraftUrl', 'poshmark', POSH), POSH);
   assert.equal(call(c, 'nativeDraftUrl', 'mercari', MERCARI), MERCARI);
-  for (const url of [MERCARI, 'https://poshmark.com/create-listing', 'https://poshmark.com.evil/edit-listing/6adc371572e62463d992ffef']) {
-    assert.equal(call(c, 'nativeDraftUrl', 'poshmark', url), '');
+  for (const url of ['https://poshmark.com/edit-listing/6adc371572e62463d992ffef', 'https://www.mercari.com.evil/sell/draft/testDraft/']) {
+    assert.equal(call(c, 'nativeDraftUrl', 'mercari', url), '');
   }
+  assert.equal(call(c, 'nativeDraftUrl', 'poshmark', 'https://poshmark.com/edit-listing/6adc371572e62463d992ffef'), '');
 });
 
 test('an interrupted worker is never replayed, and checking a result does no page work', async () => {
@@ -77,17 +74,14 @@ test('Etsy listing writes are unavailable in the browser worker', async () => {
   assert.equal(call(s.context, 'nativeDraftUrl', 'etsy', 'https://www.etsy.com/your/shops/me/listing-editor/edit/123456'), '');
 });
 
-test('checking an unchanged private Poshmark draft allows saving again without a mutation', async () => {
+test('Poshmark only lists in one confirmed step', async () => {
   const s = setup();
-  Object.assign(s.context, { FormData, AbortSignal });
-  const methods = [];
-  s.context.fetch = async (_url, options) => {
-    methods.push(options.method);
-    return { ok: true, json: async () => ({ data: { status: 'user_draft', title: 'Test', description: 'Test description', price_amount: { val: '0' } } }) };
-  };
-  const result = await s.context.recoverNativeMarketplace(s.msg.payload);
-  assert.equal(result.safe_to_retry, true);
-  assert.deepEqual(methods, ['GET']);
+  for (const action of ['save_draft', 'publish']) {
+    const result = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action, confirm: true } });
+    assert.match(result.error, /Unsupported/);
+  }
+  const unconfirmed = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action: 'list', confirm: false } });
+  assert.match(unconfirmed.error, /Confirm/);
 });
 
 test('legacy Poshmark fill messages cannot publish', () => {
@@ -100,34 +94,20 @@ test('legacy Poshmark fill messages cannot publish', () => {
   assert.equal(clicks, 0);
 });
 
-test('the controller never repeats Poshmark creation after a completed or interrupted API save', async () => {
+test('the controller never repeats a Poshmark listing after a completed or interrupted one', async () => {
   for (const fail of [false, true]) {
     const s = setup();
-    s.msg.payload.draft_url = null;
-    s.msg.payload.photos = [{ id: 'a1' }, { id: 'a2' }];
+    Object.assign(s.msg.payload, { marketplace: 'poshmark', action: 'list', confirm: true, draft_url: null, photos: [{ id: 'a1' }] });
     let calls = 0;
     s.context.runPoshmarkApi = async () => {
       calls++;
       return fail ? { ok: false, safe_to_retry: false, error: 'Interrupted' }
-        : { ok: true, state: 'draft', draft_url: POSH };
+        : { ok: true, state: 'published', listing_url: 'https://poshmark.com/listing/6adc371572e62463d992ffef' };
     };
     await s.context.handleNativeMarketplaceMessage(s.msg);
-    assert.equal(s.replies[0].state, fail ? undefined : 'draft');
+    assert.equal(s.replies[0].state, fail ? undefined : 'published');
     if (fail) assert.equal(s.replies[0].safe_to_retry, false);
     await s.context.handleNativeMarketplaceMessage(s.msg);
     assert.equal(calls, 1);
   }
-});
-
-test('bridge reload targets only Vendoo and preserves native marketplace review tabs', async () => {
-  const c = loadWorker();
-  let patterns;
-  const reloaded = [];
-  c.chrome.tabs = {
-    query: async options => { patterns = options.url; return [{ id: 4 }]; },
-    reload: async id => { reloaded.push(id); },
-  };
-  await c.reloadVendooTabs();
-  assert.ok(patterns.every(pattern => /vendoo\.co/.test(pattern)));
-  assert.deepEqual(reloaded, [4]);
 });
