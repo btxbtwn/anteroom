@@ -25,6 +25,12 @@ test('Depop request context is limited to this extension and the supported API p
   const receiptsTarget = new RegExp(receipts.condition.regexFilter);
   assert.ok(receiptsTarget.test('https://webapi.depop.com/api/v1/receipts/?role=seller&limit=24'));
   assert.equal(target.test('https://webapi.depop.com/api/v1/receipts/?role=seller'), false);
+  assert.ok(target.test('https://webapi.depop.com/api/v1/addresses/?providers=USPS'));
+  assert.ok(target.test('https://webapi.depop.com/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD'));
+  assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/addresses/'));
+  assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/users/me/settings/shipping/'));
+  assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/shipping/providers/depop/?ids=USPS'));
+  assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/attributes/'));
   assert.equal(receiptsTarget.test('https://webapi.depop.com/api/payments/'), false);
 });
 
