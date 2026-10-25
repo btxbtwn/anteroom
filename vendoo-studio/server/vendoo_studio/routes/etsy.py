@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.services.etsy_audit import etsy_not_allowed_live
-from vendoo_studio.services import etsy_workspace
+from vendoo_studio.services import etsy_listings, etsy_workspace, marketplace_accounts
 from vendoo_studio.services.marketplace_accounts import SignInRequired
+from vendoo_studio.services.relay_client import RelayError
 
 router = APIRouter(prefix="/api/etsy", tags=["etsy"])
 
@@ -56,6 +57,17 @@ async def get_orders(response: Response, start: date | None = None, end: date | 
 async def get_listings(response: Response, offset: int = Query(0, ge=0, le=100000),
                        state: Literal["active", "draft", "inactive", "sold_out", "expired", "removed"] = "active"):
     return await _read_workspace(lambda client: etsy_workspace.listings(client, state, offset), response)
+
+
+@router.get("/listing-profiles")
+async def get_listing_profiles():
+    """Only profile IDs and labels; never return shipping origins or addresses."""
+    try:
+        return await etsy_listings.listing_profiles()
+    except (ValueError, marketplace_accounts.SignInRequired) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (httpx.HTTPError, RelayError) as exc:
+        raise HTTPException(502, "Could not load Etsy listing profiles. Check the Etsy connection.") from exc
 
 
 class EtsyNotAllowedItem(BaseModel):

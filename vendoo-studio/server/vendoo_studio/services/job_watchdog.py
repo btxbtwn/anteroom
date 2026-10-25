@@ -102,7 +102,9 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
     for job in running:
         last = heard[job.id]
         quiet = moment - last if last else STALL_AFTER
-        if is_vendoo_api_step(job.current_step) and not api_job_is_live(job.id) and quiet >= ORPHAN_GRACE:
+        if str(job.current_step or "").startswith("native_") and not api_job_is_live(job.id) and quiet >= ORPHAN_GRACE:
+            error, reason = "Marketplace action interrupted. Check its result before trying again.", "native_interrupted"
+        elif is_vendoo_api_step(job.current_step) and not api_job_is_live(job.id) and quiet >= ORPHAN_GRACE:
             error, reason = ABANDONED_SEND, "dead"
         elif quiet >= STALL_AFTER:
             error, reason = STALLED_JOB, "silent"

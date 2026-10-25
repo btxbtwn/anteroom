@@ -30,6 +30,7 @@ import {
 import { withDropdownOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
+import { NativeMarketplaceActions } from "./NativeMarketplaceActions";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
 import { fetchVendooItemLive, VENDOO_ITEM_STALE_MS, vendooItemQueryKey } from "../api/vendooItemQuery";
@@ -110,7 +111,7 @@ export function ListingEditor({
     queryKey: ["photos", convId],
     queryFn: () => api.conversations.photos(convId),
   });
-  const listingJob = jobs?.find((j) => j.conversation_id === convId && j.status !== "cancelled");
+  const listingJob = jobs?.find((j) => j.conversation_id === convId && j.status !== "cancelled" && j.mode !== "native_marketplace");
   const schemaProbeActive = Boolean(
     listingJob?.mode === "schema_probe"
     && ["queued", "awaiting_extension", "dispatched"].includes(String(listingJob?.status || "")),
@@ -413,6 +414,7 @@ export function ListingEditor({
         </div>
       </div>
 
+      <NativeMarketplaceActions key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle} disabled={generating} />
       <SoldElsewhereNotice
         convId={convId}
         openInVendoo={
@@ -1013,8 +1015,9 @@ export function sendToVendooEnabled(canSend: boolean, generating: boolean, pendi
 const ACTIVE_SEND_STATUSES = new Set(["queued", "awaiting_extension", "dispatched"]);
 
 /** Prefer a job that is still running over a newer finished one on the same listing. */
-export function preferredSendJob<T extends { status?: string | null }>(jobs: T[]): T | undefined {
-  return jobs.find((job) => ACTIVE_SEND_STATUSES.has(String(job.status || ""))) ?? jobs[0];
+export function preferredSendJob<T extends { status?: string | null; mode?: string | null }>(jobs: T[]): T | undefined {
+  const sends = jobs.filter((job) => job.mode !== "native_marketplace");
+  return sends.find((job) => ACTIVE_SEND_STATUSES.has(String(job.status || ""))) ?? sends[0];
 }
 
 /**
@@ -1081,7 +1084,7 @@ function SendToVendooButton({
     refetchInterval: (query) => jobsPollMs(query.state.data),
   });
 
-  const listingJob = jobs?.find((j) => j.conversation_id === convId && j.status !== "cancelled");
+  const listingJob = jobs?.find((j) => j.conversation_id === convId && j.status !== "cancelled" && j.mode !== "native_marketplace");
   const listingJobId = listingJob?.id;
   const chromeConnected = Boolean(extStatus?.connected);
   const hasDraft = Boolean(vendooItemId || listingJob?.vendoo_item_id || listingJob?.vendoo_url);

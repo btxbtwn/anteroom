@@ -20,6 +20,11 @@ describe("sendToVendooEnabled", () => {
 });
 
 describe("preferredSendJob", () => {
+  it("keeps native marketplace work out of the Vendoo draft controls", () => {
+    const native = { id: "native", status: "dispatched", mode: "native_marketplace" };
+    expect(preferredSendJob([native])).toBeUndefined();
+    expect(preferredSendJob([native, { id: "vendoo", status: "completed" }])?.id).toBe("vendoo");
+  });
   it("shows a still-running send ahead of a newer finished job", () => {
     const jobs = [
       { id: "new", status: "completed" },

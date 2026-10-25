@@ -12,9 +12,9 @@ Anteroom combines a listing editor, inventory, a business assistant, sales analy
 
 *The current interface with sample listing content. Screenshots use a separate local database with no personal photos or connected accounts.*
 
-## Roadmap
+## Direct marketplace listing
 
-We plan to roll out direct listing from Anteroom to **Depop, eBay, Etsy, Poshmark, and Mercari**, without requiring Vendoo. These integrations are planned; the current workflow saves drafts through Vendoo.
+The local build supports direct drafts and seller-confirmed publishing to **Depop, Etsy, Poshmark, Mercari, and Sellwild**, without requiring Vendoo. Use **Marketplace drafts** in the listing editor. Etsy uses its official API; Depop, Poshmark, Mercari and Sellwild use your signed-in Chrome session. Those browser connections have no confirmed marketplace authorization and carry account-enforcement risk. eBay's separate workspace uses its official API.
 
 ## From photos to a saved draft
 
@@ -27,6 +27,20 @@ We plan to roll out direct listing from Anteroom to **Depop, eBay, Etsy, Poshmar
 Edits to an existing listing have two separate steps: **Update Vendoo** writes the Vendoo form, and a delist/relist in Vendoo updates the live marketplace copy. Anteroom tracks unsent edits and listings that still need a relist. See the [existing-listing workflow](vendoo-studio/README.md#editing-something-that-is-already-listed).
 
 Open **Marketplaces** for each marketplace’s tools, sales planning, and ad history. eBay’s API marketing controls live under eBay; Etsy has a shop dashboard, orders, listings, and a Marketing tab for its sale calendar and ad CSV imports. Inventory-wide discount suggestions are in **Analytics**.
+
+### Native marketplace drafts
+
+Expand **Marketplace drafts** in a listing to send directly to Poshmark, Mercari, Depop and Etsy. Etsy uses its official API after connecting in **Settings → Connections**, without Chrome. Poshmark, Mercari and Depop use your signed-in Chrome session from the extension's background: saving and publishing open no marketplace tab. A tab opens only when you connect or reconnect a marketplace.
+
+1. **Save draft** copies the title, description, price, and photos. Depop combines the title and description into its description field. Mercari also takes the listing's Mercari category, condition, zip code and package weight (required), with buyer-paid shipping; choose brand, size and shipping option on Mercari. Etsy requires its category and who/what/when-made details; choose shipping and processing profiles from your connected shop before creating a new draft. Anteroom reads the saved draft back and checks its contents. Etsy price changes preserve the existing SKU, quantity, and processing profile; drafts with multiple variations need their prices edited in Etsy Shop Manager.
+2. **Open draft** to finish the marketplace fields and review the photos, price, and shipping. Updating an existing draft keeps its native photos.
+3. **Publish…** asks you to confirm the item and one marketplace. Publishing runs only after this separate action, and is never queued or retried automatically.
+
+After an interrupted response, use **Check result** or paste the saved draft link. Checking only reads the saved result. Save a changed Anteroom revision again before publishing it.
+
+Sellwild drafts stay in Anteroom. **Save in Anteroom** works without Chrome and sends nothing to Sellwild. **Review on Sellwild** prepares an editable browser form with the saved title, description, price and photos. Finish its category, condition, account and shipping fields there. **Publish…** requires a separate confirmation and submits that reviewed form once. If Sellwild holds it for moderation, Anteroom shows **In review**.
+
+If Sellwild restores an unfinished form for another item, Anteroom stops and preserves it. Clear that form in Sellwild before preparing a different item. The saved Anteroom drafts remain available.
 
 ## Inside Anteroom
 

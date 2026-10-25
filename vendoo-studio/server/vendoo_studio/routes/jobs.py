@@ -772,7 +772,7 @@ def _job_response(job) -> JobResponse:
         attempt_count=job.attempt_count,
         last_error=job.last_error,
         listing_title=title,
-        mode="schema_probe" if is_schema_probe_job(job) else None,
+        mode="native_marketplace" if str(job.current_step or "").startswith("native_") else "schema_probe" if is_schema_probe_job(job) else None,
         blocker_fields=blocker_fields_for_job(job),
         send_progress=progress.payload if progress else None,
         started_at=started.created_at.isoformat() if started and started.created_at else None,

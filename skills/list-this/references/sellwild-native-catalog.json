@@ -1,0 +1,671 @@
+{
+  "source": "Sellwild public web catalog, 2026-10-24",
+  "conditions": [
+    {
+      "id": 5,
+      "label": "Brand New"
+    },
+    {
+      "id": 4,
+      "label": "Like New"
+    },
+    {
+      "id": 3,
+      "label": "Good"
+    },
+    {
+      "id": 2,
+      "label": "Gently Used"
+    },
+    {
+      "id": 1,
+      "label": "Quite Used"
+    }
+  ],
+  "categories": [
+    {
+      "id": 43,
+      "label": "Vehicles > Cars"
+    },
+    {
+      "id": 57,
+      "label": "Sports > Bikes"
+    },
+    {
+      "id": 61,
+      "label": "Home & Garden > Furniture"
+    },
+    {
+      "id": 62,
+      "label": "Home & Garden > Appliances"
+    },
+    {
+      "id": 64,
+      "label": "Home & Garden > Lawn & Garden"
+    },
+    {
+      "id": 66,
+      "label": "Kids & Baby > Baby Clothes"
+    },
+    {
+      "id": 69,
+      "label": "Fashion > Shoes"
+    },
+    {
+      "id": 74,
+      "label": "Art & Collectibles > Art"
+    },
+    {
+      "id": 95,
+      "label": "Vehicles > Motorcycles"
+    },
+    {
+      "id": 157,
+      "label": "Vehicles > Parts"
+    },
+    {
+      "id": 158,
+      "label": "Vehicles > Electric Cars"
+    },
+    {
+      "id": 159,
+      "label": "Vehicles > Classics, Collectors, and SuperCars"
+    },
+    {
+      "id": 160,
+      "label": "Vehicles > Boats, Jetskis, & Other Motorized Watercraft"
+    },
+    {
+      "id": 161,
+      "label": "Vehicles > Trucks"
+    },
+    {
+      "id": 162,
+      "label": "Vehicles > RVs"
+    },
+    {
+      "id": 163,
+      "label": "Vehicles > Tires & Rims"
+    },
+    {
+      "id": 164,
+      "label": "Vehicles > Trailers"
+    },
+    {
+      "id": 165,
+      "label": "Electronics > Computers"
+    },
+    {
+      "id": 166,
+      "label": "Electronics > Phones / Tablets"
+    },
+    {
+      "id": 167,
+      "label": "Electronics > Audio"
+    },
+    {
+      "id": 168,
+      "label": "Electronics > Wearables"
+    },
+    {
+      "id": 169,
+      "label": "Electronics > Drones"
+    },
+    {
+      "id": 170,
+      "label": "Electronics > TVs"
+    },
+    {
+      "id": 171,
+      "label": "Electronics > Video Games"
+    },
+    {
+      "id": 172,
+      "label": "Electronics > Cameras"
+    },
+    {
+      "id": 173,
+      "label": "Music > Guitars / Bass"
+    },
+    {
+      "id": 174,
+      "label": "Music > Amps / Speakers"
+    },
+    {
+      "id": 175,
+      "label": "Music > Drums / Percussion"
+    },
+    {
+      "id": 176,
+      "label": "Music > Keyboards / Pianos"
+    },
+    {
+      "id": 177,
+      "label": "Tools > Hand Tools"
+    },
+    {
+      "id": 178,
+      "label": "Tools > Power Tools"
+    },
+    {
+      "id": 179,
+      "label": "Tools > Storage & Workbenches"
+    },
+    {
+      "id": 180,
+      "label": "Tools > Parts / DIY Kits"
+    },
+    {
+      "id": 184,
+      "label": "Fashion > Accessories"
+    },
+    {
+      "id": 185,
+      "label": "Tools > Tools & Machines"
+    },
+    {
+      "id": 186,
+      "label": "Home & Garden > Home Decor"
+    },
+    {
+      "id": 188,
+      "label": "Jewelry > Womens Jewelry"
+    },
+    {
+      "id": 189,
+      "label": "Jewelry > Mens Jewelry"
+    },
+    {
+      "id": 190,
+      "label": "Sports > Shoes"
+    },
+    {
+      "id": 191,
+      "label": "Sports > Exercise Equipment"
+    },
+    {
+      "id": 192,
+      "label": "Sports > Sports Equipment"
+    },
+    {
+      "id": 193,
+      "label": "Sports > Kayaks, Paddle Boards, & Other Non-Motorized Watercraft"
+    },
+    {
+      "id": 194,
+      "label": "Art & Collectibles > Antiques & Vintage"
+    },
+    {
+      "id": 195,
+      "label": "Art & Collectibles > Collectibles"
+    },
+    {
+      "id": 196,
+      "label": "Games, Toys, Hobbies > Toys"
+    },
+    {
+      "id": 197,
+      "label": "Games, Toys, Hobbies > Games & Puzzles"
+    },
+    {
+      "id": 198,
+      "label": "Games, Toys, Hobbies > Trading Cards"
+    },
+    {
+      "id": 200,
+      "label": "Kids & Baby > Cribs & Strollers"
+    },
+    {
+      "id": 201,
+      "label": "Kids & Baby > Toys"
+    },
+    {
+      "id": 202,
+      "label": "Kids & Baby > Costumes & Accessories"
+    },
+    {
+      "id": 204,
+      "label": "Pets > Pet Supplies"
+    },
+    {
+      "id": 205,
+      "label": "Pets > Pet Food"
+    },
+    {
+      "id": 206,
+      "label": "Pets > Adoption"
+    },
+    {
+      "id": 207,
+      "label": "Music > Vinyl"
+    },
+    {
+      "id": 208,
+      "label": "Music > Cassette Tapes"
+    },
+    {
+      "id": 209,
+      "label": "Music > CDs"
+    },
+    {
+      "id": 211,
+      "label": "Music > Music Memorabilia"
+    },
+    {
+      "id": 212,
+      "label": "Books > Fiction"
+    },
+    {
+      "id": 213,
+      "label": "Books > Non-Fiction"
+    },
+    {
+      "id": 214,
+      "label": "Books > Science Fiction"
+    },
+    {
+      "id": 215,
+      "label": "Books > Historical Fiction"
+    },
+    {
+      "id": 216,
+      "label": "Books > Fantasy"
+    },
+    {
+      "id": 217,
+      "label": "Books > Mystery"
+    },
+    {
+      "id": 218,
+      "label": "Books > Horror"
+    },
+    {
+      "id": 219,
+      "label": "Books > Romance Novels"
+    },
+    {
+      "id": 220,
+      "label": "Books > Thriller"
+    },
+    {
+      "id": 221,
+      "label": "Books > Literary Fiction"
+    },
+    {
+      "id": 222,
+      "label": "Books > Short Stories"
+    },
+    {
+      "id": 223,
+      "label": "Books > Graphic Novels"
+    },
+    {
+      "id": 224,
+      "label": "Books > Literature"
+    },
+    {
+      "id": 225,
+      "label": "Books > Science Fantasy"
+    },
+    {
+      "id": 226,
+      "label": "Books > Paranormal Romance"
+    },
+    {
+      "id": 227,
+      "label": "Books > Childrens Literature"
+    },
+    {
+      "id": 228,
+      "label": "Books > Dystopia"
+    },
+    {
+      "id": 229,
+      "label": "Books > Biography"
+    },
+    {
+      "id": 230,
+      "label": "Books > Magical Realism"
+    },
+    {
+      "id": 231,
+      "label": "Books > Adventure Fiction"
+    },
+    {
+      "id": 232,
+      "label": "Books > Contemporary Romance"
+    },
+    {
+      "id": 233,
+      "label": "Books > Fairy Tale"
+    },
+    {
+      "id": 234,
+      "label": "Books > Western Fiction"
+    },
+    {
+      "id": 235,
+      "label": "Books > Steampunk"
+    },
+    {
+      "id": 236,
+      "label": "Movies > DVDs"
+    },
+    {
+      "id": 237,
+      "label": "Movies > Blu-ray"
+    },
+    {
+      "id": 238,
+      "label": "Movies > VHS"
+    },
+    {
+      "id": 240,
+      "label": "Fashion > Beauty & Fragrance"
+    },
+    {
+      "id": 241,
+      "label": "Home & Garden > Kitchen & Dining"
+    },
+    {
+      "id": 242,
+      "label": "Home & Garden > Holiday & Seasonal"
+    },
+    {
+      "id": 243,
+      "label": "Games, Toys, Hobbies > Sewing & Crafts"
+    },
+    {
+      "id": 244,
+      "label": "Sports > Fan Gear"
+    },
+    {
+      "id": 245,
+      "label": "Games, Toys, Hobbies > Plush & Stuffed Animals"
+    },
+    {
+      "id": 246,
+      "label": "Kids & Baby > Kids Clothing"
+    },
+    {
+      "id": 247,
+      "label": "Home & Garden > Bedding & Bath"
+    },
+    {
+      "id": 248,
+      "label": "Art & Collectibles > Vintage Print Ads"
+    },
+    {
+      "id": 249,
+      "label": "Art & Collectibles > Business Cards"
+    },
+    {
+      "id": 250,
+      "label": "Art & Collectibles > Matchbook Covers"
+    },
+    {
+      "id": 251,
+      "label": "Art & Collectibles > Postcards"
+    },
+    {
+      "id": 252,
+      "label": "Art & Collectibles > Engravings & Antique Prints"
+    },
+    {
+      "id": 253,
+      "label": "Art & Collectibles > Billheads, Letters & Documents"
+    },
+    {
+      "id": 254,
+      "label": "Art & Collectibles > Vintage Photographs"
+    },
+    {
+      "id": 255,
+      "label": "Art & Collectibles > Pins & Badges"
+    },
+    {
+      "id": 256,
+      "label": "Art & Collectibles > Magazines & Periodicals"
+    },
+    {
+      "id": 257,
+      "label": "Art & Collectibles > Maps & Travel Brochures"
+    },
+    {
+      "id": 258,
+      "label": "Art & Collectibles > Trade Cards"
+    },
+    {
+      "id": 259,
+      "label": "Art & Collectibles > Stamps & Postal History"
+    },
+    {
+      "id": 260,
+      "label": "Art & Collectibles > Figurines"
+    },
+    {
+      "id": 261,
+      "label": "Art & Collectibles > Rocks, Minerals & Fossils"
+    },
+    {
+      "id": 262,
+      "label": "Jewelry > Earrings"
+    },
+    {
+      "id": 263,
+      "label": "Jewelry > Necklaces & Pendants"
+    },
+    {
+      "id": 264,
+      "label": "Jewelry > Bracelets & Bangles"
+    },
+    {
+      "id": 265,
+      "label": "Jewelry > Rings"
+    },
+    {
+      "id": 266,
+      "label": "Jewelry > Watches"
+    },
+    {
+      "id": 267,
+      "label": "Jewelry > Brooches & Pins"
+    },
+    {
+      "id": 268,
+      "label": "Jewelry > Charms"
+    },
+    {
+      "id": 269,
+      "label": "Fashion > Dresses"
+    },
+    {
+      "id": 270,
+      "label": "Fashion > Tops & Shirts"
+    },
+    {
+      "id": 271,
+      "label": "Fashion > Sweaters & Hoodies"
+    },
+    {
+      "id": 272,
+      "label": "Fashion > Coats & Jackets"
+    },
+    {
+      "id": 273,
+      "label": "Fashion > Pants & Jeans"
+    },
+    {
+      "id": 274,
+      "label": "Fashion > Skirts"
+    },
+    {
+      "id": 275,
+      "label": "Fashion > Shorts"
+    },
+    {
+      "id": 276,
+      "label": "Fashion > Activewear"
+    },
+    {
+      "id": 277,
+      "label": "Fashion > Swimwear"
+    },
+    {
+      "id": 278,
+      "label": "Fashion > Sleepwear & Intimates"
+    },
+    {
+      "id": 279,
+      "label": "Fashion > Suits & Blazers"
+    },
+    {
+      "id": 280,
+      "label": "Fashion > Sneakers"
+    },
+    {
+      "id": 281,
+      "label": "Fashion > Boots"
+    },
+    {
+      "id": 282,
+      "label": "Fashion > Heels"
+    },
+    {
+      "id": 283,
+      "label": "Fashion > Sandals"
+    },
+    {
+      "id": 284,
+      "label": "Fashion > Flats & Loafers"
+    },
+    {
+      "id": 285,
+      "label": "Fashion > Handbags & Purses"
+    },
+    {
+      "id": 286,
+      "label": "Fashion > Wallets"
+    },
+    {
+      "id": 287,
+      "label": "Fashion > Backpacks"
+    },
+    {
+      "id": 288,
+      "label": "Fashion > Hats"
+    },
+    {
+      "id": 289,
+      "label": "Fashion > Sunglasses & Eyewear"
+    },
+    {
+      "id": 290,
+      "label": "Fashion > Belts"
+    },
+    {
+      "id": 291,
+      "label": "Vehicles > SUVs"
+    },
+    {
+      "id": 292,
+      "label": "Vehicles > Vans & Minivans"
+    },
+    {
+      "id": 293,
+      "label": "Sports > Fan Apparel"
+    },
+    {
+      "id": 294,
+      "label": "Sports > Fan Footwear & Socks"
+    },
+    {
+      "id": 295,
+      "label": "Sports > Fan Phone Cases & Tech"
+    },
+    {
+      "id": 296,
+      "label": "Sports > Flags & Banners"
+    },
+    {
+      "id": 297,
+      "label": "Sports > Fan Home & Tailgate"
+    },
+    {
+      "id": 298,
+      "label": "Sports > Fan Car Accessories"
+    },
+    {
+      "id": 299,
+      "label": "Sports > Fan Accessories"
+    },
+    {
+      "id": 300,
+      "label": "Books > Reference & Computers"
+    },
+    {
+      "id": 301,
+      "label": "Books > Philosophy & Psychology"
+    },
+    {
+      "id": 302,
+      "label": "Books > Religion & Spirituality"
+    },
+    {
+      "id": 303,
+      "label": "Books > Society, Politics & Law"
+    },
+    {
+      "id": 304,
+      "label": "Books > Business & Money"
+    },
+    {
+      "id": 305,
+      "label": "Books > Language & Dictionaries"
+    },
+    {
+      "id": 306,
+      "label": "Books > Science & Nature"
+    },
+    {
+      "id": 307,
+      "label": "Books > Home, Garden & How-To"
+    },
+    {
+      "id": 308,
+      "label": "Books > Health & Medicine"
+    },
+    {
+      "id": 309,
+      "label": "Books > Cookbooks"
+    },
+    {
+      "id": 310,
+      "label": "Books > Art & Photography"
+    },
+    {
+      "id": 311,
+      "label": "Books > Crafts & Hobbies"
+    },
+    {
+      "id": 312,
+      "label": "Books > Music Books & Sheet Music"
+    },
+    {
+      "id": 313,
+      "label": "Books > Sports & Outdoors"
+    },
+    {
+      "id": 314,
+      "label": "Books > Poetry, Plays & Essays"
+    },
+    {
+      "id": 315,
+      "label": "Books > History"
+    },
+    {
+      "id": 316,
+      "label": "Books > Travel & Geography"
+    }
+  ]
+}

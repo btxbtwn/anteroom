@@ -43,7 +43,7 @@ function useListingJob(convId: string) {
     queryKey: ["conversation", convId],
     queryFn: () => api.conversations.get(convId),
   });
-  const listingJob = jobs?.find((job) => job.conversation_id === convId && job.status !== "cancelled");
+  const listingJob = jobs?.find((job) => job.conversation_id === convId && job.status !== "cancelled" && job.mode !== "native_marketplace");
   return {
     listingJob,
     importedItemId: listingJob?.vendoo_item_id || notesVendooItemId(conversation?.notes),

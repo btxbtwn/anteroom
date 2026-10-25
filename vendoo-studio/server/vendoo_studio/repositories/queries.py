@@ -611,7 +611,13 @@ class JobRepo:
 
         jobs = self.db.query(Job).filter(Job.status == "dispatched").all()
         for job in jobs:
-            if is_vendoo_api_step(job.current_step):
+            if str(job.current_step or "").startswith("native_"):
+                from vendoo_studio.services.api_job_lock import api_job_is_live
+                if api_job_is_live(job.id):
+                    continue
+                job.status = "failed"
+                job.last_error = "Marketplace action interrupted. Check its result before trying again."
+            elif is_vendoo_api_step(job.current_step):
                 # Must not become a form-filler queue entry — that path opens a
                 # Vendoo tab and fills the SPA instead of calling createItem.
                 # The caller resumes it once its worker has stopped.

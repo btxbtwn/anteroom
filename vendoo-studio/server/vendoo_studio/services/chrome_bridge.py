@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-from vendoo_studio.config import extension_source_dir, user_data_root
+from vendoo_studio.config import PORT, extension_source_dir, user_data_root
 
 DEFAULT_VENDOO_URL = "https://web.vendoo.co/app"
 VENDOO_HOSTS = frozenset({"web.vendoo.co", "app.vendoo.co"})
@@ -154,6 +154,7 @@ def _build_stamp_contents(fingerprint: str) -> str:
     return (
         f"var STUDIO_EXTENSION_BUILD = '{fingerprint}';\n"
         f"var STUDIO_EXTENSION_VERSION = '{version}';\n"
+        f"var STUDIO_API_ORIGIN = 'http://127.0.0.1:{PORT}';\n"
     )
 
 

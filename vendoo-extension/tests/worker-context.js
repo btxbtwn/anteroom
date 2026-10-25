@@ -13,11 +13,12 @@ function stubApi() {
   });
 }
 
-function loadWorker() {
+function loadWorker({ apiOrigin } = {}) {
   const alarms = [];
   const alarmListeners = [];
   const messageListeners = [];
   const context = {
+    ...(apiOrigin ? { STUDIO_API_ORIGIN: apiOrigin } : {}),
     console: { log() {}, error() {}, warn() {} },
     chrome: {
       alarms: {
@@ -31,6 +32,7 @@ function loadWorker() {
         },
       },
       runtime: {
+        id: 'test-extension-id',
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
         onMessage: { addListener(fn) { messageListeners.push(fn); } },
@@ -47,6 +49,8 @@ function loadWorker() {
         },
       },
       tabs: stubApi(),
+      windows: { getAll: async () => [{ id: 1, focused: true }] },
+      declarativeNetRequest: { updateSessionRules: async () => {} },
       scripting: stubApi(),
       debugger: stubApi(),
       system: { display: stubApi() },
