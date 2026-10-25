@@ -104,7 +104,7 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
   {
     id: "etsy",
     name: "Etsy",
-    what: "Tells Anteroom the moment something sells on Etsy, so you can delist it everywhere else.",
+    what: "Save drafts and publish through Etsy’s official API, and receive sale notifications so you can delist sold items elsewhere.",
   },
 ];
 

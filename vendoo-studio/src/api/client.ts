@@ -59,6 +59,7 @@ import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
+import type { EtsyDraftOptions, NativeDraft, NativeDrafts, NativeMarketplace } from "./nativeMarketplaces";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
@@ -226,6 +227,7 @@ export const api = {
       request<EtsyOrders>(`/etsy/orders?${new URLSearchParams({ ...params, offset: String(params.offset) })}`),
     listings: (state: EtsyListingState, offset: number) =>
       request<EtsyPage<EtsyListing>>(`/etsy/listings?${new URLSearchParams({ state, offset: String(offset) })}`),
+    listingProfiles: () => request<{ shipping: { id: string; title: string; is_calculated: boolean }[]; processing: { id: string; title: string }[] }>("/etsy/listing-profiles"),
   },
   analytics: {
     get: (range: AnalyticsRange, custom?: { start: string; end: string }) => {
@@ -407,6 +409,26 @@ export const api = {
       request<OkResponse>(`/marketplace-accounts/${marketplace}/connect`, { method: "DELETE" }),
     disconnect: (marketplace: DirectMarketplace) =>
       request<OkResponse>(`/marketplace-accounts/${marketplace}`, { method: "DELETE" }),
+  },
+  nativeMarketplaces: {
+    status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
+    saveDraft: (convId: string, marketplace: NativeMarketplace, revisionId: string, etsy?: EtsyDraftOptions) =>
+      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/draft`, {
+        method: "POST", body: JSON.stringify({ revision_id: revisionId, ...(etsy?.shippingProfileId ? { shipping_profile_id: etsy.shippingProfileId } : {}),
+          ...(etsy?.readinessStateId ? { readiness_state_id: etsy.readinessStateId } : {}), ...(etsy?.package ? { etsy_package: etsy.package } : {}) }),
+      }),
+    reviewSellwild: (convId: string, revisionId: string) =>
+      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/sellwild/review`, {
+        method: "POST", body: JSON.stringify({ revision_id: revisionId }),
+      }),
+    publish: (convId: string, marketplace: NativeMarketplace, revisionId: string, draftUrl?: string) =>
+      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/publish`, {
+        method: "POST", body: JSON.stringify({ revision_id: revisionId, draft_url: draftUrl, confirm: true }),
+      }),
+    check: (convId: string, marketplace: NativeMarketplace, draftUrl?: string) =>
+      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/check`, {
+        method: "POST", body: JSON.stringify(draftUrl ? { draft_url: draftUrl } : {}),
+      }),
   },
   marketplaceSales: {
     list: (options: { state?: MarketplaceSaleState; conversationId?: string } = {}) => {

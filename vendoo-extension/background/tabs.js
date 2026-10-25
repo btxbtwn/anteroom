@@ -2,6 +2,18 @@
 
 const NEW_ITEM_URL = 'https://web.vendoo.co/app/item/new?marketplace=general';
 
+async function openMarketplaceTab(url, { active = true } = {}) {
+  const windows = await chrome.windows.getAll({ windowTypes: ['normal'] });
+  const window = windows.find(candidate => candidate.focused) || windows.at(-1);
+  if (window?.id != null) return await chrome.tabs.create({ windowId: window.id, url, active });
+  // A connected MV3 worker can outlive every Chrome window. Open a blank
+  // window first so window creation never repeats a marketplace navigation.
+  const created = await createWindowSafe({ url: 'about:blank', type: 'normal', focused: active });
+  const tab = created.tabs?.[0];
+  if (tab?.id == null) throw new Error('Chrome did not return a marketplace tab. Open Chrome and try again.');
+  return url === 'about:blank' ? tab : await chrome.tabs.update(tab.id, { url, active });
+}
+
 function isNewItemUrl(url) {
   if (!url) return false;
   try {

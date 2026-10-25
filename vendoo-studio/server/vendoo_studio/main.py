@@ -13,6 +13,7 @@ from vendoo_studio.static_files import FrontendFiles
 from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports
 from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, browser, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
+from vendoo_studio.routes import native_marketplaces
 from vendoo_studio.routes import ebay_offers
 from vendoo_studio.routes import ebay
 
@@ -146,6 +147,7 @@ app.include_router(health.router)
 app.include_router(marketplace_accounts.router)
 app.include_router(ebay_offers.router)
 app.include_router(ebay.router)
+app.include_router(native_marketplaces.router)
 app.include_router(conversations.router)
 app.include_router(photos.router)
 app.include_router(measurements.router)

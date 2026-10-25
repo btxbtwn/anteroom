@@ -77,7 +77,8 @@ def _auth_headers(device: dict) -> dict[str, str]:
 
 
 async def relay_request(method: str, path: str, *, json_body: Any = None, headers: dict | None = None,
-                        params: dict | None = None, timeout: float = 30) -> httpx.Response:
+                        params: dict | None = None, data: dict | None = None, files: dict | None = None,
+                        timeout: float = 30) -> httpx.Response:
     """One authenticated call to the relay's /studio API."""
     device = await ensure_device()
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -85,6 +86,8 @@ async def relay_request(method: str, path: str, *, json_body: Any = None, header
             method,
             f"{RELAY_URL}{path}",
             json=json_body,
+            **({"data": data} if data is not None else {}),
+            **({"files": files} if files is not None else {}),
             params=params,
             headers={**_auth_headers(device), **(headers or {})},
         )

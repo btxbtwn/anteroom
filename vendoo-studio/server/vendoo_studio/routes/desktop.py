@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 
 from vendoo_studio.services.chrome_bridge import ChromeBridgeError, chrome_executable, relaunch_studio_chrome
@@ -30,7 +32,7 @@ def chrome_status():
 @router.post("/chrome/connect")
 async def connect_chrome():
     try:
-        result = relaunch_studio_chrome(visible=True)
+        result = await asyncio.to_thread(relaunch_studio_chrome, visible=True)
         result.setdefault("via", "chrome")
         from vendoo_studio.routes.extension import (
             extension_manager,

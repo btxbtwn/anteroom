@@ -1,5 +1,8 @@
 importScripts('category-reader.js');
-const STUDIO_URL = 'http://127.0.0.1:4318';
+var STUDIO_EXTENSION_BUILD = null;
+try { importScripts('studio-build.js'); } catch {}
+const STUDIO_URL = typeof STUDIO_API_ORIGIN === 'string' ? STUDIO_API_ORIGIN : 'http://127.0.0.1:4318';
+if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(STUDIO_URL)) throw new Error('Anteroom Bridge requires a loopback API address.');
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8000;
 const HEARTBEAT_MS = 20000;
@@ -9,13 +12,9 @@ const RECONNECT_ALARM_PERIOD_MINUTES = 0.5;
 const DIAGNOSTIC_OUTBOX_KEY = 'studio_diagnostic_outbox';
 const RELOAD_GENERATION_KEY = 'studio_reload_generation';
 const RELOAD_TABS_KEY = 'studio_reload_tabs';
-const EXTENSION_TAB_URLS = [
+const VENDOO_TAB_URLS = [
   'https://app.vendoo.co/*',
   'https://web.vendoo.co/*',
-  'https://www.ebay.com/*',
-  'https://poshmark.com/*',
-  'https://www.mercari.com/*',
-  'https://www.depop.com/*',
 ];
 
 let ws = null;
@@ -37,11 +36,14 @@ importScripts('background/job-steps.js');
 importScripts('background/import-listing.js');
 importScripts('background/sold-listings.js');
 importScripts('browser-session.js');
-
-var STUDIO_EXTENSION_BUILD = null;
-try {
-  importScripts('studio-build.js');
-} catch (e) {}
+importScripts('background/depop-native.js');
+importScripts('background/mercari-native.js');
+importScripts('background/marketplace-network.js');
+importScripts('background/poshmark-native.js');
+importScripts('background/sellwild-native.js');
+importScripts('background/native-marketplaces.js');
+importScripts('background/marketplace-sessions.js');
+importScripts('background/marketplace-inspection.js');
 
 function log(msg) {
   console.log(`[BG-Studio] ${msg}`);
@@ -211,7 +213,7 @@ function connect() {
   log(`Connecting to ${STUDIO_URL}/api/extension/ws...`);
 
   try {
-    ws = new WebSocket(`ws://127.0.0.1:4318/api/extension/ws`);
+    ws = new WebSocket(`${STUDIO_URL.replace(/^http:/, 'ws:')}/api/extension/ws`);
   } catch (e) {
     error(`WebSocket creation failed: ${e.message}`);
     scheduleReconnect();
@@ -292,8 +294,10 @@ function identPayload(token, reloadGeneration) {
   };
 }
 
-async function reloadMarketplaceTabs() {
-  const tabs = await chrome.tabs.query({ url: EXTENSION_TAB_URLS });
+async function reloadVendooTabs() {
+  // Native commands inject their current implementation for each action.
+  // Reloading those pages would discard the seller's unsaved draft review.
+  const tabs = await chrome.tabs.query({ url: VENDOO_TAB_URLS });
   for (const tab of tabs) {
     if (!tab.id) continue;
     try {
@@ -499,7 +503,7 @@ async function handleStudioMessage(msg) {
         return;
       }
 
-      if (activePatch || (activeJob && activeJob.job_id !== jobId)) {
+      if (activeNativeOperation || activePatch || (activeJob && activeJob.job_id !== jobId)) {
         send({
           version: 1,
           type: 'job.step_failed',
@@ -570,7 +574,32 @@ async function handleStudioMessage(msg) {
     }
 
     case 'job.vendoo_api': {
+      if (activeNativeOperation) {
+        replyVendooApi(msg, { ok: false, error: 'Another automation job is running.', results: [] });
+        break;
+      }
       await handleVendooApiMessage(msg);
+      break;
+    }
+
+    case 'marketplace.execute':
+    case 'marketplace.result': {
+      await handleNativeMarketplaceMessage(msg);
+      break;
+    }
+
+    case 'marketplace.inspect': {
+      await handleMarketplaceInspection(msg);
+      break;
+    }
+
+    case 'marketplace.connect': {
+      await handleMarketplaceConnect(msg);
+      break;
+    }
+
+    case 'marketplace.record': {
+      await handleMarketplaceRecord(msg);
       break;
     }
 
@@ -626,6 +655,7 @@ async function handleStudioMessage(msg) {
     case 'job.cancel': {
       const jobId = msg.job_id || msg.payload?.job_id;
       if (!jobId) return;
+      await cancelNativeMarketplaceOperation(jobId);
 
       if (activePatch && activePatch.job_id === jobId) {
         const tabId = activePatch.tabId;
@@ -1091,10 +1121,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 (async () => {
   ensureReconnectAlarm();
   const stored = await chrome.storage.local.get(RELOAD_TABS_KEY);
-  if (stored[RELOAD_TABS_KEY]) {
-    await chrome.storage.local.remove(RELOAD_TABS_KEY);
-    await reloadMarketplaceTabs();
-  }
   await restoreActiveJob();
   await ensureStudioConnection({ resetBackoff: true });
+  if (stored[RELOAD_TABS_KEY]) {
+    await chrome.storage.local.remove(RELOAD_TABS_KEY);
+    await reloadVendooTabs();
+  }
 })();

@@ -308,6 +308,7 @@ const CONFIG = {SLEEP_SHORT: 1};
         script = """
 let activePatch = null;
 let activeJob = null;
+let activeNativeOperation = null;
 let calls = [];
 const log = () => {};
 const warn = () => {};
@@ -355,6 +356,7 @@ const verifySavedDraft = async (job) => {
         script = """
 let activePatch = null;
 let activeJob = null;
+let activeNativeOperation = null;
 let calls = [];
 const log = () => {};
 const warn = () => {};

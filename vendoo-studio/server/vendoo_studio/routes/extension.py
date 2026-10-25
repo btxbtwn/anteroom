@@ -19,7 +19,6 @@ from vendoo_studio.services.chrome_bridge import (
     extension_reload_token_if_needed,
     install_bundled_extension,
     pending_extension_reload_token,
-    relaunch_studio_chrome,
 )
 
 router = APIRouter(tags=["extension"])
@@ -741,11 +740,48 @@ def extension_status():
 @router.post("/api/extension/reload")
 async def reload_extension():
     try:
-        result = relaunch_studio_chrome(visible=True)
+        from vendoo_studio.services.chrome_bridge import sync_bundled_extension
+
+        await asyncio.to_thread(sync_bundled_extension)
     except ChromeBridgeError as exc:
         raise HTTPException(400, str(exc)) from exc
-    result["sent"] = True
-    return result
+    if not extension_manager.connected:
+        raise HTTPException(409, "Connect Chrome before reloading the bridge.")
+    token = extension_reload_token_if_needed(extension_manager.version, extension_manager.reload_generation, extension_manager.build)
+    return {"ok": True, "sent": await request_extension_reload(token) if token else False}
+
+
+@router.post("/api/marketplaces/{marketplace}/connect")
+async def connect_marketplace(marketplace: str):
+    from types import SimpleNamespace
+
+    from vendoo_studio.services import browser_bridge
+
+    if marketplace not in {"depop", "poshmark", "mercari", "sellwild"}:
+        raise HTTPException(404, "Unknown marketplace.")
+    try:
+        return await browser_bridge.request(SimpleNamespace(id=None), "marketplace.connect", {"marketplace": marketplace}, timeout=40)
+    except browser_bridge.BrowserBridgeError as exc:
+        raise HTTPException(502, "Finish signing in in Chrome, then reconnect.") from exc
+
+
+@router.post("/api/marketplaces/{marketplace}/record")
+async def record_marketplace_draft(marketplace: str):
+    """Record the shape of a marketplace's own draft save while the seller saves one by hand.
+
+    Opens one tab for the seller and returns request shapes only (operation names,
+    GraphQL query text, paths, header names, value types), never values or session data.
+    """
+    from types import SimpleNamespace
+
+    from vendoo_studio.services import browser_bridge
+
+    if marketplace not in {"mercari", "sellwild"}:
+        raise HTTPException(404, "Recording is not set up for this marketplace.")
+    try:
+        return await browser_bridge.request(SimpleNamespace(id=None), "marketplace.record", {"marketplace": marketplace}, timeout=330)
+    except browser_bridge.BrowserBridgeError as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 @router.websocket("/api/extension/ws")
