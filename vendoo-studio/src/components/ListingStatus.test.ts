@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listedFromImport, marketplaceStatusesFromDraft, statusHint } from "./sidebar/listingStatus";
+import { inventoryStatus, listedFromImport, marketplaceStatusesFromDraft, statusHint, withDirectListings } from "./sidebar/listingStatus";
 
 describe("statusHint", () => {
   it("says where each Vendoo label comes from", () => {
@@ -76,5 +76,35 @@ describe("marketplaceStatusesFromDraft", () => {
       ["depop", "NOT LISTED"],
       ["sellwild", "LISTED"],
     ]);
+  });
+});
+
+describe("inventoryStatus", () => {
+  it("reads a Vendoo draft as active once Anteroom has published it", () => {
+    expect(inventoryStatus({ status: "draft", direct_marketplaces: ["depop", "ebay"] })).toBe("active");
+    expect(inventoryStatus({ status: "draft" })).toBe("draft");
+  });
+
+  it("keeps a sale and a failed send", () => {
+    expect(inventoryStatus({ status: "sold", direct_marketplaces: ["depop"] })).toBe("sold");
+    expect(inventoryStatus({ status: "failed", direct_marketplaces: ["ebay"] })).toBe("failed");
+  });
+});
+
+describe("withDirectListings", () => {
+  it("shows Anteroom's publish when Vendoo says the marketplace is not listed", () => {
+    const rows = withDirectListings(
+      [
+        { id: "ebay", label: "eBay", status: "DELISTED" },
+        { id: "depop", label: "Depop", status: "NOT LISTED" },
+        { id: "etsy", label: "Etsy", status: "NOT LISTED" },
+      ],
+      ["depop", "poshmark", "mercari", "sellwild"],
+    );
+    expect(rows.filter((row) => row.status === "LISTED").map((row) => row.id)).toEqual([
+      "poshmark", "mercari", "depop", "sellwild",
+    ]);
+    expect(rows.find((row) => row.id === "etsy")?.status).toBe("NOT LISTED");
+    expect(rows.find((row) => row.id === "ebay")?.status).toBe("DELISTED");
   });
 });

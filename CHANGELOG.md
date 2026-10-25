@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.372 — 2026-10-25
+
+- Inventory shows a listing as Active, with its marketplace icons, after Anteroom publishes it. Vendoo can still call that item a draft.
+
 ## 0.1.371 — 2026-10-25
 
 - After Depop posts, View opens the public Depop page.

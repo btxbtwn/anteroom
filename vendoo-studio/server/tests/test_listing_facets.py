@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
+from vendoo_studio.models.marketplace_listing import MarketplaceListing  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.routes.conversations import _conv_response, _extras
@@ -86,6 +87,24 @@ class ListingFacetsTest(unittest.TestCase):
         self.assertEqual(response.price, 24.5)
         self.assertEqual(response.vendoo_labels, ["A19", "To List"])
         self.assertEqual(response.vendoo_marketplaces, ["ebay", "etsy"])
+        self.assertEqual(response.direct_marketplaces, [])
+
+    def test_response_names_marketplaces_anteroom_published(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="Columbia")
+        conv.status = "draft"
+        conv.notes = json.dumps({"vendooStatus": "draft", "vendooMarketplaces": []})
+        self.db.commit()
+        records = MarketplaceListingRepo(self.db)
+        records.save(conv.id, "depop", {"state": "published"})
+        records.save(conv.id, "etsy", {"state": "not_saved"})
+        records.save(conv.id, "sellwild", {"state": "pending_review"})
+        live = records.live_marketplaces()
+        response = _conv_response(conv, _extras(None, None, None, False, live[conv.id]))
+        self.assertEqual(sorted(response.direct_marketplaces), ["depop", "sellwild"])
+        self.assertEqual(response.vendoo_marketplaces, [])
+        self.assertEqual(response.status, "draft")
 
     def test_listed_marketplaces_follow_vendoo_status_flags(self):
         item = {

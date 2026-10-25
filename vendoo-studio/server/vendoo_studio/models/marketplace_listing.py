@@ -19,6 +19,8 @@ from vendoo_studio.models.conversation import new_id, utcnow
 STATES = ("not_saved", "draft", "saving", "publishing", "updating", "unknown", "published", "pending_review")
 BUSY_STATES = ("saving", "publishing", "updating")
 UNSETTLED_STATES = (*BUSY_STATES, "unknown")
+# Published, or submitted and waiting on the marketplace. Inventory treats both as listed.
+LIVE_STATES = ("published", "pending_review")
 
 
 class MarketplaceListing(Base):

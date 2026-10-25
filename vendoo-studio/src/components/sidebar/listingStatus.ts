@@ -1,4 +1,4 @@
-import { liveStatusClass, liveStatusForMarketplace, mergeStatusDrafts } from "../fillLog/marketplaces";
+import { liveStatusClass, liveStatusForMarketplace, mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
 import { marketplaceName } from "../marketplaceNames";
 
 export { liveStatusClass };
@@ -30,7 +30,7 @@ const MARKETPLACE_STATUS_ORDER = [
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const MARKETPLACE_ID_ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };
 
-/** Why a listing reads the way it does. Status follows Vendoo; it is never set here. */
+/** Why a listing reads the way it does. Status follows Vendoo, except a direct publish. */
 export function statusHint(status: string): string {
   const hint = STATUS_HINTS[status];
   if (hint) return hint;
@@ -39,6 +39,47 @@ export function statusHint(status: string): string {
 
 function marketplaceLabel(id: string): string {
   return marketplaceName(id);
+}
+
+/**
+ * The inventory label. Vendoo can still say draft after Anteroom published the
+ * item itself; that row reads Active, the same as any other live listing.
+ * A sale, a failed send, and a send in progress keep their own labels.
+ */
+export function inventoryStatus(listing: {
+  status?: string | null;
+  direct_marketplaces?: string[];
+}): string {
+  const status = String(listing.status || "draft");
+  if (status === "sold" || status === "listing" || status === "failed") return status;
+  if ((listing.direct_marketplaces || []).length && (status === "draft" || status === "in_progress")) return "active";
+  return status;
+}
+
+/** Marketplace chips, with Anteroom's own live listings outranking a Vendoo "not listed". */
+export function withDirectListings(
+  rows: { id: string; label: string; status: string }[],
+  direct: string[] | undefined,
+  visible?: Set<string>,
+): { id: string; label: string; status: string }[] {
+  if (!direct?.length) return rows;
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  let changed = false;
+  for (const rawId of direct) {
+    const id = MARKETPLACE_ID_ALIASES[rawId] || rawId;
+    if (!id || id === "general" || id === "validate") continue;
+    if (visible && !visible.has(id)) continue;
+    const existing = byId.get(id);
+    if (!existing) {
+      byId.set(id, { id, label: marketplaceLabel(id), status: "LISTED" });
+      changed = true;
+    } else if (!statusIsListed(existing.status)) {
+      byId.set(id, { ...existing, status: "LISTED" });
+      changed = true;
+    }
+  }
+  if (!changed) return rows;
+  return [...byId.values()].sort((left, right) => statusOrderIndex(left.id) - statusOrderIndex(right.id));
 }
 
 /** Listing status per marketplace, limited to `visible` (Settings → Listings → Marketplaces) when given. */
