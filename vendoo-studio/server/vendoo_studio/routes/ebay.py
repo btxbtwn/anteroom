@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.models.ebay_action import EbayAction
-from vendoo_studio.services import ebay_actions, ebay_workspace
+from vendoo_studio.services import ebay_actions, ebay_listings, ebay_workspace, user_settings
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, identity
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 
@@ -113,3 +113,39 @@ def checked(action_id: str, body: Checked, db: Session = Depends(get_db)):
         return {"ok": True}
     except (EbayFailure, SignInRequired) as exc:
         raise failure(exc) from exc
+
+
+@router.get("/listing-options")
+async def listing_options():
+    """Policy and location names only, for choosing the listing defaults."""
+    try:
+        return await ebay_listings.listing_options()
+    except Exception as exc:
+        raise failure(exc) from None
+
+
+class EbayListingDefaults(BaseModel):
+    fulfillment_policy_id: str = Field(default="", max_length=200)
+    payment_policy_id: str = Field(default="", max_length=200)
+    return_policy_id: str = Field(default="", max_length=200)
+    merchant_location_key: str = Field(default="", max_length=200)
+
+
+@router.get("/listing-defaults")
+def get_listing_defaults():
+    return user_settings.get_ebay_listing_defaults()
+
+
+@router.put("/listing-defaults")
+async def put_listing_defaults(body: EbayListingDefaults):
+    """Saved once in Settings; only the connected account's own policies are accepted."""
+    try:
+        options = await ebay_listings.listing_options()
+    except Exception as exc:
+        raise failure(exc) from None
+    choices = body.model_dump()
+    for kind, key in (("fulfillment", "fulfillment_policy_id"), ("payment", "payment_policy_id"),
+                      ("return", "return_policy_id"), ("location", "merchant_location_key")):
+        if choices[key] and choices[key] not in {option["id"] for option in options[kind]}:
+            raise HTTPException(400, "Choose policies from the connected eBay account.")
+    return user_settings.set_ebay_listing_defaults(choices)

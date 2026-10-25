@@ -32,7 +32,7 @@ test('Depop draft writes the same colour, condition, and option codes Vendoo wou
   payload.listing = { ...listing, primaryColor: 'Black', secondaryColor: 'Gray', condition: 'Pre-Owned - Good',
     form: { overrides: { condition: 'Pre-Owned - Good' }, specifics: { style: ['casual', 'retro'], age: ['modern'], source: [] } } };
   await c.depopApiAction('save', payload);
-  const body = JSON.parse(requests[1].body);
+  const body = JSON.parse(requests.find(request => request.method === 'PUT').body);
   assert.deepEqual(body.colour, ['black', 'grey']);
   assert.equal(body.condition, 'used_good');
   assert.deepEqual(body.style, ['casual', 'retro']);
@@ -44,8 +44,10 @@ test('Depop draft updates preserve photos and never call the publish endpoint', 
   const { c, requests, payload } = page();
   const result = await c.depopApiAction('save', payload);
   assert.equal(result.photo_count, 1);
-  assert.deepEqual(requests.map(r => r.method), ['GET', 'PUT', 'GET']);
-  assert.equal(JSON.parse(requests[1].body).pictures[0], 789);
+  const methods = requests.map(r => r.method);
+  assert.deepEqual(methods.filter(method => method === 'PUT'), ['PUT']);
+  assert.equal(methods.at(-1), 'GET');
+  assert.equal(JSON.parse(requests.find(request => request.method === 'PUT').body).pictures[0], 789);
   assert.ok(requests.every(r => !r.url.includes('/drafts/products/')));
   assert.ok(!JSON.stringify(result).includes('private-session'));
 });
@@ -162,7 +164,37 @@ test('a Depop description is capped at 1000 characters and read back against the
   };
   const result = await c.depopApiAction('save', payload);
   assert.equal(result.description, capped);
-  assert.equal(requests.length, 3);
+  assert.equal(requests.filter(request => request.method === 'PUT').length, 1);
+});
+
+test('a deleted Depop draft is replaced once and the missing link is not kept', async () => {
+  const gone = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
+  const created = 'https://www.depop.com/sellinghub/drafts/edit/newdraft1/';
+  const { c, requests, msg } = newDraft();
+  msg.payload.draft_url = gone;
+  const kept = { id: 'newdraft1', description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 9 }] };
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    requests.push({ method: options.method, pathname });
+    if (pathname === '/presentation/api/v1/drafts/123456/' || pathname === '/presentation/api/v1/drafts/123456') {
+      return reply(404, { message: 'Could not find draft with id: 123456' });
+    }
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/') return reply(201, { id: 'newdraft1' });
+    return reply(200, kept);
+  };
+  const result = await c.runDepopNative(msg);
+  assert.equal(result.ok, true);
+  assert.equal(result.draft_url, created);
+  assert.equal(result.draft_replaced, true);
+  assert.equal(requests.filter(request => request.method === 'POST' && request.pathname === '/presentation/api/v1/drafts/').length, 1);
+  assert.ok(!JSON.stringify(result).includes('123456'));
+
+  requests.length = 0;
+  const published = await c.runDepopNative({ job_id: 'job-1', payload: { ...msg.payload, action: 'publish', confirm: true, draft_url: gone } });
+  assert.equal(published.ok, false);
+  assert.equal(published.draft_url, undefined);
+  assert.match(published.marketplace_message, /could not find draft/i);
+  assert.ok(!requests.some(request => request.pathname.includes('/drafts/products/')));
 });
 
 test('Depop updates and reads an existing private draft without any tab or page execution', async () => {
@@ -192,4 +224,58 @@ test('Depop\'s own missing fields come back by name, safe to retry, with the dra
   assert.equal(result.marketplace_message, 'missing_fields: brand, parcel_size');
   assert.equal(result.error, 'Depop needs a brand, a parcel size.');
   assert.ok(requests.every(r => (r.method || 'GET') === 'GET'));
+});
+
+test('a boys jacket draft sends Depop\'s category, brand, location, and parcel', async () => {
+  const { c, requests, payload } = page();
+  payload.listing = {
+    ...listing, brand: 'Columbia', department: 'Boys', price: 12,
+    depop_specifics: { categoryId: 'kidswear_jackets', parcelSize: 'Medium' },
+    marketplace_category_ids: { depop: 'kidswear_jackets' },
+  };
+  const brands = [
+    { id: 'columbia-sportswear', name: 'Columbia Sportswear', status: 'active' },
+    { id: 'marshall-columbia', name: 'Marshall Columbia', status: 'active' },
+  ];
+  c.fetch = async (url, options = {}) => {
+    requests.push({ url, ...options });
+    const path = new URL(url).pathname;
+    if (options.method === 'PUT') return reply(200, { id: 123456, description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 789 }], missing_fields: [] });
+    if (path === '/presentation/api/v1/attributes/') return reply(200, { brand: brands });
+    if (path === '/presentation/api/v1/users/me/') return reply(200, { country: 'US' });
+    if (path.endsWith('/countries.json')) return reply(200, [{ country: 'United States', countryCode: 'US', address: 'United States', geoLat: 39.3, geoLng: -97.9 }]);
+    if (path === '/presentation/api/v1/users/me/settings/shipping/') return reply(200, { shipping_providers: [{ id: 'USPS', active: true }, { id: 'MANUAL', active: false }] });
+    if (path === '/presentation/api/v1/addresses/') {
+      return reply(200, [
+        { id: 1, last_modified: '2020-01-01T00:00:00Z' },
+        { id: 2, last_modified: '2024-01-01T00:00:00Z' },
+      ]);
+    }
+    if (path === '/presentation/api/v1/shipping/providers/depop/') {
+      return reply(200, [{ id: 'USPS', parcel_sizes: [{ id: 'under_1lb', title: 'Medium', cost: { amount: '1.99' } }, { id: 'medium', title: 'Large', cost: { amount: '5.99' } }] }]);
+    }
+    return reply(200, { id: 123456, description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 789 }], missing_fields: [] });
+  };
+  await c.depopApiAction('save', payload);
+  const body = JSON.parse(requests.find(request => request.method === 'PUT').body);
+  assert.equal(body.product_type, 'jackets');
+  assert.equal(body.is_kids, true);
+  assert.equal(body.gender, 'male');
+  assert.equal(body.brand, 'columbia-sportswear');
+  assert.equal(body.address, 'United States');
+  assert.equal(body.country_code, 'US');
+  assert.equal(body.geo_lat, 39.3);
+  assert.deepEqual(body.shipping_methods, [{
+    payer: 'buyer', parcel_size: 'under_1lb', shipping_provider_id: 'USPS', ship_from_address_id: 2,
+  }]);
+  assert.equal(body.national_shipping_cost, '1.99');
+  const quote = requests.find(request => request.url.includes('/shipping/providers/depop/'));
+  assert.equal(new URL(quote.url).searchParams.get('item_cost'), '12.00');
+  assert.equal(quote.headers['x-country-code'], 'US');
+  assert.equal(call(c, 'depopBrandId', brands, 'Columbia'), 'columbia-sportswear');
+  assert.equal(call(c, 'depopBrandId', brands, 'Columbia Sportswear'), 'columbia-sportswear');
+  assert.equal(call(c, 'depopBrandId', [
+    { id: 'a', name: 'Columbia One', status: 'active' },
+    { id: 'b', name: 'Columbia Two', status: 'active' },
+  ], 'Columbia'), '');
 });

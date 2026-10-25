@@ -78,7 +78,7 @@ def specifics_gaps(
             if not spec.required and is_not_applicable(value):
                 continue
             if spec.scales:
-                _, stored, resolved = encode_scaled(spec, value)
+                _, stored, resolved = encode_scaled(spec, value, listing.get("department"))
             else:
                 stored, resolved = encode_specific(spec, value)
             if resolved and stored not in (None, "", [], {}):

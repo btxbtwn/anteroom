@@ -10,6 +10,7 @@ const FORMS = {
   },
   depop: {
     style: ["Streetwear", "Sportswear"],
+    productType: ["jackets", "tshirts"],
   },
   mercari: {
     shippingLabel: ["USPS Ground Advantage / 1 - 7 days / $ 5.66 / 0.5 lb"],
@@ -43,11 +44,13 @@ describe("withDropdownOptions", () => {
   it("matches marketplace field leaves case-insensitively", () => {
     const depopInput: Field[] = [
       { key: "depop_specifics.style", label: "Style" },
+      { key: "depop_specifics.productType", label: "Product Type" },
       { key: "ebay_specifics.type", label: "Type" },
       { key: "mercari_specifics.shippingLabel", label: "Shipping Label" },
     ];
     const fields = withDropdownOptions(depopInput, "depop", FORMS);
     expect(fields[0].options).toEqual(["Streetwear", "Sportswear"]);
+    expect(fields[1].options).toEqual(["jackets", "tshirts"]);
 
     const ebay = withDropdownOptions(
       [{ key: "ebay_specifics.type", label: "Type" }] as Field[],

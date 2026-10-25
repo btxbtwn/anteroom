@@ -146,6 +146,10 @@ describe("marketplaces section", () => {
     expect(prompt).toContain("eBay said: Color is missing.");
     expect(prompt).toContain("ebay_specifics.category_specifics.Color (eBay needs Color.)");
     expect(prompt).toContain("Do not list it");
+    const deleted = askChatPrompt("depop", { state: "draft", error: "Depop refused the request (HTTP 404).",
+      marketplace_message: "Could not find draft with id: [hidden]" });
+    expect(deleted).toContain("The saved Depop draft was deleted.");
+    expect(deleted).not.toContain("Fill or fix those fields");
   });
 
   it("offers Update on a live eBay, Etsy, or Poshmark listing", () => {

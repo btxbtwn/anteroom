@@ -6,6 +6,7 @@ import { StatusDot } from "../StatusDot";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
 import type { DirectAccountStatus, DirectMarketplace } from "../../api/directConnections";
+import type { EbayListingDefaults, EbayListingOptions } from "../../api/ebay";
 import {
   EXTENSION_SESSION_NAMES,
   chromeSessionPresentation,
@@ -221,7 +222,49 @@ export function DirectConnectionRow({
       ) : null}
       {error && !account?.pending ? <SettingsNote tone="error">{error}</SettingsNote> : null}
       {marketplace.id === "etsy" && account?.connected ? <EtsyListingDefaults /> : null}
+      {marketplace.id === "ebay" && account?.connected ? <EbayListingDefaults /> : null}
     </SettingsRow>
+  );
+}
+
+const EBAY_DEFAULT_CHOICES: { kind: keyof EbayListingOptions; key: keyof EbayListingDefaults; label: string }[] = [
+  { kind: "fulfillment", key: "fulfillment_policy_id", label: "Shipping policy" },
+  { kind: "payment", key: "payment_policy_id", label: "Payment policy" },
+  { kind: "return", key: "return_policy_id", label: "Return policy" },
+  { kind: "location", key: "merchant_location_key", label: "Location" },
+];
+
+/** The eBay policies new listings use, chosen once when the account has more than one. */
+function EbayListingDefaults() {
+  const queryClient = useQueryClient();
+  const options = useQuery({ queryKey: ["ebay-listing-options"], queryFn: () => api.ebay.listingOptions(), staleTime: 60_000, retry: false });
+  const defaults = useQuery({ queryKey: ["ebay-listing-defaults"], queryFn: () => api.ebay.listingDefaults(), retry: false });
+  const save = useMutation({
+    mutationFn: (next: EbayListingDefaults) => api.ebay.setListingDefaults(next),
+    onSuccess: (data) => queryClient.setQueryData(["ebay-listing-defaults"], data),
+  });
+  const choices = EBAY_DEFAULT_CHOICES.filter(({ kind }) => (options.data?.[kind].length ?? 0) > 1);
+  if (options.isSuccess && !choices.length) return null;
+  const disabled = !options.data || save.isPending;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {choices.map(({ kind, key, label }) => {
+          const items = options.data?.[kind] ?? [];
+          return (
+            <Select key={key} value={defaults.data?.[key] || null} disabled={disabled}
+              onValueChange={(value) => save.mutate({ ...defaults.data, [key]: value || "" })}
+              items={items.map((option) => ({ value: option.id, label: option.name }))}>
+              <SelectTrigger size="compact" className="w-52" aria-label={`Default eBay ${label.toLowerCase()}`}><SelectValue placeholder={label} /></SelectTrigger>
+              <SelectPopup>{items.map((option) => <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>)}</SelectPopup>
+            </Select>
+          );
+        })}
+        {save.isPending ? <Spinner /> : null}
+      </div>
+      {options.error || save.error ? <SettingsNote tone="error">{(save.error || options.error)?.message}</SettingsNote>
+        : <SettingsNote>Your eBay account has more than one of these. New eBay listings use the ones chosen here.</SettingsNote>}
+    </div>
   );
 }
 

@@ -40,6 +40,10 @@ export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): str
   const name = marketplaceName(marketplace);
   const lines = [`Listing this item on ${name} failed. Anteroom said: ${draft.error || "the listing was refused."}`];
   if (draft.marketplace_message) lines.push(`${name} said: ${draft.marketplace_message}`);
+  if (/could not find draft/i.test(`${draft.error || ""} ${draft.marketplace_message || ""}`)) {
+    lines.push(`The saved ${name} draft was deleted. Leave the listing fields as they are. I will press List again so Anteroom starts a new draft.`);
+    return lines.join("\n");
+  }
   if (draft.error_fields?.length) lines.push(`Fields: ${draft.error_fields.map((item) => `${item.field} (${item.message})`).join("; ")}`);
   lines.push(`Fill or fix those fields in this listing so ${name} accepts it. Do not list it; I will press List again.`);
   return lines.join("\n");
@@ -237,7 +241,7 @@ export function MarketplacesLayout({
   async function listNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
     const extra = marketplace === "sellwild" ? " Sellwild may hold it for review."
-      : marketplace === "ebay" ? " This uses the one shipping, payment, and return policy on the connected eBay account."
+      : marketplace === "ebay" ? " This uses your eBay shipping, payment, and return policies, set in Settings → Connections → eBay when you have more than one."
       : marketplace === "etsy" && !etsyEligible ? " Etsy may still reject it if the item is not vintage, handmade, or a supply."
       : "";
     if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.${extra}`,

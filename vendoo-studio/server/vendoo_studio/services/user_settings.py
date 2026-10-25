@@ -164,6 +164,25 @@ def set_etsy_listing_defaults(*, shipping_profile_id: str, readiness_state_id: s
     return get_etsy_listing_defaults()
 
 
+EBAY_LISTING_DEFAULTS_KEY = "ebay_listing_defaults"
+EBAY_LISTING_DEFAULT_KEYS = ("fulfillment_policy_id", "payment_policy_id", "return_policy_id", "merchant_location_key")
+
+
+def get_ebay_listing_defaults() -> dict[str, str]:
+    """The eBay policies and location new listings use when the account has several."""
+    value = read_settings().get(EBAY_LISTING_DEFAULTS_KEY)
+    value = value if isinstance(value, dict) else {}
+    return {key: value[key] for key in EBAY_LISTING_DEFAULT_KEYS if isinstance(value.get(key), str) and value[key]}
+
+
+def set_ebay_listing_defaults(choices: dict[str, str]) -> dict[str, str]:
+    def mutator(payload: dict) -> None:
+        payload[EBAY_LISTING_DEFAULTS_KEY] = {key: choices[key] for key in EBAY_LISTING_DEFAULT_KEYS if choices.get(key)}
+
+    update_settings(mutator)
+    return get_ebay_listing_defaults()
+
+
 def setup_guide_dismissed() -> bool:
     return bool(read_settings().get(SETUP_GUIDE_DISMISSED_KEY))
 

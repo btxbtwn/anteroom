@@ -62,7 +62,7 @@ import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./
 import type { NativeDraft, NativeDrafts, NativeMarketplace, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
-import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
+import type { EbayListing, EbayListingDefaults, EbayListingOptions, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -360,6 +360,11 @@ export const api = {
     read: (section: string, params: Record<string, string | number> = {}) =>
       request<EbayPageData>(`/ebay/read/${section}?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),
     listing: (id: string) => request<EbayListing>(`/ebay/listing/${encodeURIComponent(id)}`),
+    listingOptions: () => request<EbayListingOptions>("/ebay/listing-options"),
+    listingDefaults: () => request<EbayListingDefaults>("/ebay/listing-defaults"),
+    setListingDefaults: (defaults: EbayListingDefaults) => request<EbayListingDefaults>("/ebay/listing-defaults", {
+      method: "PUT", body: JSON.stringify(defaults),
+    }),
     preview: (kind: string, payload: EbayPayload) => request<EbayReview>("/ebay/actions/preview", {
       method: "POST", body: JSON.stringify({ kind, payload }),
     }),

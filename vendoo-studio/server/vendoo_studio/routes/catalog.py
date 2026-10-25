@@ -76,15 +76,21 @@ async def sync_categories(db: Session = Depends(get_db)):
 
 
 @router.get("/dropdown-options")
-def dropdown_options():
+def dropdown_options(db: Session = Depends(get_db)):
     """Static Vendoo dropdown lists from the skill reference scrape.
 
     Used by the Forms editor when a category schema has not been cached yet, so
     sellers can pick valid condition / style / shipping values without guessing.
+    Depop product types come from the category tree: each leaf id's suffix.
     """
     from vendoo_studio.models.listing_values import marketplace_dropdown_forms
+    from vendoo_studio.services.category_tree import depop_product_types
 
-    return {"forms": marketplace_dropdown_forms()}
+    forms = {marketplace: dict(fields) for marketplace, fields in marketplace_dropdown_forms().items()}
+    product_types = depop_product_types(db)
+    if product_types:
+        forms.setdefault("depop", {})["productType"] = product_types
+    return {"forms": forms}
 
 
 @router.get("/fields")

@@ -275,7 +275,7 @@ def _category_specifics(
         if spec.scales:
             # Size and friends: Vendoo stores the chosen scale alongside the
             # value, and the value alone means nothing without it.
-            chosen_scale, code, resolved = encode_scaled(spec, value)
+            chosen_scale, code, resolved = encode_scaled(spec, value, merged.get("department"))
             if not resolved:
                 unresolved.append({"field": f"{marketplace}:{spec.display}", "value": str(value)})
                 continue

@@ -215,6 +215,43 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 2})
         self.assertEqual(len(result["conditions"]), 5)
 
+    def test_a_deleted_depop_draft_is_forgotten_and_a_replacement_is_kept(self):
+        old = URLS["depop"]
+        new = "https://www.depop.com/sellinghub/drafts/edit/newdraft1/"
+        record = {"state": "draft", "draft_url": old, "revision_id": "current"}
+        gone = native._outcome("depop", "publish", record, {
+            "ok": False, "safe_to_retry": True, "error": "Depop refused the request (HTTP 404).",
+            "marketplace_message": "Could not find draft with id: [hidden]", "error_code": "rejected",
+            "draft_url": old,
+        })
+        self.assertIsNone(gone["draft_url"])
+        self.assertEqual(gone["state"], "not_saved")
+        kept = native._outcome("depop", "save_draft", record, {
+            "ok": True, "state": "draft", "draft_url": new, "draft_replaced": True,
+        })
+        self.assertEqual(kept["draft_url"], new)
+        with self.assertRaises(native.NativeMarketplaceError):
+            native._outcome("depop", "save_draft", record, {"ok": True, "state": "draft", "draft_url": new})
+
+    def test_listing_again_replaces_a_deleted_depop_draft_in_the_same_list(self):
+        MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {
+            "state": "draft", "draft_url": URLS["depop"], "revision_id": self.rev.id,
+        })
+        new = "https://www.depop.com/sellinghub/drafts/edit/newdraft1/"
+        self.bridge.side_effect = [
+            {"ok": False, "safe_to_retry": True, "error": "Depop refused the request (HTTP 404).",
+             "marketplace_message": "Could not find draft with id: [hidden]", "error_code": "rejected"},
+            {"ok": True, "state": "draft", "draft_url": new},
+            {"ok": True, "state": "published", "draft_url": new},
+        ]
+        record = self.list("depop")
+        self.assertEqual(record["state"], "published")
+        self.assertEqual(record["draft_url"], new)
+        actions = [call.args[2]["action"] for call in self.bridge.call_args_list]
+        self.assertEqual(actions, ["publish", "save_draft", "publish"])
+        self.assertEqual(self.bridge.call_args_list[0].args[2]["draft_url"], URLS["depop"])
+        self.assertIsNone(self.bridge.call_args_list[1].args[2]["draft_url"])
+
     def test_listing_links_are_validated_for_every_marketplace(self):
         self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]},
                                    {"ok": True, "state": "published", "draft_url": URLS["mercari"], "listing_url": "https://www.mercari.com/us/search/"}]

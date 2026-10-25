@@ -35,10 +35,103 @@ function depopFormFields(listing) {
   return fields;
 }
 
+// Anteroom stores Depop's own category id, such as kidswear_jackets. The draft
+// wants the product type, whether it is kids', and male/female/unisex.
+function depopCategoryFields(listing) {
+  const id = String(listing?.depop_specifics?.categoryId || listing?.marketplace_category_ids?.depop || '');
+  const match = /^(kidswear|menswear|womenswear)_(.+)$/.exec(id);
+  if (!match) return null;
+  const kids = match[1] === 'kidswear';
+  const listed = String(listing?.department || '');
+  const gender = kids
+    ? (/boy/i.test(listed) ? 'male' : /girl/i.test(listed) ? 'female' : 'unisex')
+    : (match[1] === 'menswear' ? 'male' : 'female');
+  return { product_type: match[2], is_kids: kids, gender };
+}
+
+// Brand on the draft is Depop's brand id. "Columbia" is Columbia Sportswear,
+// and a second brand that merely contains the word is not a match.
+function depopBrandId(brands, name) {
+  const wanted = String(name || '').trim().toLowerCase();
+  if (!wanted) return '';
+  const rows = (Array.isArray(brands) ? brands : []).filter(row => row?.id && row.status !== 'inactive');
+  const exact = rows.filter(row => [row.name, row.id].some(value => String(value || '').trim().toLowerCase() === wanted));
+  if (exact.length === 1) return String(exact[0].id);
+  const prefix = rows.filter(row => String(row.name || '').trim().toLowerCase().startsWith(`${wanted} `));
+  return prefix.length === 1 ? String(prefix[0].id) : '';
+}
+
+// Depop's parcel titles are the same words Anteroom stores (Small, Medium, …).
+function depopParcelSize(sizes, listing) {
+  const wanted = String(listing?.depop_specifics?.parcelSize || listing?.depop_specifics?.parcel_size || '').trim().toLowerCase();
+  if (!wanted || !Array.isArray(sizes)) return null;
+  return sizes.find(size => String(size?.title || '').trim().toLowerCase() === wanted) || null;
+}
+
+// Category, brand, country-level location, and Depop Shipping. Each lookup is
+// skipped when Depop does not answer, so publish can still name what is missing.
+async function depopListingFields(request, listing, deadline) {
+  const fields = {};
+  const category = depopCategoryFields(listing);
+  if (category) Object.assign(fields, category);
+  try {
+    const attributes = await request('GET', '/presentation/api/v1/attributes/');
+    const brand = depopBrandId(attributes?.brand, listing?.depop_specifics?.brand || listing?.form?.overrides?.brand || listing?.brand);
+    if (brand) fields.brand = brand;
+  } catch { /* The publish check names a missing brand. */ }
+  try {
+    const account = await request('GET', '/presentation/api/v1/users/me/');
+    const code = String(account?.country || '').toUpperCase();
+    if (/^[A-Z]{2}$/.test(code)) {
+      const { data } = await marketplaceFetch('https://assets.depop.com/web/assets/listing/location/countries.json', {
+        marketplace: 'depop', step: 'location', credentials: 'omit', deadline, retry: true,
+      });
+      const country = (Array.isArray(data) ? data : []).find(row => row?.countryCode === code);
+      if (country?.address && country.country && Number.isFinite(Number(country.geoLat)) && Number.isFinite(Number(country.geoLng))) {
+        Object.assign(fields, {
+          address: country.address, country: country.country, country_code: country.countryCode,
+          geo_lat: Number(country.geoLat), geo_lng: Number(country.geoLng),
+        });
+      }
+    }
+  } catch { /* The publish check names a missing location. */ }
+  try {
+    const settings = await request('GET', '/presentation/api/v1/users/me/settings/shipping/');
+    const active = (settings?.shipping_providers || []).filter(row => row?.active && row.id);
+    const provider = active.find(row => row.id === 'USPS') || (active.length === 1 ? active[0] : null);
+    const addresses = await request('GET', '/presentation/api/v1/addresses/');
+    const from = (Array.isArray(addresses) ? addresses : [])
+      .filter(row => row?.id != null)
+      .sort((a, b) => String(b.last_modified || '').localeCompare(String(a.last_modified || '')))[0];
+    const price = Number(listing?.price);
+    if (provider && from && fields.country_code && Number.isFinite(price)) {
+      const params = new URLSearchParams({
+        ids: String(provider.id), item_cost: price.toFixed(2), item_currency: 'USD',
+      });
+      if (category?.product_type) params.set('product_type', category.product_type);
+      if (category?.gender) params.set('gender', category.gender);
+      const quoted = await request('GET', `/presentation/api/v1/shipping/providers/depop/?${params}`, undefined, {
+        'x-country-code': fields.country_code,
+      });
+      const quote = (Array.isArray(quoted) ? quoted : []).find(row => row?.id === provider.id);
+      const size = depopParcelSize(quote?.parcel_sizes, listing);
+      if (size?.id) {
+        fields.shipping_methods = [{
+          payer: 'buyer', parcel_size: String(size.id), shipping_provider_id: String(provider.id),
+          ship_from_address_id: from.id,
+        }];
+        if (size.cost?.amount != null && size.cost.amount !== '') fields.national_shipping_cost = String(size.cost.amount);
+      }
+    }
+  } catch { /* The publish check names missing shipping. */ }
+  return fields;
+}
+
 // Depop's names for the fields a draft still lacks, in plain words.
 const DEPOP_FIELD_NEEDS = { brand: 'a brand', brand_id: 'a brand', category: 'a category', category_id: 'a category',
   product_type: 'a category', group: 'a category', condition: 'a condition', colour: 'a colour', size: 'a size',
-  variants: 'a size', variant_set: 'a size', shipping: 'shipping', shipping_methods: 'shipping', parcel_size: 'a parcel size',
+  variants: 'a size', variant_set: 'a size', shipping: 'shipping', shipping_methods: 'shipping',
+  national_shipping: 'shipping', parcel_size: 'a parcel size', location: 'a location',
   address: 'a shipping address', age: 'an age', style: 'a style', source: 'a source', gender: 'a gender', pictures: 'photos',
   photos: 'photos', price: 'a price', price_amount: 'a price', description: 'a description', quantity: 'a quantity' };
 
@@ -64,10 +157,15 @@ function depopDraftMatches(draft, listing) {
 async function depopApiAction(action, payload) {
   let wrote = false;
   try {
-    const request = async (method, path, body) => {
+    const request = async (method, path, body, extraHeaders) => {
       const allowedRead = method === 'GET' && (/^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)
         || path === '/presentation/api/v1/drafts/?limit=24&sort_by=createdAt'
-        || /^\/api\/v3\/drafts\/products\/[A-Za-z0-9_-]+\/status\/$/.test(path));
+        || /^\/api\/v3\/drafts\/products\/[A-Za-z0-9_-]+\/status\/$/.test(path)
+        || path === '/presentation/api/v1/attributes/'
+        || path === '/presentation/api/v1/users/me/'
+        || path === '/presentation/api/v1/addresses/'
+        || path === '/presentation/api/v1/users/me/settings/shipping/'
+        || /^\/presentation\/api\/v1\/shipping\/providers\/depop\/\?[A-Za-z0-9._~%=&+-]+$/.test(path));
       const draftWrite = payload.action === 'save_draft' && (
         (action === 'create' && method === 'POST' && path === '/presentation/api/v1/drafts/')
         || (action === 'photo' && method === 'POST' && path === '/presentation/api/v1/pictures/')
@@ -77,7 +175,7 @@ async function depopApiAction(action, payload) {
       if (!allowedRead && !draftWrite && !publishWrite) throw marketplaceError('Unsupported Depop action.');
       const cookie = await chrome.cookies.get({ url: 'https://www.depop.com/', name: 'access_token' });
       if (!cookie?.value) throw marketplaceError('Sign in to Depop in Chrome first. No tab will be opened automatically.', { code: 'signed_out' });
-      const headers = { Accept: 'application/json', Authorization: `Bearer ${decodeURIComponent(cookie.value)}` };
+      const headers = { Accept: 'application/json', Authorization: `Bearer ${decodeURIComponent(cookie.value)}`, ...extraHeaders };
       if (method !== 'GET') {
         headers['Content-Type'] = 'application/json';
         if (publishWrite) headers['Depop-Session-Id'] = '';
@@ -156,7 +254,7 @@ async function depopApiAction(action, payload) {
       draft.price_amount = String(payload.listing.price ?? existing.price_amount ?? '');
       draft.price_currency ||= 'USD';
       draft.pictures = payload.uploaded_photo_ids || (existing.pictures || []).map(photo => photo.id);
-      Object.assign(draft, depopFormFields(payload.listing));
+      Object.assign(draft, depopFormFields(payload.listing), await depopListingFields(request, payload.listing, payload.deadline));
       await request('PUT', path, draft);
       const saved = await request('GET', path);
       if (!depopDraftMatches(saved, payload.listing) || saved.pictures?.length !== draft.pictures.length) throw new Error('Depop did not keep this listing\'s fields and photos.');
@@ -190,6 +288,10 @@ async function depopApiAction(action, payload) {
   }
 }
 
+function depopDraftGone(error) {
+  return /could not find draft/i.test(`${error?.message || ''} ${error?.marketplace_message || ''}`);
+}
+
 async function depopAction(action, payload) {
   if (activeNativeOperation?.cancelled) throw marketplaceError('Marketplace action cancelled.', { code: 'network' });
   const result = await depopApiAction(action, payload);
@@ -206,6 +308,7 @@ async function runDepopNative(msg, recovery = false) {
   const key = `native_operation_${payload.operation_id}`;
   // Before the final save the draft has no photos, and a retry reuses it.
   let committed = recovery;
+  let replacedDraft = false;
   try {
     const storeReceipt = async receipt => {
       const journal = (await chrome.storage.local.get(key))[key] || {};
@@ -217,7 +320,21 @@ async function runDepopNative(msg, recovery = false) {
           || (payload.expected_photo_count != null && draft.photo_count !== payload.expected_photo_count)) {
         throw new Error('Depop did not keep this listing\'s fields and photos. Check them and list again.');
       }
-      return { ok: true, state: 'draft', draft_url: payload.draft_url };
+      return { ok: true, state: 'draft', draft_url: payload.draft_url, ...(replacedDraft ? { draft_replaced: true } : {}) };
+    };
+    const openDraft = async () => {
+      photosChosen();
+      try {
+        const created = await depopAction('create', payload);
+        payload.draft_url = nativeDraftUrl('depop', created.draft_url);
+      } catch (error) {
+        // A create whose reply was lost may have made a draft Anteroom cannot name.
+        if (error.rejected !== true) committed = true;
+        throw error;
+      }
+      if (!payload.draft_url) { committed = true; throw new Error('Depop did not return a valid draft link.'); }
+      payload.expected_photo_count = payload.photos.length;
+      await storeReceipt({ receipt_url: payload.draft_url, expected_photo_count: payload.expected_photo_count });
     };
     const photosChosen = () => {
       if (!payload.photos?.length || payload.photos.length > 8) {
@@ -236,21 +353,18 @@ async function runDepopNative(msg, recovery = false) {
         if (draft.photo_count === 0) return marketplaceFailure(new Error('Depop kept the listing before its photos were saved. List again to finish the same one.'), true, { draft_url: payload.draft_url });
         return await verify();
       }
-      if (!payload.draft_url) {
-        photosChosen();
-        try {
-          const created = await depopAction('create', payload);
-          payload.draft_url = nativeDraftUrl('depop', created.draft_url);
-        } catch (error) {
-          // A create whose reply was lost may have made a draft Anteroom cannot name.
-          if (error.rejected !== true) committed = true;
-          throw error;
-        }
-        if (!payload.draft_url) { committed = true; throw new Error('Depop did not return a valid draft link.'); }
-        payload.expected_photo_count = payload.photos.length;
-        await storeReceipt({ receipt_url: payload.draft_url, expected_photo_count: payload.expected_photo_count });
+      if (!payload.draft_url) await openDraft();
+      let existing;
+      try {
+        existing = await depopAction('read', payload);
+      } catch (error) {
+        // The seller deleted this draft. Start another instead of listing the missing one.
+        if (!depopDraftGone(error)) throw error;
+        payload.draft_url = '';
+        replacedDraft = true;
+        await openDraft();
+        existing = await depopAction('read', payload);
       }
-      const existing = await depopAction('read', payload);
       if (existing.photo_count === 0) {
         photosChosen();
         payload.expected_photo_count = payload.photos.length;
@@ -289,6 +403,7 @@ async function runDepopNative(msg, recovery = false) {
     }
     throw new Error('Depop has not confirmed publishing yet. Check its result later.');
   } catch (error) {
+    if (depopDraftGone(error) && !replacedDraft) payload.draft_url = '';
     return marketplaceFailure(error, !committed, payload.draft_url ? { draft_url: payload.draft_url } : {});
   }
 }

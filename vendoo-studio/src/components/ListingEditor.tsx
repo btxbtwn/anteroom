@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Job, ListingData, MarketplaceForm } from "../api/types";
-import { cloneListing, getListingEditorValue, setListingEditorValue } from "../listingPaths";
+import { cloneListing, formFieldText, getListingEditorValue, setListingEditorValue } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
@@ -55,7 +55,7 @@ import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
-import { FieldLabel, InspectorSection, NativeSelect } from "./ListingFormControls";
+import { FieldLabel, InspectorSection, SearchableSelect } from "./ListingFormControls";
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -560,9 +560,7 @@ function StructuredEditor({
       const val = getListingEditorValue(listing, f.key);
       // Schema labels ("Sleeve Length") don't match JSON keys ("sleeveLength");
       // the fields API already resolved the value — use it when the path miss.
-      const text = f.locked
-        ? (f.defaultValue || "")
-        : (val != null && String(val).trim() !== "" ? String(val) : (f.defaultValue || ""));
+      const text = f.locked ? formFieldText(f.defaultValue) : (formFieldText(val) || formFieldText(f.defaultValue));
       init[f.key] = text;
     });
     setLocal(init);
@@ -573,13 +571,15 @@ function StructuredEditor({
     const field = fields.find((entry) => entry.key === key);
     if (field?.locked) return;
     const before = getListingEditorValue(listing, key);
-    if (local[key] === (before != null ? String(before) : field?.defaultValue || "")) return;
+    if (local[key].trim() === "[object Object]") return;
+    if (local[key] === formFieldText(before) || local[key] === formFieldText(field?.defaultValue)) return;
     const updated = cloneListing(listing);
     setListingEditorValue(updated, key, coerce(local[key]));
     onChange(updated);
   };
 
   const commitField = (key: string, value: string) => {
+    if (value.trim() === "[object Object]") return;
     const nextLocal = { ...local, [key]: value };
     setLocal(nextLocal);
     const updated = cloneListing(listing);
@@ -595,21 +595,14 @@ function StructuredEditor({
     }
     if (f.options?.length) {
       return (
-        <NativeSelect
+        <SearchableSelect
           id={id}
-          data-listing-field={f.key}
+          fieldKey={f.key}
           value={local[f.key] || ""}
-          onChange={(e) => commitField(f.key, e.target.value)}
-        >
-          <option value="">—</option>
-          {local[f.key]
-            && !f.options.some((option) => option === local[f.key]) ? (
-            <option value={local[f.key]}>{local[f.key]} (current)</option>
-          ) : null}
-          {f.options.map((option) => (
-            <option key={option} value={option}>{option}</option>
-          ))}
-        </NativeSelect>
+          options={f.options}
+          disabled={f.locked}
+          onChange={(value) => commitField(f.key, value)}
+        />
       );
     }
     return (
@@ -703,12 +696,18 @@ export function fieldsForMarketplaceForm(
   forms: MarketplaceForm[] | undefined,
 ): EditorField[] {
   const own = getFieldsForTab(listing, tab);
-  if (tab === "general") return own;
-  const schema = schemaFieldsForTab(forms, tab);
-  const shared = PACKAGE_MARKETPLACES.has(tab)
-    ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
-    : SHARED_FORM_FIELDS;
-  return mergeEditorFields([...shared, ...own, ...(schema ?? [])]);
+  const merged = tab === "general" ? own : mergeEditorFields([
+    ...(PACKAGE_MARKETPLACES.has(tab) ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS] : SHARED_FORM_FIELDS),
+    ...own,
+    ...(schemaFieldsForTab(forms, tab) ?? []),
+  ]);
+  // A group of values (eBay's Best Offer, Depop's national shipping) is edited
+  // through its own rows, never as one text box.
+  return merged.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 /** Fields for this tab from Vendoo's own schema, or null when it has none. */
@@ -721,14 +720,14 @@ function schemaFieldsForTab(
   // An unknown leaf still answers with the marketplace's own controls and the
   // values this listing holds, so render whatever rows came back.
   if (!form?.fields.length) return null;
-  return form.fields.map((field) => ({
+  return form.fields.filter((field) => !isPlainObject(field.value)).map((field) => ({
     // Schema keys are Vendoo labels ("Sleeve Length"); listing JSON uses camelCase.
     // getListingEditorValue / setListingEditorValue bridge the two.
     key: `${tab}_specifics.${field.key}`,
     label: field.required ? `${field.label} *` : field.label,
     required: field.required,
     options: field.options,
-    defaultValue: field.value != null ? String(field.value) : "",
+    defaultValue: formFieldText(field.value),
   }));
 }
 
@@ -836,18 +835,25 @@ function mergeSpecificsWithDefaults(
   return [...ordered, ...extras];
 }
 
+function humanizeFieldKey(key: string): string {
+  const words = key.replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\s+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
+}
+
 function specificsFields(specs: unknown, prefix: string, skip: string[] = []): EditorField[] {
   if (!specs || typeof specs !== "object") return [];
   const fields: EditorField[] = [];
+  const add = (path: string, value: unknown, label: string) => {
+    if (isPlainObject(value)) {
+      for (const [nested, child] of Object.entries(value)) add(`${path}.${nested}`, child, humanizeFieldKey(nested));
+      return;
+    }
+    if (Array.isArray(value) && value.some((item) => isPlainObject(item))) return;
+    fields.push({ key: `${prefix}.${path}`, label, ...(typeof value === "number" ? { type: "number" as const } : {}) });
+  };
   for (const [key, value] of Object.entries(specs as Record<string, unknown>)) {
     if (skip.includes(key)) continue;
-    if (key === "category_specifics" && value && typeof value === "object" && !Array.isArray(value)) {
-      for (const nested of Object.keys(value)) {
-        fields.push({ key: `${prefix}.category_specifics.${nested}`, label: nested });
-      }
-      continue;
-    }
-    fields.push({ key: `${prefix}.${key}`, label: key });
+    add(key, value, key === "category_specifics" ? "Category specifics" : humanizeFieldKey(key));
   }
   return fields;
 }

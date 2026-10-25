@@ -27,6 +27,7 @@ from vendoo_studio.services.listing_result import ListingProblem, failure, missi
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 from vendoo_studio.services.relay_client import RelayError
 from vendoo_studio.services.native_form import vendoo_form
+from vendoo_studio.services import user_settings
 from vendoo_studio.services.user_settings import get_package_dimensions
 from vendoo_studio.services.vendoo_specifics import is_not_applicable
 
@@ -224,23 +225,54 @@ def _published(offer: dict, record: Callable[[dict], None]) -> dict | None:
     return None
 
 
-async def _only(client: EbayClient, kind: str) -> str:
+_POLICY_LABELS = {"fulfillment": "shipping", "payment": "payment", "return": "return"}
+_DEFAULTS_HINT = "Choose the one new listings use in Settings → Connections → eBay, then List again."
+
+
+async def _policies(client: EbayClient, kind: str) -> list[dict]:
     body = await client.request("GET", f"/sell/account/v1/{kind}_policy", params={"marketplace_id": "EBAY_US"})
-    policies = [policy for policy in body.get(f"{kind}Policies", []) if policy.get("marketplaceId") in (None, "EBAY_US")]
-    if len(policies) != 1:
-        names = ", ".join(str(policy.get("name") or "untitled") for policy in policies[:5]) or "none"
-        label = {"fulfillment": "shipping", "payment": "payment", "return": "return"}[kind]
-        raise ValueError(f"eBay needs exactly one {label} policy on this account. Found {len(policies)}: {names}.")
-    return str(policies[0][f"{kind}PolicyId"])
+    return [policy for policy in body.get(f"{kind}Policies", []) if policy.get("marketplaceId") in (None, "EBAY_US")]
+
+
+async def _locations(client: EbayClient) -> list[dict]:
+    body = await client.request("GET", "/sell/inventory/v1/location", params={"limit": "20"})
+    return [item for item in body.get("locations", []) if item.get("merchantLocationStatus") == "ENABLED"]
+
+
+def _choose(ids: list[str], chosen: str | None, what: str) -> str:
+    """The account's only option, or the one the seller chose in Settings."""
+    if len(ids) == 1:
+        return ids[0]
+    if not ids:
+        raise ValueError(f"eBay has no {what} on this account. Add one on eBay, then List again.")
+    if chosen in ids:
+        return chosen
+    raise ListingProblem(f"eBay has {len(ids)} {what}s on this account. {_DEFAULTS_HINT}")
+
+
+async def _only(client: EbayClient, kind: str) -> str:
+    ids = [str(policy[f"{kind}PolicyId"]) for policy in await _policies(client, kind)]
+    chosen = user_settings.get_ebay_listing_defaults().get(f"{kind}_policy_id")
+    return _choose(ids, chosen, f"{_POLICY_LABELS[kind]} policy")
 
 
 async def _location(client: EbayClient) -> str:
-    body = await client.request("GET", "/sell/inventory/v1/location", params={"limit": "20"})
-    locations = [item for item in body.get("locations", []) if item.get("merchantLocationStatus") == "ENABLED"]
-    if len(locations) != 1:
-        names = ", ".join(str(item.get("name") or item.get("merchantLocationKey") or "untitled") for item in locations[:5]) or "none"
-        raise ValueError(f"eBay needs exactly one enabled inventory location. Found {len(locations)}: {names}.")
-    return str(locations[0]["merchantLocationKey"])
+    keys = [str(item["merchantLocationKey"]) for item in await _locations(client)]
+    chosen = user_settings.get_ebay_listing_defaults().get("merchant_location_key")
+    return _choose(keys, chosen, "enabled inventory location")
+
+
+async def listing_options() -> dict[str, list[dict]]:
+    """Policy and location names for Settings; nothing else from the account."""
+    client = await EbayClient.connect()
+    out: dict[str, list[dict]] = {}
+    for kind in ("fulfillment", "payment", "return"):
+        out[kind] = [{"id": str(p[f"{kind}PolicyId"]), "name": str(p.get("name") or "Untitled")[:200]}
+                     for p in await _policies(client, kind)]
+    out["location"] = [{"id": str(item["merchantLocationKey"]),
+                        "name": str(item.get("name") or item["merchantLocationKey"])[:200]}
+                       for item in await _locations(client)]
+    return out
 
 
 async def _complete_aspects(client: EbayClient, category_id: str, aspects: dict[str, list[str]]) -> dict[str, list[str]]:
