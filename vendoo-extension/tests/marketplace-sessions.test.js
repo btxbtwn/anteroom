@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadWorker } = require('./worker-context');
+const { loadWorker, reply } = require('./worker-context');
 
 function jwt(claims) {
   const payload = btoa(JSON.stringify(claims)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
@@ -53,38 +53,29 @@ test('an expired Poshmark token is expired even when the cookie date is later', 
   assert.equal(JSON.stringify(summary).includes(token), false);
 });
 
-test('Mercari keeps a saved sign-in in local storage and drops an expired one', async () => {
-  const token = jwt({ exp: Math.floor(Date.now() / 1000) + 86400 * 10, username: 'mercari-seller' });
-  const { c } = worker({
-    local: { mercari_session: { headers: { authorization: `Bearer ${token}`, 'x-csrf-token': 'csrf-secret' } } },
-  });
+test('Mercari sign-in is read from its own initialize, never stored, and hides the token', async () => {
+  const token = jwt({ exp: Math.floor(Date.now() / 1000) + 86400 * 10 });
+  const { c, stored } = worker({ fetch: async url => (url === 'https://www.mercari.com/v1/initialize'
+    ? reply(200, { csrf: 'csrf-secret', accessToken: token, user: { userId: 5, name: 'mercari-seller', email: 'secret@example.com' } })
+    : reply(404, {})) });
   const summary = await c.readExtensionSession('mercari');
   assert.equal(summary.state, 'signed_in');
   assert.equal(summary.label, 'mercari-seller');
-  assert.equal(JSON.stringify(summary).includes(token), false);
-  assert.equal(JSON.stringify(summary).includes('csrf-secret'), false);
-
-  const expired = jwt({ exp: Math.floor(Date.now() / 1000) - 5 });
-  const stale = worker({
-    local: { mercari_session: { headers: { authorization: `Bearer ${expired}`, 'x-csrf-token': 'csrf-secret' } } },
-  });
-  assert.equal((await stale.c.readExtensionSession('mercari')).state, 'expired');
-  await assert.rejects(() => stale.c.mercariHeaders(), /Reconnect Mercari/);
+  for (const secret of [token, 'csrf-secret', 'secret@example.com']) assert.equal(JSON.stringify(summary).includes(secret), false);
+  assert.equal(stored.mercari_session, undefined);
 });
 
-test('a Mercari sign-in saved only for this browser session still counts', async () => {
-  const { c } = worker({
-    session: { headers: { authorization: 'Bearer opaque-session', 'x-csrf-token': 'csrf' } },
-  });
-  assert.equal((await c.readExtensionSession('mercari')).state, 'signed_in');
-  const headers = await c.mercariHeaders();
-  assert.equal(headers.authorization, 'Bearer opaque-session');
+test('Mercari is signed out when initialize has no user, and unknown when it cannot be reached', async () => {
+  const anonymous = worker({ fetch: async () => reply(200, { csrf: 'csrf', user: {} }) });
+  assert.equal((await anonymous.c.readExtensionSession('mercari')).state, 'signed_out');
+  const offline = worker({ fetch: async () => { throw new Error('offline'); } });
+  assert.equal((await offline.c.readExtensionSession('mercari')).state, 'unknown');
 });
 
 test('Sellwild uses the session response and hides the account payload', async () => {
   const { c } = worker({
     cookies: { 'https://sellwild.com/': [{ name: 'authjs.session-token', expirationDate: Math.floor(Date.now() / 1000) + 3600 }] },
-    fetch: async () => ({ ok: true, status: 200, json: async () => ({ user: { username: 'wild', email: 'secret@example.com', id: 'user-secret' } }) }),
+    fetch: async () => reply(200, { user: { username: 'wild', email: 'secret@example.com', id: 'user-secret' } }),
   });
   const summary = await c.readExtensionSession('sellwild');
   assert.equal(summary.state, 'signed_in');

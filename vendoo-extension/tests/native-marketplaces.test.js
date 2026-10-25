@@ -49,6 +49,8 @@ test('an interrupted worker is never replayed, and checking a result does no pag
   s.stored.native_operation_abc123 = { finished: false };
   await s.context.handleNativeMarketplaceMessage(s.msg);
   assert.equal(s.replies[0].ok, false);
+  assert.equal(s.replies[0].safe_to_retry, false);
+  assert.equal(s.replies[0].error_code, 'uncertain');
   s.msg.type = 'marketplace.result';
   await s.context.handleNativeMarketplaceMessage(s.msg);
   assert.equal(s.replies[1].finished, false);
@@ -60,6 +62,7 @@ test('another running job blocks native work', async () => {
   vm.runInContext('activeJob = {job_id: "another"}', s.context);
   await s.context.handleNativeMarketplaceMessage(s.msg);
   assert.equal(s.replies[0].safe_to_retry, true);
+  assert.equal(s.replies[0].error_code, 'rejected');
   assert.equal(s.actions.length, 0);
 });
 
@@ -112,4 +115,21 @@ test('the controller never repeats a Poshmark listing after a completed or inter
     await s.context.handleNativeMarketplaceMessage(s.msg);
     assert.equal(calls, 1);
   }
+});
+
+test('a cancel aborts the request in flight', async () => {
+  const s = setup();
+  vm.runInContext("activeNativeOperation = { id: 'op-9', tabId: null, cancelled: false, controller: new AbortController() }", s.context);
+  let signal;
+  s.context.fetch = (_url, options) => new Promise((_resolve, reject) => {
+    signal = options.signal;
+    options.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+  });
+  const pending = s.context.marketplaceFetch('https://webapi.depop.com/presentation/api/v1/drafts/', { marketplace: 'depop', step: 'create',
+    method: 'POST', body: '{}', deadline: Date.now() + 60000 });
+  await new Promise(resolve => setImmediate(resolve));
+  await s.context.cancelNativeMarketplaceOperation('op-9');
+  const error = await pending.catch(value => value);
+  assert.equal(signal.aborted, true);
+  assert.equal(error.code, 'uncertain');
 });

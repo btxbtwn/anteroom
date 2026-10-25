@@ -4,41 +4,29 @@
 // marketplace's own web client (read 2026-10-24).
 const DELETE_DEADLINE_MS = 60000;
 
-function deleteGuard(deadline) {
-  if (Date.now() >= deadline || activeNativeOperation?.cancelled) throw new Error('The delete stopped. Delist again to check; it is safe to repeat.');
-}
-
 async function deletePoshmark(id, deadline) {
-  const cookie = await chrome.cookies.get({ url: 'https://poshmark.com/', name: 'jwt' });
-  let account = {};
-  try { account = JSON.parse(atob(cookie.value.split('.')[1])); } catch {}
-  if (!/^[a-f0-9]{24}$/.test(String(account.user_id))) throw new Error('Reconnect Poshmark in Anteroom first.');
-  const call = async method => {
-    deleteGuard(deadline);
-    const response = await fetch(`https://poshmark.com/vm-rest/posts/${id}?app_version=2.55&app_type=web&pm_version=2026.43.00`, {
-      method, credentials: 'include', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(25000) });
-    if (!response.ok) throw new Error(`Poshmark rejected the ${method === 'GET' ? 'read' : 'delete'} (HTTP ${response.status}).`);
-    return response.json();
-  };
+  const account = await poshmarkAccount();
+  const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
   // Poshmark answers errors with HTTP 200 and an error body.
-  const gone = result => ['PostRemovedError', 'NotFoundError'].includes(result?.error?.errorType);
-  const before = await call('GET');
-  if (gone(before)) return { ok: true, state: 'deleted', already: true };
-  if (before.error) throw new Error('Poshmark did not return this listing.');
-  const post = before.data || before;
-  if (String(post.creator_id) !== String(account.user_id)) throw new Error('This Poshmark listing belongs to another account.');
+  const gone = error => ['PostRemovedError', 'NotFoundError'].includes(error?.marketplace_type);
+  const read = async step => {
+    try { return await client.call('GET', `/vm-rest/posts/${id}?app_type=web`, undefined, { step, what: 'the read' }); }
+    catch (error) { if (gone(error)) return null; throw error; }
+  };
+  const post = await read('read');
+  if (!post) return { ok: true, state: 'deleted', already: true };
+  if (String(post.creator_id) !== account.user_id) throw marketplaceError('This Poshmark listing belongs to another account.');
   const sold = (post.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
   if (sold || post.status === 'archived' || ['sold_out', 'not_available'].includes(post.inventory?.status)) {
-    throw new Error('This Poshmark listing has sold. It was not deleted.');
+    throw marketplaceError('This Poshmark listing has sold. It was not deleted.');
   }
-  const removed = await call('DELETE');
-  if (removed?.error) throw new Error(`Poshmark refused the delete${removed.error.userMessage ? `: ${String(removed.error.userMessage).slice(0, 160)}` : '.'}`);
-  if (!gone(await call('GET'))) throw new Error('Poshmark has not confirmed the delete. Delist again to check.');
+  await client.call('DELETE', `/vm-rest/posts/${id}?app_type=web`, undefined, { step: 'delete', what: 'the delete' });
+  if (await read('read-back')) throw marketplaceError('Poshmark has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false });
   return { ok: true, state: 'deleted' };
 }
 
 async function deleteMercari(id, deadline) {
-  deleteGuard(deadline);
+  mercariSession = null;
   // Mercari's own Delete button: updateItemStatus to "cancel". Its reply
   // carries the new status; an item already removed reports the same.
   const data = await mercariRequest({ operationName: 'UpdateItemStatusMutation', variables: { input: { id, status: 'cancel' } },
@@ -48,56 +36,56 @@ async function deleteMercari(id, deadline) {
   // just succeeded answers status OK instead of repeating the item status.
   const status = String(data.updateItemStatus?.status || '');
   if (!['cancel', 'admin_cancel'].includes(status) && status.toUpperCase() !== 'OK') {
-    throw new Error(`Mercari did not confirm the delete${status ? ` (status ${status})` : ''}.`);
+    throw marketplaceError('Mercari did not confirm the delete.', { marketplace_message: status ? `status ${status}` : '' });
   }
   return { ok: true, state: 'deleted' };
 }
 
 async function deleteDepop(slug, deadline) {
   const cookie = await chrome.cookies.get({ url: 'https://www.depop.com/', name: 'access_token' });
-  if (!cookie?.value) throw new Error('Reconnect Depop in Anteroom first.');
-  const call = async (method, path) => {
-    deleteGuard(deadline);
-    await ensureMarketplaceRequestContext();
-    const response = await fetch(`https://webapi.depop.com${path}`, { method, credentials: 'omit', signal: AbortSignal.timeout(25000),
-      headers: { Accept: 'application/json', Authorization: `Bearer ${decodeURIComponent(cookie.value)}` } });
-    if (method === 'GET' && response.status === 404) return null;
-    if (response.status === 403) throw new Error('Depop requested browser verification. Reconnect Depop in Anteroom.');
-    if (!response.ok) throw new Error(`Depop rejected the ${method === 'GET' ? 'read' : 'delete'} (HTTP ${response.status}).`);
-    return response.status === 204 ? {} : response.json().catch(() => ({}));
+  if (!cookie?.value) throw marketplaceError('Reconnect Depop in Anteroom first.', { code: 'signed_out' });
+  const call = async (method, path, step) => {
+    try {
+      const { data } = await marketplaceFetch(`https://webapi.depop.com${path}`, { marketplace: 'depop', step, method, credentials: 'omit', deadline,
+        headers: { Accept: 'application/json', Authorization: `Bearer ${decodeURIComponent(cookie.value)}` } });
+      return data;
+    } catch (error) {
+      if (method === 'GET' && error.status === 404) return null;
+      throw error;
+    }
   };
-  const product = await call('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`);
+  const product = await call('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, 'read');
   const status = String(product?.status || '').toUpperCase();
   if (!product || status.includes('DELETED')) return { ok: true, state: 'deleted', already: true };
-  if (/SOLD|PURCHASED/.test(status) || product.sold === true) throw new Error('This Depop listing has sold. It was not deleted.');
+  if (/SOLD|PURCHASED/.test(status) || product.sold === true) throw marketplaceError('This Depop listing has sold. It was not deleted.');
   const id = String(product.id || '');
-  if (!/^\d{1,15}$/.test(id)) throw new Error('Depop did not return this listing\'s ID.');
-  await call('DELETE', `/presentation/api/v1/products/${id}/`);
+  if (!/^\d{1,15}$/.test(id)) throw marketplaceError('Depop did not return this listing\'s ID.', { code: 'schema_drift' });
+  await call('DELETE', `/presentation/api/v1/products/${id}/`, 'delete');
   // Depop's read lags the delete: the slug can still look on sale for a moment.
   const removed = product => !product || String(product.status || '').toUpperCase().includes('DELETED');
   let after = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    after = await call('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`);
+    after = await call('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, 'read-back');
     if (removed(after)) return { ok: true, state: 'deleted' };
-    if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 700));
+    if (attempt < 2) await marketplaceSleep(700);
   }
   const left = String(after?.status || '').toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 40);
-  throw new Error(`Depop has not confirmed the delete${left ? ` (status ${left})` : ''}. Delist again to check.`);
+  throw marketplaceError('Depop has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false,
+    marketplace_message: left ? `status ${left}` : '' });
 }
 
 async function deleteSellwild(id, deadline) {
-  deleteGuard(deadline);
   // Sellwild gives sellers delist, not delete; a delisted item leaves the site.
-  const { response, result } = await sellwildFetch('/api/seller/listings/bulk-status', { method: 'POST', deadline,
+  const result = await sellwildFetch('/api/seller/listings/bulk-status', { method: 'POST', deadline, step: 'delist',
     body: { action: 'delist', listingIds: [Number(id)] } });
-  if (!response.ok || result?.success !== true) throw new Error(`Sellwild did not delist the item${result?.error ? `: ${String(result.error).slice(0, 160)}` : '.'}`);
+  if (result?.success !== true) throw marketplaceError('Sellwild did not delist the item.', { marketplace_message: marketplaceBodyMessage(result) });
   if (result.changed > 0) return { ok: true, state: 'deleted' };
-  if (result.notFound > 0) throw new Error('Sellwild says this listing is not on your account.');
+  if (result.notFound > 0) throw marketplaceError('Sellwild says this listing is not on your account.');
   if (result.skipped > 0) {
     // Already delisted, or a sale is in progress: Sellwild skips both.
-    throw new Error('Sellwild skipped this listing: it is already delisted or has a sale in progress. Check it on Sellwild.');
+    throw marketplaceError('Sellwild skipped this listing: it is already delisted or has a sale in progress. Check it on Sellwild.');
   }
-  throw new Error('Sellwild did not confirm the delist.');
+  throw marketplaceError('Sellwild did not confirm the delist.', { code: 'uncertain', rejected: false });
 }
 
 const MARKETPLACE_DELETE = {
@@ -110,21 +98,22 @@ const MARKETPLACE_DELETE = {
 async function runMarketplaceDelete(payload) {
   const entry = MARKETPLACE_DELETE[payload?.marketplace];
   if (!entry || payload.confirm !== true || !entry[0].test(String(payload.listing_id || ''))) {
-    return { ok: false, error: 'Confirm deleting a named marketplace listing.' };
+    return marketplaceFailure(marketplaceError('Confirm deleting a named marketplace listing.'), true);
   }
   try {
     return await entry[1](String(payload.listing_id), Date.now() + DELETE_DEADLINE_MS);
   } catch (error) {
-    return { ok: false, error: String(error.message || error) };
+    // Every delete reads the listing first, so repeating one is safe.
+    return marketplaceFailure(error.code === 'uncertain' ? Object.assign(error, { code: 'network' }) : error, true);
   }
 }
 
 async function handleMarketplaceDelete(msg) {
   if (activeNativeOperation || activeJob || activePatch) {
-    sendBrowserResult(msg, { ok: false, error: 'Another automation job is running.' });
+    sendBrowserResult(msg, marketplaceFailure(marketplaceError('Another automation job is running.'), true));
     return;
   }
-  activeNativeOperation = { id: `delete-${msg.payload?.request_id || ''}`, tabId: null, cancelled: false };
+  activeNativeOperation = { id: `delete-${msg.payload?.request_id || ''}`, tabId: null, cancelled: false, controller: new AbortController() };
   try { sendBrowserResult(msg, await runMarketplaceDelete(msg.payload)); }
   finally { activeNativeOperation = null; }
 }
