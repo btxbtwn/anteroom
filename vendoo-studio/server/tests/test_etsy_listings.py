@@ -62,7 +62,7 @@ class EtsyListingsTest(unittest.TestCase):
         # Each test answers Etsy's schema itself; nothing is kept between tests.
         self.enterContext(patch("vendoo_studio.services.marketplace_schemas.load_rows", return_value=None))
         self.enterContext(patch("vendoo_studio.services.marketplace_schemas.save_rows"))
-        self.enterContext(patch.dict("vendoo_studio.services.marketplace_schemas._etsy_leaves", {"at": 0.0, "ids": frozenset()}))
+        self.enterContext(patch.dict("vendoo_studio.services.marketplace_schemas._etsy_taxonomy", {"at": 0.0, "leaves": ()}))
         self.api = self.enterContext(patch.object(etsy_listings.marketplace_accounts, "etsy_api", side_effect=self.request))
         self.enterContext(patch("vendoo_studio.database.SessionLocal", self.sessions))
         self.enterContext(patch("vendoo_studio.services.user_settings.get_etsy_listing_defaults", return_value={}))

@@ -233,8 +233,11 @@ def card_condition(listing: dict, category_id: str) -> tuple[str, list[dict]] | 
 
 
 def ebay_category_id(listing: dict) -> str:
+    """The live eBay leaf when one was chosen, otherwise the Vendoo category id Send uses."""
+    from vendoo_studio.services.direct_categories import direct_category_id
+
     specifics = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
-    category = (listing.get("marketplace_category_ids") or {}).get("ebay") or specifics.get("categoryId")
+    category = direct_category_id(listing, "ebay") or (listing.get("marketplace_category_ids") or {}).get("ebay") or specifics.get("categoryId")
     text = str(category or "")
     if not re.fullmatch(r"\d{1,15}", text):
         raise missing("Choose an eBay category before listing.", "marketplace_category_ids.ebay")
