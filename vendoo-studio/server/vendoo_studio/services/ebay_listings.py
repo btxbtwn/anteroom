@@ -287,6 +287,10 @@ def _failure(exc: Exception, pending: str | None) -> dict:
     if isinstance(exc, EbayFailure) and exc.code:
         # A definite refusal: eBay answered and did not run the call.
         return failure(str(exc), exc.code, safe=True, retry_after_s=exc.retry_after_s, marketplace_message=said)
+    if isinstance(exc, EbayFailure) and exc.status >= 500 and pending not in _UNREPEATABLE and str(exc).startswith("eBay returned HTTP"):
+        # A gateway 503 (and its cousins) is eBay being down, not a refusal of this listing.
+        # Hand-raised failures also default to status 502, and those keep their own words.
+        return failure("eBay is temporarily unavailable. Try again.", "network", safe=True, marketplace_message=said)
     if isinstance(exc, ValueError) and pending is None:
         return failure(str(exc), "rejected", safe=True)
     if pending not in _UNREPEATABLE:
@@ -377,18 +381,27 @@ async def _create_ship_from_location(client: EbayClient) -> dict:
             "settings.ebay.merchant_location_key",
         )
     key = f"zip-{postal}"
-    try:
-        await client.request("POST", f"/sell/inventory/v1/location/{segment(key)}", body={
-            "name": postal,
-            "merchantLocationStatus": "ENABLED",
-            "locationTypes": ["WAREHOUSE"],
-            "location": {"address": {"postalCode": postal, "country": "US"}},
-        })
-    except EbayFailure as exc:
-        # The same ZIP was already created. Listing can use that key.
-        if exc.status != 409:
-            raise
-    return {"id": key, "title": postal}
+    body = {
+        "name": postal,
+        "merchantLocationStatus": "ENABLED",
+        "locationTypes": ["WAREHOUSE"],
+        "location": {"address": {"postalCode": postal, "country": "US"}},
+    }
+    path = f"/sell/inventory/v1/location/{segment(key)}"
+    for attempt in range(2):
+        try:
+            await client.request("POST", path, body=body)
+            return {"id": key, "title": postal}
+        except EbayFailure as exc:
+            # 409: this ZIP is already a location. 5xx: eBay often stores the
+            # location and then fails the reply, which is what a bare 503 was.
+            if exc.status == 409:
+                return {"id": key, "title": postal}
+            if exc.status >= 500 and any(item["id"] == key for item in await _locations(client)):
+                return {"id": key, "title": postal}
+            if exc.status < 500 or attempt:
+                raise
+    raise EbayFailure("eBay is temporarily unavailable. Try again.", 503)
 
 
 async def listing_profiles(client: EbayClient | None = None) -> dict[str, list[dict]]:
