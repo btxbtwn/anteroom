@@ -26,9 +26,10 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.services.listing_result import failure
 
-NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild"}
+NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
 RULE_MODULES = ("vendoo_studio.services.ebay_listings", "vendoo_studio.services.etsy_listings",
-                "vendoo_studio.services.sellwild_listing", "vendoo_studio.services.chrome_listing")
+                "vendoo_studio.services.sellwild_listing", "vendoo_studio.services.chrome_listing",
+                "vendoo_studio.services.vinted_listing")
 
 
 @dataclass
@@ -64,7 +65,12 @@ def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
     from vendoo_studio.services.native_form import attach_form
 
-    return attach_form(prepare_listing_snapshot(db, conv, copy.deepcopy(listing_json)), marketplace)
+    snapshot = attach_form(prepare_listing_snapshot(db, conv, copy.deepcopy(listing_json)), marketplace)
+    if marketplace == "vinted":
+        from vendoo_studio.services.vinted_listing import apply_vinted_listing
+
+        apply_vinted_listing(snapshot)
+    return snapshot
 
 
 def _unresolved(snapshot: dict, marketplace: str) -> list[dict]:

@@ -6,10 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.378 — 2026-10-25
+
+- eBay's Size is now always one of the eBay category's own choices, so a listing sized XXL goes to eBay as 2XL and OS as One Size instead of being left empty, and setting eBay's Size to 2XL no longer snaps back to XXL. The same size written another way (XXL, 2XL, 2X) is matched on every marketplace.
+- Notes about a marketplace leaving a field empty now have Edit and Ask chat buttons. A required field that is simply empty now says so.
+
+## 0.1.377 — 2026-10-25
+
+- A listing you delisted everywhere from Anteroom now reads Draft in the sidebar, and its marketplace logos go away, even though Vendoo still calls it Active.
+
+## 0.1.376 — 2026-10-25
+
+- List on Vinted uploads the item on Vinted when you confirm it. Send does not list it, and it does not save a Vinted draft.
+
 ## 0.1.375 — 2026-10-25
 
-- A listing sized XXL now goes to eBay as 2XL, eBay's own spelling, instead of being left empty, and setting eBay's Size to 2XL no longer snaps back to XXL. The same size written another way (XXL, 2XL, 2X) is matched on every marketplace.
-- Notes about a marketplace leaving a field empty now have Edit and Ask chat buttons. A required field that is simply empty now says so.
+- Depop listings use the description only. The title is no longer repeated at the top.
 
 ## 0.1.374 — 2026-10-25
 
