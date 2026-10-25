@@ -82,11 +82,27 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
 
         with patch("vendoo_studio.services.direct_categories._ebay_leaf", new=AsyncMock(return_value={"id": "15687", "path": "Clothing > T-Shirts"})), \
              patch("vendoo_studio.services.direct_categories._etsy_leaf", new=AsyncMock(return_value={"id": "482", "path": "Clothing > Men > T-shirts"})), \
-             patch("vendoo_studio.services.marketplace_schemas.etsy_taxonomy", etsy_taxonomy):
+             patch("vendoo_studio.services.marketplace_schemas.etsy_taxonomy", etsy_taxonomy), \
+             patch("vendoo_studio.services.chrome_catalog.chrome_category_ids", new=AsyncMock(return_value={})):
             await attach_direct_categories(listing, "cotton tee")
         self.assertEqual(listing["marketplace_category_ids"], {"ebay": "111", "etsy": "222"})
         self.assertEqual(listing["direct_category_ids"]["ebay"], "15687")
         self.assertEqual(listing["direct_category_ids"]["etsy"], "482")
+
+    async def test_poshmark_and_depop_categories_are_stored_beside_vendoo(self):
+        listing = {
+            "title": "Nike tee",
+            "marketplace_categories": {"poshmark": "Men > Shirts > Tees", "depop": "Men > Tops > T-Shirts"},
+            "marketplace_category_ids": {"ebay": "111", "poshmark": "stale", "depop": "old_leaf"},
+        }
+        chrome = {"poshmark": "dept/shirts/tees", "depop": "menswear_tshirts"}
+        with patch("vendoo_studio.services.direct_categories._ebay_leaf", new=AsyncMock(return_value=None)), \
+             patch("vendoo_studio.services.direct_categories._etsy_leaf", new=AsyncMock(return_value=None)), \
+             patch("vendoo_studio.services.chrome_catalog.chrome_category_ids", new=AsyncMock(return_value=chrome)):
+            await attach_direct_categories(listing, "")
+        self.assertEqual(listing["marketplace_category_ids"], {"ebay": "111", "poshmark": "stale", "depop": "old_leaf"})
+        self.assertEqual(listing["direct_category_ids"]["poshmark"], "dept/shirts/tees")
+        self.assertEqual(listing["direct_category_ids"]["depop"], "menswear_tshirts")
 
 
 if __name__ == "__main__":

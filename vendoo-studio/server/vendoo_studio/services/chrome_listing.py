@@ -3,8 +3,9 @@
 Send to Vendoo still uses ``marketplace_category_ids`` and Vendoo's field names.
 These checks read the same snapshot and only decide whether direct List can start.
 A color Poshmark does not list, a price it will round, and a quantity above one
-are said beside List. A missing category, an overlong description, or a missing
-Depop parcel holds List off.
+are said beside List. A missing category, an overlong description, a missing
+Depop parcel, or a parcel title Depop does not ship holds List off. A size
+Poshmark does not offer is added when Chrome has read Poshmark's catalog.
 """
 from __future__ import annotations
 
@@ -121,11 +122,17 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
 
 @requirement("depop")
 def depop_requirements(snapshot: dict, context: Context) -> list[dict]:
-    del context
     found: list[dict] = []
     specifics = snapshot.get("depop_specifics") if isinstance(snapshot.get("depop_specifics"), dict) else {}
-    if not str(specifics.get("parcelSize") or specifics.get("parcel_size") or "").strip():
+    label = str(specifics.get("parcelSize") or specifics.get("parcel_size") or "").strip()
+    if not label:
         found.append(gap("depop_specifics.parcelSize", "Depop needs a parcel size."))
+    else:
+        from vendoo_studio.services.chrome_catalog import KNOWN_PARCELS, parcel_key
+
+        if parcel_key(label) not in KNOWN_PARCELS:
+            found.append(gap("depop_specifics.parcelSize", f'Depop does not offer "{label}" as a parcel size.'))
     if not _category_id(snapshot, "depop"):
         found.append(gap("direct_category_ids.depop", "Depop needs a category from its own list."))
+    del context
     return found

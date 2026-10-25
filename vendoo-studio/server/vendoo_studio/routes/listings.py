@@ -150,6 +150,9 @@ def update_listing(conv_id: str, body: ListingUpdate, db: Session = Depends(get_
 
     previous = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
     previous_json = previous.listing_json if previous and isinstance(previous.listing_json, dict) else {}
+    from vendoo_studio.services.chrome_catalog import keep_direct_categories
+
+    keep_direct_categories(previous_json, body.listing)
     changes = explicit_changes(previous_json, body.listing)
     sanitize_listing_sizes(body.listing)
     # The seller's size input is the source of truth; the title follows it.

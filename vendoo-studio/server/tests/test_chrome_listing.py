@@ -4,6 +4,13 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from vendoo_studio.services.chrome_catalog import (
+    apply_direct_ids,
+    apply_preview,
+    depop_category_id,
+    keep_direct_categories,
+    poshmark_category_id,
+)
 from vendoo_studio.services.chrome_listing import (
     depop_requirements,
     mercari_requirements,
@@ -45,6 +52,16 @@ class ChromePreflightTest(unittest.TestCase):
     def test_a_missing_parcel_or_a_parent_category_holds_list_off(self):
         depop = depop_requirements({"marketplace_category_ids": {"depop": "menswear_tshirts"}}, Context())
         self.assertTrue(any(gap["field"] == "depop_specifics.parcelSize" and gap["blocking"] for gap in depop))
+        titled = depop_requirements({
+            "depop_specifics": {"parcelSize": "Under 1lb"},
+            "marketplace_category_ids": {"depop": "menswear_tshirts"},
+        }, Context())
+        self.assertTrue(any("does not offer" in gap["message"] and gap["blocking"] for gap in titled))
+        known = depop_requirements({
+            "depop_specifics": {"parcelSize": "Medium"},
+            "marketplace_category_ids": {"depop": "menswear_tshirts"},
+        }, Context())
+        self.assertFalse(any("does not offer" in gap["message"] for gap in known))
         mercari = mercari_requirements({
             "description": "Soft cotton",
             "marketplace_category_ids": {"mercari": "1885"},
@@ -71,3 +88,67 @@ class ChromePreflightTest(unittest.TestCase):
             gaps = etsy_requirements(listing, Context())
         self.assertTrue(any("Sleeve length" in gap["message"] and gap["blocking"] for gap in gaps))
         self.assertEqual(listing["marketplace_category_ids"]["etsy"], "111")
+
+
+DEPT = "01008c10d97b4e1245005764"
+SHIRTS = "07008c10d97b4e1245005764"
+TEES = "a" * 24
+POSHMARK = {"catalog": {"departments": [{"id": DEPT, "display": "Men", "categories": [{
+    "id": SHIRTS, "display": "Shirts", "category_features": [{"id": TEES, "display": "Tees - Short Sleeve"}],
+}]}]}}
+DEPOP = {
+    "department": [{"id": "menswear"}, {"id": "womenswear"}],
+    "group": [
+        {"id": "tops", "department": ["menswear", "womenswear"], "product_types": [{"id": "tshirts"}]},
+        {"id": "dresses", "department": ["womenswear"], "product_types": [{"id": "dresses"}]},
+    ],
+}
+
+
+class ChromeCatalogTest(unittest.TestCase):
+    def test_a_stale_vendoo_id_resolves_to_the_live_category_and_stays_off_vendoo(self):
+        listing = {
+            "marketplace_category_ids": {"poshmark": "stale", "depop": "old_leaf"},
+            "marketplace_categories": {"poshmark": "Men > Shirts > Tees - Short Sleeve", "depop": "Men > Tops > T-Shirts"},
+        }
+        self.assertEqual(poshmark_category_id(POSHMARK, listing), f"{DEPT}/{SHIRTS}/{TEES}")
+        self.assertEqual(depop_category_id(DEPOP, listing), "menswear_tshirts")
+        self.assertTrue(apply_direct_ids(listing, {
+            "poshmark": f"{DEPT}/{SHIRTS}/{TEES}", "depop": "menswear_tshirts",
+        }))
+        self.assertEqual(listing["marketplace_category_ids"], {"poshmark": "stale", "depop": "old_leaf"})
+        self.assertEqual(listing["direct_category_ids"]["depop"], "menswear_tshirts")
+
+    def test_a_direct_depop_id_wins_over_the_vendoo_id(self):
+        listing = {
+            "direct_category_ids": {"depop": "womenswear_dresses"},
+            "marketplace_category_ids": {"depop": "menswear_tshirts"},
+        }
+        self.assertEqual(depop_category_id(DEPOP, listing), "womenswear_dresses")
+
+    def test_a_poshmark_size_chrome_refuses_holds_list_off(self):
+        found = apply_preview([], {
+            "ok": True,
+            "gaps": {"poshmark": [{"field": "size", "message": "Poshmark needs a size Poshmark offers in this category.", "blocking": True}]},
+        }, "poshmark")
+        self.assertTrue(found[0]["blocking"])
+        self.assertIn("size", found[0]["message"])
+
+    def test_a_live_parcel_match_keeps_a_title_the_saved_list_does_not_know(self):
+        found = depop_requirements({
+            "depop_specifics": {"parcelSize": "Oversize"},
+            "direct_category_ids": {"depop": "menswear_tshirts"},
+        }, Context())
+        kept = apply_preview(found, {"parcels_checked": True, "gaps": {"depop": []}}, "depop")
+        self.assertFalse(any("does not offer" in gap["message"] for gap in kept))
+        refused = apply_preview(found, {"parcels_checked": True, "gaps": {"depop": [{
+            "field": "depop_specifics.parcelSize", "message": 'Depop does not offer "Medium" as a parcel size.', "blocking": True,
+        }]}}, "depop")
+        self.assertTrue(any("Medium" in gap["message"] and gap["blocking"] for gap in refused))
+
+    def test_an_editor_save_keeps_a_resolved_category(self):
+        previous = {"direct_category_ids": {"ebay": "111", "poshmark": f"{DEPT}/{SHIRTS}/{TEES}"}, "title": "Tee"}
+        incoming = {"direct_category_ids": {"ebay": "111"}, "title": "Tee"}
+        keep_direct_categories(previous, incoming)
+        self.assertEqual(incoming["direct_category_ids"]["poshmark"], f"{DEPT}/{SHIRTS}/{TEES}")
+        self.assertEqual(incoming["direct_category_ids"]["ebay"], "111")

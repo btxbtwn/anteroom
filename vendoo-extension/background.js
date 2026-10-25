@@ -48,6 +48,7 @@ importScripts('background/marketplace-delete.js');
 importScripts('background/marketplace-sessions.js');
 importScripts('background/marketplace-sales.js');
 importScripts('background/marketplace-inspection.js');
+importScripts('background/direct-check.js');
 
 function log(msg) {
   console.log(`[BG-Studio] ${msg}`);
@@ -604,6 +605,11 @@ async function handleStudioMessage(msg) {
 
     case 'marketplace.sessions': {
       await handleMarketplaceSessions(msg);
+      break;
+    }
+
+    case 'marketplace.direct_check': {
+      await handleMarketplaceDirectCheck(msg);
       break;
     }
 
