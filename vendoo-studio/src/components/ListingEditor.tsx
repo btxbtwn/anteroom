@@ -9,7 +9,7 @@ import { ConnectChromeButton } from "./ConnectChromeButton";
 import { SendProgress, sendProgressLabel } from "./SendProgress";
 import { ListingBlockers } from "./ListingBlockers";
 import { ListingHistory } from "./ListingHistory";
-import { blockerTarget, matchingEditorField } from "./listingChanges";
+import { blockerTarget, isEbayInventoryLocationEdit, matchingEditorField } from "./listingChanges";
 import { VendooSyncStatus } from "./VendooSyncStatus";
 import { OpenListingButton } from "./OpenListingButton";
 import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
@@ -73,6 +73,7 @@ interface Props {
   reviewTab: ListingReviewTab;
   onReviewTabChange: (tab: ListingReviewTab) => void;
   onBulkListingsCreated?: (listings: BulkListingUploadResult[], generate: boolean) => void;
+  onEditInventoryLocation?: () => void;
 }
 
 interface EditorField {
@@ -94,6 +95,7 @@ export function ListingEditor({
   reviewTab,
   onReviewTabChange,
   onBulkListingsCreated,
+  onEditInventoryLocation,
 }: Props) {
   const queryClient = useQueryClient();
   const [editTab, setEditTab] = React.useState("general");
@@ -239,6 +241,10 @@ export function ListingEditor({
   }, [editTab, tabs]);
 
   const openBlocker = (field: string) => {
+    if (isEbayInventoryLocationEdit(field)) {
+      onEditInventoryLocation?.();
+      return;
+    }
     const target = blockerTarget(field);
     onReviewTabChange(target.reviewTab);
     setEditTab(tabs.includes(target.tab) ? target.tab : "general");
@@ -535,14 +541,27 @@ function StructuredEditor({
     queryFn: api.catalog.dropdownOptions,
     staleTime: Infinity,
   });
+  const { data: inventoryLocation } = useQuery({
+    queryKey: ["settings-ebay-inventory-location"],
+    queryFn: api.settings.ebayInventoryLocation,
+    staleTime: 30_000,
+  });
   const fields = React.useMemo(
-    () =>
-      withDropdownOptions(
+    () => {
+      const rows = withDropdownOptions(
         fieldsForMarketplaceForm(listing, tab, forms?.forms),
         tab,
         dropdownOptions?.forms,
-      ),
-    [forms, listing, tab, dropdownOptions?.forms],
+      );
+      const fallback = inventoryLocation?.location || "";
+      if (!fallback) return rows;
+      return rows.map((field) => (
+        field.key === "zipCode" && !formFieldText(getListingEditorValue(listing, field.key))
+          ? { ...field, defaultValue: fallback }
+          : field
+      ));
+    },
+    [forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
   );
   const [local, setLocal] = React.useState<Record<string, string>>({});
   React.useEffect(() => {
@@ -782,6 +801,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         { key: "secondaryColor", label: "Secondary Color" },
         { key: "size", label: "Size" },
         { key: "sku", label: "SKU" },
+        { key: "zipCode", label: "Inventory location" },
         { key: "category_path", label: "Category" },
         { key: "department", label: "Department" },
         { key: "weight_oz", label: "Package Weight (oz)", type: "number" },
@@ -789,6 +809,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
       ];
     case "ebay":
       return mergeSpecificsWithDefaults(listing?.ebay_specifics, "ebay_specifics", [
+        { key: "zipCode", label: "Inventory location" },
         ...liveCategoryFields(listing, "ebay"),
         { key: "ebay_specifics.department", label: "Department" },
         { key: "ebay_specifics.size", label: "Size" },

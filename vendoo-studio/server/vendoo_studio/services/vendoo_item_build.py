@@ -194,6 +194,9 @@ def _general_details(
     dims = _dimensions(listing.get("package_dimensions_in"))
     if dims:
         general["dimensions"] = dims
+    from vendoo_studio.services.user_settings import listing_inventory_location
+
+    general["zipCode"] = listing_inventory_location(listing)
     return general
 
 
@@ -354,6 +357,18 @@ def _learned_category_specifics(
     return out
 
 
+def _apply_ebay_inventory_location(known: dict[str, Any], general: dict[str, Any]) -> None:
+    """Copy the general ship-from ZIP onto eBay when that form's location is blank."""
+    shipping = known.get("shipping")
+    if not isinstance(shipping, dict):
+        return
+    if str(shipping.get("location") or "").strip():
+        return
+    location = str(general.get("zipCode") or "").strip()
+    if location:
+        shipping["location"] = location
+
+
 def _listing_section(
     marketplace: str,
     listing: dict[str, Any],
@@ -495,6 +510,7 @@ def _listing_section(
         _apply_ebay_pricing(known, general, listing)
         # The seller's Condition Description never varies per item.
         known["conditionDescription"] = EBAY_CONDITION_DESCRIPTION
+        _apply_ebay_inventory_location(known, general)
     elif marketplace == "etsy":
         _apply_etsy_listing_codes(known, listing)
         _apply_etsy_tags(known, general)

@@ -101,7 +101,7 @@ const LISTING_GENERAL_FIELDS: { key: string; label: string }[] = [
   { key: "primaryColor", label: "Primary Color" },
   { key: "secondaryColor", label: "Secondary Color" },
   { key: "sku", label: "SKU" },
-  { key: "zipCode", label: "Zip Code" },
+  { key: "zipCode", label: "Inventory location" },
   { key: "quantity", label: "Quantity" },
   { key: "category_path", label: "Category" },
   { key: "size", label: "US Size" },

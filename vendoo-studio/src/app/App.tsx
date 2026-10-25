@@ -351,6 +351,14 @@ export function App() {
   const openAnalytics = () => togglePage("analytics");
   const openMarketplaces = () => togglePage("marketplaces");
   const openAssistant = () => goAssistant();
+  const openEbayInventoryLocation = () => {
+    if (activeView !== "settings") viewBeforeSettings.current = activeView;
+    setSettingsSection("connections");
+    setSettingsTargetId("ebay-inventory-location");
+    setActiveView("settings");
+    setMobilePane("workspace");
+    closeMobileSidebar();
+  };
   const openProviders = () => {
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
     setSettingsSection("providers");
@@ -918,6 +926,7 @@ export function App() {
                           onCleared={() => {
                             clearListingWorkspace(tab.id);
                           }}
+                          onEditInventoryLocation={openEbayInventoryLocation}
                           onBulkListingsCreated={(listings, generate) => {
                             if (generate) void generateBatch(listings);
                             const first = listings[0]?.convId;
