@@ -122,7 +122,8 @@ class Draft(Input):
     category_id: str = Field(pattern=r"^\d{1,15}$")
     price: str = Field(max_length=20)
     quantity: int = Field(default=1, strict=True, ge=1, le=10000)
-    condition: Literal["NEW", "NEW_OTHER", "USED_EXCELLENT", "USED_VERY_GOOD", "USED_GOOD", "USED_ACCEPTABLE"]
+    condition: Literal["NEW", "NEW_OTHER", "NEW_WITH_DEFECTS", "PRE_OWNED_EXCELLENT", "USED_EXCELLENT",
+                       "PRE_OWNED_FAIR", "USED_VERY_GOOD", "USED_GOOD", "USED_ACCEPTABLE"]
     image_urls: list[str] = Field(min_length=1, max_length=12)
     aspects: dict[str, list[str]] = Field(default_factory=dict)
     fulfillment_policy_id: str = Field(min_length=1, max_length=200)

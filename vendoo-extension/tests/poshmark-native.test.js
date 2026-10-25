@@ -101,6 +101,7 @@ test('an update writes the live Poshmark post and does not create or publish ano
   };
   msg.payload.action = 'update';
   msg.payload.listing_id = POST;
+  msg.payload.listing = { ...LISTING, price: 17.6 };
   const result = JSON.parse(JSON.stringify(await c.runPoshmarkApi(msg)));
   assert.deepEqual(result, { ok: true, state: 'published', listing_url: `https://poshmark.com/listing/${POST}` });
   assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), ['GET /vm-rest/posts/' + POST, 'GET /vm-rest/meta/catalog_v2', 'GET /create-listing',
@@ -112,6 +113,24 @@ test('an update writes the live Poshmark post and does not create or publish ano
   assert.ok(!requests.some(r => r.path.includes('/users/') || r.path.endsWith('/status/published') || r.method === 'DELETE'));
 });
 
+test('Poshmark gets whole dollars, rounded the way Vendoo rounds', async () => {
+  const { c, msg, requests } = setup();
+  msg.payload.listing = { ...LISTING, price: 17.5 };
+  assert.equal((await c.runPoshmarkApi(msg)).ok, true);
+  assert.equal(requests[5].body.post.price_amount.val, '18');
+  assert.equal(c.poshmarkPrice({ price: 19.49 }), 19);
+  assert.equal(c.poshmarkPrice({ price: 19.99, poshmark_specifics: { poshmarkPrice: '24.5' } }), 25);
+});
+
+test('Poshmark conditions use its own codes and never drop a plain New', () => {
+  const { c } = setup();
+  const labels = { 'New With Tags/Box': 'nwt', 'New Without Tags/Box': 'uln', 'New With Imperfections': 'ug',
+    'Pre-Owned - Excellent': 'uln', 'Pre-Owned - Good': 'ug', 'Pre-Owned - Fair': 'uf', 'Poor (Major flaws)': 'uf',
+    New: 'nwt', 'Brand new': 'nwt', 'Pre-owned': 'ug', Mint: null };
+  for (const [label, code] of Object.entries(labels)) assert.equal(c.poshmarkCondition({ condition: label }), code, label);
+  assert.equal(c.poshmarkCondition({ condition: 'Pre-Owned - Good', form: { overrides: { condition: 'uf' } } }), 'uf');
+});
+
 test('big sizes are found in the Big & Tall set', () => {
   const { c } = setup();
   const category = CATALOG.data.catalog.departments[0].categories[0];
@@ -121,8 +140,8 @@ test('big sizes are found in the Big & Tall set', () => {
   assert.equal(c.poshmarkSize(category, { size: '40R' }), null);
 });
 
-test('missing category, size, price or confirmation stops before creating anything', async () => {
-  for (const change of [{ marketplace_category_objects: {} }, { size: '40R' }, { price: 2 }, { description: '' }]) {
+test('missing category, size, price, condition or confirmation stops before creating anything', async () => {
+  for (const change of [{ marketplace_category_objects: {} }, { size: '40R' }, { price: 2 }, { description: '' }, { condition: '' }]) {
     const { c, msg, requests } = setup();
     msg.payload.listing = { ...LISTING, ...change };
     const result = await c.runPoshmarkApi(msg);

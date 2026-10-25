@@ -40,6 +40,22 @@ test('Depop draft writes the same colour, condition, and option codes Vendoo wou
   assert.equal(body.source, undefined);
 });
 
+test('Depop keeps its own condition slugs and maps Studio labels the way Vendoo does', () => {
+  const c = loadWorker();
+  for (const slug of ['brand_new', 'used_like_new', 'used_excellent', 'used_good', 'used_fair']) assert.equal(c.depopCondition(slug), slug);
+  const labels = { 'New With Tags/Box': 'brand_new', 'New Without Tags/Box': 'used_like_new', 'New With Imperfections': 'used_good',
+    'Pre-Owned - Excellent': 'used_excellent', 'Pre-Owned - Good': 'used_good', 'Pre-Owned - Fair': 'used_fair',
+    'Poor (Major flaws)': 'used_fair', 'Like New': 'used_like_new', New: 'brand_new', '': '' };
+  for (const [label, slug] of Object.entries(labels)) assert.equal(c.depopCondition(label), slug, label);
+});
+
+test('Depop draft sends the slug Studio already chose', async () => {
+  const { c, requests, payload } = page();
+  payload.listing = { ...listing, condition: 'New Without Tags/Box', form: { overrides: { condition: 'used_like_new' }, specifics: {} } };
+  await c.depopApiAction('save', payload);
+  assert.equal(JSON.parse(requests[1].body).condition, 'used_like_new');
+});
+
 test('Depop draft updates preserve photos and never call the publish endpoint', async () => {
   const { c, requests, payload } = page();
   const result = await c.depopApiAction('save', payload);

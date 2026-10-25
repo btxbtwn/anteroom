@@ -17,7 +17,7 @@ import httpx
 
 from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.models.etsy_fields import (
-    etsy_eligible, etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
+    etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
 )
 from vendoo_studio.services import marketplace_accounts
 from vendoo_studio.services.keychain import get_marketplace_accounts
@@ -111,14 +111,11 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     who = {"I did": "i_did", "A member of my shop": "collective", "Another company or person": "someone_else"}.get(details.get("who_made"))
     what = {"A finished product": False, "A supply or tool to make things": True}.get(details.get("what_is"))
     when = etsy_when_to_store(str(details.get("when_made") or ""), snapshot, etsy_when_options())
-    label = re.sub(r"\s*\([^)]*\)\s*$", "", when).strip()
-    when = {"Made To Order": "made_to_order", "2020 - 2026": "2020_2026", "2010 - 2019": "2010_2019",
-            "2007 - 2009": "2007_2009", "2000 - 2006": "2000_2006", "Before 2007": "before_2007",
-            "1900 - 1909": "1900s", "Before 1700": "before_1700"}.get(label, label)
-    if not who or what is None or not re.fullmatch(r"made_to_order|2020_2026|2010_2019|2007_2009|2000_2006|before_2007|19[0-9]0s|1800s|1700s|before_1700", when):
+    when = etsy_when_made_code(when)
+    if not who or what is None or not when:
         raise missing("Complete Etsy's who made it, what is it, and when made details before listing.",
                       *[f"etsy_specifics.{name}" for name, value in (("who_made", who), ("what_is", what), ("when_made", when))
-                        if value is None or (name == "when_made" and not re.fullmatch(r"made_to_order|2020_2026|2010_2019|2007_2009|2000_2006|before_2007|19[0-9]0s|1800s|1700s|before_1700", when))])
+                        if value is None or value == ""])
     category = str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
     if not re.fullmatch(r"[1-9]\d*", category):
         raise missing("Choose a verified Etsy category before listing.", "marketplace_category_ids.etsy")

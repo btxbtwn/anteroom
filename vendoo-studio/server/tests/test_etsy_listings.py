@@ -148,6 +148,30 @@ class EtsyListingsTest(unittest.TestCase):
         vintage = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "1990s (Vintage)"}}
         self.assertEqual(etsy_listings.draft_fields(vintage, creating=True)["when_made"], "1990s")
 
+    def test_when_made_follows_etsys_ranges_for_the_year(self):
+        from datetime import date
+
+        from vendoo_studio.models import etsy_fields
+
+        self.assertEqual(etsy_fields.etsy_when_made_codes(date(2026, 10, 25)), (
+            "made_to_order", "2020_2026", "2010_2019", "2007_2009", "before_2007", "2000_2006", "1990s", "1980s",
+            "1970s", "1960s", "1950s", "1940s", "1930s", "1920s", "1910s", "1900s", "1800s", "1700s", "before_1700"))
+        new_year = date(2027, 1, 1)
+        for label, code in {"2020 - 2026 (Recently)": "2020_2027", "2007 - 2009 (Recently)": "2008_2009",
+                            "Before 2007 (Vintage)": "before_2008", "2000 - 2006 (Vintage)": "2000_2007",
+                            "2020_2026": "2020_2027", "1900 - 1909 (Vintage)": "1900s", "Before 1700 (Vintage)": "before_1700",
+                            "1990s (Vintage)": "1990s", "2010 - 2019 (Recently)": "2010_2019", "Sometime": ""}.items():
+            self.assertEqual(etsy_fields.etsy_when_made_code(label, new_year), code, label)
+
+        class NewYear(date):
+            @classmethod
+            def today(cls):
+                return new_year
+
+        vintage = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "Before 2007 (Vintage)"}}
+        with patch.object(etsy_fields, "date", NewYear):
+            self.assertEqual(etsy_listings.draft_fields(vintage, creating=True)["when_made"], "before_2008")
+
     def test_list_creates_uploads_and_activates_in_one_job_without_chrome(self):
         record = self.list()
         self.assertEqual(record["state"], "published", record)

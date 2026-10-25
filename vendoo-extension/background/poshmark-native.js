@@ -96,16 +96,22 @@ function poshmarkClient(deadline, csrf) {
   return client;
 }
 
-// Anteroom/Vendoo condition labels to Poshmark's own codes.
+// Anteroom/Vendoo condition labels to Poshmark's own codes. Studio's form already carries the code.
 function poshmarkCondition(listing) {
-  const native = String(listing.poshmark_specifics?.condition || '').toLowerCase();
+  const native = String(listing.form?.overrides?.condition || listing.poshmark_specifics?.condition || '').toLowerCase();
   if (POSHMARK_CONDITIONS.has(native)) return native;
   const text = String(listing.poshmark_specifics?.poshmarkCondition || listing.condition || '').toLowerCase();
   if (/new with tags|\bnwt\b/.test(text) && !/without/.test(text)) return 'nwt';
   if (/new without tags|\bnwot\b|like new|excellent/.test(text)) return 'uln';
   if (/fair|poor/.test(text)) return 'uf';
   if (/good|imperfection|defect|pre-owned|used/.test(text)) return 'ug';
+  if (/^new\b|brand new/.test(text)) return 'nwt';
   return null;
+}
+
+// Poshmark takes whole dollars only. Vendoo rounds to the nearest one.
+function poshmarkPrice(listing) {
+  return Math.round(Number(listing?.poshmark_specifics?.poshmarkPrice || listing?.price));
 }
 
 function poshmarkCategory(catalog, listing) {
@@ -143,7 +149,8 @@ function poshmarkPostFields(catalog, listing) {
   const size = category ? poshmarkSize(category.category, listing) : null;
   if (category && !size) missing.push({ field: 'size', needs: 'a size Poshmark offers in this category' });
   const condition = poshmarkCondition(listing);
-  const price = Number(listing.poshmark_specifics?.poshmarkPrice || listing.price);
+  if (!condition) missing.push({ field: 'condition', needs: 'a condition' });
+  const price = poshmarkPrice(listing);
   if (!(price >= 3)) missing.push({ field: 'price', needs: 'a price of $3 or more' });
   const title = String(listing.title || '').trim();
   if (!title) missing.push({ field: 'title', needs: 'a title' });
@@ -165,7 +172,7 @@ function poshmarkPostFields(catalog, listing) {
       size_set_tags: size.set.tags || [], seller_inventory_private_info: {} }] },
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
     original_price_amount: { val: '0', currency_code: 'USD', currency_symbol: '$' },
-    ...(condition ? { condition } : {}),
+    condition,
     ...(brand ? { brand: String(brand) } : {}),
     colors: [...new Set(colors)].slice(0, 2),
     style_tags: (Array.isArray(listing.poshmark_specifics?.styleTags) ? listing.poshmark_specifics.styleTags : []).slice(0, 3).map(String),
@@ -196,7 +203,7 @@ async function updatePoshmarkPost(msg, recovery = false) {
   let stage = 'prepare';
   const matches = post => post.status === 'published'
     && marketplaceText(post.title) === marketplaceText(String(p.listing?.title || '').trim().slice(0, 80))
-    && String(post.price_amount?.val) === String(Number(p.listing?.poshmark_specifics?.poshmarkPrice || p.listing?.price));
+    && String(post.price_amount?.val) === String(poshmarkPrice(p.listing));
   try {
     if (!/^[a-f0-9]{24}$/.test(id) || (p.confirm !== true && !recovery)) {
       return marketplaceFailure(marketplaceError('Confirm updating the live Poshmark listing.'), true);
