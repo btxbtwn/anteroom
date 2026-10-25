@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.359 — 2026-10-25
+
+- Etsy's when-made year ranges keep moving so vintage stays 20 years old, including after 2029.
+
 ## 0.1.358 — 2026-10-25
 
 - Depop uses Other when a brand is missing or not on Depop's list.
