@@ -306,7 +306,7 @@ All eBay Item Specifics fields. Use Appendix values.
 - Jackets/coats must include `category_specifics["Outer Shell Material"]` (or the discovered schema key), following the required best-guess and uncertainty rules in `SKILL.md`.
 
 **Etsy Specifics:**
-- `who_made`, `what_is`, `when_made` (required for Etsy). `when_made` must be an exact Etsy dropdown value from `vendoo-dropdown-options.json`, such as `2010 - 2019 (Recently)`, not `2010s` or `2010-2019`.
+- `who_made`, `what_is`, `when_made` (required for Etsy). `when_made` must be an exact Etsy dropdown year range from `vendoo-dropdown-options.json`, such as `2010 - 2019 (Recently)`, not `2010s`, `2010-2019`, or Made To Order. Non-vintage items use `2020 - 2026 (Recently)`, `2010 - 2019 (Recently)`, or `2007 - 2009 (Recently)`.
 - `section`: Shop section
 - `materials`: Array of materials
 - `tags`: Up to 13 tags (letters/numbers/spaces/hyphen/apostrophe only; max 20 chars each)

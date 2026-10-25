@@ -102,6 +102,14 @@ class EtsyListingsTest(unittest.TestCase):
     def publish(self, **changes):
         return self.client.post(self.base + "/publish", json={"revision_id": self.rev.id, "draft_url": URL, "confirm": True, **changes})
 
+    def test_non_vintage_when_made_is_a_year_range(self):
+        made = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "who_made": "I did", "when_made": "Made To Order (Not Yet Made)"}}
+        self.assertEqual(etsy_listings.draft_fields(made, creating=True)["when_made"], "2010_2019")
+        recent = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "who_made": "I did", "when_made": "non-vintage"}}
+        self.assertEqual(etsy_listings.draft_fields(recent, creating=True)["when_made"], "2010_2019")
+        vintage = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "1990s (Vintage)"}}
+        self.assertEqual(etsy_listings.draft_fields(vintage, creating=True)["when_made"], "1990s")
+
     def test_new_draft_uses_official_api_and_uploads_all_photos_without_chrome(self):
         saved = self.save()
         self.assertEqual(saved["state"], "draft")

@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.340 — 2026-10-24
+## 0.1.341 — 2026-10-24
 
 - On a live eBay, Etsy, or Poshmark listing, **Update…** writes the listing saved in Anteroom onto that listing, after you confirm. It changes the one that is already up.
+
+## 0.1.340 — 2026-10-24
+
+- Non-vintage Etsy items use a year range for when they were made. Made To Order is no longer selected for an item that already exists.
 
 ## 0.1.339 — 2026-10-24
 

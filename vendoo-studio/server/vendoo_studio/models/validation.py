@@ -41,6 +41,7 @@ from vendoo_studio.models.etsy_fields import (
     etsy_eligible,
     etsy_when_options,
     etsy_when_raw,
+    etsy_when_to_store,
     etsy_who_raw,
     is_etsy_digital_listing,
     resolve_etsy_when,
@@ -487,7 +488,7 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
         if what and text_value(etsy.get("what_is")) != what:
             etsy["what_is"] = what
             changed = True
-        canonical_when = resolve_etsy_when(when_raw, etsy_when_options()) if when_raw else ""
+        canonical_when = etsy_when_to_store(when_raw, listing, etsy_when_options()) if when_raw else ""
         if canonical_when and text_value(etsy.get("when_made")) != canonical_when:
             etsy["when_made"] = canonical_when
             if "whenMade" in etsy:
