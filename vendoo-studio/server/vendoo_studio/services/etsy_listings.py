@@ -221,7 +221,9 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
         raise missing("Complete Etsy's who made it, what is it, and when made details before listing.",
                       *[f"etsy_specifics.{name}" for name, value in (("who_made", who), ("what_is", what), ("when_made", when))
                         if not value])
-    category = str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
+    from vendoo_studio.services.direct_categories import direct_category_id
+
+    category = direct_category_id(snapshot, "etsy") or str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
     if not re.fullmatch(r"[1-9]\d*", category):
         raise missing("Choose a verified Etsy category before listing.", "marketplace_category_ids.etsy")
     # Like the Vendoo path: is_supply is Etsy's "What is it?" answer, a supply or tool.

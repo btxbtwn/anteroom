@@ -44,6 +44,16 @@ describe("marketplace form fields", () => {
     expect(labels.filter((label) => label === "Title")).toHaveLength(1);
   });
 
+  it("shows the live eBay category beside the shared one", () => {
+    const fields = fieldsForMarketplaceForm({
+      ...listing,
+      category_path: "Clothing > Shirts",
+      direct_category_ids: { ebay: "15687", ebay_path: "Clothing, Shoes & Accessories > Men > Shirts" },
+    }, "ebay", undefined);
+    expect(fields.find((field) => field.label === "eBay category")).toMatchObject({ locked: true });
+    expect(fields.filter((field) => field.key === "category_path")).toHaveLength(1);
+  });
+
   it("keeps category specifics when a schema exists, without dropping title and price", () => {
     const fields = fieldsForMarketplaceForm(listing, "ebay", schema);
     const labels = fields.map((field) => field.label);

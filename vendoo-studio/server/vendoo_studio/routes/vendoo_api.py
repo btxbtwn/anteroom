@@ -320,6 +320,15 @@ def _listing_only_fields(
     return extra
 
 
+async def _with_live_schema(listing: dict, marketplace: str, fields: list[dict]) -> list[dict]:
+    """eBay and Etsy editor rows gain the live schema. Other marketplaces are unchanged."""
+    if marketplace not in ("ebay", "etsy"):
+        return fields
+    from vendoo_studio.services.direct_categories import overlay_live_fields
+
+    return await overlay_live_fields(listing, marketplace, fields)
+
+
 @router.get("/api/conversations/{conv_id}/vendoo-api/fields")
 async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
     """Every field each marketplace form renders for *this* listing's categories.
@@ -370,6 +379,7 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
             # blank and a rejected value is still reachable.
             fallback = _scraped_only_fields(listing, marketplace, static, [])
             fallback.extend(_listing_only_fields(listing, marketplace, fallback))
+            fallback = await _with_live_schema(listing, marketplace, fallback)
             fallback.sort(key=lambda row: row["label"])
             out.append({
                 "marketplace": marketplace, "category_id": category_id,
@@ -401,6 +411,7 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
             })
         fields.extend(_scraped_only_fields(listing, marketplace, static, fields))
         fields.extend(_listing_only_fields(listing, marketplace, fields))
+        fields = await _with_live_schema(listing, marketplace, fields)
         fields.sort(key=lambda row: (not row["required"], row["label"]))
         out.append({
             "marketplace": marketplace, "category_id": category_id,

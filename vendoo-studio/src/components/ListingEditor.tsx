@@ -760,6 +760,13 @@ function schemaFieldsForTab(
   }));
 }
 
+function liveCategoryFields(listing: ListingData | undefined, marketplace: "ebay" | "etsy"): EditorField[] {
+  const ids = listing?.direct_category_ids;
+  const path = ids && typeof ids === "object" ? String((ids as Record<string, unknown>)[`${marketplace}_path`] || "") : "";
+  if (!path) return [];
+  return [{ key: `direct_category_ids.${marketplace}_path`, label: marketplace === "ebay" ? "eBay category" : "Etsy category", locked: true }];
+}
+
 function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorField[] {
   switch (tab) {
     case "general":
@@ -782,6 +789,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
       ];
     case "ebay":
       return mergeSpecificsWithDefaults(listing?.ebay_specifics, "ebay_specifics", [
+        ...liveCategoryFields(listing, "ebay"),
         { key: "ebay_specifics.department", label: "Department" },
         { key: "ebay_specifics.size", label: "Size" },
         { key: "ebay_specifics.sizeType", label: "Size Type" },
@@ -826,6 +834,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         listing?.etsy_specifics,
         "etsy_specifics",
         [
+          ...liveCategoryFields(listing, "etsy"),
           { key: "etsy_specifics.whoMade", label: "Who Made It?" },
           { key: "etsy_specifics.whatIsIt", label: "What Is It?" },
           { key: "etsy_specifics.whenMade", label: "When Was It Made?" },
