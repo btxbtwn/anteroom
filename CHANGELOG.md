@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.377 — 2026-10-25
+
+- A listing you delisted everywhere from Anteroom now reads Draft in the sidebar, and its marketplace logos go away, even though Vendoo still calls it Active.
+
 ## 0.1.376 — 2026-10-25
 
 - List on Vinted uploads the item on Vinted when you confirm it. Send does not list it, and it does not save a Vinted draft.

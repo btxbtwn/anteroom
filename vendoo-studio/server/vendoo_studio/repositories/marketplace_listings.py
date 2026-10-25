@@ -70,6 +70,17 @@ class MarketplaceListingRepo:
             grouped.setdefault(conversation_id, []).append(marketplace)
         return grouped
 
+    def listing_urls(self, conv_id: str | None = None) -> dict[str, dict[str, str]]:
+        """Each item's direct listing links by marketplace, for every item or one."""
+        query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace,
+                              MarketplaceListing.listing_url).filter(MarketplaceListing.listing_url.isnot(None))
+        if conv_id:
+            query = query.filter(MarketplaceListing.conversation_id == conv_id)
+        grouped: dict[str, dict[str, str]] = {}
+        for conversation_id, marketplace, url in query.all():
+            grouped.setdefault(conversation_id, {})[marketplace] = url
+        return grouped
+
     def unsettled(self) -> list[MarketplaceListing]:
         """Records whose last action is still running or unconfirmed, on every item."""
         return (self.db.query(MarketplaceListing).filter(MarketplaceListing.state.in_(UNSETTLED_STATES))

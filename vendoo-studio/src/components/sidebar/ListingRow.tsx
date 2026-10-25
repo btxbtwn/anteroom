@@ -128,8 +128,9 @@ export function ListingRow({
       marketplaceStatuses.length ? marketplaceStatuses : importedRows,
       listing.direct_marketplaces,
       visibleMarketplaces,
+      listing.removed_marketplaces,
     ),
-    [marketplaceStatuses, importedRows, listing.direct_marketplaces, visibleMarketplaces],
+    [marketplaceStatuses, importedRows, listing.direct_marketplaces, visibleMarketplaces, listing.removed_marketplaces],
   );
   const listedMarketplaces = popupStatuses.filter((row) => row.id !== "general" && statusIsListed(row.status));
   // "active" alone would read as done. These listings are live on copy older

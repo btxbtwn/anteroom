@@ -26,6 +26,8 @@ export interface ConversationSummary {
   vendoo_marketplaces?: string[];
   /** Marketplaces Anteroom published directly. Vendoo may still call the item a draft. */
   direct_marketplaces?: string[];
+  /** Marketplaces Anteroom delisted directly. Vendoo may still call the item listed there. */
+  removed_marketplaces?: string[];
   /** Each marketplace listing's own page, where Vendoo recorded one. */
   vendoo_listing_urls?: Record<string, string>;
   /** Vendoo's own time tracking: when the item was created, last modified,

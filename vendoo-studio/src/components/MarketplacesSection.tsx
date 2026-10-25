@@ -226,7 +226,11 @@ export function MarketplacesLayout({
     mutationFn: (marketplaces: Marketplace[]) => api.marketplaceListings.delist(convId, marketplaces),
     retry: false,
     onSuccess: (data) => queryClient.setQueryData(liveKey, data),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: liveKey }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      // The sidebar row drops the delisted marketplaces and may read Draft.
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
   });
   const mark = useMutation({
     mutationFn: ({ marketplace, state, url }: { marketplace: Marketplace; state: MarketplaceMark; url?: string }) =>
@@ -236,6 +240,7 @@ export function MarketplacesLayout({
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: liveKey });
       void queryClient.invalidateQueries({ queryKey: nativeKey });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
 

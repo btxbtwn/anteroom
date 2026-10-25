@@ -106,6 +106,36 @@ class ListingFacetsTest(unittest.TestCase):
         self.assertEqual(response.vendoo_marketplaces, [])
         self.assertEqual(response.status, "draft")
 
+    def test_response_names_marketplaces_anteroom_delisted(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="Columbia")
+        conv.status = "active"
+        conv.notes = json.dumps({
+            "vendooStatus": "active",
+            "vendooMarketplaces": ["depop", "ebay", "mercari"],
+            "vendooListingUrls": {
+                "ebay": "https://www.ebay.com/itm/123456789012",
+                "depop": "https://www.depop.com/products/seller-columbia-jacket/",
+                "mercari": "https://www.mercari.com/us/item/m12345678901/",
+            },
+            "marketplaceDelists": {
+                "ebay": {"state": "deleted", "listing_id": "123456789012"},
+                "depop": {"state": "deleted", "listing_id": "seller-columbia-jacket"},
+                # Relisted on Mercari since: a newer listing is live again.
+                "mercari": {"state": "deleted", "listing_id": "m99999999999"},
+            },
+            "marketplaceMarks": {"poshmark": {"state": "not_listed"}},
+        })
+        self.db.commit()
+        records = MarketplaceListingRepo(self.db)
+        # Anteroom republished on Depop after the delete.
+        records.save(conv.id, "depop", {"state": "published",
+                                        "listing_url": "https://www.depop.com/products/seller-columbia-jacket-2/"})
+        response = _conv_response(conv, _extras(None, None, None, False, ["depop"], records.listing_urls()[conv.id]))
+        self.assertEqual(response.removed_marketplaces, ["ebay", "poshmark"])
+        self.assertEqual(response.status, "active")
+
     def test_listed_marketplaces_follow_vendoo_status_flags(self):
         item = {
             "listings": {

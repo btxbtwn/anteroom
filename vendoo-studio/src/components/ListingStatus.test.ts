@@ -85,7 +85,21 @@ describe("inventoryStatus", () => {
     expect(inventoryStatus({ status: "draft" })).toBe("draft");
   });
 
+  it("reads a Vendoo active as draft once Anteroom delisted every marketplace", () => {
+    const delisted = {
+      status: "active",
+      vendoo_marketplaces: ["depop", "ebay", "mercari", "poshmark", "sellwild"],
+      removed_marketplaces: ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild"],
+    };
+    expect(inventoryStatus(delisted)).toBe("draft");
+    expect(inventoryStatus({ ...delisted, removed_marketplaces: ["ebay"] })).toBe("active");
+    expect(inventoryStatus({ ...delisted, vendoo_marketplaces: [...delisted.vendoo_marketplaces, "facebook"] })).toBe("active");
+    expect(inventoryStatus({ ...delisted, direct_marketplaces: ["depop"] })).toBe("active");
+    expect(inventoryStatus({ status: "active", vendoo_marketplaces: ["ebay"] })).toBe("active");
+  });
+
   it("keeps a sale and a failed send", () => {
+    expect(inventoryStatus({ status: "sold", removed_marketplaces: ["ebay"] })).toBe("sold");
     expect(inventoryStatus({ status: "sold", direct_marketplaces: ["depop"] })).toBe("sold");
     expect(inventoryStatus({ status: "failed", direct_marketplaces: ["ebay"] })).toBe("failed");
   });
@@ -106,5 +120,23 @@ describe("withDirectListings", () => {
     ]);
     expect(rows.find((row) => row.id === "etsy")?.status).toBe("NOT LISTED");
     expect(rows.find((row) => row.id === "ebay")?.status).toBe("DELISTED");
+  });
+});
+
+describe("withDirectListings removals", () => {
+  it("marks what Anteroom delisted as delisted, but keeps a sale", () => {
+    const rows = withDirectListings(
+      [
+        { id: "ebay", label: "eBay", status: "LISTED" },
+        { id: "depop", label: "Depop", status: "SOLD" },
+        { id: "mercari", label: "Mercari", status: "LISTED" },
+      ],
+      undefined,
+      undefined,
+      ["ebay", "depop"],
+    );
+    expect(rows.map((row) => [row.id, row.status])).toEqual([
+      ["ebay", "DELISTED"], ["depop", "SOLD"], ["mercari", "LISTED"],
+    ]);
   });
 });

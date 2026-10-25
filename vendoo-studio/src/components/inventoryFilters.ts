@@ -1,7 +1,7 @@
 /** Vendoo Inventory's filters and sorts, over Studio's own listing rows. */
 
 import { needsRelist } from "./relistStatus";
-import { inventoryStatus } from "./sidebar/listingStatus";
+import { inventoryStatus, liveMarketplaces } from "./sidebar/listingStatus";
 
 export type ListingSortId =
   | "recent"
@@ -56,6 +56,7 @@ export type FilterableListing = {
   vendoo_labels?: string[];
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
+  removed_marketplaces?: string[];
   vendoo_listed_at?: string | null;
   vendoo_sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
@@ -116,7 +117,7 @@ function lower(value: string | null | undefined): string {
 }
 
 function listedOn(listing: FilterableListing): string[] {
-  return [...new Set([...(listing.vendoo_marketplaces || []), ...(listing.direct_marketplaces || [])])];
+  return liveMarketplaces(listing);
 }
 
 /** Vendoo searches Title and SKU; Studio also searches the labels a listing wears. */
