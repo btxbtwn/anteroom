@@ -226,6 +226,27 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 raise
             return response
 
+        if action == "update":
+            if confirm is not True:
+                raise ValueError("Confirm updating the live Etsy listing.")
+            item_id = str(binding.get("listing_id") or "")
+            if not re.fullmatch(r"[1-9]\d*", item_id):
+                item_id = listing_id(binding.get("draft_url"))
+            remote = await _read(shop_id, item_id)
+            if remote.get("state") != "active":
+                raise ValueError("This Etsy listing is not live. Check it in Etsy before updating it.")
+            fields = draft_fields(snapshot, creating=False)
+            inventory = remote.get("_inventory") or {}
+            if _remote_price(remote) != _price(snapshot["price"]):
+                await write("PUT", f"listings/{item_id}/inventory", "price", json_body=_inventory_price(inventory, _price(snapshot["price"])))
+                record({"etsy_pending_write": None})
+            await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
+            record({"etsy_pending_write": None})
+            remote = await _read(shop_id, item_id)
+            if remote.get("state") != "active" or not _matches(remote, snapshot):
+                raise ValueError("Etsy has not confirmed the update on the live listing. Check it before trying again.")
+            return _success(remote)
+
         if action == "publish":
             if confirm is not True:
                 raise ValueError("Confirm listing on Etsy.")
@@ -327,11 +348,12 @@ async def check(snapshot: dict, binding: dict, candidate: str | None) -> dict:
         if binding.get("etsy_shop_id") and binding["etsy_shop_id"] != shop_id:
             raise ValueError("This Etsy draft belongs to a different connected shop.")
         remote = await _read(shop_id, listing_id(candidate))
-        if binding["action"] == "publish":
+        if binding["action"] in {"publish", "update"}:
             if remote.get("state") == "active" and _matches(remote, snapshot):
                 return _success(remote)
             # A draft read is not proof that a timed-out activation cannot finish.
-            raise ValueError("Etsy has not confirmed activation. Check the native account; do not repeat publishing.")
+            waiting = "the update" if binding["action"] == "update" else "activation"
+            raise ValueError(f"Etsy has not confirmed {waiting}. Check the native account; do not repeat it.")
         if remote.get("state") != "draft":
             raise ValueError("The Etsy item is no longer a private draft. Check the native listing.")
         expected = binding.get("etsy_photo_ids")

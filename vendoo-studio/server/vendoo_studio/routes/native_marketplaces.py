@@ -43,6 +43,11 @@ async def list_now(conv_id: str, marketplace: Marketplace, body: PublishRequest,
     return await _reply(native.list_now(conv_id, marketplace, body, db))
 
 
+@router.post("/{marketplace}/update")
+async def update_live(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session = Depends(get_db)):
+    return await _reply(native.update_live(conv_id, marketplace, body, db))
+
+
 @router.post("/{marketplace}/publish")
 async def publish(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session = Depends(get_db)):
     return await _reply(native.publish(conv_id, marketplace, body, db))

@@ -7,6 +7,10 @@ file: Settings → General → About → What's new.
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 
+## 0.1.340 — 2026-10-24
+
+- On a live eBay, Etsy, or Poshmark listing, **Update…** writes the listing saved in Anteroom onto that listing, after you confirm. It changes the one that is already up.
+
 ## 0.1.338 — 2026-10-24
 
 - Settings → Connections has a **Chrome sign-in** for Depop, Poshmark, Mercari, and Sellwild. Anteroom shows who is signed in and when that sign-in expires, and asks you to sign in again when it expires or is about to. The cookies and tokens stay in Chrome.

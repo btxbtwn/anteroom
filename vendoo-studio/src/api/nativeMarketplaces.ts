@@ -6,7 +6,7 @@ export interface EtsyDraftOptions {
     item_weight_unit: "oz"; item_dimensions_unit: "in" };
 }
 export interface NativeDraft {
-  state: "not_saved" | "saving" | "publishing" | "unknown" | "draft" | "published" | "pending_review";
+  state: "not_saved" | "saving" | "publishing" | "updating" | "unknown" | "draft" | "published" | "pending_review";
   storage?: "local";
   sellwild_category_id?: number;
   sellwild_condition_id?: number;

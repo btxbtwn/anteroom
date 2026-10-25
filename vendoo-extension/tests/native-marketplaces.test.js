@@ -82,6 +82,8 @@ test('Poshmark only lists in one confirmed step', async () => {
   }
   const unconfirmed = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action: 'list', confirm: false } });
   assert.match(unconfirmed.error, /Confirm/);
+  const missing = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action: 'update', confirm: true } });
+  assert.match(missing.error, /Confirm updating/);
 });
 
 test('legacy Poshmark fill messages cannot publish', () => {

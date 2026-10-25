@@ -200,8 +200,117 @@ def _listing_url(listing_id: str) -> str:
     return f"https://www.ebay.com/itm/{listing_id}"
 
 
+def _listing_fields(snapshot: dict, form: dict) -> dict:
+    title = str(snapshot.get("title") or "").strip()[:80]
+    description = str(snapshot.get("description") or "").strip()[:4000]
+    if not title or not description:
+        raise ValueError("Add an eBay title and description before listing.")
+    quantity = int(snapshot.get("quantity") or 1)
+    if not 1 <= quantity <= 10000:
+        raise ValueError("Enter an eBay quantity from 1 to 10000.")
+    return {"title": title, "description": description, "quantity": quantity,
+            "price": dollars(money_cents(str(snapshot.get("price")))), "category_id": ebay_category_id(snapshot),
+            "condition": ebay_condition(snapshot),
+            "condition_description": str((form.get("specifics") or {}).get("conditionDescription") or EBAY_CONDITION_DESCRIPTION)}
+
+
+async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict) -> dict:
+    """A pasted eBay link has an item ID and no inventory offer. Revise that listing in place."""
+    from xml.etree import ElementTree as ET
+
+    from vendoo_studio.services.ebay_actions import owned_listing
+    from vendoo_studio.services.ebay_client import NS
+
+    before = await owned_listing(client, listing_id)
+    if before["type"] != "FixedPriceItem":
+        raise ValueError("Only a fixed-price eBay listing can be updated.")
+    if fields["quantity"] < int(before.get("soldQuantity") or 0):
+        raise ValueError("Quantity cannot be lower than the quantity already sold.")
+    root = ET.Element("ReviseFixedPriceItemRequest", xmlns=NS["e"])
+    item = ET.SubElement(root, "Item")
+    for name, value in {"ItemID": listing_id, "Title": fields["title"], "Description": fields["description"],
+                        "StartPrice": fields["price"], "Quantity": str(fields["quantity"])}.items():
+        ET.SubElement(item, name).text = value
+    await client.request("POST", "/ws/api.dll", xml=ET.tostring(root, encoding="unicode"), call="ReviseFixedPriceItem")
+    after = await owned_listing(client, listing_id)
+    if after["title"] != fields["title"] or str(after.get("price")) != fields["price"]:
+        raise ValueError("eBay has not confirmed the update. Check the live listing before trying again.")
+    return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}
+
+
+async def _update_live(snapshot: dict, photos: list, binding: dict, record: Callable[[dict], None],
+                       active: Callable[[], bool]) -> dict:
+    """Replace fields on the listing that is already live. Never publishes a second one."""
+    attempted = False
+    try:
+        if not active():
+            raise ValueError("The eBay update stopped. Check its result before trying again.")
+        if not 1 <= len(photos) <= 12:
+            raise ValueError("Choose between one and twelve eBay photos.")
+        client = await EbayClient.connect()
+        form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
+        fields = _listing_fields(snapshot, form)
+        listing_id = str(binding.get("listing_id") or binding.get("ebay_listing_id") or "")
+        offer_id = str(binding.get("ebay_offer_id") or "")
+        if not re.fullmatch(r"\d{6,20}", listing_id):
+            raise ValueError("eBay has not confirmed which live listing to update.")
+        if not offer_id:
+            return await _revise_by_item_id(client, listing_id, fields)
+        offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+        current_id = str((offer.get("listing") or {}).get("listingId") or "")
+        if offer.get("status") != "PUBLISHED" or current_id != listing_id:
+            raise ValueError("This eBay offer is not the live listing. Check eBay before updating it.")
+        aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
+        sku = str(offer.get("sku") or ebay_sku(snapshot, binding))
+        record({"ebay_sku": sku, "ebay_offer_id": offer_id, "ebay_listing_id": listing_id})
+        image_urls = list(binding.get("ebay_image_urls") or [])
+        if len(image_urls) != len(photos):
+            image_urls = []
+            for photo in photos:
+                if not active():
+                    raise ValueError("The eBay update stopped. Check its result before trying again.")
+                attempted = True
+                image_urls.append(await _image_url(client, photo))
+                record({"ebay_image_urls": image_urls})
+        weight = Decimal(package_ounces(snapshot, form))
+        package = get_package_dimensions()
+        attempted = True
+        await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}", body={
+            "condition": fields["condition"],
+            "conditionDescription": fields["condition_description"],
+            "availability": {"shipToLocationAvailability": {"quantity": fields["quantity"]}},
+            "product": {"title": fields["title"], "description": fields["description"], "imageUrls": image_urls, "aspects": aspects},
+            "packageWeightAndSize": {
+                "weight": {"value": format(weight, "f"), "unit": "OUNCE"},
+                "dimensions": {**package, "unit": "INCH"},
+            },
+        })
+        policies = offer.get("listingPolicies") if isinstance(offer.get("listingPolicies"), dict) else {}
+        await client.request("PUT", f"/sell/inventory/v1/offer/{segment(offer_id)}", body={
+            "sku": sku, "marketplaceId": "EBAY_US", "format": "FIXED_PRICE",
+            "categoryId": fields["category_id"], "availableQuantity": fields["quantity"],
+            "pricingSummary": {"price": {"value": fields["price"], "currency": "USD"}},
+            "listingDescription": fields["description"],
+            "merchantLocationKey": offer.get("merchantLocationKey"),
+            "listingPolicies": policies,
+        })
+        confirmed = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+        confirmed_id = str((confirmed.get("listing") or {}).get("listingId") or "")
+        if confirmed.get("status") != "PUBLISHED" or confirmed_id != listing_id:
+            raise ValueError("eBay has not confirmed the update on the same listing. Check eBay before trying again.")
+        return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}
+    except Exception as exc:
+        client_rejected = isinstance(exc, EbayFailure) and exc.status in {400, 401, 403, 422}
+        safe = not attempted or client_rejected or isinstance(exc, (ValueError, SignInRequired))
+        return {"ok": False, "safe_to_retry": safe and not attempted, "error": _error_text(exc)}
+
+
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                   record: Callable[[dict], None], active: Callable[[], bool], *, confirm: bool = False) -> dict:
+    if action == "update":
+        if confirm is not True:
+            return {"ok": False, "safe_to_retry": True, "error": "Confirm updating the live eBay listing."}
+        return await _update_live(snapshot, photos, binding, record, active)
     attempted = False
     try:
         if action != "list" or confirm is not True:
@@ -212,15 +321,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             raise ValueError("Choose between one and twelve eBay photos.")
         client = await EbayClient.connect()
         form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
-        title = str(snapshot.get("title") or "").strip()[:80]
-        description = str(snapshot.get("description") or "").strip()[:4000]
-        if not title or not description:
-            raise ValueError("Add an eBay title and description before listing.")
-        category_id = ebay_category_id(snapshot)
-        price = dollars(money_cents(str(snapshot.get("price"))))
-        quantity = int(snapshot.get("quantity") or 1)
-        if not 1 <= quantity <= 10000:
-            raise ValueError("Enter an eBay quantity from 1 to 10000.")
+        fields = _listing_fields(snapshot, form)
+        title, description = fields["title"], fields["description"]
+        category_id, price, quantity = fields["category_id"], fields["price"], fields["quantity"]
         aspects = await _complete_aspects(client, category_id, ebay_aspects(snapshot, form))
         fulfillment, payment, returns, location = await _only(client, "fulfillment"), await _only(client, "payment"), await _only(client, "return"), await _location(client)
         sku = ebay_sku(snapshot, binding)
@@ -235,8 +338,8 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 image_urls.append(await _image_url(client, photo))
                 record({"ebay_image_urls": image_urls})
         weight = Decimal(package_ounces(snapshot, form))
-        condition = ebay_condition(snapshot)
-        condition_description = str((form.get("specifics") or {}).get("conditionDescription") or EBAY_CONDITION_DESCRIPTION)
+        condition = fields["condition"]
+        condition_description = fields["condition_description"]
         package = get_package_dimensions()
         attempted = True
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}", body={
@@ -281,7 +384,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         return {"ok": False, "safe_to_retry": safe, "error": _error_text(exc)}
 
 
-async def check(binding: dict) -> dict:
+async def check(binding: dict, snapshot: dict | None = None) -> dict:
     try:
         offer_id = str(binding.get("ebay_offer_id") or "")
         if not offer_id:
@@ -289,6 +392,15 @@ async def check(binding: dict) -> dict:
         client = await EbayClient.connect()
         offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
         listing_id = str((offer.get("listing") or {}).get("listingId") or binding.get("ebay_listing_id") or "")
+        if binding.get("action") == "update" and snapshot:
+            sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
+            item = await client.request("GET", f"/sell/inventory/v1/inventory_item/{segment(sku)}") if sku else {}
+            product = item.get("product") if isinstance(item.get("product"), dict) else {}
+            price = str((offer.get("pricingSummary") or {}).get("price", {}).get("value") or "")
+            expected = dollars(money_cents(str(snapshot.get("price"))))
+            title = str(snapshot.get("title") or "").strip()[:80]
+            if product.get("title") != title or price != expected:
+                raise ValueError("eBay has not confirmed the update. Check the live listing before trying again.")
         if offer.get("status") == "PUBLISHED" and listing_id:
             return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}
         raise ValueError("eBay has not confirmed this listing is live. Check eBay before listing again.")

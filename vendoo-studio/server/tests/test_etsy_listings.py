@@ -150,6 +150,21 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertEqual(self.publish().status_code, 409)
         self.assertEqual(len(self.calls), count)
 
+    def test_update_changes_the_live_listing_and_does_not_create_another(self):
+        self.save()
+        self.assertEqual(self.publish().json()["state"], "published")
+        self.calls.clear()
+        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "title": "Updated tee", "price": 13}, "user")
+        updated = self.client.post(self.base + "/update", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["state"], "published")
+        self.assertEqual(updated.json()["listing_url"], "https://www.etsy.com/listing/123456")
+        self.assertNotIn(("POST", "shops/123/listings"), [(c[0], c[1]) for c in self.calls])
+        self.assertFalse(any(c[2].get("state") for c in self.calls))
+        self.assertEqual(self.remote["title"], "Updated tee")
+        self.assertEqual(self.remote["state"], "active")
+        self.assertEqual(self.publish().status_code, 409)
+
     def test_changed_remote_fields_or_shop_cannot_be_published(self):
         self.save()
         for changes in [{"title": "Changed"}, {"shop_id": 999}]:
