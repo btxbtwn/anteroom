@@ -6,6 +6,9 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.339 — 2026-10-24
+
+- Send eBay offers from Marketplaces → eBay → Offers. Settings → Connections keeps the eBay sign-in for sale alerts.
 
 ## 0.1.340 — 2026-10-24
 

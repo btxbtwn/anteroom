@@ -80,7 +80,7 @@ connections must reconnect after this relay version is deployed to grant it;
 refreshing a token retains its original permissions so sale alerts keep working.
 The relay never sends offers. Anteroom calls eBay directly from the Mac and
 keeps offer rules and send receipts in its local database, without buyer details.
-In Settings → Connections → eBay offers, preview selected US fixed-price
+On Marketplaces → eBay → Offers, preview selected US fixed-price
 listings with individual minimum prices before sending or enabling automation.
 Automation checks every 30 minutes while the app is running, with a 24-hour
 cooldown per listing. An uncertain send pauses that listing until the seller
