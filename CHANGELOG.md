@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.353 — 2026-10-25
+
+- Choosing an eBay shipping policy in Settings → Connections saves that choice. Payment, returns, and the ships-from location stay automatic when the account has only one of each.
+
 ## 0.1.352 — 2026-10-25
 
 - Detect sales checks your whole shop, including closets with hundreds of listings. Depop and Mercari are read from your sales. Poshmark and Sellwild compare the live closet with what Anteroom still has listed. The shops take turns a few times an hour, with an uneven gap between checks. You hear once when something sells, and only for items Anteroom still shows as listed there.
