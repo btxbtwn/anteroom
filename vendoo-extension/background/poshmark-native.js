@@ -163,20 +163,54 @@ function poshmarkPrice(listing) {
   return Math.round(Number(listing?.poshmark_specifics?.poshmarkPrice || listing?.price));
 }
 
-// The post's catalog from the leaf's id chain. Studio resolves the chain from
-// the category tree; Poshmark's "Global & Traditional Wear" is a grouping in
-// that tree, not a catalog level, so its id is skipped.
-function poshmarkCategory(catalog, listing) {
-  const chain = listing.form?.overrides?.categoryV2?.path || listing.marketplace_category_objects?.poshmark?.path;
-  const ids = (Array.isArray(chain) ? chain : []).map(String).filter(id => !id.startsWith('group:'));
-  if (ids.length < 2 || ids.length > 3) return null;
-  const department = catalog.catalog.departments.find(entry => entry.id === ids[0]);
-  const category = department?.categories.find(entry => entry.id === ids[1]);
+function poshmarkKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// A department, category, and optional feature that exist in Poshmark's catalog.
+// A "Global & Traditional Wear" id is a grouping in Vendoo's tree, not a catalog level.
+function poshmarkFromIds(catalog, ids) {
+  const clean = (Array.isArray(ids) ? ids : []).map(String).filter(id => id && !id.startsWith('group:'));
+  if (clean.length < 2 || clean.length > 3) return null;
+  const department = catalog.catalog?.departments?.find(entry => entry.id === clean[0]);
+  const category = department?.categories?.find(entry => entry.id === clean[1]);
   if (!category) return null;
-  const feature = ids[2] && ids[2] !== ids[1] ? category.category_features?.find(entry => entry.id === ids[2]) : null;
-  if (ids[2] && ids[2] !== ids[1] && !feature) return null;
+  const feature = clean[2] && clean[2] !== clean[1] ? category.category_features?.find(entry => entry.id === clean[2]) : null;
+  if (clean[2] && clean[2] !== clean[1] && !feature) return null;
   return { department, category, leaf: feature ? feature.id : category.id,
     catalog: { department: department.id, category: category.id, category_features: feature ? [feature.id] : [] } };
+}
+
+function poshmarkNames(listing) {
+  const object = listing.marketplace_category_objects?.poshmark;
+  const formPath = listing.form?.overrides?.categoryV2?.displayPath;
+  const names = Array.isArray(object?.displayPath) && object.displayPath.length ? object.displayPath
+    : Array.isArray(formPath) && formPath.length ? formPath : null;
+  if (names) return names.map(String);
+  return String(listing.marketplace_categories?.poshmark || '').split('>').map(part => part.trim()).filter(Boolean);
+}
+
+// The live leaf whose names match the listing's path, when the stored ids are not in the catalog.
+function poshmarkByName(catalog, names) {
+  if (names.length < 2) return null;
+  const department = (catalog.catalog?.departments || []).find(entry => poshmarkKey(entry.display) === poshmarkKey(names[0]));
+  if (!department) return null;
+  const category = (department.categories || []).find(entry => poshmarkKey(entry.display) === poshmarkKey(names[1]));
+  if (!category) return null;
+  if (names.length === 2) return poshmarkFromIds(catalog, [department.id, category.id]);
+  const feature = (category.category_features || []).find(entry => poshmarkKey(entry.display) === poshmarkKey(names[2]));
+  return feature ? poshmarkFromIds(catalog, [department.id, category.id, feature.id]) : null;
+}
+
+// Poshmark's own category for a direct list. A stored direct id wins, then ids
+// that are still in the live catalog, then the catalog leaf with the same names.
+// Vendoo's category ids are left as they are.
+function poshmarkCategory(catalog, listing) {
+  const direct = listing.direct_category_ids?.poshmark;
+  const directIds = typeof direct === 'string' ? direct.split('/') : Array.isArray(direct) ? direct : [];
+  return poshmarkFromIds(catalog, directIds)
+    || poshmarkFromIds(catalog, listing.form?.overrides?.categoryV2?.path || listing.marketplace_category_objects?.poshmark?.path)
+    || poshmarkByName(catalog, poshmarkNames(listing));
 }
 
 const POSHMARK_FIT_LABELS = { petite: 'Petite', plus: 'Plus', 'big_&_tall': 'Big & Tall', maternity: 'Maternity', juniors: 'Juniors' };

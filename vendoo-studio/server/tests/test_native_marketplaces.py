@@ -28,7 +28,9 @@ LIVE = {"mercari": "https://www.mercari.com/us/item/m123456789/", "depop": None}
 POSH_URL = "https://poshmark.com/listing/6adc371572e62463d992ffef"
 SELLWILD_URL = "https://sellwild.com/product/123/test"
 LISTING = {"title": "ANTEROOM DRAFT CHECK - DO NOT PUBLISH", "description": "Private test draft.", "price": 12,
-           "weight_oz": 8, "package_dimensions_in": "12x9x2", "marketplace_category_ids": {"ebay": "11450"}}
+           "weight_oz": 8, "package_dimensions_in": "12x9x2",
+           "marketplace_category_ids": {"ebay": "11450", "poshmark": "5c3c3d4a6a2b3c4d5e6f7081", "mercari": "1934", "depop": "menswear_tshirts"},
+           "depop_specifics": {"parcelSize": "Medium"}}
 SELLWILD = {"sellwild_category_id": 272, "sellwild_condition_id": 2}
 
 
@@ -215,10 +217,12 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     def test_sellwild_options_suggest_from_the_listing(self):
         listing = {**LISTING, "title": "Vintage Patagonia fleece jacket", "condition": "Pre-Owned - Good",
+                   "marketplace_category_ids": {"ebay": "11450"},
                    "marketplace_category_objects": {"sellwild": {"displayPath": ["Fashion", "Mens Clothing"]}}}
+        listing.pop("depop_specifics", None)
         ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
         result = self.client.get(f"{self.base}/sellwild/options").json()
-        self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 2})
+        self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 3})
         self.assertEqual(len(result["conditions"]), 5)
 
     def test_a_deleted_depop_draft_is_forgotten_and_a_replacement_is_kept(self):

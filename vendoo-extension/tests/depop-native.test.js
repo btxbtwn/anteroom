@@ -354,3 +354,20 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
   assert.equal(call(c, 'depopBrandId', translated, 'GB Girls'), 'other');
   assert.equal(call(c, 'depopBrand', { brand: 'Not A Real Brand' }, { brand: split }), 'brand-other');
 });
+
+test('a direct Depop category wins, and a stale id falls back to the live product type name', () => {
+  const c = loadWorker();
+  const direct = call(c, 'depopCategory', {
+    direct_category_ids: { depop: 'womenswear_dresses' },
+    marketplace_category_ids: { depop: 'menswear_tshirts' },
+    form: { overrides: { categoryV2: { id: 'menswear_tshirts', path: ['menswear', 'menswear_tops', 'menswear_tshirts'] } } },
+  }, ATTRIBUTES);
+  assert.equal(direct.productType, 'dresses');
+  assert.equal(direct.department, 'womenswear');
+  const named = call(c, 'depopCategory', {
+    marketplace_categories: { depop: 'Men > Tops > T-Shirts' },
+    marketplace_category_objects: { depop: { id: 'old_leaf', path: ['old'] } },
+  }, ATTRIBUTES);
+  assert.equal(named.productType, 'tshirts');
+  assert.equal(named.department, 'menswear');
+});

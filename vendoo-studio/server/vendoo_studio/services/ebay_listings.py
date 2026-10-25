@@ -413,6 +413,11 @@ async def _complete_aspects(client: EbayClient, category_id: str, aspects: dict[
             raise missing("eBay does not list items in that category. Choose a current, most specific eBay category.",
                           "marketplace_category_ids.ebay") from exc
         raise
+    return _match_aspects(schema, aspects)
+
+
+def _match_aspects(schema: list[dict], aspects: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Match the listing's aspects to one category's schema. Required misses are refused together."""
     given = {_aspect_key(name): values for name, values in aspects.items()}
     completed: dict[str, list[str]] = {}
     problems: list[tuple[str, str]] = []
@@ -576,7 +581,30 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
     category = str((snapshot.get("marketplace_category_ids") or {}).get("ebay") or "")
     if seeded_leaf(context.db, "ebay", category) is False:
         found.append(gap("marketplace_category_ids.ebay", "That eBay category has subcategories. Choose the most specific one."))
+    found.extend(_cached_aspect_gaps(snapshot, form))
     return found
+
+
+def _cached_aspect_gaps(snapshot: dict, form: dict) -> list[dict]:
+    """Required eBay aspects from the cached live schema. No cache means List still checks them."""
+    from vendoo_studio.services.category_fields import load_rows
+    from vendoo_studio.services.direct_categories import direct_category_id
+    from vendoo_studio.services.marketplace_schemas import EBAY_ASPECTS
+
+    category = direct_category_id(snapshot, "ebay") or str((snapshot.get("marketplace_category_ids") or {}).get("ebay") or "")
+    if not re.fullmatch(r"[1-9]\d{0,14}", category):
+        return []
+    try:
+        rows = load_rows(EBAY_ASPECTS, category)
+    except Exception:  # noqa: BLE001 - a closed database only means the live check at List remains
+        return []
+    if not rows:
+        return []
+    try:
+        _match_aspects(rows, ebay_aspects(snapshot, form))
+    except ListingProblem as exc:
+        return [gap(item["field"], item["message"]) for item in exc.fields or []]
+    return []
 
 
 async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict) -> dict:
