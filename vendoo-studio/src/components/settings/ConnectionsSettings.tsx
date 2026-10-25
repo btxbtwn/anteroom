@@ -290,14 +290,19 @@ function EbayListingDefaults() {
   const profiles = useQuery({ queryKey: ["ebay-listing-profiles"], queryFn: () => api.ebay.listingProfiles(), staleTime: 60_000, retry: false });
   const defaults = useQuery({ queryKey: ["ebay-listing-defaults"], queryFn: () => api.ebay.listingDefaults(), retry: false });
   const save = useMutation({
-    mutationFn: (next: Record<(typeof EBAY_DEFAULTS)[number][1], string>) => api.ebay.setListingDefaults(next),
+    mutationFn: (next: Partial<Record<(typeof EBAY_DEFAULTS)[number][1], string>>) => api.ebay.setListingDefaults(next),
     onSuccess: (data) => queryClient.setQueryData(["ebay-listing-defaults"], data),
   });
   const several = EBAY_DEFAULTS.filter(([kind]) => (profiles.data?.[kind].length ?? 0) > 1);
   if (!profiles.error && several.length === 0) return null;
   const current = (key: (typeof EBAY_DEFAULTS)[number][1]) => defaults.data?.[key] ?? "";
   const choose = (key: (typeof EBAY_DEFAULTS)[number][1], value: string) => {
-    const next = Object.fromEntries(EBAY_DEFAULTS.map(([, name]) => [name, name === key ? value : current(name)])) as Record<(typeof EBAY_DEFAULTS)[number][1], string>;
+    if (!value) return;
+    const next: Partial<Record<(typeof EBAY_DEFAULTS)[number][1], string>> = {};
+    for (const [, name] of EBAY_DEFAULTS) {
+      const chosen = name === key ? value : current(name);
+      if (chosen) next[name] = chosen;
+    }
     save.mutate(next);
   };
   return (

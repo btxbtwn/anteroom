@@ -1,10 +1,11 @@
 """eBay workspace: direct reads and separately reviewed account changes."""
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
@@ -58,11 +59,25 @@ async def listing(listing_id: str):
         raise failure(exc) from exc
 
 
+_EBAY_DEFAULT = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+
+
 class EbayListingDefaults(BaseModel):
-    fulfillment_policy_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
-    payment_policy_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
-    return_policy_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
-    merchant_location_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
+    """A blank field means the account has one of that kind, so nothing to store."""
+
+    fulfillment_policy_id: str | None = None
+    payment_policy_id: str | None = None
+    return_policy_id: str | None = None
+    merchant_location_key: str | None = None
+
+    @field_validator("fulfillment_policy_id", "payment_policy_id", "return_policy_id", "merchant_location_key", mode="before")
+    @classmethod
+    def blank_means_unset(cls, value: object) -> object:
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return None
+        if isinstance(value, str) and _EBAY_DEFAULT.fullmatch(value):
+            return value
+        raise ValueError("Choose a policy or location from the connected eBay account.")
 
 
 @router.get("/listing-profiles")

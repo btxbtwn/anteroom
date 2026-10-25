@@ -14,7 +14,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 - Before List, the Marketplaces section shows what eBay, Etsy, and Sellwild still need, with Edit and Ask chat, and List stays off until those are filled.
 - Etsy listings include tags, materials, the category's own properties, and the return policy you choose in Settings → Connections.
-- eBay item specifics use eBay's exact field names for that category. When the account has more than one shipping, payment, or return policy, or more than one location, you choose which one new listings use in Settings → Connections.
+- eBay item specifics use eBay's exact field names for that category. When the account has more than one shipping, payment, or return policy, or more than one location, you choose which one new listings use in Settings → Connections. Choosing a shipping policy saves on its own when payment, returns, and the ships-from location have only one option.
 
 ## 0.1.350 — 2026-10-25
 
