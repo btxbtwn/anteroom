@@ -6,7 +6,8 @@ many listings are still up. Shops take turns, and the gap before the next
 check is between four and twelve minutes. Anteroom sends every listing it still has live
 there. A sold item counts only when Anteroom still has it live on that
 marketplace, so a sale Anteroom already knows, or one it never listed, is not
-reported. The extension returns listing IDs only. Nothing here delists.
+reported. The extension returns listing IDs only. Delisting the other
+marketplaces happens only when the seller turned that option on.
 """
 from __future__ import annotations
 
@@ -119,7 +120,7 @@ def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_f
 
 async def check_marketplace(marketplace: str) -> None:
     from vendoo_studio.services import browser_bridge
-    from vendoo_studio.services.marketplace_accounts import _notify_sales
+    from vendoo_studio.services.marketplace_accounts import announce_sales
 
     if marketplace not in CHROME_MARKETS or not sale_detection_enabled(marketplace):
         clear_check_error(marketplace)
@@ -150,10 +151,7 @@ async def check_marketplace(marketplace: str) -> None:
     created = await asyncio.to_thread(record_reported_sales, marketplace, sold)
     if not created:
         return
-    try:
-        await asyncio.to_thread(_notify_sales, created)
-    except Exception:  # noqa: BLE001 - a missed banner must not drop the recorded sale
-        log.debug("could not show the sale notification", exc_info=True)
+    await announce_sales(created)
 
 
 async def check_due() -> None:

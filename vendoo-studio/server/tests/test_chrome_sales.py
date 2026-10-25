@@ -149,12 +149,24 @@ class ChromeSaleParsingTest(unittest.TestCase):
 class SaleDetectionRouteTest(unittest.TestCase):
     def tearDown(self):
         user_settings.set_sale_detection("sellwild", True)
+        user_settings.set_autodelist(False)
 
     def test_sale_detection_can_be_turned_off(self):
         client = TestClient(app)
         body = client.get("/api/settings/sale-detection").json()
         self.assertTrue(body["enabled"]["sellwild"])
         self.assertTrue(body["enabled"]["ebay"])
+        self.assertFalse(body["autodelist"])
         saved = client.put("/api/settings/sale-detection", json={"marketplace": "sellwild", "enabled": False}).json()
         self.assertFalse(saved["enabled"]["sellwild"])
+        self.assertFalse(saved["autodelist"])
         self.assertEqual(client.put("/api/settings/sale-detection", json={"marketplace": "facebook", "enabled": True}).status_code, 400)
+
+    def test_autodelist_stays_off_until_the_seller_turns_it_on(self):
+        client = TestClient(app)
+        turned_on = client.put("/api/settings/sale-detection", json={"autodelist": True}).json()
+        self.assertTrue(turned_on["autodelist"])
+        self.assertTrue(turned_on["enabled"]["ebay"])
+        turned_off = client.put("/api/settings/sale-detection", json={"autodelist": False}).json()
+        self.assertFalse(turned_off["autodelist"])
+        self.assertEqual(client.put("/api/settings/sale-detection", json={}).status_code, 400)

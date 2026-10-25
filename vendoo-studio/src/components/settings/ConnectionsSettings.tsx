@@ -421,6 +421,10 @@ function MarketplaceSection() {
       api.settings.setSaleDetection(marketplace, enabled),
     onSuccess: (data) => queryClient.setQueryData(["sale-detection"], data),
   });
+  const saveAutodelist = useMutation({
+    mutationFn: (autodelist: boolean) => api.settings.setSaleAutodelist(autodelist),
+    onSuccess: (data) => queryClient.setQueryData(["sale-detection"], data),
+  });
   const chromeReady = Boolean(extension.data?.connected);
   const accounts = direct.data?.accounts;
   const relay = direct.data?.relay;
@@ -463,7 +467,7 @@ function MarketplaceSection() {
       <SettingsRow
         id="sale-detection"
         title="Sale detection"
-        description="Turn Detect sales on for a marketplace to hear when something sells there. The listing shows where else it is listed, and nothing is delisted until you choose. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark and Sellwild closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
+        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark and Sellwild closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
         status={
           listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -476,6 +480,24 @@ function MarketplaceSection() {
         }
       >
         {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+      </SettingsRow>
+      <SettingsRow
+        id="sale-autodelist"
+        title="Delist the other marketplaces"
+        description="When something sells, take it off the other marketplaces where Anteroom still has it listed. The place it sold stays as it is. This stays off until you turn it on. If a delist can't finish, the sale notice says so and you can delist from the item."
+        control={
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Switch
+              size="sm"
+              checked={detection.data?.autodelist === true}
+              disabled={saveAutodelist.isPending}
+              aria-label="Delist the other marketplaces when something sells"
+              onCheckedChange={(checked) => saveAutodelist.mutate(checked)}
+            />
+          </span>
+        }
+      >
+        {saveAutodelist.error ? <SettingsNote tone="error">{saveAutodelist.error.message}</SettingsNote> : null}
       </SettingsRow>
     </SettingsSection>
   );

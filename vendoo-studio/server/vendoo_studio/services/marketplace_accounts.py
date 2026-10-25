@@ -302,17 +302,121 @@ async def read_etsy_receipt(shop_id: str, receipt_id: str) -> dict:
     return await etsy_api("GET", f"shops/{shop_id}/receipts/{receipt_id}")
 
 
-def _notify_sales(sale_ids: list[str]) -> None:
+def _notify_sales(sale_ids: list[str], notes: dict[str, str] | None = None) -> None:
     from vendoo_studio.database import SessionLocal
     from vendoo_studio.desktop import notify
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.marketplace_sale import MarketplaceSale
 
+    notes = notes or {}
     with SessionLocal() as db:
         for sale in db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).all():
             conv = db.get(Conversation, sale.conversation_id) if sale.conversation_id else None
             title = conv.title if conv and conv.title else "An item"
-            notify(f"Sold on {NAMES.get(sale.marketplace, sale.marketplace)}: {title}. Open Anteroom to delist it elsewhere.")
+            where = NAMES.get(sale.marketplace, sale.marketplace)
+            extra = notes.get(sale.id) or "Open Anteroom to delist it elsewhere."
+            notify(f"Sold on {where}: {title}. {extra}")
+
+
+def _join_names(names: list[str]) -> str:
+    labels = [NAMES.get(name, name) for name in names]
+    if len(labels) <= 1:
+        return labels[0] if labels else ""
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return f"{', '.join(labels[:-1])}, and {labels[-1]}"
+
+
+def _delist_sentence(done: list[str], failed: dict[str, str]) -> str:
+    if done and not failed:
+        return f"Delisted from {_join_names(done)}."
+    if done:
+        return f"Delisted from {_join_names(done)}. {_join_names(list(failed))} could not be delisted. You can delist it from the item."
+    detail = next(iter(failed.values()), "The marketplace did not confirm the delete.")
+    return f"Couldn't delist it elsewhere: {detail} You can delist it from the item."
+
+
+async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> dict[str, str]:
+    """Delist the other live marketplaces after a sale, once, when the seller turned that on.
+
+    The marketplace that sold is never included. ``confirm`` is the seller's saved choice,
+    and the names are the other listings Anteroom still has up. Nothing is retried.
+    """
+    from vendoo_studio.services.user_settings import autodelist_enabled
+
+    if not sale_ids or not autodelist_enabled():
+        return {}
+    if session_factory is None:
+        from vendoo_studio.database import SessionLocal
+
+        session_factory = SessionLocal
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+    from vendoo_studio.services.marketplace_delist import MARKETPLACES, DelistError, delist, listings
+
+    notes: dict[str, str] = {}
+    groups: dict[str, list[str]] = {}
+    order: list[str] = []
+    with session_factory() as db:
+        sales = db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).all()
+        for sale in sales:
+            if not sale.conversation_id:
+                notes[sale.id] = "Anteroom doesn't have this listing, so nothing else was delisted."
+                continue
+            if sale.conversation_id not in groups:
+                groups[sale.conversation_id] = []
+                order.append(sale.conversation_id)
+            groups[sale.conversation_id].append(sale.id)
+    for conv_id in order:
+        try:
+            with session_factory() as db:
+                known = listings(db, conv_id)
+        except DelistError as exc:
+            text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
+        else:
+            others = [
+                name for name in MARKETPLACES
+                if (entry := known.get(name))
+                and entry.get("state") == "live"
+                and entry.get("listing_id")
+                and not entry.get("sold_here")
+            ]
+            if not others:
+                text = "It isn't listed anywhere else."
+            else:
+                try:
+                    with session_factory() as db:
+                        result = await delist(db, conv_id, others, confirm=True)
+                except DelistError as exc:
+                    text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
+                else:
+                    failed = {
+                        name: str((result.get(name) or {}).get("error") or "The marketplace did not confirm the delete.")
+                        for name in others
+                        if (result.get(name) or {}).get("state") == "failed"
+                    }
+                    done = [name for name in others if name not in failed]
+                    text = _delist_sentence(done, failed)
+        for sale_id in groups[conv_id]:
+            notes[sale_id] = text
+    return notes
+
+
+async def announce_sales(sale_ids: list[str], *, session_factory=None) -> None:
+    """Tell the seller about new sales. Delist the other marketplaces only when they opted in."""
+    from vendoo_studio.services.user_settings import autodelist_enabled
+
+    notes: dict[str, str] = {}
+    try:
+        notes = await autodelist_for_sales(sale_ids, session_factory=session_factory)
+    except Exception:  # noqa: BLE001 - the sale is already recorded
+        log.exception("could not delist after a sale")
+        if autodelist_enabled():
+            notes = {sale_id: "Couldn't delist it elsewhere. You can delist it from the item." for sale_id in sale_ids}
+    try:
+        notify = partial(_notify_sales, sale_ids, notes)
+        await asyncio.to_thread(notify)
+    except Exception:  # noqa: BLE001 - a missed banner must not drop the recorded sale
+        log.debug("could not show the sale notification", exc_info=True)
 
 
 def _handler():
@@ -324,10 +428,7 @@ def _handler():
     async def handle(event: dict) -> None:
         created = await record(event)
         if created:
-            try:
-                await asyncio.to_thread(_notify_sales, created)
-            except Exception:  # noqa: BLE001 - a missed banner must not unacknowledge the sale
-                log.debug("could not show the sale notification", exc_info=True)
+            await announce_sales(created)
 
     return handle
 
