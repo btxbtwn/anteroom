@@ -269,18 +269,9 @@ def apply_vinted_listing(listing: dict) -> bool:
     if not isinstance(specifics, dict):
         specifics = {}
     changed = False
-    categories = listing.get("marketplace_categories")
-    if not isinstance(categories, dict):
-        categories = {}
-    path = str(categories.get("vinted") or specifics.get("category") or "").strip()
-    if not path:
-        path = map_vinted_category_path(listing)
-    if path and categories.get("vinted") != path:
-        categories["vinted"] = path
-        listing["marketplace_categories"] = categories
-        changed = True
-    elif categories is not listing.get("marketplace_categories") and categories:
-        listing["marketplace_categories"] = categories
+    # The breadcrumb belongs on the direct listing. marketplace_categories.vinted
+    # is Vendoo's category, and writing it here makes Send fill that form.
+    path = str(specifics.get("category") or "").strip() or map_vinted_category_path(listing)
 
     def fill(key: str, value: object) -> None:
         nonlocal changed
