@@ -19,7 +19,6 @@ import { Button, buttonVariants } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
-import { EbayOffersSettings } from "./EbayOffersSettings";
 
 function CategoryTreesRow() {
   const queryClient = useQueryClient();
@@ -106,7 +105,7 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
   {
     id: "ebay",
     name: "eBay",
-    what: "Connect eBay for sale alerts and seller-approved offers to interested buyers.",
+    what: "Connect eBay for sale alerts. Send offers to interested buyers from Marketplaces → eBay → Offers.",
   },
   {
     id: "etsy",
@@ -245,7 +244,7 @@ function DirectConnectionsSection() {
       ))}
       <SettingsRow
         title="How it works"
-        description="eBay and Etsy notify Anteroom's relay when something sells, and this Mac picks the sale up. The listing shows which other marketplaces to delist, and nothing is delisted until you choose. eBay also grants offer permissions; sending offers requires a separate approval below. The relay keeps only IDs, never buyer details."
+        description="eBay and Etsy notify Anteroom's relay when something sells, and this Mac picks the sale up. The listing shows which other marketplaces to delist, and nothing is delisted until you choose. The eBay connection also covers offer permissions. The relay keeps only IDs, never buyer details."
         status={
           anyConnected ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -365,7 +364,6 @@ export function ConnectionsSettings() {
       </SettingsSection>
       <ChromeSignInSection />
       <DirectConnectionsSection />
-      <EbayOffersSettings />
       <SettingsSection id="remote-access" title="Remote access">
         <TailscaleHttpsRow />
       </SettingsSection>

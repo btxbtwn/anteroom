@@ -74,8 +74,8 @@ export function EbayOffersSettings() {
   }
 
   return (
-    <SettingsSection id="ebay-offers" title="eBay offers">
-      <SettingsRow title="Offers to interested buyers"
+    <SettingsSection id="ebay-offers" title="eBay offers" hideTitle>
+      <SettingsRow title={<span className="sr-only">Offers to interested buyers</span>}
         description="Choose listings and a minimum item price in USD. Preview the live eBay prices before sending or approving automatic offers. Shipping and tax are separate."
         control={<Button size="xs" variant="outline" disabled={connect.isPending || busy} onClick={() => connect.mutate()}>
           {connect.isPending ? <Spinner /> : null}{data?.connected ? "Reconnect eBay" : "Connect eBay"}
