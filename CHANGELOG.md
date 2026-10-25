@@ -6,9 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.341 — 2026-10-24
+## 0.1.343 — 2026-10-24
 
 - Delist everywhere ends the eBay listing. Mercari and Depop stay marked delisted when those sites have already taken the item down.
+
+## 0.1.342 — 2026-10-24
+
+- Poshmark original price is always 0.
+
+## 0.1.341 — 2026-10-24
+
+- On a live eBay, Etsy, or Poshmark listing, **Update…** writes the listing saved in Anteroom onto that listing, after you confirm. It changes the one that is already up.
 
 ## 0.1.340 — 2026-10-24
 

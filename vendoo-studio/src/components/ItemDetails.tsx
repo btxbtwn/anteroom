@@ -27,7 +27,6 @@ interface ItemDetailsData {
   cog: string;
   packageDimensions: string;
   vendooLabels: string;
-  poshmarkOriginalPrice: string;
   garment: Garment;
   measurements: Measurements;
 }
@@ -77,7 +76,6 @@ const DEFAULTS: ItemDetailsData = {
   cog: "",
   packageDimensions: "13x10x3",
   vendooLabels: "",
-  poshmarkOriginalPrice: "0",
   garment: "top",
   measurements: { top: {}, pants: {}, skirt: {} },
 };
@@ -109,7 +107,6 @@ function parseNotes(notes: string | null, defaultPackageDimensions = DEFAULTS.pa
       cog: parsed.cog || "",
       packageDimensions: parsed.packageDimensions || defaultPackageDimensions,
       vendooLabels: parsed.vendooLabels ?? DEFAULTS.vendooLabels,
-      poshmarkOriginalPrice: parsed.poshmarkOriginalPrice ?? "0",
       garment: parsed.garment === "shorts"
         ? "pants"
         : GARMENTS.some((g) => g.id === parsed.garment) ? parsed.garment : DEFAULTS.garment,
@@ -255,7 +252,7 @@ export function ItemDetails({ convId }: Props) {
           cog: updated.cog,
           packageDimensions: updated.packageDimensions,
           vendooLabels: updated.vendooLabels,
-          poshmarkOriginalPrice: updated.poshmarkOriginalPrice,
+          poshmarkOriginalPrice: "0",
           garment: updated.garment,
           measurements: updated.measurements,
         })});
@@ -517,7 +514,7 @@ export function ItemDetails({ convId }: Props) {
       </InspectorSection>
 
       <InspectorSection title="Pricing & Shipping" titleId={`item-section-pricing-${convId}`}>
-        <div className="grid grid-cols-3 gap-2 @max-[320px]:grid-cols-2">
+        <div className="grid grid-cols-2 gap-2">
           <div className="min-w-0">
             <FieldLabel htmlFor={`item-cog-${convId}`}>COG ($)</FieldLabel>
             <Input
@@ -528,10 +525,6 @@ export function ItemDetails({ convId }: Props) {
               placeholder={box?.cost_per_piece != null ? box.cost_per_piece.toFixed(2) : "0.00"}
               title={box?.cost_per_piece != null ? "Blank uses the box's cost per piece" : undefined}
             />
-          </div>
-          <div className="min-w-0">
-            <FieldLabel htmlFor={`item-posh-${convId}`}>Posh Orig ($)</FieldLabel>
-            <Input nativeInput id={`item-posh-${convId}`} {...f("poshmarkOriginalPrice", "number")} step="1" placeholder="0" />
           </div>
           <div className="min-w-0">
             <FieldLabel htmlFor={`item-package-${convId}`}>Package L×W×H</FieldLabel>

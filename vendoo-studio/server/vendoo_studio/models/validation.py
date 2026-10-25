@@ -344,12 +344,12 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
     if not isinstance(listing, dict):
         return False
     changed = canonicalize_listing_keys(listing)
+    # Poshmark original price is always 0. A compare-at or previous asking
+    # price is not shown.
     poshmark = listing.get("poshmark_specifics")
-    if isinstance(poshmark, dict) and "originalPrice" in poshmark:
-        price = poshmark["originalPrice"]
-        if price is None or (isinstance(price, str) and not price.strip()):
-            del poshmark["originalPrice"]
-            changed = True
+    if isinstance(poshmark, dict) and poshmark.get("originalPrice") != 0:
+        poshmark["originalPrice"] = 0
+        changed = True
     if _ensure_general_condition(listing):
         changed = True
 

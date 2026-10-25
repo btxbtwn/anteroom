@@ -120,10 +120,10 @@ def _apply_result(db: Session, conv, marketplace: str, binding: dict, result: di
     updated = {**binding, "state": "unknown", "error": f"{reason} {UNKNOWN}".strip()}
     # Retry only after a confirmed rejection or proof no write happened.
     if result.get("ok") is True:
-        url = None if marketplace == "sellwild" or action == "list" else draft_url(marketplace, str(result.get("draft_url") or ""))
+        url = None if marketplace == "sellwild" or action in {"list", "update"} else draft_url(marketplace, str(result.get("draft_url") or ""))
         if url and binding.get("draft_url") and url != binding["draft_url"]:
             raise NativeMarketplaceError(502, "Chrome answered for a different draft. Check the native listing.")
-        expected = "published" if action in {"publish", "list"} else "draft"
+        expected = "published" if action in {"publish", "list", "update"} else "draft"
         state = result.get("state")
         matches = state == expected or (marketplace == "sellwild" and action == "publish" and state == "pending_review")
         if matches:
@@ -141,8 +141,16 @@ def _apply_result(db: Session, conv, marketplace: str, binding: dict, result: di
                 if marketplace == "ebay" and not re.fullmatch(r"/itm/\d{6,20}", public.path):
                     raise NativeMarketplaceError(502, "eBay returned an invalid listing link.")
                 updated["listing_url"] = f"https://{public.netloc}{public.path}"
-            elif (marketplace == "sellwild" and action == "publish") or action == "list":
+            elif (marketplace == "sellwild" and action == "publish") or action in {"list", "update"}:
                 raise NativeMarketplaceError(502, "Chrome did not return the listing link.")
+            if action == "update":
+                from vendoo_studio.services.marketplace_delist import listing_id as parse_listing_id
+
+                if parse_listing_id(marketplace, updated.get("listing_url")) != binding.get("listing_id"):
+                    raise NativeMarketplaceError(502, "The marketplace answered for a different listing. The live one was not replaced.")
+    elif action == "update" and result.get("safe_to_retry") is True:
+        # A refused update leaves the live listing in place. Another Update is the seller's choice.
+        updated.update(state="published", error=str(result.get("error") or "Could not update the live listing."))
     elif result.get("safe_to_retry") is True:
         recovered_url = binding.get("draft_url")
         if marketplace in {"depop", "etsy"} and action == "save_draft" and result.get("draft_url"):
@@ -209,15 +217,26 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
     with start_gate():
         db.refresh(conv)
         binding = _bindings(conv).get(marketplace, {})
-        if binding.get("state") in {"saving", "publishing", "unknown"}:
+        if binding.get("state") in {"saving", "publishing", "updating", "unknown"}:
             raise NativeMarketplaceError(409, UNKNOWN)
-        if binding.get("state") in {"published", "pending_review"}:
-            raise NativeMarketplaceError(409, "This draft has already been published.")
-        if action == "list":
+        if action == "update":
             if not isinstance(body, PublishRequest) or body.confirm is not True:
+                raise NativeMarketplaceError(400, f"Confirm updating the live {marketplace} listing.")
+            if marketplace not in {"ebay", "etsy", "poshmark"}:
+                raise NativeMarketplaceError(409, f"A live {marketplace.title()} listing cannot be updated from Anteroom yet.")
+            from vendoo_studio.services.marketplace_delist import listings as live_listings
+
+            live = live_listings(db, conv_id).get(marketplace) or {}
+            if live.get("sold_here") or live.get("state") != "live" or not live.get("listing_id"):
+                raise NativeMarketplaceError(409, f"This item is not live on {marketplace.title()}.")
+            binding = {**binding, "listing_id": live["listing_id"], "listing_url": live.get("url")}
+        elif binding.get("state") in {"published", "pending_review"}:
+            raise NativeMarketplaceError(409, "This draft has already been published.")
+        if action in {"list", "update"}:
+            if action == "list" and (not isinstance(body, PublishRequest) or body.confirm is not True):
                 raise NativeMarketplaceError(400, f"Confirm listing on {marketplace}.")
             if not photos:
-                raise NativeMarketplaceError(400, "Add photos before listing.")
+                raise NativeMarketplaceError(400, "Add photos before listing." if action == "list" else "Add photos before updating the live listing.")
         elif action == "publish":
             if not isinstance(body, PublishRequest) or body.confirm is not True:
                 raise NativeMarketplaceError(400, f"Confirm publishing to {marketplace}.")
@@ -242,7 +261,7 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
             raise NativeMarketplaceError(409, "Another automation job is queued or running. Wait for it to finish.")
         job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{action}")
         claim_api_job(job.id)
-        binding = {**binding, "state": "publishing" if action == "publish" else "saving", "action": action,
+        binding = {**binding, "state": "updating" if action == "update" else "publishing" if action == "publish" else "saving", "action": action,
                    "previous_revision_id": binding.get("revision_id"), "revision_id": body.revision_id,
                    "job_id": job.id, "error": None}
         _store(db, conv, marketplace, binding)
@@ -275,8 +294,8 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
                                                  package=package)
             return _apply_result(db, conv, marketplace, binding, result)
         result = await browser_bridge.request(job, "marketplace.execute", {
-            "marketplace": marketplace, "action": action, "confirm": action in {"publish", "list"},
-            "operation_id": job.id, "draft_url": binding.get("draft_url"), "listing": snapshot,
+            "marketplace": marketplace, "action": action, "confirm": action in {"publish", "list", "update"},
+            "operation_id": job.id, "draft_url": binding.get("draft_url"), "listing_id": binding.get("listing_id"), "listing": snapshot,
             "local_draft_id": binding.get("local_draft_id"), "revision_id": body.revision_id,
             "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
             **({"sellwild": {"category_id": binding["sellwild_category_id"], "condition_id": binding["sellwild_condition_id"]}}
@@ -483,6 +502,13 @@ async def list_now(conv_id: str, marketplace: Marketplace, body: PublishRequest,
     return await _confirmed(conv_id, marketplace, body.model_copy(update={"draft_url": draft, "confirm": True}), "publish", db)
 
 
+async def update_live(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session):
+    """Write the listing saved in Anteroom onto the one already live. One confirmation, never a second listing."""
+    if body.confirm is not True:
+        raise NativeMarketplaceError(400, f"Confirm updating the live {marketplace} listing.")
+    return await _confirmed(conv_id, marketplace, body, "update", db)
+
+
 async def publish(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session):
     if marketplace in ONE_STEP:
         raise NativeMarketplaceError(409, f"{marketplace.title()} lists in one step. Use List.")
@@ -519,13 +545,13 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
 
         if api_job_is_live(binding["job_id"]):
             raise NativeMarketplaceError(409, "The eBay listing is still running. Wait for it to finish.")
-        result = await ebay_listings.check(binding)
+        result = await ebay_listings.check(binding, snapshot if binding.get("action") == "update" else None)
         return _apply_result(db, conv, marketplace, binding, result)
     try:
         result = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.result", {
             "operation_id": binding["job_id"],
             "context": {"marketplace": marketplace, "action": binding["action"],
-                        "operation_id": binding["job_id"], "draft_url": candidate,
+                        "operation_id": binding["job_id"], "draft_url": candidate, "listing_id": binding.get("listing_id"),
                         "local_draft_id": binding.get("local_draft_id"), "revision_id": binding.get("revision_id"),
                         "photo_ids": binding.get("photo_ids"),
                         "expected_photo_count": len(ConversationRepo(db).get_photos(conv_id)) if binding["action"] == "save_draft" and not binding.get("previous_revision_id") else None,

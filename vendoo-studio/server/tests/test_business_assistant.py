@@ -547,8 +547,7 @@ def test_applying_saves_each_listing_as_a_revision_and_skips_what_it_cannot_chan
     newest = ListingRepo(db).get_revisions(coat)[0]
     assert newest.source == "assistant"
     assert (newest.listing_json["price"], newest.listing_json["title"]) == (100, "Carhartt Chore Coat Brown")
-    # Poshmark keeps the higher was-price, as a price drop in the listing does.
-    assert newest.listing_json["poshmark_specifics"]["originalPrice"] == 120
+    assert newest.listing_json["poshmark_specifics"]["originalPrice"] == 0
     assert ListingRepo(db).get_revisions(jeans)[0].listing_json["sku"] == "A-13"
     assert ConversationRepo(db).get(jeans).box_id is None
 

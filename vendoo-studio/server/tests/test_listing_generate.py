@@ -1063,7 +1063,7 @@ class PersistListingTest(unittest.TestCase):
             self.assertEqual(listing["ebay_specifics"]["department"], "Women")
             self.assertEqual(listing["ebay_specifics"]["brand"], "Unbranded")
             self.assertEqual(listing["title"], "Unbranded XS Streetwear Graphic T-Shirt Black Slim Fit")
-            self.assertNotIn("originalPrice", listing["poshmark_specifics"])
+            self.assertEqual(listing["poshmark_specifics"]["originalPrice"], 0)
             validation = validate_listing(listing, require_photos=False, selected_marketplaces=["ebay", "poshmark"])
             blocked = {error["field"] for error in validation.errors}
             self.assertFalse(blocked & {"title", "brand", "ebay_specifics.department", "ebay_specifics.brand", "poshmark_specifics.originalPrice"})
@@ -1081,23 +1081,21 @@ class PersistListingTest(unittest.TestCase):
                     response = await client.get(f"/api/conversations/{self.conv.id}/listing")
                     self.assertEqual(response.status_code, 200)
                     payload = response.json()
-                    self.assertNotIn("originalPrice", payload["listing"]["poshmark_specifics"])
+                    self.assertEqual(payload["listing"]["poshmark_specifics"]["originalPrice"], 0)
                     self.assertEqual(payload["listing"]["ebay_specifics"]["department"], "Women")
             finally:
                 app.dependency_overrides.clear()
 
         asyncio.run(read_saved_listing())
 
-    def test_optional_original_price_accepts_blank_but_rejects_non_numeric_values(self):
+    def test_poshmark_original_price_is_always_zero(self):
         from vendoo_studio.models.validation import validate_listing
 
-        for value in (None, "", "   "):
+        for value in (None, "", "   ", "unknown", 40, "90"):
             data = {"poshmark_specifics": {"originalPrice": value}}
             validation = validate_listing(data, require_photos=False, selected_marketplaces=[])
-            self.assertNotIn("originalPrice", data["poshmark_specifics"])
+            self.assertEqual(data["poshmark_specifics"]["originalPrice"], 0)
             self.assertFalse(any(error["field"] == "poshmark_specifics.originalPrice" for error in validation.errors))
-        validation = validate_listing({"poshmark_specifics": {"originalPrice": "unknown"}}, require_photos=False, selected_marketplaces=[])
-        self.assertTrue(any(error["field"] == "poshmark_specifics.originalPrice" for error in validation.errors))
 
     def test_apply_missing_fields_repairs_and_saves_when_ask_chat_format_breaks(self):
         listing_repo = ListingRepo(self.db)

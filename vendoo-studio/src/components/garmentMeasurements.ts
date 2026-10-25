@@ -139,5 +139,6 @@ export function notesWithItemDetails(notes: string | null | undefined, details: 
     vendooLabels: details.labels.trim(),
     cog: details.cog.trim(),
     sku: details.sku.trim(),
+    poshmarkOriginalPrice: "0",
   });
 }

@@ -81,6 +81,7 @@ interface EditorField {
   defaultValue?: string;
   required?: boolean;
   options?: string[];
+  locked?: boolean;
 }
 
 export function ListingEditor({
@@ -558,7 +559,9 @@ function StructuredEditor({
       const val = getListingEditorValue(listing, f.key);
       // Schema labels ("Sleeve Length") don't match JSON keys ("sleeveLength");
       // the fields API already resolved the value — use it when the path miss.
-      const text = val != null && String(val).trim() !== "" ? String(val) : (f.defaultValue || "");
+      const text = f.locked
+        ? (f.defaultValue || "")
+        : (val != null && String(val).trim() !== "" ? String(val) : (f.defaultValue || ""));
       init[f.key] = text;
     });
     setLocal(init);
@@ -567,6 +570,7 @@ function StructuredEditor({
   const handleBlur = (key: string) => {
     if (local[key] == null) return;
     const field = fields.find((entry) => entry.key === key);
+    if (field?.locked) return;
     const before = getListingEditorValue(listing, key);
     if (local[key] === (before != null ? String(before) : field?.defaultValue || "")) return;
     const updated = cloneListing(listing);
@@ -624,8 +628,9 @@ function StructuredEditor({
                 id={`listing-field-${f.key}`}
                 data-listing-field={f.key}
                 type={f.type || "text"}
+                readOnly={f.locked}
                 value={local[f.key] || ""}
-                onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })}
+                onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }}
                 onBlur={() => handleBlur(f.key)}
               />
             )}
@@ -750,7 +755,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
     case "poshmark":
       return [
         { key: "price", label: "Price", type: "number" },
-        { key: "poshmark_specifics.originalPrice", label: "Original Price", type: "number", defaultValue: "0" },
+        { key: "poshmark_specifics.originalPrice", label: "Original Price", type: "number", defaultValue: "0", locked: true },
         { key: "condition", label: "Condition" },
         { key: "brand", label: "Brand" },
         { key: "primaryColor", label: "Primary Color" },

@@ -212,6 +212,11 @@ def _apply_etsy_tags(known: dict[str, Any], general: dict[str, Any]) -> None:
         known["tags"] = tags
 
 
+def _apply_poshmark_original_price(known: dict[str, Any]) -> None:
+    """Poshmark original price is always 0. No compare-at price."""
+    known["originalPrice"] = "0"
+
+
 def _apply_poshmark_smart_sell(
     known: dict[str, Any],
     general: dict[str, Any],

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import tempfile
+import types
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -96,6 +98,56 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("shipping", result["error"])
         self.assertTrue(result["safe_to_retry"])
         self.assertFalse(any(call[0] == "PUT" for call in client.calls))
+
+    async def test_update_rewrites_the_live_offer_and_does_not_publish_another(self):
+        self.binding.update(ebay_offer_id="offer-1", ebay_listing_id="123456789012", listing_id="123456789012",
+                            ebay_image_urls=["https://i.ebayimg.com/images/g/test/s-l1600.jpg"])
+        client = Client()
+        changed = {**LISTING, "title": "Updated tee", "price": "30"}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("update", changed, [self.photo], self.binding, self.record, self.active, confirm=True)
+        self.assertEqual(result["listing_url"], "https://www.ebay.com/itm/123456789012")
+        self.assertFalse(any(call[1].endswith("/publish") or call[1] == "/sell/inventory/v1/offer" for call in client.calls))
+        inventory = next(call for call in client.calls if call[0] == "PUT" and "/inventory_item/" in call[1])
+        self.assertEqual(inventory[2]["body"]["product"]["title"], "Updated tee")
+        offer = next(call for call in client.calls if call[0] == "PUT" and call[1].endswith("/offer/offer-1"))
+        self.assertEqual(offer[2]["body"]["pricingSummary"]["price"]["value"], "30.00")
+        self.assertEqual(offer[2]["body"]["sku"], inventory[1].rsplit("/", 1)[-1])
+
+    async def test_update_without_an_offer_revises_the_same_item(self):
+        self.binding["listing_id"] = "123456789012"
+        client = Client()
+        item = (
+            '<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item>'
+            "<ItemID>123456789012</ItemID><Title>Abercrombie tee</Title><Description>Soft cotton tee.</Description>"
+            '<ListingType>FixedPriceItem</ListingType><Site>US</Site><SKU></SKU>'
+            "<Seller><UserID>ada</UserID></Seller><Quantity>1</Quantity>"
+            '<SellingStatus><ListingStatus>Active</ListingStatus><QuantitySold>0</QuantitySold>'
+            '<CurrentPrice currencyID="USD">24.00</CurrentPrice></SellingStatus>'
+            "<PrimaryCategory><CategoryID>15687</CategoryID></PrimaryCategory></Item></GetItemResponse>"
+        )
+        revised = item.replace("Abercrombie tee", "Updated tee").replace(">24.00<", ">30.00<")
+        seen = {"revise": False}
+
+        async def request(method, path, **kwargs):
+            client.calls.append((method, path, kwargs))
+            if kwargs.get("call") == "ReviseFixedPriceItem":
+                seen["revise"] = True
+                return {"xml": ET.Element("ok")}
+            if kwargs.get("call") == "GetItem":
+                xml = revised if seen["revise"] else item
+                return {"xml": ET.fromstring(xml)}
+            raise AssertionError(path)
+
+        client.request = request
+        client.trading = types.MethodType(ebay_listings.EbayClient.trading, client)
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client), \
+             patch("vendoo_studio.services.keychain.get_marketplace_accounts", return_value={"ebay": {"label": "ada"}}):
+            result = await ebay_listings.execute("update", {**LISTING, "title": "Updated tee", "price": "30"}, [self.photo],
+                                                 self.binding, self.record, self.active, confirm=True)
+        self.assertEqual(result["listing_url"], "https://www.ebay.com/itm/123456789012")
+        self.assertTrue(seen["revise"])
+        self.assertTrue(all(call[1] != "/sell/inventory/v1/offer" for call in client.calls))
 
     async def test_a_lost_publish_is_confirmed_by_reading_the_offer(self):
         self.binding["ebay_offer_id"] = "offer-1"

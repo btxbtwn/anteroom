@@ -60,6 +60,7 @@ from vendoo_studio.services.vendoo_marketplace_fields import (
     _apply_marketplace_brand,
     _apply_mercari_shipping,
     _apply_mercari_smart_pricing,
+    _apply_poshmark_original_price,
     _apply_poshmark_smart_sell,
     _apply_vinted_package,
 )
@@ -498,6 +499,7 @@ def _listing_section(
         _apply_etsy_listing_codes(known, listing)
         _apply_etsy_tags(known, general)
     elif marketplace == "poshmark":
+        _apply_poshmark_original_price(known)
         _apply_poshmark_smart_sell(known, general, listing)
     elif marketplace == "mercari":
         _apply_mercari_shipping(known, section["overrides"].get("weight"), section["overrides"])

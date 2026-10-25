@@ -390,7 +390,7 @@ class ConversationResetTest(unittest.TestCase):
         notes = json.loads(response.json()["notes"])
         self.assertEqual(notes["sku"], "NIKE-TEE-M")
         self.assertEqual(notes["packageDimensions"], "12x10x2")
-        self.assertEqual(notes["poshmarkOriginalPrice"], "45")
+        self.assertNotIn("poshmarkOriginalPrice", notes)
         self.assertEqual(notes["cog"], "1.50")
         self.assertEqual(notes["vendooLabels"], "Bin 4")
         self.assertEqual(notes["sellerNotes"], "Bought at the bins")
