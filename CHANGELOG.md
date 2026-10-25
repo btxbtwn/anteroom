@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.348 — 2026-10-25
+
+- eBay now gets the condition you picked: New with imperfections, Pre-owned Excellent, Good and Fair each list as eBay's own clothing grade instead of all becoming "Good". If a category doesn't take that condition, Anteroom says so and lists nothing.
+- Depop keeps the condition you picked, so Brand new and Like new no longer go missing or drop to Used - Good.
+- Poshmark gets a whole-dollar price, rounded like Vendoo does, and a plain "New" is no longer dropped. An item with no condition stops before anything is listed.
+- Etsy's "when made" ranges follow the year, so listings keep working after January 1.
+
 ## 0.1.347 — 2026-10-25
 
 - List on a marketplace now runs in the background with its progress shown in the Marketplaces section, and Cancel stops it before it publishes. A queued Send to Vendoo waits until Chrome has finished, instead of failing because Chrome was still busy.

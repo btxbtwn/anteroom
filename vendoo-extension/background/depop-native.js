@@ -3,13 +3,17 @@
 
 const DEPOP_COLOURS = new Set(['black', 'grey', 'white', 'brown', 'tan', 'cream', 'yellow', 'red', 'burgundy', 'pink', 'purple', 'blue', 'navy', 'green', 'khaki', 'orange', 'silver', 'gold', 'multi']);
 
+const DEPOP_CONDITIONS = new Set(['brand_new', 'used_like_new', 'used_excellent', 'used_good', 'used_fair']);
+
+// Studio's form already carries Depop's own slug; a plain label is mapped the way Vendoo maps it.
 function depopCondition(value) {
-  const text = String(value || '').toLowerCase();
-  if (!text) return '';
+  const text = String(value || '').trim().toLowerCase();
+  if (DEPOP_CONDITIONS.has(text)) return text;
+  if (/defect|imperfection/.test(text)) return 'used_good';
   if (/fair|poor/.test(text)) return 'used_fair';
   if (/excellent/.test(text)) return 'used_excellent';
   if (/like new|nwot|new without/.test(text)) return 'used_like_new';
-  if (/brand new|nwt|new with tags/.test(text) && !/without/.test(text)) return 'brand_new';
+  if (/brand new|nwt|new with tags|^new\b/.test(text)) return 'brand_new';
   if (/good|pre-owned|preowned|used/.test(text)) return 'used_good';
   return '';
 }

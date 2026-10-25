@@ -37,23 +37,51 @@ _SKIP = {
     "shippingservice", "paymentmethod", "paypalemail", "acceptreturns",
     "returnpayedby", "returnwithin", "returnrefundmethod", "statusitem", "shipping",
 }
+# Studio's conditions as eBay's apparel grades, which is where eBay keeps the
+# Pre-owned Excellent/Good/Fair ladder (condition IDs 2990/3000/3010).
 _CONDITION = (
-    (r"poor|major flaw", "USED_ACCEPTABLE"),
-    (r"fair|acceptable", "USED_ACCEPTABLE"),
-    (r"very good", "USED_VERY_GOOD"),
-    (r"excellent|like new|nwot|new without", "USED_EXCELLENT"),
-    (r"good|pre-owned|preowned|used", "USED_GOOD"),
+    (r"defect|imperfection", "NEW_WITH_DEFECTS"),
+    (r"new without|new other|nwot|without (tags|box)", "NEW_OTHER"),
     (r"new with tags|nwt|brand new|^new\b", "NEW"),
+    (r"excellent|like new", "PRE_OWNED_EXCELLENT"),
+    (r"fair|poor|major flaw|acceptable", "PRE_OWNED_FAIR"),
+    (r"good|pre-owned|preowned|used", "USED_EXCELLENT"),
 )
+CONDITION_IDS = {
+    "NEW": "1000", "NEW_OTHER": "1500", "NEW_WITH_DEFECTS": "1750", "LIKE_NEW": "2750",
+    "PRE_OWNED_EXCELLENT": "2990", "USED_EXCELLENT": "3000", "PRE_OWNED_FAIR": "3010",
+    "USED_VERY_GOOD": "4000", "USED_GOOD": "5000", "USED_ACCEPTABLE": "6000", "FOR_PARTS_OR_NOT_WORKING": "7000",
+}
 
 
 def ebay_condition(listing: dict) -> str:
     specifics = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
-    text = str(specifics.get("condition") or listing.get("condition") or "").lower()
+    text = str(specifics.get("condition") or listing.get("condition") or "").strip()
+    if text.upper() in CONDITION_IDS:
+        return text.upper()
     for pattern, code in _CONDITION:
-        if re.search(pattern, text) and not ("without" in text and code == "NEW"):
+        if re.search(pattern, text.lower()):
             return code
-    return "USED_GOOD"
+    return "USED_EXCELLENT"
+
+
+async def _check_condition(client: EbayClient, category_id: str, condition: str) -> None:
+    """Refuse a condition this category does not take, when eBay says which ones it does.
+
+    Without that answer the listing goes ahead and eBay's own refusal explains it.
+    """
+    try:
+        body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_item_condition_policies",
+                                    params={"filter": f"categoryIds:{{{category_id}}}"})
+    except EbayFailure:
+        return
+    policy = next((row for row in body.get("itemConditionPolicies") or [] if str(row.get("categoryId")) == category_id), {})
+    allowed = {str(item.get("conditionId")): str(item.get("conditionDescription") or "")
+               for item in policy.get("itemConditions") or [] if item.get("conditionId")}
+    if allowed and CONDITION_IDS[condition] not in allowed:
+        names = ", ".join(name for name in allowed.values() if name)
+        message = f"eBay does not take this condition in this category. Choose one of: {names}."
+        raise ListingProblem(message, "missing_fields", fields=[{"field": "condition", "message": message}])
 
 
 def item_key(conversation_id: str) -> str:
@@ -437,6 +465,7 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         if offer.get("status") != "PUBLISHED" or current_id != listing_id:
             raise ValueError("This eBay offer is not the live listing. Check eBay before updating it.")
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
+        await _check_condition(client, fields["category_id"], fields["condition"])
         sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
         if not sku:
             raise ValueError("eBay did not return this listing's SKU. Check eBay before updating it.")
@@ -476,6 +505,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
+        await _check_condition(client, fields["category_id"], fields["condition"])
         fulfillment, payment, returns, location = await _only(client, "fulfillment"), await _only(client, "payment"), await _only(client, "return"), await _location(client)
         sku = ebay_sku(snapshot, binding, conversation_id)
         if not binding.get("ebay_inventory_written") and sku != item_key(conversation_id):

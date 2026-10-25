@@ -25,8 +25,9 @@ LISTING = {
 
 
 class Client:
-    def __init__(self, policies=1, aspects=None):
+    def __init__(self, policies=1, aspects=None, conditions=None):
         self.policies = policies
+        self.conditions = conditions
         self.calls = []
         self.aspects = aspects
         self.offers = {}
@@ -44,6 +45,12 @@ class Client:
                 {"localizedAspectName": "Sleeve Length", "aspectConstraint": {"aspectRequired": True, "aspectMode": "SELECTION_ONLY"},
                  "aspectValues": [{"localizedValue": "Does Not Apply"}, {"localizedValue": "Short Sleeve"}]},
             ]}
+        if path.endswith("get_item_condition_policies"):
+            if self.conditions is None:
+                raise EbayFailure("eBay returned HTTP 403.", 403)
+            category = kwargs["params"]["filter"].removeprefix("categoryIds:{").removesuffix("}")
+            return {"itemConditionPolicies": [{"categoryId": category, "itemConditions": [
+                {"conditionId": cid, "conditionDescription": name} for cid, name in self.conditions]}]}
         if path.endswith("/fulfillment_policy"):
             rows = [{"fulfillmentPolicyId": f"f{i}", "name": f"Ship {i}", "marketplaceId": "EBAY_US"} for i in range(self.policies)]
             return {"fulfillmentPolicies": rows}
@@ -116,12 +123,43 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(product["aspects"]["Brand"], ["Abercrombie"])
         self.assertEqual(product["aspects"]["Department"], ["Men"])
         self.assertEqual(product["aspects"]["Sleeve Length"], ["Does Not Apply"])
-        self.assertEqual(inventory[2]["body"]["condition"], "USED_GOOD")
+        self.assertEqual(inventory[2]["body"]["condition"], "USED_EXCELLENT")
         self.assertEqual(inventory[2]["body"]["conditionDescription"], "Pre-owned, washed, no stains.")
         self.assertEqual(product["imageUrls"], ["https://i.ebayimg.com/images/g/test1/s-l1600.jpg"])
         offer = next(call for call in client.calls if call[:2] == ("POST", "/sell/inventory/v1/offer"))
         self.assertTrue(offer[2]["body"]["listingPolicies"]["bestOfferTerms"]["bestOfferEnabled"])
         self.assertEqual(client.calls[-1][1], "/sell/inventory/v1/offer/offer-1/publish")
+
+    def test_studio_conditions_map_to_ebays_apparel_grades(self):
+        expected = {
+            "New With Tags/Box": "NEW", "New Without Tags/Box": "NEW_OTHER", "New With Imperfections": "NEW_WITH_DEFECTS",
+            "Pre-Owned - Excellent": "PRE_OWNED_EXCELLENT", "Pre-Owned - Good": "USED_EXCELLENT",
+            "Pre-Owned - Fair": "PRE_OWNED_FAIR", "Poor (Major flaws)": "PRE_OWNED_FAIR",
+            "New with defects": "NEW_WITH_DEFECTS", "Pre-owned - Good": "USED_EXCELLENT", "USED_GOOD": "USED_GOOD",
+        }
+        for condition, code in expected.items():
+            self.assertEqual(ebay_listings.ebay_condition({"condition": condition}), code, condition)
+        self.assertEqual(ebay_listings.ebay_condition({"condition": "Pre-Owned - Good",
+                                                       "ebay_specifics": {"condition": "New with tags"}}), "NEW")
+
+    async def test_a_condition_the_category_does_not_take_lists_nothing(self):
+        client = Client(conditions=[("1000", "New"), ("3000", "Used"), ("7000", "For parts or not working")])
+        listing = {**LISTING, "condition": "Pre-Owned - Excellent"}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", listing, [self.photo], self.binding, self.record, self.active, confirm=True)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "missing_fields")
+        self.assertEqual([field["field"] for field in result["fields"]], ["condition"])
+        self.assertIn("New, Used, For parts or not working", result["error"])
+        self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls))
+
+    async def test_a_condition_the_category_takes_is_listed(self):
+        client = Client(conditions=[("1000", "New with tags"), ("3000", "Pre-owned - Good")])
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"])
+        self.assertEqual(client.items["ar-abc123"]["condition"], "USED_EXCELLENT")
 
     async def test_more_than_one_shipping_policy_lists_nothing(self):
         client = Client(policies=2)
