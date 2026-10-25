@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.357 — 2026-10-25
+
+- A boys size such as XL (18/20) stays on Poshmark's boys scale.
+- If you delete a Depop draft, List creates a new one instead of looking for the missing draft.
+- Grouped values such as Best Offer and Depop shipping are their own fields. A form no longer shows [object Object].
+- Menus with a fixed list of choices can be searched, including Depop's product type.
+
 ## 0.1.356 — 2026-10-25
 
 - eBay and Etsy categories for a direct listing come from each site's own category list. The eBay and Etsy sections of the editor show that category and its fields. Send to Vendoo still uses Vendoo's categories and field names.
