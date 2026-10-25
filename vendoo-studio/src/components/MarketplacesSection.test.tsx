@@ -186,6 +186,18 @@ describe("marketplaces section", () => {
     expect(disabledButton(html, "List…")).toBe(true);
   });
 
+  it("offers Edit and Ask chat for a value the marketplace will leave empty, without stopping List", () => {
+    const gaps = [{ field: "ebay_specifics.category_specifics.Size", message: "Size “Huge” is not one of eBay's choices, so it is left empty.", blocking: false }];
+    const html = render({}, {}, {
+      selected: "ebay", onAskChat: vi.fn(), onEditField: vi.fn(),
+      preflight: { marketplaces: { ebay: { ready: true, gaps } } },
+    });
+    expect(html).toContain("is not one of eBay");
+    expect(enabledButton(html, "Edit Size")).toBe(true);
+    expect(enabledButton(html, "Ask chat")).toBe(true);
+    expect(enabledButton(html, "List…")).toBe(true);
+  });
+
   it("offers List on eBay from the same rail", () => {
     const html = render({}, {}, { selected: "ebay" });
     expect(row(html, "eBay")).toContain("Not listed");

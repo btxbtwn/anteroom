@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -202,20 +203,38 @@ class ModelReportTest(unittest.TestCase):
 
 class ResearchTest(unittest.IsolatedAsyncioTestCase):
     async def test_sold_and_active_search_side_by_side_with_brave(self):
-        brave = AsyncMock(return_value=brave_report())
+        # Each search waits until all three have started, so they finish only
+        # if they run at once. Run one after another, the first would wait out
+        # the fallback and the overlap check below fails instead of hanging.
+        started = 0
+        all_started = asyncio.Event()
+
+        def overlapping(search):
+            async def run(*args, **kwargs):
+                nonlocal started
+                started += 1
+                if started == 3:
+                    all_started.set()
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(all_started.wait(), 5)
+                return await search(*args, **kwargs)
+            return run
+
+        brave = AsyncMock(side_effect=overlapping(AsyncMock(return_value=brave_report())))
         calls: list = []
-        model = ModelSearch("ChatGPT", searcher(listing_json(
+        model = ModelSearch("ChatGPT", overlapping(searcher(listing_json(
             (22, "511 Slim Shorts", "https://www.ebay.com/itm/1"),
             (19, "Slim Shorts", "https://poshmark.com/listing/2"),
             (25, "511 Shorts", "https://www.mercari.com/us/item/m3"),
             live=((28, "Shorts", "https://www.ebay.com/itm/4"),),
-        ), delay=0.05, calls=calls))
+        ), calls=calls)))
         first, second, third = patched(model, brave=brave)
-        started = asyncio.get_running_loop().time()
+        began = asyncio.get_running_loop().time()
         with first, second, third:
             text = await research_sold_comps(ANALYSIS)
         # Both model searches and Brave ran at once, not one after another.
-        self.assertLess(asyncio.get_running_loop().time() - started, 0.1)
+        self.assertTrue(all_started.is_set())
+        self.assertLess(asyncio.get_running_loop().time() - began, 5)
         self.assertEqual(len(calls), 2)
         asks = sorted(call[1]["content"] for call in calls)
         self.assertTrue(asks[0].startswith("Find active marketplace listings"))

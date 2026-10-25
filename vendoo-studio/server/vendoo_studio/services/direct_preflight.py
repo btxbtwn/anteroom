@@ -83,8 +83,14 @@ def _unresolved(snapshot: dict, marketplace: str) -> list[dict]:
         prefix, _, aspect = label.partition(":")
         if prefix != marketplace or not aspect:
             continue
-        found.append(gap(f"{marketplace}_specifics.category_specifics.{aspect}",
-                         f"{aspect} “{item.get('value')}” is not one of {name}'s choices, so it is left empty.", blocking=False))
+        field = f"{marketplace}_specifics.category_specifics.{aspect}"
+        value = str(item.get("value") or "").strip()
+        if not value:
+            # A required field left empty. Refused values are reported first, and their note already says why.
+            if not any(existing["field"] == field for existing in found):
+                found.append(gap(field, f"{name} needs {aspect}, and it is empty.", blocking=False))
+            continue
+        found.append(gap(field, f"{aspect} “{value}” is not one of {name}'s choices, so it is left empty.", blocking=False))
     return found
 
 
