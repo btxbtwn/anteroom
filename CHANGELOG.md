@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.355 — 2026-10-25
+## 0.1.356 — 2026-10-25
 
 - eBay and Etsy categories for a direct listing come from each site's own category list. The eBay and Etsy sections of the editor show that category and its fields. Send to Vendoo still uses Vendoo's categories and field names.
+
+## 0.1.355 — 2026-10-25
+
+- You can turn on Delist the other marketplaces in Settings → Connections. When something sells, Anteroom takes it off the other places it is still listed. The marketplace it sold on is left alone. This stays off until you turn it on.
 
 ## 0.1.354 — 2026-10-25
 

@@ -775,6 +775,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ marketplace, enabled }),
       }),
+    setSaleAutodelist: (autodelist: boolean) =>
+      request<SaleDetectionStatus>("/settings/sale-detection", {
+        method: "PUT",
+        body: JSON.stringify({ autodelist }),
+      }),
     provider: () => request<ProviderStatus>("/settings/provider"),
     setProvider: (apiKey: string) =>
       request<OkResponse>("/settings/provider", {

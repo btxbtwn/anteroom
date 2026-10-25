@@ -1019,15 +1019,16 @@ def delete_error_logs():
 
 
 class SaleDetectionConfig(BaseModel):
-    marketplace: str
-    enabled: bool
+    marketplace: str | None = None
+    enabled: bool | None = None
+    autodelist: bool | None = None
 
 
 def _sale_detection_status() -> dict:
     from vendoo_studio.services.chrome_sales import check_errors
-    from vendoo_studio.services.user_settings import get_sale_detection
+    from vendoo_studio.services.user_settings import autodelist_enabled, get_sale_detection
 
-    return {"ok": True, "enabled": get_sale_detection(), "checks": check_errors()}
+    return {"ok": True, "enabled": get_sale_detection(), "autodelist": autodelist_enabled(), "checks": check_errors()}
 
 
 @router.get("/sale-detection")
@@ -1038,8 +1039,16 @@ def get_sale_detection_route():
 @router.put("/sale-detection")
 def put_sale_detection(body: SaleDetectionConfig):
     from vendoo_studio.services.chrome_sales import clear_check_error
-    from vendoo_studio.services.user_settings import set_sale_detection
+    from vendoo_studio.services.user_settings import set_autodelist, set_sale_detection
 
+    if body.autodelist is None and (body.marketplace is None or body.enabled is None):
+        raise HTTPException(400, "Name the marketplace, or choose whether to delist the other marketplaces.")
+    if body.autodelist is not None:
+        set_autodelist(body.autodelist)
+    if body.marketplace is None and body.enabled is None:
+        return _sale_detection_status()
+    if body.marketplace is None or body.enabled is None:
+        raise HTTPException(400, "Name the marketplace.")
     try:
         set_sale_detection(body.marketplace, body.enabled)
     except ValueError as exc:

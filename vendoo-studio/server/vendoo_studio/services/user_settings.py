@@ -726,6 +726,22 @@ def set_sale_detection(marketplace: str, enabled: bool) -> dict[str, bool]:
     return get_sale_detection()
 
 
+AUTODELIST_KEY = "sale_autodelist"
+
+
+def autodelist_enabled() -> bool:
+    """The seller asked Anteroom to delist the other marketplaces after a sale. Off unless saved."""
+    return read_settings().get(AUTODELIST_KEY) is True
+
+
+def set_autodelist(enabled: bool) -> bool:
+    def mutator(payload: dict) -> None:
+        payload[AUTODELIST_KEY] = bool(enabled)
+
+    update_settings(mutator)
+    return autodelist_enabled()
+
+
 BUSINESS_NOTE_KEY = "business_note"
 MAX_BUSINESS_NOTE_CHARS = 4000
 
