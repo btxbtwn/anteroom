@@ -46,6 +46,7 @@ export function VendooSyncStatus({ convId, bound }: { convId: string; bound: boo
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
     queryClient.invalidateQueries({ queryKey: ["vendoo-item"] });
     queryClient.invalidateQueries({ queryKey: ["vendoo-item-peek"] });
+    queryClient.invalidateQueries({ queryKey: ["marketplace-statuses"] });
     queryClient.invalidateQueries({ queryKey: ["vendoo-sync", convId] });
   }, [convId, queryClient]);
 

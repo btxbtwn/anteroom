@@ -103,6 +103,26 @@ class ListingFacetsTest(unittest.TestCase):
             ["depop", "ebay", "etsy", "vestiaire"],
         )
 
+    def test_direct_listings_count_as_live_on_that_marketplace(self):
+        item = {
+            "listings": {"ebay": {"status": {"notListed": True}}},
+            "externalListings": {
+                "poshmark": {
+                    "status": {"listed": True},
+                    "listingURL": "https://poshmark.com/listing/windbreaker",
+                },
+                "mercari": {
+                    "status": {"notListed": True},
+                    "listingURL": "https://www.mercari.com/us/item/gone/",
+                },
+            },
+        }
+        self.assertEqual(vendoo_listed_marketplaces(item, None), ["poshmark"])
+        self.assertEqual(
+            vendoo_listing_urls(item, None),
+            {"poshmark": "https://poshmark.com/listing/windbreaker"},
+        )
+
     def test_listed_marketplaces_are_empty_without_listings(self):
         self.assertEqual(vendoo_listed_marketplaces(None, None), [])
         self.assertEqual(vendoo_listed_marketplaces({"listings": "nope"}, None), [])
