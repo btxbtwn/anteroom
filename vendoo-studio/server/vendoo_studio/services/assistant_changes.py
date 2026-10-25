@@ -137,7 +137,11 @@ def saved_as(listing: dict, to_set: dict[str, Any]) -> dict:
     from vendoo_studio.models.validation import normalize_listing_dropdowns
     from vendoo_studio.services.size_audit import aligned
 
-    updated = aligned(apply_fields(listing, to_set))
+    previous = listing.get("size")
+    updated = aligned(
+        apply_fields(listing, to_set),
+        previous_size=None if previous is None else str(previous),
+    )
     normalize_listing_dropdowns(updated)
     return updated
 
