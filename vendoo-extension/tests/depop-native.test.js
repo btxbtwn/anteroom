@@ -27,6 +27,19 @@ test('Depop accepts only durable native edit links', () => {
   assert.equal(call(c, 'nativeDraftUrl', 'depop', DRAFT.replace('123456', 'draft-opaque-id')), DRAFT.replace('123456', 'draft-opaque-id'));
 });
 
+test('Depop draft writes the same colour, condition, and option codes Vendoo would', async () => {
+  const { c, requests, payload } = page();
+  payload.listing = { ...listing, primaryColor: 'Black', secondaryColor: 'Gray', condition: 'Pre-Owned - Good',
+    form: { overrides: { condition: 'Pre-Owned - Good' }, specifics: { style: ['casual', 'retro'], age: ['modern'], source: [] } } };
+  await c.depopApiAction('save', payload);
+  const body = JSON.parse(requests[1].body);
+  assert.deepEqual(body.colour, ['black', 'grey']);
+  assert.equal(body.condition, 'used_good');
+  assert.deepEqual(body.style, ['casual', 'retro']);
+  assert.deepEqual(body.age, ['modern']);
+  assert.equal(body.source, undefined);
+});
+
 test('Depop draft updates preserve photos and never call the publish endpoint', async () => {
   const { c, requests, payload } = page();
   const result = await c.depopApiAction('save', payload);

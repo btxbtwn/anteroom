@@ -16,7 +16,7 @@ import httpx
 
 from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.models.etsy_fields import (
-    etsy_eligible, etsy_when_options, is_etsy_digital_listing, resolve_etsy_when,
+    etsy_when_options, is_etsy_digital_listing, resolve_etsy_when,
 )
 from vendoo_studio.services import marketplace_accounts
 from vendoo_studio.services.keychain import get_marketplace_accounts
@@ -72,7 +72,7 @@ def _price(value) -> Decimal:
                 return rounded
     except (InvalidOperation, ValueError):
         pass
-    raise ValueError("Set a positive Etsy price before saving.")
+    raise ValueError("Set a positive Etsy price before listing.")
 
 
 def _remote_price(remote: dict) -> Decimal:
@@ -95,12 +95,10 @@ def _matches(remote: dict, snapshot: dict) -> bool:
 def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     title, description = str(snapshot.get("title") or ""), str(snapshot.get("description") or "")
     if not title.strip() or not description.strip():
-        raise ValueError("Add an Etsy title and description before saving.")
+        raise ValueError("Add an Etsy title and description before listing.")
     fields = {"title": title, "description": description, "price": str(_price(snapshot.get("price")))}
     if not creating:
         return fields
-    if not etsy_eligible(snapshot):
-        raise ValueError("This item's Etsy details do not identify an eligible handmade, vintage, or supply item.")
     if is_etsy_digital_listing(snapshot):
         raise ValueError("This listing flow supports physical Etsy items. Prepare digital files in Etsy Shop Manager.")
     details = snapshot.get("etsy_specifics") or {}
@@ -112,10 +110,10 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
             "2007 - 2009": "2007_2009", "2000 - 2006": "2000_2006", "Before 2007": "before_2007",
             "1900 - 1909": "1900s", "Before 1700": "before_1700"}.get(label, label)
     if not who or what is None or not re.fullmatch(r"made_to_order|2020_2026|2010_2019|2007_2009|2000_2006|before_2007|19[0-9]0s|1800s|1700s|before_1700", when):
-        raise ValueError("Complete Etsy's who made it, what is it, and when made details before saving.")
+        raise ValueError("Complete Etsy's who made it, what is it, and when made details before listing.")
     category = str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
     if not re.fullmatch(r"[1-9]\d*", category):
-        raise ValueError("Choose a verified Etsy category before saving a new draft.")
+        raise ValueError("Choose a verified Etsy category before listing.")
     fields.update(quantity="1", who_made=who, when_made=when, is_supply=str(what).lower(),
                   taxonomy_id=category, type="physical", should_auto_renew="false")
     # Only use explicit seller-selected IDs. Shipping and processing can also be
@@ -230,11 +228,11 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
 
         if action == "publish":
             if confirm is not True:
-                raise ValueError("Confirm publishing this saved Etsy draft.")
+                raise ValueError("Confirm listing on Etsy.")
             item_id = listing_id(binding.get("draft_url"))
             remote = await _read(shop_id, item_id)
-            if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images") or not etsy_eligible(snapshot):
-                raise ValueError("Review the Etsy draft's saved fields, photos, and eligibility before publishing.")
+            if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images"):
+                raise ValueError("Etsy did not accept this listing's fields or photos.")
             remote = await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "publish", data={"state": "active"})
             # A successful response is a receipt; a later read failure must not
             # discard it and invite a second paid activation.
@@ -251,9 +249,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             selected = shipping_profile_id or fields.get("shipping_profile_id")
             processing = readiness_state_id or fields.get("readiness_state_id")
             if not selected:
-                raise ValueError("Choose an Etsy shipping profile before saving a new draft.")
+                raise ValueError("Choose an Etsy shipping profile in Settings before listing.")
             if not processing:
-                raise ValueError("Choose an Etsy processing profile before saving a new draft.")
+                raise ValueError("Choose an Etsy processing profile in Settings before listing.")
             profiles = await listing_profiles()
             if selected not in {profile["id"] for profile in profiles["shipping"]}:
                 raise ValueError("Choose a shipping profile from the connected Etsy shop.")
@@ -342,7 +340,7 @@ async def check(snapshot: dict, binding: dict, candidate: str | None) -> dict:
             return _success(remote)
         if not binding.get("etsy_pending_write"):
             return {"ok": False, "safe_to_retry": True, "draft_url": candidate,
-                    "error": "This Etsy draft is incomplete. Save this revision again to finish the same draft."}
+                    "error": "This Etsy listing is incomplete. List again to finish the same one."}
         raise ValueError("Etsy's draft write is unconfirmed. Review its fields and photos before another attempt.")
     except Exception as exc:
         return {"ok": False, "error": _error_text(exc)}

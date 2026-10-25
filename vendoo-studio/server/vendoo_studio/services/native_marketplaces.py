@@ -1,4 +1,4 @@
-"""Seller-operated native marketplace drafts. Publish is never queued or retried."""
+"""Seller-confirmed native listings. One confirmed List creates the live listing and is never queued or retried. Anteroom keeps the listing."""
 from __future__ import annotations
 
 from functools import cache
@@ -21,7 +21,7 @@ class NativeMarketplaceError(RuntimeError):
         self.status_code = status_code
 
 
-Marketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
+Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild"]
 InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
 # Marketplaces that list in one seller-confirmed step, with no marketplace draft.
 ONE_STEP = frozenset({"poshmark"})
@@ -133,11 +133,13 @@ def _apply_result(db: Session, conv, marketplace: str, binding: dict, result: di
             if url:
                 updated["draft_url"] = url
             public = urlparse(str(result.get("listing_url") or ""))
-            if public.scheme == "https" and public.netloc == {"poshmark": "poshmark.com", "mercari": "www.mercari.com", "depop": "www.depop.com", "etsy": "www.etsy.com", "sellwild": "sellwild.com"}[marketplace]:
-                if marketplace == "sellwild":
-                    import re
-                    if not re.fullmatch(r"/product/\d+/[a-z0-9-]+", public.path):
-                        raise NativeMarketplaceError(502, "Chrome returned an invalid Sellwild listing link.")
+            hosts = {"ebay": "www.ebay.com", "poshmark": "poshmark.com", "mercari": "www.mercari.com", "depop": "www.depop.com", "etsy": "www.etsy.com", "sellwild": "sellwild.com"}
+            if public.scheme == "https" and public.netloc == hosts[marketplace]:
+                import re
+                if marketplace == "sellwild" and not re.fullmatch(r"/product/\d+/[a-z0-9-]+", public.path):
+                    raise NativeMarketplaceError(502, "Chrome returned an invalid Sellwild listing link.")
+                if marketplace == "ebay" and not re.fullmatch(r"/itm/\d{6,20}", public.path):
+                    raise NativeMarketplaceError(502, "eBay returned an invalid listing link.")
                 updated["listing_url"] = f"https://{public.netloc}{public.path}"
             elif (marketplace == "sellwild" and action == "publish") or action == "list":
                 raise NativeMarketplaceError(502, "Chrome did not return the listing link.")
@@ -178,6 +180,11 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
     snapshot = revision.listing_json
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
+    import copy
+
+    from vendoo_studio.services.native_form import attach_form
+
+    snapshot = attach_form(copy.deepcopy(snapshot), marketplace)
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace == "etsy":
@@ -185,6 +192,14 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
             etsy_listings.connected_shop_id()
         except ValueError as exc:
             raise NativeMarketplaceError(409, str(exc)) from exc
+    elif marketplace == "ebay":
+        from vendoo_studio.services.ebay_client import EbayClient
+        from vendoo_studio.services.marketplace_accounts import SignInRequired
+
+        try:
+            await EbayClient.connect()
+        except SignInRequired as exc:
+            raise NativeMarketplaceError(409, "Connect eBay in Settings → Connections before listing.") from exc
     else:
         if not extension_manager.connected:
             raise NativeMarketplaceError(409, "Connect Chrome first.")
@@ -221,7 +236,7 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
             if not binding.get("sellwild_category_id") or not binding.get("sellwild_condition_id"):
                 raise NativeMarketplaceError(409, "Choose a Sellwild category and condition, then save in Anteroom again.")
         elif not binding.get("draft_url") and not photos:
-            raise NativeMarketplaceError(400, "Add at least one photo before saving a native draft.")
+            raise NativeMarketplaceError(400, "Add at least one photo before listing.")
         repo = JobRepo(db)
         if repo.get_active():
             raise NativeMarketplaceError(409, "Another automation job is queued or running. Wait for it to finish.")
@@ -232,7 +247,7 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
                    "job_id": job.id, "error": None}
         _store(db, conv, marketplace, binding)
     try:
-        if marketplace == "etsy":
+        if marketplace in {"etsy", "ebay"}:
             from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
 
             def record(values: dict) -> None:
@@ -243,6 +258,12 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
                 db.refresh(job)
                 return job.status in ACTIVE_JOB_STATUSES and _bindings(conv).get(marketplace, {}).get("job_id") == job.id
 
+            if marketplace == "ebay":
+                from vendoo_studio.services import ebay_listings
+
+                result = await ebay_listings.execute(action, snapshot, photos, binding, record, active,
+                                                     confirm=isinstance(body, PublishRequest) and body.confirm is True)
+                return _apply_result(db, conv, marketplace, binding, result)
             from vendoo_studio.services import user_settings
 
             defaults = user_settings.get_etsy_listing_defaults()
@@ -424,16 +445,42 @@ def save_local_sellwild_draft(conv_id: str, body: DraftRequest, db: Session):
     return binding
 
 
-async def list_now(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session):
-    """Create a live listing in one seller-confirmed step. Never queued or retried."""
-    if marketplace not in ONE_STEP:
-        raise NativeMarketplaceError(409, f"{marketplace.title()} does not list in one step yet. Save a draft first.")
-    if body.confirm is not True:
-        raise NativeMarketplaceError(400, f"Confirm listing on {marketplace}.")
+def _current_draft(binding: dict, revision_id: str) -> str | None:
+    url = binding.get("draft_url")
+    if binding.get("state") == "draft" and binding.get("revision_id") == revision_id and url:
+        return str(url)
+    return None
+
+
+async def _confirmed(conv_id: str, marketplace: str, body: DraftRequest, action: str, db: Session) -> dict:
     try:
-        return await _run(conv_id, marketplace, body, "list", db)
+        return await _run(conv_id, marketplace, body, action, db)
     except browser_bridge.BrowserBridgeError as exc:
         raise NativeMarketplaceError(502, UNKNOWN) from exc
+
+
+async def list_now(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session):
+    """Create a live listing in one seller-confirmed step. Never queued or retried.
+
+    Anteroom holds the listing. Poshmark lists directly. Sellwild records the category
+    here, then lists. Mercari, Depop and Etsy finish any in-progress marketplace record
+    and list it in the same confirmation, and do not stop on a saved draft.
+    """
+    if body.confirm is not True:
+        raise NativeMarketplaceError(400, f"Confirm listing on {marketplace}.")
+    if marketplace in {"poshmark", "ebay"}:
+        return await _confirmed(conv_id, marketplace, body, "list", db)
+    if marketplace == "sellwild":
+        save_local_sellwild_draft(conv_id, body, db)
+        return await _confirmed(conv_id, marketplace, body, "publish", db)
+    binding = _bindings(_conversation(db, conv_id)).get(marketplace, {})
+    draft = _current_draft(binding, body.revision_id)
+    if not draft:
+        saved = await _confirmed(conv_id, marketplace, body, "save_draft", db)
+        if saved.get("state") != "draft" or saved.get("error") or not saved.get("draft_url"):
+            return saved
+        draft = str(saved["draft_url"])
+    return await _confirmed(conv_id, marketplace, body.model_copy(update={"draft_url": draft, "confirm": True}), "publish", db)
 
 
 async def publish(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session):
@@ -465,6 +512,14 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
         if api_job_is_live(binding["job_id"]):
             raise NativeMarketplaceError(409, "The Etsy API action is still running. Wait for it to finish.")
         result = await etsy_listings.check(snapshot, binding, candidate)
+        return _apply_result(db, conv, marketplace, binding, result)
+    if marketplace == "ebay":
+        from vendoo_studio.services.api_job_lock import api_job_is_live
+        from vendoo_studio.services import ebay_listings
+
+        if api_job_is_live(binding["job_id"]):
+            raise NativeMarketplaceError(409, "The eBay listing is still running. Wait for it to finish.")
+        result = await ebay_listings.check(binding)
         return _apply_result(db, conv, marketplace, binding, result)
     try:
         result = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.result", {

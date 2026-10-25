@@ -14,12 +14,12 @@ const SELLWILD = { categories: [{ id: 272, label: "Fashion > Coats & Jackets" }]
 const live = { url: "https://www.mercari.com/us/item/m70565754838", listing_id: "m70565754838", source: "vendoo", sold_here: false, state: "live" } as const;
 
 function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { error = null as Error | null, pending = false, etsyEligible = true,
-  suggested = SELLWILD.suggested as { category_id: number | null; condition_id: number | null }, selected = "" } = {}) {
+  etsyReady = false, suggested = SELLWILD.suggested as { category_id: number | null; condition_id: number | null }, selected = "" } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
     : queryKey[0] === "sellwild-options" ? { data: { ...SELLWILD, suggested }, isPending: false }
-    : queryKey[0] === "etsy-listing-defaults" ? { data: {}, isSuccess: true, isPending: false }
+    : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2" } : {}, isSuccess: true, isPending: false }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, error: null, variables: { marketplace: "depop", kind: "draft" } });
   return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible} selected={selected} />);
@@ -40,6 +40,8 @@ describe("marketplaces section", () => {
     const names = [...html.matchAll(/<li aria-label="([^"]+)"/g)].map((match) => match[1]);
     expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild"]);
     expect(row(html, "eBay")).toContain("Not listed");
+    // Ordinary "not listed" stays in the row for assistive tech, not as a second line on every marketplace.
+    expect(row(html, "eBay")).not.toContain('role="status"');
   });
 
   it("puts the selected marketplace's actions beside its form, and lists Poshmark in one step", () => {
@@ -51,21 +53,26 @@ describe("marketplaces section", () => {
     expect(row(render({ poshmark: { state: "draft", revision_id: "current", draft_url: "https://poshmark.com/edit-listing/x" } }), "Poshmark")).toContain("Not listed");
   });
 
-  it("keeps draft marketplaces' publish disabled until a current draft is saved", () => {
-    expect(disabledButton(render({}, {}, { selected: "mercari" }), "Publish…")).toBe(true);
+  it("lists every marketplace from its form, with no draft to save", () => {
+    const mercari = render({}, {}, { selected: "mercari" });
+    expect(enabledButton(mercari, "List…")).toBe(true);
+    expect(mercari).not.toContain("Save draft");
+    expect(mercari).not.toContain("Publish…");
     const saved = render({ mercari: { state: "draft", revision_id: "current", draft_url: "https://www.mercari.com/sell/draft/x/" } }, {}, { selected: "mercari" });
-    expect(row(saved, "Mercari")).toContain("Draft saved");
-    expect(saved).toContain("Open draft");
-    expect(enabledButton(saved, "Publish…")).toBe(true);
+    expect(row(saved, "Mercari")).toContain("Not listed");
+    expect(saved).not.toContain("Draft saved");
+    expect(saved).not.toContain("Open draft");
+    expect(enabledButton(saved, "List…")).toBe(true);
     const stale = render({ depop: { state: "draft", revision_id: "older", draft_url: "https://www.depop.com/sellinghub/drafts/edit/1/" } }, {}, { selected: "depop" });
-    expect(row(stale, "Depop")).toContain("Draft out of date");
-    expect(stale).toContain("Save changes");
-    expect(disabledButton(stale, "Publish…")).toBe(true);
+    expect(row(stale, "Depop")).toContain("Not listed");
+    expect(stale).not.toContain("Save changes");
+    expect(enabledButton(stale, "List…")).toBe(true);
   });
 
   it("offers a result check instead of repeating an uncertain write", () => {
     const html = render({ mercari: { state: "unknown", revision_id: "current", error: "Check before trying again." } }, {}, { selected: "mercari" });
     expect(row(html, "Mercari")).toContain("Unconfirmed");
+    expect(row(html, "Mercari")).toContain('role="status"');
     expect(html).toContain("Check result");
     expect(html).not.toContain("Publish…");
   });
@@ -75,9 +82,9 @@ describe("marketplaces section", () => {
     expect(html).toContain("Fashion &gt; Coats &amp; Jackets · Gently Used");
     expect(html).toContain(">Change</button>");
     expect(html).not.toContain('aria-label="Sellwild category"');
-    expect(enabledButton(html, "Save")).toBe(true);
+    expect(enabledButton(html, "List…")).toBe(true);
     const unmatched = render({}, {}, { suggested: { category_id: null, condition_id: 2 }, selected: "sellwild" });
-    expect(disabledButton(unmatched, "Save")).toBe(true);
+    expect(disabledButton(unmatched, "List…")).toBe(true);
     expect(unmatched).toContain('aria-label="Sellwild category"');
     expect(unmatched).toContain("couldn&#x27;t match");
   });
@@ -86,13 +93,20 @@ describe("marketplaces section", () => {
     const html = render({}, {}, { selected: "etsy" });
     expect(html).not.toContain("Shipping profile");
     expect(html).toContain("Settings → Connections");
-    expect(disabledButton(html, "Save draft")).toBe(true);
+    expect(disabledButton(html, "List…")).toBe(true);
   });
 
-  it("explains Etsy ineligibility in its own row, with no actions", () => {
-    const html = render({}, {}, { etsyEligible: false, selected: "etsy" });
+  it("warns when an item may not qualify for Etsy and still offers List", () => {
+    const html = render({}, {}, { etsyEligible: false, etsyReady: true, selected: "etsy" });
     expect(row(html, "Etsy")).toContain("Not eligible");
-    expect(html).not.toContain("Save draft");
+    expect(html).toContain("You can still list this");
+    expect(enabledButton(html, "List…")).toBe(true);
+  });
+
+  it("offers List on eBay from the same rail", () => {
+    const html = render({}, {}, { selected: "ebay" });
+    expect(row(html, "eBay")).toContain("Not listed");
+    expect(enabledButton(html, "List…")).toBe(true);
   });
 
   it("gives every marketplace its own actions menu, and offers Delist everywhere only for more than one listing", () => {
@@ -106,8 +120,8 @@ describe("marketplaces section", () => {
 
   it("offers no new listings once the item sold somewhere", () => {
     const sold = { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } };
-    expect(render({}, sold, { selected: "mercari" })).not.toContain("Save draft");
-    expect(render({}, sold, { selected: "sellwild" })).not.toContain(">Save<");
+    expect(render({}, sold, { selected: "mercari" })).not.toContain("List…");
+    expect(render({}, sold, { selected: "sellwild" })).not.toContain("List…");
   });
 
   it("shows a failed delist with its reason", () => {
@@ -118,7 +132,7 @@ describe("marketplaces section", () => {
 
   it("blocks writes when the saved state could not be loaded or another action runs", () => {
     for (const options of [{ error: new Error("Could not load saved marketplace drafts.") }, { pending: true }]) {
-      expect(disabledButton(render({}, {}, { ...options, selected: "mercari" }), "Save draft")).toBe(true);
+      expect(disabledButton(render({}, {}, { ...options, selected: "mercari" }), "List…")).toBe(true);
       expect(/<button[^>]*disabled=""[^>]*>List(?:ing)?…<\/button>/.test(render({}, {}, { ...options, selected: "poshmark" }))).toBe(true);
     }
   });

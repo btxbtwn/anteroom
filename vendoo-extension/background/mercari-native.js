@@ -48,11 +48,14 @@ function mercariCategoryId(listing) {
 
 // Package weight in whole ounces. Mercari's server fails the draft save
 // without it (verified 2026-10-24); its form sends ounces with no unit.
-function mercariWeightOz(listing) {
-  const pounds = Number(listing.weight_lb || 0);
-  const ounces = Number(listing.weight_oz || 0);
+function mercariOunces(pounds, ounces) {
   const total = Math.ceil((Number.isFinite(pounds) ? pounds : 0) * 16 + (Number.isFinite(ounces) ? ounces : 0));
   return total > 0 ? total : null;
+}
+
+function mercariWeightOz(listing) {
+  return mercariOunces(Number(listing.weight_lb || 0), Number(listing.weight_oz || 0))
+    || mercariOunces(Number(listing.form?.overrides?.weight?.pounds || 0), Number(listing.form?.overrides?.weight?.ounces || 0));
 }
 
 // What the seller filled in Anteroom, in Mercari's form fields. Brand, size
@@ -97,7 +100,7 @@ async function mercariHeaders() {
 function mercariFailure(operationName, status, errors) {
   const text = JSON.stringify(errors || '').slice(0, 4000);
   if (status === 401 || /unauthenticated|unauthori[sz]ed/i.test(text)) return 'Mercari asked to sign in again. Reconnect Mercari in Anteroom.';
-  if (/PersistedQueryNotFound|PERSISTED_QUERY/i.test(text)) return 'Mercari changed its listing form. Anteroom needs an update before saving Mercari drafts.';
+  if (/PersistedQueryNotFound|PERSISTED_QUERY/i.test(text)) return 'Mercari changed its listing form. Anteroom needs an update before listing there.';
   if (/captcha|verify you|challenge/i.test(text)) return 'Mercari requested browser verification.';
   const first = Array.isArray(errors) ? errors[0] : null;
   const code = String(first?.extensions?.code || first?.extensions?.errorCode || '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 60);
@@ -189,13 +192,13 @@ async function runMercariNative(msg, recovery = false) {
       if (!id) return { ok: false, error: 'Mercari did not confirm a draft. Check your Mercari drafts before trying again.' };
       const draft = await readMercariDraft(id, payload.deadline);
       if (!mercariDraftMatches(draft, payload.listing, payload.expected_photo_count)) {
-        return { ok: false, draft_url: payload.draft_url, error: 'The Mercari draft differs from this revision. Review it before continuing.' };
+        return { ok: false, draft_url: payload.draft_url, error: 'Mercari\'s listing does not match this revision. List again.' };
       }
       return { ok: true, state: 'draft', draft_url: payload.draft_url };
     }
     const common = mercariCommon(payload.listing);
-    if (!common.name) throw new Error('Add a title before saving a Mercari draft.');
-    if (!common.shipping.weight) throw new Error('Add a package weight before saving a Mercari draft.');
+    if (!common.name) throw new Error('Add a title before listing on Mercari.');
+    if (!common.shipping.weight) throw new Error('Add a package weight before listing on Mercari.');
     let expectedPhotos = null;
     if (id) {
       committed = true;
@@ -215,7 +218,7 @@ async function runMercariNative(msg, recovery = false) {
     }
     const draft = await readMercariDraft(id, payload.deadline);
     if (!mercariDraftMatches(draft, payload.listing, expectedPhotos)) {
-      throw new Error('The saved Mercari draft differs from this revision. Review its fields and photos.');
+      throw new Error('Mercari did not keep this listing\'s fields and photos. Check them and list again.');
     }
     return { ok: true, state: 'draft', draft_url: payload.draft_url };
   } catch (error) {
@@ -231,7 +234,7 @@ const MERCARI_ACTION_LABELS = { categoryId: 'category', conditionId: 'condition'
 // sent at most once, and never retried when the reply is lost.
 async function publishMercariDraft(payload, storeReceipt, recovery) {
   const id = mercariDraftId(payload.draft_url);
-  if (!id) return { ok: false, safe_to_retry: true, error: 'Save a Mercari draft before publishing.' };
+  if (!id) return { ok: false, safe_to_retry: true, error: 'Mercari did not confirm a listing to publish. List again.' };
   if (recovery) {
     const journal = (await chrome.storage.local.get(`native_operation_${payload.operation_id}`))[`native_operation_${payload.operation_id}`] || {};
     if (journal.listing_url) return { ok: true, state: 'published', draft_url: payload.draft_url, listing_url: journal.listing_url };
@@ -242,12 +245,12 @@ async function publishMercariDraft(payload, storeReceipt, recovery) {
   try {
     const draft = await readMercariDraft(id, payload.deadline);
     if (!mercariDraftMatches(draft, payload.listing, null)) {
-      return { ok: false, safe_to_retry: true, draft_url: payload.draft_url, error: 'The Mercari draft differs from this revision. Save it again before publishing.' };
+      return { ok: false, safe_to_retry: true, draft_url: payload.draft_url, error: 'Mercari\'s listing does not match this revision. List again.' };
     }
     if (draft.status !== 'DRAFT_ITEM_STATUS_READY') {
       const needed = [...new Set(draft.actions_required.map(field => MERCARI_ACTION_LABELS[field] || field))];
       return { ok: false, safe_to_retry: true, draft_url: payload.draft_url,
-        error: `Mercari needs ${needed.length ? needed.join(', ') : 'more details'} on the draft before it can be listed.` };
+        error: `Mercari needs ${needed.length ? needed.join(', ') : 'more details'} before it can be listed.` };
     }
     submitted = true;
     const data = await mercariRequest(mercariOperation('listDraftItemMutation', { input: { draftItemId: id } }), { deadline: payload.deadline });

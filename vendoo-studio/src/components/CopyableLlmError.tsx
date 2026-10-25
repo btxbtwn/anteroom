@@ -294,8 +294,8 @@ ${replyShape(fields)}`;
 
 export function emptyFieldsButtonLabel(count: number): string {
   const n = Math.max(0, Math.floor(Number(count) || 0));
-  if (n <= 0) return "Ask chat for fields";
-  return `Ask chat for ${n} field${n === 1 ? "" : "s"}`;
+  if (n <= 0) return "Fill empty fields";
+  return `Fill ${n} empty field${n === 1 ? "" : "s"}`;
 }
 
 export function CopyableLlmError({
@@ -304,6 +304,8 @@ export function CopyableLlmError({
   onAskChat,
   emptyFieldsCount = 0,
   emptyFieldsPrompt,
+  hideDetails = false,
+  issueCount = 0,
   className,
 }: {
   text: string;
@@ -311,6 +313,10 @@ export function CopyableLlmError({
   onAskChat?: (text: string) => void;
   emptyFieldsCount?: number;
   emptyFieldsPrompt?: string;
+  /** The caller already lists these issues, so the raw dump would repeat them. */
+  hideDetails?: boolean;
+  /** Blocking issues, when known, so Fix says how many. */
+  issueCount?: number;
   className?: string;
 }) {
   const body = String(text || "").trim();
@@ -320,48 +326,46 @@ export function CopyableLlmError({
   // empty the card stays so its fill button survives the error clearing.
   if (!body && !canFillEmpty) return null;
 
+  const fixLabel = issueCount > 0
+    ? `Fix ${issueCount} in chat`
+    : "Fix in chat";
+
   return (
     <div className={cn("flex min-w-0 flex-col gap-2", className)}>
-      {onAskChat && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap gap-1.5 max-[900px]:[&>*]:w-full">
-            {body && (
-              <Button
-                variant="outline"
-                size="xs"
-                title="Send these errors to chat so it can fix them"
-                onClick={() => onAskChat(prompt)}
-              >
-                <WrenchIcon />
-                Fix errors
-              </Button>
-            )}
+      {onAskChat && (body || canFillEmpty) && (
+        <div className="flex flex-wrap gap-1.5 max-[900px]:[&>*]:w-full">
+          {body && (
             <Button
               variant="outline"
               size="xs"
-              disabled={!canFillEmpty}
-              title={canFillEmpty
-                ? "Send empty listing fields to chat. Does not change Vendoo yet."
-                : "No empty listing fields to fill"}
+              title="Send the blocking issues to chat. Chat updates this listing. It does not send to Vendoo."
+              onClick={() => onAskChat(prompt)}
+            >
+              <WrenchIcon />
+              {fixLabel}
+            </Button>
+          )}
+          {canFillEmpty && (
+            <Button
+              variant="outline"
+              size="xs"
+              title="Send empty listing fields to chat. Does not change Vendoo yet."
               onClick={() => {
-                if (!canFillEmpty || !emptyFieldsPrompt) return;
+                if (!emptyFieldsPrompt) return;
                 onAskChat(emptyFieldsPrompt);
               }}
             >
               <MessageSquareIcon />
               {emptyFieldsButtonLabel(emptyCount)}
             </Button>
-          </div>
-          <p className="text-muted-foreground text-xs">
-            Saves changes to this listing. Send to Vendoo when ready.
-          </p>
+          )}
         </div>
       )}
-      {body && (
+      {body && !hideDetails && (
         <details className="group rounded-lg border border-error/32 bg-error-surface">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 px-2.5 py-1.5 text-error-foreground text-xs [&::-webkit-details-marker]:hidden">
             <CircleAlertIcon className="size-3.5 shrink-0 text-error" aria-hidden="true" />
-            Errors need attention · View details
+            Errors need attention
             <ChevronDownIcon className="ms-auto size-3.5 shrink-0 opacity-70 transition-transform group-open:rotate-180" aria-hidden="true" />
           </summary>
           <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words border-error/20 border-t px-2.5 py-2 text-error-foreground/90 text-xs max-[900px]:max-h-22">

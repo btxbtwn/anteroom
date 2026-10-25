@@ -111,7 +111,7 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
   {
     id: "etsy",
     name: "Etsy",
-    what: "Save drafts and publish through Etsy’s official API, and receive sale notifications so you can delist sold items elsewhere.",
+    what: "List through Etsy’s official API, and receive sale notifications so you can delist sold items elsewhere.",
   },
 ];
 

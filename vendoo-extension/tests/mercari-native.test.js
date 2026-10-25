@@ -93,7 +93,7 @@ test('a draft that Mercari saved differently is reported, not accepted', async (
   setDraft({ name: 'Test jacket', description: 'Private draft', price: 2500, itemCondition: { id: 3 }, photos: [{ id: 'i1' }] });
   const result = await c.runMercariNative(message());
   assert.equal(result.ok, false);
-  assert.match(result.error, /differs/);
+  assert.match(result.error, /did not keep/);
 });
 
 test('a changed Mercari form is reported as needing an update', async () => {
@@ -132,6 +132,7 @@ test('Mercari needs a package weight, sent in whole ounces', async () => {
   assert.equal(c.mercariWeightOz({ weight_lb: 1, weight_oz: 2.2 }), 19);
   assert.equal(c.mercariWeightOz({ weight_oz: 8 }), 8);
   assert.equal(c.mercariWeightOz({}), null);
+  assert.equal(c.mercariWeightOz({ form: { overrides: { weight: { pounds: '0', ounces: '8' } } } }), 8);
   const { c: w, requests } = worker();
   const result = await w.runMercariNative(message({ listing: { ...listing, weight_lb: 0, weight_oz: 0 } }));
   assert.match(result.error, /package weight/);

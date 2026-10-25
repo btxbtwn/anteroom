@@ -1506,7 +1506,7 @@ console.log(JSON.stringify({ blouse, tee }));
         self.assertIn("Listing:", panel)
         self.assertIn("Marketplace:", panel)
         self.assertIn("Current value:", panel)
-        self.assertIn("Ask chat for", panel)
+        self.assertIn("Fill ${n} empty field", panel)
         self.assertIn("askChatGapsPrompt", panel)
         self.assertNotIn("Apply on Vendoo", panel)
         self.assertNotIn("Set Vendoo category", panel)

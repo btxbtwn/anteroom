@@ -72,10 +72,13 @@ function poshmarkPostFields(catalog, listing) {
   const colorNames = new Set((catalog.colors || []).map(color => color.name));
   const colors = [listing.poshmark_specifics?.poshmarkColor || listing.primaryColor, listing.secondaryColor]
     .map(value => ({ Grey: 'Gray', Beige: 'Tan' })[value] || value).filter(value => colorNames.has(value));
-  const original = Number(listing.poshmark_specifics?.originalPrice || 0);
-  const minimum = Number(listing.poshmark_specifics?.smartSellMinimumPrice || listing.poshmark_specifics?.smartSell?.minimumPrice || 0);
+  const formOriginal = Number(listing.form?.specifics?.originalPrice);
+  const original = formOriginal > 0 ? formOriginal : Number(listing.poshmark_specifics?.originalPrice || 0);
+  const smart = listing.form?.specifics?.smartSell;
+  const minimum = Number(smart?.enabled && smart.minPrice) || Number(listing.poshmark_specifics?.smartSellMinimumPrice || listing.poshmark_specifics?.smartSell?.minimumPrice || 0);
   const sku = String(listing.sku || listing.poshmark_specifics?.poshmarkSku || '').trim();
   const cost = Number(listing.poshmark_specifics?.costPrice || listing.costPrice || 0);
+  const brand = listing.form?.overrides?.brand || listing.poshmark_specifics?.poshmarkBrand || listing.brand;
   return {
     title: title.slice(0, 80), description: String(listing.description).slice(0, 1500),
     catalog: category.catalog,
@@ -85,7 +88,7 @@ function poshmarkPostFields(catalog, listing) {
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
     original_price_amount: { val: String(original > price ? original : 0), currency_code: 'USD', currency_symbol: '$' },
     ...(condition ? { condition } : {}),
-    ...(listing.poshmark_specifics?.poshmarkBrand || listing.brand ? { brand: String(listing.poshmark_specifics?.poshmarkBrand || listing.brand) } : {}),
+    ...(brand ? { brand: String(brand) } : {}),
     colors: [...new Set(colors)].slice(0, 2),
     style_tags: (Array.isArray(listing.poshmark_specifics?.styleTags) ? listing.poshmark_specifics.styleTags : []).slice(0, 3).map(String),
     offer_auto_actions_v2_enabled: minimum > 0 && minimum < price,
