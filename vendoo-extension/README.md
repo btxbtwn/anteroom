@@ -36,7 +36,7 @@ After updating the extension, reload it in `chrome://extensions/` and refresh op
   "category": "Clothing > Jackets",
   "color": "Blue",
   "sku": "DENIM-001",
-  "originalPrice": 89.00,
+  "originalPrice": 0,
   "quantity": 1,
   "tags": ["vintage", "denim", "levis", "90s"],
   "images": ["https://example.com/img1.jpg", "https://example.com/img2.jpg"]
@@ -56,7 +56,7 @@ After updating the extension, reload it in `chrome://extensions/` and refresh op
 | category | string | Category path |
 | color | string | Primary color |
 | sku | string | Your SKU/inventory ID |
-| originalPrice | number | Original retail price (Poshmark) |
+| originalPrice | number | Poshmark original price; always 0 |
 | quantity | number | Available quantity |
 | tags | array | Keywords/tags (Etsy) |
 | images | array | Image URLs (not yet implemented) |

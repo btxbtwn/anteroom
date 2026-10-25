@@ -315,7 +315,7 @@ All eBay Item Specifics fields. Use Appendix values.
 - `category_specifics`: T-shirt optional fields after Show Optional Fields. Use live Etsy dropdown values from `vendoo-dropdown-options.json` (`clothingStyle`, `sleeveLength`, `neckline`, `closure`, `graphic`, `fabricPattern`). Fill every applicable row. Use Does Not Apply only for `graphic` / `collarStyle` / `occasion` / `holiday` / `sustainability` when they literally do not apply.
 
 **Poshmark Specifics:**
-- `originalPrice`: MSRP for comparison
+- `originalPrice`: always 0
 - `smartPricing`: Enable smart pricing (true/false)
 - Shipping discount and return policy are account-level Poshmark settings — leave them out
 

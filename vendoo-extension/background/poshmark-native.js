@@ -72,8 +72,6 @@ function poshmarkPostFields(catalog, listing) {
   const colorNames = new Set((catalog.colors || []).map(color => color.name));
   const colors = [listing.poshmark_specifics?.poshmarkColor || listing.primaryColor, listing.secondaryColor]
     .map(value => ({ Grey: 'Gray', Beige: 'Tan' })[value] || value).filter(value => colorNames.has(value));
-  const formOriginal = Number(listing.form?.specifics?.originalPrice);
-  const original = formOriginal > 0 ? formOriginal : Number(listing.poshmark_specifics?.originalPrice || 0);
   const smart = listing.form?.specifics?.smartSell;
   const minimum = Number(smart?.enabled && smart.minPrice) || Number(listing.poshmark_specifics?.smartSellMinimumPrice || listing.poshmark_specifics?.smartSell?.minimumPrice || 0);
   const sku = String(listing.sku || listing.poshmark_specifics?.poshmarkSku || '').trim();
@@ -86,7 +84,7 @@ function poshmarkPostFields(catalog, listing) {
       size_id: size.size.id, size_obj: size.size, size_system: 'us', quantity_available: 1, quantity_sold: 0,
       size_set_tags: size.set.tags || [], seller_inventory_private_info: {} }] },
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
-    original_price_amount: { val: String(original > price ? original : 0), currency_code: 'USD', currency_symbol: '$' },
+    original_price_amount: { val: '0', currency_code: 'USD', currency_symbol: '$' },
     ...(condition ? { condition } : {}),
     ...(brand ? { brand: String(brand) } : {}),
     colors: [...new Set(colors)].slice(0, 2),

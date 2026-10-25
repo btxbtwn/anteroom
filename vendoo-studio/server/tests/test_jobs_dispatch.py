@@ -590,6 +590,7 @@ class PrepareListingSnapshotRetryTest(unittest.TestCase):
             "sku": "KEEP-ME-SKU",
             "cog": "3.50",
             "sellerNotes": "Bin 4, small hole on hem",
+            "poshmarkOriginalPrice": "80",
         })
         self.db.commit()
         snapshot = prepare_listing_snapshot(
@@ -601,8 +602,10 @@ class PrepareListingSnapshotRetryTest(unittest.TestCase):
         self.assertEqual(snapshot["sku"], "KEEP-ME-SKU")
         self.assertEqual(snapshot["cost"], 3.5)
         self.assertEqual(snapshot["internal_notes"], "Bin 4, small hole on hem")
+        self.assertEqual(snapshot["poshmark_specifics"]["originalPrice"], 0)
 
         item, _ = build_vendoo_item(snapshot, None, images=[], user_id="u", item_id="i")
+        self.assertEqual(item["listings"]["poshmark"]["marketplaceSpecifics"]["originalPrice"], "0")
         general = item["generalDetails"]
         self.assertEqual(item["labels"], ["A19", "To List"])
         self.assertEqual(general["sku"], "KEEP-ME-SKU")

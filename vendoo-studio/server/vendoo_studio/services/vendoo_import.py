@@ -1334,8 +1334,8 @@ def _poshmark_specifics(section: Any) -> dict[str, Any]:
         specifics["categoryPath"] = [part.strip() for part in path.split(">") if part.strip()]
     elif not isinstance(path, list):
         specifics["categoryPath"] = []
-    price = _number(specifics.get("originalPrice"))
-    specifics["originalPrice"] = price or 0
+    # A compare-at price on the Vendoo draft is not kept. Original price is 0.
+    specifics["originalPrice"] = 0
     return specifics
 
 

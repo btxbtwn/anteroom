@@ -116,7 +116,7 @@ class VendooImportMapperTest(unittest.TestCase):
         self.assertEqual(listing["internal_notes"], "Small stain")
         self.assertEqual(listing["ebay_specifics"]["type"], "T-Shirt")
         self.assertEqual(listing["ebay_specifics"]["material"], "Cotton")
-        self.assertEqual(listing["poshmark_specifics"]["originalPrice"], 40)
+        self.assertEqual(listing["poshmark_specifics"]["originalPrice"], 0)
         self.assertEqual(listing["poshmark_specifics"]["categoryPath"], ["Women", "Tops"])
         self.assertEqual(listing["mercari_specifics"]["shippingLabel"], "USPS Ground Advantage")
         self.assertNotIn("smartPricing", listing["mercari_specifics"])

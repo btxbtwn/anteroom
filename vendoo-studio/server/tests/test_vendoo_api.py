@@ -253,7 +253,7 @@ class BuildItemTest(unittest.TestCase):
 
         posh = listings["poshmark"]
         self.assertEqual(posh["overrides"]["categoryV2"], {"displayPath": ["Men", "Jeans", "Straight"]})
-        self.assertEqual(posh["marketplaceSpecifics"]["originalPrice"], "90")
+        self.assertEqual(posh["marketplaceSpecifics"]["originalPrice"], "0")
 
         mercari = listings["mercari"]
         self.assertEqual(mercari["overrides"]["categoryV2"]["displayPath"], ["Men", "Jeans"])
@@ -880,7 +880,7 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(back["weight_lb"], 1)
         self.assertEqual(back["weight_oz"], 8)
         self.assertEqual(back["package_dimensions_in"], "13x10x3")
-        self.assertEqual(back["poshmark_specifics"]["originalPrice"], 90.0)
+        self.assertEqual(back["poshmark_specifics"]["originalPrice"], 0)
         self.assertNotIn("department", back.get("ebay_specifics") or {})
         self.assertEqual(back["etsy_specifics"]["who_made"], "someone_else")
         self.assertNotIn("category_specifics", back.get("etsy_specifics") or {})

@@ -133,7 +133,7 @@ class HistoryAndSuggestTest(unittest.TestCase):
 
 
 class ApplyPriceTest(unittest.TestCase):
-    def test_updates_price_and_poshmark_original(self):
+    def test_updates_price_and_keeps_poshmark_original_at_zero(self):
         listing = {
             "price": 48,
             "poshmark_specifics": {"originalPrice": 40},
@@ -141,7 +141,7 @@ class ApplyPriceTest(unittest.TestCase):
         }
         updated = apply_price_to_listing(listing, 41)
         self.assertEqual(updated["price"], 41)
-        self.assertEqual(updated["poshmark_specifics"]["originalPrice"], 48)
+        self.assertEqual(updated["poshmark_specifics"]["originalPrice"], 0)
         self.assertEqual(listing["price"], 48)
 
 

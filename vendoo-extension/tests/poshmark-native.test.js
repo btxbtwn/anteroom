@@ -17,6 +17,7 @@ const CATALOG = { data: {
 } };
 const LISTING = { title: 'Vintage tee', description: 'Soft cotton tee', price: 18, brand: 'Hanes', size: 'M', condition: 'Pre-Owned - Good',
   primaryColor: 'White', secondaryColor: 'Grey', marketplace_category_objects: { poshmark: { path: [DEPT, SHIRTS, TEES] } },
+  form: { specifics: { originalPrice: 55 } },
   poshmark_specifics: { originalPrice: 30, styleTags: ['Casual', 'Retro', 'Streetwear', 'Extra'], smartSellMinimumPrice: 12 } };
 
 function setup({ publishAnswer = [200, {}], status = 'published' } = {}) {
@@ -65,7 +66,7 @@ test('Poshmark lists in one step with every field, no draft save, no tab', async
   assert.deepEqual(post.colors, ['White', 'Gray']);
   assert.deepEqual(post.style_tags, ['Casual', 'Retro', 'Streetwear']);
   assert.deepEqual(post.price_amount, { val: '18', currency_code: 'USD', currency_symbol: '$' });
-  assert.equal(post.original_price_amount.val, '30');
+  assert.equal(post.original_price_amount.val, '0');
   assert.equal(post.offer_auto_actions_v2_enabled, true);
   assert.equal(post.cover_shot.id.length, 24);
   assert.equal(post.pictures.length, 1);
@@ -99,6 +100,7 @@ test('an update writes the live Poshmark post and does not create or publish ano
   const post = requests.find(r => r.method === 'POST' && r.path === `/vm-rest/posts/${POST}`).body.post;
   assert.equal(post.inventory.size_quantity_revision, 3);
   assert.equal(post.title, 'Vintage tee');
+  assert.equal(post.original_price_amount.val, '0');
   assert.ok(!requests.some(r => r.path.includes('/users/') || r.path.endsWith('/status/published') || r.method === 'DELETE'));
 });
 

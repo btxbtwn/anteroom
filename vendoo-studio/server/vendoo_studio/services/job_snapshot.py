@@ -99,15 +99,10 @@ def prepare_listing_snapshot(
     category_override = str(conv_notes.get("categoryOverride") or "").strip()
     if category_override and (not prefer_listing_category or not listing_category):
         listing_snapshot["category_path"] = category_override
-    price_raw = str(conv_notes.get("poshmarkOriginalPrice") or "").strip()
-    try:
-        poshmark_price = float(price_raw) if price_raw else 0
-    except ValueError:
-        poshmark_price = 0
     poshmark = listing_snapshot.get("poshmark_specifics") or {}
     if not isinstance(poshmark, dict):
         poshmark = {}
-    poshmark["originalPrice"] = poshmark_price
+    poshmark["originalPrice"] = 0
     listing_snapshot["poshmark_specifics"] = poshmark
     align_listing_gender(listing_snapshot)
     ensure_listing_defaults(listing_snapshot)

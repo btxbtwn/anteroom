@@ -79,7 +79,6 @@ class CarryoverUpdatesTest(unittest.TestCase):
             "sku": "SAG-HARBOR-L",
             "cog": "1.50",
             "packageDimensions": "14x11x4",
-            "poshmarkOriginalPrice": "48",
             "vendooLabels": "Bin 4, Thrift",
             "sellerNotes": "Bought at the Goodwill bins",
             "knownFlaws": "small stain near the hem and a loose button",
@@ -90,7 +89,7 @@ class CarryoverUpdatesTest(unittest.TestCase):
         listing = {"description": "Tee.\n\nFlaws: tiny hole on the cuff. See photos for details.\n\nMeasurements: See photos"}
         self.assertEqual(carryover_updates(listing, {}), {"knownFlaws": "tiny hole on the cuff"})
 
-    def test_default_package_and_zero_posh_do_not_block_listing_values(self):
+    def test_default_package_does_not_block_listing_package(self):
         listing = {
             "package_dimensions_in": "12x10x2",
             "poshmark_specifics": {"originalPrice": 60},
@@ -98,7 +97,6 @@ class CarryoverUpdatesTest(unittest.TestCase):
         notes = {"packageDimensions": "13x10x3", "poshmarkOriginalPrice": "0"}
         self.assertEqual(carryover_updates(listing, notes), {
             "packageDimensions": "12x10x2",
-            "poshmarkOriginalPrice": "60",
         })
 
     def test_seller_entered_details_win(self):
@@ -115,7 +113,6 @@ class CarryoverUpdatesTest(unittest.TestCase):
             "sku": "MINE-SKU",
             "cog": "3.00",
             "packageDimensions": "15x12x5",
-            "poshmarkOriginalPrice": "99",
             "vendooLabels": "Rack B",
             "sellerNotes": "Mine",
         }
@@ -123,7 +120,6 @@ class CarryoverUpdatesTest(unittest.TestCase):
         self.assertNotIn("sku", updates)
         self.assertNotIn("cog", updates)
         self.assertNotIn("packageDimensions", updates)
-        self.assertNotIn("poshmarkOriginalPrice", updates)
         self.assertNotIn("vendooLabels", updates)
         self.assertNotIn("sellerNotes", updates)
         self.assertIn("knownFlaws", updates)
