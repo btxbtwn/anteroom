@@ -54,16 +54,32 @@ function depopCategoryFields(listing) {
   return { product_type: match[2], is_kids: kids, gender };
 }
 
-// Brand on the draft is Depop's brand id. "Columbia" is Columbia Sportswear,
-// and a second brand that merely contains the word is not a match.
+function depopBrandLabel(row) {
+  return String(row?.name_i18n?.['en-US'] ?? row?.name ?? row?.title ?? '').trim();
+}
+
+// Depop's catch-all brand. A catalog row named Other wins; otherwise the id Depop uses.
+function depopOtherId(rows) {
+  const other = rows.find(row => {
+    const id = String(row.id || '').trim().toLowerCase();
+    return id === 'other' || id === 'unbranded' || depopBrandLabel(row).toLowerCase() === 'other';
+  });
+  return other ? String(other.id) : 'other';
+}
+
+// Brand on the draft is Depop's brand id. "Columbia" is Columbia Sportswear
+// when that is the only brand the word starts. Anything Depop does not list,
+// including a blank brand, is Other.
 function depopBrandId(brands, name) {
   const wanted = String(name || '').trim().toLowerCase();
-  if (!wanted) return '';
   const rows = (Array.isArray(brands) ? brands : []).filter(row => row?.id && row.status !== 'inactive');
-  const exact = rows.filter(row => [row.name, row.id].some(value => String(value || '').trim().toLowerCase() === wanted));
-  if (exact.length === 1) return String(exact[0].id);
-  const prefix = rows.filter(row => String(row.name || '').trim().toLowerCase().startsWith(`${wanted} `));
-  return prefix.length === 1 ? String(prefix[0].id) : '';
+  if (wanted && wanted !== 'other') {
+    const exact = rows.filter(row => [depopBrandLabel(row), row.id].some(value => String(value || '').trim().toLowerCase() === wanted));
+    if (exact.length === 1) return String(exact[0].id);
+    const prefix = rows.filter(row => depopBrandLabel(row).toLowerCase().startsWith(`${wanted} `));
+    if (prefix.length === 1) return String(prefix[0].id);
+  }
+  return depopOtherId(rows);
 }
 
 // Depop's parcel titles are the same words Anteroom stores (Small, Medium, …).
@@ -236,16 +252,11 @@ function depopSize(listing, category, attributes) {
   return found.length ? { set: Number(set.id), id: Number(found[0].size.id) } : { problem: 'a size Depop offers for this category' };
 }
 
-// Depop's brand id. A brand Depop does not list goes as Depop's own "Other",
-// which is what Depop does with a brand it cannot match.
+// Depop's brand id for this listing. An unknown or blank brand is Other.
 function depopBrand(listing, attributes) {
-  const brands = Array.isArray(attributes.brand) ? attributes.brand : Array.isArray(attributes.brands) ? attributes.brands : null;
-  if (!brands) return null;
-  const wanted = String(listing.form?.overrides?.brand || listing.brand || '').trim();
-  const key = marketplaceNameKey(wanted);
-  const match = key && key !== 'other' && brands.find(entry => marketplaceNameKey(depopName(entry)) === key || marketplaceNameKey(entry?.id) === key);
-  const other = brands.find(entry => ['other', 'unbranded'].includes(String(entry?.id).toLowerCase()) || marketplaceNameKey(depopName(entry)) === 'other');
-  return String((match || other)?.id ?? '') || null;
+  const brands = Array.isArray(attributes?.brand) ? attributes.brand : attributes?.brands;
+  const wanted = listing?.depop_specifics?.brand || listing?.form?.overrides?.brand || listing?.brand;
+  return depopBrandId(brands, wanted);
 }
 
 const DEPOP_FIT_ATTRIBUTE = { petite: 'petite', plus: 'plussize', 'big_&_tall': 'tall', maternity: 'maternity' };
@@ -309,9 +320,7 @@ async function depopResolvedFields(payload) {
     if (Object.keys(extra.values).length) fields.attributes = extra.values;
     missing.push(...extra.missing);
   }
-  const brand = depopBrand(listing, attributes);
-  if (brand) fields.brand = brand;
-  else missing.push({ field: 'brand', needs: 'a brand from Depop\'s list' });
+  fields.brand = depopBrand(listing, attributes);
   const parcelLabel = String(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size || '').trim();
   if (!parcelLabel) missing.push({ field: 'parcel_size', needs: 'a parcel size' });
   if (missing.length) throw marketplaceMissing('depop', missing);

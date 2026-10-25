@@ -1118,6 +1118,80 @@ def _ready_note(*, repaired: bool, finalized: bool, blockers: list) -> str:
     return "Listing extracted and ready for review."
 
 
+# Mercari caps the description at 1,000. Poshmark caps it at 1,500. Depop caps
+# the title, a blank line, and the description together at 1,000, and a title
+# is at most 80 characters. 918 is the longest description that still fits.
+MERCARI_DESCRIPTION_MAX = 1000
+POSHMARK_DESCRIPTION_MAX = 1500
+DEPOP_POST_MAX = 1000
+TITLE_MAX_FOR_DESCRIPTION = 80
+_DEPOP_TITLE_GAP = 2
+_MEASUREMENTS_HEAD = re.compile(r"(?is)^measurements\s*:")
+
+
+def description_character_limit(title: str) -> int:
+    """How long this description can be and still list on every marketplace."""
+    title_len = len(str(title or "").strip())
+    gap = _DEPOP_TITLE_GAP if title_len else 0
+    depop_room = DEPOP_POST_MAX - title_len - gap
+    return max(0, min(MERCARI_DESCRIPTION_MAX, POSHMARK_DESCRIPTION_MAX, depop_room))
+
+
+def _cut_at_word(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text.strip()
+    if limit <= 0:
+        return ""
+    cut = text[:limit]
+    space = cut.rfind(" ")
+    if space > 0:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:-").strip()
+
+
+def fit_description(text: str, limit: int) -> str:
+    """Shorten a description to ``limit`` without dropping its Measurements block."""
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text) if part.strip()]
+    measurements = ""
+    body = paragraphs
+    if paragraphs and _MEASUREMENTS_HEAD.match(paragraphs[-1]):
+        measurements = paragraphs[-1]
+        body = paragraphs[:-1]
+    if measurements and len(measurements) + (2 if body else 0) > limit:
+        return _cut_at_word(text, limit)
+    room = limit - (len(measurements) + 2 if measurements else 0)
+    kept: list[str] = []
+    for para in body:
+        gap = 2 if kept else 0
+        if len(para) + gap <= room:
+            kept.append(para)
+            room -= len(para) + gap
+            continue
+        piece = _cut_at_word(para, room - gap)
+        if piece:
+            kept.append(piece)
+        break
+    fitted = "\n\n".join([*kept, *([measurements] if measurements else [])]).strip()
+    if len(fitted) > limit:
+        fitted = _cut_at_word(fitted, limit)
+    return fitted
+
+
+def cap_listing_description(listing: dict) -> bool:
+    """Cut a generated description to the shortest marketplace limit."""
+    if not isinstance(listing, dict):
+        return False
+    description = str(listing.get("description") or "")
+    limit = description_character_limit(str(listing.get("title") or ""))
+    if len(description.strip()) <= limit:
+        return False
+    listing["description"] = fit_description(description, limit)
+    return listing["description"] != description
+
+
 def persist_generated_listing(
     db,
     conv_id: str,
@@ -1178,6 +1252,7 @@ def persist_generated_listing(
             specifics = {}
         specifics["originalPrice"] = 0
         listing["poshmark_specifics"] = specifics
+    cap_listing_description(listing)
     ListingRepo(db).save_revision(conv_id, listing, source=source)
 
     if announce:
@@ -1245,6 +1320,7 @@ async def persist_generated_listing_with_repair(
                 apply_seller_description_facts(updated, parse_notes(conv.notes))
             if listing.get("package_dimensions_in"):
                 updated["package_dimensions_in"] = listing["package_dimensions_in"]
+            cap_listing_description(updated)
             listing = updated
             ListingRepo(db).save_revision(conv_id, listing, source="generation_finalize")
             finalized = True

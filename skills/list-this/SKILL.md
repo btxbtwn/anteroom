@@ -263,6 +263,7 @@ Measurements: {See photos OR specific measurements}
 ```
 - Include the Flaws line only when the item has flaws. When there are none, leave the line out entirely — never write "none noted" or any other no-flaws filler.
 - Keep the first line short and keyword-driven (vibe, decade/trend, fit, fabric) — not two separate sentences.
+- Max 918 characters. Mercari allows 1,000, Poshmark allows 1,500, and Depop allows 1,000 for the title, a blank line, and this description together. Titles are at most 80 characters, so 918 is the longest description that still fits all three.
 - Do not add Size, a full condition write-up, shipping speed, or bundle/discount lines — those are covered by marketplace fields and marketplace-level promos already.
 - Do not count lint or wrinkles as flaws or mention them in the description. If those are the only visible issues, write `Flaws: none noted. See photos for details.` Continue to disclose actual damage such as stains, holes, or tears.
 - NEVER include pricing details in the description: no prices, dollar amounts, comps, sold-listing counts, market or resale value, MSRP, discounts, offers, or notes about pricing confidence. Pricing belongs in the price field only.
