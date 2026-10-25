@@ -33,7 +33,7 @@ from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listin
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.chrome_bridge import expected_extension_build
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
-from vendoo_studio.services.sellwild_listing import sellwild_catalog, suggest_sellwild
+from vendoo_studio.services.sellwild_listing import chosen, sellwild_catalog, suggest_sellwild
 
 log = logging.getLogger("vendoo_studio.native_marketplaces")
 
@@ -211,6 +211,10 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
         if not (state == expected or (marketplace == "sellwild" and action == "publish" and state == "pending_review")):
             return {"state": "unknown", **_CLEARED_ERROR, "error": UNKNOWN, "error_code": "uncertain"}
         values = {"state": state, **_CLEARED_ERROR}
+        # Listed, but a setting did not stick (Poshmark's Smart Pricing). Shown on the live row.
+        warning = str(result.get("warning") or "").strip()
+        if warning and state in {"published", "pending_review"}:
+            values["error"] = warning[:300]
         if marketplace == "etsy":
             values.update(etsy_pending_write=None)
         if url:
@@ -376,7 +380,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         if marketplace == "sellwild":
             if record.get("photo_ids") != [p.id for p in photos]:
                 raise NativeMarketplaceError(409, "The photos changed. List on Sellwild again.")
-            if not record.get("sellwild_category_id") or not record.get("sellwild_condition_id"):
+            choice = chosen(snapshot, record)
+            if not choice["category_id"] or not choice["condition_id"]:
                 raise NativeMarketplaceError(409, "Choose a Sellwild category and condition first.")
         steps = _plan(marketplace, kind, record, body.revision_id)
         repo = JobRepo(db)
@@ -481,8 +486,7 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
         "listing": snapshot, "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
         "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
-        **({"sellwild": {"category_id": record["sellwild_category_id"], "condition_id": record["sellwild_condition_id"]}}
-           if marketplace == "sellwild" else {}),
+        **({"sellwild": chosen(snapshot, record)} if marketplace == "sellwild" else {}),
     }
 
 
@@ -872,8 +876,51 @@ def sellwild_options(conv_id: str, db: Session) -> dict:
     return {"categories": catalog["categories"], "conditions": catalog["conditions"], "suggested": suggest_sellwild(snapshot)}
 
 
+POSHMARK_CONDITIONS = ["New With Tags (NWT)", "Like New", "Good", "Fair"]
+
+
+async def poshmark_options(conv_id: str, db: Session) -> dict:
+    """The Poshmark tab's choices from Poshmark's own catalog: colors, and the sub-categories of the listing's category.
+
+    The catalog is Poshmark's public one, read the same way the category check reads it.
+    When it cannot be read the colors are the ones Poshmark listed when last checked and
+    no sub-categories are offered.
+    """
+    from vendoo_studio.services.chrome_catalog import ensure_catalogs, poshmark_category_id
+    from vendoo_studio.services.chrome_listing import POSHMARK_COLORS
+
+    _conversation(db, conv_id)
+    listing = ListingRepo(db).get_current(conv_id)
+    revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
+    snapshot = revision.listing_json if revision and isinstance(revision.listing_json, dict) else {}
+    try:
+        catalog = (await ensure_catalogs()).get("poshmark") or {}
+    except Exception:  # noqa: BLE001 - the tab still edits as text
+        catalog = {}
+    body = catalog.get("data") if isinstance(catalog.get("data"), dict) else catalog
+    colors = [str(color["name"]) for color in body.get("colors") or [] if isinstance(color, dict) and color.get("name")]
+    department_id, _, rest = poshmark_category_id(catalog, snapshot).partition("/")
+    category_id = rest.partition("/")[0]
+    department = next((entry for entry in (body.get("catalog") or {}).get("departments") or []
+                       if department_id and entry.get("id") == department_id), None)
+    category = next((entry for entry in (department or {}).get("categories") or []
+                     if category_id and entry.get("id") == category_id), None)
+    features = [str(entry["display"]) for entry in (category or {}).get("category_features") or [] if entry.get("display")]
+    return {
+        "category": [str(department["display"]), str(category["display"])] if category else [],
+        "subcategories": [*features, "None"] if features else [],
+        "colors": colors or list(POSHMARK_COLORS),
+        "conditions": POSHMARK_CONDITIONS,
+    }
+
+
 def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> dict:
-    """Record Sellwild's category and condition in Anteroom; Sellwild has no draft of its own."""
+    """Record the seller's Sellwild category and condition in Anteroom; Sellwild has no draft of its own.
+
+    Only a value the seller picked is stored. One left to Anteroom stays empty and
+    is matched again from the listing on every List, so an edited listing is not
+    sent with the category its earlier revision suggested.
+    """
     import uuid
 
     _conversation(db, conv_id)
@@ -884,9 +931,9 @@ def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> d
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
     catalog = sellwild_catalog()
-    automatic = suggest_sellwild(snapshot)
-    category_id = body.sellwild_category_id or automatic["category_id"]
-    condition_id = body.sellwild_condition_id or automatic["condition_id"]
+    picked = {"sellwild_category_id": body.sellwild_category_id, "sellwild_condition_id": body.sellwild_condition_id}
+    choice = chosen(snapshot, picked)
+    category_id, condition_id = choice["category_id"], choice["condition_id"]
     if category_id not in {option["id"] for option in catalog["categories"]}:
         raise NativeMarketplaceError(400, "Anteroom couldn't match a Sellwild category for this item. Choose one with Change.")
     if condition_id not in {option["id"] for option in catalog["conditions"]}:
@@ -899,5 +946,5 @@ def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> d
             **_CLEARED_ERROR, "storage": "local", "state": "draft", "revision_id": body.revision_id,
             "photo_ids": [p.id for p in ConversationRepo(db).get_photos(conv_id)],
             "local_draft_id": previous.get("local_draft_id") or uuid.uuid4().hex,
-            "sellwild_category_id": category_id, "sellwild_condition_id": condition_id,
+            **picked,
         })

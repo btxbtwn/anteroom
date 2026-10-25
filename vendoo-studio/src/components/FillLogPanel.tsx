@@ -35,6 +35,7 @@ import {
   withoutHiddenFields,
   type OpenMenu,
 } from "./fillLog/formFilters";
+import { withSchemaOptions } from "../dropdownOptions";
 import { groupFields } from "./fillLog/formLayout";
 import type { DraftField } from "./fillLog/formModel";
 import { liveStatusClass, marketplaceLabel } from "./fillLog/marketplaces";
@@ -130,6 +131,11 @@ export function FillLogPanel({
     enabled: Boolean(conversationId),
     staleTime: 60_000,
   });
+  // The category's own options win over the static lists in Ask-chat prompts.
+  const promptOptions = React.useMemo(
+    () => withSchemaOptions(dropdownOptions?.forms, schemaForms?.forms),
+    [dropdownOptions?.forms, schemaForms?.forms],
+  );
   const hiddenQueryKey = ["settings-hidden-fields", conversationId] as const;
   const { data: hiddenData } = useQuery({
     queryKey: hiddenQueryKey,
@@ -541,12 +547,12 @@ export function FillLogPanel({
                                 type="button"
                                 className="pr-read"
                                 onClick={() => onAskChat(leftover && FILL_FAILURE_STATUSES.has(leftover.status)
-                                  ? leftoverFieldPrompt(listing, leftover, applyValue || vendooText, dropdownOptions?.forms)
+                                  ? leftoverFieldPrompt(listing, leftover, applyValue || vendooText, promptOptions)
                                   : emptyFieldsPrompt(
                                     [{ ...selectedForm, fields: [field] }],
                                     fromVendooDraft,
                                     listing,
-                                    dropdownOptions?.forms,
+                                    promptOptions,
                                   ))}
                               >
                                 Ask chat

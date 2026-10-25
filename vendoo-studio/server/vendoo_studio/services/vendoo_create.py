@@ -275,7 +275,12 @@ def _category_targets(listing: dict[str, Any]) -> list[tuple[str, str, str]]:
 
 
 def tree_leaf(marketplace: str, path: str) -> dict[str, Any] | None:
-    """Exact leaf from the seeded ``category_tree_nodes`` table, when present."""
+    """Exact leaf from the seeded ``category_tree_nodes`` table, when present.
+
+    Vendoo's Mercari tree marks some parents as leaves ("Kids > Boys coats &
+    jackets" has Boys 0-24 mos, 2T-5T and 4+ under it). Mercari lists such a
+    parent with no size, so for Mercari a node with children is never a leaf.
+    """
     import sqlite3
 
     from vendoo_studio.config import DATABASE_PATH
@@ -289,8 +294,8 @@ def tree_leaf(marketplace: str, path: str) -> dict[str, Any] | None:
         with sqlite3.connect(DATABASE_PATH) as db:
             row = db.execute(
                 "SELECT category_id, path, label, has_children FROM category_tree_nodes "
-                "WHERE marketplace = ? AND path = ? AND is_leaf = 1 LIMIT 1",
-                (marketplace, wanted),
+                "WHERE marketplace = ? AND path = ? AND is_leaf = 1 AND (? = 0 OR has_children = 0) LIMIT 1",
+                (marketplace, wanted, 1 if marketplace == "mercari" else 0),
             ).fetchone()
             if not row:
                 return None

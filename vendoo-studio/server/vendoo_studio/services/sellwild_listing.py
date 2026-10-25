@@ -57,8 +57,14 @@ def suggest_sellwild(listing: dict) -> dict:
     specifics = listing.get("sellwild_specifics") if isinstance(listing.get("sellwild_specifics"), dict) else {}
     explicit = specifics.get("nativeCategoryId")
     category_id = int(explicit) if str(explicit or "").isdigit() and int(explicit) in ids else None
-    poshmark = ((listing.get("marketplace_category_objects") or {}).get("poshmark") or {}).get("displayPath") or []
-    everything = " ".join([str(listing.get("category_path") or ""), " ".join(map(str, poshmark)),
+    objects = listing.get("marketplace_category_objects") or {}
+    poshmark = (objects.get("poshmark") or {}).get("displayPath") or []
+    general = (objects.get("general") or {}).get("displayPath") or []
+    # Every category the listing names except Vendoo's retired Sellwild one, whose
+    # "Fashion > Mens Clothing" says nothing about a boys' or girls' item.
+    paths = [str(path) for key, path in (listing.get("marketplace_categories") or {}).items() if key != "sellwild"]
+    everything = " ".join([str(listing.get("category_path") or ""), str(listing.get("department") or ""),
+                           " ".join(map(str, general)), " ".join(map(str, poshmark)), *paths,
                            str((listing.get("marketplace_category_ids") or {}).get("depop") or "")]).lower()
     if category_id is None and re.search(r"\bbaby\b|infant|newborn", everything):
         category_id = 66

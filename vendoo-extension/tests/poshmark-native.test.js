@@ -388,3 +388,58 @@ test('a Poshmark catalog that cannot be read stops safely and says why', async (
     assert.ok(!requests.some(r => r.method !== 'GET'));
   }
 });
+
+test('Smart Pricing follows the listing form, off included, and cost keeps its cents', () => {
+  const { c } = setup();
+  const fields = listing => c.poshmarkPostFields(CATALOG.data, listing);
+  const off = fields({ ...LISTING, cost: 3.65, form: { specifics: { smartSell: { enabled: false, minPrice: '' } } } });
+  assert.equal(off.offer_auto_actions_v2_enabled, false);
+  assert.equal(off.offer_auto_actions_min_price_amount, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(off.seller_private_info)),
+    { cost_price_amount: { val: '3.65', currency_code: 'USD', currency_symbol: '$' } });
+  const on = fields({ ...LISTING, form: { specifics: { smartSell: { enabled: true, minPrice: '14' } } } });
+  assert.equal(on.offer_auto_actions_v2_enabled, true);
+  assert.equal(on.offer_auto_actions_min_price_amount.val, '14');
+  assert.equal(on.seller_private_info, undefined);
+  // No form setting: the Poshmark specifics' minimum (12 of 18).
+  assert.equal(fields({ ...LISTING, form: {} }).offer_auto_actions_min_price_amount.val, '12');
+  // A minimum at or above the price is off.
+  assert.equal(fields({ ...LISTING, form: { specifics: { smartSell: { enabled: true, minPrice: 18 } } } }).offer_auto_actions_v2_enabled, false);
+});
+
+test('a published post that did not keep Smart Pricing is listed with a warning', async () => {
+  const { c, msg } = setup();
+  const fetch = c.fetch;
+  c.fetch = async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    if ((options.method || 'GET') === 'GET' && path === `/vm-rest/posts/${POST}`) {
+      return response(200, { data: { id: POST, status: 'published', offer_auto_actions_v2_enabled: true, offer_auto_actions_min_price_amount: { val: '9' } } });
+    }
+    return fetch(url, options);
+  };
+  msg.payload.listing = { ...LISTING, form: { specifics: { smartSell: { enabled: false } } } };
+  const result = await c.runPoshmarkApi(msg);
+  assert.equal(result.ok, true);
+  assert.match(result.warning, /left Smart Pricing on/);
+  msg.payload.listing = LISTING;
+  msg.payload.operation_id = 'op-2';
+  const kept = await c.runPoshmarkApi(msg);
+  assert.match(kept.warning, /\$12 minimum/);
+});
+
+test('the Poshmark tab\'s condition, colors and sub-category win over the shared values', () => {
+  const { c } = setup();
+  const LONG = '44009813d97b4e3995005764';
+  const catalog = JSON.parse(JSON.stringify(CATALOG.data));
+  catalog.catalog.departments[0].categories[0].category_features.push({ id: LONG, display: 'Tees - Long Sleeve' });
+  const listing = { ...LISTING, form: { overrides: { condition: 'ug' } },
+    poshmark_specifics: { poshmarkCondition: 'Like New', poshmarkColor: 'Blue', poshmarkSecondaryColor: 'Grey', subcategory: 'Tees - Long Sleeve' } };
+  const post = c.poshmarkPostFields(catalog, listing);
+  assert.equal(post.condition, 'uln');
+  assert.deepEqual(JSON.parse(JSON.stringify(post.colors)), ['Blue', 'Gray']);
+  assert.deepEqual(JSON.parse(JSON.stringify(post.catalog)), { department: DEPT, category: SHIRTS, category_features: [LONG] });
+  const none = c.poshmarkCategory(catalog, { ...listing, poshmark_specifics: { subcategory: 'None' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(none.catalog.category_features)), []);
+  const unknown = c.poshmarkCategory(catalog, { ...listing, poshmark_specifics: { subcategory: 'Polos' } });
+  assert.equal(unknown.leaf, TEES);
+});

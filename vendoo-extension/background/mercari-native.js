@@ -52,14 +52,15 @@ const MERCARI_SHIPPING_PAYER = { SELLER: 2, BUYER: 1 };
 const MERCARI_MAX_LABEL_OZ = 800;
 
 // The leaf a direct list sends. A stored Mercari category id wins. Otherwise
-// the id is the one Vendoo has, and a parent of that tree is still too broad.
+// the id is the one Vendoo has. A category with subcategories is too broad
+// even when Vendoo's tree calls it a leaf: Mercari then lists it with no size.
 function mercariCategory(listing) {
-  const direct = String(listing.direct_category_ids?.mercari ?? '');
-  if (/^\d{1,6}$/.test(direct)) return { id: Number(direct), parent: false };
   const resolved = listing.form?.overrides?.categoryV2;
-  const id = resolved?.id ?? listing.marketplace_category_ids?.mercari ?? listing.mercari_specifics?.categoryId;
+  const direct = String(listing.direct_category_ids?.mercari ?? '');
+  const id = /^\d{1,6}$/.test(direct) ? direct
+    : resolved?.id ?? listing.marketplace_category_ids?.mercari ?? listing.mercari_specifics?.categoryId;
   if (!/^\d{1,6}$/.test(String(id ?? ''))) return null;
-  return { id: Number(id), parent: resolved?.hasChildren === true };
+  return { id: Number(id), parent: resolved?.hasChildren === true && String(resolved.id) === String(id) };
 }
 
 function mercariCategoryId(listing) {
@@ -78,31 +79,66 @@ function mercariWeightOz(listing) {
     || mercariOunces(Number(listing.form?.overrides?.weight?.pounds || 0), Number(listing.form?.overrides?.weight?.ounces || 0));
 }
 
+// Mercari sizes whose own numbers hold one of the seller's: kids' "XL (18/20)"
+// is Mercari's "2XL (18)", not the "XL (14-16)" a bare XL would pick.
+function mercariNumberedSizes(wanted, sizes) {
+  const inner = /\(([^)]*)\)/.exec(wanted)?.[1];
+  const numbers = (inner || '').split(/[/,]|\s-\s|-/).map(part => part.trim()).filter(part => /^\d+(?:\.\d+)?$/.test(part)).map(Number);
+  if (!numbers.length) return [];
+  return sizes.filter(size => {
+    const range = /\((\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?\)\s*$/.exec(String(size.name || ''));
+    if (!range) return false;
+    const low = Number(range[1]);
+    const high = Number(range[2] ?? range[1]);
+    return numbers.some(number => number >= low && number <= high);
+  });
+}
+
 // Mercari's size id: Vendoo's coded ``<leaf>_Size`` first, else the seller's
 // size among the category's own sizes (Studio sends them as form.sizes, in
-// Mercari's order). A size that only matches inside a fit the listing does
-// not name, or several fits when it names one, is not chosen.
+// Mercari's order), its numbers before its letters. A size that only matches
+// inside a fit the listing does not name, or several fits when it names one,
+// is not chosen. ``none: 'unknown'`` means Studio could not read the sizes.
 function mercariSize(listing, categoryId) {
   const sizes = listing.form?.sizes;
   if (!Array.isArray(sizes) || !sizes.length) return { none: !Array.isArray(sizes) ? 'unknown' : 'none' };
   const coded = Number(listing.form?.aspects?.[`${categoryId}_Size`]);
   if (coded && sizes.some(size => Number(size.id) === coded)) return { id: coded };
-  const wanted = String(listing.mercari_specifics?.size || listing.size || '').trim();
+  const wanted = mercariWantedSize(listing);
   if (!wanted) return { problem: 'a size' };
   const entries = sizes.map(size => ({ size, keys: sizeEntryKeys([size.name, size.title]) }));
-  const found = matchSize(wanted, entries);
+  const numbered = mercariNumberedSizes(wanted, sizes);
+  const found = numbered.length ? entries.filter(entry => numbered.includes(entry.size)) : matchSize(wanted, entries);
   if (!found.length) return { problem: 'a size Mercari offers in this category' };
   const groups = new Set(found.map(entry => entry.size.group));
   if (groups.size > 1 && listingSizeFit(listing)) return { problem: `which of Mercari's ${found.map(entry => entry.size.name).join(' or ')} sizes this is` };
   return { id: Number(found[0].size.id) };
 }
 
+function mercariWantedSize(listing) {
+  return String(listing.mercari_specifics?.size || listing.size || '').trim();
+}
+
+// Package dimensions in whole inches, from the form or "13x10x3".
+function mercariDimensions(listing) {
+  const form = listing.form?.overrides?.dimensions || {};
+  let sides = [form.length, form.width, form.height];
+  if (!sides.every(side => Number(side) > 0)) {
+    sides = String(listing.package_dimensions_in || '').split(/\s*[x×*]\s*/i);
+  }
+  sides = sides.map(Number);
+  if (sides.length !== 3 || !sides.every(side => Number.isFinite(side) && side > 0)) return {};
+  const [length, width, height] = sides;
+  return { unit: 'INCH', length, width, height };
+}
+
 // What the seller filled in Anteroom, in Mercari's form fields. Studio's
 // form carries Vendoo's codes: condition id, the Ground Advantage class for
 // the weight, who pays, and the ships-from ZIP. ``brandId`` is added once
-// Mercari's id for the brand is known.
-// Needs a live check: Mercari's draft input names for size (sizeId) and
-// shipping class (shippingClassIds) follow its own "actions required" fields.
+// Mercari's id for the brand is known. The shipping class goes inside
+// ``shipping`` as ``classIds`` and ``suggestedClassIds``, the way Mercari's
+// own draft form sends it (recorded 2026-10-24): without it Mercari saves
+// the draft as ship-on-your-own and makes the seller pay.
 function mercariCommon(listing) {
   const specifics = listing.form?.specifics || {};
   const common = { name: String(listing.title || '').trim(), isAutoPriceDrop: false };
@@ -111,7 +147,7 @@ function mercariCommon(listing) {
   if (price != null) common.price = price;
   const categoryId = mercariCategoryId(listing);
   if (categoryId != null) common.categoryId = categoryId;
-  const conditionId = mercariConditionId(listing.form?.overrides?.condition || listing.mercari_specifics?.condition || listing.condition);
+  const conditionId = mercariConditionId(listing.mercari_specifics?.condition || listing.form?.overrides?.condition || listing.condition);
   if (conditionId != null) common.conditionId = conditionId;
   if (categoryId != null) {
     const size = mercariSize(listing, categoryId);
@@ -122,9 +158,10 @@ function mercariCommon(listing) {
   const weight = mercariWeightOz(listing);
   const payerId = [MERCARI_SHIPPING_PAYER.BUYER, MERCARI_SHIPPING_PAYER.SELLER].includes(Number(specifics.shipping?.payerId))
     ? Number(specifics.shipping.payerId) : MERCARI_SHIPPING_PAYER.BUYER;
-  common.shipping = { payerId, ...(zip ? { zipCode: zip } : {}), dimensions: {}, ...(weight ? { weight: { weight } } : {}) };
   const carrierId = Number(specifics.shipping?.carrierId);
-  if (Number.isInteger(carrierId) && carrierId > 0) common.shippingClassIds = [carrierId];
+  const classIds = Number.isInteger(carrierId) && carrierId > 0 ? [carrierId] : null;
+  common.shipping = { payerId, ...(classIds ? { classIds, suggestedClassIds: classIds } : {}), ...(zip ? { zipCode: zip } : {}),
+    dimensions: mercariDimensions(listing), ...(weight ? { weight: { weight } } : {}) };
   return common;
 }
 
@@ -144,7 +181,9 @@ function mercariMissing(listing, common) {
   if (category) {
     const size = mercariSize(listing, category.id);
     if (size.problem) missing.push({ field: 'sizeId', needs: size.problem });
+    else if (size.none === 'unknown' && mercariWantedSize(listing)) missing.push({ field: 'sizeId', needs: 'its size list, which Anteroom could not read (try again)' });
   }
+  if (!common.shipping.classIds) missing.push({ field: 'shippingClassIds', needs: 'a prepaid shipping label' });
   const weight = common.shipping.weight?.weight;
   if (!weight) missing.push({ field: 'weight', needs: 'a package weight' });
   else if (weight > MERCARI_MAX_LABEL_OZ) missing.push({ field: 'weight', needs: 'a package of 50 lb or less for a Mercari label' });
@@ -153,8 +192,9 @@ function mercariMissing(listing, common) {
 
 // Mercari's id for the listing's brand. Mercari's own brand search is not
 // known to Anteroom, so this reads the Mercari brand index Vendoo's form uses,
-// with Vendoo's saved sign-in only: no tab is opened, and a brand that cannot
-// be found is left for Mercari's own check of the draft before it lists.
+// with Vendoo's saved sign-in only: no tab is opened. Only a brand whose name
+// is the listing's (case and punctuation aside) is taken; a brand that was
+// given but cannot be placed stops the save, never goes out as no brand.
 // Needs a live check: the index answers [{ value: <Mercari brand id>, label }].
 async function mercariBrandId(listing, deadline) {
   const overrides = listing.form?.overrides || {};
@@ -162,23 +202,31 @@ async function mercariBrandId(listing, deadline) {
   const name = String(overrides.brand || listing.brand || '').trim();
   if (!name) return null;
   if (/^\d{1,9}$/.test(name)) return Number(name);
+  let id;
   try {
-    return await marketplaceCatalog(`mercari:brand:${marketplaceNameKey(name)}`, async () => {
-      let session = await loadCachedVendooSession();
-      if (!session) throw new Error('No saved Vendoo sign-in');
-      if (!tokenIsFresh(session)) session = await cacheVendooSession(await refreshVendooToken(session));
-      const res = await vendooFetchOnce(`${VENDOO_API_BASE}/api/rest/v1/brand/mercari?search=${encodeURIComponent(name)}&matchValue=true`,
-        { token: session.access_token, timeoutMs: Math.max(1000, Math.min(15000, deadline - Date.now())) });
-      if (!res.ok) throw new Error(`Vendoo brand index returned ${res.status}`);
-      const hits = Array.isArray(res.data) ? res.data : [res.data];
-      const hit = hits.find(entry => marketplaceNameKey(entry?.label ?? entry?.name) === marketplaceNameKey(name)) || hits[0];
-      const id = Number(hit?.value ?? hit?.id);
-      return Number.isInteger(id) && id > 0 ? id : null;
-    });
+    id = await mercariBrandLookup(name, deadline);
   } catch (error) {
     marketplaceLog('mercari', 'brand', { error_code: 'unresolved' });
-    return null;
+    throw marketplaceMissing('mercari', [{ field: 'brandId', needs: `its brand id for ${name}, which Anteroom could not read (try again)` }],
+      String(error?.message || error));
   }
+  if (!id) throw marketplaceMissing('mercari', [{ field: 'brandId', needs: `a brand from its list (${name} is not one)` }]);
+  return id;
+}
+
+function mercariBrandLookup(name, deadline) {
+  return marketplaceCatalog(`mercari:brand:${marketplaceNameKey(name)}`, async () => {
+    let session = await loadCachedVendooSession();
+    if (!session) throw new Error('No saved Vendoo sign-in');
+    if (!tokenIsFresh(session)) session = await cacheVendooSession(await refreshVendooToken(session));
+    const res = await vendooFetchOnce(`${VENDOO_API_BASE}/api/rest/v1/brand/mercari?search=${encodeURIComponent(name)}&matchValue=true`,
+      { token: session.access_token, timeoutMs: Math.max(1000, Math.min(15000, deadline - Date.now())) });
+    if (!res.ok) throw new Error(`Vendoo brand index returned ${res.status}`);
+    const hits = Array.isArray(res.data) ? res.data : [res.data];
+    const hit = hits.find(entry => marketplaceNameKey(entry?.label ?? entry?.name) === marketplaceNameKey(name));
+    const id = Number(hit?.value ?? hit?.id);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  });
 }
 
 // The session Mercari's web client starts with: a CSRF token, the access
@@ -323,17 +371,51 @@ async function readMercariDraft(id, deadline) {
   if (!draft) throw marketplaceError('Mercari did not return the saved draft.', { code: 'schema_drift' });
   return { name: draft.name, description: draft.description, price: draft.price,
     conditionId: draft.itemCondition?.id ?? null, photo_count: draft.photos?.length || 0,
+    categoryId: draft.itemCategory?.id ?? null, brandId: draft.brand?.id ?? null, sizeId: draft.itemSize?.id ?? null,
+    payerId: draft.shippingPayer?.id ?? null,
+    classIds: (draft.shippingClasses || []).map(entry => Number(entry?.id)).filter(classId => classId > 0),
     status: draft.draftItemStatus || null,
     actions_required: (draft.draftItemActionsRequired || []).map(action => String(action.field || '')).filter(Boolean) };
 }
 
-function mercariDraftMatches(draft, listing, expectedPhotos) {
+// What Mercari kept differently from what was sent, as the seller names it.
+function mercariDraftDifferences(draft, common, expectedPhotos) {
+  const differ = [];
+  if (marketplaceText(draft.name) !== marketplaceText(common.name)) differ.push('title');
+  if (common.description != null && marketplaceText(draft.description) !== marketplaceText(common.description)) differ.push('description');
+  if (common.price != null && Number(draft.price) !== common.price) differ.push('price');
+  if (common.conditionId != null && draft.conditionId != null && Number(draft.conditionId) !== common.conditionId) differ.push('condition');
+  if (expectedPhotos != null && draft.photo_count !== expectedPhotos) differ.push('photos');
+  if (common.categoryId != null && Number(draft.categoryId) !== common.categoryId) differ.push('category');
+  if (common.brandId != null && Number(draft.brandId) !== common.brandId) differ.push('brand');
+  if (common.sizeId != null && Number(draft.sizeId) !== common.sizeId) differ.push('size');
+  const sent = common.shipping.classIds || [];
+  if (Number(draft.payerId) !== common.shipping.payerId || sent.length !== draft.classIds.length
+      || sent.some(classId => !draft.classIds.includes(classId))) differ.push('shipping');
+  return differ;
+}
+
+function mercariDraftMatches(draft, common, expectedPhotos) {
+  return !mercariDraftDifferences(draft, common, expectedPhotos).length;
+}
+
+// The draft Mercari should hold for this listing, brand included.
+async function mercariExpected(listing, deadline) {
   const common = mercariCommon(listing);
-  return marketplaceText(draft.name) === marketplaceText(common.name)
-    && (common.description == null || marketplaceText(draft.description) === marketplaceText(common.description))
-    && (common.price == null || Number(draft.price) === common.price)
-    && (common.conditionId == null || draft.conditionId == null || Number(draft.conditionId) === common.conditionId)
-    && (expectedPhotos == null || draft.photo_count === expectedPhotos);
+  const brandId = await mercariBrandId(listing, deadline);
+  if (brandId) common.brandId = brandId;
+  return common;
+}
+
+function mercariDraftMismatch(draft, common, expectedPhotos, lead) {
+  const differ = mercariDraftDifferences(draft, common, expectedPhotos);
+  if (!differ.length) return null;
+  const soyo = differ.includes('shipping') && common.shipping.classIds && !draft.classIds.length;
+  const detail = soyo
+    ? ' Mercari has it as ship-on-your-own with the seller paying, not the prepaid label Anteroom sent.'
+    : '';
+  return marketplaceError(`${lead} (${differ.join(', ')}).${detail} Nothing was listed. Check the draft and list again.`,
+    { code: 'uncertain', marketplace_message: `draft differs: ${differ.join(', ')}` });
 }
 
 async function runMercariNative(msg, recovery = false) {
@@ -353,7 +435,7 @@ async function runMercariNative(msg, recovery = false) {
     if (recovery) {
       if (!id) return marketplaceFailure(new Error('Mercari did not confirm a draft. Check your Mercari drafts before trying again.'), false);
       const draft = await readMercariDraft(id, payload.deadline);
-      if (!mercariDraftMatches(draft, payload.listing, payload.expected_photo_count)) {
+      if (!mercariDraftMatches(draft, await mercariExpected(payload.listing, payload.deadline), payload.expected_photo_count)) {
         return marketplaceFailure(new Error('Mercari\'s listing does not match this revision. List again.'), false, { draft_url: payload.draft_url });
       }
       return { ok: true, state: 'draft', draft_url: payload.draft_url };
@@ -385,9 +467,8 @@ async function runMercariNative(msg, recovery = false) {
       await storeReceipt({ receipt_url: payload.draft_url, expected_photo_count: expectedPhotos });
     }
     const draft = await readMercariDraft(id, payload.deadline);
-    if (!mercariDraftMatches(draft, payload.listing, expectedPhotos)) {
-      throw new Error('Mercari did not keep this listing\'s fields and photos. Check them and list again.');
-    }
+    const mismatch = mercariDraftMismatch(draft, common, expectedPhotos, 'Mercari did not keep everything this listing sent');
+    if (mismatch) throw mismatch;
     return { ok: true, state: 'draft', draft_url: payload.draft_url };
   } catch (error) {
     // A draft mutation Mercari clearly refused wrote nothing.
@@ -399,9 +480,12 @@ async function runMercariNative(msg, recovery = false) {
 const MERCARI_ACTION_LABELS = { categoryId: 'a category', conditionId: 'a condition', brandId: 'a brand', sizeId: 'a size',
   shipping: 'shipping', shippingClassIds: 'shipping', photos: 'photos', price: 'a price', name: 'a title', description: 'a description' };
 
-// Publishing lists an existing READY draft the way Mercari's own drafts page
-// does: one listDraftItemMutation with the draft ID. Seller-confirmed only,
-// sent at most once, and never retried when the reply is lost.
+// Publishing lists an existing READY draft with one listDraftItemMutation and
+// the draft ID. Seller-confirmed only, sent at most once, and never retried
+// when the reply is lost. The draft is read back first and must hold what
+// this revision sends: category, brand, size, the prepaid label and who pays.
+// Mercari's own drafts page also sends a ``createListingInput`` built from its
+// form; the draft alone has listed correctly, so that input is not rebuilt.
 async function publishMercariDraft(payload, storeReceipt, recovery) {
   const id = mercariDraftId(payload.draft_url);
   if (!id) return marketplaceFailure(marketplaceError('Mercari did not confirm a listing to publish. List again.'), true);
@@ -413,10 +497,14 @@ async function publishMercariDraft(payload, storeReceipt, recovery) {
   if (payload.confirm !== true) return marketplaceFailure(marketplaceError('Confirm publishing on Mercari.'), true);
   let stage = 'prepare';
   try {
+    const common = mercariCommon(payload.listing);
+    const missing = mercariMissing(payload.listing, common);
+    if (missing.length) throw marketplaceMissing('mercari', missing);
+    const brandId = await mercariBrandId(payload.listing, payload.deadline);
+    if (brandId) common.brandId = brandId;
     const draft = await readMercariDraft(id, payload.deadline);
-    if (!mercariDraftMatches(draft, payload.listing, null)) {
-      throw marketplaceError('Mercari\'s listing does not match this revision. List again.');
-    }
+    const mismatch = mercariDraftMismatch(draft, common, null, 'Mercari\'s draft does not match this revision');
+    if (mismatch) throw Object.assign(mismatch, { code: 'rejected' });
     if (draft.status !== 'DRAFT_ITEM_STATUS_READY') {
       const fields = [...new Set(draft.actions_required)];
       throw marketplaceMissing('mercari', (fields.length ? fields : ['details']).map(field => ({ field,

@@ -35,7 +35,15 @@ export interface NativePreflight {
   revision_id: string | null;
   marketplaces: Partial<Record<NativeMarketplace, { ready: boolean; gaps: PreflightGap[] }>>;
 }
-export interface SellwildChoice { categoryId: number; conditionId: number }
+/** The seller's own Sellwild picks. A value left out is matched from the listing on every List. */
+export interface SellwildChoice { categoryId?: number; conditionId?: number }
+/** The Poshmark tab's choices from Poshmark's own catalog. */
+export interface PoshmarkOptions {
+  category: string[];
+  subcategories: string[];
+  colors: string[];
+  conditions: string[];
+}
 export interface SellwildOptions {
   categories: { id: number; label: string }[];
   conditions: { id: number; label: string }[];

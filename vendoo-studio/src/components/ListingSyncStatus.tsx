@@ -45,7 +45,8 @@ export function directSyncErrors(result: NativeSync | undefined): string[] {
  * extension tells Studio), when the listing opens, and when Studio regains
  * focus — never on a timer against Vendoo. Status/date-only changes refresh
  * labels without rewriting listing fields; form-content changes take Vendoo's
- * copy. Nothing pops up; this line says when Studio last checked.
+ * copy only when Studio has none of its own. When both moved, Studio's listing
+ * stays and this line says so. Nothing pops up; this line says when Studio last checked.
  *
  * Direct listings are checked only on click: unconfirmed results are settled
  * and the Chrome marketplaces are asked for sales now instead of on their next
@@ -170,8 +171,10 @@ export function ListingSyncStatus({ convId, bound }: { convId: string; bound: bo
     : directSyncErrors(directSync.data);
   const failed = vendooFailed || directErrors.length > 0;
   const checkedAt = bound ? status?.checked_at : directSync.data?.checked_at;
+  const conflict = bound && Boolean(status?.conflict);
   let label: string;
   if (busy) label = "Syncing…";
+  else if (conflict) label = "Vendoo differs";
   else if (checkedAt) label = `Synced ${checkedAgo(checkedAt, now)}`;
   else label = failed ? "Not synced" : bound ? "Syncing…" : "Sync";
 
@@ -180,6 +183,9 @@ export function ListingSyncStatus({ convId, bound }: { convId: string; bound: bo
       ? (status?.checked_at ? `Last checked Vendoo ${new Date(status.checked_at).toLocaleString()}` : "Not checked with Vendoo yet")
       : "",
     vendooFailed ? "Last check could not reach Vendoo — is Chrome connected?" : "",
+    conflict
+      ? "Vendoo's draft and this listing were both edited. This listing was kept. Update Vendoo writes it to Vendoo; Discard takes Vendoo's copy."
+      : "",
     direct && directSync.data ? `Last checked direct listings ${new Date(directSync.data.checked_at).toLocaleString()}` : "",
     ...directErrors,
     !direct ? "Click to check now" : bound ? "Click to check Vendoo and your direct listings now" : "Click to check your direct listings now",
@@ -190,7 +196,7 @@ export function ListingSyncStatus({ convId, bound }: { convId: string; bound: bo
       <span aria-hidden="true">·</span>
       <button
         type="button"
-        className={`pr-vendoo-sync-btn${failed && !busy ? " is-stale" : ""}`}
+        className={`pr-vendoo-sync-btn${(failed || conflict) && !busy ? " is-stale" : ""}`}
         disabled={busy}
         title={title}
         onMouseDown={(event) => event.stopPropagation()}

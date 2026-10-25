@@ -214,6 +214,21 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **SELLWILD}).status_code, 409)
         self.assertEqual(self.bridge.call_count, 1)
 
+    def test_sellwild_keeps_only_the_sellers_pick_and_matches_the_rest_on_each_list(self):
+        mens = {**LISTING, "condition": "Pre-Owned - Good", "category_path": "Clothing, Shoes & Accessories > Men > Coats & Jackets"}
+        mens.pop("marketplace_category_ids")
+        rev = ListingRepo(self.db).save_revision(self.conv.id, mens, "model")
+        native.save_local_sellwild_draft(self.conv.id, native.ListRequest(revision_id=rev.id, sellwild_condition_id=2), self.db)
+        record = self.record("sellwild")
+        self.assertIsNone(record.get("sellwild_category_id"))
+        self.assertEqual(record["sellwild_condition_id"], 2)
+        self.assertEqual(native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, mens, [], "job")["sellwild"],
+                         {"category_id": 272, "condition_id": 2})
+        boys = {**mens, "category_path": "", "department": "Boys", "title": "Columbia windbreaker jacket",
+                "marketplace_category_objects": {"sellwild": {"displayPath": ["Fashion", "Mens Clothing"]}}}
+        self.assertEqual(native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, boys, [], "job")["sellwild"],
+                         {"category_id": 246, "condition_id": 2})
+
     def test_sellwild_needs_a_category_and_condition(self):
         for extra in ({"sellwild_category_id": 183, "sellwild_condition_id": 2}, {"sellwild_category_id": 272, "sellwild_condition_id": 9}):
             response = self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **extra})
@@ -246,6 +261,29 @@ class NativeMarketplacesTest(unittest.TestCase):
         result = self.client.get(f"{self.base}/sellwild/options").json()
         self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 3})
         self.assertEqual(len(result["conditions"]), 5)
+
+    def test_poshmark_options_come_from_its_catalog(self):
+        catalog = {"poshmark": {"colors": [{"name": "Blue"}, {"name": "Gray"}], "catalog": {"departments": [
+            {"id": "kids", "display": "Kids", "categories": [{"id": "jackets", "display": "Jackets & Coats", "category_features": [
+                {"id": "puffer", "display": "Puffers"}, {"id": "rain", "display": "Raincoats"}]}]}]}}}
+        listing = {**LISTING, "marketplace_categories": {"poshmark": "Kids > Jackets & Coats"}}
+        listing.pop("marketplace_category_ids")
+        ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        with patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=AsyncMock(return_value=catalog)):
+            result = self.client.get(f"{self.base}/poshmark/options").json()
+        self.assertEqual(result["category"], ["Kids", "Jackets & Coats"])
+        self.assertEqual(result["subcategories"], ["Puffers", "Raincoats", "None"])
+        self.assertEqual(result["colors"], ["Blue", "Gray"])
+        with patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=AsyncMock(return_value={})):
+            offline = self.client.get(f"{self.base}/poshmark/options").json()
+        self.assertEqual((offline["category"], offline["subcategories"]), ([], []))
+        self.assertIn("Tan", offline["colors"])
+
+    def test_a_listed_poshmark_post_keeps_the_extensions_warning(self):
+        outcome = native._outcome("poshmark", "list", {}, {
+            "ok": True, "state": "published", "listing_url": POSH_URL, "warning": "Poshmark left Smart Pricing on.",
+        })
+        self.assertEqual((outcome["state"], outcome["error"], outcome["error_code"]), ("published", "Poshmark left Smart Pricing on.", None))
 
     def test_a_depop_publish_keeps_the_public_product_link(self):
         url = "https://www.depop.com/products/seller-columbia-xl/"

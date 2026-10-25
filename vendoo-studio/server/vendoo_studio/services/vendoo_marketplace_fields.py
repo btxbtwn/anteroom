@@ -114,8 +114,11 @@ def _apply_ebay_pricing(
     fixed["duration"] = _clean(fixed.get("duration")) or "GTC"
     fixed["allowBestOffer"] = True
     accept, minimum = offer_floors(price or fixed.get("buyItNowPrice")) or ("", "")
-    fixed["acceptOffersOfAtLeast"] = accept
-    fixed["declineOffersLowerThan"] = minimum
+    # The seller's own floors (eBay → Best Offer in the editor) win over the formula.
+    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
+    fixed["acceptOffersOfAtLeast"] = _num_str(chosen.get("autoAcceptPrice")) or accept
+    fixed["declineOffersLowerThan"] = _num_str(chosen.get("minimumOfferPrice") or chosen.get("autoDeclinePrice")) or minimum
 
 
 def _etsy_who_code(raw: Any) -> str:

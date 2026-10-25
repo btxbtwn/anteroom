@@ -152,3 +152,49 @@ class ChromeCatalogTest(unittest.TestCase):
         keep_direct_categories(previous, incoming)
         self.assertEqual(incoming["direct_category_ids"]["poshmark"], f"{DEPT}/{SHIRTS}/{TEES}")
         self.assertEqual(incoming["direct_category_ids"]["ebay"], "111")
+
+
+class MercariParentCategoryTest(unittest.TestCase):
+    """Mercari lists a parent category with no size, so List holds it off, stored id or not."""
+
+    def setUp(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        from vendoo_studio.database import Base
+        from vendoo_studio.models.catalog import CategoryTreeNode
+
+        engine = create_engine("sqlite://")
+        Base.metadata.create_all(engine)
+        self.db = Session(engine)
+        for cid, parent, path, children in (
+            ("1881", "3", "Kids > Boys coats & jackets", True),
+            ("1915", "1881", "Kids > Boys coats & jackets > Boys 0-24 mos", False),
+            ("1923", "1881", "Kids > Boys coats & jackets > Boys 2T-5T", False),
+            ("1931", "1881", "Kids > Boys coats & jackets > Boys (4+)", False),
+        ):
+            self.db.add(CategoryTreeNode(marketplace="mercari", category_id=cid, parent_id=parent, label=path.split(" > ")[-1],
+                                         path=path, is_leaf=True, has_children=children, children_loaded=True))
+        self.db.commit()
+
+    def tearDown(self):
+        self.db.close()
+
+    def _gaps(self, **listing):
+        return mercari_requirements({"description": "Windbreaker", **listing}, Context(db=self.db))
+
+    def test_a_stored_parent_id_is_refused_and_its_subcategories_named(self):
+        for listing in ({"direct_category_ids": {"mercari": "1881"}},
+                        {"marketplace_category_ids": {"mercari": "1881"},
+                         "form": {"overrides": {"categoryV2": {"id": "1881", "isLeaf": True}}}},
+                        {"marketplace_categories": {"mercari": "Kids > Boys coats & jackets"}}):
+            gaps = self._gaps(**listing)
+            self.assertTrue(any(gap["blocking"] and "Boys 0-24 mos, Boys 2T-5T, Boys (4+)" in gap["message"]
+                                for gap in gaps), listing)
+
+    def test_a_sized_leaf_needs_mercaris_size_list(self):
+        leaf = {"size": "XL (18/20)", "direct_category_ids": {"mercari": "1931"}}
+        unread = self._gaps(**leaf, form={"overrides": {}})
+        self.assertTrue(any(gap["blocking"] and gap["field"] == "mercari_specifics.size" for gap in unread))
+        self.assertEqual(self._gaps(**leaf, form={"overrides": {}, "sizes": [{"id": 168}]}), [])
+        self.assertEqual(self._gaps(direct_category_ids={"mercari": "1931"}, form={"overrides": {}}), [])

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { optionsForField, withDropdownOptions } from "./dropdownOptions";
+import { optionsForField, withDropdownOptions, withSchemaOptions } from "./dropdownOptions";
 
 type Field = { key: string; label: string; options?: string[] };
 
@@ -74,5 +74,18 @@ describe("withDropdownOptions", () => {
       FORMS,
     );
     expect(fields[0].options).toEqual(["Live Only"]);
+  });
+
+  it("prefers the category schema's options in fix prompts", () => {
+    const forms = { depop: { size: ["XS", "XL", "Other"], material: ["Cotton"] } };
+    const schema = [{
+      marketplace: "depop", category_id: "kidswear_jackets", known: true,
+      fields: [{ key: "size", label: "Size", value: "", required: true, multi: false, selection_only: true,
+        options: ["14 years", "16 years", "Other"] }],
+    }];
+    const merged = withSchemaOptions(forms, schema);
+    expect(optionsForField(merged, "depop", "depop_specifics.size")).toEqual(["14 years", "16 years", "Other"]);
+    expect(optionsForField(merged, "depop", "depop_specifics.material")).toEqual(["Cotton"]);
+    expect(withSchemaOptions(forms, undefined)).toBe(forms);
   });
 });

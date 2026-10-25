@@ -79,8 +79,8 @@ test('several Depop addresses at the ships-from ZIP use the one updated most rec
     { id: 2, postalCode: '70115', lastModified: '2026-08-23T16:17:37Z' },
     { id: 3, postalCode: '70125', lastModified: '2026-05-20T15:55:18Z' },
   ];
-  assert.equal(call(c, 'depopAddress', { form: { ships_from_zip: '70115' } }, data), 2);
-  assert.equal(call(c, 'depopAddress', { form: { ships_from_zip: '70125' } }, data), 3);
+  assert.equal(call(c, 'depopAddress', { form: { ships_from_zip: '70115' } }, data).id, 2);
+  assert.equal(call(c, 'depopAddress', { form: { ships_from_zip: '70125' } }, data).id, 3);
 });
 
 test('Depop accepts only durable native edit links', () => {
@@ -414,11 +414,13 @@ test('a Depop save confirms the draft by reading it again when the first read fa
   msg.payload.listing = { ...FULL, tags: [] };
   msg.payload.draft_url = DRAFT;
   let saved = false;
+  let kept = {};
   let readsAfterSave = 0;
   c.fetch = async (url, options = {}) => {
     const { pathname } = new URL(url);
     if (options.method === 'PUT' && /\/drafts\/[^/]+\/$/.test(pathname)) {
       saved = true;
+      kept = JSON.parse(options.body);
       return reply(200, {});
     }
     if ((!options.method || options.method === 'GET') && /\/drafts\/[^/]+\/$/.test(pathname)) {
@@ -427,7 +429,7 @@ test('a Depop save confirms the draft by reading it again when the first read fa
         // The read is retried on its own. Only a read after those retries is the confirmation.
         if (readsAfterSave <= 4) throw new Error('Disconnected');
       }
-      return reply(200, { id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }] });
+      return reply(200, { ...kept, variant_set_id: kept.variant_set, id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }] });
     }
     return reply(200, {});
   };
@@ -490,11 +492,13 @@ test('Depop\'s own missing fields come back by name, safe to retry, with the dra
   c.chrome.storage.local.get = async () => ({});
   c.fetch = async (url, options) => {
     requests.push({ url, ...options });
-    return reply(200, { description: 'Private draft', price_amount: '12', pictures: [{}], missing_fields: ['brand', 'parcel_size'] });
+    return reply(200, { description: 'Private draft', price_amount: '12', pictures: [{}], missing_fields: ['brand', 'parcel_size'],
+      product_type: 'tshirts', variant_set_id: 12, variants: { 7: 1 }, attributes: { material: ['cotton'], occasion: ['casual'] } });
   };
-  const result = await c.runDepopNative({ payload: { ...payload, action: 'publish', confirm: true, operation_id: 'abc123' } });
+  withCatalog(c);
+  const result = await c.runDepopNative({ payload: { ...payload, listing: { ...FULL, tags: [] }, action: 'publish', confirm: true, operation_id: 'abc123' } });
   assert.equal(result.ok, false);
-  assert.equal(result.error_code, 'missing_fields');
+  assert.equal(result.error_code, 'missing_fields', result.error);
   assert.equal(result.safe_to_retry, true);
   assert.equal(result.draft_url, DRAFT);
   assert.deepEqual(JSON.parse(JSON.stringify(result.fields)), [{ field: 'brand', message: 'Depop needs a brand' },
@@ -585,4 +589,59 @@ test('a direct Depop category wins, and a stale id falls back to the live produc
   }, ATTRIBUTES);
   assert.equal(named.productType, 'tshirts');
   assert.equal(named.department, 'menswear');
+});
+
+// Depop's kids coats, as its catalog lists them: an age size set and a jacket type.
+const KIDS_JACKETS = {
+  ...ATTRIBUTES,
+  group: [...ATTRIBUTES.group, { id: 'coats-jackets', department: ['kidswear'], product_types: [
+    { id: 'jackets', attribute_ids: ['material', 'occasion', 'jacket-type'] }] }],
+  generic_attributes: [...ATTRIBUTES.generic_attributes, { id: 'jacket-type', max_selection: 2, is_mandatory: false,
+    attributes: [{ id: 'puffer', name_i18n: { 'en-US': 'Puffer' } }, { id: 'windbreaker', name_i18n: { 'en-US': 'Windbreaker' } }] }],
+  category_size_mapping: [...ATTRIBUTES.category_size_mapping,
+    { department: 'kidswear', group: 'coats-jackets', product_type: 'jackets', size_set_by_region: { US: 100 } }],
+  size_sets: [...ATTRIBUTES.size_sets, { id: 100, sizes: [{ id: 20, name_i18n: { 'en-US': '14 years' } },
+    { id: 21, name_i18n: { 'en-US': 'Other' } }, { id: 23, name_i18n: { 'en-US': '16 years' } }] }],
+};
+const KIDS_JACKET = { ...listing, brand: 'Columbia', department: 'Boys', size: 'XL', condition: 'Pre-Owned - Good',
+  direct_category_ids: { depop: 'kidswear_jackets' },
+  depop_specifics: { size: '16 years', type: 'Windbreaker', material: ['Polyester'], parcelSize: 'Medium', location: 'New Orleans, LA, United States' },
+  form: { overrides: { condition: 'used_good' }, specifics: {}, aspects: {}, ships_from_zip: '70115' } };
+
+test('a kids jacket takes Depop\'s age size, its jacket type, and the ship-from city', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  withCatalog(c, { attributes: [200, KIDS_JACKETS], addresses: [200, [{ id: 41, postal_code: '70115', city: 'New Orleans', state: 'LA' }]] });
+  const fields = await c.depopResolvedFields({ listing: KIDS_JACKET, deadline: Date.now() + 30000 });
+  assert.equal(fields.variant_set, 100);
+  assert.deepEqual(JSON.parse(JSON.stringify(fields.variants)), { 23: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(fields.attributes['jacket-type'])), ['windbreaker']);
+  assert.equal(fields.address, 'New Orleans, LA');
+  assert.equal(fields.geo_lat, undefined);
+  // Other on the Depop form is never chosen for a tag size; the tag stays the fallback.
+  const other = await c.depopResolvedFields({ listing: { ...KIDS_JACKET, size: '14 years',
+    depop_specifics: { ...KIDS_JACKET.depop_specifics, size: 'Other' } }, deadline: Date.now() + 30000 });
+  assert.deepEqual(JSON.parse(JSON.stringify(other.variants)), { 20: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(call(c, 'depopLocation', KIDS_JACKET, { id: 1, latitude: '29.95', longitude: '-90.07' }))),
+    { address: 'New Orleans, LA, United States', geo_lat: 29.95, geo_lng: -90.07 });
+});
+
+test('Depop publish refuses a draft whose size or type is not the one sent', async () => {
+  const { c, requests, payload } = page();
+  const fields = { product_type: 'jackets', variant_set: 100, variants: { 23: 1 }, attributes: { 'jacket-type': ['windbreaker'] } };
+  const draft = { description: 'Private draft', price_amount: '12', pictures: [{}], missing_fields: [],
+    product_type: 'jackets', variant_set_id: 100, variants: { 21: 1 }, attributes: { 'jacket-type': ['windbreaker'] } };
+  c.fetch = async (url, options) => {
+    requests.push({ url, ...options });
+    return reply(200, options.method === 'GET' ? draft : { id: 'job-1' });
+  };
+  const approved = { ...payload, action: 'publish', confirm: true, depop_fields: fields };
+  const refused = await c.depopApiAction('publish', approved);
+  assert.match(refused.error, /different size than this revision/);
+  assert.deepEqual(requests.map(r => r.method || 'GET'), ['GET']);
+  draft.variants = { 23: 1 };
+  draft.attributes = { 'jacket-type': ['puffer'] };
+  assert.match((await c.depopApiAction('publish', approved)).error, /different jacket type/);
+  draft.attributes = { 'jacket-type': ['windbreaker'] };
+  assert.equal((await c.depopApiAction('publish', approved)).publish_job_id, 'job-1');
 });

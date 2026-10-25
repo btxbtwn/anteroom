@@ -506,6 +506,25 @@ class ListingFieldsRouteTest(unittest.TestCase):
         self.assertEqual(body["forms"][0]["known"], False)
         self.assertEqual(body["forms"][0]["fields"], [])
 
+    def test_mercari_offers_its_own_sizes_for_the_category_a_direct_list_sends(self):
+        from vendoo_studio.services import category_fields as cf
+        from vendoo_studio.services import native_form
+
+        listing = {"size": "XL (18/20)", "direct_category_ids": {"mercari": "1931"}}
+        sizes = [{"id": 105, "name": "XL (14-16)", "title": "XL", "group": 83},
+                 {"id": 168, "name": "2XL (18)", "title": "2XL", "group": 83}]
+        with mock.patch.object(cf, "listing_category_ids", return_value={"mercari": "1881"}), \
+                mock.patch.object(cf, "load_fields", return_value=None), \
+                mock.patch.object(native_form, "mercari_sizes", return_value=sizes) as read, \
+                mock.patch("vendoo_studio.repositories.queries.ConversationRepo.get", return_value=object()), \
+                mock.patch("vendoo_studio.repositories.queries.ListingRepo.get_revisions",
+                           return_value=[type("R", (), {"listing_json": listing})()]):
+            body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
+        read.assert_called_once_with("1931")
+        size = next(f for f in body["forms"][0]["fields"] if f["label"] == "Size")
+        self.assertEqual(size["options"], ["XL (14-16)", "2XL (18)"])
+        self.assertEqual(size["value"], "XL (18/20)")
+
 
 if __name__ == "__main__":
     unittest.main()

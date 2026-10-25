@@ -42,6 +42,16 @@ def direct_category_id(listing: dict, marketplace: str) -> str:
     return text if _ID.fullmatch(text) else ""
 
 
+def live_category_id(listing: dict, marketplace: str) -> str:
+    """The leaf whose live schema applies: the direct one, else for eBay the Vendoo id (eBay's own ids)."""
+    chosen = direct_category_id(listing, marketplace)
+    if chosen or marketplace != "ebay":
+        return chosen
+    ids = listing.get("marketplace_category_ids")
+    text = str(ids.get("ebay") or "").strip() if isinstance(ids, dict) else ""
+    return text if _ID.fullmatch(text) else ""
+
+
 def pick_ebay_suggestion(body: dict) -> dict[str, str] | None:
     """eBay's first suggestion: id and the path from the root down to that leaf."""
     suggestions = body.get("categorySuggestions") if isinstance(body, dict) else None
@@ -126,7 +136,7 @@ async def overlay_live_fields(listing: dict, marketplace: str, fields: list[dict
     """The editor's rows for one marketplace, with the live schema merged when it is cached or readable."""
     if marketplace not in ("ebay", "etsy"):
         return fields
-    category_id = direct_category_id(listing, marketplace)
+    category_id = live_category_id(listing, marketplace)
     if not category_id:
         return fields
     from vendoo_studio.services import marketplace_schemas
@@ -147,10 +157,10 @@ def live_fields_prompt(listing: dict) -> str:
     ids = listing.get("direct_category_ids") if isinstance(listing.get("direct_category_ids"), dict) else {}
     blocks = []
     for marketplace, cache_key, bucket in (
-        ("ebay", EBAY_ASPECTS, "ebay_specifics.category_specifics"),
+        ("ebay", EBAY_ASPECTS, "ebay_specifics"),
         ("etsy", ETSY_PROPERTIES, "etsy_specifics.category_specifics"),
     ):
-        category_id = direct_category_id(listing, marketplace)
+        category_id = live_category_id(listing, marketplace)
         rows = load_rows(cache_key, category_id) if category_id else None
         if not rows:
             continue

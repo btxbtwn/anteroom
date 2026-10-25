@@ -738,9 +738,9 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
             ],
             {"size": "10", "ebay_specifics": {"material": "Cotton"}},
         )
-        self.assertEqual([patch["field"] for patch in ready], ["Material", "Pattern"])
-        self.assertEqual(ready[1]["value"], "Solid")
-        self.assertEqual([gap["field"] for gap in needs], ["Size"])
+        # Nothing shows the pattern, so none is invented.
+        self.assertEqual([patch["field"] for patch in ready], ["Material"])
+        self.assertEqual([gap["field"] for gap in needs], ["Pattern", "Size"])
 
     def test_unlisted_brand_uses_depop_other_and_mercari_no_brand(self):
         gaps = [

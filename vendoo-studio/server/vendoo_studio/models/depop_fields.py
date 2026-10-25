@@ -16,7 +16,6 @@ from vendoo_studio.models.listing_values import (
     text_value,
 )
 from vendoo_studio.models.schema import (
-    VALID_DEPOP_MATERIAL,
     VALID_DEPOP_OCCASION,
     VALID_DEPOP_STYLE,
 )
@@ -34,6 +33,8 @@ DEPOP_OPTIONAL_DNA_KEYS = frozenset({
     "sizeGrouping",  # Regular sizing — omit / Does Not Apply
 })
 DEPOP_OPTIONAL_EVIDENCE_KEYS = frozenset({"material"})
+# Keys a model sometimes copies from Depop's shipping form. No code reads them.
+DEPOP_UNREAD_KEYS = ("nationalShipping", "shippingmethod", "shippingMethod")
 DEPOP_OPTIONAL_MUST_FILL_LOOKUPS = frozenset({
     "source",
     "age",
@@ -329,34 +330,6 @@ def _infer_depop_parcel_size(listing: dict) -> str:
     return "Extra large"
 
 
-def _map_depop_material(value: str) -> str | None:
-    raw = text_value(value)
-    if not raw:
-        return None
-    folded = raw.casefold()
-    aliases = {
-        "spandex": "Elastane / Lycra / Spandex",
-        "lycra": "Elastane / Lycra / Spandex",
-        "elastane": "Elastane / Lycra / Spandex",
-        "vegan leather": "Faux leather",
-        "faux leather": "Faux leather",
-        "genuine leather": "Leather",
-        "real leather": "Leather",
-        "faux fur": "Faux fur",
-        "organic cotton": "Cotton - Organic",
-        "recycled cotton": "Cotton - Recycled",
-        "recycled polyester": "Polyester - Recycled",
-    }
-    for needle, mapped in aliases.items():
-        if needle in folded:
-            return mapped
-    hit = canonical_option(raw, VALID_DEPOP_MATERIAL)
-    if hit:
-        return hit
-    cleaned = re.sub(r"\b(?:blend|pure|100%)\b", "", raw, flags=re.I).strip(" ,")
-    return canonical_option(cleaned, VALID_DEPOP_MATERIAL) if cleaned else None
-
-
 def ensure_depop_category_optionals(listing: dict) -> bool:
     """Fill Depop Show-Optional-Fields rows; omit size grouping for Regular."""
     if not isinstance(listing, dict):
@@ -456,21 +429,99 @@ def ensure_depop_category_optionals(listing: dict) -> bool:
         depop.pop("size_grouping", None)
         changed = True
 
-    if not as_list(depop.get("material")):
-        candidates = [
-            *as_list(depop.get("material")),
-            *as_list(ebay.get("material") if isinstance(ebay, dict) else None),
-            *as_list(ebay.get("fabricType") if isinstance(ebay, dict) else None),
-        ]
-        mapped_materials: list[str] = []
-        for candidate in candidates:
-            hit = _map_depop_material(str(candidate))
-            if hit and hit not in mapped_materials:
-                mapped_materials.append(hit)
-        if mapped_materials:
-            depop["material"] = mapped_materials[:4]
+    # Studio's own section builder writes Depop shipping from parcelSize. A
+    # model's copy of Depop's shipping form is read by nothing, so it goes.
+    for key in DEPOP_UNREAD_KEYS:
+        if key in depop:
+            depop.pop(key)
             changed = True
 
     if changed:
         listing["depop_specifics"] = depop
     return changed
+
+
+def depop_category_id(listing: dict) -> str:
+    """Depop's own category id for the listing (``kidswear_jackets``), read the way the extension reads it."""
+    direct = listing.get("direct_category_ids")
+    specifics = listing.get("depop_specifics")
+    ids = listing.get("marketplace_category_ids")
+    for source in (direct, specifics, ids):
+        if not isinstance(source, dict):
+            continue
+        value = source.get("categoryId") if source is specifics else source.get("depop")
+        if text_value(value):
+            return text_value(value)
+    return ""
+
+
+def depop_is_kids(listing: dict) -> bool:
+    category = depop_category_id(listing)
+    if category:
+        return category.startswith("kidswear_")
+    paths = listing.get("marketplace_categories")
+    path = text_value(paths.get("depop")) if isinstance(paths, dict) else ""
+    return path.casefold().startswith("kid")
+
+
+# Depop sizes kids' clothes by age. A US youth letter is the lower age it is
+# made for: XS 4/5, S 6/7, M 10/12, L 14/16, and XL 18/20 is past Depop's
+# oldest, 16 years.
+_KIDS_LETTER_AGES = {"xxs": 3, "xs": 4, "s": 6, "m": 10, "l": 14, "xl": 16, "xxl": 16, "2xl": 16, "xxxl": 16, "3xl": 16}
+_KIDS_MONTHS = ((0, "0-3 months"), (3, "3-6 months"), (6, "6-9 months"), (9, "9-12 months"),
+                (12, "12-18 months"), (18, "18-24 months"))
+DEPOP_KIDS_OLDEST = 16
+
+
+def _kids_age_label(age: int) -> str:
+    return f"{min(age, DEPOP_KIDS_OLDEST)} years"
+
+
+def depop_kids_size(size: Any) -> str:
+    """A kids' tag size as the age Depop lists it under; anything else unchanged.
+
+    ``XL (18/20)`` and ``18/20`` are 16 years, ``M`` is 10 years, ``4T`` is
+    4 years, ``12M`` is 12-18 months. A number on the tag wins over its letter.
+    """
+    text = text_value(size)
+    folded = text.casefold()
+    if folded in {"os", "one size", "onesize"}:
+        return "One size"
+    months = re.fullmatch(r"(\d{1,2})\s*(?:-\s*\d{1,2}\s*)?(?:m|mo|mos|months?)", folded)
+    if months:
+        start = int(months.group(1))
+        if start >= 24:
+            return _kids_age_label(start // 12)
+        return next(label for floor, label in reversed(_KIDS_MONTHS) if start >= floor)
+    numbers = [int(number) for number in re.findall(r"\d{1,2}", folded)]
+    if numbers and re.fullmatch(r"[a-z\s]*\(?\s*\d{1,2}\s*t?\s*(?:[/-]\s*\d{1,2}\s*)?\)?\s*(?:t|years?|yrs?|y)?", folded):
+        age = min(numbers)
+        return _kids_age_label(age) if age >= 2 else text
+    letter = _KIDS_LETTER_AGES.get(re.sub(r"[\s.]+", "", folded))
+    return _kids_age_label(letter) if letter else text
+
+
+def depop_size_for(size: Any, listing: dict) -> str:
+    """The general tag size as Depop's size for this listing's category."""
+    return depop_kids_size(size) if depop_is_kids(listing) else text_value(size)
+
+
+def depop_offers_sizes(listing: dict) -> bool:
+    """Depop's category has real sizes, not only Other and One size.
+
+    Read from the category's cached schema; a clothing department with no
+    schema cached yet is taken to be sized.
+    """
+    category = depop_category_id(listing)
+    if not category:
+        return False
+    from vendoo_studio.services.category_fields import load_fields
+
+    try:
+        specs = load_fields("depop", category)
+    except Exception:  # noqa: BLE001 - no cached schema reads as unknown
+        specs = None
+    spec = (specs or {}).get("size")
+    if spec is None:
+        return category.split("_", 1)[0] in {"kidswear", "menswear", "womenswear"}
+    return any(label.strip().casefold() not in {"other", "one size"} for label in spec.options.values())

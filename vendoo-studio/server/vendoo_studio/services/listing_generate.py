@@ -830,9 +830,9 @@ def ebay_size_choices(listing: dict, block: dict | None = None) -> list[str]:
 def propagate_general_size(listing: dict, *, previous_size: str | None = None) -> bool:
     """Mirror general size into marketplace size slots that were following it.
 
-    Depop keeps a size the seller set on that form. Other stays Other when the
-    tag is XL. It follows the tag only when it was still a copy of the previous
-    general size and that general size is what changed.
+    Depop keeps a size the seller set on that form. It follows the tag when it
+    is empty, "Other", or still a copy of the general size, and a kids'
+    category takes the tag as Depop's age (XL (18/20) is 16 years).
     """
     if not isinstance(listing, dict):
         return False
@@ -842,18 +842,26 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
     if str(listing.get("size") or "").strip() != size:
         listing["size"] = size
     changed = False
+    from vendoo_studio.models.depop_fields import depop_size_for
+
     previous = sanitize_size_value(previous_size) if previous_size is not None else None
     for specifics_key in _SIZE_SPECIFIC_KEYS:
         block = listing.get(specifics_key)
         if not isinstance(block, dict):
             continue
-        if specifics_key != "ebay_specifics" and "size" not in block:
-            continue
         current = str(block.get("size") or "").strip()
         target = size
         if specifics_key == "ebay_specifics":
             target = ebay_size(listing, block, size)
-        elif specifics_key == "depop_specifics" and current and current != target and (previous is None or current != previous):
+        elif specifics_key == "depop_specifics":
+            # A kids' age is written even where Depop had no size yet: the
+            # letter on the tag is not one of its choices.
+            target = depop_size_for(size, listing)
+            if "size" not in block and target == size:
+                continue
+            if current and current.casefold() != "other" and current not in {target, size, previous}:
+                continue
+        elif "size" not in block:
             continue
         if current == target:
             continue

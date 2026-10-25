@@ -1,6 +1,34 @@
 /** Map a Forms editor field key onto static Vendoo dropdown lists. */
 
+import type { MarketplaceForm } from "./api/types";
+
 export type DropdownForms = Record<string, Record<string, string[]>>;
+
+/**
+ * The static lists with this listing's category schema laid over them. A
+ * category's own options win: Depop's kids sizes are ages, not the adult list.
+ */
+export function withSchemaOptions(
+  forms: DropdownForms | undefined,
+  schema: MarketplaceForm[] | undefined,
+): DropdownForms | undefined {
+  if (!schema?.length) return forms;
+  const out: DropdownForms = { ...forms };
+  for (const form of schema) {
+    const bucket = { ...out[form.marketplace] };
+    for (const field of form.fields) {
+      if (!field.options?.length) continue;
+      // Replace every static spelling of the field, then add the schema's own.
+      for (const key of Object.keys(bucket)) {
+        if (optionKey(key) === optionKey(field.key) || optionKey(key) === optionKey(field.label)) delete bucket[key];
+      }
+      bucket[field.key] = field.options;
+      bucket[field.label] = field.options;
+    }
+    out[form.marketplace] = bucket;
+  }
+  return out;
+}
 
 /**
  * Every fix prompt says this: a listed dropdown is the whole menu, and a value

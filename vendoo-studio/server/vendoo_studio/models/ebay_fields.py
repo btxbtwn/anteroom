@@ -8,17 +8,15 @@ from typing import Any
 
 from vendoo_studio.models.sizes import letter_size
 from vendoo_studio.models.listing_values import (
-    DNA_VALUE,
     collapse_option,
     dropdown_field_options,
-    evidence_unknown,
     infer_known_option,
-    infer_known_options,
     normalized_option_key,
     text_value,
 )
 
-REQUIRED_EBAY_KEYS = ("type", "department", "sizeType", "size", "brand")
+# Size Type is only some categories' aspect; the live schema says where eBay needs it.
+REQUIRED_EBAY_KEYS = ("type", "department", "size", "brand")
 EBAY_KEY_ALIASES = {
     "Size": "size",
     "Department": "department",
@@ -117,16 +115,8 @@ EBAY_OPTIONAL_FIXED_DEFAULTS = {
     "unitType": "Unit",
     "vintage": "No",
 }
-EBAY_OPTIONAL_INFER_FALLBACKS = {
-    "pattern": "Solid",
-    "occasion": "Casual",
-    "fit": "Regular",
-    "style": "Basic",
-    "closure": "Pullover",
-    "neckline": "Crew Neck",
-    "features": "Lightweight",
-}
-EBAY_OPTIONAL_ALWAYS_DEFAULTS = {**EBAY_OPTIONAL_FIXED_DEFAULTS, **EBAY_OPTIONAL_INFER_FALLBACKS}
+# Optionals read from the listing's own words. Nothing matching leaves them empty.
+EBAY_OPTIONAL_INFERRED = ("pattern", "occasion", "fit", "style", "closure", "neckline", "features")
 EBAY_OCCASION_OPTIONS = (
     "Casual", "Workwear", "Formal", "Party/Cocktail", "Activewear",
     "Travel", "Everyday", "Business",
@@ -179,7 +169,9 @@ EBAY_APPAREL_CUES = {
         "Travel": (r"\btravel\b", r"\bvacation\b"),
     },
 }
-# Only these may be Does Not Apply when empty — everything else must be a real value.
+# Only these may hold Does Not Apply — everything else is a real value or empty.
+# Nothing writes it for them: an empty optional stays empty, and direct List
+# sends Does Not Apply only where eBay requires an aspect (and MPN/UPC).
 # Fabric Weight is numeric on eBay (must be > 0); DNA is rejected at list time.
 EBAY_OPTIONAL_DNA_KEYS = frozenset({
     "mpn",
@@ -473,6 +465,47 @@ def ebay_optional_raw(ebay: dict, key: str) -> Any:
     return None
 
 
+# eBay aspects that take several values: two copies are one list, not a choice.
+EBAY_MULTI_KEYS = frozenset({"season", "features", "occasion", "performanceactivity", "character", "theme", "accents"})
+
+
+def _aspect_items(value: Any) -> list:
+    return [item for item in (value if isinstance(value, list) else [value]) if not ebay_optional_blank(item)]
+
+
+def flatten_ebay_specifics(listing: dict) -> bool:
+    """Keep one copy of each eBay aspect, at the top of ``ebay_specifics``.
+
+    Generation used to write category aspects under ``category_specifics`` while
+    the editor, the gap filler and Send write the top level, so one aspect could
+    hold two answers. The nested copy is folded in and removed: a top-level
+    answer wins, an empty or Does Not Apply one takes the nested value, and a
+    multi-value aspect keeps both sets.
+    """
+    from vendoo_studio.services.vendoo_specifics import is_not_applicable
+
+    ebay = listing.get("ebay_specifics") if isinstance(listing, dict) else None
+    if not isinstance(ebay, dict) or "category_specifics" not in ebay:
+        return False
+    flat = {key: value for key, value in ebay.items() if key != "category_specifics"}
+    nested = ebay.get("category_specifics")
+    for key, value in (nested.items() if isinstance(nested, dict) else ()):
+        if ebay_optional_blank(value):
+            continue
+        name = next(iter(ebay_optional_keys(flat, key)), key)
+        held = flat.get(name)
+        if ebay_optional_blank(held) or (is_not_applicable(held) and not is_not_applicable(value)):
+            flat[name] = value
+        elif isinstance(held, list) or isinstance(value, list) or ebay_key_fold(key) in EBAY_MULTI_KEYS:
+            merged: list = []
+            for item in _aspect_items(held) + _aspect_items(value):
+                if not is_not_applicable(item) and str(item).casefold() not in {str(seen).casefold() for seen in merged}:
+                    merged.append(item)
+            flat[name] = merged or held
+    listing["ebay_specifics"] = flat
+    return True
+
+
 def ebay_size_for_type(size: Any, size_type: Any) -> str:
     """A size as eBay spells it: counted letters (2XL, not XXL), and PS/PM/PL/PXL or a numeric P suffix for petites."""
     text = text_value(size)
@@ -520,6 +553,7 @@ def ebay_optional_blank(value: Any) -> bool:
 
 
 def _infer_ebay_sleeve_length(listing: dict | None, ebay: dict | None) -> str:
+    """The sleeve the listing's words name, or empty."""
     hay = ebay_season_haystack(listing, ebay)
     if re.search(r"\b(?:sleeveless|tank|cami|halter|strapless)\b", hay):
         return "Sleeveless"
@@ -533,7 +567,7 @@ def _infer_ebay_sleeve_length(listing: dict | None, ebay: dict | None) -> str:
         return "Cap Sleeve"
     if re.search(r"\b(?:short[\s-]*sleeve|ss|tee|t[\s-]?shirt|polo|blouse)\b", hay):
         return "Short Sleeve"
-    return "Short Sleeve"
+    return ""
 
 
 def _fabric_weight_word_key(text: str) -> str:
@@ -584,24 +618,19 @@ def _infer_ebay_fabric_type(listing: dict | None, ebay: dict | None) -> str | No
 
 
 def ensure_ebay_category_optionals(listing: dict) -> bool:
-    """Fill eBay Show-Optional-Fields rows: defaults, DNA only when N/A, infer season/sleeve."""
+    """Fill eBay Show-Optional-Fields rows: fixed defaults, and values the listing's words show."""
     if not isinstance(listing, dict):
         return False
+    changed = flatten_ebay_specifics(listing)
     raw = listing.get("ebay_specifics")
     if not isinstance(raw, dict):
-        return False
+        return changed
     ebay = dict(raw)
-    changed = False
 
     def set_key(key: str, value: Any) -> None:
-        nonlocal ebay, changed
-        if ebay_optional_blank(ebay_optional_raw(ebay, key)):
+        nonlocal changed
+        if value and ebay_optional_blank(ebay_optional_raw(ebay, key)):
             ebay[key] = value
-            nested = ebay.get("category_specifics")
-            if isinstance(nested, dict) and key in nested and ebay_optional_blank(nested.get(key)):
-                nested = dict(nested)
-                nested[key] = value
-                ebay["category_specifics"] = nested
             changed = True
 
     for key, default in EBAY_OPTIONAL_FIXED_DEFAULTS.items():
@@ -616,47 +645,20 @@ def ensure_ebay_category_optionals(listing: dict) -> bool:
         "closure": ("closure", "Closure"),
         "features": ("Features", "features"),
     }
-    for key, fallback in EBAY_OPTIONAL_INFER_FALLBACKS.items():
+    for key in EBAY_OPTIONAL_INFERRED:
         if not ebay_optional_blank(ebay_optional_raw(ebay, key)):
             continue
         if key == "occasion":
             options = list(EBAY_OCCASION_OPTIONS)
         else:
-            options = dropdown_field_options("ebay", *field_option_names.get(key, (key,))) or [fallback]
-        cues = EBAY_APPAREL_CUES.get(key)
-        if key == "features":
-            picked = infer_known_options(hay, options, cues=cues, fallbacks=(fallback,), limit=1)
-            value = picked[0] if picked else fallback
-        else:
-            value = infer_known_option(hay, options, cues=cues, fallback=fallback) or fallback
-        set_key(key, value)
-
+            options = dropdown_field_options("ebay", *field_option_names.get(key, (key,)))
+        set_key(key, infer_known_option(hay, options, cues=EBAY_APPAREL_CUES.get(key)))
 
     # Condition Description is fixed, not a default: whatever a model wrote or
     # an import carried over is replaced.
     if ebay.get("conditionDescription") != EBAY_CONDITION_DESCRIPTION:
         ebay["conditionDescription"] = EBAY_CONDITION_DESCRIPTION
         changed = True
-    nested = ebay.get("category_specifics")
-    if isinstance(nested, dict) and nested.get("conditionDescription") not in (
-        None, EBAY_CONDITION_DESCRIPTION,
-    ):
-        nested = dict(nested)
-        nested["conditionDescription"] = EBAY_CONDITION_DESCRIPTION
-        ebay["category_specifics"] = nested
-        changed = True
-
-    care_unknown = evidence_unknown(
-        text_value((listing or {}).get("description")),
-        "care tag is not shown",
-        "garment care",
-        "unverified",
-    ) or any(
-        token in text_value((listing or {}).get("description")).casefold()
-        for token in ("garment care is unknown", "care is unknown", "care tag is not shown")
-    )
-    if not care_unknown and ebay_optional_blank(ebay_optional_raw(ebay, "garmentCare")):
-        set_key("garmentCare", "Machine Washable")
 
     if ebay_optional_blank(ebay_optional_raw(ebay, "season")) and ebay_optional_blank(
         ebay_optional_raw(ebay, "Season")
@@ -690,21 +692,7 @@ def ensure_ebay_category_optionals(listing: dict) -> bool:
         if text_value(ebay_optional_raw(ebay, "vintage")).casefold() != "no":
             ebay["vintage"] = "No"
             ebay.pop("Vintage", None)
-            nested = ebay.get("category_specifics")
-            if isinstance(nested, dict) and ({"vintage", "Vintage"} & nested.keys()):
-                ebay["category_specifics"] = {
-                    **{k: v for k, v in nested.items() if k != "Vintage"},
-                    "vintage": "No",
-                }
             changed = True
-
-    for key in EBAY_OPTIONAL_DNA_KEYS:
-        if key == "personalizationInstructions":
-            personalize = text_value(ebay_optional_raw(ebay, "personalize") or "No")
-            if personalize.casefold() == "yes":
-                continue
-        if ebay_optional_blank(ebay_optional_raw(ebay, key)):
-            set_key(key, DNA_VALUE)
 
     # Fabric Weight: keep evidenced numerics only; clear DNA / Lightweight / other junk.
     # Never invent a weight — blank when unknown.
@@ -716,11 +704,6 @@ def ensure_ebay_category_optionals(listing: dict) -> bool:
             # "Fabric Weight" reaches the form just as one under "fabricWeight".
             for name in ebay_optional_keys(ebay, "fabricWeight") or ["fabricWeight"]:
                 ebay[name] = normalized_weight
-            nested = ebay.get("category_specifics")
-            nested_keys = ebay_optional_keys(nested, "fabricWeight")
-            if nested_keys:
-                nested = {**nested, **{name: normalized_weight for name in nested_keys}}
-                ebay["category_specifics"] = nested
             changed = True
 
     # Material: copy fabricType fiber when material empty and fabric looks like a fiber.
@@ -737,19 +720,15 @@ def ensure_ebay_category_optionals(listing: dict) -> bool:
 
 
 def promote_required_ebay_specifics(listing: dict) -> bool:
-    """Fill required eBay keys from nested specifics or matching general values."""
+    """Fill required eBay keys from the matching general values."""
     ebay = listing.get("ebay_specifics")
     if not isinstance(ebay, dict):
         return False
-    nested = ebay.get("category_specifics")
-    nested = nested if isinstance(nested, dict) else {}
     changed = False
     for key in REQUIRED_EBAY_KEYS:
         if not ebay_optional_blank(ebay.get(key)):
             continue
-        value = nested.get(key)
-        if ebay_optional_blank(value) and key in {"brand", "department", "size", "sizeType"}:
-            value = listing.get(key)
+        value = listing.get(key) if key in {"brand", "department", "size"} else None
         if ebay_optional_blank(value):
             continue
         ebay[key] = value

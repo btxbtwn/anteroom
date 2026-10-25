@@ -145,11 +145,21 @@ function poshmarkClient(deadline, csrf) {
   return client;
 }
 
-// Anteroom/Vendoo condition labels to Poshmark's own codes. Studio's form already carries the code.
+// Anteroom/Vendoo condition labels to Poshmark's own codes. The condition the
+// seller chose on the Poshmark tab wins, then the code Studio's form carries,
+// then the listing's own condition.
 function poshmarkCondition(listing) {
-  const native = String(listing.form?.overrides?.condition || listing.poshmark_specifics?.condition || '').toLowerCase();
-  if (POSHMARK_CONDITIONS.has(native)) return native;
-  const text = String(listing.poshmark_specifics?.poshmarkCondition || listing.condition || '').toLowerCase();
+  const own = String(listing.poshmark_specifics?.condition || '').toLowerCase();
+  if (POSHMARK_CONDITIONS.has(own)) return own;
+  const chosen = poshmarkConditionFromText(listing.poshmark_specifics?.poshmarkCondition);
+  if (chosen) return chosen;
+  const form = String(listing.form?.overrides?.condition || '').toLowerCase();
+  if (POSHMARK_CONDITIONS.has(form)) return form;
+  return poshmarkConditionFromText(listing.condition);
+}
+
+function poshmarkConditionFromText(value) {
+  const text = String(value || '').toLowerCase();
   if (/new with tags|\bnwt\b/.test(text) && !/without/.test(text)) return 'nwt';
   if (/new without tags|\bnwot\b|like new|excellent/.test(text)) return 'uln';
   if (/fair|poor/.test(text)) return 'uf';
@@ -208,9 +218,21 @@ function poshmarkByName(catalog, names) {
 function poshmarkCategory(catalog, listing) {
   const direct = listing.direct_category_ids?.poshmark;
   const directIds = typeof direct === 'string' ? direct.split('/') : Array.isArray(direct) ? direct : [];
-  return poshmarkFromIds(catalog, directIds)
+  const found = poshmarkFromIds(catalog, directIds)
     || poshmarkFromIds(catalog, listing.form?.overrides?.categoryV2?.path || listing.marketplace_category_objects?.poshmark?.path)
     || poshmarkByName(catalog, poshmarkNames(listing));
+  return found && poshmarkWithSubcategory(catalog, found, listing.poshmark_specifics?.subcategory);
+}
+
+// The sub-category the seller chose on the Poshmark tab, inside the category
+// already found. "None" leaves it off; a name the category lacks changes nothing.
+function poshmarkWithSubcategory(catalog, found, wanted) {
+  const name = String(wanted || '').trim();
+  if (!name) return found;
+  const ids = [found.department.id, found.category.id];
+  if (/^none$/i.test(name)) return poshmarkFromIds(catalog, ids);
+  const feature = (found.category.category_features || []).find(entry => poshmarkKey(entry.display) === poshmarkKey(name));
+  return feature ? poshmarkFromIds(catalog, [...ids, feature.id]) : found;
 }
 
 const POSHMARK_FIT_LABELS = { petite: 'Petite', plus: 'Plus', 'big_&_tall': 'Big & Tall', maternity: 'Maternity', juniors: 'Juniors' };
@@ -265,6 +287,31 @@ function poshmarkSize(category, listing, { kids = false, leaf = category.id } = 
   return null;
 }
 
+// Smart Pricing's lowest accepted offer in whole dollars, or 0 for off. The
+// listing's form decides when it has the setting, off included; otherwise the
+// Poshmark specifics' minimum. A minimum at or above the price is off.
+function poshmarkSmartMinimum(listing, price) {
+  const smart = listing.form?.specifics?.smartSell;
+  const minimum = smart && typeof smart === 'object'
+    ? (smart.enabled ? Math.round(Number(smart.minPrice)) : 0)
+    : Math.round(Number(listing.poshmark_specifics?.smartSellMinimumPrice || listing.poshmark_specifics?.smartSell?.minimumPrice || 0));
+  return minimum > 0 && minimum < price ? minimum : 0;
+}
+
+// What the saved post says about Smart Pricing, when it differs from what was
+// sent. A post that does not say leaves nothing to compare.
+function poshmarkSmartWarning(post, saved) {
+  if (typeof saved?.offer_auto_actions_v2_enabled !== 'boolean') {
+    marketplaceLog('poshmark', 'smart-pricing', { read_back: 'missing' });
+    return null;
+  }
+  const sent = post.offer_auto_actions_v2_enabled ? Number(post.offer_auto_actions_min_price_amount.val) : 0;
+  const kept = saved.offer_auto_actions_v2_enabled ? Number(saved.offer_auto_actions_min_price_amount?.val) || 0 : 0;
+  if (sent === kept) return null;
+  return sent ? `Poshmark did not keep Smart Pricing at a $${sent} minimum. Check it in the listing.`
+    : 'Poshmark left Smart Pricing on. Turn it off in the listing if you do not want it.';
+}
+
 function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {}) {
   const missing = [];
   const category = poshmarkCategory(catalog, listing);
@@ -283,12 +330,13 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   if (description.length > 1500) missing.push({ field: 'description', needs: 'a description of 1500 characters or fewer' });
   if (missing.length) throw marketplaceMissing('poshmark', missing);
   const colorNames = new Set((catalog.colors || []).map(color => color.name));
-  const colors = [listing.poshmark_specifics?.poshmarkColor || listing.primaryColor, listing.secondaryColor]
+  const colors = [listing.poshmark_specifics?.poshmarkColor || listing.primaryColor,
+    listing.poshmark_specifics?.poshmarkSecondaryColor || listing.secondaryColor]
     .map(value => ({ Grey: 'Gray', Beige: 'Tan' })[value] || value).filter(value => colorNames.has(value));
-  const smart = listing.form?.specifics?.smartSell;
-  const minimum = Math.round(Number(smart?.enabled && smart.minPrice) || Number(listing.poshmark_specifics?.smartSellMinimumPrice || listing.poshmark_specifics?.smartSell?.minimumPrice || 0));
+  const minimum = poshmarkSmartMinimum(listing, price);
   const sku = String(listing.sku || listing.poshmark_specifics?.poshmarkSku || '').trim().slice(0, 50);
-  const cost = Math.round(Number(listing.poshmark_specifics?.costPrice || listing.costPrice || 0));
+  // The item's cost (Anteroom's share of the box price), in dollars and cents as Poshmark's editor keeps it.
+  const cost = Number(listing.cost);
   return {
     title, description,
     catalog: category.catalog,
@@ -301,10 +349,10 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
     ...(brand ? { brand } : {}),
     colors: [...new Set(colors)].slice(0, 2),
     style_tags: styleTags,
-    offer_auto_actions_v2_enabled: minimum > 0 && minimum < price,
-    offer_auto_actions_min_price_amount: minimum > 0 && minimum < price ? { val: String(minimum), currency_code: 'USD' } : null,
+    offer_auto_actions_v2_enabled: minimum > 0,
+    offer_auto_actions_min_price_amount: minimum > 0 ? { val: String(minimum), currency_code: 'USD' } : null,
     ...(sku || cost > 0 ? { seller_private_info: { ...(sku ? { sku } : {}),
-      ...(cost > 0 ? { cost_price_amount: { val: String(cost), currency_code: 'USD' } } : {}) } } : {}),
+      ...(cost > 0 ? { cost_price_amount: { val: cost.toFixed(2), currency_code: 'USD', currency_symbol: '$' } } : {}) } } : {}),
   };
 }
 
@@ -365,7 +413,8 @@ async function updatePoshmarkPost(msg, recovery = false) {
     stage = 'saved';
     const saved = await client.call('GET', `/vm-rest/posts/${id}`, undefined, { step: 'read-back' });
     if (!matches(saved)) throw new Error('Poshmark did not keep this listing\'s title and price. Check the live listing before trying again.');
-    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id) };
+    const warning = poshmarkSmartWarning(post, saved);
+    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id), ...(warning ? { warning } : {}) };
   } catch (error) {
     const safe = stage === 'prepare' || (stage === 'saving' && error.rejected === true);
     return marketplaceFailure(error, safe && !recovery);
@@ -413,7 +462,8 @@ async function runPoshmarkApi(msg, recovery = false) {
     stage = 'published';
     const published = await client.call('GET', `/vm-rest/posts/${created}`, undefined, { step: 'read-back' });
     if (published.status !== 'published') throw new Error('Poshmark has not confirmed the listing.');
-    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(created) };
+    const warning = poshmarkSmartWarning(post, published);
+    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(created), ...(warning ? { warning } : {}) };
   } catch (error) {
     if (recovery) return marketplaceFailure(error, false);
     // Until the publish request, nothing is public; a clear refusal of it is safe too.

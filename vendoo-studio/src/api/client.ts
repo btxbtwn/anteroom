@@ -59,7 +59,7 @@ import { AssistantRefused, type AssistantMemory, type AssistantMessage, type Ass
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, PoshmarkOptions, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -449,6 +449,7 @@ export const api = {
       return request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight${query ? `?${query}` : ""}`);
     },
     sellwildOptions: (convId: string) => request<SellwildOptions>(`/conversations/${convId}/native-marketplaces/sellwild/options`),
+    poshmarkOptions: (convId: string) => request<PoshmarkOptions>(`/conversations/${convId}/native-marketplaces/poshmark/options`),
     list: (convId: string, marketplace: NativeMarketplace, revisionId: string, sellwild?: SellwildChoice) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/list`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true,
@@ -503,7 +504,7 @@ export const api = {
     sync: (convId: string, signal?: AbortSignal) =>
       request<{
         ok: boolean;
-        action: "pull" | "label" | "none" | "unavailable";
+        action: "pull" | "conflict" | "label" | "none" | "unavailable";
         reason: string;
         item_id?: string;
         revision_id?: string;

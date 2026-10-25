@@ -95,7 +95,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "live", label: "Live", href: live.url ?? undefined, hrefLabel: "View", detail: draft?.state === "published" ? draft.error : null, said };
   }
   if (draft && draft.state !== "draft") {
-    if (draft.state === "published") return { tone: "live", label: "Live", href: draft.listing_url, hrefLabel: "View" };
+    if (draft.state === "published") return { tone: "live", label: "Live", href: draft.listing_url, hrefLabel: "View", detail: draft.error };
     if (draft.state === "pending_review") return { tone: "attention", label: "In review", href: draft.listing_url, hrefLabel: "View" };
     if (draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
   }
@@ -188,11 +188,17 @@ export function MarketplacesLayout({
   const sellwildOptions = useQuery({ queryKey: ["sellwild-options", convId, revisionId], queryFn: () => api.nativeMarketplaces.sellwildOptions(convId),
     enabled: sellwildOpen, staleTime: 60_000, retry: false });
   const savedSellwild = drafts.sellwild;
-  const sellwildCategory = sellwildPick.categoryId ?? savedSellwild?.sellwild_category_id ?? sellwildOptions.data?.suggested.category_id ?? undefined;
-  const sellwildCondition = sellwildPick.conditionId ?? savedSellwild?.sellwild_condition_id ?? sellwildOptions.data?.suggested.condition_id ?? undefined;
+  // Only what the seller chose is sent and saved; Anteroom's match is shown and
+  // worked out again from the listing on every List.
+  const sellwildChoice = {
+    categoryId: sellwildPick.categoryId ?? savedSellwild?.sellwild_category_id,
+    conditionId: sellwildPick.conditionId ?? savedSellwild?.sellwild_condition_id,
+  };
+  const sellwildCategory = sellwildChoice.categoryId ?? sellwildOptions.data?.suggested.category_id ?? undefined;
+  const sellwildCondition = sellwildChoice.conditionId ?? sellwildOptions.data?.suggested.condition_id ?? undefined;
   const preflight = useQuery({
-    queryKey: ["native-preflight", convId, revisionId, sellwildCategory ?? null, sellwildCondition ?? null],
-    queryFn: () => api.nativeMarketplaces.preflight(convId, { categoryId: sellwildCategory, conditionId: sellwildCondition }),
+    queryKey: ["native-preflight", convId, revisionId, sellwildChoice.categoryId ?? null, sellwildChoice.conditionId ?? null],
+    queryFn: () => api.nativeMarketplaces.preflight(convId, sellwildChoice),
     enabled: Boolean(revisionId),
     staleTime: 15_000,
   });
@@ -212,8 +218,7 @@ export function MarketplacesLayout({
       if (!revisionId) throw new Error("Generate a listing first.");
       if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId);
       return api.nativeMarketplaces.list(convId, marketplace, revisionId,
-        marketplace === "sellwild" && sellwildCategory && sellwildCondition
-          ? { categoryId: sellwildCategory, conditionId: sellwildCondition } : undefined);
+        marketplace === "sellwild" ? sellwildChoice : undefined);
     },
     retry: false,
     onSettled: () => {

@@ -9,6 +9,7 @@ from vendoo_studio.models.depop_fields import (
     DEPOP_CATEGORY_OPTIONAL_KEYS,
     VALID_DEPOP_GROUPING,
     VALID_DEPOP_PARCEL,
+    depop_offers_sizes,
     ensure_depop_category_optionals,
     infer_depop_styles,
 )
@@ -18,12 +19,14 @@ from vendoo_studio.models.ebay_fields import (
     EBAY_KEY_ALIASES,
     EBAY_OPTIONAL_DNA_KEYS,
     EBAY_OPTIONAL_EVIDENCE_KEYS,
+    EBAY_OPTIONAL_FIXED_DEFAULTS,
     REQUIRED_EBAY_KEYS,
     ebay_optional_blank,
     ebay_optional_raw,
     ebay_season_parts,
     ensure_ebay_category_optionals,
     exact_ebay_season,
+    flatten_ebay_specifics,
     infer_ebay_season,
     normalize_ebay_fabric_weight,
     normalize_ebay_season_value,
@@ -305,6 +308,8 @@ def canonicalize_listing_keys(listing: dict) -> bool:
     if not isinstance(listing, dict):
         return False
     changed = _canonicalize_record_keys(listing, allowed=frozenset(ListingSchema.model_fields))
+    if flatten_ebay_specifics(listing):
+        changed = True
     for marketplace in FILLABLE_MARKETPLACES:
         specifics = listing.get(f"{marketplace}_specifics")
         if not isinstance(specifics, dict):
@@ -628,13 +633,17 @@ def validate_listing(
                 continue
             value = ebay_optional_raw(ebay, key)
             if ebay_optional_blank(value):
-                if key in EBAY_OPTIONAL_EVIDENCE_KEYS:
-                    continue
-                add_issue(
-                    result,
-                    f"ebay_specifics.{key}",
-                    f"eBay optional '{key}' must be filled (or Does Not Apply only when it truly does not apply)",
-                )
+                # Empty is an answer: eBay takes the listing without it, and a
+                # value nothing shows would be invented.
+                if key in EBAY_OPTIONAL_FIXED_DEFAULTS:
+                    add_issue(result, f"ebay_specifics.{key}", f"eBay optional '{key}' must be filled")
+                elif key not in EBAY_OPTIONAL_EVIDENCE_KEYS and key not in EBAY_OPTIONAL_DNA_KEYS:
+                    add_issue(
+                        result,
+                        f"ebay_specifics.{key}",
+                        f"eBay optional '{key}' is empty. Fill it when the photos or tags show it.",
+                        warning=True,
+                    )
                 continue
             text = text_value(value) if not isinstance(value, (list, tuple)) else ",".join(str(v) for v in value)
             is_dna = text.casefold() in {
@@ -725,6 +734,11 @@ def validate_listing(
             add_issue(result, "depop_specifics.parcelSize", "Depop parcel size is not a current dropdown value")
         elif not parcel:
             add_issue(result, "depop_specifics.parcelSize", "Depop parcel size is required")
+        tag_size = text_value(payload.get("size"))
+        if (text_value(depop.get("size")).casefold() == "other" and tag_size
+                and tag_size.casefold() not in {"other", "one size", "os"} and depop_offers_sizes(payload)):
+            add_issue(result, "depop_specifics.size",
+                      f'Depop size "Other" hides the tag size {tag_size}. Choose the Depop size that matches it.')
         grouping = text_value(depop.get("sizeGrouping") or depop.get("size_grouping"))
         size_type = text_value(payload.get("sizeType"))
         if grouping:
