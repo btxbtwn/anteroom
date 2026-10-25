@@ -40,6 +40,7 @@ def workspace(tmp_path, monkeypatch):
     origin = f"http://127.0.0.1:{server.server_port}"
     monkeypatch.setattr(ebay_client, "API", origin)
     monkeypatch.setattr(ebay_client, "APIZ", origin)
+    monkeypatch.setattr(ebay_client, "APIM", origin)
     accounts = {"ebay": {"accountId": "seller-id", "label": "seller", "accessToken": "test-token", "connectedAt": 1}}
     monkeypatch.setattr(ebay_client, "get_marketplace_accounts", lambda: accounts)
     monkeypatch.setattr(keychain, "get_marketplace_accounts", lambda: accounts)

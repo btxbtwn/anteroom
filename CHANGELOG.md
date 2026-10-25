@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.369 — 2026-10-25
+
+- After the photos upload, eBay no longer answers with an inventory error. The extra bit on the photo address is left off, and the packed weight is sent as a number.
+
 ## 0.1.368 — 2026-10-25
 
 - eBay photos are sent to eBay's photo address, so List no longer stops with "not found" before the listing exists.
