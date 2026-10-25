@@ -200,6 +200,26 @@ def merge_notes(existing: str | None, updates: dict[str, Any]) -> str:
     return json.dumps(data)
 
 
+def _inventory_location(general: dict[str, Any], ebay: Any) -> str:
+    """The draft's ship-from ZIP, else eBay's shipping location, else the saved setting."""
+    from vendoo_studio.services.user_settings import get_ebay_inventory_location, normalize_ebay_inventory_location
+
+    candidates = [general.get("zipCode"), general.get("zip_code")]
+    specifics = ebay.get("marketplaceSpecifics") if isinstance(ebay, dict) else None
+    shipping = specifics.get("shipping") if isinstance(specifics, dict) else None
+    if isinstance(shipping, dict):
+        candidates.append(shipping.get("location"))
+    for raw in candidates:
+        text = " ".join(str(raw or "").split())
+        if not text:
+            continue
+        try:
+            return normalize_ebay_inventory_location(text)
+        except ValueError:
+            return text[:80]
+    return get_ebay_inventory_location()
+
+
 def listing_from_vendoo(item: dict | None, form: dict | None) -> dict[str, Any]:
     merged = _merge_payloads(form, item)
     general = merged.get("generalDetails") if isinstance(merged.get("generalDetails"), dict) else {}
@@ -244,6 +264,7 @@ def listing_from_vendoo(item: dict | None, form: dict | None) -> dict[str, Any]:
         "weight_lb": _int(weight.get("pounds")) or 0,
         "weight_oz": _int(weight.get("ounces")) if _int(weight.get("ounces")) is not None else 8,
         "package_dimensions_in": package,
+        "zipCode": _inventory_location(general, listings.get("ebay")),
         "internal_notes": _text(general.get("notes")),
         "ebay_specifics": _ebay_specifics(listings.get("ebay"), size, size_type),
         "poshmark_specifics": _poshmark_specifics(listings.get("poshmark")),

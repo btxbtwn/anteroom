@@ -79,7 +79,7 @@ const RULES: SectionRule[] = [
   {
     id: "shipping",
     title: "Shipping",
-    patterns: [/shipping/, /weight/, /dimension/, /package/],
+    patterns: [/shipping/, /weight/, /dimension/, /package/, /^zipcode$/, /inventorylocation/],
   },
 ];
 

@@ -40,6 +40,9 @@ AUTO_CURSOR_MODEL = "auto"
 DEFAULT_SETTLED_SHELF_EXPANDED = True
 PACKAGE_DIMENSIONS_KEY = "package_dimensions_in"
 SHIPS_FROM_ZIP_KEY = "ships_from_zip"
+EBAY_INVENTORY_LOCATION_KEY = "ebay_inventory_location"
+DEFAULT_EBAY_INVENTORY_LOCATION = "70125"
+_INVENTORY_LOCATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,'#-]{0,79}$")
 DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
 DEFAULT_THEME: Literal["dark", "light", "system"] = "dark"
 
@@ -104,6 +107,57 @@ def set_ships_from_zip(value: object) -> str:
 
     update_settings(mutator)
     return text
+
+
+def normalize_ebay_inventory_location(value: object) -> str:
+    """ZIP or place name eBay stores as the ship-from location."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        raise ValueError("Enter a ZIP code or place name for the eBay inventory location.")
+    if not _INVENTORY_LOCATION_RE.fullmatch(text):
+        raise ValueError("Inventory location must be a ZIP code or place name, up to 80 characters.")
+    return text
+
+
+def get_ebay_inventory_location() -> str:
+    raw = read_settings().get(EBAY_INVENTORY_LOCATION_KEY)
+    try:
+        return normalize_ebay_inventory_location(raw)
+    except ValueError:
+        return DEFAULT_EBAY_INVENTORY_LOCATION
+
+
+def set_ebay_inventory_location(value: object) -> str:
+    location = normalize_ebay_inventory_location(value)
+
+    def mutator(payload: dict) -> None:
+        payload[EBAY_INVENTORY_LOCATION_KEY] = location
+
+    update_settings(mutator)
+    return location
+
+
+def listing_inventory_location(listing: dict | None) -> str:
+    """Ship-from location for one listing: its own ZIP, else the saved eBay setting."""
+    if isinstance(listing, dict):
+        for key in ("zipCode", "zip_code"):
+            text = " ".join(str(listing.get(key) or "").split())
+            if not text:
+                continue
+            try:
+                return normalize_ebay_inventory_location(text)
+            except ValueError:
+                return text[:80]
+        ebay = listing.get("ebay_specifics")
+        shipping = ebay.get("shipping") if isinstance(ebay, dict) else None
+        if isinstance(shipping, dict):
+            text = " ".join(str(shipping.get("location") or "").split())
+            if text:
+                try:
+                    return normalize_ebay_inventory_location(text)
+                except ValueError:
+                    return text[:80]
+    return get_ebay_inventory_location()
 
 
 def package_dimensions_string() -> str:

@@ -44,6 +44,10 @@ class ShipsFromZipConfig(BaseModel):
     zip: str = ""
 
 
+class EbayInventoryLocationConfig(BaseModel):
+    location: str
+
+
 class PackageDimensionsConfig(BaseModel):
     length: int
     width: int
@@ -572,6 +576,23 @@ def set_ships_from_zip(config: ShipsFromZipConfig):
 
     try:
         return {"ok": True, "zip": save_zip(config.zip)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/ebay-inventory-location")
+def get_ebay_inventory_location():
+    from vendoo_studio.services.user_settings import get_ebay_inventory_location as load_location
+
+    return {"location": load_location()}
+
+
+@router.put("/ebay-inventory-location")
+def set_ebay_inventory_location(config: EbayInventoryLocationConfig):
+    from vendoo_studio.services.user_settings import set_ebay_inventory_location as save_location
+
+    try:
+        return {"ok": True, "location": save_location(config.location)}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

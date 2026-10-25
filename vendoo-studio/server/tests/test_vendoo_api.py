@@ -216,7 +216,14 @@ class BuildItemTest(unittest.TestCase):
         self.assertEqual(general["size"]["scale"], {"label": "Regular", "value": "Regular"})
         self.assertEqual(general["images"], IMAGES)
         self.assertEqual(general["category"], "Clothing > Men > Jeans")
+        self.assertEqual(general["zipCode"], "70125")
+        self.assertEqual(self.item["listings"]["ebay"]["marketplaceSpecifics"]["shipping"]["location"], "70125")
         self.assertNotIn("labels", general)
+
+    def test_listing_zip_overrides_the_saved_inventory_location(self):
+        item, _ = build_vendoo_item({**LISTING, "zipCode": "10001"}, self.schema)
+        self.assertEqual(item["generalDetails"]["zipCode"], "10001")
+        self.assertEqual(item["listings"]["ebay"]["marketplaceSpecifics"]["shipping"]["location"], "10001")
 
     def test_a_created_item_is_marked_saved_and_its_forms_stamped(self):
         item, unresolved = build_vendoo_item(

@@ -125,6 +125,23 @@ class VendooImportMapperTest(unittest.TestCase):
         self.assertEqual(listing["etsy_specifics"]["who_made"], "Another company or person")
         self.assertEqual(listing["etsy_specifics"]["category_specifics"]["sleeveLength"], "Short Sleeve")
         self.assertEqual(listing["labels"], ["To List"])
+        self.assertEqual(listing["zipCode"], "70125")
+
+    def test_import_keeps_a_vendoo_zip_and_falls_back_to_ebay_shipping_location(self):
+        with_zip = listing_from_vendoo(
+            {"generalDetails": {**VENDOO_ITEM["generalDetails"], "zipCode": "10001"}, "listings": VENDOO_ITEM["listings"]},
+            None,
+        )
+        self.assertEqual(with_zip["zipCode"], "10001")
+        ebay = {
+            "marketplaceSpecifics": {"shipping": {"location": "30301"}},
+        }
+        from_ebay = listing_from_vendoo(
+            {"generalDetails": {key: value for key, value in VENDOO_ITEM["generalDetails"].items() if key != "zipCode"},
+             "listings": {"ebay": ebay}},
+            None,
+        )
+        self.assertEqual(from_ebay["zipCode"], "30301")
 
     def test_label_details_replace_opaque_ids_with_names(self):
         item = {

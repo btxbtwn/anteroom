@@ -130,6 +130,10 @@ describe("marketplaces section", () => {
       marketplace_message: "25002: A user error has occurred. Color is missing." } }, {}, { selected: "ebay", onAskChat: vi.fn(), onEditField: vi.fn() });
     expect(missing).toContain("eBay said: 25002: A user error has occurred. Color is missing.");
     expect(enabledButton(missing, "Edit Color")).toBe(true);
+    const location = render({ ebay: { state: "not_saved", error: "Choose the inventory location.", error_code: "missing_fields",
+      error_fields: [{ field: "settings.ebay.merchant_location_key", message: "Choose the inventory location." }] } },
+      {}, { selected: "ebay", onEditField: vi.fn() });
+    expect(enabledButton(location, "Edit Inventory location")).toBe(true);
     expect(enabledButton(missing, "Ask chat")).toBe(true);
     const signedOut = render({ etsy: { state: "not_saved", error: "Reconnect Etsy.", error_code: "signed_out" } }, {}, { selected: "etsy", etsyReady: true });
     expect(enabledButton(signedOut, "Reconnect Etsy")).toBe(true);

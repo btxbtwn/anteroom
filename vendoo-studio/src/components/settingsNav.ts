@@ -232,6 +232,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["ebay", "sold", "sale", "detect sales", "delist", "connect", "sign in", "notification"],
   },
   {
+    id: "ebay-inventory-location",
+    title: "eBay inventory location",
+    section: "connections",
+    targetId: "ebay-inventory-location",
+    searchTerms: ["inventory location", "zip", "zip code", "shipping location", "item location", "ebay", "ship from"],
+  },
+  {
     id: "direct-etsy",
     title: "Etsy",
     section: "connections",

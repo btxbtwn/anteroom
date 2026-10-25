@@ -1,6 +1,7 @@
 import {
   fieldMatchKey,
   isAccountManagedField,
+  isInventoryLocationField,
   isSystemField,
   isUnfillableField,
   normalizeFieldName,
@@ -43,7 +44,7 @@ export function withoutHiddenFields(forms: DraftForm[], hidden: HiddenFieldsStat
     .map((form) => {
       const fields = form.fields.filter(
         (field) => !isFieldHidden(keys, form.id, field)
-          && !isAccountManagedField(form.id, field)
+          && (!isAccountManagedField(form.id, field) || isInventoryLocationField(field))
           && !isSystemField(field),
       );
       return toForm(form.id, fields, form.liveStatus);
