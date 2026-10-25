@@ -43,13 +43,6 @@ export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
-    id: "ebay-offers",
-    title: "eBay offers",
-    section: "connections",
-    targetId: "ebay-offers",
-    searchTerms: ["automatic offers", "watchers", "interested buyers", "discount", "minimum price", "auto offers"],
-  },
-  {
     id: "business-note",
     title: "About your business",
     section: "assistant",
