@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.361 — 2026-10-25
+
+- Depop size stays on Other when you set it there, instead of snapping back to the tag size.
+
 ## 0.1.360 — 2026-10-25
 
 - When Mercari, Depop, Poshmark, or Sellwild signs you out, Anteroom asks you to sign in. Sign in opens that shop in Chrome.
