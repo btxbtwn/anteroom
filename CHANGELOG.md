@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.351 — 2026-10-25
+
+- Before List, the Marketplaces section shows what eBay, Etsy, and Sellwild still need, with Edit and Ask chat, and List stays off until those are filled.
+- Etsy listings include tags, materials, the category's own properties, and the return policy you choose in Settings → Connections.
+- eBay item specifics use eBay's exact field names for that category. When the account has more than one shipping, payment, or return policy, or more than one location, you choose which one new listings use in Settings → Connections.
+
 ## 0.1.350 — 2026-10-25
 
 - Poshmark, Mercari, and Depop sizes, brands, and shipping now come from the options on your signed-in account. A size that does not belong in that category, such as an adult size on a kids' listing, stops the listing before anything is created.

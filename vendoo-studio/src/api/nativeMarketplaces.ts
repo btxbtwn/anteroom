@@ -25,6 +25,11 @@ export interface NativeDraft {
   progress?: { step: string; label: string; index: number; total: number } | null;
 }
 export type NativeDrafts = Partial<Record<NativeMarketplace, NativeDraft>>;
+export interface PreflightGap { field: string; message: string; blocking: boolean }
+export interface NativePreflight {
+  revision_id: string | null;
+  marketplaces: Partial<Record<NativeMarketplace, { ready: boolean; gaps: PreflightGap[] }>>;
+}
 export interface SellwildChoice { categoryId: number; conditionId: number }
 export interface SellwildOptions {
   categories: { id: number; label: string }[];

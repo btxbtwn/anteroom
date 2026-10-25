@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import html
 import re
+import unicodedata
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -17,12 +18,16 @@ import httpx
 
 from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.models.etsy_fields import (
-    etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
+    sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
 )
-from vendoo_studio.services import marketplace_accounts
+from vendoo_studio.services import marketplace_accounts, marketplace_schemas
 from vendoo_studio.services.keychain import get_marketplace_accounts
 from vendoo_studio.services.listing_result import ListingProblem, failure, missing, retry_after_seconds, scrub
+from vendoo_studio.services.direct_preflight import Context, gap, requirement, seeded_leaf
+from vendoo_studio.services.native_form import vendoo_form
 from vendoo_studio.services.relay_client import RelayError
+from vendoo_studio.services.vendoo_marketplace_fields import ETSY_WHAT_CODES, ETSY_WHO_CODES
+from vendoo_studio.services.vendoo_specifics import is_not_applicable
 
 
 NOT_ELIGIBLE = "Etsy only allows vintage (20+ years), handmade or craft supplies. This item doesn't qualify."
@@ -51,9 +56,10 @@ def edit_url(item_id: str) -> str:
 
 async def listing_profiles() -> dict[str, list[dict]]:
     shop_id = connected_shop_id()
-    shipping, processing = await asyncio.gather(
+    shipping, processing, returns = await asyncio.gather(
         marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/shipping-profiles"),
         marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/readiness-state-definitions", params={"limit": 100}),
+        marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/policies/return"),
     )
     if connected_shop_id() != shop_id:
         raise ValueError("The connected Etsy shop changed. Load its shipping profiles again.")
@@ -65,7 +71,17 @@ async def listing_profiles() -> dict[str, list[dict]]:
             {"ready_to_ship": "Ready to ship", "made_to_order": "Made to order"}.get(p.get("readiness_state"), "Processing profile"),
             str(p.get("processing_days_display_label") or "")[:100]]))}
             for p in processing.get("results", []) if re.fullmatch(r"[1-9]\d*", str(p.get("readiness_state_id") or ""))],
+        "returns": [{"id": str(p["return_policy_id"]), "title": _return_title(p)}
+                    for p in returns.get("results", []) if re.fullmatch(r"[1-9]\d*", str(p.get("return_policy_id") or ""))],
     }
+
+
+def _return_title(policy: dict) -> str:
+    if not policy.get("accepts_returns") and not policy.get("accepts_exchanges"):
+        return "No returns or exchanges"
+    kinds = " and ".join(word for word, on in (("Returns", policy.get("accepts_returns")), ("exchanges", policy.get("accepts_exchanges"))) if on)
+    days = policy.get("return_deadline")
+    return f"{kinds.capitalize()} within {days} days" if days else kinds.capitalize()
 
 
 def _price(value) -> Decimal:
@@ -90,43 +106,267 @@ def _remote_price(remote: dict) -> Decimal:
 
 def _matches(remote: dict, snapshot: dict) -> bool:
     try:
-        return (html.unescape(str(remote.get("title") or "")) == snapshot.get("title")
+        return (html.unescape(str(remote.get("title") or "")) == etsy_title(snapshot)
                 and html.unescape(str(remote.get("description") or "")) == str(snapshot.get("description") or "")
                 and _remote_price(remote) == _price(snapshot.get("price")))
     except (KeyError, InvalidOperation, ValueError, ZeroDivisionError):
         return False
 
 
+_ETSY_TITLE_MAX = 140
+_ETSY_TITLE_SYMBOLS = frozenset("™©®")
+# Etsy takes each of these at most once in a title.
+_ETSY_TITLE_ONCE = "%:&+"
+_ETSY_LIST_LIMITS = {"materials": (13, 45), "styles": (2, 45)}
+
+
+def _title_char(ch: str) -> str:
+    if ch in _ETSY_TITLE_SYMBOLS:
+        return ch
+    category = unicodedata.category(ch)
+    if category[0] in "LP" or category in {"Nd", "Sm", "Zs"}:
+        return ch
+    return " " if ch.isspace() else ""
+
+
+def etsy_title(snapshot: dict) -> str:
+    """The title as Etsy takes it: its characters only, %:&+ once each, a letter or digit first, 140 at most.
+
+    A longer title is cut at the last whole word; the pre-flight says so.
+    """
+    text = "".join(_title_char(ch) for ch in unicodedata.normalize("NFC", str(snapshot.get("title") or "")))
+    for symbol in _ETSY_TITLE_ONCE:
+        first = text.find(symbol)
+        if first >= 0:
+            text = text[:first + 1] + text[first + 1:].replace(symbol, " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"^[\W_]+", "", text)
+    if len(text) > _ETSY_TITLE_MAX:
+        cut = text[:_ETSY_TITLE_MAX + 1]
+        text = (cut.rsplit(" ", 1)[0] if " " in cut else text[:_ETSY_TITLE_MAX]).rstrip(" -,|/:&+")
+    return text
+
+
+def _words(values, limit: int, max_length: int) -> list[str]:
+    """Etsy materials and styles: letters, numbers and spaces only, unique, capped."""
+    if isinstance(values, str):
+        values = values.split(",")
+    out: list[str] = []
+    for value in values if isinstance(values, list) else []:
+        text = re.sub(r"\s+", " ", "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in str(value or ""))).strip()
+        if text and len(text) <= max_length and text.casefold() not in {item.casefold() for item in out}:
+            out.append(text)
+    return out[:limit]
+
+
+def _form(snapshot: dict) -> dict:
+    return snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "etsy")
+
+
+def list_fields(snapshot: dict) -> dict[str, list[str]]:
+    """Tags, materials and styles, cleaned the way Etsy takes them (the Vendoo path's tags)."""
+    details = snapshot.get("etsy_specifics") if isinstance(snapshot.get("etsy_specifics"), dict) else {}
+    specifics = _form(snapshot).get("specifics") or {}
+    tags = sanitize_etsy_tags(specifics.get("tags") or details.get("tags") or snapshot.get("tags"))
+    materials = _words(details.get("materials") or snapshot.get("material"), *_ETSY_LIST_LIMITS["materials"])
+    styles = _words(details.get("styles") or details.get("style") or snapshot.get("style"), *_ETSY_LIST_LIMITS["styles"])
+    return {key: value for key, value in (("tags", tags), ("materials", materials), ("styles", styles)) if value}
+
+
+def _code(raw, codes: dict[str, str]) -> str | None:
+    """Etsy's code for a who-made or what-is answer, given as Etsy's code or Studio's label."""
+    if isinstance(raw, bool):
+        raw = "1" if raw else "0"
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text in codes.values():
+        return text
+    return codes.get(re.sub(r"\s+", " ", text.lower()))
+
+
+_WHO = dict(ETSY_WHO_CODES, **{"i_did": "i_did", "collective": "collective", "someone_else": "someone_else"})
+# Studio's label, Vendoo's code ("0" finished, "1" supply) or Etsy's own is_supply.
+_WHAT = dict(ETSY_WHAT_CODES, **{"false": "0", "true": "1", "finished product": "0", "supply": "1"})
+
+
+def etsy_quantity(snapshot: dict) -> int:
+    try:
+        quantity = int(str(snapshot.get("quantity") or 1).strip())
+    except ValueError:
+        quantity = 0
+    if not 1 <= quantity <= 999:
+        raise missing("Enter an Etsy quantity from 1 to 999.", "quantity")
+    return quantity
+
+
 def draft_fields(snapshot: dict, *, creating: bool) -> dict:
-    title, description = str(snapshot.get("title") or ""), str(snapshot.get("description") or "")
+    title, description = etsy_title(snapshot), str(snapshot.get("description") or "")
     if not title.strip() or not description.strip():
         raise missing("Add an Etsy title and description before listing.",
                       *[name for name, value in (("title", title), ("description", description)) if not value.strip()])
     fields = {"title": title, "description": description, "price": str(_price(snapshot.get("price")))}
+    # Etsy takes list fields as comma-separated values.
+    fields.update({key: ",".join(values) for key, values in list_fields(snapshot).items()})
     if not creating:
         return fields
     if is_etsy_digital_listing(snapshot):
         raise ValueError("This listing flow supports physical Etsy items. Prepare digital files in Etsy Shop Manager.")
     details = snapshot.get("etsy_specifics") or {}
-    who = {"I did": "i_did", "A member of my shop": "collective", "Another company or person": "someone_else"}.get(details.get("who_made"))
-    what = {"A finished product": False, "A supply or tool to make things": True}.get(details.get("what_is"))
+    who = _code(details.get("who_made") or details.get("whoMade"), _WHO)
+    what = _code(details.get("what_is") or details.get("whatIsIt"), _WHAT)
     when = etsy_when_to_store(str(details.get("when_made") or ""), snapshot, etsy_when_options())
     when = etsy_when_made_code(when)
     if not who or what is None or not when:
         raise missing("Complete Etsy's who made it, what is it, and when made details before listing.",
                       *[f"etsy_specifics.{name}" for name, value in (("who_made", who), ("what_is", what), ("when_made", when))
-                        if value is None or value == ""])
+                        if not value])
     category = str((snapshot.get("marketplace_category_ids") or {}).get("etsy") or "")
     if not re.fullmatch(r"[1-9]\d*", category):
         raise missing("Choose a verified Etsy category before listing.", "marketplace_category_ids.etsy")
-    fields.update(quantity="1", who_made=who, when_made=when, is_supply=str(what).lower(),
+    # Like the Vendoo path: is_supply is Etsy's "What is it?" answer, a supply or tool.
+    fields.update(quantity=str(etsy_quantity(snapshot)), who_made=who, when_made=when, is_supply="true" if what == "1" else "false",
                   taxonomy_id=category, type="physical", should_auto_renew="false")
-    # Only use explicit seller-selected IDs. Shipping and processing can also be
-    # completed in the native draft; never choose a shop policy on the seller's behalf.
-    for key in ("shipping_profile_id", "return_policy_id", "readiness_state_id"):
-        if re.fullmatch(r"[1-9]\d*", str(details.get(key) or "")):
-            fields[key] = str(details[key])
+    # Only use explicit seller-selected IDs. Preparation renames these to
+    # Vendoo's camelCase; the listing may still have the snake_case spelling.
+    # Shipping and processing can also be completed in the native draft; never
+    # choose a shop policy on the seller's behalf.
+    for key, aliases in (
+        ("shipping_profile_id", ("shipping_profile_id", "shippingProfileId")),
+        ("return_policy_id", ("return_policy_id", "returnPolicyId")),
+        ("readiness_state_id", ("readiness_state_id", "readinessStateId")),
+    ):
+        chosen = next((str(details.get(name) or "").strip() for name in aliases
+                       if re.fullmatch(r"[1-9]\d*", str(details.get(name) or "").strip())), "")
+        if chosen:
+            fields[key] = chosen
     return fields
+
+
+@requirement("etsy")
+def requirements(snapshot: dict, context: Context) -> list[dict]:
+    """What Etsy would refuse, read from the listing alone. Shop profiles are chosen in Settings."""
+    found = []
+    try:
+        fields = draft_fields(snapshot, creating=True)
+    except ListingProblem as exc:
+        return [gap(item["field"], item["message"]) for item in exc.fields or []] or [gap("listing", str(exc))]
+    except ValueError as exc:
+        return [gap("listing", str(exc))]
+    if fields["title"] != str(snapshot.get("title") or "").strip():
+        reason = (f"Etsy titles are at most {_ETSY_TITLE_MAX} characters" if len(str(snapshot.get("title") or "")) > _ETSY_TITLE_MAX
+                  else "Etsy allows %, :, & and + once each and no emoji or special symbols")
+        found.append(gap("title", f"{reason}, so Etsy gets: {fields['title']}", blocking=False))
+    if seeded_leaf(context.db, "etsy", fields["taxonomy_id"]) is False:
+        found.append(gap("marketplace_category_ids.etsy", "That Etsy category has subcategories. Choose the most specific one."))
+    return found
+
+
+# --- category properties ----------------------------------------------------------
+
+def _key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+# Listing keys that are never category properties.
+_NOT_PROPERTIES = frozenset(_key(key) for key in (
+    "who_made", "what_is", "when_made", "section", "materials", "tags", "styles", "style", "category_specifics",
+    "shipping_profile_id", "return_policy_id", "readiness_state_id", "listing_type", "renewal_option"))
+
+
+def _answers(snapshot: dict) -> dict[str, list[str]]:
+    """What the listing says, keyed the way Etsy names properties ("Sleeve length" → sleevelength)."""
+    details = snapshot.get("etsy_specifics") if isinstance(snapshot.get("etsy_specifics"), dict) else {}
+    nested = details.get("category_specifics") if isinstance(details.get("category_specifics"), dict) else {}
+    answers: dict[str, list[str]] = {}
+
+    def put(name: str, value) -> None:
+        key = _key(name)
+        values = value if isinstance(value, list) else str(value or "").split(",")
+        values = [str(part).strip() for part in values if str(part or "").strip() and not is_not_applicable(part)]
+        if key and values and key not in answers and key not in _NOT_PROPERTIES:
+            answers[key] = values
+
+    for name, value in nested.items():
+        put(name, value)
+    for name, value in details.items():
+        if not isinstance(value, dict):
+            put(name, value)
+    put("Primary color", snapshot.get("primaryColor") or snapshot.get("color"))
+    put("Secondary color", snapshot.get("secondaryColor"))
+    return answers
+
+
+def _match(value: str, choices: list[dict]) -> dict | None:
+    """Etsy's value for the listing's word: exact, then singular, then the one choice that contains it."""
+    wanted = _key(value)
+    if not wanted:
+        return None
+    for compare in (lambda label: label == wanted, lambda label: label.rstrip("s") == wanted.rstrip("s")):
+        hit = next((choice for choice in choices if compare(_key(choice["label"]))), None)
+        if hit:
+            return hit
+    near = [choice for choice in choices if wanted in _key(choice["label"]) or _key(choice["label"]) in wanted]
+    return near[0] if len(near) == 1 else None
+
+
+def property_values(snapshot: dict, properties: list[dict]) -> list[dict]:
+    """The category properties to write, matched against Etsy's own (``marketplace_schemas``).
+
+    A required one with no answer is refused before anything is written.
+    """
+    answers = _answers(snapshot)
+    assignments: list[dict] = []
+    problems: list[dict] = []
+    for prop in properties:
+        name = prop["name"]
+        values = answers.get(_key(name)) or answers.get(_key(prop.get("alias") or "")) or []
+        hits: list[dict] = []
+        for value in values:
+            hit = _match(value, prop["values"]) if prop["values"] else {"id": None, "label": value}
+            if hit and hit not in hits:
+                hits.append(hit)
+        limit = int(prop.get("max_values") or (len(hits) if prop.get("multi") else 1) or 1)
+        hits = hits[:limit]
+        if not hits:
+            if prop.get("required"):
+                message = (f"Choose one of Etsy's {name} values." if values else f"Etsy needs {name} in this category.")
+                problems.append({"field": f"etsy_specifics.category_specifics.{name}", "message": message})
+            continue
+        row = {"property_id": prop["id"], "name": name, "value_ids": [hit["id"] for hit in hits if hit["id"] is not None],
+               "values": [hit["label"].replace("(", "").replace(")", "") for hit in hits]}
+        scale = next((hit.get("scale_id") for hit in hits if hit.get("scale_id")), None)
+        if scale:
+            row["scale_id"] = scale
+        assignments.append(row)
+    if problems:
+        raise ListingProblem(" ".join(item["message"] for item in problems), "missing_fields", fields=problems)
+    return assignments
+
+
+async def _write_properties(write, shop_id: str, item_id: str, assignments: list[dict]) -> None:
+    for row in assignments:
+        data = {"value_ids": ",".join(str(value) for value in row["value_ids"]), "values": ",".join(row["values"])}
+        if row.get("scale_id"):
+            data["scale_id"] = str(row["scale_id"])
+        await write("PUT", f"shops/{shop_id}/listings/{item_id}/properties/{row['property_id']}", "properties", data=data)
+
+
+async def unkept_properties(item_id: str, assignments: list[dict]) -> list[str]:
+    """The written properties Etsy did not keep, read back from the listing."""
+    if not assignments:
+        return []
+    body = await marketplace_accounts.etsy_api("GET", f"listings/{item_id}/properties")
+    kept = {str(row.get("property_id")): ({str(value) for value in row.get("value_ids") or []},
+                                          {str(value).casefold() for value in row.get("values") or []})
+            for row in body.get("results") or []}
+    lost = []
+    for row in assignments:
+        ids, names = kept.get(str(row["property_id"]), (set(), set()))
+        wanted_ids = {str(value) for value in row["value_ids"]}
+        if (wanted_ids and not wanted_ids <= ids) or (not wanted_ids and not {v.casefold() for v in row["values"]} <= names):
+            lost.append(row["name"])
+    return lost
 
 
 async def _read(shop_id: str, item_id: str) -> dict:
@@ -248,7 +488,7 @@ async def find_draft(shop_id: str, snapshot: dict) -> str | None:
     """The edit link of the shop's one draft with this listing's title, when a create reply was lost."""
     found = await marketplace_accounts.etsy_api("GET", f"shops/{shop_id}/listings", params={
         "state": "draft", "limit": 100, "sort_on": "created", "sort_order": "desc"})
-    title = str(snapshot.get("title") or "")
+    title = etsy_title(snapshot)
     matches = [str(item.get("listing_id")) for item in found.get("results") or []
                if html.unescape(str(item.get("title") or "")) == title and str(item.get("shop_id")) == shop_id]
     if len(matches) > 1:
@@ -297,7 +537,7 @@ async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: 
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                   record: Callable[[dict], None], active: Callable[[], bool], *, confirm: bool = False,
                   shipping_profile_id: str | None = None, readiness_state_id: str | None = None,
-                  package: dict | None = None) -> dict:
+                  return_policy_id: str | None = None, package: dict | None = None) -> dict:
     attempted = False
     rejected = False
     try:
@@ -373,24 +613,38 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             # Etsy refuses modern resale outright; nothing is sent.
             raise ValueError(NOT_ELIGIBLE)
         creating = not binding.get("draft_url")
-        fields = draft_fields(snapshot, creating=creating)
+        fields = draft_fields(snapshot, creating=True)
+        taxonomy = fields["taxonomy_id"]
+        if taxonomy not in await marketplace_schemas.etsy_leaves():
+            raise missing("Etsy no longer offers that category, or it has subcategories. Choose a current Etsy category.",
+                          "marketplace_category_ids.etsy")
+        # Every required category property is answered before anything is written.
+        assignments = property_values(snapshot, await marketplace_schemas.etsy_properties(taxonomy))
+        if not creating:
+            fields = draft_fields(snapshot, creating=False)
         if creating:
             selected = shipping_profile_id or fields.get("shipping_profile_id")
             processing = readiness_state_id or fields.get("readiness_state_id")
+            returns = return_policy_id or fields.get("return_policy_id")
             if not selected:
                 raise ValueError("Choose an Etsy shipping profile in Settings before listing.")
             if not processing:
                 raise ValueError("Choose an Etsy processing profile in Settings before listing.")
+            if not returns:
+                raise ValueError("Choose an Etsy return policy in Settings before listing.")
             profiles = await listing_profiles()
             if selected not in {profile["id"] for profile in profiles["shipping"]}:
                 raise ValueError("Choose a shipping profile from the connected Etsy shop.")
             if processing not in {profile["id"] for profile in profiles["processing"]}:
                 raise ValueError("Choose a processing profile from the connected Etsy shop.")
+            if returns not in {profile["id"] for profile in profiles["returns"]}:
+                raise ValueError("Choose a return policy from the connected Etsy shop.")
             shipping = next(profile for profile in profiles["shipping"] if profile["id"] == selected)
             if shipping["is_calculated"] and not package:
                 raise ValueError("Enter packed weight and dimensions for Etsy calculated shipping.")
             fields["shipping_profile_id"] = selected
             fields["readiness_state_id"] = processing
+            fields["return_policy_id"] = returns
             if package:
                 fields.update({key: str(value) for key, value in package.items()})
             if not 1 <= len(photos) <= 20:
@@ -417,6 +671,15 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 record({"etsy_pending_write": None})
             await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
             record({"etsy_pending_write": None})
+        # Each property write replaces that property, so writing it again is safe.
+        await _write_properties(write, shop_id, item_id, assignments)
+        record({"etsy_pending_write": None})
+        lost = await unkept_properties(item_id, assignments)
+        if lost:
+            rejected = True
+            raise ListingProblem(f"Etsy did not keep these category details: {', '.join(lost)}. Check them in the Etsy draft.",
+                                 "rejected", fields=[{"field": f"etsy_specifics.category_specifics.{name}", "message": "Etsy did not keep it."}
+                                                     for name in lost])
         await _sync_photos(write, shop_id, item_id, remote, photos, binding, record)
         remote = await _read(shop_id, item_id)
         if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images"):

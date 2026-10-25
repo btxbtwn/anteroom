@@ -20,7 +20,6 @@ import logging
 import re
 import time
 from datetime import UTC, datetime, timedelta
-from functools import cache
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -30,10 +29,11 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.marketplace_listing import BUSY_STATES, UNSETTLED_STATES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, etsy_listings
+from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.chrome_bridge import expected_extension_build
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
+from vendoo_studio.services.sellwild_listing import sellwild_catalog, suggest_sellwild
 
 log = logging.getLogger("vendoo_studio.native_marketplaces")
 
@@ -74,6 +74,7 @@ class ListRequest(BaseModel):
     confirm: bool = False
     shipping_profile_id: str | None = Field(default=None, pattern=r"^[1-9]\d*$")
     readiness_state_id: str | None = Field(default=None, pattern=r"^[1-9]\d*$")
+    return_policy_id: str | None = Field(default=None, pattern=r"^[1-9]\d*$")
     etsy_package: EtsyPackage | None = None
     sellwild_category_id: int | None = Field(default=None, ge=1)
     sellwild_condition_id: int | None = Field(default=None, ge=1)
@@ -280,17 +281,16 @@ def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[s
 async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -> tuple[dict, list]:
     from vendoo_studio.routes.extension import extension_manager
     from vendoo_studio.services import activity
-    from vendoo_studio.services.native_form import attach_form
     from vendoo_studio.services.streaming import active_generation
 
-    _conversation(db, conv_id)
+    conv = _conversation(db, conv_id)
     listing = ListingRepo(db).get_current(conv_id)
     if not listing or listing.current_revision_id != body.revision_id:
         raise NativeMarketplaceError(409, "The listing changed. Refresh it before continuing.")
     snapshot = ListingRepo(db).get_revision(body.revision_id).listing_json
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
-    snapshot = attach_form(copy.deepcopy(snapshot), marketplace)
+    snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace == "etsy":
@@ -327,6 +327,9 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
     snapshot, photos = await _preflight(db, conv_id, marketplace, body)
     if not photos:
         raise NativeMarketplaceError(400, "Add photos before updating the live listing." if kind == "update" else "Add photos before listing.")
+    found = direct_preflight.gaps(snapshot, marketplace, _context(db, conv_id, marketplace, body))
+    if direct_preflight.blocking(found):
+        return _refuse(db, conv_id, marketplace, direct_preflight.refusal(marketplace, found))
     if marketplace == "sellwild" and kind == "list":
         save_local_sellwild_draft(conv_id, body, db)
     options = {}
@@ -336,6 +339,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         defaults = user_settings.get_etsy_listing_defaults()
         options = {"shipping_profile_id": body.shipping_profile_id or defaults.get("shipping_profile_id"),
                    "readiness_state_id": body.readiness_state_id or defaults.get("readiness_state_id"),
+                   "return_policy_id": body.return_policy_id or defaults.get("return_policy_id"),
                    "package": body.etsy_package.model_dump() if body.etsy_package else listing_package(snapshot)}
     with start_gate():
         record = _record(db, conv_id, marketplace)
@@ -370,6 +374,49 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
     _launch(run_job(job.id, conv_id, marketplace, steps, options))
     record["running"] = True
     return record
+
+
+def _context(db: Session, conv_id: str, marketplace: str, body: ListRequest | None = None) -> direct_preflight.Context:
+    choices = {}
+    if marketplace == "sellwild":
+        record = _record(db, conv_id, "sellwild")
+        choices = {"sellwild_category_id": (body and body.sellwild_category_id) or record.get("sellwild_category_id"),
+                   "sellwild_condition_id": (body and body.sellwild_condition_id) or record.get("sellwild_condition_id")}
+    return direct_preflight.Context(db=db, choices=choices)
+
+
+def _refuse(db: Session, conv_id: str, marketplace: str, result: dict) -> dict:
+    """Record a List the pre-flight refused. No job, nothing sent; the record keeps its state."""
+    with start_gate():
+        record = _record(db, conv_id, marketplace)
+        if record.get("state") in UNSETTLED_STATES:
+            raise NativeMarketplaceError(409, f"Check the last {NAMES[marketplace]} action first; Anteroom has not confirmed it.")
+        stored = _store(db, conv_id, marketplace, {**_CLEARED_ERROR, **_contract(result), "error": result["error"],
+                                                   "state": record.get("state") or "not_saved"})
+    stored["running"] = False
+    return stored
+
+
+def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None,
+              sellwild_condition_id: int | None = None) -> dict:
+    """What each marketplace still needs before List, read before the seller clicks. Writes nothing."""
+    conv = _conversation(db, conv_id)
+    listing = ListingRepo(db).get_current(conv_id)
+    revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
+    if not revision or not isinstance(revision.listing_json, dict):
+        return {"revision_id": None, "marketplaces": {}}
+    from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
+    from vendoo_studio.services.native_form import attach_form
+
+    prepared = prepare_listing_snapshot(db, conv, copy.deepcopy(revision.listing_json))
+    body = ListRequest(revision_id=revision.id, sellwild_category_id=sellwild_category_id,
+                       sellwild_condition_id=sellwild_condition_id)
+    out = {}
+    for marketplace in NAMES:
+        found = direct_preflight.gaps(attach_form(copy.deepcopy(prepared), marketplace), marketplace,
+                                      _context(db, conv_id, marketplace, body))
+        out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found}
+    return {"revision_id": revision.id, "marketplaces": out}
 
 
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session) -> dict:
@@ -744,85 +791,6 @@ def listing_package(snapshot: dict) -> dict | None:
         return None
     return {"item_weight": round(ounces, 2), "item_length": sides[0], "item_width": sides[1], "item_height": sides[2],
             "item_weight_unit": "oz", "item_dimensions_unit": "in"}
-
-
-@cache
-def sellwild_catalog() -> dict:
-    """Sellwild's own categories and conditions. Vendoo's Sellwild IDs are retired there."""
-    import json
-
-    from vendoo_studio.config import skills_dir
-
-    return json.loads((skills_dir() / "list-this" / "references" / "sellwild-native-catalog.json").read_text(encoding="utf-8"))
-
-
-# Marketplace and general category words that name the same Sellwild leaf.
-_SELLWILD_SYNONYMS = {"tee": "shirt", "tshirt": "shirt", "tees": "shirt", "blouse": "top", "tank": "top", "cami": "top",
-                      "jumper": "sweater", "sweatshirt": "sweater", "cardigan": "sweater", "pullover": "sweater",
-                      "vest": "jacket", "gilet": "jacket", "parka": "coat", "trouser": "pant", "legging": "activewear",
-                      "sneaker": "sneaker", "trainer": "sneaker", "bag": "handbag", "purse": "handbag"}
-
-
-def _sellwild_words(text: str) -> set[str]:
-    text = re.sub(r"\b(short|long|3/4)[ -]sleeves?\b", " ", text.lower()).replace("t-shirt", "tshirt")
-    words = set()
-    for word in re.findall(r"[a-z0-9]+", text):
-        word = word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
-        words.add(_SELLWILD_SYNONYMS.get(word, word))
-    return words
-
-
-def _sellwild_text_sources(listing: dict) -> list[str]:
-    """Where the listing already says what it is, most specific first."""
-    poshmark = ((listing.get("marketplace_category_objects") or {}).get("poshmark") or {}).get("displayPath") or []
-    depop = str((listing.get("marketplace_category_ids") or {}).get("depop") or "")
-    # eBay's top level names every clothing branch; it says nothing about the item.
-    general = re.sub(r"clothing,? shoes (&|and) accessories", " ", str(listing.get("category_path") or ""), flags=re.I)
-    return [" ".join(map(str, poshmark[1:])), depop.split("_", 1)[-1].replace("-", " "),
-            " ".join(general.replace(">", "/").split("/")[-2:]), str(listing.get("title") or "")]
-
-
-def suggest_sellwild(listing: dict) -> dict:
-    """Sellwild's own category and condition, worked out from what the listing already says."""
-    catalog = sellwild_catalog()
-    ids = {option["id"] for option in catalog["categories"]}
-    specifics = listing.get("sellwild_specifics") if isinstance(listing.get("sellwild_specifics"), dict) else {}
-    explicit = specifics.get("nativeCategoryId")
-    category_id = int(explicit) if str(explicit or "").isdigit() and int(explicit) in ids else None
-    poshmark = ((listing.get("marketplace_category_objects") or {}).get("poshmark") or {}).get("displayPath") or []
-    everything = " ".join([str(listing.get("category_path") or ""), " ".join(map(str, poshmark)),
-                           str((listing.get("marketplace_category_ids") or {}).get("depop") or "")]).lower()
-    if category_id is None and re.search(r"\bbaby\b|infant|newborn", everything):
-        category_id = 66
-    elif category_id is None and re.search(r"\bkids?\b|kidswear|\bboys?\b|\bgirls?\b", everything):
-        category_id = 246
-    # Vendoo's (retired) Sellwild category still names the right top-level group.
-    vendoo_group = str((((listing.get("marketplace_category_objects") or {}).get("sellwild") or {}).get("displayPath") or [""])[0] or "")
-    clothing = bool(re.search(r"clothing|menswear|womenswear|\bmen\b|\bwomen\b|shoes|accessories", everything))
-    group = vendoo_group or ("Fashion" if clothing else "")
-    if category_id is None:
-        for text in _sellwild_text_sources(listing):
-            words = _sellwild_words(text)
-            best, score = None, 0
-            for option in catalog["categories"]:
-                parent, _, leaf = option["label"].partition(" > ")
-                if group and parent != group:
-                    continue
-                hits = len(_sellwild_words(leaf.replace("&", " ").replace(",", " ")) & words)
-                if hits > score:
-                    best, score = option["id"], hits
-            if best is not None:
-                category_id = best
-                break
-    native_condition = specifics.get("nativeConditionId")
-    condition = str(listing.get("condition") or "").lower()
-    condition_id = (int(native_condition) if str(native_condition or "") in {"1", "2", "3", "4", "5"}
-                    else 1 if re.search(r"poor|major flaw", condition)
-                    else 4 if re.search(r"new without tags|nwot|like new", condition)
-                    else 3 if re.search(r"new with defects|imperfection", condition)
-                    else 5 if re.search(r"new with tags|nwt|brand new|^new\b", condition)
-                    else 2 if re.search(r"pre-owned|used|good|fair|excellent", condition) else None)
-    return {"category_id": category_id, "condition_id": condition_id}
 
 
 def sellwild_options(conv_id: str, db: Session) -> dict:

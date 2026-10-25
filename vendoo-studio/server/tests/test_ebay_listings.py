@@ -16,6 +16,7 @@ LISTING = {
     "description": "Soft cotton tee.",
     "price": "24",
     "quantity": 1,
+    "weight_oz": 8,
     "condition": "Pre-Owned - Good",
     "brand": "Abercrombie",
     "marketplace_category_ids": {"ebay": "15687"},
@@ -42,6 +43,8 @@ class Client:
         if path.endswith("get_item_aspects_for_category"):
             return {"aspects": [
                 {"localizedAspectName": "Brand", "aspectConstraint": {"aspectRequired": True, "aspectMode": "FREE_TEXT"}},
+                {"localizedAspectName": "Department", "aspectConstraint": {"aspectMode": "SELECTION_ONLY"},
+                 "aspectValues": [{"localizedValue": "Men"}, {"localizedValue": "Women"}]},
                 {"localizedAspectName": "Sleeve Length", "aspectConstraint": {"aspectRequired": True, "aspectMode": "SELECTION_ONLY"},
                  "aspectValues": [{"localizedValue": "Does Not Apply"}, {"localizedValue": "Short Sleeve"}]},
             ]}
@@ -104,6 +107,11 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.photo = SimpleNamespace(id="p1", stored_filename="tee.jpg", mime_type="image/jpeg")
         self.back = SimpleNamespace(id="p2", stored_filename="back.jpg", mime_type="image/jpeg")
         self.binding = {}
+        # Each test answers eBay's schema itself; nothing is kept between tests.
+        self.enterContext(patch("vendoo_studio.services.marketplace_schemas.load_rows", return_value=None))
+        self.enterContext(patch("vendoo_studio.services.marketplace_schemas.save_rows"))
+        self.defaults = {}
+        self.enterContext(patch.object(ebay_listings, "get_ebay_listing_defaults", lambda: dict(self.defaults)))
 
     def record(self, values):
         self.binding.update(values)
@@ -161,14 +169,126 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(client.items["ar-abc123"]["condition"], "USED_EXCELLENT")
 
-    async def test_more_than_one_shipping_policy_lists_nothing(self):
+    async def test_several_shipping_policies_and_no_choice_ask_for_one(self):
         client = Client(policies=2)
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
             result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
         self.assertFalse(result["ok"])
-        self.assertIn("shipping", result["error"])
+        self.assertEqual(result["error_code"], "missing_fields")
+        self.assertEqual(result["fields"][0]["field"], "settings.ebay.fulfillment_policy_id")
+        self.assertIn("2 shipping policies", result["error"])
         self.assertTrue(result["safe_to_retry"])
-        self.assertFalse(any(call[0] == "PUT" for call in client.calls))
+        self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls))
+
+    async def test_several_shipping_policies_use_the_stored_default(self):
+        client = Client(policies=3)
+        self.defaults = {"fulfillment_policy_id": "f2"}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"], result)
+        offer = client.offers["offer-1"]
+        self.assertEqual(offer["listingPolicies"]["fulfillmentPolicyId"], "f2")
+        self.assertEqual((offer["merchantLocationKey"], offer["listingDuration"]), ("home", "GTC"))
+        # A stored default that is no longer on the account is not used.
+        self.defaults = {"fulfillment_policy_id": "gone"}
+        self.assertEqual((await ebay_listings.listing_choices(Client(policies=1)))["fulfillmentPolicyId"], "f0")
+
+    async def test_best_offer_uses_the_vendoo_paths_floors(self):
+        from vendoo_studio.services.native_form import vendoo_form
+
+        listing = {**LISTING, "price": "24"}
+        listing["form"] = vendoo_form(listing, "ebay")
+        client = Client()
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", listing, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"], result)
+        terms = client.offers["offer-1"]["listingPolicies"]["bestOfferTerms"]
+        self.assertEqual(terms, {"bestOfferEnabled": True, "autoAcceptPrice": {"value": "22.00", "currency": "USD"},
+                                 "autoDeclinePrice": {"value": "20.00", "currency": "USD"}})
+
+    async def test_aspects_use_ebays_exact_names_values_and_cardinality(self):
+        catalog = [
+            {"localizedAspectName": "Country/Region of Manufacture", "aspectConstraint": {"aspectMode": "SELECTION_ONLY"},
+             "aspectValues": [{"localizedValue": "Bangladesh"}, {"localizedValue": "China"}]},
+            {"localizedAspectName": "Theme", "aspectConstraint": {"aspectMode": "SELECTION_ONLY", "itemToAspectCardinality": "MULTI"},
+             "aspectValues": [{"localizedValue": "Floral"}, {"localizedValue": "Spring"}, {"localizedValue": "Animals"}]},
+            {"localizedAspectName": "Sleeve Length", "aspectConstraint": {"aspectRequired": True, "aspectMode": "SELECTION_ONLY"},
+             "aspectValues": [{"localizedValue": "Short Sleeve"}, {"localizedValue": "Long Sleeve"}]},
+            {"localizedAspectName": "Performance/Activity", "aspectConstraint": {"aspectMode": "FREE_TEXT"}},
+            {"localizedAspectName": "MPN", "aspectConstraint": {"aspectMode": "FREE_TEXT", "aspectMaxLength": 65}},
+            {"localizedAspectName": "Style", "aspectConstraint": {"aspectMode": "FREE_TEXT", "itemToAspectCardinality": "SINGLE"}},
+        ]
+        listing = {**LISTING, "ebay_specifics": {"countryOfOrigin": "bangladesh", "theme": "Floral, Spring", "sleeveLength": "short sleeves",
+                                                 "performanceActivity": "Running", "mpn": "CW-123", "upc": "Does Not Apply",
+                                                 "style": ["Basic", "Classic"], "madeUpThing": "x"}}
+        aspects = await ebay_listings._complete_aspects(Client(aspects=catalog), "15687", ebay_listings.ebay_aspects(listing, {}))
+        self.assertEqual(aspects, {"Country/Region of Manufacture": ["Bangladesh"], "Theme": ["Floral", "Spring"],
+                                   "Sleeve Length": ["Short Sleeve"], "Performance/Activity": ["Running"], "MPN": ["CW-123"],
+                                   "Style": ["Basic"]})
+        self.assertEqual(ebay_listings.product_ids(listing), {"upc": ["Does not apply"]})
+
+    async def test_a_category_ebay_does_not_take_is_a_missing_field(self):
+        class Refusing(Client):
+            async def request(self, method, path, **kwargs):
+                if path.endswith("get_item_aspects_for_category"):
+                    raise EbayFailure("eBay returned HTTP 400.", 400, code="rejected")
+                return await super().request(method, path, **kwargs)
+
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=Refusing()):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True)
+        self.assertEqual((result["error_code"], result["fields"][0]["field"]), ("missing_fields", "marketplace_category_ids.ebay"))
+
+    async def test_no_weight_is_asked_for_instead_of_guessed(self):
+        client = Client()
+        listing = {**LISTING, "weight_oz": 0}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", listing, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertEqual((result["error_code"], result["fields"][0]["field"]), ("missing_fields", "weight_oz"))
+        self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls if "image" not in call[1]))
+
+    def test_long_titles_are_cut_at_a_word_and_the_preflight_says_so(self):
+        from vendoo_studio.services.direct_preflight import Context
+
+        title = "Carter's Girls 4T Pink Floral Cotton Short Sleeve Dress Toddler Spring Easter Party Outfit Gift"
+        listing = {**LISTING, "title": title}
+        self.assertEqual(ebay_listings.ebay_title(listing), "Carter's Girls 4T Pink Floral Cotton Short Sleeve Dress Toddler Spring Easter")
+        gaps = ebay_listings.requirements(listing, Context())
+        self.assertEqual([(gap["field"], gap["blocking"]) for gap in gaps], [("title", False)])
+        long_text = "word " * 1000
+        fields = ebay_listings._listing_fields({**LISTING, "description": long_text}, {})
+        body = ebay_listings._inventory_body(fields, {}, [], LISTING, {})
+        self.assertLessEqual(len(body["product"]["description"]), 4000)
+        self.assertEqual(ebay_listings._offer_body("s", fields, "home", {})["listingDescription"], long_text.strip())
+
+    async def test_up_to_24_photos_are_listed(self):
+        photos = [self.photo] * 24
+        client = Client()
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, photos, self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+            self.assertTrue(result["ok"], result)
+            too_many = await ebay_listings.execute("list", LISTING, [self.photo] * 25, {}, self.record, self.active, confirm=True)
+        self.assertEqual(too_many["fields"][0]["field"], "photos")
+
+    def test_trading_cards_carry_condition_descriptors(self):
+        card = {**LISTING, "marketplace_category_ids": {"ebay": "183454"}}
+        graded = {**card, "ebay_specifics": {"category_specifics": {"Professional Grader": "PSA", "Grade": "9.5",
+                                                                     "Certification Number": "12345678"}}}
+        self.assertEqual(ebay_listings.card_condition(graded, "183454"), ("LIKE_NEW", [
+            {"name": "27501", "values": ["275010"]}, {"name": "27502", "values": ["275021"]},
+            {"name": "27503", "additionalInfo": "12345678"}]))
+        ungraded = {**card, "ebay_specifics": {"cardCondition": "Near Mint or Better"}}
+        self.assertEqual(ebay_listings.card_condition(ungraded, "183454"), ("USED_VERY_GOOD", [{"name": "40001", "values": ["400010"]}]))
+        fields = ebay_listings._listing_fields(ungraded, {})
+        self.assertEqual(ebay_listings._inventory_body(fields, {}, [], ungraded, {})["conditionDescriptors"],
+                         [{"name": "40001", "values": ["400010"]}])
+        with self.assertRaises(ebay_listings.ListingProblem) as raised:
+            ebay_listings._listing_fields(card, {})
+        self.assertEqual(raised.exception.fields[0]["field"], "ebay_specifics.category_specifics.Card Condition")
+        self.assertIsNone(ebay_listings.card_condition(LISTING, "15687"))
 
     async def test_update_rewrites_the_live_offer_and_does_not_publish_another(self):
         self.binding.update(ebay_offer_id="offer-1", ebay_listing_id="123456789012", listing_id="123456789012",

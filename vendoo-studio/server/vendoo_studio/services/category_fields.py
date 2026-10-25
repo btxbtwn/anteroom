@@ -25,7 +25,7 @@ from vendoo_studio.services.vendoo_specifics import (
 log = logging.getLogger("vendoo_studio.category_fields")
 SCHEMA_MAX_AGE = timedelta(days=7)
 
-__all__ = ["load_fields", "save_fields", "cached_marketplaces", "load_rows",
+__all__ = ["load_fields", "save_fields", "save_rows", "cached_marketplaces", "load_rows",
            "listing_category_ids"]
 
 
@@ -57,9 +57,14 @@ def load_fields(marketplace: str, category_id: str) -> dict[str, FieldSpec] | No
 
 def save_fields(marketplace: str, category_id: str, specs: dict[str, FieldSpec]) -> None:
     """Store one leaf's schema, replacing whatever was there."""
+    save_rows(marketplace, category_id, specs_to_rows(specs))
+
+
+def save_rows(marketplace: str, category_id: str, rows: list[dict[str, Any]]) -> None:
+    """Store one leaf's rows as given. A marketplace's own schema (Etsy's
+    category properties) is kept under its own ``marketplace`` key."""
     if not marketplace or not category_id:
         return
-    rows = specs_to_rows(specs)
     with SessionLocal() as db:
         existing = (
             db.query(CategoryFieldSchema)

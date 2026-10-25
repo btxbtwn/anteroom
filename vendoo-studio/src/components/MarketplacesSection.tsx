@@ -3,7 +3,7 @@ import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, External
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark } from "../api/marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, SellwildOptions } from "../api/nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap, SellwildOptions } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
@@ -177,13 +177,19 @@ export function MarketplacesLayout({
   const etsyCreating = !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
   const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
     enabled: etsyCreating, staleTime: 60_000, retry: false });
-  const etsyReady = Boolean(etsyDefaults.data?.shipping_profile_id && etsyDefaults.data?.readiness_state_id);
+  const etsyReady = Boolean(etsyDefaults.data?.shipping_profile_id && etsyDefaults.data?.readiness_state_id && etsyDefaults.data?.return_policy_id);
   const sellwildOpen = !listings.sellwild?.listing_id && !["published", "pending_review"].includes(drafts.sellwild?.state ?? "");
   const sellwildOptions = useQuery({ queryKey: ["sellwild-options", convId, revisionId], queryFn: () => api.nativeMarketplaces.sellwildOptions(convId),
     enabled: sellwildOpen, staleTime: 60_000, retry: false });
   const savedSellwild = drafts.sellwild;
   const sellwildCategory = sellwildPick.categoryId ?? savedSellwild?.sellwild_category_id ?? sellwildOptions.data?.suggested.category_id ?? undefined;
   const sellwildCondition = sellwildPick.conditionId ?? savedSellwild?.sellwild_condition_id ?? sellwildOptions.data?.suggested.condition_id ?? undefined;
+  const preflight = useQuery({
+    queryKey: ["native-preflight", convId, revisionId, sellwildCategory ?? null, sellwildCondition ?? null],
+    queryFn: () => api.nativeMarketplaces.preflight(convId, { categoryId: sellwildCategory, conditionId: sellwildCondition }),
+    enabled: Boolean(revisionId),
+    staleTime: 15_000,
+  });
 
   const action = useMutation({
     mutationFn: async ({ marketplace, kind, draftUrl }: {
@@ -276,8 +282,12 @@ export function MarketplacesLayout({
     // A sold item is not listed anywhere else.
     return !soldSomewhere;
   }
+  function preflightGaps(marketplace: Marketplace): PreflightGap[] {
+    return preflight.data?.marketplaces?.[marketplace as NativeMarketplace]?.gaps ?? [];
+  }
   function listBlocked(marketplace: Marketplace): boolean {
     if (retryIn(marketplace) > 0) return true;
+    if (preflightGaps(marketplace).some((gap) => gap.blocking)) return true;
     if (marketplace === "etsy" && !etsyEligible) return true;
     if (marketplace === "etsy") {
       const draft = drafts.etsy;
@@ -343,6 +353,37 @@ export function MarketplacesLayout({
     );
   }
 
+  function preflightNotice(marketplace: Marketplace): ReactNode {
+    const draft = NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined;
+    if (draft?.error || isRunning(draft) || unconfirmed(marketplace)) return null;
+    const gaps = preflightGaps(marketplace);
+    const blocking = gaps.filter((gap) => gap.blocking);
+    if (!gaps.length) return null;
+    const prompt = [
+      `${marketplaceName(marketplace)} still needs details before this item can be listed.`,
+      ...gaps.map((gap) => `${gap.field}: ${gap.message}`),
+      "Fill those fields in this listing. Do not list it; I will press List again.",
+    ].join("\n");
+    return (
+      <>
+        {gaps.map((gap) => <p key={`${gap.field}:${gap.message}`} className="text-muted-foreground">{gap.message}</p>)}
+        {blocking.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {onEditField && blocking.map((item) => (
+              <Button key={item.field} size="xs" variant="ghost" title={item.message} onClick={() => onEditField(item.field)}>
+                Edit {fieldLabel(item.field)}
+              </Button>
+            ))}
+            {onAskChat && (
+              <Button size="xs" variant="outline" title="Chat fills these fields. It does not list the item."
+                onClick={() => onAskChat(prompt)}>Ask chat</Button>
+            )}
+          </div>
+        )}
+      </>
+    );
+  }
+
   /** The one thing that fixes this refusal, per error code. */
   function errorActions(marketplace: Marketplace): ReactNode {
     const m = marketplace as NativeMarketplace;
@@ -392,7 +433,7 @@ export function MarketplacesLayout({
 
   function settings(marketplace: Marketplace): ReactNode {
     if (marketplace === "etsy" && etsyCreating && etsyDefaults.isSuccess && !etsyReady) {
-      return <p className="text-muted-foreground">Choose Etsy's default shipping and processing profiles in Settings → Connections.</p>;
+      return <p className="text-muted-foreground">Choose Etsy's default shipping, processing, and return profiles in Settings → Connections.</p>;
     }
     if (marketplace !== "sellwild" || !sellwildOpen || !sellwildOptions.data) return null;
     const category = sellwildOptions.data.categories.find((option) => option.id === sellwildCategory);
@@ -496,6 +537,7 @@ export function MarketplacesLayout({
               role={selectedStatus.tone === "failed" ? "alert" : undefined}>{selectedStatus.detail}</p>}
             {selectedStatus.said && <p className="whitespace-pre-wrap break-words text-muted-foreground" data-marketplace-message>{selectedStatus.said}</p>}
             {errorActions(selectedMarketplace)}
+            {preflightNotice(selectedMarketplace)}
             {settings(selectedMarketplace)}
             {linkForm(selectedMarketplace)}
             {(() => {

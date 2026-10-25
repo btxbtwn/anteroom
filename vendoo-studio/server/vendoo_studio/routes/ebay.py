@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.models.ebay_action import EbayAction
-from vendoo_studio.services import ebay_actions, ebay_workspace
+from vendoo_studio.services import ebay_actions, ebay_listings, ebay_workspace, user_settings
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, identity
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 
@@ -56,6 +56,42 @@ async def listing(listing_id: str):
         return await ebay_actions.owned_listing(await EbayClient.connect(), listing_id)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
+
+
+class EbayListingDefaults(BaseModel):
+    fulfillment_policy_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
+    payment_policy_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
+    return_policy_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
+    merchant_location_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
+
+
+@router.get("/listing-profiles")
+async def listing_profiles():
+    """Business policy and location names and IDs only."""
+    try:
+        return await ebay_listings.listing_profiles()
+    except (EbayFailure, SignInRequired, httpx.HTTPError) as exc:
+        raise failure(exc) from exc
+
+
+@router.get("/listing-defaults")
+def get_listing_defaults():
+    return user_settings.get_ebay_listing_defaults()
+
+
+@router.put("/listing-defaults")
+async def put_listing_defaults(body: EbayListingDefaults):
+    """Chosen once in Settings, for accounts with several policies or locations. Only the account's own are kept."""
+    try:
+        profiles = await ebay_listings.listing_profiles()
+    except (EbayFailure, SignInRequired, httpx.HTTPError) as exc:
+        raise failure(exc) from exc
+    for name, kind in (("fulfillment_policy_id", "fulfillment"), ("payment_policy_id", "payment"),
+                       ("return_policy_id", "return"), ("merchant_location_key", "locations")):
+        value = getattr(body, name)
+        if value and value not in {option["id"] for option in profiles[kind]}:
+            raise HTTPException(400, "Choose policies and a location from the connected eBay account.")
+    return user_settings.set_ebay_listing_defaults(body.model_dump())
 
 
 @router.post("/research/image")
