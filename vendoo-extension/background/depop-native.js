@@ -328,14 +328,18 @@ function depopAttributeValues(listing, category, attributes) {
   return { values, missing };
 }
 
-// The seller's ship-from address: the one at the Ships from ZIP in Settings,
-// else their only one, else the one Depop marks as default.
+// The seller's ship-from address. Depop can store several at the same ZIP and
+// does not mark one as the default, so the most recently updated match is used.
 function depopAddress(listing, data) {
-  const list = Array.isArray(data) ? data : data?.addresses || data?.objects || data?.data || [];
-  const zip = String(listing.form?.ships_from_zip || '').trim();
-  const byZip = zip && list.filter(entry => String(entry?.postal_code ?? entry?.postalCode ?? entry?.zip ?? '').slice(0, 5) === zip);
-  const chosen = byZip?.length === 1 ? byZip[0] : list.length === 1 ? list[0]
-    : list.find(entry => entry?.is_default === true || entry?.default === true || entry?.primary === true);
+  const raw = Array.isArray(data) ? data : data?.addresses || data?.objects || data?.data || [];
+  const rows = (Array.isArray(raw) ? raw : []).filter(entry => entry?.id != null);
+  const zip = String(listing.form?.ships_from_zip || '').replace(/\D/g, '').slice(0, 5);
+  const postal = entry => String(entry?.postal_code ?? entry?.postalCode ?? entry?.zip ?? '').replace(/\D/g, '').slice(0, 5);
+  const newest = group => group.slice().sort((a, b) => String(b.lastModified || b.last_modified || '').localeCompare(String(a.lastModified || a.last_modified || '')))[0];
+  const matches = zip ? rows.filter(entry => postal(entry) === zip) : [];
+  const chosen = matches.length ? newest(matches)
+    : rows.length === 1 ? rows[0]
+    : rows.find(entry => entry?.is_default === true || entry?.default === true || entry?.primary === true);
   return chosen?.id != null ? chosen.id : null;
 }
 
@@ -374,7 +378,12 @@ async function depopResolvedFields(payload) {
     'parcel sizes', payload.deadline);
   const parcels = (Array.isArray(providers) ? providers : providers?.objects || []).flatMap(provider => provider?.parcelSizes || provider?.parcel_sizes || []);
   const parcel = parcels.find(entry => marketplaceNameKey(entry?.title) === marketplaceNameKey(parcelLabel));
-  if (addressId == null) missing.push({ field: 'address', needs: 'a ship-from address (set your Ships from ZIP in Settings → Listings)' });
+  if (addressId == null) {
+    const zip = String(listing.form?.ships_from_zip || '').replace(/\D/g, '').slice(0, 5);
+    missing.push({ field: 'address', needs: zip
+      ? `a Depop ship-from address for ZIP ${zip} (the ZIP in Settings → Listings does not match an address saved in Depop)`
+      : 'a ship-from address (set your Ships from ZIP in Settings → Listings)' });
+  }
   if (!parcel?.id) missing.push({ field: 'parcel_size', needs: `a parcel size Depop offers (it has no "${parcelLabel}")` });
   if (missing.length) throw marketplaceMissing('depop', missing);
   fields.shipping_methods = [{ ship_from_address_id: addressId, shipping_provider_id: 'USPS', parcel_size_id: String(parcel.id), payer: 'buyer' }];
