@@ -718,16 +718,31 @@ class PersistListingTest(unittest.TestCase):
         self.assertTrue(propagate_general_size(listing, previous_size="10"))
         self.assertEqual(listing["depop_specifics"]["size"], "12")
 
-        kept = {
+        # "Other" is never a seller's Depop choice over a known tag, and a kids'
+        # category takes the tag as Depop's age.
+        kids = {
             "size": "XL (18/20)",
             "title": "Columbia XL (18/20) Outdoors Hooded Windbreaker",
+            "direct_category_ids": {"depop": "kidswear_jackets"},
             "depop_specifics": {"size": "Other"},
             "ebay_specifics": {"size": "XL (18/20)"},
         }
-        self.assertFalse(propagate_general_size(kept))
-        self.assertEqual(kept["depop_specifics"]["size"], "Other")
-        self.assertEqual(kept["size"], "XL (18/20)")
-        self.assertEqual(kept["ebay_specifics"]["size"], "XL (18/20)")
+        self.assertTrue(propagate_general_size(kids))
+        self.assertEqual(kids["depop_specifics"]["size"], "16 years")
+        self.assertEqual(kids["size"], "XL (18/20)")
+        self.assertEqual(kids["ebay_specifics"]["size"], "XL (18/20)")
+        # A kids' age the seller chose on the Depop form stays.
+        kids["depop_specifics"]["size"] = "14 years"
+        self.assertFalse(propagate_general_size(kids))
+        self.assertEqual(kids["depop_specifics"]["size"], "14 years")
+        # Without a Depop size yet, the kids' age is still written.
+        missing = {"size": "M", "marketplace_categories": {"depop": "Kids > Coats and jackets > Jackets"},
+                   "depop_specifics": {"source": "Preloved"}}
+        self.assertTrue(propagate_general_size(missing))
+        self.assertEqual(missing["depop_specifics"]["size"], "10 years")
+        adult = {"size": "XL", "depop_specifics": {"size": "Other"}, "marketplace_category_ids": {"depop": "menswear_jackets"}}
+        self.assertTrue(propagate_general_size(adult))
+        self.assertEqual(adult["depop_specifics"]["size"], "XL")
 
         dirty = {
             "title": "Test Tee",

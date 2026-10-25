@@ -86,12 +86,12 @@ class SyncStateTest(unittest.TestCase):
         self.level_with(2000)
         self.assertEqual(sync_state(self.db, self.conv.id, self.item(2000))["action"], "none")
 
-    def test_both_moving_prefers_vendoo_when_content_changed(self):
+    def test_both_moving_is_a_conflict_not_a_pull(self):
         self.level_with(1000, title="Old")
         ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
         state = sync_state(self.db, self.conv.id, self.item(2000, title="From Vendoo"))
-        self.assertEqual(state["action"], "pull")
-        self.assertEqual(state["reason"], "both changed, prefer vendoo")
+        self.assertEqual(state["action"], "conflict")
+        self.assertEqual(state["reason"], "both changed")
 
     def test_studio_edits_survive_status_only_vendoo_list(self):
         """List in Vendoo after a Studio regenerate: keep the regenerate."""
@@ -392,19 +392,32 @@ class SyncConversationTest(unittest.TestCase):
         self.assertTrue(studio_has_unpushed_edits(self.db, self.conv.id))
         self.assertEqual(sync_status(self.db, self.conv.id)["revision_id"], self.rev.id)
 
-    def test_content_change_with_studio_edits_takes_vendoo(self):
-        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
-        result = self.sync(item={
+    def test_content_change_with_studio_edits_keeps_studio_and_flags_a_conflict(self):
+        edited = ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
+        vendoo = {
             "itemID": "itm1",
             "dateLastModified": 2000,
             "generalDetails": {"title": "Vendoo rewrote this"},
-        })
-        self.assertEqual(result["action"], "pull")
-        self.assertEqual(result["reason"], "both changed, prefer vendoo")
-        self.assertEqual(
-            ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json["title"],
-            "Vendoo rewrote this",
-        )
+        }
+        result = self.sync(item=vendoo)
+        self.assertEqual(result["action"], "conflict")
+        self.assertNotIn("revision_id", result)
+        self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id)[0].id, edited.id)
+        self.assertTrue(sync_status(self.db, self.conv.id)["conflict"])
+        notes = parse_notes(ConversationRepo(self.db).get(self.conv.id).notes)
+        self.assertEqual(notes[SYNCED_AT], "1000")
+        self.assertEqual(notes[SYNCED_REVISION], self.rev.id)
+        # Every later check sees the same conflict until the seller settles it.
+        self.assertEqual(self.sync(item=vendoo)["action"], "conflict")
+        self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id)[0].id, edited.id)
+
+    def test_discard_settles_a_conflict(self):
+        ListingRepo(self.db).save_revision(self.conv.id, {"title": "Edited here"}, source="user")
+        vendoo = {"itemID": "itm1", "dateLastModified": 2000, "generalDetails": {"title": "Vendoo rewrote this"}}
+        self.sync(item=vendoo)
+        apply_pull(self.db, self.conv.id, vendoo, source="vendoo_pull")
+        self.assertFalse(sync_status(self.db, self.conv.id)["conflict"])
+        self.assertEqual(self.sync(item=vendoo)["action"], "none")
 
     def test_stuck_listing_badge_clears_when_no_send_is_running(self):
         """Listed on Vendoo with a finished job must not stay on Listing."""

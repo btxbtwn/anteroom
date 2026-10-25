@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Job, ListingData, MarketplaceForm } from "../api/types";
+import type { NativeDraft, PoshmarkOptions, SellwildOptions } from "../api/nativeMarketplaces";
 import { cloneListing, formFieldText, getListingEditorValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { ItemDetails } from "./ItemDetails";
@@ -23,10 +24,18 @@ import {
 } from "./relistStatus";
 import {
   DEPOP_CATEGORY_OPTIONALS,
+  depopSchemaKey,
+  depopSizeGroupingApplies,
   EBAY_CATEGORY_OPTIONALS,
   ETSY_CATEGORY_OPTIONALS,
+  MERCARI_CONDITIONS,
+  mercariConditionLabel,
+  POSHMARK_COLORS,
+  POSHMARK_CONDITIONS,
+  poshmarkColorName,
+  poshmarkConditionLabel,
 } from "../marketplaceFields";
-import { withDropdownOptions } from "../dropdownOptions";
+import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
 import { MarketplacesLayout } from "./MarketplacesSection";
@@ -137,8 +146,20 @@ export function ListingEditor({
     },
   });
   async function confirmDiscardUnsent() {
+    const drafts = await queryClient
+      .fetchQuery({
+        queryKey: ["native-marketplaces", convId],
+        queryFn: () => api.nativeMarketplaces.status(convId),
+      })
+      .catch(() => undefined);
+    const live = Object.entries(drafts ?? {})
+      .filter(([, draft]) => draft?.state === "published")
+      .map(([marketplace]) => marketplaceName(marketplace));
+    const liveNote = live.length
+      ? ` This listing is live on ${live.join(", ")} from Anteroom. Discarding won't change those listings, so Anteroom will no longer match them.`
+      : "";
     const confirmed = await confirmDialog(
-      "Discard unsent edits?\nThis listing goes back to what Vendoo has. Edits and anything regenerated since the last send are replaced.",
+      `Discard unsent edits?\nThis listing goes back to what Vendoo has. Edits and anything regenerated since the last send are replaced.${liveNote}`,
       { variant: "destructive", confirmLabel: "Discard edits" },
     );
     if (confirmed) discardUnsent.mutate();
@@ -551,10 +572,33 @@ function StructuredEditor({
     queryFn: api.settings.ebayInventoryLocation,
     staleTime: 30_000,
   });
+  const { data: poshmarkOptions } = useQuery({
+    queryKey: ["poshmark-options", convId, revisionId],
+    queryFn: () => api.nativeMarketplaces.poshmarkOptions(convId),
+    enabled: tab === "poshmark",
+    staleTime: 60_000,
+    retry: false,
+  });
+  // The same reads the Sellwild row beside List uses.
+  const { data: sellwildOptions } = useQuery({
+    queryKey: ["sellwild-options", convId, revisionId],
+    queryFn: () => api.nativeMarketplaces.sellwildOptions(convId),
+    enabled: tab === "sellwild",
+    staleTime: 60_000,
+    retry: false,
+  });
+  const { data: nativeDrafts } = useQuery({
+    queryKey: ["native-marketplaces", convId],
+    queryFn: () => api.nativeMarketplaces.status(convId),
+    enabled: tab === "sellwild",
+  });
   const fields = React.useMemo(
     () => {
       const rows = withDropdownOptions(
-        fieldsForMarketplaceForm(listing, tab, forms?.forms),
+        withDirectChoices(fieldsForMarketplaceForm(listing, tab, forms?.forms), {
+          poshmark: poshmarkOptions,
+          sellwild: sellwildOptions && sellwildChoiceLabels(sellwildOptions, nativeDrafts?.sellwild),
+        }),
         tab,
         dropdownOptions?.forms,
       );
@@ -566,7 +610,7 @@ function StructuredEditor({
           : field
       ));
     },
-    [forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
+    [forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location, poshmarkOptions, sellwildOptions, nativeDrafts?.sellwild],
   );
   const [local, setLocal] = React.useState<Record<string, string>>({});
   React.useEffect(() => {
@@ -692,6 +736,8 @@ const PACKAGE_FORM_FIELDS: EditorField[] = [
 ];
 
 const PACKAGE_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "sellwild"]);
+const MERCARI_ABSENT_FIELDS = new Set(["quantity", "primaryColor", "secondaryColor"]);
+const MERCARI_DERIVED_LABELS = new Set(["quantity", "shipping label", "delivery method", "who will pay for delivery?"]);
 
 /**
  * Two rows are the same field when they share a label or edit the same value.
@@ -739,13 +785,22 @@ export function fieldsForMarketplaceForm(
   tab: string,
   forms: MarketplaceForm[] | undefined,
 ): EditorField[] {
-  const own = getFieldsForTab(listing, tab);
+  // eBay's category schema names its own aspects, so the fixed rows give way to it.
+  const own = getFieldsForTab(listing, tab, Boolean(forms?.find((form) => form.marketplace === tab)?.fields.length));
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
   if (tab === "general") return withoutObjects(own);
-  const schema = schemaFieldsForTab(forms, tab) ?? [];
+  // Vendoo's Sellwild ids are retired; its Sellwild form is not what direct List sends.
+  const schema = (tab === "sellwild" ? [] : schemaFieldsForTab(forms, tab) ?? [])
+    // Vendoo's Mercari quantity and shipping rows are rewritten on every build (the
+    // weight's prepaid label, buyer pays), so an edit there would never be sent.
+    .filter((field) => tab !== "mercari" || !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()));
   let shared = PACKAGE_MARKETPLACES.has(tab)
     ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
     : SHARED_FORM_FIELDS;
+  // Sellwild takes no brand, and its condition is its own (shown on the tab).
+  if (tab === "sellwild") shared = shared.filter((field) => field.key !== "brand" && field.key !== "condition");
+  // Mercari's form has no quantity and no color.
+  if (tab === "mercari") shared = shared.filter((field) => !MERCARI_ABSENT_FIELDS.has(field.key));
   // A marketplace with its own category path is categorised by that, not the shared one.
   if (own.some((field) => field.label === "Category")) {
     shared = shared.filter((field) => field.key !== "category_path");
@@ -760,7 +815,11 @@ export function fieldsForMarketplaceForm(
   });
   // A group of values (eBay's Best Offer, Depop's national shipping) is edited
   // through its own rows, never as one text box.
-  return withoutObjects(named);
+  const rows = withoutObjects(named);
+  // Regular sizing has no Depop size grouping.
+  return tab === "depop" && !depopSizeGroupingApplies(listing)
+    ? rows.filter((field) => field.key !== "depop_specifics.sizeGrouping")
+    : rows;
 }
 
 /** Fields for this tab from Vendoo's own schema, or null when it has none. */
@@ -776,12 +835,40 @@ function schemaFieldsForTab(
   return form.fields.filter((field) => !isPlainObject(field.value)).map((field) => ({
     // Schema keys are Vendoo labels ("Sleeve Length"); listing JSON uses camelCase.
     // getListingEditorValue / setListingEditorValue bridge the two.
-    key: `${tab}_specifics.${field.key}`,
+    key: `${tab}_specifics.${tab === "depop" ? depopSchemaKey(field.key) : field.key}`,
     label: field.required ? `${field.label} *` : field.label,
     required: field.required,
     options: field.options,
     defaultValue: formFieldText(field.value),
   }));
+}
+
+/** Sellwild's category and condition as List will send them: the seller's pick, else Anteroom's match. */
+export function sellwildChoiceLabels(options: SellwildOptions, saved: NativeDraft | undefined): { category: string; condition: string } {
+  const category = saved?.sellwild_category_id ?? options.suggested.category_id;
+  const condition = saved?.sellwild_condition_id ?? options.suggested.condition_id;
+  const label = (list: { id: number; label: string }[], id: number | null | undefined) =>
+    list.find((option) => option.id === id)?.label ?? "Choose one beside List";
+  return { category: label(options.categories, category), condition: label(options.conditions, condition) };
+}
+
+/** Poshmark's live catalog choices and Sellwild's direct picks on their tabs' rows. */
+export function withDirectChoices(fields: EditorField[], choices: {
+  poshmark?: PoshmarkOptions;
+  sellwild?: { category: string; condition: string };
+}): EditorField[] {
+  const { poshmark, sellwild } = choices;
+  return fields.map((field) => {
+    if (poshmark && (field.key === "poshmark_specifics.poshmarkColor" || field.key === "poshmark_specifics.poshmarkSecondaryColor")) {
+      return { ...field, options: poshmark.colors };
+    }
+    if (poshmark?.subcategories.length && field.key === "poshmark_specifics.subcategory") {
+      return { ...field, options: poshmark.subcategories };
+    }
+    if (sellwild && field.key === "sellwild.category") return { ...field, defaultValue: sellwild.category };
+    if (sellwild && field.key === "sellwild.condition") return { ...field, defaultValue: sellwild.condition };
+    return field;
+  });
 }
 
 function liveCategoryFields(listing: ListingData | undefined, marketplace: "ebay" | "etsy"): EditorField[] {
@@ -791,7 +878,9 @@ function liveCategoryFields(listing: ListingData | undefined, marketplace: "ebay
   return [{ key: `direct_category_ids.${marketplace}_path`, label: marketplace === "ebay" ? "eBay category" : "Etsy category", locked: true }];
 }
 
-function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorField[] {
+const EBAY_STORE_KEYS = new Set(["primaryStoreCategory", "secondaryStoreCategory"]);
+
+function getFieldsForTab(listing: ListingData | undefined, tab: string, schemaKnown = false): EditorField[] {
   switch (tab) {
     case "general":
       return [
@@ -816,35 +905,46 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
       return mergeSpecificsWithDefaults(listing?.ebay_specifics, "ebay_specifics", [
         { key: "zipCode", label: "Inventory location" },
         ...liveCategoryFields(listing, "ebay"),
-        { key: "ebay_specifics.department", label: "Department" },
-        { key: "ebay_specifics.size", label: "Size" },
-        { key: "ebay_specifics.sizeType", label: "Size Type" },
-        { key: "ebay_specifics.type", label: "Type" },
+        ...(schemaKnown ? [] : [
+          { key: "ebay_specifics.department", label: "Department" },
+          { key: "ebay_specifics.size", label: "Size" },
+          { key: "ebay_specifics.type", label: "Type" },
+        ]),
         { key: "ebay_specifics.pricingFormat", label: "Pricing Format" },
         { key: "ebay_specifics.conditionDescription", label: "Condition Description" },
-        ...EBAY_CATEGORY_OPTIONALS.map((field) => ({
-          key: `ebay_specifics.category_specifics.${field.key}`,
-          label: field.label,
-        })),
+        // One copy per aspect, at the top of ebay_specifics, where Send and direct List read it.
+        ...EBAY_CATEGORY_OPTIONALS
+          .filter((field) => !schemaKnown || EBAY_STORE_KEYS.has(field.key))
+          .map((field) => ({ key: `ebay_specifics.${field.key}`, label: field.label })),
       ]);
     case "poshmark":
+      // Poshmark's own choices. Until the seller picks one, each shows what
+      // direct List maps the listing's own value to.
       return [
         { key: "price", label: "Price", type: "number" },
         { key: "poshmark_specifics.originalPrice", label: "Original Price", type: "number", defaultValue: "0", locked: true },
-        { key: "condition", label: "Condition" },
+        { key: "poshmark_specifics.poshmarkCondition", label: "Condition", options: POSHMARK_CONDITIONS,
+          defaultValue: poshmarkConditionLabel(listing?.condition) },
         { key: "brand", label: "Brand" },
-        { key: "primaryColor", label: "Primary Color" },
+        { key: "poshmark_specifics.poshmarkColor", label: "Primary Color", options: POSHMARK_COLORS,
+          defaultValue: poshmarkColorName(listing?.primaryColor) },
+        { key: "poshmark_specifics.poshmarkSecondaryColor", label: "Secondary Color", options: POSHMARK_COLORS,
+          defaultValue: poshmarkColorName(listing?.secondaryColor) },
+        { key: "poshmark_specifics.subcategory", label: "Sub-category" },
         { key: "quantity", label: "Quantity", type: "number" },
-        ...specificsFields(listing?.poshmark_specifics, "poshmark_specifics", ["originalPrice"]),
+        // Vendoo's delist message is not a Poshmark field.
+        ...specificsFields(listing?.poshmark_specifics, "poshmark_specifics", ["originalPrice", "delistingAttemptMessages"]),
       ];
     case "mercari":
+      // Mercari's own condition; until the seller picks one it shows what direct
+      // List maps the listing's condition to. The prepaid label follows the
+      // package weight (buyer pays) and Size comes from Mercari's size list.
       return [
         { key: "price", label: "Price", type: "number" },
-        { key: "condition", label: "Condition" },
+        { key: "mercari_specifics.condition", label: "Condition", options: MERCARI_CONDITIONS,
+          defaultValue: mercariConditionLabel(listing?.condition) },
         { key: "brand", label: "Brand" },
-        { key: "quantity", label: "Quantity", type: "number" },
-        { key: "mercari_specifics.shippingLabel", label: "Shipping Label", defaultValue: "USPS Ground Advantage / 1 - 7 days / $ 5.66 / 0.5 lb" },
-        ...specificsFields(listing?.mercari_specifics, "mercari_specifics", ["shippingLabel"]),
+        ...specificsFields(listing?.mercari_specifics, "mercari_specifics", ["shippingLabel", "condition", "delistingAttemptMessages"]),
       ];
     case "depop":
       return mergeSpecificsWithDefaults(
@@ -870,10 +970,18 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
           })),
         ],
       );
+    case "sellwild":
+      // Direct List sends Sellwild's own category and condition (chosen beside
+      // List), no brand, and never Vendoo's retired Sellwild category.
+      return [
+        { key: "price", label: "Price", type: "number" },
+        { key: "sellwild.category", label: "Category", locked: true },
+        { key: "sellwild.condition", label: "Condition", locked: true },
+        ...specificsFields(listing?.sellwild_specifics, "sellwild_specifics", ["category_path", "categoryPath"]),
+      ];
     case "grailed":
     case "vinted":
     case "facebook":
-    case "sellwild":
       // Their fields come from the category Vendoo maps to, once it is chosen.
       return [
         { key: "price", label: "Price", type: "number" },
@@ -1148,11 +1256,21 @@ function SendToVendooButton({
 
   // Vendoo's dropdown lists ride along in the fix prompts, so chat repairs a
   // rejected option (Depop material "Other") with one the dropdown really has.
+  // The category's own schema wins over the static lists (Depop kids' ages).
   const { data: dropdownOptions } = useQuery({
     queryKey: ["catalog-dropdown-options"],
     queryFn: api.catalog.dropdownOptions,
     staleTime: Infinity,
   });
+  const { data: schemaForms } = useQuery({
+    queryKey: ["listing-fields", convId],
+    queryFn: () => api.vendooApi.listingFields(convId),
+    staleTime: 60_000,
+  });
+  const promptOptions = React.useMemo(
+    () => withSchemaOptions(dropdownOptions?.forms, schemaForms?.forms),
+    [dropdownOptions?.forms, schemaForms?.forms],
+  );
 
   const { data: extStatus } = useQuery({
     queryKey: ["extension-status"],
@@ -1224,7 +1342,7 @@ function SendToVendooButton({
         fromVendooDraft,
         listing,
         fillFailures,
-        dropdownOptions?.forms,
+        promptOptions,
       )
       : undefined),
     [
@@ -1233,7 +1351,7 @@ function SendToVendooButton({
       fromVendooDraft,
       listing,
       fillFailures,
-      dropdownOptions?.forms,
+      promptOptions,
     ],
   );
 
@@ -1380,7 +1498,7 @@ function SendToVendooButton({
         {existingJob.last_error && (
           <CopyableLlmError
             text={existingJob.last_error}
-            prompt={jobErrorPrompt(existingJob.last_error, listingTitle, null, dropdownOptions?.forms)}
+            prompt={jobErrorPrompt(existingJob.last_error, listingTitle, null, promptOptions)}
             onAskChat={onAskChat}
             emptyFieldsCount={emptyFieldsCount}
             emptyFieldsPrompt={fillEmptyPrompt}
@@ -1389,7 +1507,7 @@ function SendToVendooButton({
         {shownSendError && (
           <CopyableLlmError
             text={shownSendError}
-            prompt={jobErrorPrompt(shownSendError, listingTitle, null, dropdownOptions?.forms)}
+            prompt={jobErrorPrompt(shownSendError, listingTitle, null, promptOptions)}
             onAskChat={onAskChat}
             emptyFieldsCount={emptyFieldsCount}
             emptyFieldsPrompt={fillEmptyPrompt}
@@ -1423,7 +1541,7 @@ function SendToVendooButton({
   const blockerPrompt = validationErrorsPrompt(
     uniqueBlockers.length ? uniqueBlockers : [{ message: displayError }],
     listingTitle,
-    dropdownOptions?.forms,
+    promptOptions,
   );
   // The grouped list below already names these issues. The red dump would repeat them.
   const blockersListed = !error && !canSend && uniqueBlockers.length > 0;
@@ -1442,7 +1560,7 @@ function SendToVendooButton({
       issueCount={blockersListed ? uniqueBlockers.length : 0}
       prompt={uniqueBlockers.length
         ? blockerPrompt
-        : jobErrorPrompt(displayError, listingTitle, null, dropdownOptions?.forms)}
+        : jobErrorPrompt(displayError, listingTitle, null, promptOptions)}
       onAskChat={onAskChat}
       emptyFieldsCount={emptyFieldsCount}
       emptyFieldsPrompt={fillEmptyPrompt}

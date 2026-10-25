@@ -368,7 +368,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         fields = ebay_listings._listing_fields({**LISTING, "description": long_text}, {})
         body = ebay_listings._inventory_body(fields, {}, [], LISTING, {})
         self.assertLessEqual(len(body["product"]["description"]), 4000)
-        self.assertEqual(ebay_listings._offer_body("s", fields, "home", {})["listingDescription"], long_text.strip())
+        self.assertEqual(ebay_listings._offer_body("s", fields, "home", {})["listingDescription"], f"<p>{long_text.strip()}</p>")
 
     async def test_up_to_24_photos_are_listed(self):
         photos = [self.photo] * 24
@@ -394,7 +394,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
                          [{"name": "40001", "values": ["400010"]}])
         with self.assertRaises(ebay_listings.ListingProblem) as raised:
             ebay_listings._listing_fields(card, {})
-        self.assertEqual(raised.exception.fields[0]["field"], "ebay_specifics.category_specifics.Card Condition")
+        self.assertEqual(raised.exception.fields[0]["field"], "ebay_specifics.Card Condition")
         self.assertIsNone(ebay_listings.card_condition(LISTING, "15687"))
 
     async def test_the_shipping_policy_chosen_in_settings_is_used_when_there_are_several(self):
@@ -603,7 +603,58 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
             await ebay_listings._complete_aspects(Client(aspects=catalog), "57988", ebay_listings.ebay_aspects({**jacket, "primaryColor": ""}, {}))
         self.assertEqual(raised.exception.code, "missing_fields")
         self.assertEqual([item["field"] for item in raised.exception.fields],
-                         ["ebay_specifics.category_specifics.Color", "ebay_specifics.category_specifics.Outer Shell Material"])
+                         ["ebay_specifics.Color", "ebay_specifics.Outer Shell Material"])
+
+    def test_the_description_keeps_its_paragraphs_and_line_breaks(self):
+        text = "Columbia windbreaker.\n\nMeasurements:\nPit to pit: 20\"\nLength <27>"
+        fields = ebay_listings._listing_fields({**LISTING, "description": text}, {})
+        self.assertEqual(ebay_listings._offer_body("s", fields, "home", {})["listingDescription"],
+                         "<p>Columbia windbreaker.</p><p>Measurements:<br>Pit to pit: 20&quot;<br>Length &lt;27&gt;</p>")
+        # The product's copy stays plain text.
+        self.assertEqual(ebay_listings._inventory_body(fields, {}, [], LISTING, {})["product"]["description"], text)
+
+    def test_one_copy_per_aspect_and_no_does_not_apply_on_optionals(self):
+        listing = {**LISTING, "ebay_specifics": {
+            "size": "XL", "season": "Spring", "character": "Does Not Apply", "mpn": "Does Not Apply",
+            "bestOffer": {"autoAcceptPrice": 15}, "primaryStoreCategory": "Other", "shippingPolicy": "BUYER PAYS SHIPPING",
+            "category_specifics": {"size": "XL (18/20)", "season": ["Fall", "Spring", "Summer"], "silhouette": "Does Not Apply",
+                                   "outerShellMaterial": "Polyester"},
+        }}
+        aspects = ebay_listings.ebay_aspects(listing, {})
+        self.assertEqual(aspects["Size"], ["XL"])
+        self.assertEqual(aspects["Season"], ["Spring", "Fall", "Summer"])
+        self.assertEqual(aspects["Outer Shell Material"], ["Polyester"])
+        self.assertEqual(aspects["MPN"], ["Does Not Apply"])
+        for name in ("Character", "Silhouette", "Best Offer", "Primary Store Category", "Shipping Policy"):
+            self.assertNotIn(name, aspects)
+
+    def test_free_text_values_take_ebays_spelling_when_one_matches(self):
+        schema = [
+            {"name": "Size", "required": True, "mode": "free_text", "multi": False,
+             "values": [{"label": label} for label in ("XL", "18", "20", "18-20")]},
+            {"name": "Features", "required": False, "mode": "free_text", "multi": True,
+             "values": [{"label": label} for label in ("Full Zip", "Hooded", "Side Pockets")]},
+            {"name": "Brand", "required": True, "mode": "free_text", "multi": False,
+             "values": [{"label": "Columbia Sportswear"}]},
+        ]
+        aspects = ebay_listings._match_aspects(schema, {"Size": ["XL (18/20)"], "Features": ["full-zip", "hood", "Drawcord"],
+                                                        "Brand": ["Columbia"]})
+        self.assertEqual(aspects, {"Size": ["18-20"], "Features": ["Full Zip", "Hooded", "Drawcord"], "Brand": ["Columbia"]})
+
+    def test_store_categories_are_sent_only_when_the_seller_chose_one(self):
+        fields = ebay_listings._listing_fields(LISTING, {})
+        self.assertNotIn("storeCategoryNames", ebay_listings._offer_body("s", fields, "home", {}))
+        chosen = {**LISTING, "ebay_specifics": {"primaryStoreCategory": "Kids Jackets", "secondaryStoreCategory": "Other"}}
+        fields = ebay_listings._listing_fields(chosen, {})
+        self.assertEqual(ebay_listings._offer_body("s", fields, "home", {})["storeCategoryNames"], ["/Kids Jackets"])
+
+    def test_the_sellers_best_offer_floors_win(self):
+        from vendoo_studio.services.native_form import vendoo_form
+
+        listing = {**LISTING, "price": "17", "ebay_specifics": {"bestOffer": {"autoAcceptPrice": 15, "minimumOfferPrice": 12}}}
+        terms = ebay_listings.best_offer_terms(vendoo_form(listing, "ebay"), "17.00")
+        self.assertEqual(terms, {"bestOfferEnabled": True, "autoAcceptPrice": {"value": "15.00", "currency": "USD"},
+                                 "autoDeclinePrice": {"value": "12.00", "currency": "USD"}})
 
     async def test_a_401_refreshes_the_token_once_and_a_second_401_is_signed_out(self):
         import httpx

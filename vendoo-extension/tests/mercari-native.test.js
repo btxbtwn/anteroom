@@ -3,7 +3,11 @@ const assert = require('node:assert/strict');
 const { loadWorker, reply } = require('./worker-context');
 
 const listing = { title: 'Test jacket', description: 'Private draft', price: 24.6, condition: 'Pre-Owned - Good',
-  marketplace_category_ids: { mercari: '303' }, zipCode: '70125', weight_lb: 0, weight_oz: 10 };
+  marketplace_category_ids: { mercari: '303' }, zipCode: '70125', weight_lb: 0, weight_oz: 10,
+  form: { specifics: { shipping: { payerId: 1, carrierId: '2509' } } } };
+// What Mercari's draftItemQuery answers for a draft that kept the label and payer.
+const KEPT = { itemCondition: { id: 3 }, itemCategory: { id: 303 }, shippingPayer: { id: 1 }, shippingClasses: [{ id: 2509 }] };
+const SHIPPING = { payerId: 1, classIds: [2509], suggestedClassIds: [2509], zipCode: '70125', dimensions: {}, weight: { weight: 10 } };
 const SESSION = { csrf: 'private-csrf', accessToken: 'private-session', user: { userId: 7, name: 'seller', email: 'seller@example.com' } };
 const INITIALIZE = 'https://www.mercari.com/v1/initialize';
 
@@ -20,7 +24,7 @@ function worker({ session = SESSION, respond, http } = {}) {
   const requests = [];
   const initializes = [];
   let images = 0;
-  let draft = { name: 'Test jacket', description: 'Private draft', price: 2500, itemCondition: { id: 3 }, photos: [{ id: 'i1' }, { id: 'i2' }] };
+  let draft = { name: 'Test jacket', description: 'Private draft', price: 2500, ...KEPT, photos: [{ id: 'i1' }, { id: 'i2' }] };
   c.fetch = async (url, options) => {
     if (url === INITIALIZE) {
       initializes.push(options);
@@ -55,7 +59,7 @@ test('a new Mercari draft uploads photos, saves once, and is confirmed by readin
   const upload = requests[0].body.multipart;
   assert.deepEqual(JSON.parse(upload.get('map')), { 0: ['variables.input.photos.0'] });
   assert.deepEqual(JSON.parse(upload.get('operations')).variables, { input: { photos: [null] } });
-  assert.deepEqual(requests[2].body.variables, { input: { common: { name: 'Test jacket', isAutoPriceDrop: false, description: 'Private draft', price: 2500, categoryId: 303, conditionId: 3, shipping: { payerId: 1, zipCode: '70125', dimensions: {}, weight: { weight: 10 } }, imageIds: ['i1', 'i2'] } } });
+  assert.deepEqual(requests[2].body.variables, { input: { common: { name: 'Test jacket', isAutoPriceDrop: false, description: 'Private draft', price: 2500, categoryId: 303, conditionId: 3, shipping: SHIPPING, imageIds: ['i1', 'i2'] } } });
   assert.equal(requests[2].body.extensions.persistedQuery.sha256Hash, '2b7de5aa72261ef11ab70a37cd06eb470bf6c57097d3e9f346f57025c4fc9a97');
   assert.deepEqual(requests[3].body.variables, { input: { draftItemId: 'm9AbC123' } });
   assert.ok(requests.every(r => r.url === 'https://www.mercari.com/v1/api' && r.headers['x-csrf-token'] === 'private-csrf'
@@ -122,8 +126,9 @@ test('a transient Mercari read is retried, a draft save never is', async () => {
 
 test('Mercari read-back ignores line endings and spacing Mercari rewrites', () => {
   const c = loadWorker();
-  assert.equal(c.mercariDraftMatches({ name: 'Test  jacket ', description: 'Line one\r\nLine two ', price: 2500, photo_count: 1 },
-    { ...listing, title: 'Test jacket', description: 'Line one\nLine two' }, 1), true);
+  const common = c.mercariCommon({ ...listing, title: 'Test jacket', description: 'Line one\nLine two' });
+  assert.equal(c.mercariDraftMatches({ name: 'Test  jacket ', description: 'Line one\r\nLine two ', price: 2500, photo_count: 1,
+    categoryId: 303, payerId: 1, classIds: [2509] }, common, 1), true);
 });
 
 test('an existing Mercari draft is edited in place without re-uploading photos', async () => {
@@ -131,7 +136,7 @@ test('an existing Mercari draft is edited in place without re-uploading photos',
   const result = await c.runMercariNative(message({ draft_url: 'https://www.mercari.com/sell/draft/m9AbC123/' }));
   assert.equal(result.ok, true);
   assert.deepEqual(opsOf(), ['editDraftItemMutation', 'draftItemQuery']);
-  assert.deepEqual(requests[0].body.variables, { input: { id: 'm9AbC123', common: { name: 'Test jacket', isAutoPriceDrop: false, description: 'Private draft', price: 2500, categoryId: 303, conditionId: 3, shipping: { payerId: 1, zipCode: '70125', dimensions: {}, weight: { weight: 10 } } } } });
+  assert.deepEqual(requests[0].body.variables, { input: { id: 'm9AbC123', common: { name: 'Test jacket', isAutoPriceDrop: false, description: 'Private draft', price: 2500, categoryId: 303, conditionId: 3, shipping: SHIPPING } } });
 });
 
 test('Mercari asks for a reconnect when initialize has no signed-in user, before any request', async () => {
@@ -159,10 +164,10 @@ test('a lost reply after the draft save is never retried', async () => {
 
 test('a draft that Mercari saved differently is reported, not accepted', async () => {
   const { c, setDraft } = worker();
-  setDraft({ name: 'Test jacket', description: 'Private draft', price: 2500, itemCondition: { id: 3 }, photos: [{ id: 'i1' }] });
+  setDraft({ name: 'Test jacket', description: 'Private draft', price: 2500, ...KEPT, photos: [{ id: 'i1' }] });
   const result = await c.runMercariNative(message());
   assert.equal(result.ok, false);
-  assert.match(result.error, /did not keep/);
+  assert.match(result.error, /did not keep everything this listing sent \(photos\)/);
   assert.equal(result.error_code, 'uncertain');
 });
 
@@ -219,7 +224,7 @@ const publish = extra => message({ action: 'publish', confirm: true, draft_url: 
 
 test('a READY Mercari draft is listed with one request, the way its drafts page does, with no tab', async () => {
   const { c, requests, journal, opsOf } = worker({ respond: op => ({
-    draftItemQuery: { draftItem: { name: 'Test jacket', description: 'Private draft', price: 2500, itemCondition: { id: 3 },
+    draftItemQuery: { draftItem: { name: 'Test jacket', description: 'Private draft', price: 2500, ...KEPT,
       photos: [{ id: 'i1' }], draftItemStatus: 'DRAFT_ITEM_STATUS_READY', draftItemActionsRequired: [] } },
     listDraftItemMutation: { listDraftItem: 'm12345678901' },
   }[op]) });
@@ -233,7 +238,7 @@ test('a READY Mercari draft is listed with one request, the way its drafts page 
 
 test('publishing an incomplete Mercari draft says what Mercari still needs, without listing it', async () => {
   const { c, opsOf } = worker({ respond: op => ({
-    draftItemQuery: { draftItem: { name: 'Test jacket', description: 'Private draft', price: 2500, photos: [{ id: 'i1' }],
+    draftItemQuery: { draftItem: { name: 'Test jacket', description: 'Private draft', price: 2500, ...KEPT, photos: [{ id: 'i1' }],
       draftItemStatus: 'DRAFT_ITEM_STATUS_ACTION_REQUIRED', draftItemActionsRequired: [{ field: 'brandId' }, { field: 'shippingClassIds' }] } },
   }[op]) });
   const result = await c.runMercariNative(publish());
@@ -258,7 +263,7 @@ test('Mercari publishing needs the seller to confirm, and sends nothing otherwis
 test('a lost reply after the Mercari publish is never retried, and recovery uses only the receipt', async () => {
   const { c, journal } = worker({ respond: op => {
     if (op === 'listDraftItemMutation') throw new Error('Disconnected');
-    return { draftItemQuery: { draftItem: { name: 'Test jacket', description: 'Private draft', price: 2500, photos: [{}],
+    return { draftItemQuery: { draftItem: { name: 'Test jacket', description: 'Private draft', price: 2500, ...KEPT, photos: [{}],
       draftItemStatus: 'DRAFT_ITEM_STATUS_READY', draftItemActionsRequired: [] } } }[op];
   } });
   const result = await c.runMercariNative(publish());
@@ -293,18 +298,61 @@ function withVendooBrand(c, journal, answer) {
   return asked;
 }
 
-test('a full Mercari clothing listing sends its category, size, brand, label, payer and ZIP', async () => {
+// The draft Mercari keeps for clothing(): what draftItemQuery answers.
+const CLOTHING_DRAFT = { name: 'Boys graphic tee', description: 'Soft cotton tee', price: 1800, itemCondition: { id: 3 },
+  itemCategory: { id: 1934 }, brand: { id: 5813 }, itemSize: { id: 168 }, shippingPayer: { id: 1 }, shippingClasses: [{ id: 2508 }],
+  photos: [{ id: 'i1' }, { id: 'i2' }] };
+
+test('a full Mercari clothing listing sends its category, size, brand, label inside shipping, payer, ZIP and box', async () => {
   const { c, requests, journal, setDraft } = worker();
-  setDraft({ name: 'Boys graphic tee', description: 'Soft cotton tee', price: 1800, itemCondition: { id: 3 }, photos: [{ id: 'i1' }, { id: 'i2' }] });
-  const asked = withVendooBrand(c, journal, [200, [{ value: '5813', label: 'Nike' }]]);
-  const result = await c.runMercariNative(message({ listing: clothing() }));
+  setDraft(CLOTHING_DRAFT);
+  const asked = withVendooBrand(c, journal, [200, [{ value: '9', label: 'Nike SB' }, { value: '5813', label: 'NIKE' }]]);
+  const result = await c.runMercariNative(message({ listing: clothing({ package_dimensions_in: '13x10x3' }) }));
   assert.equal(result.ok, true);
   const common = requests.find(r => r.body.operationName === 'addDraftItemMutation').body.variables.input.common;
+  // Mercari's own draft form puts the label in shipping.classIds and suggestedClassIds
+  // (draft-recording-4); a top-level shippingClassIds left the live item ship-on-your-own.
   assert.deepEqual(JSON.parse(JSON.stringify(common)), { name: 'Boys graphic tee', isAutoPriceDrop: false, description: 'Soft cotton tee',
-    price: 1800, categoryId: 1934, conditionId: 3, sizeId: 105,
-    shipping: { payerId: 1, zipCode: '70115', dimensions: {}, weight: { weight: 7 } }, shippingClassIds: [2508], brandId: 5813,
+    price: 1800, categoryId: 1934, conditionId: 3, sizeId: 168,
+    shipping: { payerId: 1, classIds: [2508], suggestedClassIds: [2508], zipCode: '70115',
+      dimensions: { unit: 'INCH', length: 13, width: 10, height: 3 }, weight: { weight: 7 } }, brandId: 5813,
     imageIds: ['i1', 'i2'] });
+  assert.ok(!('shippingClassIds' in common));
   assert.match(asked[0], /\/api\/rest\/v1\/brand\/mercari\?search=Nike&matchValue=true$/);
+});
+
+test('a Mercari draft that lost its label, payer, size or brand is refused, and never published', async () => {
+  for (const [lost, named] of [[{ shippingPayer: { id: 2 }, shippingClasses: [] }, /shipping\).*ship-on-your-own with the seller paying/],
+    [{ itemSize: null }, /\(size\)/], [{ brand: null }, /\(brand\)/], [{ itemCategory: { id: 1881 } }, /\(category\)/]]) {
+    const saved = worker();
+    saved.setDraft({ ...CLOTHING_DRAFT, ...lost });
+    withVendooBrand(saved.c, saved.journal, [200, [{ value: '5813', label: 'Nike' }]]);
+    const result = await saved.c.runMercariNative(message({ listing: clothing() }));
+    assert.equal(result.ok, false);
+    assert.match(result.error, named);
+    const listed = worker({ respond: op => ({
+      draftItemQuery: { draftItem: { ...CLOTHING_DRAFT, ...lost, draftItemStatus: 'DRAFT_ITEM_STATUS_READY', draftItemActionsRequired: [] } },
+      listDraftItemMutation: { listDraftItem: 'm12345678901' },
+    }[op]) });
+    withVendooBrand(listed.c, listed.journal, [200, [{ value: '5813', label: 'Nike' }]]);
+    const refused = await listed.c.runMercariNative(publish({ listing: clothing() }));
+    assert.equal(refused.ok, false);
+    assert.equal(refused.safe_to_retry, true);
+    assert.match(refused.error, /does not match this revision/);
+    assert.match(refused.error, named);
+    assert.ok(!listed.opsOf().includes('listDraftItemMutation'));
+  }
+});
+
+test('a Mercari parent category is never published, even with its id stored', async () => {
+  const parent = clothing({ form: { overrides: { condition: '3', brand: 'Nike', categoryV2: { id: '1881', hasChildren: true } },
+    specifics: { shipping: { payerId: 1, carrierId: 2508 } }, sizes: [] } });
+  parent.direct_category_ids = { mercari: '1881' };
+  const { c, opsOf } = worker();
+  const result = await c.runMercariNative(publish({ listing: parent }));
+  assert.equal(result.error_code, 'missing_fields');
+  assert.ok(result.fields.some(entry => entry.field === 'categoryId'));
+  assert.deepEqual(opsOf(), []);
 });
 
 test('a stored Mercari category is the one that is listed, and the Vendoo id stays put', () => {
@@ -319,13 +367,36 @@ test('a stored Mercari category is the one that is listed, and the Vendoo id sta
 test('Mercari sizes come from the category and never cross a fit the listing names', () => {
   const { c } = worker();
   const size = (listing, sizes = BOYS_SIZES) => JSON.parse(JSON.stringify(c.mercariSize({ ...listing, form: { aspects: {}, sizes } }, 1934)));
-  assert.deepEqual(size({ size: 'XL (18/20)' }), { id: 105 });
+  // Kids' XL (18/20) is Mercari's 2XL (18) by its numbers, not XL (14-16) by its letters.
+  assert.deepEqual(size({ size: 'XL (18/20)' }), { id: 168 });
+  assert.deepEqual(size({ size: 'XL (14/16)' }), { id: 105 });
+  assert.deepEqual(size({ size: 'XL' }), { id: 105 });
+  assert.deepEqual(size({ size: 'L (42-44)' }, MEN_TOP_SIZES), { id: 11 });
   assert.deepEqual(size({ size: '2XL' }), { id: 168 });
   assert.deepEqual(size({ size: 'XL' }, MEN_TOP_SIZES), { id: 12 });
   assert.match(size({ size: 'XL', sizeType: 'Big & Tall' }, MEN_TOP_SIZES).problem, /XL \(46-48\) or XL/);
   assert.deepEqual(size({ size: 'L/XL' }), { problem: 'a size Mercari offers in this category' });
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: { '1934_Size': '103' }, sizes: BOYS_SIZES } }, 1934))), { id: 103 });
   assert.deepEqual(size({ size: 'M' }, []), { none: 'none' });
+  assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: {} } }, 1934))), { none: 'unknown' });
+});
+
+test('a sized Mercari listing whose size list could not be read stops before any upload', async () => {
+  const unread = clothing();
+  delete unread.form.sizes;
+  const { c, requests } = worker();
+  const result = await c.runMercariNative(message({ listing: unread }));
+  assert.equal(result.error_code, 'missing_fields');
+  assert.ok(result.fields.some(entry => entry.field === 'sizeId' && /could not read/.test(entry.message)));
+  assert.equal(requests.length, 0);
+});
+
+test('a Mercari listing with no prepaid label stops before any upload rather than going ship-on-your-own', async () => {
+  const { c, requests } = worker();
+  const result = await c.runMercariNative(message({ listing: { ...listing, form: { specifics: { shipping: { payerId: 1 } } } } }));
+  assert.equal(result.error_code, 'missing_fields');
+  assert.ok(result.fields.some(entry => entry.field === 'shippingClassIds'));
+  assert.equal(requests.length, 0);
 });
 
 test('a Mercari listing Mercari would refuse stops before any upload and names each field', async () => {
@@ -341,18 +412,24 @@ test('a Mercari listing Mercari would refuse stops before any upload and names e
   }
 });
 
-test('a brand Vendoo\'s Mercari index cannot place is left for Mercari\'s own check', async () => {
-  const { c, requests, journal } = worker();
-  withVendooBrand(c, journal, [503, {}]);
-  await c.runMercariNative(message({ listing: clothing() }));
-  const common = requests.find(r => r.body.operationName === 'addDraftItemMutation').body.variables.input.common;
-  assert.equal(common.brandId, undefined);
+test('a brand Mercari\'s index cannot read or does not list exactly stops the save, before any upload', async () => {
+  for (const [answer, named] of [[[503, {}], /could not read/], [[200, [{ value: '9', label: 'Nike SB' }]], /Nike is not one/], [[200, []], /Nike is not one/]]) {
+    const { c, requests, journal } = worker();
+    withVendooBrand(c, journal, answer);
+    const result = await c.runMercariNative(message({ listing: clothing() }));
+    assert.equal(result.error_code, 'missing_fields');
+    assert.equal(result.safe_to_retry, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.fields.map(entry => entry.field))), ['brandId']);
+    assert.match(result.error, named);
+    assert.equal(requests.length, 0);
+  }
 });
 
 test('a Mercari draft input it no longer accepts is reported as a form change, safe to retry', async () => {
-  const { c } = worker({ respond: op => (op === 'addDraftItemMutation'
+  const { c, journal } = worker({ respond: op => (op === 'addDraftItemMutation'
     ? { errors: [{ message: 'Field "sizeId" is not defined by type "DraftItemCommonInput".', extensions: { code: 'GRAPHQL_VALIDATION_FAILED' } }] }
     : { uploadDraftItemImage: { images: [{ id: 'i1' }] } }) });
+  withVendooBrand(c, journal, [200, [{ value: '5813', label: 'Nike' }]]);
   const result = await c.runMercariNative(message({ listing: clothing() }));
   assert.equal(result.error_code, 'schema_drift');
   assert.equal(result.safe_to_retry, true);

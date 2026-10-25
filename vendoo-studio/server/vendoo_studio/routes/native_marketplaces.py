@@ -65,6 +65,11 @@ async def cancel(conv_id: str, marketplace: Marketplace, db: Session = Depends(g
     return await _reply(native.cancel(conv_id, marketplace, db))
 
 
+@router.get("/poshmark/options")
+async def poshmark_options(conv_id: str, db: Session = Depends(get_db)):
+    return await _reply(native.poshmark_options(conv_id, db))
+
+
 @router.get("/sellwild/options")
 def sellwild_options(conv_id: str, db: Session = Depends(get_db)):
     return _sync(native.sellwild_options, conv_id, db)

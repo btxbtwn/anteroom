@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.374 — 2026-10-25
+
+- Mercari listings now carry the brand, size and prepaid shipping label (buyer pays), and Anteroom checks Mercari's draft before posting. A category with sub-categories, like Boys coats & jackets, has to be narrowed down first.
+- Depop kids' sizes use Depop's ages (XL 18/20 lists as 16 years, not Other). The jacket or dress type is filled in, the listing shows your city, and material is left blank unless the tag shows it.
+- eBay descriptions keep their paragraphs, season keeps every season you chose, and Anteroom no longer guesses care instructions, neckline or other details it can't see. Your Best Offer amounts and store categories are used.
+- Poshmark: Smart Pricing stays off when you turn it off, your cost is saved with the cents, and the Poshmark tab offers Poshmark's own conditions, colors and sub-categories.
+- Sellwild picks a kids category for kids' items and recalculates its suggestion each time you list.
+- Discard next to Unsent edits keeps everything Vendoo doesn't hold, warns when the listing is already live from Anteroom, and a sync that finds changes on both sides now asks instead of overwriting your edits.
+
 ## 0.1.373 — 2026-10-25
 
 - Turn off Send to Vendoo in Settings → Listings → Vendoo to hide the button under every listing when you list without Vendoo.

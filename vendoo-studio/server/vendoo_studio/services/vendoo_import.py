@@ -28,7 +28,23 @@ SKIP_SPECIFIC_KEYS = frozenset({
     "warnings",
     "images",
     "photos",
+    # Vendoo's own bookkeeping on a marketplace section, not listing fields.
+    "marketplaceId",
+    "lastItemSharedAt",
+    "listingUrl",
+    "statusItem",
+    # Poshmark's private "other info" and cost: the seller's internal notes.
+    "otherInfo",
+    "costPriceAmount",
 })
+
+# On the section itself (not inside its specifics) ``type`` is Vendoo's record
+# kind, "listing". Inside specifics it is a real field (eBay Type, Depop type).
+SKIP_SECTION_KEYS = frozenset({"type"})
+
+# Depop leaf fields: ``kidswearJacketsAttributeMaterial``, valued in codes.
+_DEPOP_ATTRIBUTE_KEY = re.compile(r"^[a-z][A-Za-z0-9]*Attribute[A-Z]")
+_NUMERIC_LEAF_KEY = re.compile(r"^\d+_(.+)$")
 
 ETSY_KEY_MAP = {
     "whoMade": "who_made",
@@ -1245,18 +1261,65 @@ def _package_dimensions(dims: dict[str, Any]) -> str | None:
     return None
 
 
+def _section_leaf_id(section: dict[str, Any]) -> str:
+    overrides = section.get("overrides") if isinstance(section.get("overrides"), dict) else {}
+    category = overrides.get("categoryV2") or section.get("categoryV2")
+    return str(category.get("id") or "") if isinstance(category, dict) else ""
+
+
+def _category_field_name(key: str, leaf_id: str) -> str | None:
+    """Studio's name for one of Vendoo's ``categorySpecifics`` keys, or None.
+
+    Vendoo keys a leaf's fields by the leaf: ``260968_Outer Shell Material``
+    on eBay, ``436_62809790395`` (a property id) on Etsy,
+    ``23008c10d97b4e1245005764Size`` on Poshmark, ``kidswearJacketsAttributeMaterial``
+    on Depop. Only a readable field name survives, without its prefix; property
+    ids, scales, store categories and coded leaf fields are Vendoo's encoding of
+    fields Studio writes from its own, and are dropped.
+    """
+    rest = None
+    if leaf_id and key.startswith(f"{leaf_id}_"):
+        rest = key[len(leaf_id) + 1:]
+    elif match := _NUMERIC_LEAF_KEY.match(key):
+        rest = match.group(1)
+    elif (leaf_id and key.startswith(leaf_id)) or _DEPOP_ATTRIBUTE_KEY.match(key):
+        return None
+    if rest is None:
+        return key
+    if rest.endswith("_scale") or rest.isdigit() or rest.startswith("StoreCategory"):
+        return None
+    words = re.findall(r"[A-Za-z0-9]+", rest)
+    if not words:
+        return None
+    return words[0][:1].lower() + words[0][1:] + "".join(word[:1].upper() + word[1:] for word in words[1:])
+
+
+def _category_fields(section: dict[str, Any]) -> dict[str, Any]:
+    nested = section.get("categorySpecifics")
+    if not isinstance(nested, dict):
+        return {}
+    leaf_id = _section_leaf_id(section)
+    out: dict[str, Any] = {}
+    for key, value in nested.items():
+        name = _category_field_name(str(key), leaf_id)
+        if name and name not in out:
+            out[name] = value
+    return out
+
+
 def _section_fields(section: Any) -> dict[str, Any]:
     if not isinstance(section, dict):
         return {}
     merged: dict[str, Any] = {}
-    for key in ("overrides", "marketplaceSpecifics", "categorySpecifics"):
+    for key in ("overrides", "marketplaceSpecifics"):
         nested = section.get(key)
         if isinstance(nested, dict):
             merged.update(nested)
+    merged.update(_category_fields(section))
     for key, value in section.items():
         if key in {"overrides", "marketplaceSpecifics", "categorySpecifics"}:
             continue
-        if key in SKIP_SPECIFIC_KEYS:
+        if key in SKIP_SPECIFIC_KEYS or key in SKIP_SECTION_KEYS:
             continue
         if key not in merged:
             merged[key] = value
@@ -1400,8 +1463,8 @@ def _depop_specifics(section: Any) -> dict[str, Any]:
 def _etsy_specifics(section: Any) -> dict[str, Any]:
     specifics = _copy_specifics(section, rename=ETSY_KEY_MAP)
     category = {}
-    if isinstance(section, dict) and isinstance(section.get("categorySpecifics"), dict):
-        for key, value in section["categorySpecifics"].items():
+    if isinstance(section, dict):
+        for key, value in _category_fields(section).items():
             copied = _as_scalar_field(value)
             if copied is None:
                 continue

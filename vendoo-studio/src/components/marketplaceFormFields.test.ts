@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MarketplaceForm } from "../api/types";
 import { formFieldText, getListingEditorValue } from "../listingPaths";
-import { fieldsForMarketplaceForm } from "./ListingEditor";
+import { fieldsForMarketplaceForm, sellwildChoiceLabels, withDirectChoices } from "./ListingEditor";
 
 const listing = {
   title: "Nike tee",
@@ -38,10 +38,31 @@ const schema: MarketplaceForm[] = [{
 describe("marketplace form fields", () => {
   it("shows the shared listing fields on a marketplace, then that marketplace's own", () => {
     const labels = fieldsForMarketplaceForm(listing, "mercari", undefined).map((field) => field.label);
-    expect(labels.slice(0, 6)).toEqual(["Title", "Description", "Price", "Brand", "Condition", "Primary Color"]);
-    expect(labels).toContain("Shipping Label");
+    expect(labels.slice(0, 6)).toEqual(["Title", "Description", "Price", "Brand", "Condition", "Size"]);
     expect(labels).toContain("Package Weight (oz)");
     expect(labels.filter((label) => label === "Title")).toHaveLength(1);
+  });
+
+  it("offers Mercari's own conditions and no quantity, color or hand-typed shipping label", () => {
+    const mercariSchema: MarketplaceForm[] = [{
+      marketplace: "mercari", category_id: "1931", known: true,
+      fields: [
+        ...["Quantity", "Shipping Label", "Delivery Method", "Who will pay for delivery?"].map((label) => ({
+          key: label, label, value: "", required: false, multi: false, selection_only: false, options: [] as string[],
+        })),
+        { key: "size", label: "Size", value: "XL (18/20)", required: true, multi: false, selection_only: true,
+          options: ["XL (14-16)", "2XL (18)"] },
+      ],
+    }];
+    const fields = fieldsForMarketplaceForm({ ...listing, primaryColor: "Blue", quantity: 1 }, "mercari", mercariSchema);
+    const labels = fields.map((field) => field.label.replace(/\s*\*$/, ""));
+    for (const absent of ["Quantity", "Primary Color", "Secondary Color", "Shipping Label", "Delivery Method", "Who will pay for delivery?"]) {
+      expect(labels).not.toContain(absent);
+    }
+    const condition = fields.find((field) => field.label === "Condition");
+    expect(condition).toMatchObject({ key: "mercari_specifics.condition", options: ["New", "Like new", "Good", "Fair", "Poor"],
+      defaultValue: "Good" });
+    expect(fields.find((field) => field.label.startsWith("Size"))?.options).toEqual(["XL (14-16)", "2XL (18)"]);
   });
 
   it("shows the live eBay category beside the shared one", () => {
@@ -62,6 +83,15 @@ describe("marketplace form fields", () => {
     expect(labels).toContain("Sleeve Length *");
     expect(labels.filter((label) => label.replace(/\s*\*$/, "") === "Condition")).toHaveLength(1);
     expect(fields.find((field) => field.label.startsWith("Condition"))?.options).toEqual(["New", "Pre-owned"]);
+  });
+
+  it("shows the eBay category's own aspects once its schema is known", () => {
+    const labels = fieldsForMarketplaceForm(listing, "ebay", schema).map((field) => field.label);
+    for (const fixed of ["Size Type", "Neckline", "Garment Care", "Strap Type"]) expect(labels).not.toContain(fixed);
+    expect(labels).toContain("Primary Store Category");
+    const fallback = fieldsForMarketplaceForm(listing, "ebay", undefined);
+    expect(fallback.map((field) => field.label)).not.toContain("Size Type");
+    expect(fallback.find((field) => field.label === "Neckline")?.key).toBe("ebay_specifics.neckline");
   });
 
   it("edits eBay's Best Offer prices as their own rows, never as [object Object]", () => {
@@ -131,6 +161,29 @@ describe("marketplace form fields", () => {
     expect(parcel[0].options).toEqual(["Small", "Medium", "Large"]);
   });
 
+  it("stores Depop's type attribute as its type and hides size grouping for regular sizing", () => {
+    const depopListing = {
+      ...listing,
+      sizeType: "Regular",
+      depop_specifics: { type: "Windbreaker", sizeGrouping: "Does Not Apply" },
+    };
+    const option = (key: string, label: string, options: string[]) => ({
+      key, label, value: "", required: false, multi: true, selection_only: true, options,
+    });
+    const depopSchema: MarketplaceForm[] = [{
+      marketplace: "depop", category_id: "kidswear_jackets", known: true,
+      fields: [option("attribute_jacket-type", "Type", ["Puffer", "Windbreaker"]),
+        option("attribute_body-fit", "Size grouping", ["Petite", "Tall"])],
+    }];
+    const fields = fieldsForMarketplaceForm(depopListing, "depop", depopSchema);
+    const type = fields.filter((field) => field.label === "Type");
+    expect(type.map((field) => field.key)).toEqual(["depop_specifics.type"]);
+    expect(type[0].options).toEqual(["Puffer", "Windbreaker"]);
+    expect(fields.some((field) => field.key === "depop_specifics.sizeGrouping")).toBe(false);
+    const petite = fieldsForMarketplaceForm({ ...depopListing, sizeType: "Petite" }, "depop", depopSchema);
+    expect(petite.filter((field) => field.key === "depop_specifics.sizeGrouping")).toHaveLength(1);
+  });
+
   it("names fields the way the marketplace does, not by their listing keys", () => {
     const depopListing = {
       ...listing,
@@ -169,5 +222,36 @@ describe("marketplace form fields", () => {
     const labels = fieldsForMarketplaceForm(listing, "general", schema).map((field) => field.label);
     expect(labels.filter((label) => label === "Title")).toHaveLength(1);
     expect(labels).not.toContain("Sleeve Length *");
+  });
+  it("edits Poshmark's own condition, colors and sub-category, and hides Vendoo's delist message", () => {
+    const posh = { ...listing, primaryColor: "Grey", secondaryColor: "Blue",
+      poshmark_specifics: { delistingAttemptMessages: "Does Not Apply", styleTags: ["Casual"] } };
+    const fields = fieldsForMarketplaceForm(posh, "poshmark", undefined);
+    const byLabel = (label: string) => fields.filter((field) => field.label === label);
+    expect(byLabel("Condition")).toHaveLength(1);
+    expect(byLabel("Condition")[0]).toMatchObject({ key: "poshmark_specifics.poshmarkCondition", defaultValue: "Good" });
+    expect(byLabel("Condition")[0].options).toContain("New With Tags (NWT)");
+    expect(byLabel("Primary Color")[0]).toMatchObject({ key: "poshmark_specifics.poshmarkColor", defaultValue: "Gray" });
+    expect(byLabel("Secondary Color")[0]).toMatchObject({ key: "poshmark_specifics.poshmarkSecondaryColor", defaultValue: "Blue" });
+    expect(fields.map((field) => field.key)).not.toContain("poshmark_specifics.delistingAttemptMessages");
+    const live = withDirectChoices(fields, { poshmark: { category: ["Kids", "Jackets & Coats"], subcategories: ["Puffers", "None"],
+      colors: ["Blue", "Gray"], conditions: [] } });
+    expect(live.find((field) => field.label === "Sub-category")?.options).toEqual(["Puffers", "None"]);
+    expect(live.find((field) => field.label === "Primary Color")?.options).toEqual(["Blue", "Gray"]);
+  });
+
+  it("shows Sellwild's direct category and condition, not Vendoo's retired category or a brand", () => {
+    const sellwild = { ...listing, category_path: "Clothing > Kids", sellwild_specifics: { categoryId: "183", category_path: ["Fashion", "Mens Clothing"] } };
+    const fields = fieldsForMarketplaceForm(sellwild, "sellwild", schema.map((form) => ({ ...form, marketplace: "sellwild" })));
+    const labels = fields.map((field) => field.label);
+    expect(labels).not.toContain("Brand");
+    expect(labels.filter((label) => label === "Category")).toHaveLength(1);
+    expect(labels.filter((label) => label === "Condition")).toHaveLength(1);
+    expect(fields.map((field) => field.key)).not.toContain("sellwild_specifics.category_path");
+    const options = { categories: [{ id: 246, label: "Kids & Baby > Kids Clothing" }], conditions: [{ id: 3, label: "Good" }, { id: 2, label: "Gently Used" }],
+      suggested: { category_id: 246, condition_id: 3 } };
+    const shown = withDirectChoices(fields, { sellwild: sellwildChoiceLabels(options, { sellwild_condition_id: 2 } as never) });
+    expect(shown.find((field) => field.key === "sellwild.category")).toMatchObject({ locked: true, defaultValue: "Kids & Baby > Kids Clothing" });
+    expect(shown.find((field) => field.key === "sellwild.condition")?.defaultValue).toBe("Gently Used");
   });
 });

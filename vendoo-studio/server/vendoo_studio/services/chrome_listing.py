@@ -12,10 +12,10 @@ from __future__ import annotations
 import re
 from decimal import Decimal, ROUND_HALF_UP
 
-from vendoo_studio.services.direct_preflight import Context, gap, requirement
+from vendoo_studio.services.direct_preflight import Context, gap, requirement, seeded_subcategories
 
 # Poshmark's catalog colors (catalog_v2, read 2026-10-25). Grey and Beige are its Gray and Tan.
-_POSHMARK_COLORS = (
+POSHMARK_COLORS = (
     "Black", "Blue", "Brown", "Cream", "Gold", "Gray", "Green", "Orange", "Pink", "Purple", "Red",
     "Silver", "Yellow", "Tan", "White",
 )
@@ -40,7 +40,7 @@ def poshmark_color_name(value: str) -> str | None:
     if not text:
         return None
     translated = _POSHMARK_TRANSLATE.get(text.casefold(), text)
-    return next((name for name in _POSHMARK_COLORS if name.casefold() == translated.casefold()), None)
+    return next((name for name in POSHMARK_COLORS if name.casefold() == translated.casefold()), None)
 
 
 @requirement("poshmark")
@@ -99,9 +99,29 @@ def _category_id(snapshot: dict, marketplace: str) -> str:
     return str(ids.get(marketplace) or "").strip()
 
 
+def _mercari_parent(snapshot: dict, context: Context, chosen: str, category: dict) -> list[str] | None:
+    """The subcategories under the Mercari category this list would send, or None for a real leaf.
+
+    Vendoo's tree calls some Mercari parents leaves; Mercari lists them with no size.
+    """
+    paths = snapshot.get("marketplace_categories") if isinstance(snapshot.get("marketplace_categories"), dict) else {}
+    path = " > ".join(part.strip() for part in str(paths.get("mercari") or "").split(">") if part.strip())
+    children = seeded_subcategories(context.db, "mercari", category_id=chosen) if chosen \
+        else seeded_subcategories(context.db, "mercari", path=path)
+    if children:
+        return children
+    if chosen and category.get("hasChildren") is True and str(category.get("id") or "") == chosen:
+        return []
+    return None
+
+
+def _mercari_size(snapshot: dict) -> str:
+    specifics = snapshot.get("mercari_specifics") if isinstance(snapshot.get("mercari_specifics"), dict) else {}
+    return str(specifics.get("size") or snapshot.get("size") or "").strip()
+
+
 @requirement("mercari")
 def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
-    del context
     found: list[dict] = []
     description = str(snapshot.get("description") or "").strip()
     if not description:
@@ -112,11 +132,17 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
     category = (form.get("overrides") or {}).get("categoryV2") if isinstance(form.get("overrides"), dict) else {}
     category = category if isinstance(category, dict) else {}
     chosen = _category_id(snapshot, "mercari") or str(category.get("id") or "")
-    direct = snapshot.get("direct_category_ids") if isinstance(snapshot.get("direct_category_ids"), dict) else {}
-    if not re.fullmatch(r"\d{1,6}", chosen):
+    chosen = chosen if re.fullmatch(r"\d{1,6}", chosen) else ""
+    children = _mercari_parent(snapshot, context, chosen, category)
+    if children is not None:
+        listed = f" ({', '.join(children)})" if children else ""
+        found.append(gap("marketplace_category_ids.mercari",
+                         f"That Mercari category has subcategories{listed}. Choose the most specific one."))
+    elif not chosen:
         found.append(gap("direct_category_ids.mercari", "Mercari needs a category."))
-    elif category.get("hasChildren") is True and not str(direct.get("mercari") or "").strip():
-        found.append(gap("marketplace_category_ids.mercari", "That Mercari category has subcategories. Choose the most specific one."))
+    elif _mercari_size(snapshot) and "sizes" not in form:
+        found.append(gap("mercari_specifics.size",
+                         "Anteroom could not read Mercari's sizes, so the size would be left off. Try again."))
     return found
 
 

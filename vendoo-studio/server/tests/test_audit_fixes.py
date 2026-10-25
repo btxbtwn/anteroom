@@ -430,7 +430,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertEqual(listing["ebay_specifics"]["somethingCustom"], "keep")
         self.assertEqual(listing["ebay_specifics"]["sizeType"], "Regular")
 
-    def test_ebay_category_optionals_are_filled_or_dna(self):
+    def test_ebay_category_optionals_take_defaults_and_evidence_only(self):
         from vendoo_studio.models.listing_values import DNA_VALUE
         from vendoo_studio.models.ebay_fields import ensure_ebay_category_optionals
         from vendoo_studio.models.validation import normalize_listing_dropdowns
@@ -445,14 +445,13 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertEqual(ebay["unitQuantity"], "1")
         self.assertEqual(ebay["unitType"], "Unit")
         self.assertEqual(ebay["season"], "Spring")
-        self.assertEqual(ebay["mpn"], DNA_VALUE)
-        self.assertEqual(ebay["upc"], DNA_VALUE)
-        self.assertEqual(ebay["character"], DNA_VALUE)
+        # Nothing writes Does Not Apply, and nothing the words do not show is invented.
+        for key in ("mpn", "upc", "character", "neckline", "closure", "garmentCare"):
+            self.assertNotIn(key, ebay)
+        self.assertEqual(ebay["pattern"], "Floral")
+        self.assertEqual(ebay["fit"], "Regular")
         # Fabric Weight stays blank unless an evidenced numeric oz/gsm value is present.
         self.assertEqual(str(ebay.get("fabricWeight") or "").strip(), "")
-        self.assertNotEqual(str(ebay.get("features") or "").strip(), "")
-        self.assertNotEqual(str(ebay.get("neckline") or "").strip(), "")
-        # DNA must not be used for must-fill apparel attributes.
         self.assertNotEqual(str(ebay.get("fit") or "").casefold(), DNA_VALUE.casefold())
         normalize_listing_dropdowns(listing)
         result = validate_listing(listing, 5, selected_marketplaces=["ebay"])
@@ -469,6 +468,31 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertFalse(optional_errors, optional_errors)
         self.assertTrue(result.can_send, result.errors)
 
+    def test_ebay_aspects_keep_one_copy_at_the_top_level(self):
+        from vendoo_studio.models.validation import normalize_listing_dropdowns
+
+        listing = copy.deepcopy(VALID_LISTING)
+        listing["title"] = "Columbia XL Hooded Windbreaker Blue"
+        listing["ebay_specifics"] = {
+            **VALID_LISTING["ebay_specifics"], "size": "XL", "season": "Spring", "character": "Does Not Apply",
+            "category_specifics": {"size": "XL (18/20)", "season": ["Fall", "Spring", "Summer"],
+                                   "character": "Mickey", "outerShellMaterial": "Polyester", "model": ""},
+        }
+        self.assertTrue(normalize_listing_dropdowns(listing))
+        ebay = listing["ebay_specifics"]
+        self.assertNotIn("category_specifics", ebay)
+        self.assertEqual(ebay["size"], "XL")
+        self.assertEqual(ebay["season"], ["Spring", "Summer", "Fall"])
+        self.assertEqual(ebay["character"], "Mickey")
+        self.assertEqual(ebay["outerShellMaterial"], "Polyester")
+        self.assertNotIn("model", ebay)
+        # Nothing on the listing shows the care tag, a neckline or a closure.
+        for key in ("garmentCare", "neckline", "closure"):
+            self.assertNotIn(key, ebay)
+        result = validate_listing(listing, 5, selected_marketplaces=["ebay"])
+        self.assertFalse([err for err in result.errors if err["field"] in {
+            "ebay_specifics.sizeType", "ebay_specifics.neckline", "ebay_specifics.closure", "ebay_specifics.character"}])
+
     def test_ebay_condition_description_is_always_the_fixed_line(self):
         from vendoo_studio.models.ebay_fields import (
             EBAY_CONDITION_DESCRIPTION,
@@ -484,9 +508,7 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertTrue(ensure_ebay_category_optionals(listing))
         ebay = listing["ebay_specifics"]
         self.assertEqual(ebay["conditionDescription"], EBAY_CONDITION_DESCRIPTION)
-        self.assertEqual(
-            ebay["category_specifics"]["conditionDescription"], EBAY_CONDITION_DESCRIPTION
-        )
+        self.assertNotIn("category_specifics", ebay)
 
     def test_ebay_vintage_follows_era_not_style_words(self):
         from vendoo_studio.models.ebay_fields import ensure_ebay_category_optionals
@@ -506,7 +528,7 @@ class ValidationCasesTest(unittest.TestCase):
         }
         self.assertTrue(ensure_ebay_category_optionals(listing))
         self.assertEqual(listing["ebay_specifics"]["vintage"], "No")
-        self.assertEqual(listing["ebay_specifics"]["category_specifics"], {"vintage": "No"})
+        self.assertNotIn("category_specifics", listing["ebay_specifics"])
 
         # A genuinely old item keeps the model's Yes.
         listing["ebay_specifics"] = {**VALID_LISTING["ebay_specifics"], "vintage": "Yes"}
@@ -818,6 +840,45 @@ class ValidationCasesTest(unittest.TestCase):
         listing["depop_specifics"]["parcelSize"] = "Large"
         normalize_listing_dropdowns(listing)
         self.assertEqual(listing["depop_specifics"]["parcelSize"], "Large")
+
+    def test_depop_material_is_not_guessed_from_ebay(self):
+        import copy
+
+        from vendoo_studio.models.depop_fields import ensure_depop_category_optionals
+
+        listing = copy.deepcopy(VALID_LISTING)
+        listing["ebay_specifics"] = {**listing.get("ebay_specifics", {}), "material": "Polyester", "fabricType": "Woven"}
+        listing["depop_specifics"] = {**listing["depop_specifics"], "material": [],
+                                      "nationalShipping": {"parcelSize": "Under 1 lb"},
+                                      "shippingmethod": "Depop Shipping (USPS)"}
+        ensure_depop_category_optionals(listing)
+        depop = listing["depop_specifics"]
+        self.assertEqual(depop["material"], [])
+        self.assertNotIn("nationalShipping", depop)
+        self.assertNotIn("shippingmethod", depop)
+
+    def test_depop_size_other_is_flagged_when_the_tag_size_is_known(self):
+        import copy
+
+        listing = copy.deepcopy(VALID_LISTING)
+        listing["size"] = "XL"
+        listing["direct_category_ids"] = {"depop": "kidswear_jackets"}
+        listing["depop_specifics"] = {**listing["depop_specifics"], "size": "Other"}
+        with patch("vendoo_studio.services.category_fields.load_fields", return_value=None):
+            result = validate_listing(listing, 5, selected_marketplaces=["depop"])
+        self.assertTrue(any(error["field"] == "depop_specifics.size" for error in result.errors), result.errors)
+        listing["direct_category_ids"] = {"depop": "everything-else_decor-home-accesories"}
+        with patch("vendoo_studio.services.category_fields.load_fields", return_value=None):
+            result = validate_listing(listing, 5, selected_marketplaces=["depop"])
+        self.assertFalse(any(error["field"] == "depop_specifics.size" for error in result.errors), result.errors)
+
+    def test_depop_kids_sizes_are_ages(self):
+        from vendoo_studio.models.depop_fields import depop_kids_size
+
+        for tag, age in {"XL (18/20)": "16 years", "XL": "16 years", "M": "10 years", "L (14/16)": "14 years",
+                         "XS": "4 years", "4T": "4 years", "10/12": "10 years", "8": "8 years", "12M": "12-18 months",
+                         "0-3M": "0-3 months", "OS": "One size", "Husky": "Husky"}.items():
+            self.assertEqual(depop_kids_size(tag), age, tag)
 
     def test_legacy_etsy_when_made_aliases_match_current_dropdown(self):
         listing = dict(VALID_LISTING)

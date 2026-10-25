@@ -142,7 +142,9 @@ def attach_form(snapshot: dict[str, Any], marketplace: str) -> dict[str, Any]:
             # Vendoo's own field for Mercari's ships-from ZIP.
             shipping["location"] = zip_code
     if marketplace == "mercari":
-        leaf = (form["overrides"].get("categoryV2") or {}).get("id")
+        # The category the direct list sends: a stored Mercari id wins, as in Chrome.
+        direct = snapshot.get("direct_category_ids") if isinstance(snapshot.get("direct_category_ids"), dict) else {}
+        leaf = str(direct.get("mercari") or "").strip() or (form["overrides"].get("categoryV2") or {}).get("id")
         if leaf:
             sizes = mercari_sizes(str(leaf))
             if sizes is not None:

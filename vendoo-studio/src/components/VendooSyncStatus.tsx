@@ -24,7 +24,8 @@ export function checkedAgo(checkedAt: string, now: number): string {
  * extension tells Studio), when the listing opens, and when Studio regains
  * focus — never on a timer against Vendoo. Status/date-only changes refresh
  * labels without rewriting listing fields; form-content changes take Vendoo's
- * copy. Nothing pops up; this line says when Studio last checked.
+ * copy only when Studio has none of its own. When both moved, Studio's listing
+ * stays and this line says so. Nothing pops up; it says when Studio last checked.
  */
 export function VendooSyncStatus({ convId, bound }: { convId: string; bound: boolean }) {
   const queryClient = useQueryClient();
@@ -111,14 +112,19 @@ export function VendooSyncStatus({ convId, bound }: { convId: string; bound: boo
   const busy = sync.isPending;
   const checkedAt = status?.checked_at;
   const failed = sync.data?.action === "unavailable" || sync.isError;
+  const conflict = Boolean(status?.conflict);
   let label: string;
   if (busy) label = "Syncing…";
+  else if (conflict) label = "Vendoo differs";
   else if (checkedAt) label = `Synced ${checkedAgo(checkedAt, now)}`;
   else label = failed ? "Not synced" : "Syncing…";
 
   const title = [
     checkedAt ? `Last checked Vendoo ${new Date(checkedAt).toLocaleString()}` : "Not checked with Vendoo yet",
     failed ? "Last check could not reach Vendoo — is Chrome connected?" : "",
+    conflict
+      ? "Vendoo's draft and this listing were both edited. This listing was kept. Update Vendoo writes it to Vendoo; Discard takes Vendoo's copy."
+      : "",
     "Click to check now",
   ].filter(Boolean).join("\n");
 
@@ -127,7 +133,7 @@ export function VendooSyncStatus({ convId, bound }: { convId: string; bound: boo
       <span aria-hidden="true">·</span>
       <button
         type="button"
-        className={`pr-vendoo-sync-btn${failed && !busy ? " is-stale" : ""}`}
+        className={`pr-vendoo-sync-btn${(failed || conflict) && !busy ? " is-stale" : ""}`}
         disabled={busy}
         title={title}
         onMouseDown={(event) => event.stopPropagation()}

@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, patch
 
 from vendoo_studio.services.direct_categories import (
     attach_direct_categories,
+    live_category_id,
     live_fields_prompt,
     merge_live_fields,
+    overlay_live_fields,
     pick_ebay_suggestion,
     pick_etsy_leaf,
 )
@@ -68,7 +70,22 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
             text = live_fields_prompt(listing)
         self.assertIn("Sleeve Length (required)", text)
         self.assertIn("Send to Vendoo reads those", text)
-        self.assertIn("ebay_specifics.category_specifics", text)
+        self.assertIn("Fill these under ebay_specifics using", text)
+
+    async def test_the_vendoo_ebay_id_is_the_live_leaf_when_none_was_chosen(self):
+        listing = {"marketplace_category_ids": {"ebay": "260968", "etsy": "392"}}
+        self.assertEqual(live_category_id(listing, "ebay"), "260968")
+        self.assertEqual(live_category_id(listing, "etsy"), "")
+        self.assertEqual(live_category_id({**listing, "direct_category_ids": {"ebay": "57988"}}, "ebay"), "57988")
+        rows = [{"name": "Outer Shell Material", "required": True, "values": [{"label": "Polyester"}]}]
+        with patch("vendoo_studio.services.category_fields.load_rows", return_value=rows):
+            self.assertIn("(id 260968)", live_fields_prompt(listing))
+        live = AsyncMock(return_value=[{"name": "Outer Shell Material", "required": True, "mode": "free_text",
+                                        "values": [{"label": "Polyester"}]}])
+        with patch("vendoo_studio.services.marketplace_schemas.fields", live):
+            fields = await overlay_live_fields(listing, "ebay", [])
+        live.assert_awaited_once_with("ebay", "260968")
+        self.assertEqual([(row["key"], row["options"]) for row in fields], [("Outer Shell Material", ["Polyester"])])
 
     async def test_choosing_a_live_category_leaves_the_vendoo_id_alone(self):
         listing = {
