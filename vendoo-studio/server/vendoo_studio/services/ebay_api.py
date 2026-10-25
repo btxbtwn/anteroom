@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 
 import httpx
 
+from vendoo_studio.services.ebay_client import TRADING_XML_DECLARATION
 from vendoo_studio.services.marketplace_accounts import SignInRequired, access_token
 
 API_URL = "https://api.ebay.com"
@@ -81,8 +82,8 @@ async def listing_price(listing_id: str) -> int:
                 "X-EBAY-API-COMPATIBILITY-LEVEL": "1487",
                 "Content-Type": "text/xml",
             },
-            content=(f'<GetItemRequest xmlns="{NS["e"]}"><ItemID>{listing_id}</ItemID>'
-                     '<DetailLevel>ReturnAll</DetailLevel></GetItemRequest>'),
+            content=(f'{TRADING_XML_DECLARATION}<GetItemRequest xmlns="{NS["e"]}">'
+                     f'<ItemID>{listing_id}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>'),
         )
     _check_response(response)
     try:

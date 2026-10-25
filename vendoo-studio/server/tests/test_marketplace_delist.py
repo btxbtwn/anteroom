@@ -200,3 +200,19 @@ class MarketplaceStepsTest(unittest.IsolatedAsyncioTestCase):
             client.trading.side_effect = EbayFailure("eBay rejected the listing request. Error code: 17.")
             with self.assertRaises(EbayFailure):
                 await d._delete_ebay("377507697747")
+
+    async def test_the_end_request_declares_xml_so_ebay_parses_it(self):
+        from vendoo_studio.services.ebay_client import EbayClient
+
+        client = EbayClient("token", ("seller", "connected"))
+        sent = {}
+
+        async def request(_method, _path, **kwargs):
+            sent["xml"] = kwargs.get("xml")
+            return {"xml": None}
+
+        with patch.object(client, "request", request):
+            await client.trading("EndFixedPriceItem", {"ItemID": "377507697747", "EndingReason": "NotAvailable"})
+        self.assertTrue(sent["xml"].startswith('<?xml version="1.0" encoding="utf-8"?>'))
+        self.assertIn("<ItemID>377507697747</ItemID>", sent["xml"])
+        self.assertIn("<EndingReason>NotAvailable</EndingReason>", sent["xml"])
