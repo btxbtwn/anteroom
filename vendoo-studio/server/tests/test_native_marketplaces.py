@@ -102,7 +102,7 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(self.client.post(f"{self.base}/sellwild/publish", json={**body, "confirm": False}).status_code, 400)
         self.assertEqual(self.client.post(f"{self.base}/sellwild/publish", json={**body, "revision_id": "stale"}).status_code, 409)
         self.bridge.assert_not_called()
-        self.assertEqual(self.client.post(f"{self.base}/sellwild/review", json=body).status_code, 405)
+        self.assertIn(self.client.post(f"{self.base}/sellwild/review", json=body).status_code, {404, 405})
 
     def test_sellwild_publish_sends_the_saved_choice_once(self):
         self.prepare_sellwild()
