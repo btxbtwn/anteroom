@@ -2,7 +2,7 @@ import asyncio
 import base64
 import io
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -20,7 +20,7 @@ from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.ebay_action import EbayAction
 from vendoo_studio.repositories.queries import ListingRepo
-from vendoo_studio.services import ebay_actions, ebay_client, keychain
+from vendoo_studio.services import ebay_actions, ebay_client, ebay_workspace, keychain
 from vendoo_studio.services.vendoo_import import merge_notes
 
 
@@ -128,7 +128,9 @@ def action_cases():
 
 
 @pytest.mark.parametrize("kind", list(action_cases()))
-def test_each_write_requires_review_then_confirmation_and_never_repeats(workspace, kind):
+def test_each_write_requires_review_then_confirmation_and_never_repeats(workspace, kind, monkeypatch):
+    if kind in ("contest", "evidence", "upload_evidence"):
+        monkeypatch.setattr(ebay_client, "API", "http://127.0.0.1:1")
     payload = action_cases()[kind]
     review = preview(workspace, kind, payload)
     assert workspace.remote.writes == []
@@ -158,10 +160,11 @@ def test_read_views_use_real_http_and_return_displayable_rows(workspace, section
     assert "accessToken" not in response.text and "test-token" not in response.text
 
 
-@pytest.mark.parametrize("section,unused_host", [("orders", "APIZ"), ("payouts", "API")])
-def test_fulfillment_and_finances_use_their_actual_production_hosts(workspace, monkeypatch, section, unused_host):
+@pytest.mark.parametrize("section,target,unused_host", [("orders", "", "APIZ"), ("payouts", "", "API"),
+    ("disputes", "", "API"), ("dispute", "dispute-1", "API")])
+def test_fulfillment_and_finances_use_their_actual_production_hosts(workspace, monkeypatch, section, target, unused_host):
     monkeypatch.setattr(ebay_client, unused_host, "http://127.0.0.1:1")
-    response = workspace.client.get(f"/api/ebay/read/{section}")
+    response = workspace.client.get(f"/api/ebay/read/{section}", params={"target": target})
     assert response.status_code == 200, response.text
 
 
@@ -170,7 +173,17 @@ def test_earnings_match_live_order_quantities_to_local_costs(workspace):
     assert row["amount"] == "40.00"
     assert row["fields"]["Item cost"] == "10.00"
     assert row["fields"]["Profit"] == "30.00"
-    assert row["fields"]["Expenses"] == "10.00"
+    assert row["fields"]["Proceeds"] == "Recorded order credits minus debits"
+    assert not any("order_earnings" in path for path in workspace.remote.reads)
+    assert any("filter=creationdate" in path for path in workspace.remote.reads)
+
+
+def test_finance_end_date_never_extends_into_the_future(monkeypatch):
+    now = datetime(2026, 10, 24, 12, 34, 56, tzinfo=UTC)
+    monkeypatch.setattr(ebay_workspace, "datetime", SimpleNamespace(now=lambda _zone: now))
+    assert ebay_workspace.dates(date(2026, 10, 1), date(2026, 10, 24)) == (
+        "2026-10-01T00:00:00.000Z", "2026-10-24T12:34:56.000Z")
+    assert ebay_workspace.dates(date(2026, 10, 1), date(2026, 10, 23))[1] == "2026-10-23T23:59:59.999Z"
 
 
 def test_missing_costs_remain_unknown(workspace):

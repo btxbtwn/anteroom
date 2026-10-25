@@ -97,6 +97,17 @@ picker. Refreshing an existing connection cannot add permissions. eBay may
 require separate seller eligibility or production app approval for each API;
 an unavailable feature leaves the other views usable.
 
+All eight groups can be selected together with the production keyset's granted
+scopes. The finances group requests `sell.finances` for payments and payouts.
+Detailed order earnings require the separate `sell.finances.earnings.read`
+scope, which this keyset has not been granted. It is excluded from sign-in so
+it cannot prevent consent for the other tools. The dashboard instead uses
+Fulfillment orders and Finances transactions through the existing grants. It
+shows the latest recorded order credits minus debits for orders created in the
+selected UTC dates, with matching local item costs where known. Bank transfers,
+withdrawals, purchases, loan repayments, and other business expenses are not
+order proceeds. Missing transaction data or ambiguous item costs stay unknown.
+
 Seller data and writes go directly between the Mac and eBay. The relay research
 endpoint accepts only `categories`, `aspects`, `search`, `image`, and `ad_metadata`, with fixed
 paths and parameter allowlists. It cannot administer notifications or send

@@ -21,7 +21,7 @@ export function workspaceCrumbs(
   listing: { title?: string | null } | null | undefined,
   detail?: string | null,
 ): WorkspaceCrumbs {
-  if (view === "marketplaces") return { context: "Marketplaces", title: null };
+  if (view === "marketplaces") return { context: "Marketplaces", title: detail?.trim() || null };
   if (view === "settings") {
     return { context: SETTINGS_CRUMB, title: settingsLabel.trim() || null };
   }

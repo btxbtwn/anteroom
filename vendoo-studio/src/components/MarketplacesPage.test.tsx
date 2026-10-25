@@ -64,7 +64,7 @@ afterEach(() => vi.useRealTimers());
 
 describe("MarketplacesPage", () => {
   it("groups marketplace tools under one workspace", () => {
-    const html = renderToStaticMarkup(<MarketplacesPage onOpenListing={vi.fn()} />);
+    const html = renderToStaticMarkup(<MarketplacesPage marketplace="ebay" onMarketplaceChange={vi.fn()} onOpenListing={vi.fn()} />);
     expect(html).toContain(">Marketplaces</h1>");
     expect(html).toContain('aria-label="Marketplaces"');
     expect(html.match(/role="tab"/g)).toHaveLength(5);

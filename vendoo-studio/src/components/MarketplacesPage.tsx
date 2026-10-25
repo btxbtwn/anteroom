@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api/client";
+import { FormDraftProvider } from "./ebay/FormDrafts";
 import { Tabs } from "@base-ui/react/tabs";
 import { AdSpend } from "./AdSpend";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -9,14 +11,20 @@ import { EbayWorkspace } from "./ebay/EbayWorkspace";
 import { PageHeader, WorkspacePage } from "./WorkspacePage";
 
 const MARKETPLACES = ["ebay", "etsy", "poshmark", "depop", "sellwild"] as const;
-type Marketplace = (typeof MARKETPLACES)[number];
+export type Marketplace = (typeof MARKETPLACES)[number];
 
-export function MarketplacesPage({ onOpenListing }: { onOpenListing: (id: string) => void }) {
-  const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
+export function MarketplacesPage({ marketplace, onMarketplaceChange, onOpenListing }: {
+  marketplace: Marketplace;
+  onMarketplaceChange: (marketplace: Marketplace) => void;
+  onOpenListing: (id: string) => void;
+}) {
+  const connection = useQuery({ queryKey: ["direct-connections"], queryFn: api.directConnections.status,
+    refetchInterval: (query) => Object.values(query.state.data?.accounts || {}).some((account) => account.pending) ? 2000 : 15000 });
+  const ebay = connection.data?.accounts.ebay;
   return (
-    <WorkspacePage width="expanded">
+    <FormDraftProvider key={`${ebay?.label}-${ebay?.connectedAt}`}><WorkspacePage width="expanded">
       <PageHeader title="Marketplaces" description="Manage each marketplace’s listings, sales, and marketing in one place." />
-      <Tabs.Root value={marketplace} onValueChange={(value) => setMarketplace(value as Marketplace)}>
+      <Tabs.Root value={marketplace} onValueChange={(value) => onMarketplaceChange(value as Marketplace)}>
         <Tabs.List aria-label="Marketplaces" className="mb-7 flex flex-wrap gap-1 border-b border-border">
           {MARKETPLACES.map((id) => <Tabs.Tab key={id} value={id}
             className="flex min-h-11 cursor-pointer items-center gap-2 rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring data-[active]:border-primary data-[active]:text-foreground">
@@ -27,7 +35,7 @@ export function MarketplacesPage({ onOpenListing }: { onOpenListing: (id: string
           <MarketplacePanel key={marketplace} marketplace={marketplace} onOpenListing={onOpenListing} />
         </Tabs.Panel>
       </Tabs.Root>
-    </WorkspacePage>
+    </WorkspacePage></FormDraftProvider>
   );
 }
 

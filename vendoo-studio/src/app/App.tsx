@@ -43,6 +43,8 @@ import {
   type BulkUploadDefaults,
   type BulkUploadItem,
 } from "../bulkPhotoUpload";
+import type { Marketplace } from "../components/MarketplacesPage";
+import { marketplaceName } from "../components/marketplaceNames";
 import { ThemeSync } from "../components/ThemeSync";
 
 import { OpenListingTabs } from "../components/OpenListingTabs";
@@ -117,6 +119,7 @@ export function App() {
   const clearListingWorkspace = (id: string) => dispatchListingTab({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
   const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
+  const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
   /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
   const shell = useRef<"listings" | "assistant">(listingFromUrl ? "listings" : "assistant");
   const viewBeforeSettings = useRef<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
@@ -281,7 +284,7 @@ export function App() {
     : activeView === "analytics"
       ? "Analytics"
       : activeView === "marketplaces"
-        ? "Marketplaces"
+        ? marketplaceName(marketplace)
       : activeView === "usage"
         ? "Usage"
       : activeView === "assistant"
@@ -294,7 +297,7 @@ export function App() {
     activeView,
     SETTINGS_SECTION_LABELS[settingsSection],
     activeView === "listings" ? selectedListing : null,
-    activeView === "assistant" ? assistantThreadTitle : null,
+    activeView === "assistant" ? assistantThreadTitle : activeView === "marketplaces" ? marketplaceName(marketplace) : null,
   );
   // The sidebar overlays the workspace on mobile and the editor is its own pane
   // there, so the desktop collapse states only apply to the desktop layout.
@@ -789,7 +792,7 @@ export function App() {
                 </Suspense>
               ) : activeView === "marketplaces" ? (
                 <Suspense fallback={pageLoading}>
-                  <MarketplacesPage onOpenListing={openListing} />
+                  <MarketplacesPage marketplace={marketplace} onMarketplaceChange={setMarketplace} onOpenListing={openListing} />
                 </Suspense>
               ) : activeView === "usage" ? (
                 <Suspense fallback={pageLoading}>

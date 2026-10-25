@@ -29,7 +29,9 @@ export const EBAY_SALE_TOPICS = ["ORDER_CONFIRMATION"];
 // sign-in or sale alerts. A seller can grant each group separately.
 export const EBAY_FEATURE_SCOPES = {
   analytics: ["sell.analytics.readonly"],
-  finances: ["sell.finances", "sell.finances.earnings.read"],
+  // The production keyset has sell.finances, but not the separate detailed
+  // earnings scope. Requesting that scope rejects the entire consent flow.
+  finances: ["sell.finances"],
   orders: ["sell.fulfillment"],
   disputes: ["sell.payment.dispute"],
   messages: ["commerce.message"],

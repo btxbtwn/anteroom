@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EtsyOrders as EtsyOrderPage, EtsyShop } from "../../api/etsy";
 import { EtsyWorkspace } from "./EtsyWorkspace";
-import { EtsyDashboard, EtsyListings, EtsyOrders, etsyMoney } from "./SellerPanels";
+import { EtsyDashboard, EtsyListings, EtsyOrders, EtsySaleAlerts, etsyMoney } from "./SellerPanels";
 
 const { useQuery, useMutation, account } = vi.hoisted(() => ({
   useQuery: vi.fn(), useMutation: vi.fn(),
@@ -100,6 +100,18 @@ describe("EtsyDashboard", () => {
 });
 
 describe("Etsy seller pages", () => {
+  it("keeps Etsy sale alerts and local listing links from the marketplace hub", () => {
+    useQuery.mockReturnValue({ data: { sales: [
+      { id: "etsy-sale", marketplace: "etsy", title: "Etsy wool coat", conversationId: "coat", listedElsewhere: ["ebay"] },
+      { id: "ebay-sale", marketplace: "ebay", title: "eBay-only sale", conversationId: "other", listedElsewhere: [] },
+    ] } });
+    const html = renderToStaticMarkup(<EtsySaleAlerts onOpenListing={vi.fn()} />);
+    expect(html).toContain("Etsy wool coat");
+    expect(html).not.toContain("eBay-only sale");
+    expect(html).toContain("You choose any delisting separately.");
+    expect(html).toContain("Open item");
+  });
+
   it("lists orders with fulfillment status, local pagination, and an Etsy orders link", () => {
     const html = renderToStaticMarkup(<EtsyOrders scope="shop-1" period={period} />);
     expect(html).toContain("Vintage wool coat");

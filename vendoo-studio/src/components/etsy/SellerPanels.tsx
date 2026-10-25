@@ -5,7 +5,7 @@ import { api } from "../../api/client";
 import type { EtsyListingState, EtsyMoney, EtsyOrder, EtsyOrderStatus, EtsyShop } from "../../api/etsy";
 import { Stat, StatGrid } from "../AnalyticsStat";
 import { EtsyNotAllowed } from "../EtsyNotAllowed";
-import { EmptyRow, PageError, PageNote, PageSection, Panel } from "../WorkspacePage";
+import { EmptyRow, ListRow, PageError, PageNote, PageSection, Panel } from "../WorkspacePage";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -88,6 +88,21 @@ export function EtsyOrders({ scope, period }: { scope: string; period: OrderPeri
       <SelectPopup>{ORDER_STATUSES.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectPopup>
     </Select>
     <OrderResults key={`${period.start}-${period.end}-${status}`} scope={scope} period={period} status={status} />
+  </PageSection>;
+}
+
+export function EtsySaleAlerts({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+  const sales = useQuery({ queryKey: ["marketplace-sales", "new"], queryFn: () => api.marketplaceSales.list(),
+    refetchInterval: 15000 });
+  const rows = (sales.data?.sales ?? []).filter((sale) => sale.marketplace === "etsy");
+  return <PageSection title="New Etsy sales" description="Open a matched item to review its other marketplace listings. You choose any delisting separately."
+    actions={<Button variant="outline" size="xs" disabled={sales.isFetching} onClick={() => void sales.refetch()}>Refresh alerts</Button>}>
+    {sales.error ? <PageError message={sales.error.message} /> : sales.isPending ? <Loading label="Loading Etsy sale alerts…" />
+      : rows.length ? <Panel><ul>{rows.map((sale) => <ListRow key={sale.id} title={sale.title || "Etsy sale"}
+        meta={sale.listedElsewhere.length ? "Review other marketplaces" : "Sale received"}
+        valueHint={sale.conversationId ? "Open item" : "Unmatched item"}
+        onClick={sale.conversationId ? () => onOpenListing(sale.conversationId!) : undefined} />)}</ul></Panel>
+        : <EmptyRow>No new Etsy sale alerts.</EmptyRow>}
   </PageSection>;
 }
 

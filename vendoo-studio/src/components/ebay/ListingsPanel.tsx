@@ -7,18 +7,19 @@ import { PageError, PageNote, PageSection } from "../WorkspacePage";
 import { ImageUploader, RemoteList, RowCards, fileBase64 } from "./shared";
 import { ActionForm } from "./ActionForm";
 import { WorkspaceTabs } from "./WorkspaceTabs";
+import { useFormDraft } from "./FormDrafts";
 
 export function ListingsPanel() {
   const aspectId = useId();
-  const [task, setTask] = useState("Create draft");
-  const [search, setSearch] = useState("");
-  const [keywords, setKeywords] = useState("");
-  const [category, setCategory] = useState("");
-  const [aspects, setAspects] = useState<Record<string, string>>({});
-  const [images, setImages] = useState<string[]>([]);
-  const [id, setId] = useState("");
-  const [sku, setSku] = useState("");
-  const [offerId, setOfferId] = useState("");
+  const [task, setTask] = useFormDraft("listings:task", () => "Create draft");
+  const [search, setSearch] = useFormDraft("listings:search", () => "");
+  const [keywords, setKeywords] = useFormDraft("listings:keywords", () => "");
+  const [category, setCategory] = useFormDraft("listings:category", () => "");
+  const [aspects, setAspects] = useFormDraft<Record<string, string>>("listings:aspects", () => ({}));
+  const [images, setImages] = useFormDraft<string[]>("listings:images", () => []);
+  const [id, setId] = useFormDraft("listings:lookup", () => "");
+  const [sku, setSku] = useFormDraft("listings:sku", () => "");
+  const [offerId, setOfferId] = useFormDraft("listings:offer", () => "");
   const specifics = useQuery({ queryKey: ["ebay", "aspects", category], queryFn: () => api.ebay.read("aspects", { target: category }), enabled: /^\d+$/.test(category), retry: false });
   const lookup = useMutation({ mutationFn: api.ebay.listing, retry: false });
   const policies = useQuery({ queryKey: ["ebay", "policies"], queryFn: () => api.ebay.read("policies"), retry: false });

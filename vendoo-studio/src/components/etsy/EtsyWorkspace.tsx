@@ -11,7 +11,7 @@ import { PageError, PageNote, Panel } from "../WorkspacePage";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "../ui/dialog";
-import { EtsyDashboard, EtsyListings, EtsyOrders, type OrderPeriod } from "./SellerPanels";
+import { EtsyDashboard, EtsyListings, EtsyOrders, EtsySaleAlerts, type OrderPeriod } from "./SellerPanels";
 
 const TABS = ["Dashboard", "Orders", "Listings", "Marketing"] as const;
 type Tab = (typeof TABS)[number];
@@ -78,7 +78,7 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
               </div>
               {!period.valid ? <PageNote>Choose valid dates through today, up to one year at a time.</PageNote> : null}
             </> : null}
-            {tab === "Dashboard" ? <EtsyDashboard shop={shop.data} shopError={shop.error} scope={scope} period={period} onOpenOrders={() => setTab("Orders")} />
+            {tab === "Dashboard" ? <><EtsyDashboard shop={shop.data} shopError={shop.error} scope={scope} period={period} onOpenOrders={() => setTab("Orders")} /><EtsySaleAlerts onOpenListing={onOpenListing} /></>
               : tab === "Orders" ? <EtsyOrders scope={scope} period={period} />
                 : <EtsyListings scope={scope} onOpenListing={onOpenListing} />}
           </>}

@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { workspaceCrumbs } from "./workspaceCrumbs";
 
 describe("workspaceCrumbs", () => {
+  it("names the marketplace hub and its selected channel", () => {
+    expect(workspaceCrumbs("marketplaces", "", null)).toEqual({ context: "Marketplaces", title: null });
+    expect(workspaceCrumbs("marketplaces", "", null, "Etsy")).toEqual({ context: "Marketplaces", title: "Etsy" });
+  });
+
   it("stops at the context when no listing is open", () => {
     expect(workspaceCrumbs("listings", "Providers", null)).toEqual({ context: "Inventory", title: null });
   });
