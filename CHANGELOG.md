@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.374 — 2026-10-25
+
+- The Sync button on a listing now syncs your direct listings too: it settles unconfirmed results and checks Poshmark, Mercari, Depop and Sellwild for sales right away. Sales of items you listed directly are now noticed on every marketplace.
+
 ## 0.1.373 — 2026-10-25
 
 - Turn off Send to Vendoo in Settings → Listings → Vendoo to hide the button under every listing when you list without Vendoo.

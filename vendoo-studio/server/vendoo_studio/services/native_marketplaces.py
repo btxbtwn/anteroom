@@ -730,6 +730,36 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
         schedule_advance_job_queue()
 
 
+async def sync(conv_id: str, db: Session) -> dict:
+    """The seller's Sync: settle unconfirmed results and look for sales of this item's direct listings.
+
+    Read-only, like Check. eBay and Etsy report sales through the relay as they
+    happen, so only the marketplaces read through Chrome are asked for sales.
+    """
+    from vendoo_studio.services import chrome_sales
+    from vendoo_studio.services.marketplace_delist import listings as live_listings
+
+    _conversation(db, conv_id)
+    checked: dict[str, str | None] = {}
+    for marketplace, record in MarketplaceListingRepo(db).for_conversation(conv_id).items():
+        if record.get("state") not in UNSETTLED_STATES or not record.get("job_id") or _running(record):
+            continue
+        try:
+            await check_result(conv_id, marketplace, db)
+            checked[marketplace] = None
+        except NativeMarketplaceError as exc:
+            checked[marketplace] = str(exc)
+    for marketplace, entry in live_listings(db, conv_id).items():
+        if marketplace not in chrome_sales.CHROME_MARKETS or checked.get(marketplace):
+            continue
+        if entry.get("state") != "live" or entry.get("sold_here") or not entry.get("listing_id"):
+            continue
+        ok = await chrome_sales.check_now(marketplace)
+        checked[marketplace] = None if ok else f"Chrome could not check {NAMES[marketplace]}. Connect Chrome and sync again."
+    return {"checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "marketplaces": {name: {"ok": error is None, "error": error} for name, error in checked.items()}}
+
+
 def reset(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
     """The seller looked on the marketplace themselves. Clear an unconfirmed record; never touch the marketplace."""
     _conversation(db, conv_id)
