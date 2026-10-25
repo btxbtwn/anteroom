@@ -25,7 +25,7 @@ from vendoo_studio.services import etsy_listings, native_marketplaces, relay_cli
 LISTING = {"title": "Private api check - do not publish", "description": "Private draft check.", "price": 12,
            "marketplace_category_ids": {"etsy": 482}, "etsy_specifics": {
                "who_made": "Another company or person", "what_is": "A finished product", "when_made": "1990s (Vintage)",
-               "shipping_profile_id": "99", "readiness_state_id": "88"}}
+               "shipping_profile_id": "99", "readiness_state_id": "88", "return_policy_id": "77"}}
 URL = "https://www.etsy.com/your/shops/me/listing-editor/edit/123456"
 
 
@@ -56,6 +56,13 @@ class EtsyListingsTest(unittest.TestCase):
         self.calculated = False
         self.uploaded = 0
         self.other_drafts = []
+        self.properties = []
+        self.listing_properties = {}
+        self.drop_properties = False
+        # Each test answers Etsy's schema itself; nothing is kept between tests.
+        self.enterContext(patch("vendoo_studio.services.marketplace_schemas.load_rows", return_value=None))
+        self.enterContext(patch("vendoo_studio.services.marketplace_schemas.save_rows"))
+        self.enterContext(patch.dict("vendoo_studio.services.marketplace_schemas._etsy_leaves", {"at": 0.0, "ids": frozenset()}))
         self.api = self.enterContext(patch.object(etsy_listings.marketplace_accounts, "etsy_api", side_effect=self.request))
         self.enterContext(patch("vendoo_studio.database.SessionLocal", self.sessions))
         self.enterContext(patch("vendoo_studio.services.user_settings.get_etsy_listing_defaults", return_value={}))
@@ -79,6 +86,19 @@ class EtsyListingsTest(unittest.TestCase):
         if path.endswith("/shipping-profiles"):
             return {"results": [{"shipping_profile_id": 99, "title": "Buyer pays", "origin_postal_code": "never-expose",
                                  "profile_type": "calculated" if self.calculated else "manual"}]}
+        if path.endswith("/policies/return"):
+            return {"results": [{"return_policy_id": 77, "accepts_returns": True, "accepts_exchanges": False, "return_deadline": 30}]}
+        if path == "seller-taxonomy/nodes":
+            return {"results": [{"id": 1, "children": [{"id": 482, "children": []}, {"id": 600, "children": [{"id": 601}]}]}]}
+        if path.startswith("seller-taxonomy/nodes/"):
+            return {"results": copy.deepcopy(self.properties)}
+        if method == "PUT" and "/properties/" in path:
+            if not self.drop_properties:
+                self.listing_properties[path.rsplit("/", 1)[-1]] = data
+            return {}
+        if method == "GET" and path.endswith("/properties"):
+            return {"results": [{"property_id": int(pid), "value_ids": [int(v) for v in d["value_ids"].split(",") if v],
+                                 "values": d["values"].split(",")} for pid, d in self.listing_properties.items()]}
         if path.endswith("/readiness-state-definitions"):
             return {"results": [{"readiness_state_id": 88, "readiness_state": "ready_to_ship", "processing_days_display_label": "1-2 days"}]}
         if method == "GET" and path == "shops/123/listings":
@@ -135,10 +155,19 @@ class EtsyListingsTest(unittest.TestCase):
         photos = photos if photos is not None else ConversationRepo(self.db).get_photos(self.conv.id)
         return asyncio.run(etsy_listings.execute(action, copy.deepcopy(LISTING) if "snapshot" not in kwargs else kwargs.pop("snapshot"),
                                                  photos, binding, record, lambda: True, confirm=True,
-                                                 shipping_profile_id="99", readiness_state_id="88", **kwargs))
+                                                 shipping_profile_id="99", readiness_state_id="88", return_policy_id="77", **kwargs))
 
     def writes(self):
         return [c for c in self.calls if c[0] != "GET"]
+
+    def test_profile_ids_survive_vendoo_camel_case(self):
+        details = {key: value for key, value in LISTING["etsy_specifics"].items()
+                   if key not in {"shipping_profile_id", "return_policy_id", "readiness_state_id"}}
+        details.update(shippingProfileId="99", returnPolicyId="77", readinessStateId="88")
+        fields = etsy_listings.draft_fields({**LISTING, "etsy_specifics": details}, creating=True)
+        self.assertEqual(fields["shipping_profile_id"], "99")
+        self.assertEqual(fields["return_policy_id"], "77")
+        self.assertEqual(fields["readiness_state_id"], "88")
 
     def test_non_vintage_when_made_is_a_year_range(self):
         made = {**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "who_made": "I did", "when_made": "Made To Order (Not Yet Made)"}}
@@ -211,7 +240,9 @@ class EtsyListingsTest(unittest.TestCase):
         self.calls.clear()
         result = self.execute("save_draft", binding, snapshot={**LISTING, "price": 13})
         self.assertEqual(result["state"], "draft", result)
-        self.assertEqual([c[0] for c in self.calls], ["GET", "GET", "PUT", "PATCH", "GET", "GET"])
+        # The category-property schema is read before the draft is touched.
+        self.assertEqual([c[0] for c in self.calls], ["GET", "GET", "GET", "PUT", "PATCH", "GET", "GET"])
+        self.assertTrue(self.calls[0][1].startswith("seller-taxonomy/nodes/"))
         self.assertNotIn("price", next(c[2] for c in self.calls if c[0] == "PATCH"))
         inventory = next(c[2] for c in self.calls if c[0] == "PUT")
         self.assertEqual(inventory["products"][0]["sku"], "keep-sku")
@@ -389,7 +420,8 @@ class EtsyListingsTest(unittest.TestCase):
         r = self.client.get("/api/etsy/listing-profiles")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), {"shipping": [{"id": "99", "title": "Buyer pays", "is_calculated": False}],
-                                    "processing": [{"id": "88", "title": "Ready to ship · 1-2 days"}]})
+                                    "processing": [{"id": "88", "title": "Ready to ship · 1-2 days"}],
+                                    "returns": [{"id": "77", "title": "Returns within 30 days"}]})
         self.assertNotIn("never-expose", r.text)
 
     def test_another_shops_shipping_profile_cannot_create_a_draft(self):

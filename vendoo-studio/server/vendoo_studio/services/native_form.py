@@ -124,6 +124,8 @@ def vendoo_form(listing: dict[str, Any], marketplace: str) -> dict[str, Any]:
         "overrides": section.get("overrides") or {},
         "specifics": section.get("marketplaceSpecifics") or {},
         "aspects": section.get("categorySpecifics") or {},
+        # Values the section could not encode; the direct pre-flight shows them.
+        "unresolved": unresolved,
     }
 
 

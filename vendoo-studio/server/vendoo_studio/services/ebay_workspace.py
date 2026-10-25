@@ -237,12 +237,12 @@ async def read(client: EbayClient, section: str, offset: int = 0, target: str = 
                               subtitle=" › ".join(a["categoryName"] for a in c.get("categoryTreeNodeAncestors", [])))
                          for c in body.get("categorySuggestions", [])]}
     if section == "aspects":
-        body = await client.request("GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category",
-                                    params={"category_id": segment(target)}, app=True)
-        return {"rows": [row(a["localizedAspectName"], a["localizedAspectName"],
-                              status="Required" if a.get("aspectConstraint", {}).get("aspectRequired") else "Optional",
-                              subtitle=", ".join(v["localizedValue"] for v in a.get("aspectValues", [])[:20]),
-                              fields={"Mode": a.get("aspectConstraint", {}).get("aspectMode")}) for a in body.get("aspects", [])]}
+        from vendoo_studio.services.marketplace_schemas import ebay_aspects
+
+        aspects = await ebay_aspects(client, segment(target))
+        return {"rows": [row(a["name"], a["name"], status="Required" if a["required"] else "Optional",
+                              subtitle=", ".join(v["label"] for v in a["values"][:20]),
+                              fields={"Mode": "SELECTION_ONLY" if a["mode"] == "selection" else "FREE_TEXT"}) for a in aspects]}
     if section == "research":
         body = await client.request("GET", "/buy/browse/v1/item_summary/search", params={**params, "q": query,
                                     "filter": "buyingOptions:{FIXED_PRICE},deliveryCountry:US"}, app=True)

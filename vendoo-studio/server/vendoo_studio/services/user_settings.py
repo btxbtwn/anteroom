@@ -166,22 +166,43 @@ def update_settings(mutator) -> dict:
 
 
 ETSY_LISTING_DEFAULTS_KEY = "etsy_listing_defaults"
+ETSY_LISTING_DEFAULT_FIELDS = ("shipping_profile_id", "readiness_state_id", "return_policy_id")
+EBAY_LISTING_DEFAULTS_KEY = "ebay_listing_defaults"
+EBAY_LISTING_DEFAULT_FIELDS = ("fulfillment_policy_id", "payment_policy_id", "return_policy_id", "merchant_location_key")
+
+
+def _listing_defaults(key: str, names: tuple[str, ...], pattern: str) -> dict[str, str]:
+    value = read_settings().get(key)
+    value = value if isinstance(value, dict) else {}
+    return {name: value[name] for name in names if isinstance(value.get(name), str) and re.fullmatch(pattern, value[name])}
+
+
+def _set_listing_defaults(key: str, values: dict[str, str]) -> None:
+    def mutator(payload: dict) -> None:
+        payload[key] = {name: value for name, value in values.items() if value}
+
+    update_settings(mutator)
 
 
 def get_etsy_listing_defaults() -> dict[str, str]:
-    """The shop's shipping and processing profiles every new Etsy listing uses."""
-    value = read_settings().get(ETSY_LISTING_DEFAULTS_KEY)
-    value = value if isinstance(value, dict) else {}
-    return {key: str(value[key]) for key in ("shipping_profile_id", "readiness_state_id")
-            if isinstance(value.get(key), str) and value[key].isdigit()}
+    """The shop's shipping, processing and return profiles every new Etsy listing uses."""
+    return _listing_defaults(ETSY_LISTING_DEFAULTS_KEY, ETSY_LISTING_DEFAULT_FIELDS, r"\d+")
 
 
-def set_etsy_listing_defaults(*, shipping_profile_id: str, readiness_state_id: str) -> dict[str, str]:
-    def mutator(payload: dict) -> None:
-        payload[ETSY_LISTING_DEFAULTS_KEY] = {"shipping_profile_id": shipping_profile_id, "readiness_state_id": readiness_state_id}
-
-    update_settings(mutator)
+def set_etsy_listing_defaults(*, shipping_profile_id: str, readiness_state_id: str, return_policy_id: str) -> dict[str, str]:
+    _set_listing_defaults(ETSY_LISTING_DEFAULTS_KEY, {"shipping_profile_id": shipping_profile_id,
+                                                     "readiness_state_id": readiness_state_id, "return_policy_id": return_policy_id})
     return get_etsy_listing_defaults()
+
+
+def get_ebay_listing_defaults() -> dict[str, str]:
+    """The business policies and inventory location new eBay listings use when the account has several."""
+    return _listing_defaults(EBAY_LISTING_DEFAULTS_KEY, EBAY_LISTING_DEFAULT_FIELDS, r"[A-Za-z0-9_.:-]{1,64}")
+
+
+def set_ebay_listing_defaults(values: dict[str, str]) -> dict[str, str]:
+    _set_listing_defaults(EBAY_LISTING_DEFAULTS_KEY, {name: values.get(name) or "" for name in EBAY_LISTING_DEFAULT_FIELDS})
+    return get_ebay_listing_defaults()
 
 
 def setup_guide_dismissed() -> bool:

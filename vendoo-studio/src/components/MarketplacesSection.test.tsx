@@ -15,12 +15,14 @@ const live = { url: "https://www.mercari.com/us/item/m70565754838", listing_id: 
 
 function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { error = null as Error | null, pending = false, etsyEligible = true,
   etsyReady = false, suggested = SELLWILD.suggested as { category_id: number | null; condition_id: number | null }, selected = "",
-  onAskChat = undefined as ((text: string) => void) | undefined, onEditField = undefined as ((field: string) => void) | undefined } = {}) {
+  onAskChat = undefined as ((text: string) => void) | undefined, onEditField = undefined as ((field: string) => void) | undefined,
+  preflight = undefined as { marketplaces: Record<string, { ready: boolean; gaps: { field: string; message: string; blocking: boolean }[] }> } | undefined } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
     : queryKey[0] === "sellwild-options" ? { data: { ...SELLWILD, suggested }, isPending: false }
-    : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2" } : {}, isSuccess: true, isPending: false }
+    : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2", return_policy_id: "3" } : {}, isSuccess: true, isPending: false }
+    : queryKey[0] === "native-preflight" ? { data: preflight, isPending: false }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, error: null, variables: { marketplace: "depop", kind: "draft" } });
   return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
@@ -162,6 +164,18 @@ describe("marketplaces section", () => {
     const mercari = render({}, { mercari: live }, { selected: "mercari" });
     expect(mercari).not.toContain("Update…");
     expect(mercari).not.toContain("List…");
+  });
+
+  it("shows missing fields and stops List before anything is written", () => {
+    const gaps = [{ field: "ebay_specifics.category_specifics.Color", message: "eBay needs Color.", blocking: true }];
+    const html = render({}, {}, {
+      selected: "ebay", onAskChat: vi.fn(), onEditField: vi.fn(),
+      preflight: { marketplaces: { ebay: { ready: false, gaps } } },
+    });
+    expect(html).toContain("eBay needs Color.");
+    expect(enabledButton(html, "Edit Color")).toBe(true);
+    expect(enabledButton(html, "Ask chat")).toBe(true);
+    expect(disabledButton(html, "List…")).toBe(true);
   });
 
   it("offers List on eBay from the same rail", () => {
