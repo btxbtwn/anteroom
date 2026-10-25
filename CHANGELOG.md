@@ -6,13 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.339 — 2026-10-24
-
-- Send eBay offers from Marketplaces → eBay → Offers. Settings → Connections keeps the eBay sign-in for sale alerts.
-
 ## 0.1.340 — 2026-10-24
 
 - On a live eBay, Etsy, or Poshmark listing, **Update…** writes the listing saved in Anteroom onto that listing, after you confirm. It changes the one that is already up.
+
+## 0.1.339 — 2026-10-24
+
+- Send eBay offers from Marketplaces → eBay → Offers. Settings → Connections keeps the eBay sign-in for sale alerts.
 
 ## 0.1.338 — 2026-10-24
 
