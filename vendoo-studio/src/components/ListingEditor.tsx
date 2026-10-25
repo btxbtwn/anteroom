@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Job, ListingData, MarketplaceForm } from "../api/types";
-import { cloneListing, getListingEditorValue, setListingEditorValue } from "../listingPaths";
+import { cloneListing, getListingEditorValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
@@ -629,7 +629,8 @@ function StructuredEditor({
   const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category";
 
   return (
-    <div ref={formRef} className="flex flex-col">
+    // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
+    <div ref={formRef} key={tab} className="flex flex-col">
       {sections.map((section) => {
         const filled = section.fields.filter((f) => (local[f.key] || "").trim() !== "").length;
         return (
@@ -675,8 +676,17 @@ const PACKAGE_FORM_FIELDS: EditorField[] = [
 
 const PACKAGE_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "sellwild"]);
 
-function fieldIdentity(field: EditorField): string {
-  return field.label.replace(/\s*\*$/, "").trim().toLowerCase();
+/**
+ * Two rows are the same field when they share a label or edit the same value.
+ * "productType" from the listing and "Product Type" from Vendoo's schema both
+ * write depop_specifics.productType (see setListingEditorValue).
+ */
+function fieldIdentities(field: EditorField): string[] {
+  const parts = field.key.split(".");
+  const key = parts.length === 2 && parts[0].endsWith("_specifics")
+    ? `${parts[0]}.${squashFieldKey(parts[1])}`
+    : field.key.toLowerCase();
+  return [`label:${field.label.replace(/\s*\*$/, "").trim().toLowerCase()}`, `key:${key}`];
 }
 
 /** First occurrence wins, unless a later row is the one with a choice list. */
@@ -684,13 +694,14 @@ function mergeEditorFields(fields: EditorField[]): EditorField[] {
   const index = new Map<string, number>();
   const out: EditorField[] = [];
   for (const field of fields) {
-    const key = fieldIdentity(field);
-    const at = index.get(key);
+    const ids = fieldIdentities(field);
+    const at = ids.map((id) => index.get(id)).find((hit) => hit != null);
     if (at == null) {
-      index.set(key, out.length);
+      ids.forEach((id) => index.set(id, out.length));
       out.push(field);
       continue;
     }
+    ids.forEach((id) => { if (!index.has(id)) index.set(id, at); });
     if (!out[at].options?.length && field.options?.length) out[at] = field;
   }
   return out;
@@ -704,11 +715,27 @@ export function fieldsForMarketplaceForm(
 ): EditorField[] {
   const own = getFieldsForTab(listing, tab);
   if (tab === "general") return own;
-  const schema = schemaFieldsForTab(forms, tab);
-  const shared = PACKAGE_MARKETPLACES.has(tab)
+  const schema = schemaFieldsForTab(forms, tab) ?? [];
+  let shared = PACKAGE_MARKETPLACES.has(tab)
     ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
     : SHARED_FORM_FIELDS;
-  return mergeEditorFields([...shared, ...own, ...(schema ?? [])]);
+  // A marketplace with its own category path is categorised by that, not the shared one.
+  if (own.some((field) => field.label === "Category")) {
+    shared = shared.filter((field) => field.key !== "category_path");
+  }
+  const merged = mergeEditorFields([...shared, ...own, ...schema]);
+  return merged.map((field) => {
+    // Vendoo's label is the name the marketplace uses, so it wins over a listing key.
+    const match = schema.find((row) => sameField(row, field));
+    return match && match !== field
+      ? { ...field, label: match.label, required: field.required || match.required }
+      : field;
+  });
+}
+
+function sameField(a: EditorField, b: EditorField): boolean {
+  const ids = new Set(fieldIdentities(a));
+  return fieldIdentities(b).some((id) => ids.has(id));
 }
 
 /** Fields for this tab from Vendoo's own schema, or null when it has none. */
@@ -830,26 +857,40 @@ function mergeSpecificsWithDefaults(
 ): EditorField[] {
   const existing = specificsFields(specs, prefix);
   const byKey = new Map(existing.map((field) => [field.key.toLowerCase(), field]));
-  const ordered = defaults.map((field) => byKey.get(field.key.toLowerCase()) || field);
+  const ordered = defaults.map((field) => {
+    const held = byKey.get(field.key.toLowerCase());
+    return held ? { ...field, key: held.key } : field;
+  });
   const seen = new Set(ordered.map((field) => field.key.toLowerCase()));
   const extras = existing.filter((field) => !seen.has(field.key.toLowerCase()));
   return [...ordered, ...extras];
 }
 
+// Keys Studio keeps in <marketplace>_specifics that no form renders.
+const NON_FORM_SPECIFIC_KEYS = new Set(["categoryid", "category"]);
+
 function specificsFields(specs: unknown, prefix: string, skip: string[] = []): EditorField[] {
   if (!specs || typeof specs !== "object") return [];
   const fields: EditorField[] = [];
   for (const [key, value] of Object.entries(specs as Record<string, unknown>)) {
-    if (skip.includes(key)) continue;
+    if (skip.includes(key) || NON_FORM_SPECIFIC_KEYS.has(squashFieldKey(key))) continue;
     if (key === "category_specifics" && value && typeof value === "object" && !Array.isArray(value)) {
       for (const nested of Object.keys(value)) {
-        fields.push({ key: `${prefix}.category_specifics.${nested}`, label: nested });
+        fields.push({ key: `${prefix}.category_specifics.${nested}`, label: humanizeFieldKey(nested) });
       }
       continue;
     }
-    fields.push({ key: `${prefix}.${key}`, label: key });
+    const label = squashFieldKey(key) === "categorypath" ? "Category" : humanizeFieldKey(key);
+    fields.push({ key: `${prefix}.${key}`, label });
   }
   return fields;
+}
+
+/** "parcelSize" -> "Parcel Size". Keys already written as labels pass through. */
+export function humanizeFieldKey(key: string): string {
+  const text = key.replace(/[_-]+/g, " ").trim();
+  const spaced = text.includes(" ") ? text : text.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 function notesVendooItemId(notes?: string | null): string | null {

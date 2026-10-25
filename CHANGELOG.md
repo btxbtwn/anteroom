@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.349 — 2026-10-25
+
+- Each marketplace form shows only its own fields, once each, under the names the marketplace uses. Fields from another marketplace no longer linger after switching tabs, and a marketplace's own category shows as its Category.
+
 ## 0.1.348 — 2026-10-25
 
 - eBay now gets the condition you picked: New with imperfections, Pre-owned Excellent, Good and Fair each list as eBay's own clothing grade instead of all becoming "Good". If a category doesn't take that condition, Anteroom says so and lists nothing.
