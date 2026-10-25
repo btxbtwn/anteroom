@@ -69,6 +69,13 @@ function loadWorker({ apiOrigin } = {}) {
     URL,
     URLSearchParams,
     Blob,
+    FormData,
+    Response,
+    Headers,
+    AbortSignal,
+    AbortController,
+    atob,
+    btoa,
     TextEncoder,
     crypto: globalThis.crypto,
   };
@@ -87,7 +94,17 @@ function loadWorker({ apiOrigin } = {}) {
   context.__alarmListeners = alarmListeners;
   vm.createContext(context);
   context.importScripts('background.js');
+  // Retry pauses return at once; tests that count them replace this.
+  context.marketplaceSleep = async () => {};
   return context;
+}
+
+/** A marketplace reply the way fetch() returns it. */
+function reply(status, body, headers = {}) {
+  const empty = body === undefined || body === null || [204, 205, 304].includes(status);
+  const text = typeof body === 'string';
+  return new Response(empty ? null : text ? body : JSON.stringify(body), { status,
+    headers: { ...(empty || text ? {} : { 'content-type': 'application/json' }), ...headers } });
 }
 
 /** Call a worker function and return a plain value (VM arrays/objects have their own prototypes). */
@@ -97,4 +114,4 @@ function call(context, name, ...args) {
   return result === undefined ? undefined : JSON.parse(JSON.stringify(result));
 }
 
-module.exports = { loadWorker, call };
+module.exports = { loadWorker, call, reply };

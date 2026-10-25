@@ -26,20 +26,10 @@ function sellwildBox(listing) {
   return { depth: sides[0], width: sides[1], height: sides[2] };
 }
 
-async function sellwildFetch(path, { method = 'GET', body, deadline }) {
-  if (Date.now() >= deadline || activeNativeOperation?.cancelled) {
-    throw new Error('The Sellwild action stopped. Check its result before trying again.');
-  }
-  await ensureMarketplaceRequestContext();
-  const response = await fetch(`${SELLWILD}${path}`, { method, credentials: 'include', signal: AbortSignal.timeout(30000),
+async function sellwildFetch(path, { method = 'GET', body, deadline, step = path }) {
+  const { data } = await marketplaceFetch(`${SELLWILD}${path}`, { marketplace: 'sellwild', step, method, deadline, timeoutMs: 30000,
     headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  let result = null;
-  try { result = await response.json(); } catch {}
-  if (response.status === 401) {
-    // Sellwild checks the session before anything else, so nothing was written.
-    throw Object.assign(new Error('Sellwild asked to sign in again. Reconnect Sellwild in Anteroom.'), { rejected: true });
-  }
-  return { response, result };
+  return data;
 }
 
 async function sellwildPhotoBlob(photo) {
@@ -80,70 +70,77 @@ async function runSellwildNative(msg, recovery = false) {
     const journal = (await chrome.storage.local.get(key))[key] || {};
     await chrome.storage.local.set({ [key]: { ...journal, ...receipt } });
   };
-  if (p.action !== 'publish') return { ok: false, safe_to_retry: true, error: 'Sellwild drafts are saved in Anteroom.' };
+  if (p.action !== 'publish') return marketplaceFailure(marketplaceError('Sellwild drafts are saved in Anteroom.'), true);
   if (recovery) {
     const journal = (await chrome.storage.local.get(key))[key] || {};
     if (journal.sellwild_activation) return journal.sellwild_activation;
-    return { ok: false, error: journal.sellwild_created_id
+    return marketplaceFailure(new Error(journal.sellwild_created_id
       ? `Sellwild created listing ${journal.sellwild_created_id} but did not confirm activating it. Check your Sellwild listings before another attempt.`
-      : 'Sellwild did not confirm a listing. Check your Sellwild listings before another attempt.' };
+      : 'Sellwild did not confirm a listing. Check your Sellwild listings before another attempt.'), false);
   }
-  if (p.confirm !== true) return { ok: false, safe_to_retry: true, error: 'Confirm publishing on Sellwild.' };
-  let sent = false;
+  if (p.confirm !== true) return marketplaceFailure(marketplaceError('Confirm publishing on Sellwild.'), true);
+  // prepare -> creating -> created
+  let stage = 'prepare';
   let created = null;
   try {
     const listing = p.listing || {};
     const photos = p.photos || [];
     const choice = p.sellwild || {};
     const box = sellwildBox(listing);
-    const missing = [String(listing.title || '').trim().length < 3 && 'a title of at least 3 characters',
-      !String(listing.description || '').trim() && 'a description', !(Number(listing.price) >= 5) && 'a price of $5 or more',
-      !Number.isInteger(Number(choice.category_id)) && 'a Sellwild category', !Number.isInteger(Number(choice.condition_id)) && 'a Sellwild condition',
-      !sellwildWeightLb(listing) && 'a package weight', !box && 'package dimensions',
-      (!photos.length || photos.length > SELLWILD_MAX_PHOTOS) && `between 1 and ${SELLWILD_MAX_PHOTOS} photos`].filter(Boolean);
-    if (missing.length) throw new Error(`Sellwild needs ${missing.join(', ')}.`);
+    const missing = [String(listing.title || '').trim().length < 3 && { field: 'title', needs: 'a title of at least 3 characters' },
+      !String(listing.description || '').trim() && { field: 'description', needs: 'a description' },
+      !(Number(listing.price) >= 5) && { field: 'price', needs: 'a price of $5 or more' },
+      !Number.isInteger(Number(choice.category_id)) && { field: 'category', needs: 'a Sellwild category' },
+      !Number.isInteger(Number(choice.condition_id)) && { field: 'condition', needs: 'a Sellwild condition' },
+      !sellwildWeightLb(listing) && { field: 'weight', needs: 'a package weight' },
+      !box && { field: 'dimensions', needs: 'package dimensions' },
+      (!photos.length || photos.length > SELLWILD_MAX_PHOTOS) && { field: 'photos', needs: `between 1 and ${SELLWILD_MAX_PHOTOS} photos` }].filter(Boolean);
+    if (missing.length) throw marketplaceMissing('sellwild', missing);
 
-    const session = await sellwildFetch('/api/auth/session', { deadline: p.deadline });
-    if (!session.response.ok || !session.result?.user) throw new Error('Sign in to Sellwild: reconnect it in Anteroom. Publishing will not open a tab.');
-    const addresses = await sellwildFetch('/api/addresses', { deadline: p.deadline });
-    const address = addresses.result?.success ? sellwildAddress(addresses.result.addresses) : null;
-    if (!address) throw new Error('Add your ship-from address on Sellwild (street, city, state and ZIP) before publishing.');
+    const session = await sellwildFetch('/api/auth/session', { deadline: p.deadline, step: 'session' });
+    if (!session?.user) throw marketplaceError('Sign in to Sellwild: reconnect it in Anteroom. Publishing will not open a tab.', { code: 'signed_out' });
+    const addresses = await sellwildFetch('/api/addresses', { deadline: p.deadline, step: 'addresses' });
+    const address = addresses?.success ? sellwildAddress(addresses.addresses) : null;
+    if (!address) throw marketplaceMissing('sellwild', [{ field: 'address', needs: 'your ship-from address (street, city, state and ZIP) on Sellwild' }]);
     const blobs = [];
-    for (const photo of photos) blobs.push(await sellwildPhotoBlob(await nativePhoto(msg.job_id, photo)));
+    for (const photo of photos) blobs.push(await sellwildPhotoBlob(await nativePhoto(msg.job_id, photo, p.deadline)));
 
-    sent = true;
-    const create = await sellwildFetch('/api/listings/create', { method: 'POST', deadline: p.deadline,
+    stage = 'creating';
+    const create = await sellwildFetch('/api/listings/create', { method: 'POST', deadline: p.deadline, step: 'create',
       body: sellwildCreateBody(listing, choice, address, blobs.length) });
-    const id = String(create.result?.listing?.id ?? '');
-    if (!create.response.ok || create.result?.success !== true || !/^\d+$/.test(id)) {
-      // A clear rejection means nothing was created.
-      if (create.result?.success === false && create.response.status >= 400 && create.response.status < 500) sent = false;
-      throw new Error(`Sellwild did not create the listing${create.result?.error ? `: ${String(create.result.error).slice(0, 160)}` : '.'}`);
+    const id = String(create?.listing?.id ?? '');
+    if (create?.success !== true || !/^\d+$/.test(id)) {
+      throw marketplaceError('Sellwild did not confirm the new listing.', { code: 'schema_drift', rejected: create?.success === false,
+        marketplace_message: marketplaceBodyMessage(create) });
     }
-    created = { id, title: String(create.result.listing.title || listing.title) };
+    created = { id, title: String(create.listing.title || listing.title) };
+    stage = 'created';
     await storeReceipt({ sellwild_created_id: id });
 
-    const urls = Array.isArray(create.result.presignedUrls) ? create.result.presignedUrls : [];
+    const urls = Array.isArray(create.presignedUrls) ? create.presignedUrls : [];
     for (const [index, blob] of blobs.entries()) {
       const target = urls.find(entry => entry.photoIndex === index)?.presignedUrl;
-      if (!target || new URL(target).protocol !== 'https:') throw new Error(`Sellwild did not return an upload address for photo ${index + 1}.`);
-      if (Date.now() >= p.deadline || activeNativeOperation?.cancelled) throw new Error('The Sellwild action stopped.');
-      const upload = await fetch(target, { method: 'PUT', body: blob, headers: { 'content-type': 'image/jpeg' }, signal: AbortSignal.timeout(60000) });
-      if (upload.status !== 200) throw new Error(`Sellwild did not accept photo ${index + 1} (HTTP ${upload.status}).`);
+      let destination = null;
+      try { destination = new URL(target); } catch {}
+      if (destination?.protocol !== 'https:') throw marketplaceError(`Sellwild did not return an upload address for photo ${index + 1}.`, { code: 'schema_drift' });
+      // A presigned PUT replaces the same object, so it is safe to repeat.
+      await marketplaceFetch(destination.href, { marketplace: 'sellwild', step: 'photo-upload', method: 'PUT', credentials: 'omit',
+        headers: { 'content-type': 'image/jpeg' }, body: blob, deadline: p.deadline, timeoutMs: 60000, retry: true, expect: 'none' })
+        .catch(error => { throw marketplaceStorageRefusal('sellwild', error); });
     }
 
-    const activate = await sellwildFetch(`/api/listings/${id}/confirm-photos`, { method: 'POST', deadline: p.deadline });
-    if (!activate.response.ok || activate.result?.success !== true) {
-      throw new Error(`Sellwild did not activate the listing${activate.result?.error ? `: ${String(activate.result.error).slice(0, 160)}` : '.'}`);
+    const activate = await sellwildFetch(`/api/listings/${id}/confirm-photos`, { method: 'POST', deadline: p.deadline, step: 'activate' });
+    if (activate?.success !== true) {
+      throw marketplaceError('Sellwild did not activate the listing.', { code: 'rejected', marketplace_message: marketplaceBodyMessage(activate) });
     }
-    const receipt = { ok: true, state: activate.result.underReview === true ? 'pending_review' : 'published',
+    const receipt = { ok: true, state: activate.underReview === true ? 'pending_review' : 'published',
       listing_url: sellwildListingUrl(id, created.title) };
     await storeReceipt({ sellwild_activation: receipt });
     return receipt;
   } catch (error) {
-    const message = String(error.message || error);
-    return { ok: false, safe_to_retry: !sent || (error.rejected === true && !created), error: created
-      ? `${message} Sellwild listing ${created.id} exists but is not active; check your Sellwild listings before another attempt.`
-      : message };
+    const safe = stage === 'prepare' || (stage === 'creating' && error.rejected === true);
+    const result = marketplaceFailure(error, safe);
+    if (created) result.error = `${result.error} Sellwild listing ${created.id} exists but is not active; check your Sellwild listings before another attempt.`;
+    return result;
   }
 }

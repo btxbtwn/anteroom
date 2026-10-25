@@ -24,15 +24,26 @@ async function nativeWait(tabId, test, deadline) {
   throw new Error('Chrome did not confirm the marketplace navigation.');
 }
 
-async function nativePhoto(jobId, photo) {
-  if (!/^[a-f0-9-]+$/i.test(String(photo.id))) throw new Error('Invalid photo ID.');
-  const response = await fetch(`${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/photos/${encodeURIComponent(photo.id)}`);
-  if (!response.ok) throw new Error('Could not load a listing photo.');
+// A listing photo from Studio, bounded by the operation's deadline.
+async function nativePhoto(jobId, photo, deadline = Date.now() + 30000) {
+  if (!/^[a-f0-9-]+$/i.test(String(photo.id))) throw marketplaceError('Invalid photo ID.');
+  let response;
+  try {
+    response = await fetch(`${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/photos/${encodeURIComponent(photo.id)}`,
+      { signal: AbortSignal.timeout(Math.max(1000, Math.min(30000, deadline - Date.now()))) });
+  } catch {
+    throw marketplaceError('Anteroom could not load a listing photo in time.', { code: 'network' });
+  }
+  if (!response.ok) throw marketplaceError('Could not load a listing photo.', { code: 'network' });
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > 20 * 1024 * 1024) throw new Error('A listing photo exceeds 20 MB.');
+  if (bytes.length > 20 * 1024 * 1024) throw marketplaceMissing('', [{ field: 'photos', needs: 'photos under 20 MB each' }]);
   let binary = '';
   for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
   return { base64: btoa(binary), name: `${photo.id}.${photo.mime_type === 'image/png' ? 'png' : 'jpg'}`, mime_type: photo.mime_type || 'image/jpeg' };
+}
+
+function nativeRefusal(error) {
+  return marketplaceFailure(marketplaceError(error), true);
 }
 
 async function recoverNativeMarketplace(context) {
@@ -40,23 +51,23 @@ async function recoverNativeMarketplace(context) {
   if (context.marketplace === 'depop') return await runDepopNative({ payload: context }, true);
   if (context.marketplace === 'poshmark') return await runPoshmarkApi({ payload: context }, true);
   if (context.marketplace === 'mercari') return await runMercariNative({ payload: context }, true);
-  return { ok: false, error: 'Unsupported marketplace.' };
+  return nativeRefusal('Unsupported marketplace.');
 }
 
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
   if (!['poshmark', 'mercari', 'depop', 'sellwild'].includes(p.marketplace)
       || !({ sellwild: ['publish'], poshmark: ['list', 'update'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action)) {
-    return { ok: false, safe_to_retry: true, error: 'Unsupported marketplace action.' };
+    return nativeRefusal('Unsupported marketplace action.');
   }
-  if (p.action === 'list' && p.confirm !== true) return { ok: false, safe_to_retry: true, error: 'Confirm listing on this marketplace.' };
+  if (p.action === 'list' && p.confirm !== true) return nativeRefusal('Confirm listing on this marketplace.');
   if (p.action === 'update' && (p.confirm !== true || !/^[a-f0-9]{24}$/.test(String(p.listing_id || '')))) {
-    return { ok: false, safe_to_retry: true, error: 'Confirm updating the live Poshmark listing.' };
+    return nativeRefusal('Confirm updating the live Poshmark listing.');
   }
   if (p.action === 'publish' && (p.confirm !== true || (p.marketplace !== 'sellwild' && !nativeDraftUrl(p.marketplace, p.draft_url)))) {
-    return { ok: false, safe_to_retry: true, error: 'Confirm publishing an existing native draft.' };
+    return nativeRefusal('Confirm publishing an existing native draft.');
   }
-  if (p.draft_url && !nativeDraftUrl(p.marketplace, p.draft_url)) return { ok: false, safe_to_retry: true, error: 'Invalid native draft link.' };
+  if (p.draft_url && !nativeDraftUrl(p.marketplace, p.draft_url)) return nativeRefusal('Invalid native draft link.');
   if (p.marketplace === 'sellwild') return await runSellwildNative(msg);
   if (p.marketplace === 'depop') return await runDepopNative(msg);
   if (p.marketplace === 'poshmark') return await runPoshmarkApi(msg);
@@ -66,7 +77,7 @@ async function runNativeMarketplace(msg) {
 async function handleNativeMarketplaceMessage(msg) {
   const operationId = String(msg.payload?.operation_id || '');
   if (!/^[a-f0-9-]+$/i.test(operationId)) {
-    sendBrowserResult(msg, { ok: false, safe_to_retry: true, error: 'Invalid operation ID.' });
+    sendBrowserResult(msg, nativeRefusal('Invalid operation ID.'));
     return;
   }
   const key = `native_operation_${operationId}`;
@@ -75,7 +86,7 @@ async function handleNativeMarketplaceMessage(msg) {
     if (!stored && msg.payload.context?.draft_url) stored = { finished: false, context: msg.payload.context };
     if (stored && !stored.context && msg.payload.context) stored = { ...stored, context: msg.payload.context };
     if (stored?.context && !activeNativeOperation && !activeJob && !activePatch && (!stored.finished || (!stored.result?.ok && !stored.result?.safe_to_retry))) {
-      activeNativeOperation = { id: operationId, tabId: null, cancelled: false };
+      activeNativeOperation = { id: operationId, tabId: null, cancelled: false, controller: new AbortController() };
       try {
         const recovered = await recoverNativeMarketplace({ ...stored.context, ...msg.payload.context,
           draft_url: msg.payload.context?.draft_url || stored.receipt_url || stored.context.draft_url,
@@ -92,14 +103,15 @@ async function handleNativeMarketplaceMessage(msg) {
     return;
   }
   if (stored) {
-    sendBrowserResult(msg, stored.finished ? stored.result : { ok: false, error: 'This action is already in progress or interrupted. Check its result.' });
+    sendBrowserResult(msg, stored.finished ? stored.result
+      : marketplaceFailure(new Error('This action is already in progress or interrupted. Check its result.'), false));
     return;
   }
   if (activeNativeOperation || activeJob || activePatch) {
-    sendBrowserResult(msg, { ok: false, safe_to_retry: true, error: 'Another automation job is running.' });
+    sendBrowserResult(msg, nativeRefusal('Another automation job is running.'));
     return;
   }
-  activeNativeOperation = { id: operationId, tabId: null, cancelled: false };
+  activeNativeOperation = { id: operationId, tabId: null, cancelled: false, controller: new AbortController() };
   try {
     const context = { marketplace: msg.payload.marketplace, action: msg.payload.action, draft_url: msg.payload.draft_url,
       listing_id: msg.payload.listing_id, local_draft_id: msg.payload.local_draft_id, revision_id: msg.payload.revision_id,
@@ -115,6 +127,7 @@ async function handleNativeMarketplaceMessage(msg) {
 async function cancelNativeMarketplaceOperation(jobId) {
   if (activeNativeOperation?.id !== jobId) return;
   activeNativeOperation.cancelled = true;
+  activeNativeOperation.controller?.abort();
   const tabId = activeNativeOperation.tabId;
   if (tabId != null) {
     await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN',

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadWorker } = require('./worker-context');
+const { loadWorker, reply } = require('./worker-context');
 
 const listing = { title: 'Test jacket', description: 'Private description', price: 24, weight_lb: 1, weight_oz: 4,
   package_dimensions_in: '13x10x3' };
@@ -33,7 +33,7 @@ function worker({ routes = {} } = {}) {
     const route = parsed.hostname === 'sellwild.com' ? `${options.method || 'GET'} ${parsed.pathname}` : `${options.method} s3`;
     requests.push({ route, url, options, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body });
     const [status, body] = routes[route] || defaults[route] || [404, { success: false, error: 'missing' }];
-    return { ok: status >= 200 && status < 300, status, json: async () => body };
+    return reply(status, body);
   };
   return { c, requests, journal };
 }
@@ -89,7 +89,8 @@ test('a rejected create can be retried; a lost create reply cannot', async () =>
   let { c } = worker({ routes: { 'POST /api/listings/create': [400, { success: false, error: 'Price must be less than 1,000,000' }] } });
   let result = await c.runSellwildNative(message());
   assert.equal(result.safe_to_retry, true);
-  assert.match(result.error, /Price must be/);
+  assert.equal(result.error_code, 'rejected');
+  assert.equal(result.marketplace_message, 'Price must be less than 1,000,000');
   ({ c } = worker({ routes: { 'POST /api/listings/create': [502, null] } }));
   result = await c.runSellwildNative(message());
   assert.equal(result.safe_to_retry, false);

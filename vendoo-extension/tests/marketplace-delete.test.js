@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadWorker } = require('./worker-context');
+const { loadWorker, reply } = require('./worker-context');
 
 const USER = 'a'.repeat(24);
 const POST = 'b'.repeat(24);
@@ -12,19 +12,21 @@ function worker(routes) {
   c.chrome.cookies = { get: async ({ name }) => ({ jwt: { value: jwt }, access_token: { value: 'private-token' } })[name] };
   c.chrome.declarativeNetRequest = { updateSessionRules: async () => {} };
   c.atob = atob;
-  c.chrome.storage = { session: { get: async () => ({ mercari_session: { headers: { authorization: 'Bearer x', 'x-csrf-token': 'y' } } }) },
-    local: { get: async () => ({}), set: async () => {} } };
+  c.chrome.storage = { local: { get: async () => ({}), set: async () => {} } };
   c.chrome.tabs = { create: () => { throw new Error('opened a tab'); } };
   const requests = [];
   const counts = {};
+  const PAGE = `<html><script>window.__INITIAL_STATE__={"csrftoken":"page-csrf","userCookies":{"userInfo":{"uid":"${USER}"}}};</script></html>`;
+  routes = { 'GET poshmark.com/create-listing': [200, PAGE, { 'content-type': 'text/html' }],
+    'GET www.mercari.com/v1/initialize': [200, { csrf: 'csrf', accessToken: 'token', user: { userId: 1, name: 'seller' } }], ...routes };
   c.fetch = async (url, options = {}) => {
     const parsed = new URL(url);
     const key = `${options.method || 'GET'} ${parsed.hostname}${parsed.pathname}`;
     requests.push(key);
     counts[key] = (counts[key] || 0) + 1;
     const answer = routes[key];
-    const [status, body] = typeof answer === 'function' ? answer(counts[key], options) : answer || [404, {}];
-    return { ok: status >= 200 && status < 300, status, json: async () => body };
+    const [status, body, headers] = typeof answer === 'function' ? answer(counts[key], options) : answer || [404, {}];
+    return reply(status, body, headers);
   };
   return { c, requests };
 }
@@ -38,7 +40,7 @@ test('Poshmark delete reads, deletes once, and confirms it is gone', async () =>
     [`DELETE ${posh}`]: [200, {}],
   });
   assert.deepEqual({ ...(await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true })) }, { ok: true, state: 'deleted' });
-  assert.deepEqual(requests, [`GET ${posh}`, `DELETE ${posh}`, `GET ${posh}`]);
+  assert.deepEqual(requests, ['GET poshmark.com/create-listing', `GET ${posh}`, `DELETE ${posh}`, `GET ${posh}`]);
 });
 
 test('Poshmark never deletes a sold or foreign listing, and a gone one is already deleted', async () => {
@@ -59,7 +61,23 @@ test('Mercari delete sends its own Delete status and checks the reply', async ()
   assert.equal((await c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true })).state, 'deleted');
   assert.deepEqual(bodies[0].variables, { input: { id: 'm70565754838', status: 'cancel' } });
   const other = worker({ 'POST www.mercari.com/v1/api': [200, { data: { updateItemStatus: { status: 'trading' } } }] });
-  assert.equal((await other.c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true })).ok, false);
+  const refused = await other.c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: 'm70565754838', confirm: true });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.marketplace_message, 'status trading');
+});
+
+test('a refused delete carries the marketplace\'s own words and is safe to repeat', async () => {
+  const { c } = worker({ [`GET ${posh}`]: [200, livePost], [`DELETE ${posh}`]: [200, { error: { errorType: 'ProductReservedError', userMessage: 'This listing has an order in progress' } }] });
+  const result = await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(result.error_code, 'rejected');
+  assert.equal(result.marketplace_message, 'This listing has an order in progress');
+  const depop = worker({ 'GET webapi.depop.com/presentation/api/v1/products/by-slug/shop-tee-136d/': [429, { message: 'Too many requests' }, { 'retry-after': '30' }] });
+  const limited = await depop.c.runMarketplaceDelete({ marketplace: 'depop', listing_id: 'shop-tee-136d', confirm: true });
+  assert.equal(limited.error_code, 'rate_limited');
+  assert.equal(limited.retry_after_s, 30);
+  assert.equal(limited.marketplace_message, 'Too many requests');
 });
 
 test('Depop delete resolves the slug, refuses sold items, and confirms', async () => {

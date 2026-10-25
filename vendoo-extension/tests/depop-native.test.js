@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadWorker, call } = require('./worker-context');
+const { loadWorker, call, reply } = require('./worker-context');
 const DRAFT = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
 const listing = { title: 'Test', description: 'Private draft', price: 12 };
 
@@ -14,7 +14,7 @@ function page() {
   c.fetch = async (url, options) => {
     requests.push({ url, ...options });
     if (options.method === 'PUT') saved = { ...saved, ...JSON.parse(options.body), pictures: JSON.parse(options.body).pictures.map(id => ({ id })) };
-    return { ok: true, status: 200, json: async () => saved };
+    return reply(200, saved);
   };
   return { c, requests, payload: { action: 'save_draft', draft_url: DRAFT, listing, deadline: Date.now() + 30000 } };
 }
@@ -60,8 +60,8 @@ test('Depop publishes only an explicitly confirmed complete draft and exactly on
   requests.length = 0;
   c.fetch = async (url, options) => {
     requests.push({ url, ...options });
-    return { ok: true, status: 200, json: async () => options.method === 'GET'
-      ? { description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{}], missing_fields: [] } : { id: 'job-1' } };
+    return reply(200, options.method === 'GET'
+      ? { description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{}], missing_fields: [] } : { id: 'job-1' });
   };
   const result = await c.depopApiAction('publish', approved);
   assert.equal(result.publish_job_id, 'job-1');
@@ -77,23 +77,92 @@ test('an uncertain Depop mutation is never retried', async () => {
   assert.equal(requests.length, 1);
 });
 
-test('Depop reports verification separately from an unexplained 403 without exporting the response', async () => {
-  for (const [body, expected] of [
-    ['{"error":"captcha_required","token":"private-response-token"}', 'browser verification'],
-    ['{"error":"invalid_token","token":"private-response-token"}', 'invalid or expired session'],
-    ['{"error":"Forbidden","token":"private-response-token"}', 'did not provide a recognized reason'],
+test('Depop refusals are classified, carry Depop\'s own words, and never export a token', async () => {
+  for (const [body, code, own] of [
+    ['{"error":"captcha_required","token":"private-response-token"}', 'challenge', 'captcha_required'],
+    ['{"error":"invalid_token","token":"private-response-token"}', 'signed_out', 'invalid_token'],
+    ['{"error":"Forbidden","token":"private-response-token"}', 'signed_out', 'Forbidden'],
   ]) {
     const { c, requests, payload } = page();
     c.fetch = async (_url, options) => {
       requests.push(options);
-      return { ok: false, status: 403, text: async () => body };
+      return reply(403, JSON.parse(body));
     };
     const result = await c.depopApiAction('create', payload);
-    assert.match(result.error, new RegExp(expected));
-    assert.equal(result.safe_to_retry, false);
+    assert.equal(result.error_code, code);
+    assert.equal(result.marketplace_message, own);
+    // A 403 is a refusal: nothing was written.
+    assert.equal(result.safe_to_retry, true);
     assert.equal(requests.length, 1);
     assert.ok(!JSON.stringify(result).includes('private-response-token'));
   }
+});
+
+function newDraft({ photoAnswer } = {}) {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  c.chrome.storage.local.get = async () => ({});
+  c.nativePhoto = async () => ({ base64: 'AA==', mime_type: 'image/jpeg' });
+  c.createImageBitmap = async () => ({ width: 10, height: 10, close() {} });
+  c.OffscreenCanvas = function OffscreenCanvas() {
+    this.getContext = () => ({ fillRect() {}, drawImage() {} });
+    this.convertToBlob = async () => new Blob(['jpeg']);
+  };
+  const requests = [];
+  c.fetch = async (url, options = {}) => {
+    const { hostname, pathname } = new URL(url);
+    requests.push({ method: options.method, hostname, pathname, body: options.body });
+    if (hostname.endsWith('amazonaws.com')) return photoAnswer ? photoAnswer(requests.filter(r => r.method === 'PUT').length) : reply(200, '');
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/') return reply(200, { id: 555 });
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/pictures/') {
+      return reply(200, { id: 9, url: 'https://media-photos-depop.s3-accelerate.amazonaws.com/p/9.jpg?X-Amz-Signature=private' });
+    }
+    return reply(200, { id: 555, description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [] });
+  };
+  const msg = { job_id: 'job-1', payload: { action: 'save_draft', operation_id: 'abc123', listing,
+    photos: [{ id: 'p1', mime_type: 'image/jpeg' }] } };
+  return { c, requests, msg };
+}
+
+test('a Depop photo failure after the draft exists returns its link and is safe to retry', async () => {
+  const { c, requests, msg } = newDraft({ photoAnswer: () => reply(403, '<Error>AccessDenied</Error>', { 'content-type': 'application/xml' }) });
+  const result = await c.runDepopNative(msg);
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(result.draft_url, 'https://www.depop.com/sellinghub/drafts/edit/555/');
+  assert.ok(!requests.some(r => r.method === 'PUT' && r.hostname === 'webapi.depop.com'));
+  assert.ok(!JSON.stringify(result).includes('private'));
+});
+
+test('a transient Depop photo upload is retried', async () => {
+  const { c, requests, msg } = newDraft({ photoAnswer: n => (n === 1 ? reply(503, 'Slow Down') : reply(200, '')) });
+  await c.runDepopNative(msg);
+  assert.equal(requests.filter(r => r.hostname.endsWith('amazonaws.com')).length, 2);
+});
+
+test('Depop photo uploads go only to Depop\'s S3 hosts', async () => {
+  const { c, requests, msg } = newDraft();
+  const original = c.fetch;
+  c.fetch = async (url, options = {}) => (new URL(url).pathname === '/presentation/api/v1/pictures/'
+    ? reply(200, { id: 9, url: 'https://evil.example.com/p/9.jpg' }) : original(url, options));
+  const result = await c.runDepopNative(msg);
+  assert.equal(result.error_code, 'schema_drift');
+  assert.ok(!requests.some(r => r.hostname === 'evil.example.com'));
+});
+
+test('a Depop description is capped at 1000 characters and read back against the capped text', async () => {
+  const { c, requests, payload } = page();
+  payload.listing = { ...listing, description: 'x'.repeat(1500) };
+  const capped = `Test\n\n${'x'.repeat(1500)}`.slice(0, 1000);
+  const original = c.fetch;
+  c.fetch = async (url, options) => {
+    const answer = await original(url, options);
+    if (options.method === 'PUT') assert.equal(JSON.parse(options.body).description.length, 1000);
+    return answer;
+  };
+  const result = await c.depopApiAction('save', payload);
+  assert.equal(result.description, capped);
+  assert.equal(requests.length, 3);
 });
 
 test('Depop updates and reads an existing private draft without any tab or page execution', async () => {
@@ -104,4 +173,23 @@ test('Depop updates and reads an existing private draft without any tab or page 
   const result = await c.runDepopNative({ payload: { ...payload, operation_id: 'abc123' } });
   assert.equal(result.ok, true);
   assert.equal(result.state, 'draft');
+});
+
+test('Depop\'s own missing fields come back by name, safe to retry, with the draft link', async () => {
+  const { c, requests, payload } = page();
+  c.chrome.storage.local.get = async () => ({});
+  c.fetch = async (url, options) => {
+    requests.push({ url, ...options });
+    return reply(200, { description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{}], missing_fields: ['brand', 'parcel_size'] });
+  };
+  const result = await c.runDepopNative({ payload: { ...payload, action: 'publish', confirm: true, operation_id: 'abc123' } });
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, 'missing_fields');
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(result.draft_url, DRAFT);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.fields)), [{ field: 'brand', message: 'Depop needs a brand' },
+    { field: 'parcel_size', message: 'Depop needs a parcel size' }]);
+  assert.equal(result.marketplace_message, 'missing_fields: brand, parcel_size');
+  assert.equal(result.error, 'Depop needs a brand, a parcel size.');
+  assert.ok(requests.every(r => (r.method || 'GET') === 'GET'));
 });
