@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.365 — 2026-10-25
+
+- Listing on eBay uses the ZIP saved under Settings → Connections → eBay as the inventory location when eBay does not have one yet.
+
 ## 0.1.364 — 2026-10-25
 
 - Sellwild lists Pre-Owned Excellent as Like New and Pre-Owned Good as Good.
