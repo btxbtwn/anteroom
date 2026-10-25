@@ -74,9 +74,10 @@ function mercariCommon(listing) {
 }
 
 async function mercariHeaders() {
-  const { mercari_session: session } = await chrome.storage.session.get('mercari_session');
-  const captured = session?.headers || {};
-  if (!captured.authorization || !captured['x-csrf-token']) {
+  const stored = await mercariStoredSession();
+  const captured = stored?.headers || {};
+  const exp = jwtClaims(String(captured.authorization || '').replace(/^Bearer\s+/i, ''))?.exp;
+  if (!captured.authorization || !captured['x-csrf-token'] || (Number.isFinite(exp) && exp * 1000 <= Date.now())) {
     throw new Error('Reconnect Mercari in Anteroom first. Listing actions will not open a tab.');
   }
   return {

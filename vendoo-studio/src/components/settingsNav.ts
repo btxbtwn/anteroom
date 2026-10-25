@@ -225,6 +225,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["categories", "extract", "sync", "taxonomy"],
   },
   {
+    id: "chrome-sign-in",
+    title: "Chrome sign-in",
+    section: "connections",
+    targetId: "chrome-sign-in",
+    searchTerms: ["depop", "poshmark", "mercari", "sellwild", "cookie", "sign in", "expired", "session"],
+  },
+  {
     id: "direct-ebay",
     title: "eBay sale alerts",
     section: "connections",

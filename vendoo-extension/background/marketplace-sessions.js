@@ -4,6 +4,129 @@ const MARKETPLACE_SIGN_IN = {
   mercari: 'https://www.mercari.com/mypage/',
   sellwild: 'https://sellwild.com/',
 };
+const EXTENSION_SESSION_MARKETS = ['depop', 'poshmark', 'mercari', 'sellwild'];
+const SESSION_EXPIRING_MS = 24 * 60 * 60 * 1000;
+
+// Cookie and token values stay in Chrome. Callers receive only this summary.
+function sessionLabel(record) {
+  if (!record || typeof record !== 'object') return null;
+  for (const key of ['username', 'user_name', 'name', 'handle', 'email']) {
+    const value = record[key];
+    if (typeof value !== 'string') continue;
+    const label = value.trim();
+    if (label && label.length <= 80 && !/[\u0000-\u001f]/.test(label)) return label;
+  }
+  return null;
+}
+
+function jwtClaims(token) {
+  try {
+    const part = String(token || '').split('.')[1];
+    if (!part || typeof atob !== 'function') return null;
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/');
+    const claims = JSON.parse(atob(padded + '='.repeat((4 - (padded.length % 4)) % 4)));
+    return claims && typeof claims === 'object' ? claims : null;
+  } catch {
+    return null;
+  }
+}
+
+function cookieToken(cookie) {
+  if (!cookie?.value) return '';
+  try { return decodeURIComponent(cookie.value); } catch { return cookie.value; }
+}
+
+function soonestExpiry(cookie, token) {
+  const times = [];
+  if (cookie && !cookie.session && Number.isFinite(cookie.expirationDate)) times.push(Math.floor(cookie.expirationDate));
+  const exp = jwtClaims(token)?.exp;
+  if (Number.isFinite(exp)) times.push(Math.floor(exp));
+  return times.length ? Math.min(...times) : null;
+}
+
+function publicExtensionSession(present, expiresAt, label, now = Date.now()) {
+  const expires_at = Number.isFinite(expiresAt) ? Math.floor(expiresAt) : null;
+  const state = !present ? 'signed_out' : expires_at != null && expires_at * 1000 <= now ? 'expired' : 'signed_in';
+  return {
+    state,
+    expires_at: state === 'signed_out' ? null : expires_at,
+    label: state === 'signed_out' ? null : sessionLabel(label),
+    expiring: state === 'signed_in' && expires_at != null && expires_at * 1000 - now <= SESSION_EXPIRING_MS,
+  };
+}
+
+function unknownExtensionSession() {
+  return { state: 'unknown', expires_at: null, label: null, expiring: false };
+}
+
+async function cookieSession(url, name) {
+  const cookie = await chrome.cookies.get({ url, name });
+  const token = cookieToken(cookie);
+  return publicExtensionSession(Boolean(token), soonestExpiry(cookie, token), jwtClaims(token));
+}
+
+async function mercariStoredSession() {
+  const local = await chrome.storage.local.get('mercari_session');
+  const saved = local?.mercari_session;
+  if (saved?.headers?.authorization && saved.headers['x-csrf-token']) return saved;
+  if (!chrome.storage.session?.get) return null;
+  const session = await chrome.storage.session.get('mercari_session');
+  return session?.mercari_session || null;
+}
+
+async function readMercariSession(now = Date.now()) {
+  const stored = await mercariStoredSession();
+  const token = String(stored?.headers?.authorization || '').replace(/^Bearer\s+/i, '');
+  return publicExtensionSession(Boolean(stored?.headers?.authorization && stored.headers['x-csrf-token']), soonestExpiry(null, token), jwtClaims(token), now);
+}
+
+async function readSellwildSession(now = Date.now()) {
+  let response;
+  try {
+    response = await fetch('https://sellwild.com/api/auth/session', {
+      credentials: 'include', signal: AbortSignal.timeout(10000),
+    });
+  } catch {
+    return unknownExtensionSession();
+  }
+  if (response.status === 401 || response.status === 403) return publicExtensionSession(false, null, null, now);
+  if (!response.ok) return unknownExtensionSession();
+  let body = {};
+  try { body = await response.json(); } catch { return unknownExtensionSession(); }
+  const user = body?.user || null;
+  let expiresAt = null;
+  try {
+    const cookies = await chrome.cookies.getAll({ url: 'https://sellwild.com/' });
+    const expirations = (Array.isArray(cookies) ? cookies : [])
+      .filter(cookie => /session|auth/i.test(cookie.name || '') && !cookie.session && Number.isFinite(cookie.expirationDate))
+      .map(cookie => Math.floor(cookie.expirationDate));
+    if (expirations.length) expiresAt = Math.min(...expirations);
+  } catch { /* expiry is optional; the session response decides signed-in */ }
+  return publicExtensionSession(Boolean(user), expiresAt, user, now);
+}
+
+async function readExtensionSession(marketplace, now = Date.now()) {
+  try {
+    if (marketplace === 'depop') return await cookieSession('https://www.depop.com/', 'access_token');
+    if (marketplace === 'poshmark') return await cookieSession('https://poshmark.com/', 'jwt');
+    if (marketplace === 'mercari') return await readMercariSession(now);
+    if (marketplace === 'sellwild') return await readSellwildSession(now);
+  } catch { /* one marketplace failing must not blank the others */ }
+  return unknownExtensionSession();
+}
+
+async function readExtensionSessions(now = Date.now()) {
+  const entries = await Promise.all(EXTENSION_SESSION_MARKETS.map(async marketplace => [marketplace, await readExtensionSession(marketplace, now)]));
+  return Object.fromEntries(entries);
+}
+
+async function handleMarketplaceSessions(msg) {
+  try {
+    sendBrowserResult(msg, { ok: true, sessions: await readExtensionSessions() });
+  } catch {
+    sendBrowserResult(msg, { ok: false, error: 'Could not check marketplace sign-in.' });
+  }
+}
 
 // Runs only during an explicit sign-in/reconnect. Session values stay inside
 // Chrome; the API receives only readiness and diagnostic field names.
@@ -111,22 +234,29 @@ async function handleMarketplaceConnect(msg) {
         await chrome.debugger.sendCommand({ tabId: tab.id }, 'Network.enable');
         await chrome.tabs.reload(tab.id);
         const deadline = Date.now() + 12000;
-        while ((!captured.headers.authorization || !Object.keys(captured.operations).length) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 250));
-        await chrome.storage.session.set({ mercari_session: { headers: captured.headers, operations: captured.operations } });
+        while ((!captured.headers.authorization || !captured.headers['x-csrf-token']) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 250));
+        if (captured.headers.authorization && captured.headers['x-csrf-token']) {
+          await chrome.storage.local.set({ mercari_session: { headers: {
+            authorization: captured.headers.authorization,
+            'x-csrf-token': captured.headers['x-csrf-token'],
+            ...(captured.headers['x-platform'] ? { 'x-platform': captured.headers['x-platform'] } : {}),
+            ...(captured.headers['x-app-version'] ? { 'x-app-version': captured.headers['x-app-version'] } : {}),
+            ...(captured.headers['x-ld-variants'] ? { 'x-ld-variants': captured.headers['x-ld-variants'] } : {}),
+          }, saved_at: Date.now() } });
+        }
       } finally {
         captured.close();
         await chrome.debugger.detach({ tabId: tab.id }).catch(() => {});
       }
     }
-    const result = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: readMarketplaceSignIn, args: [marketplace] }))?.[0]?.result || {};
-    if (marketplace === 'depop') {
-      const cookie = await chrome.cookies.get({ url: 'https://www.depop.com/', name: 'access_token' });
-      if (result.access_token) await chrome.storage.session.set({ depop_session: { access_token: result.access_token } });
-      sendBrowserResult(msg, { ok: true, signed_in: Boolean(result.access_token),
-        page_read_status: result.page_read_status,
-        cookie_matches: Boolean(cookie?.value && decodeURIComponent(cookie.value) === result.access_token) });
-    } else sendBrowserResult(msg, { ok: true, ...result,
-      ...(captured ? { captured_header_names: Object.keys(captured.headers), operations: captured.operations, body_keys: [...captured.bodyShapes] } : {}) });
+    const result = marketplace === 'depop'
+      ? ((await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: readMarketplaceSignIn, args: [marketplace] }))?.[0]?.result || {})
+      : {};
+    let summary = await readExtensionSession(marketplace);
+    if (marketplace === 'depop' && (result.page_read_status === 401 || result.page_read_status === 403) && summary.state === 'signed_in') {
+      summary = { ...summary, state: 'expired', expiring: false };
+    }
+    sendBrowserResult(msg, { ok: true, signed_in: summary.state === 'signed_in', ...summary });
   } catch { sendBrowserResult(msg, { ok: false, error: 'Finish signing in in Chrome, then reconnect. Listing actions will not open tabs.' }); }
 }
 

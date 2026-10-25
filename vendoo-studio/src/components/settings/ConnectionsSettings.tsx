@@ -6,6 +6,12 @@ import { StatusDot } from "../StatusDot";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
 import type { DirectAccountStatus, DirectMarketplace } from "../../api/directConnections";
+import {
+  EXTENSION_SESSION_MARKETS,
+  EXTENSION_SESSION_NAMES,
+  chromeSessionPresentation,
+  type ExtensionSessionMarket,
+} from "../../api/marketplaceSessions";
 import { ConnectChromeButton } from "../ConnectChromeButton";
 import { ExtensionLoadPath } from "../ExtensionLoadPath";
 import { MarketplaceLogo } from "../MarketplaceLogo";
@@ -253,6 +259,91 @@ function DirectConnectionsSection() {
   );
 }
 
+const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
+  depop: "Lists on Depop with the account signed in to Chrome.",
+  poshmark: "Lists on Poshmark with the account signed in to Chrome.",
+  mercari: "Saves the Mercari sign-in on this Mac so listing keeps working after Chrome restarts.",
+  sellwild: "Lists on Sellwild with the account signed in to Chrome.",
+};
+
+function ChromeSessionRow({
+  marketplace,
+  chromeReady,
+}: {
+  marketplace: ExtensionSessionMarket;
+  chromeReady: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [hint, setHint] = useState<string | null>(null);
+  const sessions = useQuery({
+    queryKey: ["marketplace-sessions"],
+    queryFn: api.marketplaceSessions.status,
+    enabled: chromeReady,
+    retry: false,
+    refetchInterval: chromeReady ? 60_000 : false,
+  });
+  const connect = useMutation({
+    mutationFn: () => api.marketplaceSessions.connect(marketplace),
+    onSuccess: (result) => {
+      setHint(result.signed_in ? null : "Finish signing in in the Chrome tab, then choose Sign in again.");
+      void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
+    },
+    onError: () => setHint(null),
+  });
+  const session = sessions.data?.sessions[marketplace];
+  const state = chromeSessionPresentation(session, chromeReady);
+  const name = EXTENSION_SESSION_NAMES[marketplace];
+  const error = connect.error?.message || null;
+
+  return (
+    <SettingsRow
+      id={`chrome-${marketplace}`}
+      title={
+        <span className="flex items-center gap-2">
+          <MarketplaceLogo id={marketplace} label={name} size={16} />
+          {name}
+        </span>
+      }
+      description={CHROME_SESSION_DETAILS[marketplace]}
+      status={
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <StatusDot tone={state.tone} />
+          {state.label}
+        </span>
+      }
+      control={
+        <Button size="xs" variant="outline" disabled={!chromeReady || connect.isPending} onClick={() => connect.mutate()}>
+          {connect.isPending ? <Spinner /> : null}
+          {session?.state === "signed_in" ? "Sign in again" : "Sign in"}
+        </Button>
+      }
+    >
+      {hint ? <SettingsNote>{hint}</SettingsNote> : null}
+      {error ? <SettingsNote tone="error">{error}</SettingsNote> : null}
+    </SettingsRow>
+  );
+}
+
+function ChromeSignInSection() {
+  const extension = useQuery({
+    queryKey: ["extension-status"],
+    queryFn: api.extension.status,
+    refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
+  });
+  const chromeReady = Boolean(extension.data?.connected);
+  return (
+    <SettingsSection id="chrome-sign-in" title="Chrome sign-in">
+      {EXTENSION_SESSION_MARKETS.map((marketplace) => (
+        <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady} />
+      ))}
+      <SettingsRow
+        title="Where the sign-in lives"
+        description="Depop, Poshmark, and Sellwild stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
+      />
+    </SettingsSection>
+  );
+}
+
 export function ConnectionsSettings() {
   return (
     <>
@@ -272,6 +363,7 @@ export function ConnectionsSettings() {
         </SettingsRow>
         <CategoryTreesRow />
       </SettingsSection>
+      <ChromeSignInSection />
       <DirectConnectionsSection />
       <EbayOffersSettings />
       <SettingsSection id="remote-access" title="Remote access">

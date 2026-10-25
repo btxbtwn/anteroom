@@ -599,6 +599,11 @@ async function handleStudioMessage(msg) {
       break;
     }
 
+    case 'marketplace.sessions': {
+      await handleMarketplaceSessions(msg);
+      break;
+    }
+
     case 'marketplace.record': {
       await handleMarketplaceRecord(msg);
       break;

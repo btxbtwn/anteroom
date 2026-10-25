@@ -7,6 +7,10 @@ file: Settings → General → About → What's new.
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 
+## 0.1.337 — 2026-10-24
+
+- Settings → Connections has a **Chrome sign-in** for Depop, Poshmark, Mercari, and Sellwild. Anteroom shows who is signed in and when that sign-in expires, and asks you to sign in again when it expires or is about to. The cookies and tokens stay in Chrome.
+
 ## 0.1.336 — 2026-10-24
 
 - A listing now opens like Vendoo: the marketplaces run down the left, and the form for the one you select is on the right. **General** is the photos and the shared fields. Each marketplace form shows every field that listing needs — title, description, price, brand, condition, size, category, and that marketplace's own fields — with what's already filled in, so you can check it before listing. List, Publish, Delist and Mark as listed sit with that form. The Input and Forms tabs are gone. The listing panel starts wider so the form has room beside the list, and you can drag it wider.

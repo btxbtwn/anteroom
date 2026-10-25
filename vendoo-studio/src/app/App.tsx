@@ -46,6 +46,7 @@ import {
 import type { Marketplace } from "../components/MarketplacesPage";
 import { marketplaceName } from "../components/marketplaceNames";
 import { ThemeSync } from "../components/ThemeSync";
+import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSessionNotice";
 
 import { OpenListingTabs } from "../components/OpenListingTabs";
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
@@ -318,6 +319,15 @@ export function App() {
     setMobilePane("workspace");
     setMobileThreadsOpen(false);
     closeMobileSidebar();
+  };
+
+  const openChromeSignIn = () => {
+    if (activeView !== "settings") viewBeforeSettings.current = activeView;
+    setSettingsSection("connections");
+    setSettingsTargetId("chrome-sign-in");
+    setActiveView("settings");
+    setMobilePane("workspace");
+    setMobileSidebarOpen(false);
   };
 
   const openSettings = () => {
@@ -634,6 +644,7 @@ export function App() {
 
   return (
     <div className="app-shell" style={panelWidthStyle}>
+      <MarketplaceSessionNotice onSignIn={openChromeSignIn} />
       <WorkspaceTopbar
         crumbs={crumbs}
         sidebarOpen={!sidebarHidden}
