@@ -29,7 +29,7 @@ EBAY_ASPECTS = "ebay_aspects"
 EBAY_CONDITIONS = "ebay_conditions"
 ETSY_PROPERTIES = "etsy_properties"
 _TAXONOMY_MAX_AGE_S = 24 * 3600
-_etsy_leaves: dict[str, object] = {"at": 0.0, "ids": frozenset()}
+_etsy_taxonomy: dict[str, object] = {"at": 0.0, "leaves": ()}
 
 SchemaMarketplace = Literal["ebay", "etsy"]
 
@@ -110,26 +110,34 @@ async def etsy_properties(taxonomy_id: str) -> list[dict]:
     return fields
 
 
-async def etsy_leaves() -> frozenset[str]:
-    """Etsy's current seller-taxonomy leaves, read at most once a day."""
+async def etsy_taxonomy() -> tuple[dict[str, str], ...]:
+    """Etsy's current seller-taxonomy leaves, id and path, read at most once a day."""
     from vendoo_studio.services import marketplace_accounts
 
-    if _etsy_leaves["ids"] and time.monotonic() - float(_etsy_leaves["at"]) < _TAXONOMY_MAX_AGE_S:
-        return _etsy_leaves["ids"]  # type: ignore[return-value]
+    if _etsy_taxonomy["leaves"] and time.monotonic() - float(_etsy_taxonomy["at"]) < _TAXONOMY_MAX_AGE_S:
+        return _etsy_taxonomy["leaves"]  # type: ignore[return-value]
     body = await marketplace_accounts.etsy_api("GET", "seller-taxonomy/nodes")
-    ids: set[str] = set()
+    leaves: list[dict[str, str]] = []
 
-    def walk(nodes) -> None:
+    def walk(nodes, parents: list[str]) -> None:
         for node in nodes or []:
-            if node.get("children"):
-                walk(node["children"])
-            elif node.get("id"):
-                ids.add(str(node["id"]))
+            name = str(node.get("name") or "").strip()
+            path = [*parents, name] if name else list(parents)
+            children = node.get("children") or []
+            if children:
+                walk(children, path)
+            elif node.get("id") is not None:
+                leaves.append({"id": str(node["id"]), "path": " > ".join(path) if path else str(node["id"])})
 
-    walk(body.get("results"))
-    if ids:
-        _etsy_leaves.update(at=time.monotonic(), ids=frozenset(ids))
-    return frozenset(ids)
+    walk(body.get("results"), [])
+    if leaves:
+        _etsy_taxonomy.update(at=time.monotonic(), leaves=tuple(leaves))
+    return tuple(leaves)
+
+
+async def etsy_leaves() -> frozenset[str]:
+    """The ids of Etsy's current seller-taxonomy leaves."""
+    return frozenset(leaf["id"] for leaf in await etsy_taxonomy())
 
 
 async def fields(marketplace: SchemaMarketplace, category_id: str) -> list[dict]:

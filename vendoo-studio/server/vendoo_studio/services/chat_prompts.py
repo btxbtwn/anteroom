@@ -334,6 +334,15 @@ def _empty_discovered_fields_prompt(db: Session, conv_id: str, evidence: str = "
     )
 
 
+def _live_category_fields_prompt(db: Session, conv_id: str) -> str:
+    """eBay's and Etsy's own field names, when category choice already cached them."""
+    from vendoo_studio.services.direct_categories import live_fields_prompt
+
+    revisions = ListingRepo(db).get_revisions(conv_id)
+    listing = revisions[0].listing_json if revisions and isinstance(revisions[0].listing_json, dict) else {}
+    return live_fields_prompt(listing)
+
+
 def listing_generation_messages(
     skill_rules: str,
     item_details: str,
@@ -366,6 +375,7 @@ def listing_generation_messages(
         f"{generation_evidence_prompt(db, conv_id)}"
         f"{current_listing_prompt(db, conv_id)}"
         f"{_empty_discovered_fields_prompt(db, conv_id, field_evidence)}"
+        f"{_live_category_fields_prompt(db, conv_id)}"
     )
     return [
         {"role": "system", "content": system_content},

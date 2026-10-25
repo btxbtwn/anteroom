@@ -437,6 +437,9 @@ async def prepare_generation_schema(
     seed["marketplace_categories"] = mapped
     conv = ConversationRepo(db).get(conv_id)
     seed_probe_general_fields(seed, conv.notes if conv else notes)
+    from vendoo_studio.services.direct_categories import attach_direct_categories
+
+    await attach_direct_categories(seed, f"{analysis}\n{notes}")
     ListingRepo(db).save_revision(
         conv_id,
         seed,
