@@ -24,6 +24,8 @@ export interface ConversationSummary {
   price?: number | null;
   vendoo_labels?: string[];
   vendoo_marketplaces?: string[];
+  /** Marketplaces Anteroom published directly. Vendoo may still call the item a draft. */
+  direct_marketplaces?: string[];
   /** Each marketplace listing's own page, where Vendoo recorded one. */
   vendoo_listing_urls?: Record<string, string>;
   /** Vendoo's own time tracking: when the item was created, last modified,

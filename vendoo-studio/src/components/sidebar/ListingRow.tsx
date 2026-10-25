@@ -10,7 +10,7 @@ import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
-import { listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, statusHint } from "./listingStatus";
+import { inventoryStatus, listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 
 const HOVER_STATUS_DELAY_MS = 280;
@@ -55,7 +55,10 @@ export function ListingRow({
   const name = (nameBySku && listing.sku?.trim()) || title;
   // A bulk-imported listing has no local photos yet; Vendoo's own image stands in.
   const coverUrl = listing.cover_photo_url || listing.vendoo_cover_url || null;
-  const status = String(listing.status || "draft");
+  const status = inventoryStatus(listing);
+  const statusTitle = status === "active" && String(listing.status || "draft") !== "active"
+    ? "Listed from Anteroom. Vendoo still has this item as a draft."
+    : statusHint(status);
   const settledAt = settled ? compactRelativeTime(listing.settled_at || listing.updated_at) : "";
   const queryClient = useQueryClient();
   const itemRef = useRef<HTMLDivElement>(null);
@@ -112,18 +115,23 @@ export function ListingRow({
     () => marketplaceStatusesFromDraft(draft, visibleMarketplaces),
     [draft, visibleMarketplaces],
   );
-  // A cached draft that names any marketplace is the live word and wins, even
-  // when it says the listing is live nowhere. Only a draft with nothing to say
-  // hands over to what the import recorded.
+  // A cached Vendoo draft that names any marketplace is the live word and wins,
+  // even when it says the listing is live nowhere. Only a draft with nothing to
+  // say hands over to what the import recorded. Anteroom's own publish still
+  // shows, because Vendoo does not know about that listing.
   const importedRows = useMemo(
     () => listedFromImport(listing, visibleMarketplaces),
     [listing, visibleMarketplaces],
   );
-  const draftRows = marketplaceStatuses.filter((row) => row.id !== "general");
-  const listedMarketplaces = draftRows.length
-    ? draftRows.filter((row) => statusIsListed(row.status))
-    : importedRows;
-  const popupStatuses = marketplaceStatuses.length ? marketplaceStatuses : importedRows;
+  const popupStatuses = useMemo(
+    () => withDirectListings(
+      marketplaceStatuses.length ? marketplaceStatuses : importedRows,
+      listing.direct_marketplaces,
+      visibleMarketplaces,
+    ),
+    [marketplaceStatuses, importedRows, listing.direct_marketplaces, visibleMarketplaces],
+  );
+  const listedMarketplaces = popupStatuses.filter((row) => row.id !== "general" && statusIsListed(row.status));
   // "active" alone would read as done. These listings are live on copy older
   // than Studio's last write, and only a delist + relist in Vendoo fixes that.
   const relistMarketplaces = useMemo(() => marketplacesNeedingRelist(listing), [listing]);
@@ -307,7 +315,7 @@ export function ListingRow({
             </button>
           )}
           <div className="mt-0.5 flex items-center gap-2">
-            <ListingStatusLabel status={status} title={statusHint(status)} />
+            <ListingStatusLabel status={status} title={statusTitle} />
             {listing.unsent_edits ? (
               <ListingTag
                 tone="info"

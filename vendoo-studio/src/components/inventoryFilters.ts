@@ -1,6 +1,7 @@
 /** Vendoo Inventory's filters and sorts, over Studio's own listing rows. */
 
 import { needsRelist } from "./relistStatus";
+import { inventoryStatus } from "./sidebar/listingStatus";
 
 export type ListingSortId =
   | "recent"
@@ -54,6 +55,7 @@ export type FilterableListing = {
   updated_at?: string;
   vendoo_labels?: string[];
   vendoo_marketplaces?: string[];
+  direct_marketplaces?: string[];
   vendoo_listed_at?: string | null;
   vendoo_sold_at?: string | null;
   vendoo_listed_dates?: Record<string, string>;
@@ -105,7 +107,7 @@ export function listingStatusTab(status?: string | null): string {
  */
 export function inStatusTab(listing: FilterableListing, tab: ListingStatusFilter): boolean {
   if (tab === "all") return true;
-  const own = listingStatusTab(listing.status);
+  const own = listingStatusTab(inventoryStatus(listing));
   return own === tab || (tab === "draft" && Boolean(listing.unsent_edits) && own !== "sold");
 }
 
@@ -114,7 +116,7 @@ function lower(value: string | null | undefined): string {
 }
 
 function listedOn(listing: FilterableListing): string[] {
-  return listing.vendoo_marketplaces || [];
+  return [...new Set([...(listing.vendoo_marketplaces || []), ...(listing.direct_marketplaces || [])])];
 }
 
 /** Vendoo searches Title and SKU; Studio also searches the labels a listing wears. */
@@ -264,7 +266,7 @@ export function sortListings<T extends FilterableListing>(listings: T[], sort: L
 export function statusCounts(listings: FilterableListing[]): Record<string, number> {
   const counts: Record<string, number> = { all: listings.length };
   for (const listing of listings) {
-    const status = listingStatusTab(listing.status);
+    const status = listingStatusTab(inventoryStatus(listing));
     counts[status] = (counts[status] || 0) + 1;
     if (status !== "draft" && inStatusTab(listing, "draft")) counts.draft = (counts.draft || 0) + 1;
   }

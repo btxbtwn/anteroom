@@ -55,6 +55,8 @@ class ConversationSummary(BaseModel):
     price: float | None = None
     vendoo_labels: list[str] = []
     vendoo_marketplaces: list[str] = []
+    # Marketplaces Anteroom published directly. Vendoo may still call the item a draft.
+    direct_marketplaces: list[str] = []
     # Each marketplace listing's own page, where Vendoo recorded one.
     vendoo_listing_urls: dict[str, str] = {}
     # Vendoo's own time tracking for the item: when it was created, last
@@ -130,9 +132,13 @@ def list_conversations(db: Session = Depends(get_db)):
     revisions = repo.current_revision_ids()
     conversations = repo.list_all()
     unsent = _unsent_edits(db, conversations, revisions)
+    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+    live = MarketplaceListingRepo(db).live_marketplaces()
     return [
         _conv_response(c, _extras(
             _cover_photo_url(covers.get(c.id)), facets.get(c.id), revisions.get(c.id), c.id in unsent,
+            live.get(c.id, []),
         ))
         for c in conversations
     ]
@@ -601,6 +607,7 @@ def _extras(
     facet: dict | None,
     revision_id: str | None = None,
     unsent_edits: bool = False,
+    direct_marketplaces: list[str] | None = None,
 ) -> dict:
     """The per-row fields the sidebar needs alongside the conversation itself."""
     return {
@@ -610,6 +617,7 @@ def _extras(
         "current_revision_id": revision_id,
         "unsent_edits": unsent_edits,
         "etsy_eligible": (facet or {}).get("etsy_eligible", True),
+        "direct_marketplaces": list(direct_marketplaces or []),
     }
 
 
@@ -618,11 +626,14 @@ def _extras_for(db: Session, conv_id: str) -> dict:
     conv = repo.get(conv_id)
     revision_id = repo.current_revision_id(conv_id)
     unsent = _unsent_edits(db, [conv] if conv else [], {conv_id: revision_id} if revision_id else {})
+    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
     return _extras(
         _cover_photo_url(repo.cover_photo(conv_id)),
         repo.listing_facet(conv_id),
         revision_id,
         conv_id in unsent,
+        MarketplaceListingRepo(db).live_marketplaces(conv_id).get(conv_id, []),
     )
 
 
@@ -739,6 +750,7 @@ def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
         price=row.get("price"),
         vendoo_labels=raw_labels,
         vendoo_marketplaces=[str(m) for m in marketplaces] if isinstance(marketplaces, list) else [],
+        direct_marketplaces=[str(m) for m in row.get("direct_marketplaces") or []],
         vendoo_listing_urls=_listing_urls(notes),
         unsent_edits=bool(row.get("unsent_edits")),
         etsy_eligible=bool(row.get("etsy_eligible", True)),

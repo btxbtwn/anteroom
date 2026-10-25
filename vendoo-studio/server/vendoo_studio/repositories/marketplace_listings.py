@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.marketplace_listing import FIELDS, UNSETTLED_STATES, MarketplaceListing
+from vendoo_studio.models.marketplace_listing import FIELDS, LIVE_STATES, UNSETTLED_STATES, MarketplaceListing
 
 
 def as_dict(row: MarketplaceListing | None) -> dict:
@@ -54,6 +54,21 @@ class MarketplaceListingRepo:
             setattr(row, name, value if value is not None or name != "state" else "not_saved")
         self.db.commit()
         return as_dict(row)
+
+    def live_marketplaces(self, conv_id: str | None = None) -> dict[str, list[str]]:
+        """Marketplaces each item is live on, from Anteroom's own listing records.
+
+        Vendoo can still say the item is a draft after a direct publish. The
+        inventory reads this so that row shows the listing anyway.
+        """
+        query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace).filter(
+            MarketplaceListing.state.in_(LIVE_STATES))
+        if conv_id:
+            query = query.filter(MarketplaceListing.conversation_id == conv_id)
+        grouped: dict[str, list[str]] = {}
+        for conversation_id, marketplace in query.all():
+            grouped.setdefault(conversation_id, []).append(marketplace)
+        return grouped
 
     def unsettled(self) -> list[MarketplaceListing]:
         """Records whose last action is still running or unconfirmed, on every item."""

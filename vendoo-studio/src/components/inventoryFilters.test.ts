@@ -225,6 +225,19 @@ describe("filter options", () => {
     expect(statusCounts([...inventory, inProgress])).toEqual({ all: 4, active: 1, sold: 1, draft: 2 });
   });
 
+  it("counts a Vendoo draft Anteroom published as listed", () => {
+    const jacket: FilterableListing = {
+      ...draft,
+      title: "Columbia XL",
+      direct_marketplaces: ["depop", "ebay"],
+      unsent_edits: true,
+    };
+    expect(statusCounts([jacket])).toMatchObject({ all: 1, active: 1, draft: 1 });
+    expect(filterListings([jacket], "", withFilters({ status: "active", marketplaces: ["depop"] }))).toEqual([jacket]);
+    expect(filterListings([jacket], "", withFilters({ notListed: true }))).toEqual([]);
+    expect(marketplaceCounts([jacket])).toMatchObject({ depop: 1, ebay: 1 });
+  });
+
   it("lists every label once, sorted", () => {
     expect(labelOptions([tee, boots, { vendoo_labels: ["a19"] }])).toEqual(["A19", "To List", "Vintage"]);
   });
