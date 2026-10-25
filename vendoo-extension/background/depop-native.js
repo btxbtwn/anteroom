@@ -415,6 +415,7 @@ async function depopApiAction(action, payload) {
         || /^\/api\/v3\/drafts\/products\/[A-Za-z0-9_-]+\/status\/$/.test(path)
         || path === '/presentation/api/v1/attributes/'
         || path === '/presentation/api/v1/users/me/'
+        || depopShopRead(path)
         || path === '/presentation/api/v1/addresses/'
         || path === '/presentation/api/v1/users/me/settings/shipping/'
         || /^\/presentation\/api\/v1\/shipping\/providers\/depop\/\?[A-Za-z0-9._~%=&+-]+$/.test(path));
@@ -554,8 +555,19 @@ async function depopApiAction(action, payload) {
     if (action === 'publish_status') {
       if (!/^[A-Za-z0-9_-]+$/.test(String(payload.publish_job_id))) throw marketplaceError('A Depop publish receipt is required.');
       const status = await request('GET', `/api/v3/drafts/products/${payload.publish_job_id}/status/`);
-      return { complete: status.count_by_status?.COMPLETE === 1 && status.count_by_status?.PENDING === 0,
-        pending: status.count_by_status?.PENDING > 0 };
+      const complete = status.count_by_status?.COMPLETE === 1 && status.count_by_status?.PENDING === 0;
+      const pending = status.count_by_status?.PENDING > 0;
+      // The status counts say the draft posted. The public link is a separate field, or the seller's selling list.
+      // Publish status is only a count. The public link is on the product, or on the one shop row that is this listing.
+      let listing_url = complete ? depopStatusUrl(status, id) : '';
+      if (complete && !listing_url && id) {
+        try {
+          const draft = await request('GET', `/presentation/api/v1/drafts/${id}/`);
+          listing_url = depopListingUrl(draft?.slug || draft?.product_slug || draft?.product?.slug || draft?.url);
+        } catch { /* A posted draft is gone. The shop row is the remaining place to read the link. */ }
+      }
+      if (complete && !listing_url) listing_url = await depopShopUrl(request, payload);
+      return { complete, pending, ...(listing_url ? { listing_url } : {}) };
     }
     throw marketplaceError('Unsupported Depop action.');
   } catch (error) {
@@ -565,6 +577,114 @@ async function depopApiAction(action, payload) {
 
 function depopDraftGone(error) {
   return /could not find draft/i.test(`${error?.message || ''} ${error?.marketplace_message || ''}`);
+}
+
+function depopListingUrl(value) {
+  const text = String(value || '').trim();
+  const absolute = /^https:\/\/www\.depop\.com\/products\/([a-z0-9][a-z0-9-]{0,200})\/?$/i.exec(text);
+  if (absolute) return `https://www.depop.com/products/${absolute[1].toLowerCase()}/`;
+  const slug = text.toLowerCase();
+  return /^[a-z0-9][a-z0-9-]{0,200}$/.test(slug) ? `https://www.depop.com/products/${slug}/` : '';
+}
+
+// One public product from a publish-status body. Several unnamed products stay unresolved.
+function depopStatusUrl(status, draftId) {
+  const rows = [];
+  const lists = [status?.products, status?.drafts, status?.items, status?.objects];
+  if (status?.product) lists.push([status.product]);
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const row of list) {
+      const url = depopListingUrl(row?.slug || row?.url || row?.listing_url);
+      if (!url) continue;
+      const draft = String(row?.draft_id || row?.draftId || '');
+      rows.push({ url, prefer: Boolean(draftId) && draft === String(draftId) });
+    }
+  }
+  const preferred = rows.filter(row => row.prefer);
+  const chosen = preferred.length === 1 ? preferred : rows.length === 1 ? rows : [];
+  return chosen[0]?.url || '';
+}
+
+function depopProductPrice(product) {
+  const pricing = product?.pricing && typeof product.pricing === 'object' ? product.pricing : {};
+  const raw = product?.price_amount ?? product?.price?.price_amount ?? pricing.price_amount
+    ?? pricing.current_price ?? pricing.original_price?.price_amount ?? pricing.original_price
+    ?? (typeof product?.price === 'string' || typeof product?.price === 'number' ? product.price : '');
+  const price = Number(typeof raw === 'object' ? raw?.price_amount ?? raw?.price : raw);
+  return Number.isFinite(price) ? price : null;
+}
+
+function depopShopProduct(product, listing) {
+  const text = String(product?.description || '');
+  const base = depopBaseDescription(listing);
+  const title = String(listing?.title || '').trim();
+  const textMatch = (Boolean(base) && text.startsWith(base)) || (title.length > 8 && text.includes(title));
+  if (!textMatch || !depopListingUrl(product?.slug || product?.url)) return false;
+  if (product?.user_id != null && listing?.seller_id != null && String(product.user_id) !== String(listing.seller_id)) return false;
+  const price = depopProductPrice(product);
+  const wanted = Number(listing?.price);
+  return price == null || !Number.isFinite(wanted) || price === wanted;
+}
+
+// Reads that can name the product a finished publish created. The selling list
+// without a sort starts at the oldest rows, so the new one is not on that page.
+function depopShopRead(path) {
+  const selling = /^\/presentation\/api\/v1\/shops\/\d{1,15}\/products\/by-status\/selling\/\?limit=24$/;
+  const shop = /^\/api\/v1\/shop\/\d{1,15}\/products\/\?limit=200(?:&offset_id=[A-Za-z0-9._~%-]{1,220})?$/;
+  return selling.test(path) || shop.test(path);
+}
+
+function depopProductRows(page) {
+  for (const key of ['objects', 'products', 'data']) {
+    if (Array.isArray(page?.[key])) return page[key];
+  }
+  return [];
+}
+
+function depopCursorToken(value) {
+  const text = encodeURIComponent(String(value ?? ''));
+  return /^[A-Za-z0-9._~%-]{1,220}$/.test(text) ? text : '';
+}
+
+function depopShopMatch(page, listing) {
+  const matches = [...new Set(depopProductRows(page)
+    .filter(product => depopShopProduct(product, listing))
+    .map(product => depopListingUrl(product?.slug || product?.url)))];
+  return matches.length === 1 ? matches[0] : '';
+}
+
+// Publish status names no product. The selling list is a short window that can
+// miss a listing just posted, so the shop inventory is what carries the slug.
+async function depopShopUrl(request, payload) {
+  const listing = payload.listing || {};
+  if (!depopBaseDescription(listing) || !Number.isFinite(Number(listing.price))) return '';
+  let me;
+  try { me = await request('GET', '/presentation/api/v1/users/me/'); } catch { return ''; }
+  const userId = String(me?.id ?? '');
+  if (!/^\d{1,15}$/.test(userId)) return '';
+  const scoped = { ...listing, seller_id: userId };
+  const read = async path => {
+    if (!depopShopRead(path)) return null;
+    try { return await request('GET', path); } catch { return null; }
+  };
+  const early = depopShopMatch(await read(`/presentation/api/v1/shops/${userId}/products/by-status/selling/?limit=24`), scoped);
+  if (early) return early;
+  const inventory = `/api/v1/shop/${userId}/products/?limit=200`;
+  let offset = '';
+  let previousId;
+  for (let pageNumber = 0; pageNumber < 8; pageNumber += 1) {
+    const page = await read(offset ? `${inventory}&offset_id=${offset}` : inventory);
+    const url = depopShopMatch(page, scoped);
+    if (url) return url;
+    const firstId = depopProductRows(page)[0]?.id;
+    if (!page || (pageNumber && firstId != null && firstId === previousId) || page?.meta?.end === true) break;
+    previousId = firstId;
+    const next = depopCursorToken(page?.meta?.last_offset_id);
+    if (!next || next === offset) break;
+    offset = next;
+  }
+  return '';
 }
 
 async function depopAction(action, payload) {
@@ -673,7 +793,7 @@ async function runDepopNative(msg, recovery = false) {
     if (!payload.publish_job_id) throw new Error('No confirmed Depop publish receipt is available. Review the native account.');
     while (Date.now() < payload.deadline) {
       const result = await depopAction('publish_status', payload);
-      if (result.complete) return { ok: true, state: 'published', draft_url: payload.draft_url };
+      if (result.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(result.listing_url ? { listing_url: result.listing_url } : {}) };
       if (!result.pending) throw new Error('Depop did not confirm the listing. Check Depop before listing again.');
       await marketplaceSleep(2000);
     }
@@ -686,7 +806,7 @@ async function runDepopNative(msg, recovery = false) {
       try {
         if (payload.publish_job_id) {
           const status = await depopAction('publish_status', payload);
-          if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url };
+          if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
         } else if (payload.action === 'save_draft') {
           return await verify();
         }

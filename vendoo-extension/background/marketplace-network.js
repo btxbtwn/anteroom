@@ -22,16 +22,17 @@ const DEPOP_PAGE_RULES = [
   [17014, '^https://webapi\\.depop\\.com/presentation/api/v1/addresses/'],
   [17015, '^https://webapi\\.depop\\.com/presentation/api/v1/users/'],
   [17016, '^https://webapi\\.depop\\.com/presentation/api/v1/shipping/'],
-  [17017, '^https://webapi\\.depop\\.com/presentation/api/v1/shops/\\d+/products/by-status/sold/'],
+  [17017, '^https://webapi\\.depop\\.com/presentation/api/v1/shops/\\d+/products/by-status/(sold|selling|onsale)/'],
   [17018, '^https://webapi\\.depop\\.com/api/v1/addresses/'],
   [17019, '^https://webapi\\.depop\\.com/api/v1/shipping-providers/'],
   [17020, '^https://webapi\\.depop\\.com/api/v3/drafts/products/'],
+  [17022, '^https://webapi\\.depop\\.com/api/v1/shop/\\d+/products/'],
 ];
 
 function ensureMarketplaceRequestContext() {
   if (!marketplaceNetworkReady) {
     marketplaceNetworkReady = chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020],
+      removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020, 17021, 17022, 17023],
       addRules: [
         ...DEPOP_PAGE_RULES.map(([id, regexFilter]) => marketplaceHeaderRule(id, DEPOP_PAGE_HEADERS, regexFilter, DEPOP_PAGE_METHODS)),
         marketplaceHeaderRule(17002, { Origin: 'https://www.mercari.com', Referer: 'https://www.mercari.com/sell/' },

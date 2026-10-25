@@ -99,6 +99,22 @@ async function handleNativeMarketplaceMessage(msg) {
         }
       } finally { activeNativeOperation = null; }
     }
+    // A finished Depop publish used to keep only the draft link. Read the public product before answering.
+    if (stored?.finished && stored.result?.ok && stored.result.state === 'published' && stored.context?.marketplace === 'depop'
+        && !stored.result.listing_url && stored.publish_job_id && !activeNativeOperation && !activeJob && !activePatch) {
+      activeNativeOperation = { id: operationId, tabId: null, cancelled: false, controller: new AbortController() };
+      try {
+        const status = await depopApiAction('publish_status', {
+          ...stored.context, ...msg.payload.context, publish_job_id: stored.publish_job_id,
+          action: 'publish', deadline: Date.now() + 50000,
+        });
+        if (status?.listing_url) {
+          stored = { ...stored, result: { ...stored.result, listing_url: status.listing_url } };
+          await chrome.storage.local.set({ [key]: stored });
+        }
+      } catch { /* The listing is already live. A missing link stays missing. */ }
+      finally { activeNativeOperation = null; }
+    }
     sendBrowserResult(msg, stored?.finished ? { finished: true, result: stored.result } : { finished: false });
     return;
   }
