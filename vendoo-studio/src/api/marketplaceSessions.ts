@@ -74,12 +74,13 @@ export interface SessionAlert {
   description: string;
 }
 
-/** One notice per expiry. Signing in again clears it so a later expiry can notify. */
+/** One notice when a sign-in has actually ended. A same-day expiry is only a status line. */
 export function sessionNotification(
   id: string,
   name: string,
   session: ExtensionSession | undefined,
   previous: ExtensionSessionState | undefined,
+  hadSignIn = false,
 ): SessionAlert | null {
   if (!session || session.state === "unknown") return null;
   if (session.state === "expired") {
@@ -89,14 +90,7 @@ export function sessionNotification(
       description: "Sign in again so listing can continue.",
     };
   }
-  if (sessionIsExpiring(session)) {
-    return {
-      key: `${id}:expiring:${session.expires_at}`,
-      title: `${name} sign-in expires soon`,
-      description: "Sign in again before listing starts failing.",
-    };
-  }
-  if (previous === "signed_in" && session.state === "signed_out") {
+  if (session.state === "signed_out" && (previous === "signed_in" || hadSignIn)) {
     return {
       key: `${id}:signed_out`,
       title: `${name} needs a sign-in`,

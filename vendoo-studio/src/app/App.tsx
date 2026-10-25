@@ -321,15 +321,6 @@ export function App() {
     closeMobileSidebar();
   };
 
-  const openChromeSignIn = () => {
-    if (activeView !== "settings") viewBeforeSettings.current = activeView;
-    setSettingsSection("connections");
-    setSettingsTargetId("marketplaces");
-    setActiveView("settings");
-    setMobilePane("workspace");
-    setMobileSidebarOpen(false);
-  };
-
   const openSettings = () => {
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
     setSettingsSection(DEFAULT_SETTINGS_SECTION);
@@ -644,7 +635,7 @@ export function App() {
 
   return (
     <div className="app-shell" style={panelWidthStyle}>
-      <MarketplaceSessionNotice onSignIn={openChromeSignIn} />
+      <MarketplaceSessionNotice />
       <WorkspaceTopbar
         crumbs={crumbs}
         sidebarOpen={!sidebarHidden}

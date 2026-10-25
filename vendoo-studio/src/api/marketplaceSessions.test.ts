@@ -39,6 +39,12 @@ describe("chrome marketplace sign-in", () => {
     const signedOut = session({ state: "signed_out" });
     expect(sessionNotification("mercari", "Mercari", signedOut, undefined)).toBeNull();
     expect(sessionNotification("mercari", "Mercari", signedOut, "signed_in")?.title).toBe("Mercari needs a sign-in");
+    expect(sessionNotification("mercari", "Mercari", signedOut, undefined, true)?.title).toBe("Mercari needs a sign-in");
     expect(chromeSessionPresentation(undefined, false, now).label).toBe("Connect Chrome first");
+  });
+
+  it("waits until the sign-in has ended before asking", () => {
+    const expiresAt = Math.floor(now / 1000) + 60 * 60;
+    expect(sessionNotification("mercari", "Mercari", session({ expires_at: expiresAt, expiring: true }), "signed_in")).toBeNull();
   });
 });
