@@ -18,6 +18,11 @@ test('Depop request context is limited to this extension and the supported API p
     assert.equal(target.test(url), false);
   }
   assert.ok(rule.action.requestHeaders.every(header => ['origin', 'referer'].includes(header.header.toLowerCase())));
+  const receipts = updates[0].addRules.find(value => value.id === 17004);
+  const receiptsTarget = new RegExp(receipts.condition.regexFilter);
+  assert.ok(receiptsTarget.test('https://webapi.depop.com/api/v1/receipts/?role=seller&limit=24'));
+  assert.equal(target.test('https://webapi.depop.com/api/v1/receipts/?role=seller'), false);
+  assert.equal(receiptsTarget.test('https://webapi.depop.com/api/payments/'), false);
 });
 
 test('Mercari request context covers only its GraphQL endpoint from this extension', async () => {

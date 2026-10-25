@@ -78,6 +78,11 @@ async def lifespan(app: FastAPI):
         start_listening()
     except Exception:
         pass
+    try:
+        from vendoo_studio.services.chrome_sales import start_chrome_sales
+        start_chrome_sales()
+    except Exception:
+        pass
     from vendoo_studio.providers import chatgpt_codex, claude_sessions
 
     from vendoo_studio.services import ebay_offers as offer_service
@@ -113,6 +118,11 @@ async def lifespan(app: FastAPI):
     try:
         from vendoo_studio.services.job_watchdog import stop_job_watchdog
         stop_job_watchdog()
+    except Exception:
+        pass
+    try:
+        from vendoo_studio.services.chrome_sales import stop_chrome_sales
+        stop_chrome_sales()
     except Exception:
         pass
     # Last thing before the process goes: pruning frees pages inside the file,

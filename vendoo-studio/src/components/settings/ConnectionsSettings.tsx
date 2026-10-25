@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { EXTENSION_STATUS_POLL_MS, pollMs } from "../../api/polling";
 import { extensionConnection } from "../ExtensionStatus";
@@ -7,7 +7,6 @@ import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
 import type { DirectAccountStatus, DirectMarketplace } from "../../api/directConnections";
 import {
-  EXTENSION_SESSION_MARKETS,
   EXTENSION_SESSION_NAMES,
   chromeSessionPresentation,
   type ExtensionSessionMarket,
@@ -18,6 +17,7 @@ import { MarketplaceLogo } from "../MarketplaceLogo";
 import { Button, buttonVariants } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
+import { Switch } from "../ui/switch";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 function CategoryTreesRow() {
@@ -114,6 +114,33 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
   },
 ];
 
+const CHROME_MARKET_ORDER: ExtensionSessionMarket[] = ["poshmark", "mercari", "depop", "sellwild"];
+
+function MarketplaceSalesSwitch({
+  name,
+  enabled,
+  pending,
+  onChange,
+}: {
+  name: string;
+  enabled: boolean;
+  pending: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      Detect sales
+      <Switch
+        size="sm"
+        checked={enabled}
+        disabled={pending}
+        aria-label={`Sale detection for ${name}`}
+        onCheckedChange={onChange}
+      />
+    </span>
+  );
+}
+
 function directAccountState(account: DirectAccountStatus | undefined): {
   tone: "success" | "warning" | "error" | "muted";
   label: string;
@@ -127,9 +154,13 @@ function directAccountState(account: DirectAccountStatus | undefined): {
 export function DirectConnectionRow({
   marketplace,
   account,
+  salesSwitch,
+  checkError,
 }: {
   marketplace: (typeof DIRECT_MARKETPLACES)[number];
   account: DirectAccountStatus | undefined;
+  salesSwitch?: ReactNode;
+  checkError?: string | null;
 }) {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["direct-connections"] });
@@ -172,8 +203,14 @@ export function DirectConnectionRow({
           {state.label}
         </span>
       }
-      control={control}
+      control={
+        <span className="flex flex-wrap items-center justify-end gap-2">
+          {salesSwitch}
+          {control}
+        </span>
+      }
     >
+      {checkError ? <SettingsNote tone="error">{checkError}</SettingsNote> : null}
       {account?.pending && account.authorizeUrl ? (
         <SettingsNote>
           Finish signing in on the {marketplace.name} page that opened in your browser.{" "}
@@ -226,38 +263,6 @@ function EtsyListingDefaults() {
   );
 }
 
-function DirectConnectionsSection() {
-  const { data } = useQuery({
-    queryKey: ["direct-connections"],
-    queryFn: api.directConnections.status,
-    refetchInterval: (query) => {
-      const accounts = query.state.data?.accounts;
-      return accounts && Object.values(accounts).some((a) => a.pending) ? 2000 : 15000;
-    },
-  });
-  const anyConnected = Boolean(data && Object.values(data.accounts).some((a) => a.connected));
-  const relay = data?.relay;
-  return (
-    <SettingsSection id="direct-connections" title="Sale alerts">
-      {DIRECT_MARKETPLACES.map((marketplace) => (
-        <DirectConnectionRow key={marketplace.id} marketplace={marketplace} account={data?.accounts[marketplace.id]} />
-      ))}
-      <SettingsRow
-        title="How it works"
-        description="eBay and Etsy notify Anteroom's relay when something sells, and this Mac picks the sale up. The listing shows which other marketplaces to delist, and nothing is delisted until you choose. The eBay connection also covers offer permissions. The relay keeps only IDs, never buyer details."
-        status={
-          anyConnected ? (
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <StatusDot tone={relay?.connected ? "success" : "warning"} />
-              {relay?.connected ? "Listening for sales" : relay?.lastError || "Connecting"}
-            </span>
-          ) : null
-        }
-      />
-    </SettingsSection>
-  );
-}
-
 const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
   depop: "Lists on Depop with the account signed in to Chrome.",
   poshmark: "Lists on Poshmark with the account signed in to Chrome.",
@@ -268,9 +273,13 @@ const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
 function ChromeSessionRow({
   marketplace,
   chromeReady,
+  salesSwitch,
+  checkError,
 }: {
   marketplace: ExtensionSessionMarket;
   chromeReady: boolean;
+  salesSwitch?: ReactNode;
+  checkError?: string | null;
 }) {
   const queryClient = useQueryClient();
   const [hint, setHint] = useState<string | null>(null);
@@ -311,34 +320,103 @@ function ChromeSessionRow({
         </span>
       }
       control={
-        <Button size="xs" variant="outline" disabled={!chromeReady || connect.isPending} onClick={() => connect.mutate()}>
-          {connect.isPending ? <Spinner /> : null}
-          {session?.state === "signed_in" ? "Sign in again" : "Sign in"}
-        </Button>
+        <span className="flex flex-wrap items-center justify-end gap-2">
+          {salesSwitch}
+          <Button size="xs" variant="outline" disabled={!chromeReady || connect.isPending} onClick={() => connect.mutate()}>
+            {connect.isPending ? <Spinner /> : null}
+            {session?.state === "signed_in" ? "Sign in again" : "Sign in"}
+          </Button>
+        </span>
       }
     >
       {hint ? <SettingsNote>{hint}</SettingsNote> : null}
       {error ? <SettingsNote tone="error">{error}</SettingsNote> : null}
+      {session?.state === "signed_in" && checkError ? <SettingsNote tone="error">{checkError}</SettingsNote> : null}
     </SettingsRow>
   );
 }
 
-function ChromeSignInSection() {
+function MarketplaceSection() {
+  const queryClient = useQueryClient();
   const extension = useQuery({
     queryKey: ["extension-status"],
     queryFn: api.extension.status,
     refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
   });
+  const direct = useQuery({
+    queryKey: ["direct-connections"],
+    queryFn: api.directConnections.status,
+    refetchInterval: (query) => {
+      const accounts = query.state.data?.accounts;
+      return accounts && Object.values(accounts).some((account) => account.pending) ? 2000 : 15000;
+    },
+  });
+  const detection = useQuery({
+    queryKey: ["sale-detection"],
+    queryFn: () => api.settings.saleDetection(),
+    refetchInterval: 60_000,
+  });
+  const saveDetection = useMutation({
+    mutationFn: ({ marketplace, enabled }: { marketplace: string; enabled: boolean }) =>
+      api.settings.setSaleDetection(marketplace, enabled),
+    onSuccess: (data) => queryClient.setQueryData(["sale-detection"], data),
+  });
   const chromeReady = Boolean(extension.data?.connected);
+  const accounts = direct.data?.accounts;
+  const relay = direct.data?.relay;
+  const enabled = (marketplace: string) => detection.data?.enabled?.[marketplace] !== false;
+  const salesSwitch = (marketplace: string, name: string) => (
+    <MarketplaceSalesSwitch
+      name={name}
+      enabled={enabled(marketplace)}
+      pending={saveDetection.isPending}
+      onChange={(next) => saveDetection.mutate({ marketplace, enabled: next })}
+    />
+  );
+  const listening = DIRECT_MARKETPLACES
+    .filter((marketplace) => accounts?.[marketplace.id]?.connected && enabled(marketplace.id))
+    .map((marketplace) => marketplace.name);
   return (
-    <SettingsSection id="chrome-sign-in" title="Chrome sign-in">
-      {EXTENSION_SESSION_MARKETS.map((marketplace) => (
-        <ChromeSessionRow key={marketplace} marketplace={marketplace} chromeReady={chromeReady} />
+    <SettingsSection id="marketplaces" title="Marketplaces">
+      {DIRECT_MARKETPLACES.map((marketplace) => (
+        <DirectConnectionRow
+          key={marketplace.id}
+          marketplace={marketplace}
+          account={accounts?.[marketplace.id]}
+          salesSwitch={salesSwitch(marketplace.id, marketplace.name)}
+          checkError={detection.data?.checks?.[marketplace.id]}
+        />
+      ))}
+      {CHROME_MARKET_ORDER.map((marketplace) => (
+        <ChromeSessionRow
+          key={marketplace}
+          marketplace={marketplace}
+          chromeReady={chromeReady}
+          salesSwitch={salesSwitch(marketplace, EXTENSION_SESSION_NAMES[marketplace])}
+          checkError={detection.data?.checks?.[marketplace]}
+        />
       ))}
       <SettingsRow
         title="Where the sign-in lives"
         description="Depop, Poshmark, and Sellwild stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
       />
+      <SettingsRow
+        id="sale-detection"
+        title="Sale detection"
+        description="Turn Detect sales on for a marketplace to hear when something sells there. The listing shows where else it is listed, and nothing is delisted until you choose. eBay and Etsy send the sale themselves. Depop, Poshmark, Mercari, and Sellwild are checked with the account signed in to Chrome. Anteroom keeps only the listing and order IDs."
+        status={
+          listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <StatusDot tone={relay?.connected ? "success" : "warning"} />
+              {relay?.connected
+                ? `Listening for ${listening.join(" and ")}`
+                : relay?.lastError || "Connecting"}
+            </span>
+          ) : null
+        }
+      >
+        {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+      </SettingsRow>
     </SettingsSection>
   );
 }
@@ -346,6 +424,7 @@ function ChromeSignInSection() {
 export function ConnectionsSettings() {
   return (
     <>
+      <MarketplaceSection />
       <SettingsSection id="connections" title="Vendoo">
         <ExtensionConnectionRow />
         <SettingsRow
@@ -362,8 +441,6 @@ export function ConnectionsSettings() {
         </SettingsRow>
         <CategoryTreesRow />
       </SettingsSection>
-      <ChromeSignInSection />
-      <DirectConnectionsSection />
       <SettingsSection id="remote-access" title="Remote access">
         <TailscaleHttpsRow />
       </SettingsSection>
