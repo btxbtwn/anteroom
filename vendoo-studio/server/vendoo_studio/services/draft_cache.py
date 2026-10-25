@@ -11,15 +11,12 @@ from __future__ import annotations
 EMPTY_STATUS = (None, "", {}, [])
 
 
-def _listing_statuses(item: object) -> dict:
-    if not isinstance(item, dict):
-        return {}
-    listings = item.get("listings")
-    if not isinstance(listings, dict):
+def _listing_statuses(group: object) -> dict:
+    if not isinstance(group, dict):
         return {}
     return {
         marketplace: {"status": listing["status"]}
-        for marketplace, listing in listings.items()
+        for marketplace, listing in group.items()
         if isinstance(listing, dict) and listing.get("status") not in EMPTY_STATUS
     }
 
@@ -30,11 +27,21 @@ def slim_vendoo_draft_payload(
     form: dict | None = None,
     statuses: dict | None = None,
 ) -> dict:
-    """The status slices of a draft, in the shape the UI already reads."""
+    """The status slices of a draft, in the shape the UI already reads.
+
+    ``externalListings`` is a listing the seller already had on the marketplace.
+    It can be live while the Vendoo nav still says not listed, so the sidebar
+    keeps that status too.
+    """
     payload: dict = {}
-    listings = _listing_statuses(item)
-    if listings:
-        payload["item"] = {"listings": listings}
+    listings = _listing_statuses(item.get("listings") if isinstance(item, dict) else None)
+    external = _listing_statuses(item.get("externalListings") if isinstance(item, dict) else None)
+    if listings or external:
+        payload["item"] = {}
+        if listings:
+            payload["item"]["listings"] = listings
+        if external:
+            payload["item"]["externalListings"] = external
     form_statuses = form.get("statuses") if isinstance(form, dict) else None
     if isinstance(form_statuses, dict) and form_statuses:
         payload["form"] = {"statuses": form_statuses}

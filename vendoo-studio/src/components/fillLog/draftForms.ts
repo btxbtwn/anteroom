@@ -294,6 +294,9 @@ export function formsFromDraft(
   const listings = item?.listings && typeof item.listings === "object"
     ? item.listings as Record<string, unknown>
     : {};
+  const externalListings = item?.externalListings && typeof item.externalListings === "object"
+    ? item.externalListings as Record<string, unknown>
+    : {};
   const leftoverMarkets = new Set(leftovers.map((entry) => entry.marketplace.toLowerCase()));
   const scrapedStatuses = item?.statuses && typeof item.statuses === "object" && !Array.isArray(item.statuses)
     ? item.statuses as Record<string, unknown>
@@ -310,6 +313,7 @@ export function formsFromDraft(
       const status = listing?.status as Record<string, unknown> | undefined;
       return Boolean(status?.listed) || leftoverMarkets.has(id);
     }),
+    ...Object.keys(externalListings).filter((id) => id !== "validate" && !MARKETPLACE_ORDER.includes(id)),
   ];
   for (const id of listingIds) {
     const listing = listings[id] as Record<string, unknown> | undefined;

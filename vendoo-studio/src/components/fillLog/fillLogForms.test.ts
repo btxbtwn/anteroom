@@ -11,7 +11,9 @@ import {
   liveStatusClass,
   liveStatusForMarketplace,
   marketplaceLabel,
+  mergeStatusDrafts,
   statusFromListingStatus,
+  statusIsListed,
 } from "./marketplaces";
 import { sourceFormsForJob } from "./sourceForms";
 
@@ -99,6 +101,39 @@ describe("labels", () => {
     expect(liveStatusForMarketplace("depop", {
       listings: { depop: { status: { listed: true } } },
     })).toBe("LISTED");
+  });
+
+  it("keeps a live listing when the nav still says not listed, including a direct listing", () => {
+    const item = {
+      statuses: { ebay: "NOT LISTED", poshmark: "NOT LISTED", mercari: "NOT LISTED", sellwild: "NOT LISTED", etsy: "LIVE" },
+      listings: {
+        ebay: { status: { notListed: true } },
+        mercari: { status: { listed: true } },
+        etsy: { status: { notListed: true } },
+      },
+      externalListings: {
+        poshmark: { status: { listed: true } },
+        sellwild: { status: { listed: true } },
+      },
+    };
+    expect(liveStatusForMarketplace("ebay", item)).toBe("NOT LISTED");
+    expect(liveStatusForMarketplace("poshmark", item)).toBe("LISTED");
+    expect(liveStatusForMarketplace("mercari", item)).toBe("LISTED");
+    expect(liveStatusForMarketplace("sellwild", item)).toBe("LISTED");
+    expect(liveStatusForMarketplace("etsy", item)).toBe("LIVE");
+    expect(statusIsListed("LIVE")).toBe(true);
+    expect(statusIsListed("NOT LISTED")).toBe(false);
+    expect(mergeStatusDrafts(
+      { item: { listings: { mercari: { status: { listed: true } } } } },
+      { statuses: { mercari: "NOT LISTED", ebay: "NOT LISTED" } },
+    )).toEqual({
+      statuses: { mercari: "NOT LISTED", ebay: "NOT LISTED" },
+      listings: { mercari: { status: { listed: true } } },
+    });
+    expect(liveStatusForMarketplace("mercari", mergeStatusDrafts(
+      { item: { listings: { mercari: { status: { listed: true } } } } },
+      { statuses: { mercari: "NOT LISTED" } },
+    ))).toBe("LISTED");
   });
 
   it("keys hidden fields by marketplace and field", () => {

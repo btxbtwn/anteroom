@@ -53,7 +53,7 @@ function useVendooDraft(jobId: string, enabled: boolean) {
 function LiveStatusChip({ status }: { status?: string }) {
   if (!status) return null;
   return (
-    <span className={`pr-live-status ${liveStatusClass(status)}`} title={`Vendoo status: ${status}`}>
+    <span className={`pr-live-status ${liveStatusClass(status)}`} title={`Listing status: ${status}`}>
       {status}
     </span>
   );
@@ -471,7 +471,7 @@ export function FillLogPanel({
                   <div className="pr-empty">
                     <p>
                       {selectedForm.liveStatus
-                        ? `Vendoo status: ${selectedForm.liveStatus}. Anteroom doesn’t fill this marketplace yet.`
+                        ? `Listing status: ${selectedForm.liveStatus}. Anteroom doesn’t fill this marketplace yet.`
                         : "No fields to show for this marketplace."}
                     </p>
                   </div>

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.354 — 2026-10-25
+
+- The listing status on a thread shows where the item is actually live, including listings you already had on a marketplace, instead of saying not listed for all of them.
+
 ## 0.1.353 — 2026-10-25
 
 - Choosing an eBay shipping policy in Settings → Connections saves that choice. Payment, returns, and the ships-from location stay automatic when the account has only one of each.

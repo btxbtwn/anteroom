@@ -1,5 +1,7 @@
-import { statusFromListingStatus } from "../fillLog/marketplaces";
+import { liveStatusClass, liveStatusForMarketplace, mergeStatusDrafts } from "../fillLog/marketplaces";
 import { marketplaceName } from "../marketplaceNames";
+
+export { liveStatusClass };
 
 // Vendoo's Inventory labels, plus the states that are Studio's own doing.
 const STATUS_HINTS: Record<string, string> = {
@@ -27,7 +29,6 @@ const MARKETPLACE_STATUS_ORDER = [
 ];
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const MARKETPLACE_ID_ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };
-const INVALID_LIVE_STATUSES = new Set(["BETA", "NEW", "ALPHA"]);
 
 /** Why a listing reads the way it does. Status follows Vendoo; it is never set here. */
 export function statusHint(status: string): string {
@@ -40,67 +41,42 @@ function marketplaceLabel(id: string): string {
   return marketplaceName(id);
 }
 
-function normalizeLiveStatus(raw: unknown): string | undefined {
-  if (typeof raw !== "string") return undefined;
-  const cleaned = raw.replace(/\s+/g, " ").trim().toUpperCase();
-  if (!cleaned || INVALID_LIVE_STATUSES.has(cleaned)) return undefined;
-  return cleaned;
-}
-
-export function liveStatusClass(status?: string): string {
-  const key = (status || "").toLowerCase().replace(/\s+/g, "-");
-  if (key === "listed" || key === "complete" || key === "sold") return "is-listed";
-  if (key === "not-listed" || key === "draft" || key === "incomplete") return "is-not-listed";
-  if (key === "failed") return "is-failed";
-  return "";
-}
-
-/** Live Vendoo status per marketplace, limited to `visible` (Settings → Listings → Marketplaces) when given. */
+/** Listing status per marketplace, limited to `visible` (Settings → Listings → Marketplaces) when given. */
 export function marketplaceStatusesFromDraft(
-  draft: Record<string, unknown> | undefined | null,
+  draft: unknown,
   visible?: Set<string>,
 ): {
   id: string;
   label: string;
   status: string;
 }[] {
-  if (!draft) return [];
-  const scrapedRaw = draft.statuses && typeof draft.statuses === "object" && !Array.isArray(draft.statuses)
-    ? draft.statuses as Record<string, unknown>
-    : undefined;
-  const form = draft.form && typeof draft.form === "object" && !Array.isArray(draft.form)
-    ? draft.form as Record<string, unknown>
-    : undefined;
-  const formStatuses = form?.statuses && typeof form.statuses === "object" && !Array.isArray(form.statuses)
-    ? form.statuses as Record<string, unknown>
-    : undefined;
-  const scraped = scrapedRaw || formStatuses || {};
-  const item = draft.item && typeof draft.item === "object" && !Array.isArray(draft.item)
-    ? draft.item as Record<string, unknown>
-    : undefined;
-  const listings = item?.listings && typeof item.listings === "object" && !Array.isArray(item.listings)
-    ? item.listings as Record<string, unknown>
-    : {};
-
+  const merged = mergeStatusDrafts(draft);
+  if (!merged) return [];
+  const scraped = merged.statuses || {};
+  const listings = merged.listings || {};
+  const externalListings = merged.externalListings || {};
+  const extraIds = [
+    ...Object.keys(listings),
+    ...Object.keys(externalListings),
+  ].filter((id) => id !== "validate" && !MARKETPLACE_STATUS_ORDER.includes(id) && !(id in scraped));
   const ids = [
     ...MARKETPLACE_STATUS_ORDER,
     ...Object.keys(scraped).filter((id) => !MARKETPLACE_STATUS_ORDER.includes(id)),
-    ...Object.keys(listings).filter(
-      (id) => id !== "validate" && !MARKETPLACE_STATUS_ORDER.includes(id) && !(id in scraped),
-    ),
+    ...extraIds,
   ];
 
+  const item = {
+    statuses: scraped,
+    listings,
+    externalListings,
+  };
   const rows: { id: string; label: string; status: string }[] = [];
   const seen = new Set<string>();
   for (const rawId of ids) {
     const id = MARKETPLACE_ID_ALIASES[rawId] || rawId;
     if (seen.has(id)) continue;
     if (visible && id !== "general" && !visible.has(id)) continue;
-    let status = normalizeLiveStatus(scraped[rawId]);
-    if (!status && rawId !== "general") {
-      const listing = listings[rawId] as Record<string, unknown> | undefined;
-      status = statusFromListingStatus(listing?.status) || "";
-    }
+    const status = liveStatusForMarketplace(id, item);
     if (!status) continue;
     seen.add(id);
     rows.push({ id, label: marketplaceLabel(id), status });
