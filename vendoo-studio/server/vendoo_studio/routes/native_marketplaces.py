@@ -38,6 +38,12 @@ def status(conv_id: str, db: Session = Depends(get_db)):
     return _sync(native.status, conv_id, db)
 
 
+@router.post("/sync")
+async def sync(conv_id: str, db: Session = Depends(get_db)):
+    """Settle unconfirmed results and look for sales of this item's direct listings."""
+    return await _reply(native.sync(conv_id, db))
+
+
 @router.get("/preflight")
 async def preflight(conv_id: str, sellwild_category_id: int | None = Query(None, ge=1),
                     sellwild_condition_id: int | None = Query(None, ge=1), db: Session = Depends(get_db)):

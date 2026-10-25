@@ -44,10 +44,10 @@ class NativeMarketplaceError(RuntimeError):
         self.status_code = status_code
 
 
-Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild"]
+Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]
 InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
 API_MARKETPLACES = frozenset({"ebay", "etsy"})
-NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild"}
+NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
 UNKNOWN = "Anteroom could not confirm what happened. Check the result before trying again."
 # How long Chrome has to answer one step, and how long a job then keeps the
 # slot waiting for Chrome to report what it did before giving up as unknown.
@@ -201,7 +201,7 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
     reason = str(result.get("error") or "").strip()
     if result.get("ok") is True:
         url = None
-        if marketplace != "sellwild" and action in {"save_draft", "publish"}:
+        if marketplace not in {"sellwild", "vinted"} and action in {"save_draft", "publish"}:
             url = draft_url(marketplace, str(result.get("draft_url") or ""))
             replaced = marketplace == "depop" and result.get("draft_replaced") is True
             if record.get("draft_url") and url != record["draft_url"] and not replaced:
@@ -287,7 +287,7 @@ def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[s
         return ["update"]
     if marketplace in {"ebay", "poshmark"}:
         return ["list"]
-    if marketplace == "sellwild":
+    if marketplace in {"sellwild", "vinted"}:
         return ["publish"]
     current = record.get("state") == "draft" and record.get("revision_id") == revision_id and record.get("draft_url")
     return ["publish"] if current else ["save_draft", "publish"]
@@ -732,6 +732,36 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
     finally:
         release_api_job(check_job.id)
         schedule_advance_job_queue()
+
+
+async def sync(conv_id: str, db: Session) -> dict:
+    """The seller's Sync: settle unconfirmed results and look for sales of this item's direct listings.
+
+    Read-only, like Check. eBay and Etsy report sales through the relay as they
+    happen, so only the marketplaces read through Chrome are asked for sales.
+    """
+    from vendoo_studio.services import chrome_sales
+    from vendoo_studio.services.marketplace_delist import listings as live_listings
+
+    _conversation(db, conv_id)
+    checked: dict[str, str | None] = {}
+    for marketplace, record in MarketplaceListingRepo(db).for_conversation(conv_id).items():
+        if record.get("state") not in UNSETTLED_STATES or not record.get("job_id") or _running(record):
+            continue
+        try:
+            await check_result(conv_id, marketplace, db)
+            checked[marketplace] = None
+        except NativeMarketplaceError as exc:
+            checked[marketplace] = str(exc)
+    for marketplace, entry in live_listings(db, conv_id).items():
+        if marketplace not in chrome_sales.CHROME_MARKETS or checked.get(marketplace):
+            continue
+        if entry.get("state") != "live" or entry.get("sold_here") or not entry.get("listing_id"):
+            continue
+        ok = await chrome_sales.check_now(marketplace)
+        checked[marketplace] = None if ok else f"Chrome could not check {NAMES[marketplace]}. Connect Chrome and sync again."
+    return {"checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "marketplaces": {name: {"ok": error is None, "error": error} for name, error in checked.items()}}
 
 
 def reset(conv_id: str, marketplace: Marketplace, db: Session) -> dict:

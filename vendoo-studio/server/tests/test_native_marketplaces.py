@@ -432,6 +432,25 @@ class NativeMarketplacesTest(unittest.TestCase):
         jobs = self.client.get(f"/api/jobs?conversation_id={self.conv.id}").json()
         self.assertTrue(all(job["mode"] == "native_marketplace" for job in jobs))
 
+    def test_sync_settles_an_unconfirmed_result_then_checks_for_sales(self):
+        self.bridge.side_effect = BrowserBridgeError("lost")
+        with patch.object(native, "SETTLE_DEADLINE_S", 0):
+            self.list("poshmark")
+        self.bridge.side_effect = None
+        self.bridge.return_value = {"finished": True, "result": {"ok": True, "state": "published", "listing_url": POSH_URL}}
+        check_now = AsyncMock(return_value=True)
+        with patch("vendoo_studio.services.chrome_sales.check_now", check_now):
+            body = self.client.post(f"{self.base}/sync").json()
+        self.assertEqual(body["marketplaces"], {"poshmark": {"ok": True, "error": None}})
+        self.assertEqual(self.status()["poshmark"]["state"], "published")
+        check_now.assert_awaited_once_with("poshmark")
+        writes = self.actions()
+        with patch("vendoo_studio.services.chrome_sales.check_now", AsyncMock(return_value=False)):
+            body = self.client.post(f"{self.base}/sync").json()
+        self.assertFalse(body["marketplaces"]["poshmark"]["ok"])
+        self.assertIn("Connect Chrome", body["marketplaces"]["poshmark"]["error"])
+        self.assertEqual(self.actions(), writes)
+
     def test_a_pasted_draft_link_is_checked_without_repeating_the_write(self):
         self.bridge.side_effect = BrowserBridgeError("lost")
         with patch.object(native, "SETTLE_DEADLINE_S", 0):

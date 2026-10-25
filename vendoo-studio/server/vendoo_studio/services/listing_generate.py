@@ -794,6 +794,39 @@ def sync_title_size(listing: dict) -> bool:
     return True
 
 
+def ebay_size(listing: dict, block: dict, size: str) -> str:
+    """The general size as eBay's form spells it: one of the category's own Size choices when they are known."""
+    from vendoo_studio.models.ebay_fields import ebay_optional_raw, ebay_size_for_type
+    from vendoo_studio.models.sizes import size_choice
+
+    spelled = ebay_size_for_type(size, ebay_optional_raw(block, "sizeType") or listing.get("sizeType"))
+    choices = ebay_size_choices(listing, block)
+    return size_choice(spelled, choices) or size_choice(size, choices) or spelled
+
+
+def ebay_size_choices(listing: dict, block: dict | None = None) -> list[str]:
+    """The Size choices of the listing's eBay category, from the cached category schema, or none."""
+    from vendoo_studio.services.category_fields import load_fields
+
+    ids = listing.get("marketplace_category_ids")
+    block = block if isinstance(block, dict) else {}
+    category_id = str((ids.get("ebay") if isinstance(ids, dict) else "") or block.get("categoryId") or "").strip()
+    if not category_id:
+        return []
+    try:
+        specs = load_fields("ebay", category_id) or {}
+    except Exception:  # noqa: BLE001 - without a cached schema the size keeps eBay's usual spelling
+        log.info("No cached eBay schema for %s", category_id)
+        return []
+    spec = next((spec for spec in specs.values() if (spec.display or spec.key).strip().casefold() == "size"), None)
+    if spec is None:
+        return []
+    labels = list(spec.options.values())
+    for scale in spec.scales.values():
+        labels.extend((scale.get("options") or {}).values())
+    return labels
+
+
 def propagate_general_size(listing: dict, *, previous_size: str | None = None) -> bool:
     """Mirror general size into marketplace size slots that were following it.
 
@@ -810,7 +843,6 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
         listing["size"] = size
     changed = False
     from vendoo_studio.models.depop_fields import depop_size_for
-    from vendoo_studio.models.ebay_fields import ebay_optional_raw, ebay_size_for_type
 
     previous = sanitize_size_value(previous_size) if previous_size is not None else None
     for specifics_key in _SIZE_SPECIFIC_KEYS:
@@ -820,7 +852,7 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
         current = str(block.get("size") or "").strip()
         target = size
         if specifics_key == "ebay_specifics":
-            target = ebay_size_for_type(size, ebay_optional_raw(block, "sizeType") or listing.get("sizeType"))
+            target = ebay_size(listing, block, size)
         elif specifics_key == "depop_specifics":
             # A kids' age is written even where Depop had no size yet: the
             # letter on the tag is not one of its choices.
@@ -1241,6 +1273,9 @@ def persist_generated_listing(
     listing["package_dimensions_in"] = package_dimensions_string()
     listing["zipCode"] = get_ebay_inventory_location()
     apply_send_readiness_fixes(listing)
+    from vendoo_studio.services.vinted_listing import apply_vinted_listing
+
+    apply_vinted_listing(listing)
     revisions = ListingRepo(db).get_revisions(conv_id)
     if revisions:
         selected = revisions[0].listing_json

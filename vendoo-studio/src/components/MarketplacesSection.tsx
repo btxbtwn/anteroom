@@ -17,11 +17,12 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./u
 import { Spinner } from "./ui/spinner";
 
 type Marketplace = DelistMarketplace;
-const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild"];
-const NATIVE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild"]);
+const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
+const NATIVE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]);
 // What Delist does on each marketplace: eBay has no delete; Sellwild offers only its own delist.
+// Vinted is listed here so a live link can be marked, and Delist is not offered for it.
 const REMOVED: Record<Marketplace, string> = {
-  ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted", sellwild: "Delisted",
+  ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted", sellwild: "Delisted", vinted: "Delisted",
 };
 
 type Tone = "live" | "neutral" | "busy" | "attention" | "failed" | "idle";
@@ -230,7 +231,11 @@ export function MarketplacesLayout({
     mutationFn: (marketplaces: Marketplace[]) => api.marketplaceListings.delist(convId, marketplaces),
     retry: false,
     onSuccess: (data) => queryClient.setQueryData(liveKey, data),
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: liveKey }),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      // The sidebar row drops the delisted marketplaces and may read Draft.
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
   });
   const mark = useMutation({
     mutationFn: ({ marketplace, state, url }: { marketplace: Marketplace; state: MarketplaceMark; url?: string }) =>
@@ -240,6 +245,7 @@ export function MarketplacesLayout({
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: liveKey });
       void queryClient.invalidateQueries({ queryKey: nativeKey });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
 
@@ -252,7 +258,8 @@ export function MarketplacesLayout({
   }
   async function listNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
-    const extra = marketplace === "sellwild" ? " Sellwild may hold it for review."
+    const extra = marketplace === "vinted" ? " This uploads it on Vinted. It does not save a draft."
+      : marketplace === "sellwild" ? " Sellwild may hold it for review."
       : marketplace === "ebay" ? " This uses your eBay shipping, payment, and return policies, set in Settings → Connections → eBay when you have more than one."
       : marketplace === "etsy" && !etsyEligible ? " Etsy may still reject it if the item is not vintage, handmade, or a supply."
       : "";
@@ -276,7 +283,7 @@ export function MarketplacesLayout({
   const busy = disabled || action.isPending || delist.isPending || mark.isPending || native.isPending || native.isError;
   const statuses = ORDER.map((marketplace) => rowStatus(marketplace, listings[marketplace],
     NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined, revisionId, etsyEligible));
-  const removable = ORDER.filter((marketplace) => deletable(listings[marketplace]));
+  const removable = ORDER.filter((marketplace) => marketplace !== "vinted" && deletable(listings[marketplace]));
   const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
 
   const running = (marketplace: Marketplace) => isRunning(drafts[marketplace as NativeMarketplace]);
@@ -341,7 +348,7 @@ export function MarketplacesLayout({
     const entry = listings[marketplace];
     const canList = listable(marketplace, status);
     const canUpdate = updatable(marketplace, status);
-    const canDelist = deletable(entry);
+    const canDelist = marketplace !== "vinted" && deletable(entry);
     return (
       <Menu>
         <MenuTrigger render={<Button variant="ghost" size="icon-xs" className="shrink-0" aria-label={`${name} actions`} disabled={busy} />}>
@@ -367,29 +374,33 @@ export function MarketplacesLayout({
     const draft = NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined;
     if (draft?.error || isRunning(draft) || unconfirmed(marketplace)) return null;
     const gaps = preflightGaps(marketplace);
-    const blocking = gaps.filter((gap) => gap.blocking);
     if (!gaps.length) return null;
+    const name = marketplaceName(marketplace);
+    const blocking = gaps.some((gap) => gap.blocking);
+    const fields = [...new Set(gaps.map((gap) => gap.field))];
     const prompt = [
-      `${marketplaceName(marketplace)} still needs details before this item can be listed.`,
+      blocking
+        ? `${name} still needs details before this item can be listed.`
+        : `${name} will leave these fields empty when this item is listed.`,
       ...gaps.map((gap) => `${gap.field}: ${gap.message}`),
-      "Fill those fields in this listing. Do not list it; I will press List again.",
+      blocking
+        ? "Fill those fields in this listing. Do not list it; I will press List again."
+        : `Set each one to the closest of ${name}'s choices in this listing. Do not list it; I will press List again.`,
     ].join("\n");
     return (
       <>
         {gaps.map((gap) => <p key={`${gap.field}:${gap.message}`} className="text-muted-foreground">{gap.message}</p>)}
-        {blocking.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {onEditField && blocking.map((item) => (
-              <Button key={item.field} size="xs" variant="ghost" title={item.message} onClick={() => onEditField(item.field)}>
-                Edit {fieldLabel(item.field)}
-              </Button>
-            ))}
-            {onAskChat && (
-              <Button size="xs" variant="outline" title="Chat fills these fields. It does not list the item."
-                onClick={() => onAskChat(prompt)}>Ask chat</Button>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {onEditField && fields.map((field) => (
+            <Button key={field} size="xs" variant="ghost" onClick={() => onEditField(field)}>
+              Edit {fieldLabel(field)}
+            </Button>
+          ))}
+          {onAskChat && (
+            <Button size="xs" variant="outline" title="Chat fills these fields. It does not list the item."
+              onClick={() => onAskChat(prompt)}>Ask chat</Button>
+          )}
+        </div>
       </>
     );
   }
@@ -553,7 +564,7 @@ export function MarketplacesLayout({
             {(() => {
               const draft = NATIVE.has(selectedMarketplace) ? drafts[selectedMarketplace as NativeMarketplace] : undefined;
               const name = railLabel(selectedMarketplace);
-              if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "sellwild" || selectedMarketplace === "ebay") return null;
+              if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "sellwild" || selectedMarketplace === "ebay" || selectedMarketplace === "vinted") return null;
               return (
                 <div className="flex items-center gap-2">
                   <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"

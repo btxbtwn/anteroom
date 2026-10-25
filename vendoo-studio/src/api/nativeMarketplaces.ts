@@ -1,4 +1,4 @@
-export type NativeMarketplace = "ebay" | "poshmark" | "mercari" | "depop" | "etsy" | "sellwild";
+export type NativeMarketplace = "ebay" | "poshmark" | "mercari" | "depop" | "etsy" | "sellwild" | "vinted";
 /** What the marketplace's refusal was, so the section can offer the one action that fixes it. */
 export type NativeErrorCode = "signed_out" | "challenge" | "rate_limited" | "missing_fields" | "rejected" | "schema_drift" | "network" | "uncertain";
 export interface NativeErrorField { field: string; message: string }
@@ -25,6 +25,11 @@ export interface NativeDraft {
   progress?: { step: string; label: string; index: number; total: number } | null;
 }
 export type NativeDrafts = Partial<Record<NativeMarketplace, NativeDraft>>;
+/** What Sync checked on each marketplace with a direct listing. */
+export interface NativeSync {
+  checked_at: string;
+  marketplaces: Partial<Record<NativeMarketplace, { ok: boolean; error: string | null }>>;
+}
 export interface PreflightGap { field: string; message: string; blocking: boolean }
 export interface NativePreflight {
   revision_id: string | null;

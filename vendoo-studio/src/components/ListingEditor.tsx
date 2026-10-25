@@ -11,7 +11,7 @@ import { SendProgress, sendProgressLabel } from "./SendProgress";
 import { ListingBlockers } from "./ListingBlockers";
 import { ListingHistory } from "./ListingHistory";
 import { blockerTarget, isEbayInventoryLocationEdit, matchingEditorField } from "./listingChanges";
-import { VendooSyncStatus } from "./VendooSyncStatus";
+import { ListingSyncStatus } from "./ListingSyncStatus";
 import { OpenListingButton } from "./OpenListingButton";
 import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -258,7 +258,7 @@ export function ListingEditor({
     const selected = new Set(marketplaceSettings?.selected ?? ["ebay", "etsy", "poshmark", "mercari", "depop"]);
     return [
       "general",
-      ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => selected.has(id)),
+      ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => id === "vinted" || selected.has(id)),
     ];
   }, [marketplaceSettings?.selected]);
 
@@ -392,7 +392,7 @@ export function ListingEditor({
             }}
           />
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
-          <VendooSyncStatus
+          <ListingSyncStatus
             convId={convId}
             bound={Boolean(listingJob?.vendoo_item_id || importedItemId)}
           />
@@ -979,8 +979,18 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string, schemaKn
         { key: "sellwild.condition", label: "Condition", locked: true },
         ...specificsFields(listing?.sellwild_specifics, "sellwild_specifics", ["category_path", "categoryPath"]),
       ];
-    case "grailed":
     case "vinted":
+      return [
+        { key: "price", label: "Price", type: "number" },
+        { key: "vinted_specifics.category", label: "Category" },
+        { key: "vinted_specifics.condition", label: "Condition" },
+        { key: "vinted_specifics.brand", label: "Brand" },
+        { key: "vinted_specifics.size", label: "Size" },
+        { key: "vinted_specifics.color", label: "Color" },
+        { key: "vinted_specifics.packageSize", label: "Package size" },
+        { key: "vinted_specifics.material", label: "Material" },
+      ];
+    case "grailed":
     case "facebook":
       // Their fields come from the category Vendoo maps to, once it is chosen.
       return [

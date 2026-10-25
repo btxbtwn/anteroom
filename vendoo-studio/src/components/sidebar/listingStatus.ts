@@ -41,29 +41,53 @@ function marketplaceLabel(id: string): string {
   return marketplaceName(id);
 }
 
+/** Where the listing is live: Vendoo's word plus Anteroom's own publishes, less what Anteroom delisted. */
+export function liveMarketplaces(listing: {
+  vendoo_marketplaces?: string[];
+  direct_marketplaces?: string[];
+  removed_marketplaces?: string[];
+}): string[] {
+  const removed = new Set((listing.removed_marketplaces || []).map((id) => MARKETPLACE_ID_ALIASES[id] || id));
+  const vendoo = (listing.vendoo_marketplaces || []).filter((id) => !removed.has(MARKETPLACE_ID_ALIASES[id] || id));
+  return [...new Set([...vendoo, ...(listing.direct_marketplaces || [])])];
+}
+
 /**
  * The inventory label. Vendoo can still say draft after Anteroom published the
- * item itself; that row reads Active, the same as any other live listing.
- * A sale, a failed send, and a send in progress keep their own labels.
+ * item itself; that row reads Active, the same as any other live listing. It
+ * can also still say active after Anteroom delisted the item everywhere; that
+ * row reads Draft. A sale, a failed send, and a send in progress keep their own labels.
  */
 export function inventoryStatus(listing: {
   status?: string | null;
+  vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
+  removed_marketplaces?: string[];
 }): string {
   const status = String(listing.status || "draft");
   if (status === "sold" || status === "listing" || status === "failed") return status;
   if ((listing.direct_marketplaces || []).length && (status === "draft" || status === "in_progress")) return "active";
+  if (status === "active" && (listing.removed_marketplaces || []).length && !liveMarketplaces(listing).length) return "draft";
   return status;
 }
 
-/** Marketplace chips, with Anteroom's own live listings outranking a Vendoo "not listed". */
+/** Marketplace chips, with Anteroom's own live listings and delists outranking Vendoo's word. */
 export function withDirectListings(
   rows: { id: string; label: string; status: string }[],
   direct: string[] | undefined,
   visible?: Set<string>,
+  removed?: string[],
 ): { id: string; label: string; status: string }[] {
-  if (!direct?.length) return rows;
-  const byId = new Map(rows.map((row) => [row.id, row]));
+  const gone = new Set((removed || []).map((id) => MARKETPLACE_ID_ALIASES[id] || id));
+  // Vendoo is not told about a direct delist, so its "listed" is stale there.
+  // A sale still stands.
+  const kept = gone.size
+    ? rows.map((row) => (gone.has(row.id) && row.status !== "SOLD" && row.status !== "SHIPPED"
+      ? { ...row, status: "DELISTED" }
+      : row))
+    : rows;
+  if (!direct?.length) return kept;
+  const byId = new Map(kept.map((row) => [row.id, row]));
   let changed = false;
   for (const rawId of direct) {
     const id = MARKETPLACE_ID_ALIASES[rawId] || rawId;
@@ -78,7 +102,7 @@ export function withDirectListings(
       changed = true;
     }
   }
-  if (!changed) return rows;
+  if (!changed) return kept;
   return [...byId.values()].sort((left, right) => statusOrderIndex(left.id) - statusOrderIndex(right.id));
 }
 

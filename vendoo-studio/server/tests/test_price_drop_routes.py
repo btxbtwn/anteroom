@@ -17,6 +17,12 @@ from vendoo_studio.services.vendoo_watch import SYNCED_REVISION
 
 class PriceDropRouteTest(unittest.TestCase):
     def setUp(self):
+        # Sold items are read from the whole database, which parallel tests
+        # share. Matching sales written by another test would turn the default
+        # percent suggestion into a sell-through price, so start from none.
+        outcomes = patch("vendoo_studio.services.sell_through.collect_outcomes", return_value=[])
+        outcomes.start()
+        self.addCleanup(outcomes.stop)
         self.db = SessionLocal()
         self.client = TestClient(app)
         self.conv = ConversationRepo(self.db).create(title="Price drop")

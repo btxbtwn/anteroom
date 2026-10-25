@@ -42,7 +42,7 @@ describe("marketplaces section", () => {
   it("shows one row per marketplace in a fixed order with a status", () => {
     const html = render({});
     const names = [...html.matchAll(/<li aria-label="([^"]+)"/g)].map((match) => match[1]);
-    expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild"]);
+    expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]);
     expect(row(html, "eBay")).toContain("Not listed");
     // Ordinary "not listed" stays in the row for assistive tech, not as a second line on every marketplace.
     expect(row(html, "eBay")).not.toContain('role="status"');
@@ -184,6 +184,18 @@ describe("marketplaces section", () => {
     expect(enabledButton(html, "Edit Color")).toBe(true);
     expect(enabledButton(html, "Ask chat")).toBe(true);
     expect(disabledButton(html, "List…")).toBe(true);
+  });
+
+  it("offers Edit and Ask chat for a value the marketplace will leave empty, without stopping List", () => {
+    const gaps = [{ field: "ebay_specifics.category_specifics.Size", message: "Size “Huge” is not one of eBay's choices, so it is left empty.", blocking: false }];
+    const html = render({}, {}, {
+      selected: "ebay", onAskChat: vi.fn(), onEditField: vi.fn(),
+      preflight: { marketplaces: { ebay: { ready: true, gaps } } },
+    });
+    expect(html).toContain("is not one of eBay");
+    expect(enabledButton(html, "Edit Size")).toBe(true);
+    expect(enabledButton(html, "Ask chat")).toBe(true);
+    expect(enabledButton(html, "List…")).toBe(true);
   });
 
   it("offers List on eBay from the same rail", () => {

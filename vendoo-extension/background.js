@@ -43,6 +43,7 @@ importScripts('background/mercari-native.js');
 importScripts('background/marketplace-network.js');
 importScripts('background/poshmark-native.js');
 importScripts('background/sellwild-native.js');
+importScripts('background/vinted-native.js');
 importScripts('background/native-marketplaces.js');
 importScripts('background/marketplace-delete.js');
 importScripts('background/marketplace-sessions.js');

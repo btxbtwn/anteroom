@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import copy
 import re
-from typing import Any
 
+from vendoo_studio.models.sizes import size_key
 from vendoo_studio.services.listing_generate import (
     _SIZE_SPECIFIC_KEYS,
     align_size_fields,
@@ -68,33 +68,6 @@ def size_problems(listing: dict, photo: str | None = None) -> str | None:
         if str(after.get("title") or "") != str(listing.get("title") or ""):
             problems.append("the title does not carry the size")
         seen = _TAG_SOURCE.sub("", photo or "").strip()
-        if seen and not _UNREAD.match(seen) and _plain(seen) != _plain(general):
+        if seen and not _UNREAD.match(seen) and size_key(seen) != size_key(general):
             problems.append("the photos read a different size")
     return "; ".join(problems) or None
-
-
-def _plain(size: Any) -> str:
-    """A size as one spelling, so a tag reading ``Large (12/14)`` or ``2X`` matches ``L`` or ``2XL``."""
-    text = re.sub(r"[\s.\-]+", "", _TAG_RANGE.sub("", str(size)).upper())
-    text = _SIZE_WORDS.get(text, text)
-    text = _X_WORD.sub(lambda match: match.group(1) + match.group(2)[0], text)
-    if counted := _COUNTED_SIZE.match(text):
-        return f"{counted.group(1)}X{counted.group(2) or 'L'}"
-    if repeated := _REPEATED_SIZE.match(text):
-        xs, letter = len(repeated.group(1)), repeated.group(2)
-        return f"{xs}X{letter}" if xs > 1 else "X" * xs + letter
-    return text
-
-
-# The range a tag gives after the size, like ``M (8-10)``, is not the size.
-_TAG_RANGE = re.compile(r"(?<=\S)\s*\([^)]*\)\s*$")
-_SIZE_WORDS = {
-    "EXTRASMALL": "XS", "XSMALL": "XS", "SMALL": "S", "MEDIUM": "M", "LARGE": "L",
-    "EXTRALARGE": "XL", "XLARGE": "XL", "XXLARGE": "XXL", "XXXLARGE": "XXXL",
-}
-# 3X-Large and XX-Small, as 3XL and XXS.
-_X_WORD = re.compile(r"^([2-6]?X+)(LARGE|SMALL)$")
-# 2XL, 3XS, and plus sizing's 2X, which is 2XL.
-_COUNTED_SIZE = re.compile(r"^([2-6])X([SL]?)$")
-# XS, XXL, XXXL.
-_REPEATED_SIZE = re.compile(r"^(X*)([SL])$")

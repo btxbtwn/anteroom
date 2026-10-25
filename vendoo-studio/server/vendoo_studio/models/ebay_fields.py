@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+from vendoo_studio.models.sizes import letter_size
 from vendoo_studio.models.listing_values import (
     collapse_option,
     dropdown_field_options,
@@ -506,10 +507,10 @@ def flatten_ebay_specifics(listing: dict) -> bool:
 
 
 def ebay_size_for_type(size: Any, size_type: Any) -> str:
-    """eBay's petite sizes use PS/PM/PL/PXL or a numeric P suffix."""
+    """A size as eBay spells it: counted letters (2XL, not XXL), and PS/PM/PL/PXL or a numeric P suffix for petites."""
     text = text_value(size)
     if text_value(size_type).casefold() not in {"petite", "petites"}:
-        return text
+        return letter_size(text) or text
     token = text.upper().replace(" ", "")
     alpha = r"(?:XXS|XS|S|M|L|XL|XXL|[2-6]XL)"
     match = re.fullmatch(rf"P?({alpha})P?", token)

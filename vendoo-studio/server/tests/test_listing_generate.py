@@ -1305,26 +1305,33 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_quick_identity_starts_comps_before_the_photo_analysis_ends(self):
         from vendoo_studio.services import listing_generation
 
-        started: list[float] = []
+        # Photo analysis is held until comps start, so comps can only run
+        # while it is still in progress. If comps waited for it, the fallback
+        # releases it and the assertion below fails instead of hanging.
+        analysis_held = asyncio.Event()
+        self.provider.analyze_gate = analysis_held
+        comps_saw_analysis_held: list[bool] = []
 
         async def early_comps(fields):
-            started.append(asyncio.get_running_loop().time())
+            comps_saw_analysis_held.append(not analysis_held.is_set())
+            analysis_held.set()
             return "Sold comps:\nQuery: M&O Gold tee sold comps\n- Similar tees sold $12-$18"
 
         self.patches[4].stop()
         self.patches[4] = patch("vendoo_studio.services.listing_generation.comps_search_available", return_value=True)
         self.patches[4].start()
         identity = {"brand": "M&O Gold", "category": "T-Shirt"}
-        with patch.object(listing_generation, "quick_identity_read", new=AsyncMock(return_value=identity)), \
-                patch.object(listing_generation, "research_comps_for_fields", new=early_comps):
-            began = asyncio.get_running_loop().time()
-            transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
-                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
-                    body = "".join([chunk async for chunk in resp.aiter_text()])
-        self.assertEqual(len(started), 1)
-        # The fake photo analysis takes 0.25s; comps did not wait for it.
-        self.assertLess(started[0] - began, 0.2)
+        fallback = asyncio.get_running_loop().call_later(5, analysis_held.set)
+        try:
+            with patch.object(listing_generation, "quick_identity_read", new=AsyncMock(return_value=identity)), \
+                    patch.object(listing_generation, "research_comps_for_fields", new=early_comps):
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                    async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                        body = "".join([chunk async for chunk in resp.aiter_text()])
+        finally:
+            fallback.cancel()
+        self.assertEqual(comps_saw_analysis_held, [True])
         listing_generation.research_sold_comps.assert_not_awaited()
         self.assertIn('"label": "Identify item"', body)
         self.assertIn("Similar tees sold $12-$18", _first_generate_prompt(self.provider))

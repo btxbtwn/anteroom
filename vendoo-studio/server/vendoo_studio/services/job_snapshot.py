@@ -146,6 +146,9 @@ def ensure_listing_defaults(listing_snapshot: dict) -> None:
 
     align_size_fields(listing_snapshot)
     normalize_listing_dropdowns(listing_snapshot)
+    from vendoo_studio.services.vinted_listing import apply_vinted_listing
+
+    apply_vinted_listing(listing_snapshot)
 
 
 def save_prepared_revision(db: Session, conv_id: str, prepared: dict, revision_id: str) -> str:
