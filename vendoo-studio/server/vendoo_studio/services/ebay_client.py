@@ -35,6 +35,17 @@ def digest(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+# Without this declaration, eBay's parser treats the body as a SOAP envelope
+# and rejects it with error 5 before it reads the call. That is what made
+# Delist report eBay as not delisted.
+TRADING_XML_DECLARATION = '<?xml version="1.0" encoding="utf-8"?>'
+
+
+def trading_xml(root: ET.Element) -> str:
+    """Serialize a Trading API request eBay will parse."""
+    return TRADING_XML_DECLARATION + ET.tostring(root, encoding="unicode")
+
+
 def identity() -> tuple[str, str]:
     account = get_marketplace_accounts().get("ebay") or {}
     if not account.get("accountId") or not account.get("accessToken"):
@@ -121,7 +132,14 @@ class EbayClient:
             root = ET.fromstring(response.content)
             if root.findtext("e:Ack", namespaces=NS) not in ("Success", "Warning"):
                 codes = [e.text for e in root.findall("e:Errors/e:ErrorCode", NS) if e.text and e.text.isdigit()]
-                raise EbayFailure(f"eBay rejected the listing request. Error code: {', '.join(codes) or 'unknown'}.")
+                short = ""
+                for err in root.findall("e:Errors", NS):
+                    text = " ".join((err.findtext("e:ShortMessage", namespaces=NS) or "").split())
+                    if text and "<" not in text and len(text) <= 160:
+                        short = text
+                        break
+                detail = f" {short}" if short else ""
+                raise EbayFailure(f"eBay rejected the listing request.{detail} Error code: {', '.join(codes) or 'unknown'}.")
             return {"xml": root}
         result = response.json() if response.content else {}
         # Location is used only as a receipt ID, never followed as a URL.
@@ -134,4 +152,4 @@ class EbayClient:
         root = ET.Element(f"{call}Request", xmlns=NS["e"])
         for key, value in fields.items():
             ET.SubElement(root, key).text = value
-        return await self.request("POST", "/ws/api.dll", xml=ET.tostring(root, encoding="unicode"), call=call)
+        return await self.request("POST", "/ws/api.dll", xml=trading_xml(root), call=call)

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.341 — 2026-10-24
+
+- Delist everywhere ends the eBay listing. Mercari and Depop stay marked delisted when those sites have already taken the item down.
+
 ## 0.1.340 — 2026-10-24
 
 - Non-vintage Etsy items use a year range for when they were made. Made To Order is no longer selected for an item that already exists.
