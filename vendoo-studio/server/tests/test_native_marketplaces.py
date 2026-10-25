@@ -264,6 +264,23 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(kept["draft_url"], new)
         with self.assertRaises(native.NativeMarketplaceError):
             native._outcome("depop", "save_draft", record, {"ok": True, "state": "draft", "draft_url": new})
+        refused = native._outcome("depop", "save_draft", record, {
+            "ok": False, "safe_to_retry": True, "draft_replaced": True, "draft_url": new,
+            "error": "Depop refused the request (HTTP 400).", "error_code": "rejected",
+            "marketplace_message": "parcel_size is required",
+        })
+        self.assertEqual(refused["draft_url"], new)
+        self.assertEqual(refused["state"], "draft")
+        self.assertIn("HTTP 400", refused["error"])
+        self.assertEqual(refused["marketplace_message"], "parcel_size is required")
+        unrelated = native._outcome("depop", "save_draft", record, {
+            "ok": False, "safe_to_retry": True, "draft_url": new,
+            "error": "Depop refused the request (HTTP 400).", "error_code": "rejected",
+        })
+        self.assertNotIn("draft_url", unrelated)
+        self.assertEqual(unrelated["state"], "draft")
+        self.assertIn("HTTP 400", unrelated["error"])
+        self.assertNotEqual(unrelated["state"], "unknown")
 
     def test_listing_again_replaces_a_deleted_depop_draft_in_the_same_list(self):
         MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.370 — 2026-10-25
+
+- Listing on Depop no longer asks you to check Depop yourself when Depop has already answered. If the save is refused, press List again.
+
 ## 0.1.369 — 2026-10-25
 
 - After the photos upload, eBay no longer answers with an inventory error. The extra bit on the photo address is left off, and the packed weight is sent as a number.
