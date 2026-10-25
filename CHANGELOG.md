@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.355 — 2026-10-25
+
+- You can turn on Delist the other marketplaces in Settings → Connections. When something sells, Anteroom takes it off the other places it is still listed. The marketplace it sold on is left alone. This stays off until you turn it on.
+
 ## 0.1.354 — 2026-10-25
 
 - The listing status on a thread shows where the item is actually live, including listings you already had on a marketplace, instead of saying not listed for all of them.
