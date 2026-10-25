@@ -119,7 +119,7 @@ Material, occasion, and body fit appear after **Show Optional Fields**.
 
 - **Who made:** Another company or person, A member of my shop, I did
 - **What is it:** A finished product, A supply or tool to make things
-- **When made:** Made To Order (Not Yet Made), 2020-2026 (Recently) … Before 1700 (Vintage)
+- **When made:** 2020-2026 (Recently), 2010-2019 (Recently), 2007-2009 (Recently), then vintage ranges through Before 1700 (Vintage). Select a year range. Do not select Made To Order for an already-made item.
 - **Listing type:** Physical Item, Digital Item
 - **Renewal:** Automatic, Manual
 - **Listing state:** Draft Listing, Live Listing, Inactive

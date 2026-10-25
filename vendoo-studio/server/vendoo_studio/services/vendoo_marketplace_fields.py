@@ -164,16 +164,17 @@ _ETSY_WHEN_CODE_VALUES = frozenset(_ETSY_WHEN_CODES.values())
 def _etsy_when_code(raw: Any) -> str:
     """The form's code for a when-made label; a vintage decade stays that decade.
 
-    Anything unreadable falls to the recent bucket, as Vendoo's own form does.
+    Made To Order is not selected. An already-made item gets a year range.
+    Anything unreadable falls to the recent bucket.
     """
-    from vendoo_studio.models.etsy_fields import etsy_when_options, resolve_etsy_when
+    from vendoo_studio.models.etsy_fields import etsy_when_options, etsy_when_to_store
 
     text = _clean(raw) or ""
     if not text:
         return "2020_2026"
-    if text in _ETSY_WHEN_CODE_VALUES:
+    if text in _ETSY_WHEN_CODE_VALUES and text != "made_to_order":
         return text
-    return _ETSY_WHEN_CODES.get(resolve_etsy_when(text, etsy_when_options()), "2020_2026")
+    return _ETSY_WHEN_CODES.get(etsy_when_to_store(text, options=etsy_when_options()), "2020_2026")
 
 
 def _ebay_brand_label(brand: str) -> str:

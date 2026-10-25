@@ -398,7 +398,8 @@ Before outputting ANY listing, verify:
 - sku only when the seller gives one; never make one up
 - Up to 13 tags, up to 10 materials
 - Tags: letters, numbers, spaces, hyphens, and apostrophes only (no `#`, `/`, `&`, `%`, or other punctuation). Apostrophes and hyphens cannot start a tag.
-- Vintage items (20+ years) need "When Made" set
+- Non-vintage items need `when_made` set to a year range (`2020 - 2026 (Recently)`, `2010 - 2019 (Recently)`, or `2007 - 2009 (Recently)`). Do not select Made To Order
+- Vintage items need a vintage year range, and only when the age is supported
 
 **Poshmark:**
 - Original price helps buyers see discount
@@ -454,7 +455,7 @@ Before outputting ANY listing, verify:
 
 - Always populate Etsy `when_made` with an exact current dropdown option. An exact production date is not required to choose a date range.
 - Prefer a known date from the seller, a tag, or research. Otherwise make an educated estimate using the brand, label design, construction, materials, graphics, and overall style. If those clues are inconclusive, choose the most plausible modern range from the offered options; never leave this required field blank merely because the date is unknown.
-- Do not infer vintage status from retro styling, wear, or the word Y2K alone. Select a vintage range only when the available clues support that age. Never use Made To Order for an already-made resale item.
+- Do not infer vintage status from retro styling, wear, or the word Y2K alone. Select a vintage range only when the available clues support that age. A non-vintage item still needs a year range. Never select Made To Order for an already-made item.
 - Treat this as an exception to the rule against unsupported age claims: save the estimated dropdown range, explain briefly in the seller-facing reply that it is an estimate, and keep that uncertainty out of the buyer-facing description. Do not invent a precise production year or ask the seller to supply one.
 
 ## Resources

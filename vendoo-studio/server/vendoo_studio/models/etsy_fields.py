@@ -224,6 +224,34 @@ UNKNOWN_ETSY_WHEN = frozenset({
     "unknown", "does not apply", "n/a", "na", "n.a.", "not sure", "not shown",
     "select", "----", "-", "d", "none", "modern",
 })
+_NON_VINTAGE_WHEN = re.compile(r"\b(?:not|non)\s+vintage\b|\bnonvintage\b")
+
+
+def _is_non_vintage_phrase(text: str) -> bool:
+    """'Non-vintage' contains the word vintage, but it is the opposite claim."""
+    return bool(_NON_VINTAGE_WHEN.search(_normalize_when_text(text)))
+
+
+def _is_made_to_order_when(text: str) -> bool:
+    folded = _normalize_when_text(text)
+    return bool(folded) and ("made to order" in folded or "not yet made" in folded)
+
+
+def modern_etsy_year_range(options: list[str] | None = None) -> str:
+    """A recent production range. Made To Order is not one."""
+    choices = list(options or [])
+    for candidate in (DEFAULT_ETSY_WHEN, "2020 - 2026 (Recently)", "2007 - 2009 (Recently)"):
+        if not choices:
+            return candidate
+        hit = canonical_option(candidate, choices)
+        if hit:
+            return hit
+    for option in choices:
+        if _is_made_to_order_when(option):
+            continue
+        if any(token in option for token in ("2010", "2020", "2007")):
+            return option
+    return DEFAULT_ETSY_WHEN
 
 
 def etsy_when_options() -> list[str]:
@@ -244,7 +272,7 @@ def _canonical_etsy_when(value: str) -> str:
     if not raw:
         return ""
     normalized = _normalize_when_text(raw)
-    if normalized in UNKNOWN_ETSY_WHEN:
+    if normalized in UNKNOWN_ETSY_WHEN or _is_non_vintage_phrase(raw):
         return DEFAULT_ETSY_WHEN
     for needle, mapped in ETSY_WHEN_ALIASES:
         if _normalize_when_text(needle) in normalized:
@@ -369,10 +397,43 @@ def resolve_etsy_when(raw: str, options: list[str]) -> str:
             ):
                 return option
         for option in options:
-            if "2010" in option:
+            if any(token in option for token in ("2010", "2020", "2007")) and not _is_made_to_order_when(option):
                 return option
-        return options[0]
+        for option in options:
+            if not _is_made_to_order_when(option):
+                return option
+        return modern_etsy_year_range(options)
     return mapped or DEFAULT_ETSY_WHEN
+
+
+def _ebay_year_when(listing: dict[str, Any] | None, options: list[str]) -> str:
+    ebay = (listing or {}).get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        return ""
+    year = _scalar_text(ebay.get("yearManufactured") or ebay.get("year_manufactured"))
+    if not year:
+        return ""
+    resolved = resolve_etsy_when(year, options)
+    return "" if _is_made_to_order_when(resolved) else resolved
+
+
+def etsy_when_to_store(raw: str, listing: dict[str, Any] | None = None, options: list[str] | None = None) -> str:
+    """Dropdown label to save and select. Already-made items use a year range.
+
+    Made To Order means the piece does not exist yet. Resale inventory does,
+    so a non-vintage item takes a recent range instead of that option.
+    """
+    choices = list(options) if options is not None else etsy_when_options()
+    text = str(raw or "").strip()
+    if _is_non_vintage_phrase(text):
+        dated = _ebay_year_when(listing, choices)
+        if dated and "vintage" not in dated.casefold():
+            return dated
+        return modern_etsy_year_range(choices)
+    resolved = resolve_etsy_when(text, choices) if text else ""
+    if _is_made_to_order_when(text) or _is_made_to_order_when(resolved):
+        return _ebay_year_when(listing, choices) or modern_etsy_year_range(choices)
+    return resolved
 
 
 def etsy_when_is_vintage_or_handmade(when_made: str, who_made: str, what_is: str) -> bool:
