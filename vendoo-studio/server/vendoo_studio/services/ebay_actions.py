@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.ebay_action import EbayAction
 from vendoo_studio.services.ebay_api import dollars, money_cents
-from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, NS, assert_identity, digest, identity, segment
+from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, NS, assert_identity, digest, identity, segment, trading_xml
 from vendoo_studio.services.ebay_workspace import listing
 
 
@@ -552,7 +552,7 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
         for name, value in {"ItemID": data["listing_id"], "Title": data["title"], "Description": data["description"],
                             "StartPrice": dollars(money_cents(data["price"])), "Quantity": str(data["quantity"])}.items():
             ET.SubElement(item, name).text = value
-        operation("POST", "/ws/api.dll", xml=ET.tostring(root, encoding="unicode"), call="ReviseFixedPriceItem")
+        operation("POST", "/ws/api.dll", xml=trading_xml(root), call="ReviseFixedPriceItem")
         plan["context"] = before
         plan["target"] = data["listing_id"]
         plan["summary"] = [f"Update live listing {before['title']}", f"New title: {data['title']}",

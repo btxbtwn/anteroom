@@ -59,6 +59,7 @@ class EbayStandIn(BaseHTTPRequestHandler):
         if self.path == "/ws/api.dll":
             assert self.headers["X-EBAY-API-CALL-NAME"] == "GetItem"
             assert self.headers["X-EBAY-API-IAF-TOKEN"] == "test-token"
+            assert raw.startswith(b'<?xml version="1.0" encoding="utf-8"?>')
             state.reads += 1
             self.reply(200, f'''<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item>
                 <ItemID>{ITEM_ID}</ItemID><Site>US</Site><ListingType>FixedPriceItem</ListingType>

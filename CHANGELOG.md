@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.343 — 2026-10-24
+## 0.1.344 — 2026-10-24
 
 - Settings → Connections opens on Marketplaces. Each marketplace has Detect sales. Turn it off to stop new sale notices there. Nothing is taken down until you choose.
+
+## 0.1.343 — 2026-10-24
+
+- Delist everywhere ends the eBay listing. Mercari and Depop stay marked delisted when those sites have already taken the item down.
 
 ## 0.1.342 — 2026-10-24
 
