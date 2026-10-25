@@ -1316,6 +1316,13 @@ def _as_scalar_field(value: Any) -> Any:
             return parts[0]
         return ", ".join(str(part) for part in parts)
     if isinstance(value, dict):
+        # Depop stores size as {option: {label, value}, scale}. The label is
+        # what the seller picked ("Other"); the id alone is not the size.
+        option = value.get("option")
+        if isinstance(option, dict):
+            text = _text(option)
+            if text:
+                return text
         text = _text(value)
         if text:
             return text

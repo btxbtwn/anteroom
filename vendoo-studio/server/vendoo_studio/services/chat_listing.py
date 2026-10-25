@@ -39,9 +39,12 @@ def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operation
 
     updated = align_listing_gender(listing, operations)
     stamped = _stamp_learned_fields(db, updated)
-    align_size_fields(stamped)
-    normalize_listing_dropdowns(stamped)
     revisions = ListingRepo(db).get_revisions(conv_id)
+    previous_size = None
+    if revisions and isinstance(revisions[0].listing_json, dict):
+        previous_size = revisions[0].listing_json.get("size")
+    align_size_fields(stamped, previous_size=None if previous_size is None else str(previous_size))
+    normalize_listing_dropdowns(stamped)
     parent_id = revisions[0].id if revisions else None
     ListingRepo(db).save_revision(
         conv_id,

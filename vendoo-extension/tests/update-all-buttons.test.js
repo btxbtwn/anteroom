@@ -7,6 +7,7 @@ const {
   isUpdateAllTestId,
   isUpdateAllControl,
   clickableUpdateAllTarget,
+  copiesGeneralSize,
   selectUpdateAllButtons,
 } = require('../content-scripts/update-all-buttons.js');
 
@@ -75,6 +76,23 @@ test('selectUpdateAllButtons de-dupes the same button found twice', () => {
   const other = el({ text: 'Update All' });
   assert.deepEqual(selectUpdateAllButtons([span, button, other]), [button, other]);
   assert.deepEqual(selectUpdateAllButtons([el({ text: 'Save' })]), []);
+});
+
+test('Update All on Size is not the control that copies the tag onto Depop', () => {
+  const button = el({ text: 'Update All' });
+  const label = { tagName: 'LABEL', innerText: 'Size', textContent: 'Size' };
+  button.parentElement = { children: [label, button], parentElement: null };
+  assert.equal(copiesGeneralSize(button), true);
+
+  const price = el({ text: 'Update All' });
+  const priceLabel = { tagName: 'LABEL', innerText: 'Price', textContent: 'Price' };
+  price.parentElement = { children: [priceLabel, price], parentElement: null };
+  assert.equal(copiesGeneralSize(price), false);
+
+  const src = fs.readFileSync(path.join(__dirname, '../content-scripts/vendoo.js'), 'utf8');
+  assert.match(src, /copiesGeneralSize\(btn\)/);
+  assert.match(src, /const size = marketplaceSizeValue\(marketplace, data\)/);
+  assert.match(src, /data\?\.depop_specifics\?\.size \|\| data\?\.size/);
 });
 
 test('general fill and save click Update All so marketplace forms get the new values', () => {

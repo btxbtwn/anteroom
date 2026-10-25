@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.361 — 2026-10-25
+## 0.1.362 — 2026-10-25
 
 - Set eBay's inventory location under Settings → Connections → eBay. Edit inventory location opens that setting, and Anteroom writes the ZIP or place on the general form and on eBay.
+
+## 0.1.361 — 2026-10-25
+
+- Depop size stays on Other when you set it there, instead of snapping back to the tag size.
 
 ## 0.1.360 — 2026-10-25
 

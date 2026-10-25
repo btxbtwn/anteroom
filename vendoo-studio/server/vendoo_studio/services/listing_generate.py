@@ -734,14 +734,14 @@ def normalize_mens_bottoms_size(listing: dict) -> bool:
     return changed
 
 
-def align_size_fields(listing: dict) -> bool:
+def align_size_fields(listing: dict, *, previous_size: str | None = None) -> bool:
     """Collapse men's bottoms to a waist size and make the title match that size."""
     if not isinstance(listing, dict):
         return False
     changed = False
     if normalize_mens_bottoms_size(listing):
         changed = True
-    if propagate_general_size(listing):
+    if propagate_general_size(listing, previous_size=previous_size):
         changed = True
     if sync_title_size(listing):
         changed = True
@@ -794,8 +794,13 @@ def sync_title_size(listing: dict) -> bool:
     return True
 
 
-def propagate_general_size(listing: dict) -> bool:
-    """Mirror general size into marketplace size slots Vendoo keeps in sync."""
+def propagate_general_size(listing: dict, *, previous_size: str | None = None) -> bool:
+    """Mirror general size into marketplace size slots that were following it.
+
+    Depop keeps a size the seller set on that form. Other stays Other when the
+    tag is XL. It follows the tag only when it was still a copy of the previous
+    general size and that general size is what changed.
+    """
     if not isinstance(listing, dict):
         return False
     size = sanitize_size_value(listing.get("size"))
@@ -806,16 +811,20 @@ def propagate_general_size(listing: dict) -> bool:
     changed = False
     from vendoo_studio.models.ebay_fields import ebay_optional_raw, ebay_size_for_type
 
+    previous = sanitize_size_value(previous_size) if previous_size is not None else None
     for specifics_key in _SIZE_SPECIFIC_KEYS:
         block = listing.get(specifics_key)
         if not isinstance(block, dict):
             continue
         if specifics_key != "ebay_specifics" and "size" not in block:
             continue
+        current = str(block.get("size") or "").strip()
         target = size
         if specifics_key == "ebay_specifics":
             target = ebay_size_for_type(size, ebay_optional_raw(block, "sizeType") or listing.get("sizeType"))
-        if str(block.get("size") or "").strip() == target:
+        elif specifics_key == "depop_specifics" and current and current != target and (previous is None or current != previous):
+            continue
+        if current == target:
             continue
         listing[specifics_key] = {**block, "size": target}
         changed = True

@@ -709,9 +709,25 @@ class PersistListingTest(unittest.TestCase):
         self.assertEqual(listing["depop_specifics"]["size"], "10")
 
         listing["size"] = "12"
+        # Depop already says 10, which is not the new general size. Without the
+        # previous general size that difference is a marketplace override.
+        # eBay still follows the general size.
         self.assertTrue(propagate_general_size(listing))
         self.assertEqual(listing["ebay_specifics"]["size"], "12")
+        self.assertEqual(listing["depop_specifics"]["size"], "10")
+        self.assertTrue(propagate_general_size(listing, previous_size="10"))
         self.assertEqual(listing["depop_specifics"]["size"], "12")
+
+        kept = {
+            "size": "XL (18/20)",
+            "title": "Columbia XL (18/20) Outdoors Hooded Windbreaker",
+            "depop_specifics": {"size": "Other"},
+            "ebay_specifics": {"size": "XL (18/20)"},
+        }
+        self.assertFalse(propagate_general_size(kept))
+        self.assertEqual(kept["depop_specifics"]["size"], "Other")
+        self.assertEqual(kept["size"], "XL (18/20)")
+        self.assertEqual(kept["ebay_specifics"]["size"], "XL (18/20)")
 
         dirty = {
             "title": "Test Tee",
