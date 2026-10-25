@@ -16,7 +16,18 @@ from vendoo_studio.services.relay_client import relay_request
 
 API = "https://api.ebay.com"
 APIZ = "https://apiz.ebay.com"
+# Photo upload is not on api.ebay.com. That host answers 404, with no error body.
+APIM = "https://apim.ebay.com"
 NS = {"e": "urn:ebay:apis:eBLBaseComponents"}
+
+
+def api_host(path: str) -> str:
+    """The production host for one eBay path. Media is separate from the sell API."""
+    if path.startswith("/commerce/media/"):
+        return APIM
+    if path.startswith(("/sell/finances/", "/sell/fulfillment/v1/payment_dispute")):
+        return APIZ
+    return API
 
 
 class EbayFailure(RuntimeError):
@@ -148,7 +159,7 @@ class EbayClient:
                 "operation": operation, "params": params or {}, **({"image": body["image"]} if operation == "image" else {}),
             })
             assert_identity(self.seller)
-        host = APIZ if path.startswith(("/sell/finances/", "/sell/fulfillment/v1/payment_dispute")) else API
+        host = api_host(path)
 
         async def send(token: str):
             headers = {"Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",

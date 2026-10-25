@@ -9,6 +9,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 ## 0.1.367 — 2026-10-25
 
 - If eBay saves the ship-from ZIP and then says it is unavailable, listing continues. If that location never lands, Anteroom says eBay is temporarily unavailable so you can press List again.
+- eBay photos are sent to eBay's photo address, so List no longer stops with "not found" before the listing exists.
 
 ## 0.1.366 — 2026-10-25
 
