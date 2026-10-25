@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.330 — 2026-10-24
+
+- Publish to Sellwild without opening a tab. Pick a Sellwild category and condition in **Marketplace drafts** (Anteroom suggests both), save in Anteroom, then confirm **Publish…**. Anteroom creates the listing with your signed-in Sellwild account, uploads the photos and activates it, once. It needs a package weight and size, and a ship-from address saved on Sellwild.
+
 ## 0.1.329 — 2026-10-24
 
 - Save drafts straight to Poshmark, Mercari and Depop from **Marketplace drafts** in a listing, without opening any marketplace tab. Anteroom uses your signed-in Chrome in the background, reads each saved draft back to check it, and only opens a tab when you connect or reconnect a marketplace. Publish to one marketplace with a separate confirmation; it is never queued or retried.

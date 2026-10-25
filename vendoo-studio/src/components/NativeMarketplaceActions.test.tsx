@@ -9,9 +9,14 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
-function render(data: NativeDrafts, error: Error | null = null, pending = false) {
+const SELLWILD_OPTIONS = { categories: [{ id: 272, label: "Fashion > Coats & Jackets" }], conditions: [{ id: 2, label: "Gently Used" }],
+  suggested: { category_id: 272, condition_id: 2 } };
+
+function render(data: NativeDrafts, error: Error | null = null, pending = false,
+  suggested: { category_id: number | null; condition_id: number | null } = SELLWILD_OPTIONS.suggested) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => queryKey[0] === "native-marketplaces"
     ? { data, error, isError: Boolean(error), isPending: false }
+    : queryKey[0] === "sellwild-options" ? { data: { ...SELLWILD_OPTIONS, suggested }, isPending: false }
     : { data: { shipping: [], processing: [] }, isPending: false });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, variables: { marketplace: "depop", kind: "draft" } });
   return renderToStaticMarkup(<NativeMarketplaceActions convId="item" revisionId="current" title="Review this item" disabled={false} />);
@@ -45,10 +50,18 @@ describe("direct marketplace listing controls", () => {
     expect(publishDisabled(html)).toBe(true);
   });
 
-  it("requires Sellwild review after the local save", () => {
-    const saved = { state: "draft", storage: "local", revision_id: "current" } as const;
-    expect(publishDisabled(row(render({ sellwild: saved }), "Sellwild"))).toBe(true);
-    expect(publishDisabled(row(render({ sellwild: { ...saved, review_ready: true } }), "Sellwild"))).toBe(false);
+  it("publishes Sellwild from the local save with its saved category and condition, and no review tab", () => {
+    expect(publishDisabled(row(render({}), "Sellwild"))).toBe(true);
+    const saved = { state: "draft", storage: "local", revision_id: "current", sellwild_category_id: 272, sellwild_condition_id: 2 } as const;
+    const html = row(render({ sellwild: saved }), "Sellwild");
+    expect(publishDisabled(html)).toBe(false);
+    expect(html).toContain('aria-label="Sellwild category"');
+    expect(html).not.toContain("Review on Sellwild");
+  });
+
+  it("needs a Sellwild category before saving", () => {
+    const html = row(render({}, null, false, { category_id: null, condition_id: 2 }), "Sellwild");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Save in Anteroom<\/button>/);
   });
 
   it("offers a result check instead of repeating an uncertain write", () => {

@@ -38,9 +38,7 @@ Expand **Marketplace drafts** in a listing to send directly to Poshmark, Mercari
 
 After an interrupted response, use **Check result** or paste the saved draft link. Checking only reads the saved result. Save a changed Anteroom revision again before publishing it.
 
-Sellwild drafts stay in Anteroom. **Save in Anteroom** works without Chrome and sends nothing to Sellwild. **Review on Sellwild** prepares an editable browser form with the saved title, description, price and photos. Finish its category, condition, account and shipping fields there. **Publish…** requires a separate confirmation and submits that reviewed form once. If Sellwild holds it for moderation, Anteroom shows **In review**.
-
-If Sellwild restores an unfinished form for another item, Anteroom stops and preserves it. Clear that form in Sellwild before preparing a different item. The saved Anteroom drafts remain available.
+Sellwild has no drafts, so Sellwild drafts stay in Anteroom. Choose a Sellwild category and condition (Anteroom suggests both from the listing), then **Save in Anteroom**. This works without Chrome and sends nothing to Sellwild. **Publish…** requires a separate confirmation. It then creates the listing once from the Bridge with your Sellwild session, without opening a tab: it uploads the photos and activates the listing, the same three steps Sellwild's own sell page takes. Publishing needs a package weight and `package_dimensions_in`, and a ship-from address saved on Sellwild. If Sellwild holds the listing for moderation, Anteroom shows **In review**. If a reply is lost after the listing was created, Anteroom shows its Sellwild ID and never creates it again.
 
 ## Inside Anteroom
 

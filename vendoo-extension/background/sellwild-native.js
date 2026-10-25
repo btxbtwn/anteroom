@@ -1,260 +1,149 @@
-// Sellwild drafts live in Anteroom. Review only fills an owned browser form.
-// The seller-confirmed Publish action alone clicks Finish, once.
-async function sellwildPage(action, payload) {
-  let submitted = false;
-  try {
-    if (location.origin !== 'https://sellwild.com' || location.pathname !== '/sell') throw new Error('Open the prepared Sellwild review form.');
-    const active = () => {
-      if (Date.now() >= payload.deadline || (payload.operation_id && globalThis.__anteroomCancelledNativeOperation === payload.operation_id)) throw new Error('Sellwild action stopped. Check its result before trying again.');
-    };
-    const visible = el => Boolean(el?.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
-    const field = name => document.getElementById(`${name}-input`);
-    const inspect = () => ({ title: field('title')?.value ?? null, description: field('text')?.value ?? null,
-      price: field('price')?.value ?? null, category: Boolean(field('category')?.value), condition: Boolean(field('condition')?.value),
-      photo_count: new Set([...document.querySelectorAll('img')].filter(visible).map(el => el.src)
-        .filter(src => /^(blob:|data:image\/(?:jpeg|jpg|png|webp))/i.test(src))).size });
-    if (action === 'inspect') return inspect();
-    if (action === 'session') {
-      const response = await fetch('/api/auth/session', { credentials: 'include', signal: AbortSignal.timeout(10000) });
-      return { signed_in: response.ok && Boolean((await response.json()).user) };
-    }
-    if (action === 'focus') {
-      if (payload.action !== 'review') throw new Error('Only a review action can fill this form.');
-      const input = field({ title: 'title', description: 'text', price: 'price' }[payload.field]);
-      active();
-      if (!input) throw new Error('Sellwild has not loaded its listing fields.');
-      input.focus();
-      input.setSelectionRange(0, input.value.length);
-      return { ok: true };
-    }
-    if (action === 'photo') {
-      if (payload.action !== 'review') throw new Error('Only a review action can prepare photos.');
-      const input = document.querySelector('input[type="file"][accept*="image"]');
-      if (!input) throw new Error('Sellwild has not loaded its photo control.');
-      const bytes = Uint8Array.from(atob(payload.photo.base64), char => char.charCodeAt(0));
-      const files = new DataTransfer();
-      files.items.add(new File([bytes], payload.photo.name, { type: payload.photo.mime_type }));
-      active();
-      input.files = files.files;
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true };
-    }
-    if (action === 'preflight' || action === 'publish') {
-      if (payload.action !== 'publish' || payload.confirm !== true) throw new Error('Confirm publishing this item on Sellwild.');
-      const form = inspect();
-      if (form.title !== payload.listing.title || form.description !== String(payload.listing.description || '')
-          || Number(String(form.price).replace(/[$,]/g, '')) !== Number(payload.listing.price)
-          || form.photo_count !== payload.photo_count) throw new Error('The Sellwild form differs from the saved Anteroom draft. Review it again.');
-      if (!form.category || !form.condition || !(Number(payload.listing.price) > 0)) throw new Error('Choose category, condition, and shipping in the Sellwild review form before publishing.');
-      const finish = [...document.querySelectorAll('button')].find(el => visible(el) && el.innerText.trim() === 'Finish' && !el.disabled);
-      if (!finish) throw new Error('Complete the Sellwild form before publishing.');
-      if (action === 'publish') { active(); submitted = true; finish.click(); }
-      return { ok: true };
-    }
-    throw new Error('Unsupported Sellwild action.');
-  } catch (error) { return { error: String(error.message || error), safe_to_retry: action === 'publish' && !submitted }; }
-}
-
-async function callSellwildPage(tabId, action, payload) {
-  if (activeNativeOperation?.cancelled) throw new Error('Marketplace action cancelled.');
-  const result = (await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: sellwildPage, args: [action, payload] }))?.[0]?.result;
-  if (!result || result.error) {
-    const error = new Error(result?.error || 'Sellwild did not confirm the browser step.');
-    error.safeToRetry = result?.safe_to_retry === true;
-    throw error;
-  }
-  return result;
-}
+// Sellwild publishing from the extension worker, with no marketplace tab.
+// Sellwild has no drafts: its own sell page creates the listing, uploads the
+// photos to the presigned S3 URLs it gets back, then confirm-photos activates
+// it (read from sellwild.com's web client, 2026-10-24). Only a seller-confirmed
+// Publish runs this, once; a lost reply is never retried.
+const SELLWILD = 'https://sellwild.com';
+const SELLWILD_MAX_PHOTOS = 20;
+const SELLWILD_PHOTO_EDGE = 1280;
 
 function sellwildListingUrl(id, title) {
   if (!/^\d+$/.test(String(id))) return '';
   const slug = String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'untitled';
-  return `https://sellwild.com/product/${id}/${slug}`;
+  return `${SELLWILD}/product/${id}/${slug}`;
 }
 
-function observeSellwildPublish(tabId, payload, operationKey) {
-  let created;
-  let started = false;
-  let detached = false;
-  let createGranted = false;
-  let activationGranted = false;
-  const requests = new Map();
-  let resolve;
-  const result = new Promise(done => { resolve = done; });
-  const listener = (source, method, event) => {
-    if (source.tabId !== tabId) return;
-    if (method === 'Fetch.requestPaused') {
-      const url = new URL(event.request.url);
-      const writable = !['GET', 'HEAD', 'OPTIONS'].includes(event.request.method);
-      let allowed = !writable;
-      if (writable && payload.action === 'publish' && payload.confirm === true
-          && !activeNativeOperation?.cancelled && Date.now() < payload.deadline) {
-        if (url.pathname === '/api/listings/create' && event.request.method === 'POST' && !createGranted) {
-          let body;
-          try { body = JSON.parse(event.request.postData || '{}'); } catch { /* Block an unrecognized body. */ }
-          allowed = body?.title === payload.listing.title && Number(body?.price) === Number(payload.listing.price);
-          if (allowed) { createGranted = true; started = true; }
-        }
-        const id = url.pathname.match(/^\/api\/listings\/(\d+)\/confirm-photos$/)?.[1];
-        if (id && event.request.method === 'POST' && created?.id === id && !activationGranted) {
-          allowed = true;
-          activationGranted = true;
-        }
-      }
-      chrome.debugger.sendCommand({ tabId }, allowed ? 'Fetch.continueRequest' : 'Fetch.failRequest', {
-        requestId: event.requestId, ...(allowed ? {} : { errorReason: 'BlockedByClient' }),
-      }).catch(() => { detached = true; });
-      return;
-    }
-    if (method === 'Network.requestWillBeSent' && event.request.method === 'POST') {
-      const url = new URL(event.request.url);
-      if (url.origin !== 'https://sellwild.com') return;
-      if (url.pathname === '/api/listings/create') {
-        started = true;
-        let body;
-        try { body = JSON.parse(event.request.postData || '{}'); } catch { return; }
-        // This owned form may create only the item and price the seller confirmed.
-        if (body.title !== payload.listing.title || Number(body.price) !== Number(payload.listing.price)) return;
-        requests.set(event.requestId, { action: 'create' });
-      }
-      const id = url.pathname.match(/^\/api\/listings\/(\d+)\/confirm-photos$/)?.[1];
-      if (id) requests.set(event.requestId, { action: 'activate', id });
-    }
-    if (method === 'Network.loadingFinished' && requests.has(event.requestId)) {
-      const request = requests.get(event.requestId);
-      requests.delete(event.requestId);
-      chrome.debugger.sendCommand({ tabId }, 'Network.getResponseBody', { requestId: event.requestId }).then(async response => {
-        const body = JSON.parse(response.body);
-        if (body.success !== true) return;
-        if (request.action === 'create' && /^\d+$/.test(String(body.listing?.id))) {
-          created = { id: String(body.listing.id), title: body.listing.title || payload.listing.title };
-          const journal = (await chrome.storage.local.get(operationKey))[operationKey];
-          await chrome.storage.local.set({ [operationKey]: { ...journal, sellwild_created_id: created.id } });
-        }
-        if (request.action === 'activate' && created?.id === request.id) {
-          const receipt = { ok: true, state: body.underReview === true ? 'pending_review' : 'published',
-            listing_url: sellwildListingUrl(created.id, created.title) };
-          const journal = (await chrome.storage.local.get(operationKey))[operationKey];
-          await chrome.storage.local.set({ [operationKey]: { ...journal, sellwild_activation: receipt } });
-          resolve(receipt);
-        }
-      }).catch(() => {});
-    }
-  };
-  const onDetach = source => { if (source.tabId === tabId) detached = true; };
-  chrome.debugger.onEvent.addListener(listener);
-  chrome.debugger.onDetach.addListener(onDetach);
-  return { result, started: () => started, connected: () => !detached, close: async () => {
-    chrome.debugger.onEvent.removeListener(listener);
-    chrome.debugger.onDetach.removeListener(onDetach);
-    await chrome.debugger.sendCommand({ tabId }, 'Fetch.disable').catch(() => {});
-  } };
+// Weight in pounds, as Sellwild's "Weight (lbs)" field takes it.
+function sellwildWeightLb(listing) {
+  const pounds = Number(listing.weight_lb || 0) + Number(listing.weight_oz || 0) / 16;
+  return Number.isFinite(pounds) && pounds > 0 ? Math.ceil(pounds * 100) / 100 : null;
+}
+
+// "LxWxH" inches. Sellwild calls length "depth".
+function sellwildBox(listing) {
+  const sides = String(listing.package_dimensions_in || '').split(/\s*x\s*/i).map(Number);
+  if (sides.length !== 3 || sides.some(side => !Number.isFinite(side) || side <= 0)) return null;
+  return { depth: sides[0], width: sides[1], height: sides[2] };
+}
+
+async function sellwildFetch(path, { method = 'GET', body, deadline }) {
+  if (Date.now() >= deadline || activeNativeOperation?.cancelled) {
+    throw new Error('The Sellwild action stopped. Check its result before trying again.');
+  }
+  await ensureMarketplaceRequestContext();
+  const response = await fetch(`${SELLWILD}${path}`, { method, credentials: 'include', signal: AbortSignal.timeout(30000),
+    headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  let result = null;
+  try { result = await response.json(); } catch {}
+  if (response.status === 401) {
+    // Sellwild checks the session before anything else, so nothing was written.
+    throw Object.assign(new Error('Sellwild asked to sign in again. Reconnect Sellwild in Anteroom.'), { rejected: true });
+  }
+  return { response, result };
+}
+
+async function sellwildPhotoBlob(photo) {
+  const bytes = Uint8Array.from(atob(photo.base64), char => char.charCodeAt(0));
+  const image = await createImageBitmap(new Blob([bytes], { type: photo.mime_type }));
+  const scale = Math.min(1, SELLWILD_PHOTO_EDGE / Math.max(image.width, image.height));
+  const canvas = new OffscreenCanvas(Math.round(image.width * scale), Math.round(image.height * scale));
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  image.close();
+  return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
+}
+
+function sellwildAddress(addresses) {
+  const list = Array.isArray(addresses) ? addresses : [];
+  const address = list.find(entry => Number(entry.isDefault) === 1 || entry.isDefault === true) || list[list.length - 1];
+  if (!address?.line1 || !address.locality || !address.region || !address.zipCode) return null;
+  const latitude = Number(address.latitude);
+  const longitude = Number(address.longitude);
+  return { locationText: `${address.locality}, ${address.region}`,
+    ...(address.latitude != null && Number.isFinite(latitude) && address.longitude != null && Number.isFinite(longitude) ? { latitude, longitude } : {}) };
+}
+
+// The create body, limited to the fields Sellwild's own create schema accepts.
+function sellwildCreateBody(listing, choice, address, photoCount) {
+  return { title: String(listing.title || '').trim().slice(0, 255), text: String(listing.description || ''),
+    price: Number(listing.price), categoryId: Number(choice.category_id), itemCondition: Number(choice.condition_id),
+    ...address, shippable: true, parcelTemplate: '', weight: sellwildWeightLb(listing), ...sellwildBox(listing),
+    vin: 0, mileage: 0, photos: photoCount };
 }
 
 async function runSellwildNative(msg, recovery = false) {
-  const p = { ...msg.payload, deadline: Date.now() + 120000 };
-  if (!/^[a-f0-9]{32}$/.test(String(p.local_draft_id)) || !p.revision_id || !['review', 'publish'].includes(p.action)) {
-    return { ok: false, safe_to_retry: true, error: 'Save the Sellwild draft in Anteroom first.' };
+  const p = { ...msg.payload, deadline: Date.now() + 150000 };
+  const key = `native_operation_${p.operation_id}`;
+  const storeReceipt = async receipt => {
+    const journal = (await chrome.storage.local.get(key))[key] || {};
+    await chrome.storage.local.set({ [key]: { ...journal, ...receipt } });
+  };
+  if (p.action !== 'publish') return { ok: false, safe_to_retry: true, error: 'Sellwild drafts are saved in Anteroom.' };
+  if (recovery) {
+    const journal = (await chrome.storage.local.get(key))[key] || {};
+    if (journal.sellwild_activation) return journal.sellwild_activation;
+    return { ok: false, error: journal.sellwild_created_id
+      ? `Sellwild created listing ${journal.sellwild_created_id} but did not confirm activating it. Check your Sellwild listings before another attempt.`
+      : 'Sellwild did not confirm a listing. Check your Sellwild listings before another attempt.' };
   }
-  if (p.action === 'publish' && !recovery && p.confirm !== true) return { ok: false, safe_to_retry: true, error: 'Confirm publishing on Sellwild.' };
-  const reviewKey = `sellwild_review_${p.local_draft_id}`;
-  const operationKey = `native_operation_${p.operation_id}`;
-  let review = (await chrome.storage.local.get(reviewKey))[reviewKey];
-  let tab;
-  let attached = false;
-  let clicked = false;
-  let observer;
+  if (p.confirm !== true) return { ok: false, safe_to_retry: true, error: 'Confirm publishing on Sellwild.' };
+  let sent = false;
+  let created = null;
   try {
-    if (recovery && p.action === 'publish') {
-      const journal = (await chrome.storage.local.get(operationKey))[operationKey];
-      return journal?.sellwild_activation || { ok: false, error: 'No confirmed Sellwild activation receipt. Check your Sellwild account before another attempt.' };
+    const listing = p.listing || {};
+    const photos = p.photos || [];
+    const choice = p.sellwild || {};
+    const box = sellwildBox(listing);
+    const missing = [String(listing.title || '').trim().length < 3 && 'a title of at least 3 characters',
+      !String(listing.description || '').trim() && 'a description', !(Number(listing.price) >= 5) && 'a price of $5 or more',
+      !Number.isInteger(Number(choice.category_id)) && 'a Sellwild category', !Number.isInteger(Number(choice.condition_id)) && 'a Sellwild condition',
+      !sellwildWeightLb(listing) && 'a package weight', !box && 'package dimensions',
+      (!photos.length || photos.length > SELLWILD_MAX_PHOTOS) && `between 1 and ${SELLWILD_MAX_PHOTOS} photos`].filter(Boolean);
+    if (missing.length) throw new Error(`Sellwild needs ${missing.join(', ')}.`);
+
+    const session = await sellwildFetch('/api/auth/session', { deadline: p.deadline });
+    if (!session.response.ok || !session.result?.user) throw new Error('Sign in to Sellwild: reconnect it in Anteroom. Publishing will not open a tab.');
+    const addresses = await sellwildFetch('/api/addresses', { deadline: p.deadline });
+    const address = addresses.result?.success ? sellwildAddress(addresses.result.addresses) : null;
+    if (!address) throw new Error('Add your ship-from address on Sellwild (street, city, state and ZIP) before publishing.');
+    const blobs = [];
+    for (const photo of photos) blobs.push(await sellwildPhotoBlob(await nativePhoto(msg.job_id, photo)));
+
+    sent = true;
+    const create = await sellwildFetch('/api/listings/create', { method: 'POST', deadline: p.deadline,
+      body: sellwildCreateBody(listing, choice, address, blobs.length) });
+    const id = String(create.result?.listing?.id ?? '');
+    if (!create.response.ok || create.result?.success !== true || !/^\d+$/.test(id)) {
+      // A clear rejection means nothing was created.
+      if (create.result?.success === false && create.response.status >= 400 && create.response.status < 500) sent = false;
+      throw new Error(`Sellwild did not create the listing${create.result?.error ? `: ${String(create.result.error).slice(0, 160)}` : '.'}`);
     }
-    const photoIds = p.photos?.map(photo => photo.id) || p.photo_ids;
-    if (review?.revision_id === p.revision_id && (!photoIds || JSON.stringify(photoIds) === JSON.stringify(review.photo_ids))) {
-      tab = await chrome.tabs.get(review.tab_id).catch(() => null);
+    created = { id, title: String(create.result.listing.title || listing.title) };
+    await storeReceipt({ sellwild_created_id: id });
+
+    const urls = Array.isArray(create.result.presignedUrls) ? create.result.presignedUrls : [];
+    for (const [index, blob] of blobs.entries()) {
+      const target = urls.find(entry => entry.photoIndex === index)?.presignedUrl;
+      if (!target || new URL(target).protocol !== 'https:') throw new Error(`Sellwild did not return an upload address for photo ${index + 1}.`);
+      if (Date.now() >= p.deadline || activeNativeOperation?.cancelled) throw new Error('The Sellwild action stopped.');
+      const upload = await fetch(target, { method: 'PUT', body: blob, headers: { 'content-type': 'image/jpeg' }, signal: AbortSignal.timeout(60000) });
+      if (upload.status !== 200) throw new Error(`Sellwild did not accept photo ${index + 1} (HTTP ${upload.status}).`);
     }
-    if (tab && tab.url !== 'https://sellwild.com/sell') tab = null;
-    if (p.action === 'publish' || recovery) {
-      if (!tab || !review?.ready) {
-        return { ok: false, safe_to_retry: p.action === 'review', error: 'Open a new Sellwild review from the saved Anteroom draft.' };
-      }
+
+    const activate = await sellwildFetch(`/api/listings/${id}/confirm-photos`, { method: 'POST', deadline: p.deadline });
+    if (!activate.response.ok || activate.result?.success !== true) {
+      throw new Error(`Sellwild did not activate the listing${activate.result?.error ? `: ${String(activate.result.error).slice(0, 160)}` : '.'}`);
     }
-    if (p.action === 'review' && tab && review?.ready) {
-      await chrome.tabs.update(tab.id, { active: true });
-      if (Number.isInteger(tab.windowId)) await chrome.windows.update(tab.windowId, { focused: true });
-      return { ok: true, state: 'draft', review_ready: true };
-    }
-    if (!tab) {
-      tab = await openMarketplaceTab('https://sellwild.com/sell');
-      review = { tab_id: tab.id, revision_id: p.revision_id, photo_ids: photoIds, ready: false };
-      await chrome.storage.local.set({ [reviewKey]: review });
-    }
-    if (activeNativeOperation) activeNativeOperation.tabId = tab.id;
-    await chrome.tabs.update(tab.id, { active: true });
-    if (Number.isInteger(tab.windowId)) await chrome.windows.update(tab.windowId, { focused: true });
-    await nativeWait(tab.id, t => t.status === 'complete' && t.url === 'https://sellwild.com/sell', p.deadline);
-    if (!(await callSellwildPage(tab.id, 'session', p)).signed_in) throw new Error('Sign in to Sellwild in Chrome before reviewing.');
-    await chrome.debugger.attach({ tabId: tab.id }, '1.3');
-    attached = true;
-    let form;
-    do {
-      form = await callSellwildPage(tab.id, 'inspect', p);
-      if (form.title !== null) break;
-      await new Promise(resolve => setTimeout(resolve, 300));
-    } while (Date.now() < p.deadline);
-    if (p.action === 'review') {
-      if (!p.photos?.length || p.photos.length > 20) throw new Error('Choose a supported number of Sellwild photos.');
-      if (form.title === p.listing.title && form.description === String(p.listing.description || '') && form.photo_count === p.photos.length) {
-        review.prepared_photos = true;
-      }
-      if (!review.prepared_photos && (form.title || form.description || form.photo_count)) {
-        const mismatch = [form.title !== p.listing.title && 'title', form.description !== String(p.listing.description || '') && 'description',
-          form.photo_count !== p.photos.length && 'photos'].filter(Boolean);
-        throw new Error(`Sellwild restored an unfinished form with different ${mismatch.join(', ')}. Clear that form in Sellwild before reviewing this item.`);
-      }
-      for (const [index, photo] of (review.prepared_photos ? [] : p.photos).entries()) {
-        await callSellwildPage(tab.id, 'photo', { ...p, photo: await nativePhoto(msg.job_id, photo) });
-        const photoDeadline = Math.min(p.deadline, Date.now() + 30000);
-        do {
-          await new Promise(resolve => setTimeout(resolve, 300));
-          form = await callSellwildPage(tab.id, 'inspect', p);
-        } while (form.photo_count < index + 1 && Date.now() < photoDeadline);
-        if (form.photo_count < index + 1) throw new Error(`Sellwild did not prepare photo ${index + 1}. Check its review tab.`);
-      }
-      review.prepared_photos = true;
-      await chrome.storage.local.set({ [reviewKey]: review });
-      for (const field of ['title', 'description', 'price']) {
-        await callSellwildPage(tab.id, 'focus', { ...p, field });
-        await chrome.debugger.sendCommand({ tabId: tab.id }, 'Input.insertText', { text: String(p.listing[field] ?? '') });
-      }
-      await chrome.debugger.sendCommand({ tabId: tab.id }, 'Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
-      await chrome.debugger.sendCommand({ tabId: tab.id }, 'Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
-      form = await callSellwildPage(tab.id, 'inspect', p);
-      const differences = [form.title !== p.listing.title && 'title', form.description !== String(p.listing.description || '') && 'description',
-        Number(String(form.price).replace(/[$,]/g, '')) !== Number(p.listing.price) && 'price', form.photo_count !== p.photos.length && 'photos'].filter(Boolean);
-      if (differences.length) throw new Error(`Sellwild did not retain the review ${differences.join(', ')}.`);
-      await chrome.storage.local.set({ [reviewKey]: { ...review, ready: true, photo_count: p.photos.length } });
-      return { ok: true, state: 'draft', review_ready: true };
-    }
-    p.photo_count = review.photo_count;
-    await callSellwildPage(tab.id, 'preflight', p);
-    observer = observeSellwildPublish(tab.id, p, operationKey);
-    await chrome.debugger.sendCommand({ tabId: tab.id }, 'Network.enable');
-    await chrome.debugger.sendCommand({ tabId: tab.id }, 'Fetch.enable', { patterns: [
-      { urlPattern: 'https://sellwild.com/api/listings/create', requestStage: 'Request' },
-      { urlPattern: 'https://sellwild.com/api/listings/*/edit', requestStage: 'Request' },
-      { urlPattern: 'https://sellwild.com/api/listings/*/confirm-photos', requestStage: 'Request' },
-    ] });
-    clicked = true;
-    await callSellwildPage(tab.id, 'publish', p);
-    const receipt = await Promise.race([observer.result, new Promise(resolve => setTimeout(() => resolve(null), 60000))]);
-    if (receipt) return receipt;
-    return { ok: false, safe_to_retry: !observer.started() && observer.connected(), error: observer.started() || !observer.connected()
-      ? 'Sellwild has not confirmed activation. Check the result; this publish will not be retried.'
-      : 'Sellwild did not submit the form. Complete the required category, condition, account and shipping fields in its review tab.' };
-  } catch (error) { return { ok: false, safe_to_retry: (!clicked || error.safeToRetry === true) && !recovery, error: String(error.message || error) }; }
-  finally {
-    await observer?.close();
-    if (attached) await chrome.debugger.detach({ tabId: tab.id }).catch(() => {});
+    const receipt = { ok: true, state: activate.result.underReview === true ? 'pending_review' : 'published',
+      listing_url: sellwildListingUrl(id, created.title) };
+    await storeReceipt({ sellwild_activation: receipt });
+    return receipt;
+  } catch (error) {
+    const message = String(error.message || error);
+    return { ok: false, safe_to_retry: !sent || (error.rejected === true && !created), error: created
+      ? `${message} Sellwild listing ${created.id} exists but is not active; check your Sellwild listings before another attempt.`
+      : message };
   }
 }

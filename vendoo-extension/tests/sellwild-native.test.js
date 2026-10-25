@@ -2,143 +2,124 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadWorker } = require('./worker-context');
 
-function form() {
+const listing = { title: 'Test jacket', description: 'Private description', price: 24, weight_lb: 1, weight_oz: 4,
+  package_dimensions_in: '13x10x3' };
+const ADDRESS = { id: 7, isDefault: 1, line1: '1 Private St', locality: 'New Orleans', region: 'LA', zipCode: '70125',
+  latitude: '29.96', longitude: '-90.1' };
+
+function worker({ routes = {} } = {}) {
   const c = loadWorker();
-  let clicks = 0;
-  c.location = { origin: 'https://sellwild.com', pathname: '/sell' };
-  c.getComputedStyle = () => ({ visibility: 'visible' });
-  const visible = { getClientRects: () => [{}] };
-  const fields = { title: 'Test', text: 'Private test', price: '12', category: 'Clothing', condition: 'Good' };
-  c.document = {
-    getElementById: id => ({ value: fields[id.replace('-input', '')] }),
-    querySelectorAll: selector => selector === 'img' ? [{ ...visible, src: 'blob:photo1' }, { ...visible, src: 'blob:photo2' }]
-      : [{ ...visible, innerText: 'Finish', click: () => { clicks++; } }],
+  c.AbortSignal = AbortSignal;
+  c.Blob = Blob;
+  const journal = {};
+  c.chrome.storage = { local: { get: async key => ({ [key]: journal[key] }), set: async values => Object.assign(journal, values) } };
+  c.chrome.declarativeNetRequest = { updateSessionRules: async () => {} };
+  c.chrome.tabs = { create: () => { throw new Error('opened a tab'); }, query: () => { throw new Error('read tabs'); } };
+  c.chrome.scripting = { executeScript: () => { throw new Error('ran a page script'); } };
+  c.nativePhoto = async () => ({ base64: 'AA==', mime_type: 'image/jpeg' });
+  c.sellwildPhotoBlob = async () => new Blob(['jpeg'], { type: 'image/jpeg' });
+  const requests = [];
+  const defaults = {
+    'GET /api/auth/session': [200, { user: { id: 1 } }],
+    'GET /api/addresses': [200, { success: true, addresses: [ADDRESS] }],
+    'POST /api/listings/create': [200, { success: true, listing: { id: 4512, title: 'Test jacket', price: '24' },
+      presignedUrls: [{ photoIndex: 0, size: 'o', presignedUrl: 'https://antengo-listings.s3.amazonaws.com/a?sig=1' },
+        { photoIndex: 1, size: 'o', presignedUrl: 'https://antengo-listings.s3.amazonaws.com/b?sig=2' }] }],
+    'POST /api/listings/4512/confirm-photos': [200, { success: true }],
+    'PUT s3': [200, ''],
   };
-  return { c, fields, clicks: () => clicks, payload: { operation_id: 'abc123', action: 'publish', confirm: true,
-    photo_count: 2, listing: { title: 'Test', description: 'Private test', price: 12 }, deadline: Date.now() + 30000 } };
+  c.fetch = async (url, options = {}) => {
+    const parsed = new URL(url);
+    const route = parsed.hostname === 'sellwild.com' ? `${options.method || 'GET'} ${parsed.pathname}` : `${options.method} s3`;
+    requests.push({ route, url, options, body: typeof options.body === 'string' ? JSON.parse(options.body) : options.body });
+    const [status, body] = routes[route] || defaults[route] || [404, { success: false, error: 'missing' }];
+    return { ok: status >= 200 && status < 300, status, json: async () => body };
+  };
+  return { c, requests, journal };
 }
 
-test('Sellwild review cannot click Finish; publishing requires explicit approval', async () => {
-  const s = form();
-  for (const payload of [{ ...s.payload, action: 'review' }, { ...s.payload, confirm: false }]) {
-    assert.ok((await s.c.sellwildPage('publish', payload)).error);
-  }
-  assert.equal(s.clicks(), 0);
-  assert.equal((await s.c.sellwildPage('preflight', s.payload)).ok, true);
-  assert.equal(s.clicks(), 0);
-  assert.equal((await s.c.sellwildPage('publish', s.payload)).ok, true);
-  assert.equal(s.clicks(), 1);
+const message = extra => ({ job_id: 'job-1', payload: { marketplace: 'sellwild', action: 'publish', confirm: true, operation_id: 'op-1',
+  listing, sellwild: { category_id: 272, condition_id: 2 },
+  photos: [{ id: 'p1', mime_type: 'image/jpeg' }, { id: 'p2', mime_type: 'image/jpeg' }], ...extra } });
+
+test('a confirmed Sellwild publish creates, uploads photos and activates once, with no tab', async () => {
+  const { c, requests, journal } = worker();
+  const result = JSON.parse(JSON.stringify(await c.runSellwildNative(message())));
+  assert.deepEqual(result, { ok: true, state: 'published', listing_url: 'https://sellwild.com/product/4512/test-jacket' });
+  assert.deepEqual(requests.map(r => r.route), ['GET /api/auth/session', 'GET /api/addresses', 'POST /api/listings/create',
+    'PUT s3', 'PUT s3', 'POST /api/listings/4512/confirm-photos']);
+  assert.deepEqual(requests[2].body, { title: 'Test jacket', text: 'Private description', price: 24, categoryId: 272, itemCondition: 2,
+    locationText: 'New Orleans, LA', latitude: 29.96, longitude: -90.1, shippable: true, parcelTemplate: '', weight: 1.25,
+    depth: 13, width: 10, height: 3, vin: 0, mileage: 0, photos: 2 });
+  assert.deepEqual(requests.filter(r => r.route === 'PUT s3').map(r => r.url),
+    ['https://antengo-listings.s3.amazonaws.com/a?sig=1', 'https://antengo-listings.s3.amazonaws.com/b?sig=2']);
+  assert.ok(requests.filter(r => r.url.startsWith('https://sellwild.com')).every(r => r.options.credentials === 'include'));
+  assert.equal(journal['native_operation_op-1'].sellwild_created_id, '4512');
+  assert.deepEqual(JSON.parse(JSON.stringify(journal['native_operation_op-1'].sellwild_activation)), result);
 });
 
-test('Sellwild rejects changed fields, missing category and mismatched photos before publishing', async () => {
-  const s = form();
-  s.fields.title = 'Changed';
-  assert.ok((await s.c.sellwildPage('publish', s.payload)).error);
-  s.fields.title = 'Test';
-  s.fields.category = '';
-  assert.ok((await s.c.sellwildPage('publish', s.payload)).error);
-  s.fields.category = 'Clothing';
-  assert.ok((await s.c.sellwildPage('publish', { ...s.payload, photo_count: 1 })).error);
-  assert.equal(s.clicks(), 0);
+test('Sellwild moderation is reported as pending review', async () => {
+  const { c } = worker({ routes: { 'POST /api/listings/4512/confirm-photos': [200, { success: true, underReview: true }] } });
+  assert.equal((await c.runSellwildNative(message())).state, 'pending_review');
 });
 
-test('Sellwild retains only matching create/activation receipts and distinguishes moderation', async () => {
-  for (const underReview of [false, true]) {
-    const c = loadWorker();
-    const stored = {};
-    let listener;
-    let detach;
-    c.chrome.storage.local.get = async key => ({ [key]: stored[key] });
-    c.chrome.storage.local.set = async values => Object.assign(stored, values);
-    c.chrome.debugger = {
-      onEvent: { addListener: fn => { listener = fn; }, removeListener() {} },
-      onDetach: { addListener: fn => { detach = fn; }, removeListener() {} },
-      sendCommand: async (_target, _method, { requestId }) => ({ body: JSON.stringify(requestId === 'create'
-        ? { success: true, listing: { id: 123, title: 'Test', ignored: 'never-store' } }
-        : { success: true, underReview, ignored: 'never-store' }) }),
-    };
-    const observer = c.observeSellwildPublish(4, { listing: { title: 'Test', price: 12 } }, 'native_operation_abc123');
-    const request = (id, url, body) => listener({ tabId: 4 }, 'Network.requestWillBeSent', {
-      requestId: id, request: { method: 'POST', url, postData: JSON.stringify(body), headers: { Authorization: 'never-store' } },
-    });
-    request('create', 'https://sellwild.com/api/listings/create', { title: 'Test', price: 12 });
-    listener({ tabId: 4 }, 'Network.loadingFinished', { requestId: 'create' });
-    await new Promise(resolve => setImmediate(resolve));
-    request('activate', 'https://sellwild.com/api/listings/123/confirm-photos', {});
-    listener({ tabId: 4 }, 'Network.loadingFinished', { requestId: 'activate' });
-    const result = await observer.result;
-    assert.equal(result.state, underReview ? 'pending_review' : 'published');
-    assert.equal(result.listing_url, 'https://sellwild.com/product/123/test');
-    assert.equal(observer.started(), true);
-    assert.ok(!JSON.stringify(stored).includes('never-store'));
-    detach({ tabId: 4 });
-    assert.equal(observer.connected(), false);
-    await observer.close();
+test('Sellwild publishing needs confirmation and complete fields before any request', async () => {
+  for (const extra of [{ confirm: false }, { action: 'review' }, { sellwild: { category_id: 272 } },
+    { listing: { ...listing, price: 4 } }, { listing: { ...listing, weight_lb: 0, weight_oz: 0 } },
+    { listing: { ...listing, package_dimensions_in: '' } }, { photos: [] }]) {
+    const { c, requests } = worker();
+    const result = await c.runSellwildNative(message(extra));
+    assert.equal(result.ok, false);
+    assert.equal(result.safe_to_retry, true, JSON.stringify(extra));
+    assert.equal(requests.length, 0);
   }
 });
 
-test('an unexpected Sellwild create attempt cannot be classified as safe to retry', async () => {
-  const c = loadWorker();
-  let listener;
-  c.chrome.debugger = { onEvent: { addListener: fn => { listener = fn; }, removeListener() {} },
-    onDetach: { addListener() {}, removeListener() {} }, sendCommand: async () => ({}) };
-  const observer = c.observeSellwildPublish(4, { listing: { title: 'Test', price: 12 } }, 'operation');
-  listener({ tabId: 4 }, 'Network.requestWillBeSent', { requestId: 'wrong', request: {
-    method: 'POST', url: 'https://sellwild.com/api/listings/create', postData: JSON.stringify({ title: 'Changed', price: 13 }),
-  } });
-  assert.equal(observer.started(), true);
-  await observer.close();
+test('a missing session or ship-from address stops before creating anything', async () => {
+  for (const routes of [{ 'GET /api/auth/session': [200, {}] }, { 'GET /api/addresses': [200, { success: true, addresses: [] }] },
+    { 'GET /api/addresses': [200, { success: true, addresses: [{ ...ADDRESS, line1: '' }] }] }, { 'GET /api/auth/session': [401, {}] }]) {
+    const { c, requests } = worker({ routes });
+    const result = await c.runSellwildNative(message());
+    assert.equal(result.safe_to_retry, true);
+    assert.ok(!requests.some(r => r.route === 'POST /api/listings/create'));
+  }
 });
 
-test('Sellwild network guard permits one approved create and blocks duplicate or unrelated writes', async () => {
-  const c = loadWorker();
-  let listener;
-  const commands = [];
-  const stored = {};
-  c.chrome.storage.local.get = async key => ({ [key]: stored[key] });
-  c.chrome.storage.local.set = async values => Object.assign(stored, values);
-  c.chrome.debugger = { onEvent: { addListener: fn => { listener = fn; }, removeListener() {} },
-    onDetach: { addListener() {}, removeListener() {} },
-    sendCommand: async (_target, method, args) => {
-      if (method === 'Network.getResponseBody') return { body: JSON.stringify({ success: true, listing: { id: 123, title: 'Test' } }) };
-      commands.push({ method, args }); return {};
-    } };
-  const observer = c.observeSellwildPublish(4, { action: 'publish', confirm: true, deadline: Date.now() + 30000,
-    listing: { title: 'Test', price: 12 } }, 'operation');
-  const paused = (requestId, path, body, method = 'POST') => listener({ tabId: 4 }, 'Fetch.requestPaused', {
-    requestId, request: { method, url: 'https://sellwild.com'+path, postData: JSON.stringify(body) },
-  });
-  paused('wrong', '/api/listings/create', { title: 'Changed', price: 12 });
-  paused('first', '/api/listings/create', { title: 'Test', price: 12 });
-  paused('duplicate', '/api/listings/create', { title: 'Test', price: 12 });
-  paused('edit', '/api/listings/999/edit', {}, 'PUT');
-  paused('activate-wrong-item', '/api/listings/999/confirm-photos', {});
-  assert.deepEqual(commands.map(command => command.method), ['Fetch.failRequest', 'Fetch.continueRequest', 'Fetch.failRequest', 'Fetch.failRequest', 'Fetch.failRequest']);
-  listener({ tabId: 4 }, 'Network.requestWillBeSent', { requestId: 'create', request: {
-    method: 'POST', url: 'https://sellwild.com/api/listings/create', postData: JSON.stringify({ title: 'Test', price: 12 }),
-  } });
-  listener({ tabId: 4 }, 'Network.loadingFinished', { requestId: 'create' });
-  await new Promise(resolve => setImmediate(resolve));
-  paused('activate', '/api/listings/123/confirm-photos', {});
-  paused('activate-duplicate', '/api/listings/123/confirm-photos', {});
-  assert.deepEqual(commands.slice(-2).map(command => command.method), ['Fetch.continueRequest', 'Fetch.failRequest']);
-  assert.equal(observer.started(), true);
-  await observer.close();
+test('a rejected create can be retried; a lost create reply cannot', async () => {
+  let { c } = worker({ routes: { 'POST /api/listings/create': [400, { success: false, error: 'Price must be less than 1,000,000' }] } });
+  let result = await c.runSellwildNative(message());
+  assert.equal(result.safe_to_retry, true);
+  assert.match(result.error, /Price must be/);
+  ({ c } = worker({ routes: { 'POST /api/listings/create': [502, null] } }));
+  result = await c.runSellwildNative(message());
+  assert.equal(result.safe_to_retry, false);
 });
 
-test('Sellwild publish commands are single-use and result checks never repeat the click', async () => {
-  const c = loadWorker();
-  const stored = {};
-  const replies = [];
-  let calls = 0;
-  c.chrome.storage.local.get = async key => ({ [key]: stored[key] });
-  c.chrome.storage.local.set = async values => Object.assign(stored, values);
-  c.sendBrowserResult = (_msg, result) => replies.push(result);
-  c.runSellwildNative = async () => { calls++; return { ok: true, state: 'published', listing_url: 'https://sellwild.com/product/123/test' }; };
-  const msg = { type: 'marketplace.execute', job_id: 'abc123', payload: { operation_id: 'abc123', marketplace: 'sellwild', action: 'publish', confirm: true } };
-  await c.handleNativeMarketplaceMessage(msg);
-  await c.handleNativeMarketplaceMessage(msg);
-  await c.handleNativeMarketplaceMessage({ ...msg, type: 'marketplace.result' });
-  assert.equal(calls, 1);
-  assert.equal(replies[2].result.state, 'published');
+test('a failed photo upload or activation leaves an inactive listing that is never retried', async () => {
+  for (const routes of [{ 'PUT s3': [403, ''] }, { 'POST /api/listings/4512/confirm-photos': [500, { success: false, error: 'Failed to activate listing' }] }]) {
+    const { c, requests } = worker({ routes });
+    const result = await c.runSellwildNative(message());
+    assert.equal(result.ok, false);
+    assert.equal(result.safe_to_retry, false);
+    assert.match(result.error, /listing 4512 exists but is not active/);
+    assert.equal(requests.filter(r => r.route === 'POST /api/listings/create').length, 1);
+  }
+});
+
+test('recovery only reads the journal and never writes to Sellwild', async () => {
+  const { c, requests, journal } = worker();
+  assert.match((await c.runSellwildNative(message(), true)).error, /did not confirm a listing/);
+  journal['native_operation_op-1'] = { sellwild_created_id: '4512' };
+  assert.match((await c.runSellwildNative(message(), true)).error, /created listing 4512/);
+  journal['native_operation_op-1'].sellwild_activation = { ok: true, state: 'published', listing_url: 'https://sellwild.com/product/4512/test-jacket' };
+  assert.equal((await c.runSellwildNative(message(), true)).state, 'published');
+  assert.equal(requests.length, 0);
+});
+
+test('weight and box helpers follow Sellwild units', () => {
+  const { c } = worker();
+  assert.equal(c.sellwildWeightLb({ weight_lb: 0, weight_oz: 10 }), 0.63);
+  assert.equal(c.sellwildWeightLb({}), null);
+  assert.deepEqual({ ...c.sellwildBox({ package_dimensions_in: '12 x 9 x 5' }) }, { depth: 12, width: 9, height: 5 });
+  assert.equal(c.sellwildBox({ package_dimensions_in: '12x9' }), null);
 });

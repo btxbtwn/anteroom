@@ -43,9 +43,12 @@ async def publish(conv_id: str, marketplace: Marketplace, body: PublishRequest, 
     return await _reply(native.publish(conv_id, marketplace, body, db))
 
 
-@router.post("/sellwild/review")
-async def review_sellwild(conv_id: str, body: DraftRequest, db: Session = Depends(get_db)):
-    return await _reply(native.review_sellwild(conv_id, body, db))
+@router.get("/sellwild/options")
+def sellwild_options(conv_id: str, db: Session = Depends(get_db)):
+    try:
+        return native.sellwild_options(conv_id, db)
+    except native.NativeMarketplaceError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
 
 
 @router.post("/{marketplace}/check")
