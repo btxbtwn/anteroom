@@ -633,3 +633,29 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
                 await client.request("GET", "/sell/inventory/v1/offer/1")
         self.assertEqual((raised.exception.status, raised.exception.code), (401, "signed_out"))
         self.assertIn("Invalid access token", raised.exception.marketplace_message)
+
+    async def test_photo_upload_goes_to_ebays_media_host(self):
+        import base64
+        import httpx
+
+        from vendoo_studio.services import ebay_client
+
+        seen = []
+
+        async def handler(request):
+            seen.append(str(request.url))
+            return httpx.Response(201, json={"imageUrl": "https://i.ebayimg.com/images/g/test/s-l1600.jpg"})
+
+        real = httpx.AsyncClient
+        with patch.object(ebay_client.httpx, "AsyncClient", side_effect=lambda **kwargs: real(transport=httpx.MockTransport(handler), **kwargs)), \
+             patch.object(ebay_client, "assert_identity"):
+            client = ebay_client.EbayClient("token", ("seller", "1"))
+            await client.request("POST", "/commerce/media/v1_beta/image/create_image_from_file",
+                                 upload={"field": "image", "data": base64.b64encode(b"jpeg").decode(), "mime": "image/jpeg"})
+            await client.request("GET", "/sell/inventory/v1/location")
+            await client.request("GET", "/sell/finances/v1/transaction")
+        self.assertEqual(seen, [
+            "https://apim.ebay.com/commerce/media/v1_beta/image/create_image_from_file",
+            "https://api.ebay.com/sell/inventory/v1/location",
+            "https://apiz.ebay.com/sell/finances/v1/transaction",
+        ])
