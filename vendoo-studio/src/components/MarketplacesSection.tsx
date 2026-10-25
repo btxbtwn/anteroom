@@ -6,7 +6,7 @@ import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, Market
 import type { NativeDraft, NativeDrafts, NativeMarketplace, SellwildOptions } from "../api/nativeMarketplaces";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
-import { InspectorSection } from "./ListingFormControls";
+import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "./ui/combobox";
@@ -67,14 +67,15 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   return { tone: "idle", label: "Not listed" };
 }
 
-function summary(rows: Status[]): string {
-  const live = rows.filter((row) => row.tone === "live").length;
-  const sold = rows.filter((row) => row.label === "Sold here").length;
-  const attention = rows.filter((row) => row.tone === "attention" || row.tone === "failed").length;
-  return [live && `${live} live`, sold && `${sold} sold`, attention && `${attention} need attention`].filter(Boolean).join(" · ");
+type Option = { id: number; label: string };
+
+function railLabel(id: string): string {
+  if (id === "general") return "General";
+  if (id === "json") return "JSON";
+  return marketplaceName(id);
 }
 
-type Option = { id: number; label: string };
+const MANAGED = new Set<string>(ORDER);
 
 function SellwildCategory({ options, value, onChange, disabled }: {
   options: SellwildOptions["categories"]; value: number | undefined; onChange: (id: number | undefined) => void; disabled: boolean;
@@ -96,8 +97,17 @@ function SellwildCategory({ options, value, onChange, disabled }: {
   );
 }
 
-export function MarketplacesSection({ convId, revisionId, title, disabled, etsyEligible }: {
+type MarketplaceProps = {
   convId: string; revisionId: string | null; title: string; disabled: boolean; etsyEligible: boolean;
+};
+
+export function MarketplacesLayout({
+  convId, revisionId, title, disabled, etsyEligible, ids, selected, onSelect, children,
+}: MarketplaceProps & {
+  ids: readonly string[];
+  selected: string;
+  onSelect: (id: string) => void;
+  children?: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const nativeKey = ["native-marketplaces", convId];
@@ -234,7 +244,7 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
     const canDelist = deletable(entry);
     return (
       <Menu>
-        <MenuTrigger render={<Button variant="ghost" size="icon-xs" aria-label={`${name} actions`} disabled={busy} />}>
+        <MenuTrigger render={<Button variant="ghost" size="icon-xs" className="shrink-0" aria-label={`${name} actions`} disabled={busy} />}>
           <EllipsisIcon />
         </MenuTrigger>
         <MenuPopup align="end" width="content">
@@ -304,60 +314,93 @@ export function MarketplacesSection({ convId, revisionId, title, disabled, etsyE
     );
   }
 
-  const summaryText = summary(statuses);
+  const statusById = new Map(ORDER.map((marketplace, index) => [marketplace, statuses[index]]));
+  const selectedMarketplace = MANAGED.has(selected) ? selected as Marketplace : null;
+  const selectedStatus = selectedMarketplace ? statusById.get(selectedMarketplace) : undefined;
+
   return (
-    <InspectorSection title="Marketplaces" titleId={`item-section-marketplaces-${convId}`} meta={summaryText || undefined}>
-      <ul className="flex flex-col divide-y divide-border/60 text-xs" aria-label="Marketplace listings">
-        {ORDER.map((marketplace, index) => {
-          const status = statuses[index];
-          const name = marketplaceName(marketplace);
-          const extra = settings(marketplace);
-          const link = linkForm(marketplace);
-          const draft = NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined;
-          return (
-            <li key={marketplace} aria-label={name} className="grid grid-cols-[5rem_minmax(0,1fr)_auto] items-start gap-x-2.5 gap-y-1.5 py-1.5">
-              <span className="flex min-h-6 items-center truncate font-medium text-foreground">{name}</span>
-              <div className="flex min-h-6 min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-                <span role="status" className="flex min-w-0 items-center gap-1.5 text-muted-foreground [&>a]:ms-1.5">
-                  {TONE_ICON[status.tone]}
-                  <span className={cn(status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground")}>{status.label}</span>
-                  {status.href && <a className="inline-flex items-center gap-0.5 text-foreground/80 hover:text-foreground hover:underline" href={status.href}
-                    target="_blank" rel="noopener noreferrer" aria-label={`${status.hrefLabel} on ${name}`}>{status.hrefLabel}<ExternalLinkIcon aria-hidden className="size-3" /></a>}
-                </span>
-                <span className="ms-auto flex shrink-0 items-center gap-1.5">{actions(marketplace, status)}</span>
-              </div>
-              {rowMenu(marketplace, status)}
-              {(status.detail || extra || link || (draft?.state === "unknown" && !draft.draft_url && !ONE_STEP.has(marketplace) && marketplace !== "sellwild")) && (
-                <div className="col-start-2 flex min-w-0 flex-col gap-1.5">
-                  {link}
-                  {status.detail && <p className={cn(status.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
-                    role={status.tone === "failed" ? "alert" : undefined}>{status.detail}</p>}
-                  {extra}
-                  {draft?.state === "unknown" && !draft.draft_url && !ONE_STEP.has(marketplace) && marketplace !== "sellwild" && (
-                    <div className="flex items-center gap-2">
-                      <Input size="compact" aria-label={`Saved ${name} draft link`} placeholder="Or paste the saved draft link"
-                        value={draftLinks[marketplace as NativeMarketplace] || ""}
-                        onChange={(event) => setDraftLinks({ ...draftLinks, [marketplace]: event.target.value })} />
-                      <Button size="xs" variant="outline" disabled={action.isPending || !draftLinks[marketplace as NativeMarketplace]?.trim()}
-                        onClick={() => action.mutate({ marketplace: marketplace as NativeMarketplace, kind: "check", draftUrl: draftLinks[marketplace as NativeMarketplace]?.trim() })}>Check link</Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      {removable.length > 1 && (
-        <div className="flex justify-end pt-1 text-xs">
-          <Button size="xs" variant="destructive-outline" disabled={busy} onClick={() => void runDelist(removable)}>
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <nav aria-label="Marketplaces" className="flex w-36 shrink-0 flex-col gap-0.5 overflow-y-auto border-e py-1.5 ps-1.5 pe-1">
+        <ul className="flex flex-col gap-0.5 text-xs">
+          {ids.map((id) => {
+            const marketplace = MANAGED.has(id) ? id as Marketplace : null;
+            const status = marketplace ? statusById.get(marketplace) : undefined;
+            const name = railLabel(id);
+            const current = selected === id;
+            return (
+              <li key={id} aria-label={name} className="flex items-start">
+                <button type="button" aria-selected={current} onClick={() => onSelect(id)}
+                  className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-accent",
+                    current && "bg-accent")}>
+                  {marketplace ? <MarketplaceLogo id={marketplace} label={name} size={16} /> : <span aria-hidden className="size-4 shrink-0" />}
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-foreground">{name}</span>
+                    {status && (
+                      <span role="status" className={cn("flex items-center gap-1 truncate text-[10px] text-muted-foreground",
+                        status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground")}>
+                        {TONE_ICON[status.tone]}
+                        <span className="truncate">{status.label}</span>
+                      </span>
+                    )}
+                  </span>
+                </button>
+                {marketplace && status ? rowMenu(marketplace, status) : null}
+              </li>
+            );
+          })}
+        </ul>
+        {removable.length > 1 && (
+          <Button size="xs" variant="destructive-outline" className="mt-1" disabled={busy} onClick={() => void runDelist(removable)}>
             {delist.isPending ? "Delisting…" : "Delist everywhere…"}
           </Button>
-        </div>
-      )}
-      {(native.error || live.error || action.error || delist.error || mark.error) && (
-        <p role="alert" className="text-destructive-foreground text-xs">{(mark.error || action.error || delist.error || native.error || live.error)?.message}</p>
-      )}
-    </InspectorSection>
+        )}
+      </nav>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+        {(native.error || live.error || action.error || delist.error || mark.error) && (
+          <p role="alert" className="text-destructive-foreground text-xs">{(mark.error || action.error || delist.error || native.error || live.error)?.message}</p>
+        )}
+        {selectedMarketplace && selectedStatus && (
+          <section data-marketplace-pane={selectedMarketplace} className="flex flex-col gap-2 text-xs">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                {TONE_ICON[selectedStatus.tone]}
+                <span className={cn("truncate", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground")}>{selectedStatus.label}</span>
+                {selectedStatus.href && <a className="inline-flex items-center gap-0.5 text-foreground/80 hover:text-foreground hover:underline" href={selectedStatus.href}
+                  target="_blank" rel="noopener noreferrer" aria-label={`${selectedStatus.hrefLabel} on ${railLabel(selectedMarketplace)}`}>{selectedStatus.hrefLabel}<ExternalLinkIcon aria-hidden className="size-3" /></a>}
+              </span>
+              <span className="ms-auto flex shrink-0 items-center gap-1.5">{actions(selectedMarketplace, selectedStatus)}</span>
+            </div>
+            {selectedStatus.detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
+              role={selectedStatus.tone === "failed" ? "alert" : undefined}>{selectedStatus.detail}</p>}
+            {settings(selectedMarketplace)}
+            {linkForm(selectedMarketplace)}
+            {(() => {
+              const draft = NATIVE.has(selectedMarketplace) ? drafts[selectedMarketplace as NativeMarketplace] : undefined;
+              const name = railLabel(selectedMarketplace);
+              if (draft?.state !== "unknown" || draft.draft_url || ONE_STEP.has(selectedMarketplace) || selectedMarketplace === "sellwild") return null;
+              return (
+                <div className="flex items-center gap-2">
+                  <Input size="compact" aria-label={`Saved ${name} draft link`} placeholder="Or paste the saved draft link"
+                    value={draftLinks[selectedMarketplace as NativeMarketplace] || ""}
+                    onChange={(event) => setDraftLinks({ ...draftLinks, [selectedMarketplace]: event.target.value })} />
+                  <Button size="xs" variant="outline" disabled={action.isPending || !draftLinks[selectedMarketplace as NativeMarketplace]?.trim()}
+                    onClick={() => action.mutate({ marketplace: selectedMarketplace as NativeMarketplace, kind: "check", draftUrl: draftLinks[selectedMarketplace as NativeMarketplace]?.trim() })}>Check link</Button>
+                </div>
+              );
+            })()}
+          </section>
+        )}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** The marketplace rail and the selected marketplace's actions, used on its own in tests. */
+export function MarketplacesSection(props: MarketplaceProps & { selected?: string }) {
+  return (
+    <MarketplacesLayout {...props} ids={ORDER} selected={props.selected ?? ""} onSelect={() => {}}>
+      {null}
+    </MarketplacesLayout>
   );
 }

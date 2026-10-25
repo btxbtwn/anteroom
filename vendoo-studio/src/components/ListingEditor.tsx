@@ -29,7 +29,7 @@ import {
 import { withDropdownOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
-import { MarketplacesSection } from "./MarketplacesSection";
+import { MarketplacesLayout } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
 import { fetchVendooItemLive, VENDOO_ITEM_STALE_MS, vendooItemQueryKey } from "../api/vendooItemQuery";
@@ -51,7 +51,7 @@ import {
 } from "./fillLog/formFilters";
 import { sourceFormsForJob } from "./fillLog/sourceForms";
 import { ListingBrowserButton, ListingReviewActions } from "./ListingReviewActions";
-import { ListingReviewTabs, type ListingReviewTab } from "./ListingReviewTabs";
+import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -353,7 +353,6 @@ export function ListingEditor({
           >
             {listingTitle}
           </h2>
-          <ListingReviewTabs value={reviewTab} onChange={onReviewTabChange} />
           <ListingReviewActions
             convId={convId}
             onCleared={onCleared}
@@ -477,68 +476,52 @@ export function ListingEditor({
         <Alert variant="info" role="status" className="mx-3 mt-2.5 shrink-0">
           <Spinner />
           <AlertDescription>
-            Discovering Vendoo marketplace fields for this category… Empty keys will appear on Forms as they arrive.
+            Discovering Vendoo marketplace fields for this category… Empty keys will appear on each marketplace as they arrive.
           </AlertDescription>
         </Alert>
       )}
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pt-3 pb-3">
-        {reviewTab === "input" ? (
-          <>
-            <MarketplacesSection key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
-              disabled={generating} etsyEligible={etsyEligible} />
-            <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
-            <ItemDetails convId={convId} />
-          </>
+      <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
+        disabled={generating} etsyEligible={etsyEligible} ids={tabs}
+        selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
+        onSelect={(id) => {
+          setFieldTarget(null);
+          if (id === "general") onReviewTabChange("input");
+          else onReviewTabChange("forms");
+          setEditTab(id);
+        }}>
+        {editTab === "json" && reviewTab === "forms" ? (
+          <div className="flex flex-col gap-2">
+            <Textarea
+              aria-label="Listing JSON"
+              value={jsonText}
+              onChange={(e) => setJsonText(e.target.value)}
+              className="[&_textarea]:field-sizing-fixed [&_textarea]:h-85 [&_textarea]:max-h-none [&_textarea]:font-mono [&_textarea]:text-[11.5px]"
+            />
+            <Button size="sm" className="w-full" onClick={applyJsonEdit}>
+              Apply JSON
+            </Button>
+          </div>
         ) : (
           <>
-            <div
-              role="tablist"
-              aria-label="Listing form"
-              className="mb-3 flex w-full min-w-0 shrink-0 overflow-x-auto overscroll-x-contain border-b"
-            >
-              {tabs.map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  role="tab"
-                  aria-selected={editTab === tab}
-                  className={cn(
-                    "-mb-px shrink-0 whitespace-nowrap border-transparent border-b-2 px-2.5 py-2 font-medium text-muted-foreground text-xs transition-colors hover:text-foreground max-[900px]:min-h-11 max-[900px]:px-3 max-[900px]:text-sm",
-                    editTab === tab && "border-primary text-foreground",
-                  )}
-                  onClick={() => { setFieldTarget(null); setEditTab(tab); }}
-                >
-                  {tab === "json" ? "JSON" : tab === "general" ? "General" : marketplaceName(tab)}
-                </button>
-              ))}
-            </div>
-            {editTab === "json" ? (
-              <div className="flex flex-col gap-2">
-                <Textarea
-                  aria-label="Listing JSON"
-                  value={jsonText}
-                  onChange={(e) => setJsonText(e.target.value)}
-                  className="[&_textarea]:field-sizing-fixed [&_textarea]:h-85 [&_textarea]:max-h-none [&_textarea]:font-mono [&_textarea]:text-[11.5px]"
-                />
-                <Button size="sm" className="w-full" onClick={applyJsonEdit}>
-                  Apply JSON
-                </Button>
-              </div>
-            ) : (
-              <StructuredEditor
-                convId={convId}
-                listing={listing}
-                revisionId={data?.current_revision_id}
-                tab={editTab}
-                target={fieldTarget}
-                onMissingField={showJsonEditor}
-                onChange={(updated) => updateMutation.mutate(updated)}
-              />
+            {(reviewTab !== "forms" || editTab === "general") && (
+              <>
+                <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
+                <ItemDetails convId={convId} />
+              </>
             )}
+            <StructuredEditor
+              convId={convId}
+              listing={listing}
+              revisionId={data?.current_revision_id}
+              tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
+              target={fieldTarget}
+              onMissingField={showJsonEditor}
+              onChange={(updated) => updateMutation.mutate(updated)}
+            />
           </>
         )}
-      </div>
+      </MarketplacesLayout>
 
       <div className="listing-send-footer flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(28vh,220px)] max-[900px]:pb-[max(10px,env(safe-area-inset-bottom,0px))]">
         <SendToVendooButton
@@ -595,7 +578,7 @@ function StructuredEditor({
   const fields = React.useMemo(
     () =>
       withDropdownOptions(
-        schemaFieldsForTab(forms?.forms, tab) ?? getFieldsForTab(listing, tab),
+        fieldsForMarketplaceForm(listing, tab, forms?.forms),
         tab,
         dropdownOptions?.forms,
       ),
@@ -693,6 +676,63 @@ function StructuredEditor({
       </div>
     </div>
   );
+}
+
+const SHARED_FORM_FIELDS: EditorField[] = [
+  { key: "title", label: "Title" },
+  { key: "description", label: "Description" },
+  { key: "price", label: "Price", type: "number" },
+  { key: "brand", label: "Brand" },
+  { key: "condition", label: "Condition" },
+  { key: "primaryColor", label: "Primary Color" },
+  { key: "secondaryColor", label: "Secondary Color" },
+  { key: "quantity", label: "Quantity", type: "number" },
+  { key: "size", label: "Size" },
+  { key: "sku", label: "SKU" },
+  { key: "category_path", label: "Category" },
+];
+
+const PACKAGE_FORM_FIELDS: EditorField[] = [
+  { key: "weight_oz", label: "Package Weight (oz)", type: "number" },
+  { key: "package_dimensions_in", label: "Package Dimensions (LxWxH in)" },
+];
+
+const PACKAGE_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "sellwild"]);
+
+function fieldIdentity(field: EditorField): string {
+  return field.label.replace(/\s*\*$/, "").trim().toLowerCase();
+}
+
+/** First occurrence wins, unless a later row is the one with a choice list. */
+function mergeEditorFields(fields: EditorField[]): EditorField[] {
+  const index = new Map<string, number>();
+  const out: EditorField[] = [];
+  for (const field of fields) {
+    const key = fieldIdentity(field);
+    const at = index.get(key);
+    if (at == null) {
+      index.set(key, out.length);
+      out.push(field);
+      continue;
+    }
+    if (!out[at].options?.length && field.options?.length) out[at] = field;
+  }
+  return out;
+}
+
+/** Every field that marketplace submits, shared listing values first, then its own. */
+export function fieldsForMarketplaceForm(
+  listing: ListingData | undefined,
+  tab: string,
+  forms: MarketplaceForm[] | undefined,
+): EditorField[] {
+  const own = getFieldsForTab(listing, tab);
+  if (tab === "general") return own;
+  const schema = schemaFieldsForTab(forms, tab);
+  const shared = PACKAGE_MARKETPLACES.has(tab)
+    ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
+    : SHARED_FORM_FIELDS;
+  return mergeEditorFields([...shared, ...own, ...(schema ?? [])]);
 }
 
 /** Fields for this tab from Vendoo's own schema, or null when it has none. */

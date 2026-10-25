@@ -89,8 +89,9 @@ const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
 /* The listings sidebar opens, and never narrows, below the width that fits its footer buttons. */
 const SIDEBAR_WIDTH: PanelWidthLimits = { min: SIDEBAR_FOOTER_WIDTH, max: 420, maxVw: 30 };
 const THREADS_WIDTH: PanelWidthLimits = { min: 200, max: 420, maxVw: 30 };
-/* Min 420 so the inspector can't shrink under the titlebar listing chrome. */
-const DETAIL_WIDTH: PanelWidthLimits = { min: 420, max: 640, maxVw: 45 };
+/* Min 420 so the inspector can't shrink under the titlebar listing chrome.
+   Max leaves room to widen it when the marketplace rail sits beside the form. */
+const DETAIL_WIDTH: PanelWidthLimits = { min: 420, max: 760, maxVw: 50 };
 const MAIN_PANEL_MIN_WIDTH = 360;
 let setupGuideAutoOpen: boolean | null = null;
 
