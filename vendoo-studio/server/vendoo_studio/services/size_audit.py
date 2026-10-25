@@ -36,11 +36,11 @@ def form_sizes(listing: dict) -> dict[str, str]:
     return sizes
 
 
-def aligned(listing: dict) -> dict:
+def aligned(listing: dict, *, previous_size: str | None = None) -> dict:
     """A copy of ``listing`` with its sizes as a save would leave them."""
     updated = copy.deepcopy(listing)
     sanitize_listing_sizes(updated)
-    align_size_fields(updated)
+    align_size_fields(updated, previous_size=previous_size)
     return updated
 
 
