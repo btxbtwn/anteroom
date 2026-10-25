@@ -62,7 +62,7 @@ function page() {
   c.AbortSignal = AbortSignal;
   c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
   const requests = [];
-  let saved = { id: 123456, description: 'Test\n\nPrivate draft', price_amount: '12', price_currency: 'USD',
+  let saved = { id: 123456, description: 'Private draft', price_amount: '12', price_currency: 'USD',
     pictures: [{ id: 789 }], missing_fields: ['brand'], shipping_methods: [] };
   c.fetch = async (url, options) => {
     requests.push({ url, ...options });
@@ -143,7 +143,7 @@ test('Depop publishes only an explicitly confirmed complete draft and exactly on
   c.fetch = async (url, options) => {
     requests.push({ url, ...options });
     return reply(200, options.method === 'GET'
-      ? { description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{}], missing_fields: [] } : { id: 'job-1' });
+      ? { description: 'Private draft', price_amount: '12', pictures: [{}], missing_fields: [] } : { id: 'job-1' });
   };
   const result = await c.depopApiAction('publish', approved);
   assert.equal(result.publish_job_id, 'job-1');
@@ -175,8 +175,8 @@ test('a completed Depop publish without a slug uses the one matching selling lis
     if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
     if (pathname.includes('/by-status/selling/')) {
       return reply(200, { objects: [
-        { slug: 'other-item', description: 'Test\n\nPrivate draft', price_amount: '9' },
-        { slug: 'seller-columbia-xl', description: 'Test\n\nPrivate draft\n\n#vintage', price_amount: '12.00' },
+        { slug: 'other-item', description: 'Private draft', price_amount: '9' },
+        { slug: 'seller-columbia-xl', description: 'Private draft\n\n#vintage', price_amount: '12.00' },
       ] });
     }
     throw new Error(pathname);
@@ -272,7 +272,7 @@ function newDraft({ photoAnswer } = {}) {
     if (options.method === 'POST' && pathname === '/presentation/api/v1/pictures/') {
       return reply(200, { id: 9, url: 'https://media-photos-depop.s3-accelerate.amazonaws.com/p/9.jpg?X-Amz-Signature=private' });
     }
-    return reply(200, { id: 555, description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [] });
+    return reply(200, { id: 555, description: 'Private draft', price_amount: '12', pictures: [] });
   };
   withCatalog(c);
   const msg = { job_id: 'job-1', payload: { action: 'save_draft', operation_id: 'abc123', listing: FULL,
@@ -309,7 +309,7 @@ test('Depop photo uploads go only to Depop\'s S3 hosts', async () => {
 test('a Depop description is capped at 1000 characters and read back against the capped text', async () => {
   const { c, requests, payload } = page();
   payload.listing = { ...listing, description: 'x'.repeat(1500) };
-  const capped = `Test\n\n${'x'.repeat(1500)}`.slice(0, 1000);
+  const capped = 'x'.repeat(1000);
   const original = c.fetch;
   c.fetch = async (url, options) => {
     const answer = await original(url, options);
@@ -397,7 +397,7 @@ test('a replaced Depop draft that Depop then refuses keeps the new link', async 
       return reply(200, { id: 9, url: 'https://media-photos-depop.s3-accelerate.amazonaws.com/p/9.jpg?X-Amz-Signature=private' });
     }
     if (options.method === 'PUT') return reply(400, 'parcel_size is required', { 'content-type': 'text/plain' });
-    return reply(200, { id: 'newdraft1', description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [] });
+    return reply(200, { id: 'newdraft1', description: 'Private draft', price_amount: '12', pictures: [] });
   };
   withCatalog(c);
   const result = await c.runDepopNative(msg);
@@ -427,7 +427,7 @@ test('a Depop save confirms the draft by reading it again when the first read fa
         // The read is retried on its own. Only a read after those retries is the confirmation.
         if (readsAfterSave <= 4) throw new Error('Disconnected');
       }
-      return reply(200, { id: '123456', description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 789 }] });
+      return reply(200, { id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }] });
     }
     return reply(200, {});
   };
@@ -444,7 +444,7 @@ test('a deleted Depop draft is replaced once and the missing link is not kept', 
   const created = 'https://www.depop.com/sellinghub/drafts/edit/newdraft1/';
   const { c, requests, msg } = newDraft();
   msg.payload.draft_url = gone;
-  let kept = { id: 'newdraft1', description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 9 }] };
+  let kept = { id: 'newdraft1', description: 'Private draft', price_amount: '12', pictures: [{ id: 9 }] };
   c.fetch = async (url, options = {}) => {
     const { pathname } = new URL(url);
     requests.push({ method: options.method, pathname });
@@ -490,7 +490,7 @@ test('Depop\'s own missing fields come back by name, safe to retry, with the dra
   c.chrome.storage.local.get = async () => ({});
   c.fetch = async (url, options) => {
     requests.push({ url, ...options });
-    return reply(200, { description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{}], missing_fields: ['brand', 'parcel_size'] });
+    return reply(200, { description: 'Private draft', price_amount: '12', pictures: [{}], missing_fields: ['brand', 'parcel_size'] });
   };
   const result = await c.runDepopNative({ payload: { ...payload, action: 'publish', confirm: true, operation_id: 'abc123' } });
   assert.equal(result.ok, false);
@@ -518,7 +518,7 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
   c.fetch = async (url, options = {}) => {
     requests.push({ url, ...options });
     const path = new URL(url).pathname;
-    if (options.method === 'PUT') return reply(200, { id: 123456, description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 789 }], missing_fields: [] });
+    if (options.method === 'PUT') return reply(200, { id: 123456, description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }], missing_fields: [] });
     if (path === '/presentation/api/v1/attributes/') return reply(200, { brand: brands });
     if (path === '/presentation/api/v1/users/me/') return reply(200, { country: 'US' });
     if (path.endsWith('/countries.json')) return reply(200, [{ country: 'United States', countryCode: 'US', address: 'United States', geoLat: 39.3, geoLng: -97.9 }]);
@@ -532,7 +532,7 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
     if (path === '/presentation/api/v1/shipping/providers/depop/') {
       return reply(200, [{ id: 'USPS', parcel_sizes: [{ id: 'under_1lb', title: 'Medium', cost: { amount: '1.99' } }, { id: 'medium', title: 'Large', cost: { amount: '5.99' } }] }]);
     }
-    return reply(200, { id: 123456, description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 789 }], missing_fields: [] });
+    return reply(200, { id: 123456, description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }], missing_fields: [] });
   };
   await c.depopApiAction('save', payload);
   const body = JSON.parse(requests.find(request => request.method === 'PUT').body);

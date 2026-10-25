@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.375 — 2026-10-25
+
+- Depop listings use the description only. The title is no longer repeated at the top.
+
 ## 0.1.374 — 2026-10-25
 
 - The Sync button on a listing now syncs your direct listings too: it settles unconfirmed results and checks Poshmark, Mercari, Depop and Sellwild for sales right away. Sales of items you listed directly are now noticed on every marketplace.
