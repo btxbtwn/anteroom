@@ -551,16 +551,28 @@ def _photo_upload(photo) -> dict:
     return {"field": "image", "data": base64.b64encode(path.read_bytes()).decode("ascii"), "mime": photo.mime_type}
 
 
+def ebay_picture_url(url: str) -> str:
+    """The picture address inventory will accept.
+
+    The media API appends ``?set_id=...``. Sending that query on the inventory
+    item makes eBay answer 25001, a core inventory error, and save nothing.
+    """
+    text = str(url or "").strip().split("?", 1)[0]
+    if text.startswith("https://") and " " not in text and len(text) <= 2000:
+        return text
+    return ""
+
+
 async def _image_url(client: EbayClient, photo) -> str:
     uploaded = await client.request("POST", "/commerce/media/v1_beta/image/create_image_from_file", upload=_photo_upload(photo))
     url = str(uploaded.get("imageUrl") or "")
     image_id = str(uploaded.get("imageId") or uploaded.get("fileId") or "")
     if not url and image_id:
         url = str((await client.request("GET", f"/commerce/media/v1_beta/image/{segment(image_id)}")).get("imageUrl") or "")
-    parsed_ok = url.startswith("https://") and " " not in url and len(url) <= 2000
-    if not parsed_ok:
+    picture = ebay_picture_url(url)
+    if not picture:
         raise ValueError("eBay did not confirm a photo address. Check the listing before trying again.")
-    return url
+    return picture
 
 
 def _photo_checksum(photo) -> str:
@@ -578,7 +590,7 @@ async def _image_urls(client: EbayClient, photos: list, binding: dict, record: C
     images: list[dict] = []
     for photo in photos:
         checksum = _photo_checksum(photo)
-        url = uploaded.get((photo.id, checksum))
+        url = ebay_picture_url(uploaded.get((photo.id, checksum)) or "")
         if not url:
             if not active():
                 raise ValueError("The eBay listing stopped before it finished. List again to continue.")
@@ -698,15 +710,18 @@ def _dimensions(snapshot: dict) -> dict:
 
 
 def _inventory_body(fields: dict, aspects: dict, image_urls: list[str], snapshot: dict, form: dict) -> dict:
-    weight = Decimal(package_ounces(snapshot, form))
+    ounces = Decimal(package_ounces(snapshot, form))
+    # A quoted weight is what made the inventory service answer 25001 instead of saving the item.
+    weight = int(ounces) if ounces == int(ounces) else float(ounces)
     body = {
         "condition": fields["condition"],
         "conditionDescription": fields["condition_description"],
         "availability": {"shipToLocationAvailability": {"quantity": fields["quantity"]}},
         "product": {"title": fields["title"], "description": _short_description(fields["description"]),
-                    "imageUrls": image_urls, "aspects": aspects, **product_ids(snapshot)},
+                    "imageUrls": [picture for picture in (ebay_picture_url(url) for url in image_urls) if picture],
+                    "aspects": aspects, **product_ids(snapshot)},
         "packageWeightAndSize": {
-            "weight": {"value": format(weight, "f"), "unit": "OUNCE"},
+            "weight": {"value": weight, "unit": "OUNCE"},
             "dimensions": _dimensions(snapshot),
         },
     }

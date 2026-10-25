@@ -152,6 +152,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(inventory[2]["body"]["condition"], "USED_EXCELLENT")
         self.assertEqual(inventory[2]["body"]["conditionDescription"], "Pre-owned, washed, no stains.")
         self.assertEqual(product["imageUrls"], ["https://i.ebayimg.com/images/g/test1/s-l1600.jpg"])
+        self.assertEqual(inventory[2]["body"]["packageWeightAndSize"]["weight"], {"value": 8, "unit": "OUNCE"})
         offer = next(call for call in client.calls if call[:2] == ("POST", "/sell/inventory/v1/offer"))
         self.assertTrue(offer[2]["body"]["listingPolicies"]["bestOfferTerms"]["bestOfferEnabled"])
         self.assertEqual(client.calls[-1][1], "/sell/inventory/v1/offer/offer-1/publish")
@@ -659,3 +660,21 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
             "https://api.ebay.com/sell/inventory/v1/location",
             "https://apiz.ebay.com/sell/finances/v1/transaction",
         ])
+
+    async def test_a_media_query_is_left_off_the_inventory_photo(self):
+        import hashlib
+
+        checksum = hashlib.sha256(b"image").hexdigest()
+        raw = "https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/abc/$_1.JPG?set_id=8800005007"
+        self.binding["ebay_images"] = [{"photo_id": "p1", "checksum": checksum, "url": raw}]
+        client = Client()
+        urls = await ebay_listings._image_urls(client, [self.photo], self.binding, self.record, self.active)
+        self.assertEqual(urls, ["https://i.ebayimg.com/00/s/MTYwMFgxNjAw/z/abc/$_1.JPG"])
+        self.assertEqual(client.uploads, 0)
+        body = ebay_listings._inventory_body(
+            {"title": "Columbia jacket", "description": "Blue windbreaker.", "condition": "USED_EXCELLENT",
+             "condition_description": "Washed.", "quantity": 1},
+            {"Brand": ["Columbia"]}, urls, LISTING, {},
+        )
+        self.assertEqual(body["product"]["imageUrls"], urls)
+        self.assertIsInstance(body["packageWeightAndSize"]["weight"]["value"], int)
