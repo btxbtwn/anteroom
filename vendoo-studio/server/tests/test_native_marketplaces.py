@@ -187,6 +187,24 @@ class NativeMarketplacesTest(unittest.TestCase):
         count = self.bridge.call_count
         self.assertEqual(self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
         self.assertEqual(self.bridge.call_count, count)
+        self.bridge.reset_mock()
+        revised = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
+        self.assertEqual(self.client.post(f"{self.base}/poshmark/update", json={"revision_id": revised.id}).status_code, 400)
+        self.bridge.assert_not_called()
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": self.POSH_URL}
+        updated = self.client.post(f"{self.base}/poshmark/update", json={"revision_id": revised.id, "confirm": True})
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["listing_url"], self.POSH_URL)
+        payload = self.bridge.call_args.args[2]
+        self.assertEqual((payload["action"], payload["listing_id"], payload["confirm"]), ("update", "6adc371572e62463d992ffef", True))
+        self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error": "Poshmark needs a size Poshmark offers in this category."}
+        refused = self.client.post(f"{self.base}/poshmark/update", json={"revision_id": revised.id, "confirm": True}).json()
+        self.assertEqual(refused["state"], "published")
+        self.assertIn("size", refused["error"])
+        refused_mercari = self.client.post(f"{self.base}/mercari/update", json={"revision_id": revised.id, "confirm": True})
+        self.assertEqual(refused_mercari.status_code, 409)
+        self.assertIn("cannot be updated", refused_mercari.text)
+        self.assertEqual(self.client.post(f"{self.base}/poshmark/list", json={"revision_id": revised.id, "confirm": True}).status_code, 409)
 
     def test_a_refused_poshmark_listing_can_be_tried_again(self):
         self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error": "Poshmark needs a size Poshmark offers in this category."}

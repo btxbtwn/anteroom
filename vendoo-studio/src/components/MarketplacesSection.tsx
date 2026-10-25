@@ -43,13 +43,14 @@ export function deletable(entry: MarketplaceListing | undefined): boolean {
 export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | undefined, draft: NativeDraft | undefined,
   _revisionId: string | null, etsyEligible: boolean): Status {
   if (live?.sold_here) return { tone: "neutral", label: "Sold here", href: live.url ?? undefined, hrefLabel: "View" };
+  if (draft?.state === "updating") return { tone: "busy", label: "Updating…" };
+  if (draft?.state === "unknown") return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again." };
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
   if (live?.state === "deleted") return { tone: "neutral", label: REMOVED[marketplace] };
   if (live?.state === "failed") return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error };
   if (live?.listing_id) return { tone: "live", label: "Live", href: live.url ?? undefined, hrefLabel: "View" };
   if (draft && draft.state !== "draft") {
     if (draft.state === "saving" || draft.state === "publishing") return { tone: "busy", label: "Listing…" };
-    if (draft.state === "unknown") return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again." };
     if (draft.state === "published") return { tone: "live", label: "Live", href: draft.listing_url, hrefLabel: "View" };
     if (draft.state === "pending_review") return { tone: "attention", label: "In review", href: draft.listing_url, hrefLabel: "View" };
     if (draft.error) return { tone: "failed", label: "Not listed", detail: draft.error };
@@ -126,9 +127,14 @@ export function MarketplacesLayout({
   const sellwildCondition = sellwildPick.conditionId ?? savedSellwild?.sellwild_condition_id ?? sellwildOptions.data?.suggested.condition_id ?? undefined;
 
   const action = useMutation({
-    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: "check" | "list"; draftUrl?: string }) => {
+    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: "check" | "list" | "update"; draftUrl?: string }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
       if (!revisionId) throw new Error("Generate a listing first.");
+      if (kind === "update") {
+        const updated = await api.nativeMarketplaces.update(convId, marketplace, revisionId);
+        if (updated.error) throw new Error(updated.error);
+        return updated;
+      }
       return api.nativeMarketplaces.list(convId, marketplace, revisionId,
         marketplace === "sellwild" && sellwildCategory && sellwildCondition
           ? { categoryId: sellwildCategory, conditionId: sellwildCondition } : undefined);
@@ -157,6 +163,13 @@ export function MarketplacesLayout({
     },
   });
 
+  const UPDATABLE = new Set<Marketplace>(["ebay", "etsy", "poshmark"]);
+
+  async function updateNow(marketplace: NativeMarketplace) {
+    const name = marketplaceName(marketplace);
+    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.`,
+      { confirmLabel: `Update on ${name}` })) action.mutate({ marketplace, kind: "update" });
+  }
   async function listNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
     const extra = marketplace === "sellwild" ? " Sellwild may hold it for review."
@@ -181,7 +194,7 @@ export function MarketplacesLayout({
   const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
 
   const unconfirmed = (marketplace: Marketplace) => NATIVE.has(marketplace)
-    && ["saving", "publishing", "unknown"].includes(drafts[marketplace as NativeMarketplace]?.state ?? "");
+    && ["saving", "publishing", "updating", "unknown"].includes(drafts[marketplace as NativeMarketplace]?.state ?? "");
   function listable(marketplace: Marketplace, status: Status): boolean {
     if (!NATIVE.has(marketplace) || unconfirmed(marketplace)) return false;
     if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || listings[marketplace]?.listing_id) return false;
@@ -197,10 +210,18 @@ export function MarketplacesLayout({
     return marketplace === "sellwild" && (!sellwildCategory || !sellwildCondition);
   }
 
+  function updatable(marketplace: Marketplace, status: Status): boolean {
+    return UPDATABLE.has(marketplace) && status.tone === "live" && status.label === "Live" && !unconfirmed(marketplace);
+  }
+
   function actions(marketplace: Marketplace, status: Status): ReactNode {
     const m = marketplace as NativeMarketplace;
     if (unconfirmed(marketplace)) {
       return <Button size="xs" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check result</Button>;
+    }
+    if (updatable(marketplace, status)) {
+      const pending = action.isPending && action.variables?.marketplace === m && action.variables?.kind === "update";
+      return <Button size="xs" variant="outline" disabled={busy} onClick={() => void updateNow(m)}>{pending ? "Updating…" : "Update…"}</Button>;
     }
     if (!listable(marketplace, status)) return null;
     const pending = action.isPending && action.variables?.marketplace === m;
@@ -212,6 +233,7 @@ export function MarketplacesLayout({
     const m = marketplace as NativeMarketplace;
     const entry = listings[marketplace];
     const canList = listable(marketplace, status);
+    const canUpdate = updatable(marketplace, status);
     const canDelist = deletable(entry);
     return (
       <Menu>
@@ -220,8 +242,9 @@ export function MarketplacesLayout({
         </MenuTrigger>
         <MenuPopup align="end" width="content">
           {canList && <MenuItem disabled={listBlocked(marketplace)} onClick={() => void listNow(m)}>List…</MenuItem>}
+          {canUpdate && <MenuItem onClick={() => void updateNow(m)}>Update…</MenuItem>}
           {canDelist && <MenuItem variant="destructive" onClick={() => void runDelist([marketplace])}>Delist…</MenuItem>}
-          {(canList || canDelist) && <MenuSeparator />}
+          {(canList || canUpdate || canDelist) && <MenuSeparator />}
           <MenuItem disabled={unconfirmed(marketplace)}
             onClick={() => setLinking({ marketplace, url: entry?.source === "seller" ? entry.url ?? "" : "" })}>Mark as listed…</MenuItem>
           {!entry?.sold_here && <MenuItem disabled={unconfirmed(marketplace)} onClick={() => mark.mutate({ marketplace, state: "sold" })}>Mark as sold</MenuItem>}

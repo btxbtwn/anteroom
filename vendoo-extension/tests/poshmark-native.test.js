@@ -73,6 +73,37 @@ test('Poshmark lists in one step with every field, no draft save, no tab', async
   assert.equal(journal['native_operation_op-1'].poshmark_post_id, POST);
 });
 
+test('an update writes the live Poshmark post and does not create or publish another', async () => {
+  const { c, msg, requests } = setup();
+  let saved = false;
+  c.fetch = async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    const method = options.method || 'GET';
+    const body = typeof options.body === 'string' ? JSON.parse(options.body) : options.body;
+    requests.push({ method, path, body });
+    const reply = (status, payload) => ({ ok: status < 400, status, json: async () => payload });
+    if (path === '/vm-rest/meta/catalog_v2') return reply(200, CATALOG);
+    if (path.endsWith('/media/scratch')) return reply(200, { data: { id: 'c'.repeat(24) } });
+    if (method === 'POST' && path === `/vm-rest/posts/${POST}`) { saved = true; return reply(200, { data: {} }); }
+    if (method === 'GET' && path === `/vm-rest/posts/${POST}`) {
+      return reply(200, { data: { id: POST, status: 'published', creator_id: USER, title: saved ? 'Vintage tee' : 'Old title',
+        price_amount: { val: saved ? '18' : '10' }, inventory: { size_quantity_revision: 3, size_quantities: [{ quantity_sold: 0 }] } } });
+    }
+    return reply(500, {});
+  };
+  msg.payload.action = 'update';
+  msg.payload.listing_id = POST;
+  const result = JSON.parse(JSON.stringify(await c.runPoshmarkApi(msg)));
+  assert.deepEqual(result, { ok: true, state: 'published', listing_url: `https://poshmark.com/listing/${POST}` });
+  assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), ['GET /vm-rest/posts/' + POST, 'GET /vm-rest/meta/catalog_v2',
+    `POST /api/posts/${POST}/media/scratch`, `POST /api/posts/${POST}/media/scratch`, `POST /vm-rest/posts/${POST}`, `GET /vm-rest/posts/${POST}`]);
+  const post = requests.find(r => r.method === 'POST' && r.path === `/vm-rest/posts/${POST}`).body.post;
+  assert.equal(post.inventory.size_quantity_revision, 3);
+  assert.equal(post.title, 'Vintage tee');
+  assert.equal(post.original_price_amount.val, '0');
+  assert.ok(!requests.some(r => r.path.includes('/users/') || r.path.endsWith('/status/published') || r.method === 'DELETE'));
+});
+
 test('big sizes are found in the Big & Tall set', () => {
   const { c } = setup();
   const category = CATALOG.data.catalog.departments[0].categories[0];

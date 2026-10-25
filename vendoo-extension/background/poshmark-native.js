@@ -100,7 +100,76 @@ function poshmarkListingUrl(id) {
   return `https://poshmark.com/listing/${id}`;
 }
 
+// Edit the post that is already published. The same field save the editor uses,
+// without creating a post and without calling publish again.
+async function updatePoshmarkPost(msg, recovery = false) {
+  const p = msg.payload;
+  const deadline = Date.now() + 150000;
+  const id = String(p.listing_id || '');
+  const key = `native_operation_${p.operation_id}`;
+  let wrote = false;
+  const request = async (method, path, body) => {
+    if (activeNativeOperation?.cancelled || Date.now() >= deadline) throw new Error('The Poshmark update stopped.');
+    const multipart = body instanceof FormData;
+    const response = await fetch(`https://poshmark.com${path}${path.includes('?') ? '&' : '?'}app_version=2.55&pm_version=2026.43.00`, {
+      method, credentials: 'include', headers: { Accept: 'application/json', ...(!multipart && method !== 'GET' ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }),
+      signal: AbortSignal.timeout(Math.min(25000, Math.max(1000, deadline - Date.now()))),
+    });
+    if (!response.ok) throw Object.assign(new Error(`Poshmark rejected the request (HTTP ${response.status}).`), { status: response.status });
+    const result = await response.json();
+    if (result.error) {
+      const message = String(result.error.userMessage || result.error.errorType || '').slice(0, 160);
+      throw Object.assign(new Error(`Poshmark refused it${message ? `: ${message}` : '.'}`), { rejected: true });
+    }
+    return result.data || result;
+  };
+  const matches = post => post.status === 'published'
+    && post.title === String(p.listing?.title || '').trim().slice(0, 80)
+    && String(post.price_amount?.val) === String(Number(p.listing?.poshmark_specifics?.poshmarkPrice || p.listing?.price));
+  try {
+    if (!/^[a-f0-9]{24}$/.test(id)) return { ok: false, safe_to_retry: true, error: 'Confirm updating the live Poshmark listing.' };
+    if (p.confirm !== true && !recovery) return { ok: false, safe_to_retry: true, error: 'Confirm updating the live Poshmark listing.' };
+    const cookie = await chrome.cookies.get({ url: 'https://poshmark.com/', name: 'jwt' });
+    let account = {};
+    try { account = JSON.parse(atob(cookie.value.split('.')[1])); } catch {}
+    if (!/^[a-f0-9]{24}$/.test(String(account.user_id))) throw new Error('Reconnect Poshmark in Anteroom first. No tab will be opened automatically.');
+    const existing = await request('GET', `/vm-rest/posts/${id}`);
+    if (String(existing.creator_id) !== String(account.user_id)) throw new Error('This Poshmark listing belongs to another account.');
+    const sold = (existing.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
+    if (sold || existing.status !== 'published') throw new Error('This Poshmark listing is not live. It was not changed.');
+    if (recovery) {
+      if (!matches(existing)) return { ok: false, error: 'Poshmark has not confirmed the update. Check the live listing before trying again.' };
+      return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id) };
+    }
+    if (!p.photos?.length || p.photos.length > 16) throw new Error('Choose between one and sixteen Poshmark photos.');
+    const post = poshmarkPostFields(await poshmarkCatalogData(deadline), p.listing || {});
+    post.inventory.size_quantity_revision = Number(existing.inventory?.size_quantity_revision) || 0;
+    const ids = [];
+    for (const photo of p.photos) {
+      const image = await nativePhoto(msg.job_id, photo);
+      const bytes = Uint8Array.from(atob(image.base64), char => char.charCodeAt(0));
+      const form = new FormData();
+      form.append('file', new Blob([bytes], { type: image.mime_type }), image.name);
+      const uploaded = await request('POST', `/api/posts/${id}/media/scratch?app_type=web`, form);
+      if (!/^[a-f0-9]{24}$/.test(String(uploaded.id))) throw new Error('Poshmark did not confirm a photo upload.');
+      ids.push(uploaded.id);
+    }
+    wrote = true;
+    const journal = (await chrome.storage.local.get(key))[key] || {};
+    await chrome.storage.local.set({ [key]: { ...journal, poshmark_post_id: id, poshmark_update_sent: true } });
+    await request('POST', `/vm-rest/posts/${id}`, { post: { ...post, cover_shot: { id: ids[0] }, pictures: ids.slice(1).map(photoId => ({ id: photoId })) } });
+    const saved = await request('GET', `/vm-rest/posts/${id}`);
+    if (!matches(saved)) throw new Error('Poshmark did not keep this listing\'s title and price. Check the live listing before trying again.');
+    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id) };
+  } catch (error) {
+    const refused = error.rejected === true || (error.status >= 400 && error.status < 500 && ![408, 409].includes(error.status));
+    return { ok: false, safe_to_retry: !wrote || refused, error: String(error.message || error) };
+  }
+}
+
 async function runPoshmarkApi(msg, recovery = false) {
+  if (msg.payload?.action === 'update') return await updatePoshmarkPost(msg, recovery);
   const p = msg.payload;
   const deadline = Date.now() + 150000;
   const key = `native_operation_${p.operation_id}`;

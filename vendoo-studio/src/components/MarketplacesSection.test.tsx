@@ -103,6 +103,22 @@ describe("marketplaces section", () => {
     expect(enabledButton(html, "List…")).toBe(true);
   });
 
+  it("offers Update on a live eBay, Etsy, or Poshmark listing", () => {
+    const listing = (url: string, listingId: string) => ({ ...live, url, listing_id: listingId });
+    for (const [selected, entry] of [
+      ["ebay", listing("https://www.ebay.com/itm/123456789012", "123456789012")],
+      ["etsy", listing("https://www.etsy.com/listing/123456", "123456")],
+      ["poshmark", listing("https://poshmark.com/listing/6adc371572e62463d992ffef", "6adc371572e62463d992ffef")],
+    ] as const) {
+      const html = render({}, { [selected]: entry }, { selected });
+      expect(enabledButton(html, "Update…")).toBe(true);
+      expect(html).not.toContain("List…");
+    }
+    const mercari = render({}, { mercari: live }, { selected: "mercari" });
+    expect(mercari).not.toContain("Update…");
+    expect(mercari).not.toContain("List…");
+  });
+
   it("offers List on eBay from the same rail", () => {
     const html = render({}, {}, { selected: "ebay" });
     expect(row(html, "eBay")).toContain("Not listed");
