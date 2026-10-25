@@ -44,7 +44,8 @@ class MarketplaceSettingsTest(unittest.TestCase):
 
     def test_grailed_vinted_facebook_are_filled(self):
         marketplaces.set_selected_marketplaces(["grailed", "vinted", "facebook", "whatnot"])
-        self.assertEqual(marketplaces.selected_fillable_platforms(), ["grailed", "vinted", "facebook"])
+        self.assertEqual(marketplaces.selected_fillable_platforms(), ["grailed", "facebook"])
+        self.assertNotIn("vinted", marketplaces.selected_fillable_platforms())
 
     def test_sellwild_is_filled(self):
         marketplaces.set_selected_marketplaces(["sellwild", "shopify"])

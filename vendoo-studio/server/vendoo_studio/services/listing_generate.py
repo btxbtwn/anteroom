@@ -1234,6 +1234,9 @@ def persist_generated_listing(
     listing["package_dimensions_in"] = package_dimensions_string()
     listing["zipCode"] = get_ebay_inventory_location()
     apply_send_readiness_fixes(listing)
+    from vendoo_studio.services.vinted_listing import apply_vinted_listing
+
+    apply_vinted_listing(listing)
     revisions = ListingRepo(db).get_revisions(conv_id)
     if revisions:
         selected = revisions[0].listing_json

@@ -42,7 +42,7 @@ describe("marketplaces section", () => {
   it("shows one row per marketplace in a fixed order with a status", () => {
     const html = render({});
     const names = [...html.matchAll(/<li aria-label="([^"]+)"/g)].map((match) => match[1]);
-    expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild"]);
+    expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]);
     expect(row(html, "eBay")).toContain("Not listed");
     // Ordinary "not listed" stays in the row for assistive tech, not as a second line on every marketplace.
     expect(row(html, "eBay")).not.toContain('role="status"');

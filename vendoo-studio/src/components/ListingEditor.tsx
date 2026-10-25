@@ -237,7 +237,7 @@ export function ListingEditor({
     const selected = new Set(marketplaceSettings?.selected ?? ["ebay", "etsy", "poshmark", "mercari", "depop"]);
     return [
       "general",
-      ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => selected.has(id)),
+      ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => id === "vinted" || selected.has(id)),
     ];
   }, [marketplaceSettings?.selected]);
 
@@ -870,8 +870,18 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
           })),
         ],
       );
-    case "grailed":
     case "vinted":
+      return [
+        { key: "price", label: "Price", type: "number" },
+        { key: "vinted_specifics.category", label: "Category" },
+        { key: "vinted_specifics.condition", label: "Condition" },
+        { key: "vinted_specifics.brand", label: "Brand" },
+        { key: "vinted_specifics.size", label: "Size" },
+        { key: "vinted_specifics.color", label: "Color" },
+        { key: "vinted_specifics.packageSize", label: "Package size" },
+        { key: "vinted_specifics.material", label: "Material" },
+      ];
+    case "grailed":
     case "facebook":
     case "sellwild":
       // Their fields come from the category Vendoo maps to, once it is chosen.

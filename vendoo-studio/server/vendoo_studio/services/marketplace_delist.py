@@ -30,7 +30,7 @@ from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, 
 from vendoo_studio.services.listing_result import scrub
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
-MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild")
+MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
 BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop", "sellwild"}
 
 # The listing ID each marketplace's public link carries.
@@ -41,6 +41,7 @@ LISTING_ID = {
     "mercari": re.compile(r"^https://www\.mercari\.com/us/item/(m\d{6,})/?(?:[?#]|$)"),
     "depop": re.compile(r"^https://www\.depop\.com/products/([a-z0-9][a-z0-9-]{0,200})/?(?:[?#]|$)"),
     "sellwild": re.compile(r"^https://sellwild\.com/product/(\d+)(?:/|$)"),
+    "vinted": re.compile(r"^https://www\.vinted\.com/items/(\d+)(?:-[^/?#]*)?(?:[/?#]|$)"),
 }
 
 class DelistError(RuntimeError):
@@ -256,6 +257,8 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         raise DelistError(400, "Confirm the delist before anything is deleted.")
     if not names or any(name not in MARKETPLACES for name in names):
         raise DelistError(400, "Name the marketplaces to delist.")
+    if "vinted" in names:
+        raise DelistError(409, "Delist this item on Vinted. Anteroom does not delete a Vinted listing.")
     known = listings(db, conv_id)
     for name in names:
         entry = known.get(name)

@@ -44,10 +44,10 @@ class NativeMarketplaceError(RuntimeError):
         self.status_code = status_code
 
 
-Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild"]
+Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]
 InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
 API_MARKETPLACES = frozenset({"ebay", "etsy"})
-NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild"}
+NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
 UNKNOWN = "Anteroom could not confirm what happened. Check the result before trying again."
 # How long Chrome has to answer one step, and how long a job then keeps the
 # slot waiting for Chrome to report what it did before giving up as unknown.
@@ -201,7 +201,7 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
     reason = str(result.get("error") or "").strip()
     if result.get("ok") is True:
         url = None
-        if marketplace != "sellwild" and action in {"save_draft", "publish"}:
+        if marketplace not in {"sellwild", "vinted"} and action in {"save_draft", "publish"}:
             url = draft_url(marketplace, str(result.get("draft_url") or ""))
             replaced = marketplace == "depop" and result.get("draft_replaced") is True
             if record.get("draft_url") and url != record["draft_url"] and not replaced:
@@ -283,7 +283,7 @@ def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[s
         return ["update"]
     if marketplace in {"ebay", "poshmark"}:
         return ["list"]
-    if marketplace == "sellwild":
+    if marketplace in {"sellwild", "vinted"}:
         return ["publish"]
     current = record.get("state") == "draft" and record.get("revision_id") == revision_id and record.get("draft_url")
     return ["publish"] if current else ["save_draft", "publish"]

@@ -1,4 +1,4 @@
-export type NativeMarketplace = "ebay" | "poshmark" | "mercari" | "depop" | "etsy" | "sellwild";
+export type NativeMarketplace = "ebay" | "poshmark" | "mercari" | "depop" | "etsy" | "sellwild" | "vinted";
 /** What the marketplace's refusal was, so the section can offer the one action that fixes it. */
 export type NativeErrorCode = "signed_out" | "challenge" | "rate_limited" | "missing_fields" | "rejected" | "schema_drift" | "network" | "uncertain";
 export interface NativeErrorField { field: string; message: string }
