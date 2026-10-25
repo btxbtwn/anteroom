@@ -1,5 +1,40 @@
 // Independently inspected Depop web request builders (2026-10-24).
 // Session material stays in the extension worker. No marketplace tab is used.
+
+const DEPOP_COLOURS = new Set(['black', 'grey', 'white', 'brown', 'tan', 'cream', 'yellow', 'red', 'burgundy', 'pink', 'purple', 'blue', 'navy', 'green', 'khaki', 'orange', 'silver', 'gold', 'multi']);
+
+function depopCondition(value) {
+  const text = String(value || '').toLowerCase();
+  if (!text) return '';
+  if (/fair|poor/.test(text)) return 'used_fair';
+  if (/excellent/.test(text)) return 'used_excellent';
+  if (/like new|nwot|new without/.test(text)) return 'used_like_new';
+  if (/brand new|nwt|new with tags/.test(text) && !/without/.test(text)) return 'brand_new';
+  if (/good|pre-owned|preowned|used/.test(text)) return 'used_good';
+  return '';
+}
+
+function depopColour(value) {
+  const name = String(value || '').trim().toLowerCase().replace('gray', 'grey').replace('beige', 'tan');
+  return DEPOP_COLOURS.has(name) ? name : '';
+}
+
+// Age, style, and source use the same codes Vendoo writes. Colour and condition
+// are Depop's own slugs. Brand stays on the draft until Depop's brand id is known.
+function depopFormFields(listing) {
+  const specifics = listing?.form?.specifics || {};
+  const fields = {};
+  const colour = [listing?.primaryColor, listing?.secondaryColor].map(depopColour).filter(Boolean);
+  if (colour.length) fields.colour = [...new Set(colour)].slice(0, 2);
+  const condition = depopCondition(listing?.form?.overrides?.condition || listing?.condition);
+  if (condition) fields.condition = condition;
+  for (const key of ['age', 'source', 'style']) {
+    const values = Array.isArray(specifics[key]) ? specifics[key].map(String).filter(Boolean) : [];
+    if (values.length) fields[key] = values.slice(0, 3);
+  }
+  return fields;
+}
+
 async function depopApiAction(action, payload) {
   let submitted = false;
   try {
@@ -112,16 +147,17 @@ async function depopApiAction(action, payload) {
       draft.price_amount = String(payload.listing.price ?? existing.price_amount ?? '');
       draft.price_currency ||= 'USD';
       draft.pictures = payload.uploaded_photo_ids || (existing.pictures || []).map(photo => photo.id);
+      Object.assign(draft, depopFormFields(payload.listing));
       await request('PUT', path, draft);
       const saved = await request('GET', path);
-      if (!matches(saved) || saved.pictures?.length !== draft.pictures.length) throw new Error('Depop did not retain the draft fields and photos.');
+      if (!matches(saved) || saved.pictures?.length !== draft.pictures.length) throw new Error('Depop did not keep this listing\'s fields and photos.');
       return summary(saved);
     }
     if (action === 'prepare_publish' || action === 'publish') {
-      if (payload.action !== 'publish' || payload.confirm !== true) throw new Error('Confirm publishing this Depop draft.');
+      if (payload.action !== 'publish' || payload.confirm !== true) throw new Error('Confirm listing on Depop.');
       const draft = await request('GET', path);
       if (!matches(draft) || !draft.pictures?.length || !(Number(draft.price_amount) > 0) || !Array.isArray(draft.missing_fields) || draft.missing_fields.length) {
-        throw new Error('Complete and review the Depop draft fields before publishing.');
+        throw new Error('Depop still needs fields filled in before this can be listed.');
       }
       if (action === 'prepare_publish') return { ok: true };
       const job = await request('POST', '/presentation/api/v1/drafts/products/', { draft_ids: [id] });
@@ -163,7 +199,7 @@ async function runDepopNative(msg, recovery = false) {
       const expected = [payload.listing.title, payload.listing.description].filter(Boolean).join('\n\n');
       if (draft.description !== expected || (payload.listing.price != null && Number(draft.price) !== Number(payload.listing.price))
           || (payload.expected_photo_count != null && draft.photo_count !== payload.expected_photo_count)) {
-        throw new Error('The saved Depop draft differs from this revision. Review its fields and photos.');
+        throw new Error('Depop did not keep this listing\'s fields and photos. Check them and list again.');
       }
       return { ok: true, state: 'draft', draft_url: payload.draft_url };
     };
@@ -177,10 +213,10 @@ async function runDepopNative(msg, recovery = false) {
         const draft = await depopAction('read', payload);
         if (draft.description !== [payload.listing.title, payload.listing.description].filter(Boolean).join('\n\n')
             || (payload.listing.price != null && Number(draft.price) !== Number(payload.listing.price))) {
-          throw new Error('The Depop draft differs from this revision. Review it before continuing.');
+          throw new Error('Depop\'s listing does not match this revision. List again.');
         }
         if (draft.photo_count === 0) return { ok: false, safe_to_retry: true, draft_url: payload.draft_url,
-          error: 'Depop retained the draft before its photos were saved. Save again to finish this same draft.' };
+          error: 'Depop kept the listing before its photos were saved. List again to finish the same one.' };
         return await verify();
       }
       if (!payload.draft_url) {
@@ -219,7 +255,7 @@ async function runDepopNative(msg, recovery = false) {
     while (Date.now() < payload.deadline) {
       const result = await depopAction('publish_status', payload);
       if (result.complete) return { ok: true, state: 'published', draft_url: payload.draft_url };
-      if (!result.pending) throw new Error('Depop did not confirm publishing. Review the native draft.');
+      if (!result.pending) throw new Error('Depop did not confirm the listing. Check Depop before listing again.');
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
     throw new Error('Depop has not confirmed publishing yet. Check its result later.');

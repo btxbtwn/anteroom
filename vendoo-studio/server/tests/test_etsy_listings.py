@@ -300,10 +300,13 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertTrue(all(c[0] == "GET" for c in self.calls))
 
     def test_invalid_or_ineligible_details_never_create_a_listing(self):
-        for changes in [{"marketplace_category_ids": {}}, {"etsy_specifics": {}}, {"price": "NaN"}, {"price": "0.001"},
-                        {"etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "2010 - 2019 (Recently)"}}]:
+        for changes in [{"marketplace_category_ids": {}}, {"etsy_specifics": {}}, {"price": "NaN"}, {"price": "0.001"}]:
             with self.assertRaises(ValueError):
                 etsy_listings.draft_fields({**LISTING, **changes}, creating=True)
+
+    def test_a_recent_item_can_still_be_prepared_for_etsy(self):
+        fields = etsy_listings.draft_fields({**LISTING, "etsy_specifics": {**LISTING["etsy_specifics"], "when_made": "2010 - 2019 (Recently)"}}, creating=True)
+        self.assertEqual(fields["when_made"], "2010_2019")
 
     def test_validation_errors_show_field_names_without_raw_response_data(self):
         response = httpx.Response(400, json={"error": "shipping_profile_id is required; never-expose"},

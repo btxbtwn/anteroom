@@ -95,12 +95,9 @@ export function ListingEditor({
 }: Props) {
   const queryClient = useQueryClient();
   const [editTab, setEditTab] = React.useState("general");
-  const [jsonText, setJsonText] = React.useState("");
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [fieldTarget, setFieldTarget] = React.useState<{ field: string; sequence: number } | null>(null);
   const editorRef = React.useRef<HTMLDivElement>(null);
-  const showJsonEditor = React.useCallback(() => setEditTab("json"), []);
-
   const { data: jobs, isLoading: jobsLoading } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
@@ -220,10 +217,6 @@ export function ListingEditor({
   });
 
   React.useEffect(() => {
-    if (data?.listing) setJsonText(JSON.stringify(data.listing, null, 2));
-  }, [data?.listing, data?.current_revision_id]);
-
-  React.useEffect(() => {
     if (listingJob?.mode === "schema_probe" && listingJob.status === "completed") {
       queryClient.invalidateQueries({ queryKey: ["listing", convId] });
       queryClient.invalidateQueries({ queryKey: ["fill-log"] });
@@ -236,7 +229,6 @@ export function ListingEditor({
     return [
       "general",
       ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => selected.has(id)),
-      "json",
     ];
   }, [marketplaceSettings?.selected]);
 
@@ -247,7 +239,7 @@ export function ListingEditor({
   const openBlocker = (field: string) => {
     const target = blockerTarget(field);
     onReviewTabChange(target.reviewTab);
-    setEditTab(tabs.includes(target.tab) ? target.tab : "json");
+    setEditTab(tabs.includes(target.tab) ? target.tab : "general");
     setFieldTarget({ field, sequence: Date.now() });
   };
   React.useEffect(() => {
@@ -256,26 +248,9 @@ export function ListingEditor({
       target?.scrollIntoView({ block: "center" });
       target?.focus();
     }
-    if (fieldTarget && editTab === "json" && reviewTab === "forms") {
-      const target = editorRef.current?.querySelector<HTMLTextAreaElement>("textarea[aria-label='Listing JSON']");
-      target?.focus();
-      const keys = fieldTarget.field.split(".");
-      const key = keys[keys.length - 1];
-      const index = target?.value.indexOf(JSON.stringify(key)) ?? -1;
-      if (index >= 0) target?.setSelectionRange(index, index + key.length + 2);
-    }
-  }, [fieldTarget, reviewTab, editTab]);
+  }, [fieldTarget, reviewTab]);
 
-  const applyJsonEdit = () => {
-    try {
-      const parsed = JSON.parse(jsonText);
-      updateMutation.mutate(parsed);
-    } catch {
-      alert("Invalid JSON");
-    }
-  };
-
-  // Error cards offer "Fix errors" / "Ask chat for fields"; mid-generation the
+  // Error cards offer "Fix in chat" / "Fill empty fields"; mid-generation the
   // listing is still being written, so those prompts would chase half-done values.
   const chatBusy = useChatBusy(convId);
   // Same query ChatPanel polls: background field fills keep writing after the
@@ -490,37 +465,22 @@ export function ListingEditor({
           else onReviewTabChange("forms");
           setEditTab(id);
         }}>
-        {editTab === "json" && reviewTab === "forms" ? (
-          <div className="flex flex-col gap-2">
-            <Textarea
-              aria-label="Listing JSON"
-              value={jsonText}
-              onChange={(e) => setJsonText(e.target.value)}
-              className="[&_textarea]:field-sizing-fixed [&_textarea]:h-85 [&_textarea]:max-h-none [&_textarea]:font-mono [&_textarea]:text-[11.5px]"
-            />
-            <Button size="sm" className="w-full" onClick={applyJsonEdit}>
-              Apply JSON
-            </Button>
-          </div>
-        ) : (
-          <>
-            {(reviewTab !== "forms" || editTab === "general") && (
-              <>
-                <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
-                <ItemDetails convId={convId} />
-              </>
-            )}
-            <StructuredEditor
-              convId={convId}
-              listing={listing}
-              revisionId={data?.current_revision_id}
-              tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
-              target={fieldTarget}
-              onMissingField={showJsonEditor}
-              onChange={(updated) => updateMutation.mutate(updated)}
-            />
-          </>
-        )}
+        <>
+          {(reviewTab !== "forms" || editTab === "general") && (
+            <>
+              <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
+              <ItemDetails convId={convId} />
+            </>
+          )}
+          <StructuredEditor
+            convId={convId}
+            listing={listing}
+            revisionId={data?.current_revision_id}
+            tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
+            target={fieldTarget}
+            onChange={(updated) => updateMutation.mutate(updated)}
+          />
+        </>
       </MarketplacesLayout>
 
       <div className="listing-send-footer flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(28vh,220px)] max-[900px]:pb-[max(10px,env(safe-area-inset-bottom,0px))]">
@@ -551,7 +511,6 @@ function StructuredEditor({
   tab,
   onChange,
   target,
-  onMissingField,
 }: {
   convId: string;
   listing: ListingData;
@@ -559,13 +518,12 @@ function StructuredEditor({
   tab: string;
   onChange: (v: ListingData) => void;
   target: { field: string; sequence: number } | null;
-  onMissingField: () => void;
 }) {
   const formRef = React.useRef<HTMLDivElement>(null);
   // What Vendoo says this listing's category actually renders, rather than a
   // list kept by hand here. Falls back to the static one while it loads, or
   // for a category no schema has been fetched for.
-  const { data: forms, isFetching: fieldsLoading } = useQuery({
+  const { data: forms } = useQuery({
     queryKey: ["listing-fields", convId],
     queryFn: () => api.vendooApi.listingFields(convId),
     staleTime: 60_000,
@@ -588,11 +546,11 @@ function StructuredEditor({
   React.useEffect(() => {
     if (!target) return;
     const key = matchingEditorField(fields, target.field);
-    if (!key) { if (!fieldsLoading) onMissingField(); return; }
+    if (!key) return;
     const input = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-field]") || [])].find((element) => element.dataset.listingField === key);
     input?.scrollIntoView({ block: "center" });
     input?.focus();
-  }, [target, fields, fieldsLoading, onMissingField]);
+  }, [target, fields]);
 
   React.useEffect(() => {
     const init: Record<string, string> = {};
@@ -1370,11 +1328,21 @@ function SendToVendooButton({
     listingTitle,
     dropdownOptions?.forms,
   );
+  // The grouped list below already names these issues. The red dump would repeat them.
+  const blockersListed = !error && !canSend && uniqueBlockers.length > 0;
+  const statusLine = sendEnabled
+    ? sendHint
+    : generating
+      ? "Wait for generation to finish before sending."
+      : uniqueBlockers.length
+        ? `${uniqueBlockers.length} ${uniqueBlockers.length === 1 ? "issue" : "issues"} to fix before sending.`
+        : sendHint;
   // Rendered even without an error so the fill button stays while fields are empty.
   const errorCard = (
     <CopyableLlmError
-      className="mt-2"
       text={displayError}
+      hideDetails={blockersListed}
+      issueCount={blockersListed ? uniqueBlockers.length : 0}
       prompt={uniqueBlockers.length
         ? blockerPrompt
         : jobErrorPrompt(displayError, listingTitle, null, dropdownOptions?.forms)}
@@ -1385,12 +1353,14 @@ function SendToVendooButton({
   );
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col gap-2">
       <Button
+        variant={sendEnabled ? "default" : "secondary"}
         className={cn(
           "w-full",
-          // Unbound sends create the Vendoo draft, so they carry Vendoo's green.
-          !bound && "border-(--color-vendoo) bg-(--color-vendoo) text-white shadow-none [:hover,[data-pressed]]:bg-(--color-vendoo)/90",
+          // Unbound sends create the Vendoo draft, so a ready button carries Vendoo's green.
+          // A blocked send stays quiet so the issue count is what reads as the next step.
+          !bound && sendEnabled && "border-(--color-vendoo) bg-(--color-vendoo) text-white shadow-none [:hover,[data-pressed]]:bg-(--color-vendoo)/90",
         )}
         disabled={!sendEnabled}
         aria-busy={sendMutation.isPending}
@@ -1408,12 +1378,11 @@ function SendToVendooButton({
           </>
         ) : sendLabel}
       </Button>
-      {!sendMutation.isPending && <div className="mt-1.5 text-center text-muted-foreground text-xs">{sendHint}</div>}
+      {!sendMutation.isPending && <div className="text-center text-muted-foreground text-xs">{statusLine}</div>}
       {sendMutation.isPending && (
         <SendProgress label={bound ? "Writing marketplace forms to Vendoo…" : "Starting the send…"} />
       )}
       {errorCard}
-      {/* Collapsed and below the error card, so opening a group never pushes Fix errors / Ask chat out of view. */}
       {!generating && <ListingBlockers issues={uniqueBlockers} onSelect={onSelectBlocker} />}
     </div>
   );

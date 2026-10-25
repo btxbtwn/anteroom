@@ -1,4 +1,4 @@
-export type NativeMarketplace = "poshmark" | "mercari" | "depop" | "etsy" | "sellwild";
+export type NativeMarketplace = "ebay" | "poshmark" | "mercari" | "depop" | "etsy" | "sellwild";
 export interface EtsyDraftOptions {
   shippingProfileId?: string;
   readinessStateId?: string;

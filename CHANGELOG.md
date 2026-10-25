@@ -7,6 +7,12 @@ file: Settings → General → About → What's new.
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 
+## 0.1.337 — 2026-10-24
+
+- The marketplace list no longer includes JSON, and it no longer says "Not listed" on every row. A status only appears when a marketplace needs you, such as Unconfirmed or Not eligible.
+- Send to Vendoo stays quiet until the listing can actually be sent, and says how many issues are in the way. Fix in chat handles those. Filling empty fields is a separate button.
+- List… is the only step onto a marketplace, including eBay. One confirmation creates the live listing. There is no save-draft or publish step.
+
 ## 0.1.336 — 2026-10-24
 
 - A listing now opens like Vendoo: the marketplaces run down the left, and the form for the one you select is on the right. **General** is the photos and the shared fields. Each marketplace form shows every field that listing needs — title, description, price, brand, condition, size, category, and that marketplace's own fields — with what's already filled in, so you can check it before listing. List, Publish, Delist and Mark as listed sit with that form. The Input and Forms tabs are gone. The listing panel starts wider so the form has room beside the list, and you can drag it wider.

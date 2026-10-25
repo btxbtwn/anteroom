@@ -196,6 +196,77 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.bridge.return_value = {"ok": True, "state": "published", "listing_url": self.POSH_URL}
         self.assertEqual(self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True}).json()["state"], "published")
 
+    def test_list_creates_and_publishes_in_one_confirmation(self):
+        self.bridge.side_effect = [
+            {"ok": True, "state": "draft", "draft_url": URLS["mercari"]},
+            {"ok": True, "state": "published", "draft_url": URLS["mercari"],
+             "listing_url": "https://www.mercari.com/us/item/m123456789/"},
+        ]
+        result = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["state"], "published")
+        actions = [call.args[2]["action"] for call in self.bridge.call_args_list]
+        self.assertEqual(actions, ["save_draft", "publish"])
+        self.assertFalse(self.bridge.call_args_list[0].args[2]["confirm"])
+        self.assertTrue(self.bridge.call_args_list[1].args[2]["confirm"])
+        self.assertEqual(self.bridge.call_args_list[1].args[2]["draft_url"], URLS["mercari"])
+
+    def test_list_does_not_publish_when_preparation_fails(self):
+        self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error": "Mercari needs a brand."}
+        result = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["state"], "not_saved")
+        self.assertEqual(self.bridge.call_count, 1)
+        self.assertEqual(self.bridge.call_args.args[2]["action"], "save_draft")
+
+    def test_list_finishes_the_current_marketplace_record_without_creating_another(self):
+        self.save("depop")
+        self.bridge.reset_mock()
+        self.bridge.return_value = {"ok": True, "state": "published", "draft_url": URLS["depop"]}
+        result = self.client.post(f"{self.base}/depop/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(result.json()["state"], "published", result.text)
+        self.assertEqual(self.bridge.call_count, 1)
+        self.assertEqual(self.bridge.call_args.args[2]["action"], "publish")
+        self.assertEqual(self.bridge.call_args.args[2]["draft_url"], URLS["depop"])
+
+    def test_list_requires_confirmation_before_any_write(self):
+        self.assertEqual(self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id}).status_code, 400)
+        self.bridge.assert_not_called()
+
+    def test_a_lost_list_reply_is_not_retried(self):
+        self.bridge.side_effect = BrowserBridgeError("lost")
+        self.assertEqual(self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 502)
+        self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "unknown")
+        self.assertEqual(self.bridge.call_count, 1)
+        self.assertEqual(self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
+        self.assertEqual(self.bridge.call_count, 1)
+
+    def test_sellwild_list_records_the_choice_then_lists_once(self):
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": "https://sellwild.com/product/123/test"}
+        result = self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **self.SELLWILD})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["state"], "published")
+        self.assertEqual(self.bridge.call_count, 1)
+        payload = self.bridge.call_args.args[2]
+        self.assertEqual((payload["action"], payload["confirm"]), ("publish", True))
+        self.assertEqual(payload["sellwild"], {"category_id": 272, "condition_id": 2})
+
+    def test_etsy_list_creates_then_activates_in_one_confirmation(self):
+        etsy_draft = "https://www.etsy.com/your/shops/me/listing-editor/edit/123456/"
+        with patch("vendoo_studio.services.native_marketplaces.etsy_listings.connected_shop_id", return_value="1"), \
+             patch("vendoo_studio.services.native_marketplaces.etsy_listings.execute", new_callable=AsyncMock) as execute, \
+             patch("vendoo_studio.services.user_settings.get_etsy_listing_defaults",
+                   return_value={"shipping_profile_id": "10", "readiness_state_id": "20"}):
+            execute.side_effect = [
+                {"ok": True, "state": "draft", "draft_url": etsy_draft},
+                {"ok": True, "state": "published", "draft_url": etsy_draft, "listing_url": "https://www.etsy.com/listing/123456"},
+            ]
+            result = self.client.post(f"{self.base}/etsy/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(result.json()["state"], "published")
+        self.assertEqual([call.args[0] for call in execute.call_args_list], ["save_draft", "publish"])
+        self.assertIs(execute.call_args_list[1].kwargs["confirm"], True)
+
     def test_a_lost_poshmark_reply_is_unknown_until_checked(self):
         self.bridge.side_effect = BrowserBridgeError("lost")
         self.assertEqual(self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 502)
