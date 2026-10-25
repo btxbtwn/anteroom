@@ -458,7 +458,7 @@ function MarketplaceSection() {
       <SettingsRow
         id="sale-detection"
         title="Sale detection"
-        description="Turn Detect sales on for a marketplace to hear when something sells there. The listing shows where else it is listed, and nothing is delisted until you choose. eBay and Etsy send the sale themselves. Depop, Poshmark, Mercari, and Sellwild are checked with the account signed in to Chrome. Anteroom keeps only the listing and order IDs."
+        description="Turn Detect sales on for a marketplace to hear when something sells there. The listing shows where else it is listed, and nothing is delisted until you choose. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark and Sellwild closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
         status={
           listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

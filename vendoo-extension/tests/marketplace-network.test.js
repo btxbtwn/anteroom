@@ -18,6 +18,9 @@ test('Depop request context is limited to this extension and the supported API p
     assert.equal(target.test(url), false);
   }
   assert.ok(rule.action.requestHeaders.every(header => ['origin', 'referer'].includes(header.header.toLowerCase())));
+  assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/products/by-slug/shop-classic-tee-136d/'));
+  assert.ok(target.test('https://webapi.depop.com/presentation/api/v1/shops/29809510/products/by-status/sold/?limit=24'));
+  assert.equal(target.test('https://webapi.depop.com/presentation/api/v1/shops/29809510/followers/'), false);
   const receipts = updates[0].addRules.find(value => value.id === 17004);
   const receiptsTarget = new RegExp(receipts.condition.regexFilter);
   assert.ok(receiptsTarget.test('https://webapi.depop.com/api/v1/receipts/?role=seller&limit=24'));
@@ -63,4 +66,17 @@ test('Depop\'s accelerated photo bucket gets its web referrer, for this extensio
   const target = new RegExp(rule.condition.regexFilter);
   assert.ok(target.test('https://media-photos-depop.s3-accelerate.amazonaws.com/p/1.jpg'));
   assert.equal(target.test('https://antengo-listings.s3.amazonaws.com/a'), false);
+});
+
+test('Sellwild request context covers a seller shop search from this extension', async () => {
+  const c = loadWorker();
+  const updates = [];
+  c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
+  await c.ensureMarketplaceRequestContext();
+  const rule = updates[0].addRules.find(value => value.id === 17003);
+  const target = new RegExp(rule.condition.regexFilter);
+  assert.ok(target.test('https://sellwild.com/api/search/listings?userId=99&limit=200&page=1'));
+  assert.ok(target.test('https://sellwild.com/api/listings/105101406'));
+  assert.equal(target.test('https://sellwild.com/api/users/99'), false);
+  assert.equal(target.test('https://sellwild.com.evil/api/search/listings'), false);
 });

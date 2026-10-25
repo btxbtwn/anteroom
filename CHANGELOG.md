@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.352 — 2026-10-25
+
+- Detect sales checks your whole shop, including closets with hundreds of listings. Depop and Mercari are read from your sales. Poshmark and Sellwild compare the live closet with what Anteroom still has listed. The shops take turns a few times an hour, with an uneven gap between checks. You hear once when something sells, and only for items Anteroom still shows as listed there.
+
 ## 0.1.351 — 2026-10-25
 
 - Before List, the Marketplaces section shows what eBay, Etsy, and Sellwild still need, with Edit and Ask chat, and List stays off until those are filled.
@@ -41,6 +45,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 - Listing directly on Poshmark, Mercari, Depop and Sellwild is sturdier: a slow or busy marketplace is asked again only when nothing could be listed twice, a stopped Poshmark listing cleans up its unlisted post, and Mercari no longer needs a reconnect when its sign-in refreshes.
 - When a marketplace refuses, Anteroom says why in plain words and shows the marketplace's own message: signed out, a bot check, too many requests, or the exact fields it still needs (such as Depop's brand or parcel size).
 - Depop descriptions are kept within Depop's 1,000-character limit.
+
 ## 0.1.345 — 2026-10-24
 
 - Listing fields are grouped into sections — Pricing, Condition, Item, Size & fit, Color & material, Shipping, Inventory and More details — each showing how many are filled. Required fields come first.

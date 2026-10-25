@@ -3,76 +3,124 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { loadWorker } = require('./worker-context');
 
-function jwt(claims) {
-  const payload = btoa(JSON.stringify(claims)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
-  return `e30.${payload}.sig`;
-}
-
-function worker({ cookies = {}, fetch } = {}) {
+// Response shapes follow what each marketplace returned for live and sold
+// listings on 2026-10-25. Values are made up.
+function worker(routes) {
   const c = loadWorker();
-  Object.assign(c, { atob, AbortSignal });
-  c.chrome.cookies = { get: async query => cookies[`${query.url} ${query.name}`] || null };
-  if (fetch) c.fetch = fetch;
-  return c;
+  Object.assign(c, { AbortSignal });
+  c.chrome.declarativeNetRequest.updateSessionRules = async () => {};
+  const calls = [];
+  c.fetch = async url => {
+    calls.push(String(url));
+    const route = Object.entries(routes).find(([part]) => String(url).includes(part));
+    if (!route) return { ok: false, status: 404 };
+    const [status, body] = route[1];
+    return { ok: status === 200, status, json: async () => body, text: async () => body };
+  };
+  return { c, calls };
 }
 
-test('Poshmark sales keep listing and order ids and drop the buyer', async () => {
-  const secret = 'buyer-pat@example.com';
-  const c = worker({
-    cookies: { 'https://poshmark.com/ jwt': { value: jwt({ user_id: 'aaaaaaaaaaaaaaaaaaaaaaaa', username: 'ada' }) } },
-    fetch: async url => {
-      assert.match(String(url), /\/vm-rest\/users\/aaaaaaaaaaaaaaaaaaaaaaaa\/orders\/sales/);
-      return { ok: true, status: 200, json: async () => ({ data: {
-        seller: { id: 'aaaaaaaaaaaaaaaaaaaaaaaa', email: secret },
-        sales: [{ id: 'bbbbbbbbbbbbbbbbbbbbbbbb', buyer: { username: secret },
-          line_items: [{ post_id: 'cccccccccccccccccccccccc', price_amount: { val: '40.00' } }] }],
-      } }) };
-    },
+const read = async (c, marketplace, ids) => JSON.parse(JSON.stringify(await c.readMarketplaceSales(marketplace, ids)));
+
+function mercariPage(id) {
+  const data = { props: { pageProps: {
+    req: { accessToken: 'page-token' },
+    serverState: { [`ItemDetail:${id}`]: { seller: { __ref: 'PublicUser:42' }, name: 'Jacket', price: 12 } },
+  } } };
+  return `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script></html>`;
+}
+
+test('Poshmark reports a known listing missing from the live closet when that listing is sold out', async () => {
+  const sold = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  const live = 'bbbbbbbbbbbbbbbbbbbbbbbb';
+  const seller = 'cccccccccccccccccccccccc';
+  const { c, calls } = worker({
+    [`/vm-rest/posts/${sold}`]: [200, { data: { id: sold, creator_id: seller, inventory: { status: 'sold_out' } } }],
+    [`/vm-rest/posts/${live}`]: [200, { data: { id: live, creator_id: seller, inventory: { status: 'available' } } }],
+    '/posts/filtered': [200, { data: [{ id: live }, { id: 'dddddddddddddddddddddddd' }], more: { next_max_id: null } }],
   });
-  const result = JSON.parse(JSON.stringify(await c.readMarketplaceSales('poshmark')));
-  assert.deepEqual(result, { ok: true, sales: [{ listing_id: 'cccccccccccccccccccccccc', order_id: 'bbbbbbbbbbbbbbbbbbbbbbbb' }] });
-  assert.equal(JSON.stringify(result).includes(secret), false);
-  assert.equal(JSON.stringify(result).includes('40.00'), false);
+  const gone = 'eeeeeeeeeeeeeeeeeeeeeeee';
+  const result = await read(c, 'poshmark', [sold, live, gone, 'not-an-id']);
+  assert.deepEqual(result, { ok: true, sales: [{ listing_id: sold }] });
+  assert.equal(JSON.stringify(result).includes(seller), false);
+  assert.equal(calls.filter(url => url.includes('/posts/filtered')).length, 1);
+  assert.equal(calls.some(url => url.includes(`/vm-rest/posts/${live}`)), false);
 });
 
-test('Depop receipts keep product and purchase ids only', async () => {
-  const c = worker({
-    cookies: { 'https://www.depop.com/ access_token': { value: 'depop-secret-token' } },
-    fetch: async url => {
-      assert.equal(String(url), 'https://webapi.depop.com/api/v1/receipts/?role=seller&limit=24');
-      return { ok: true, status: 200, json: async () => ({ objects: [{ purchase_id: 900, buyer: { username: 'pat' },
-        products: [{ product_id: 12345678, price: '20.00' }] }] }) };
-    },
+test('Poshmark stops once every known listing is still in the closet', async () => {
+  const live = 'bbbbbbbbbbbbbbbbbbbbbbbb';
+  const seller = 'cccccccccccccccccccccccc';
+  const { c, calls } = worker({
+    [`/vm-rest/posts/${live}`]: [200, { data: { id: live, creator_id: seller, inventory: { status: 'available' } } }],
+    '/posts/filtered': [200, { data: [{ id: live }], more: { next_max_id: 'next-page' } }],
   });
-  const result = JSON.parse(JSON.stringify(await c.readMarketplaceSales('depop')));
-  assert.deepEqual(result, { ok: true, sales: [{ listing_id: '12345678', order_id: '900' }] });
-  assert.equal(JSON.stringify(result).includes('pat'), false);
-  assert.equal(JSON.stringify(result).includes('depop-secret-token'), false);
+  assert.deepEqual(await read(c, 'poshmark', [live]), { ok: true, sales: [] });
+  assert.equal(calls.filter(url => url.includes('/posts/filtered')).length, 1);
 });
 
-test('Mercari and Sellwild report a known listing only when it is sold', async () => {
-  const calls = [];
-  const c = worker({ fetch: async url => {
-    calls.push(String(url));
-    if (String(url).includes('mercari')) {
-      const sold = String(url).includes('m12345678901');
-      const id = sold ? 'm12345678901' : 'm10987654321';
-      return { ok: true, status: 200, text: async () => `<script>{"status":"sold","id":"m00000000000"}</script><script>{"id":"${id}","buyer":"Pat","status":"${sold ? 'sold' : 'on_sale'}","price":12}</script>` };
-    }
-    return { ok: true, status: 200, json: async () => ({ listing: { id: 42, status: 'sold', buyer: { name: 'Pat' }, price: 12 } }) };
-  } });
-  const mercari = JSON.parse(JSON.stringify(await c.readMarketplaceSales('mercari', ['m1', 'm12345678901', 'm10987654321'])));
-  assert.deepEqual(mercari, { ok: true, sales: [{ listing_id: 'm12345678901', order_id: 'm12345678901' }] });
-  assert.equal(JSON.stringify(mercari).includes('Pat'), false);
-  const sellwild = JSON.parse(JSON.stringify(await c.readMarketplaceSales('sellwild', ['42', 'not-an-id'])));
-  assert.deepEqual(sellwild, { ok: true, sales: [{ listing_id: '42', order_id: '42' }] });
-  assert.equal(JSON.stringify(sellwild).includes('Pat'), false);
-  assert.equal(calls.some(url => url.includes('/us/item/m1/')), false);
+test('Mercari reads the seller trading list from the item page token', async () => {
+  const { c, calls } = worker({
+    '/us/item/m11111111111/': [200, mercariPage('m11111111111')],
+    '/v1/api': [200, { data: { search: { itemsList: [
+      { id: 'm11111111111', status: 'trading', name: 'Jacket', price: 12 },
+      { id: 'm22222222222', status: 'on_sale' },
+      { id: 'not-an-id', status: 'trading' },
+    ] } } }],
+  });
+  const result = await read(c, 'mercari', ['m11111111111', 'm33333333333']);
+  assert.deepEqual(result, { ok: true, sales: [{ listing_id: 'm11111111111' }] });
+  assert.equal(JSON.stringify(result).includes('Jacket'), false);
+  const search = calls.find(url => url.includes('/v1/api'));
+  assert.equal(search, 'https://www.mercari.com/v1/api');
+});
+
+test('Depop reads the shop sold list, found from one of the seller\'s own listings', async () => {
+  const { c, calls } = worker({
+    '/products/by-slug/shop-gone-136d/': [404, null],
+    '/products/by-slug/shop-classic-tee-136d/': [200, { id: 957631830, user_id: 29809510, slug: 'shop-classic-tee-136d', status: 'STATUS_ONSALE' }],
+    '/shops/29809510/products/by-status/sold/': [200, { page_info: { has_more: true }, objects: [
+      { id: 1, slug: 'shop-denim-jacket-0605', status: 'STATUS_PURCHASED', pricing: { current_price: '20.00' } },
+      { id: 2, slug: 'shop-vinyl-5b3e', status: 'STATUS_MARKED_AS_SOLD' },
+      { id: 3, slug: 'shop-other-1c02', status: 'STATUS_ONSALE' },
+    ] }],
+  });
+  const result = await read(c, 'depop', ['shop-gone-136d', 'shop-classic-tee-136d']);
+  assert.deepEqual(result, { ok: true, sales: [{ listing_id: 'shop-denim-jacket-0605' }, { listing_id: 'shop-vinyl-5b3e' }] });
+  assert.equal(JSON.stringify(result).includes('20.00'), false);
+  assert.equal(calls.at(-1), 'https://webapi.depop.com/presentation/api/v1/shops/29809510/products/by-status/sold/?limit=24');
+});
+
+test('Depop fails the check when no listing names the shop', async () => {
+  const { c } = worker({});
+  assert.equal((await read(c, 'depop', ['shop-gone-136d'])).ok, false);
+});
+
+test('Sellwild reports a known listing missing from the live shop when its status is 5', async () => {
+  const { c, calls } = worker({
+    '/api/listings/105101406': [200, { success: true, listing: { id: '105101406', status: 5, user: { id: '99', firstName: 'Pat' } } }],
+    '/api/listings/105232291': [200, { success: true, listing: { id: '105232291', status: 1, user: { id: '99' } } }],
+    '/api/search/listings': [200, { success: true, listings: [{ id: 105232291 }, { id: 105000001 }], hasMore: false }],
+  });
+  const result = await read(c, 'sellwild', ['105101406', '105232291', '105999999']);
+  assert.deepEqual(result, { ok: true, sales: [{ listing_id: '105101406' }] });
+  assert.equal(JSON.stringify(result).includes('Pat'), false);
+  assert.equal(calls.some(url => url.includes('/api/search/listings?userId=99&limit=200&page=1')), true);
+  assert.equal(calls.some(url => url.includes('/api/listings/105232291')), false);
+});
+
+test('a removed listing is not a sale, and a check that cannot read the shop fails', async () => {
+  const { c } = worker({
+    '/api/listings/105101406': [200, { success: true, listing: { id: '105101406', status: 1, user: { id: '99' } } }],
+    '/api/search/listings': [200, { success: true, listings: [{ id: '105101406' }], hasMore: false }],
+  });
+  assert.deepEqual(await read(c, 'sellwild', ['105101406', '105232291']), { ok: true, sales: [] });
+  assert.equal((await read(c, 'sellwild', ['105232291'])).ok, false);
 });
 
 test('a sale check waits while another marketplace action is running', async () => {
-  const c = worker({ fetch: async () => { throw new Error('should not read'); } });
+  const { c } = worker({});
+  c.fetch = async () => { throw new Error('should not read'); };
   vm.runInContext('activeNativeOperation = { id: "busy" }', c);
-  assert.deepEqual(JSON.parse(JSON.stringify(await c.readMarketplaceSales('poshmark'))), { ok: true, sales: [], skipped: true });
+  assert.deepEqual(await read(c, 'poshmark', ['aaaaaaaaaaaaaaaaaaaaaaaa']), { ok: true, sales: [], skipped: true });
   vm.runInContext('activeNativeOperation = null', c);
 });
