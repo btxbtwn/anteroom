@@ -18,7 +18,10 @@ from vendoo_studio.routes import chat as chat_routes
 from vendoo_studio.services import chat_listing, listing_generation, streaming
 from vendoo_studio.services.listing_generate import (
     PhotoAnalysisError,
+    TITLE_MAX_FOR_DESCRIPTION,
     analysis_with_photo_count,
+    cap_listing_description,
+    description_character_limit,
     extract_listing_json,
     format_photo_analysis,
     latest_photo_analysis,
@@ -332,6 +335,35 @@ class PersistListingTest(unittest.TestCase):
 
     def tearDown(self):
         self.db.close()
+
+    def test_generated_description_fits_the_shortest_marketplace(self):
+        title = "L" * TITLE_MAX_FOR_DESCRIPTION
+        self.assertEqual(description_character_limit(title), 918)
+        self.assertEqual(description_character_limit(""), 1000)
+        self.assertEqual(description_character_limit("Short"), 1000 - len("Short") - 2)
+        measurements = 'Measurements: Pit to pit: 22"; Length: 27"'
+        lead = "Y2K " + ("soft cotton " * 200)
+        listing = {
+            "title": title,
+            "description": f"{lead}\n\nFlaws: small stain near the hem.\n\n{measurements}",
+        }
+        self.assertTrue(cap_listing_description(listing))
+        self.assertLessEqual(len(listing["description"]), 918)
+        self.assertIn(measurements, listing["description"])
+        self.assertFalse(cap_listing_description(listing))
+        short = {"title": "Tee", "description": "Graphic tee."}
+        self.assertFalse(cap_listing_description(short))
+        self.assertEqual(short["description"], "Graphic tee.")
+
+    def test_persist_caps_an_overlong_description(self):
+        description = "Soft cotton. " * 200 + "\n\nMeasurements: Length: 27\""
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "",
+            parsed={**LISTING_JSON, "description": description},
+        )
+        limit = description_character_limit(LISTING_JSON["title"])
+        self.assertLessEqual(len(parsed["description"]), limit)
+        self.assertIn('Measurements: Length: 27"', parsed["description"])
 
     def test_persist_saves_revision_from_fenced_json(self):
         text = "```json\n" + json.dumps(LISTING_JSON) + "\n```"

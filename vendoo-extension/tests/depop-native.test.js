@@ -337,8 +337,20 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
   assert.equal(quote.headers['x-country-code'], 'US');
   assert.equal(call(c, 'depopBrandId', brands, 'Columbia'), 'columbia-sportswear');
   assert.equal(call(c, 'depopBrandId', brands, 'Columbia Sportswear'), 'columbia-sportswear');
-  assert.equal(call(c, 'depopBrandId', [
+  const split = [
     { id: 'a', name: 'Columbia One', status: 'active' },
     { id: 'b', name: 'Columbia Two', status: 'active' },
-  ], 'Columbia'), '');
+    { id: 'brand-other', name: 'Other', status: 'active' },
+  ];
+  assert.equal(call(c, 'depopBrandId', split, 'Columbia'), 'brand-other');
+  assert.equal(call(c, 'depopBrandId', split, ''), 'brand-other');
+  assert.equal(call(c, 'depopBrandId', split, 'Not A Real Brand'), 'brand-other');
+  assert.equal(call(c, 'depopBrandId', [{ id: 'nike', name: 'Nike' }], 'Unbranded'), 'other');
+  const translated = [
+    { id: 'nike', name_i18n: { 'en-US': 'Nike' } },
+    { id: 'other', name_i18n: { 'en-US': 'Other' } },
+  ];
+  assert.equal(call(c, 'depopBrandId', translated, 'Nike'), 'nike');
+  assert.equal(call(c, 'depopBrandId', translated, 'GB Girls'), 'other');
+  assert.equal(call(c, 'depopBrand', { brand: 'Not A Real Brand' }, { brand: split }), 'brand-other');
 });
