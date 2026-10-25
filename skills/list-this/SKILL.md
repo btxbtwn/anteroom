@@ -399,7 +399,7 @@ Before outputting ANY listing, verify:
 - sku only when the seller gives one; never make one up
 - Up to 13 tags, up to 10 materials
 - Tags: letters, numbers, spaces, hyphens, and apostrophes only (no `#`, `/`, `&`, `%`, or other punctuation). Apostrophes and hyphens cannot start a tag.
-- Non-vintage items need `when_made` set to a year range (`2020 - 2026 (Recently)`, `2010 - 2019 (Recently)`, or `2007 - 2009 (Recently)`). Do not select Made To Order
+- Non-vintage items need a year range from the current Etsy list. Those ranges move every year so vintage stays 20 years old (in 2026: `2020 - 2026 (Recently)`, `2010 - 2019 (Recently)`, `2007 - 2009 (Recently)`). Do not select Made To Order
 - Vintage items need a vintage year range, and only when the age is supported
 
 **Poshmark:**
@@ -454,7 +454,7 @@ Before outputting ANY listing, verify:
 
 ## Etsy When Made Estimation
 
-- Always populate Etsy `when_made` with an exact current dropdown option. An exact production date is not required to choose a date range.
+- Always populate Etsy `when_made` with an exact current dropdown option. An exact production date is not required to choose a date range. The ranges move every January so that vintage stays 20 years old: the newest band runs through the current year, and the vintage line is the year 19 years back. In 2029 the band under 2010 is gone, because 2010 is the first year that is not vintage.
 - Prefer a known date from the seller, a tag, or research. Otherwise make an educated estimate using the brand, label design, construction, materials, graphics, and overall style. If those clues are inconclusive, choose the most plausible modern range from the offered options; never leave this required field blank merely because the date is unknown.
 - Do not infer vintage status from retro styling, wear, or the word Y2K alone. Select a vintage range only when the available clues support that age. A non-vintage item still needs a year range. Never select Made To Order for an already-made item.
 - Treat this as an exception to the rule against unsupported age claims: save the estimated dropdown range, explain briefly in the seller-facing reply that it is an estimate, and keep that uncertainty out of the buyer-facing description. Do not invent a precise production year or ask the seller to supply one.

@@ -191,6 +191,19 @@ class EtsyListingsTest(unittest.TestCase):
                             "2020_2026": "2020_2027", "1900 - 1909 (Vintage)": "1900s", "Before 1700 (Vintage)": "before_1700",
                             "1990s (Vintage)": "1990s", "2010 - 2019 (Recently)": "2010_2019", "Sometime": ""}.items():
             self.assertEqual(etsy_fields.etsy_when_made_code(label, new_year), code, label)
+        turned = date(2029, 1, 1)
+        self.assertEqual(etsy_fields.etsy_when_made_codes(turned)[:6], (
+            "made_to_order", "2020_2029", "2010_2019", "before_2010", "2000_2009", "1990s"))
+        self.assertNotIn("2010_2009", etsy_fields.etsy_when_made_codes(turned))
+        for label, code in {"2020 - 2026 (Recently)": "2020_2029", "2007 - 2009 (Recently)": "before_2010",
+                            "Before 2007 (Vintage)": "before_2010", "2000 - 2006 (Vintage)": "2000_2009",
+                            "2010 - 2019 (Recently)": "2010_2019"}.items():
+            self.assertEqual(etsy_fields.etsy_when_made_code(label, turned), code, label)
+        aged = date(2030, 6, 1)
+        self.assertIn("2011_2019", etsy_fields.etsy_when_made_codes(aged))
+        self.assertIn("2000_2010", etsy_fields.etsy_when_made_codes(aged))
+        self.assertNotIn("2010_2019", etsy_fields.etsy_when_made_codes(aged))
+        self.assertEqual(etsy_fields.etsy_when_made_code("2010 - 2019 (Recently)", aged), "2011_2019")
 
         class NewYear(date):
             @classmethod

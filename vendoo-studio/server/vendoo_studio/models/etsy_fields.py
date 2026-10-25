@@ -261,15 +261,38 @@ def etsy_when_options() -> list[str]:
     return [str(item) for item in values if str(item).strip()]
 
 
+def _when_code(codes: tuple[str, ...], match) -> str:
+    return next((code for code in codes if match(code)), "")
+
+
 def etsy_when_made_codes(today: date | None = None) -> tuple[str, ...]:
     """Etsy's when_made values this year.
 
-    Etsy moves its newest ranges every year so that vintage stays 20 years old:
-    in 2026 they are 2020_2026, 2007_2009, before_2007 and 2000_2006.
+    Vintage stays 20 years old, so the edges move every January. In 2026 the
+    recent edges are 2020_2026, 2007_2009, before_2007 and 2000_2006. The band
+    under 2010 disappears in 2029, when 2010 is the first year that is not
+    vintage. Once 2010 itself is vintage the 2010s band shrinks, and once 2020
+    is vintage the open band starts at the first recent year.
     """
     year = (today or date.today()).year
-    return ("made_to_order", f"2020_{year}", "2010_2019", f"{year - 19}_2009", f"before_{year - 19}",
-            f"2000_{year - 20}", *(f"19{decade}0s" for decade in range(9, -1, -1)), "1800s", "1700s", "before_1700")
+    first_recent = year - 19
+    bands = ["made_to_order"]
+    open_start = max(2020, first_recent)
+    if open_start <= year:
+        bands.append(f"{open_start}_{year}")
+    if first_recent <= 2010:
+        bands.append("2010_2019")
+    elif first_recent <= 2019:
+        bands.append(f"{first_recent}_2019")
+    if first_recent <= 2009:
+        bands.append(f"{first_recent}_2009")
+    bands.append(f"before_{first_recent}")
+    vintage_end = first_recent - 1
+    if vintage_end >= 2000:
+        bands.append(f"2000_{vintage_end}")
+    bands.extend(f"19{decade}0s" for decade in range(9, -1, -1))
+    bands.extend(("1800s", "1700s", "before_1700"))
+    return tuple(bands)
 
 
 def etsy_when_made_code(label: str, today: date | None = None) -> str:
@@ -278,20 +301,25 @@ def etsy_when_made_code(label: str, today: date | None = None) -> str:
     codes = etsy_when_made_codes(today)
     span = re.fullmatch(r"(\d{4})\s*[-_]\s*(\d{4})", text)
     before = re.fullmatch(r"before[ _](\d{4})", text)
+    year = (today or date.today()).year
+    recent_before = _when_code(codes, lambda code: code.startswith("before_") and code != "before_1700")
     if text == "made to order":
         code = "made_to_order"
     elif span and span[1] == "2020":
-        code = codes[1]
+        code = _when_code(codes, lambda code: code.startswith("2020_")) or _when_code(
+            codes, lambda code: code.endswith(f"_{year}") and code[:4].isdigit())
     elif span and span[1] == "2000":
-        code = codes[5]
+        code = _when_code(codes, lambda code: code.startswith("2000_"))
     elif span and span[2] == "2009" and span[1] > "2000":
-        code = codes[3]
+        code = _when_code(codes, lambda code: code.endswith("_2009") and not code.startswith("2000_")) or recent_before
+    elif span and span[1] == "2010" and span[2] == "2019":
+        code = _when_code(codes, lambda code: code.endswith("_2019")) or recent_before
     elif span and span[1] == "1900":
         code = "1900s"
     elif span:
         code = f"{span[1]}_{span[2]}"
     elif before and before[1] > "1700":
-        code = codes[4]
+        code = recent_before
     elif before:
         code = f"before_{before[1]}"
     else:
@@ -479,7 +507,7 @@ def etsy_when_is_vintage_or_handmade(when_made: str, who_made: str, what_is: str
     when = when_made.lower()
     who = who_made.lower()
     what = what_is.lower()
-    if "vintage" in when or "before 2007" in when or "1990" in when or "1980" in when:
+    if "vintage" in when or re.search(r"before[ _](?:1[7-9]\d\d|20\d\d)", when) or "1990" in when or "1980" in when:
         return True
     if "i did" in who or "member of my shop" in who:
         return True
