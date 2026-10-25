@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
-const { loadWorker, call } = require('./worker-context');
+const { loadWorker, call, reply } = require('./worker-context');
 const MERCARI = 'https://www.mercari.com/sell/draft/testDraft/';
 
 function setup(platform = 'mercari') {
@@ -55,6 +55,29 @@ test('an interrupted worker is never replayed, and checking a result does no pag
   await s.context.handleNativeMarketplaceMessage(s.msg);
   assert.equal(s.replies[1].finished, false);
   assert.equal(s.actions.length, 0);
+});
+
+test('a finished Depop publish without a link reads the public product URL', async () => {
+  const s = setup('depop');
+  const draft = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
+  s.stored.native_operation_abc123 = {
+    finished: true, publish_job_id: 'job-1',
+    context: { marketplace: 'depop', action: 'publish', draft_url: draft },
+    result: { ok: true, state: 'published', draft_url: draft },
+  };
+  s.context.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  s.context.fetch = async url => {
+    const { pathname } = new URL(url);
+    if (pathname === '/api/v3/drafts/products/job-1/status/') {
+      return reply(200, { count_by_status: { COMPLETE: 1, PENDING: 0 }, products: [{ slug: 'seller-columbia-xl', draft_id: '123456' }] });
+    }
+    throw new Error(pathname);
+  };
+  s.msg.type = 'marketplace.result';
+  s.msg.payload = { operation_id: 'abc123', context: { marketplace: 'depop', listing: { title: 'Test', description: 'Private draft', price: 12 } } };
+  await s.context.handleNativeMarketplaceMessage(s.msg);
+  assert.equal(s.replies[0].result.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
+  assert.equal(s.stored.native_operation_abc123.result.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
 });
 
 test('another running job blocks native work', async () => {

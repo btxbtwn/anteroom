@@ -151,6 +151,79 @@ test('Depop publishes only an explicitly confirmed complete draft and exactly on
   assert.deepEqual(JSON.parse(requests[1].body), { draft_ids: ['123456'] });
 });
 
+test('a completed Depop publish returns the one public product link', async () => {
+  const { c, payload } = page();
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    if (pathname.endsWith('/status/')) {
+      return reply(200, { count_by_status: { COMPLETE: 1, PENDING: 0 },
+        products: [{ slug: 'Seller-Columbia-XL', draft_id: '123456' }] });
+    }
+    throw new Error(pathname);
+  };
+  const status = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1' });
+  assert.equal(status.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
+  assert.equal(call(c, 'depopStatusUrl', { products: [{ slug: 'one' }, { slug: 'two' }] }, '123456'), '');
+});
+
+test('a completed Depop publish without a slug uses the one matching selling listing', async () => {
+  const { c, requests, payload } = page();
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    requests.push(pathname);
+    if (pathname.endsWith('/status/')) return reply(200, { count_by_status: { COMPLETE: 1, PENDING: 0 } });
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname.includes('/by-status/selling/')) {
+      return reply(200, { objects: [
+        { slug: 'other-item', description: 'Test\n\nPrivate draft', price_amount: '9' },
+        { slug: 'seller-columbia-xl', description: 'Test\n\nPrivate draft\n\n#vintage', price_amount: '12.00' },
+      ] });
+    }
+    throw new Error(pathname);
+  };
+  const status = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1' });
+  assert.equal(status.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
+  assert.ok(requests.some(path => path.includes('/shops/42/products/by-status/selling/')));
+});
+
+test('a Depop inventory page names the posted product when the selling list does not', async () => {
+  const { c, requests, payload } = page();
+  const product = { slug: 'seller-columbia-xl-18-20-outdoors-hooded-ab12', description: 'Columbia XL Outdoors Hooded\n\nPrivate draft', price_amount: '12.00', user_id: 42 };
+  c.fetch = async (url) => {
+    const { pathname, search } = new URL(url);
+    requests.push(`${pathname}${search}`);
+    if (pathname.endsWith('/status/')) return reply(200, { count_by_status: { COMPLETE: 1, PENDING: 0 } });
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname.includes('/by-status/selling/')) return reply(200, { objects: [] });
+    if (pathname === '/api/v1/shop/42/products/') {
+      if (!search.includes('offset_id=')) return reply(200, { meta: { last_offset_id: 'next', end: false }, products: [{ slug: 'other', description: 'Something else', price_amount: '9' }] });
+      return reply(200, { meta: { end: true }, products: [product] });
+    }
+    throw new Error(pathname);
+  };
+  const status = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', listing: { ...payload.listing, title: 'Columbia XL Outdoors Hooded' } });
+  assert.equal(status.listing_url, 'https://www.depop.com/products/seller-columbia-xl-18-20-outdoors-hooded-ab12/');
+  assert.ok(requests.some(path => path.startsWith('/api/v1/shop/42/products/?limit=200&offset_id=')));
+});
+
+test('two Depop inventory rows for one listing do not pick a link', async () => {
+  const { c, payload } = page();
+  const product = (slug, description) => ({ slug, description, price_amount: '12.00', user_id: 42 });
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    if (pathname.endsWith('/status/')) return reply(200, { count_by_status: { COMPLETE: 1, PENDING: 0 } });
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname.includes('/by-status/selling/')) return reply(200, { objects: [] });
+    if (pathname === '/api/v1/shop/42/products/') {
+      const text = 'Columbia XL Outdoors Hooded\n\nPrivate draft';
+      return reply(200, { meta: { end: true }, products: [product('seller-columbia-one', text), product('seller-columbia-two', `${text} extra`)] });
+    }
+    throw new Error(pathname);
+  };
+  const status = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', listing: { ...payload.listing, title: 'Columbia XL Outdoors Hooded' } });
+  assert.equal(status.listing_url, undefined);
+});
+
 test('an uncertain Depop mutation is never retried', async () => {
   const { c, requests, payload } = page();
   c.fetch = async (_url, options) => { requests.push(options); throw new Error('Disconnected'); };

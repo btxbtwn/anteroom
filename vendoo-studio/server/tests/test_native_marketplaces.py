@@ -247,6 +247,14 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 3})
         self.assertEqual(len(result["conditions"]), 5)
 
+    def test_a_depop_publish_keeps_the_public_product_link(self):
+        url = "https://www.depop.com/products/seller-columbia-xl/"
+        outcome = native._outcome("depop", "publish", {"state": "draft", "draft_url": URLS["depop"]}, {
+            "ok": True, "state": "published", "draft_url": URLS["depop"], "listing_url": url,
+        })
+        self.assertEqual(outcome["state"], "published")
+        self.assertEqual(outcome["listing_url"], url)
+
     def test_a_deleted_depop_draft_is_forgotten_and_a_replacement_is_kept(self):
         old = URLS["depop"]
         new = "https://www.depop.com/sellinghub/drafts/edit/newdraft1/"

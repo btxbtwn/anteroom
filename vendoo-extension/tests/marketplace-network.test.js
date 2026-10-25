@@ -21,6 +21,12 @@ test('Depop request context is limited to this extension and the supported API p
   assert.ok(rule.action.requestHeaders.every(header => ['origin', 'referer'].includes(header.header.toLowerCase())));
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/products/by-slug/shop-classic-tee-136d/'));
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/shops/29809510/products/by-status/sold/?limit=24'));
+  assert.ok(covered('https://webapi.depop.com/presentation/api/v1/shops/29809510/products/by-status/selling/?limit=24'));
+  assert.ok(covered('https://webapi.depop.com/api/v1/shop/29809510/products/?limit=200'));
+  assert.equal(covered('https://webapi.depop.com/api/v1/products/?state=selling&limit=24'), false);
+  assert.equal(covered('https://webapi.depop.com/api/v2/shop/29809510/products/?limit=24'), false);
+  assert.equal(covered('https://webapi.depop.com/presentation/api/v1/shops/29809510/products/by-status/deleted/'), false);
+  assert.equal(covered('https://webapi.depop.com/api/v1/payments/'), false);
   assert.equal(covered('https://webapi.depop.com/presentation/api/v1/shops/29809510/followers/'), false);
   const receipts = updates[0].addRules.find(value => value.id === 17004);
   const receiptsTarget = new RegExp(receipts.condition.regexFilter);
