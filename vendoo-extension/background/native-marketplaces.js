@@ -47,6 +47,7 @@ function nativeRefusal(error) {
 }
 
 async function recoverNativeMarketplace(context) {
+  if (context.marketplace === 'vinted') return await runVintedNative({ payload: context }, true);
   if (context.marketplace === 'sellwild') return await runSellwildNative({ payload: context }, true);
   if (context.marketplace === 'depop') return await runDepopNative({ payload: context }, true);
   if (context.marketplace === 'poshmark') return await runPoshmarkApi({ payload: context }, true);
@@ -56,18 +57,20 @@ async function recoverNativeMarketplace(context) {
 
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
-  if (!['poshmark', 'mercari', 'depop', 'sellwild'].includes(p.marketplace)
-      || !({ sellwild: ['publish'], poshmark: ['list', 'update'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action)) {
+  const vintedPublish = p.marketplace === 'vinted' && p.action === 'publish';
+  if (!['poshmark', 'mercari', 'depop', 'sellwild', 'vinted'].includes(p.marketplace)
+      || !(vintedPublish || ({ sellwild: ['publish'], poshmark: ['list', 'update'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action))) {
     return nativeRefusal('Unsupported marketplace action.');
   }
   if (p.action === 'list' && p.confirm !== true) return nativeRefusal('Confirm listing on this marketplace.');
   if (p.action === 'update' && (p.confirm !== true || !/^[a-f0-9]{24}$/.test(String(p.listing_id || '')))) {
     return nativeRefusal('Confirm updating the live Poshmark listing.');
   }
-  if (p.action === 'publish' && (p.confirm !== true || (p.marketplace !== 'sellwild' && !nativeDraftUrl(p.marketplace, p.draft_url)))) {
-    return nativeRefusal('Confirm publishing an existing native draft.');
+  if (p.action === 'publish' && (p.confirm !== true || (!['sellwild', 'vinted'].includes(p.marketplace) && !nativeDraftUrl(p.marketplace, p.draft_url)))) {
+    return nativeRefusal(p.marketplace === 'vinted' ? 'Confirm listing on Vinted.' : 'Confirm publishing an existing native draft.');
   }
   if (p.draft_url && !nativeDraftUrl(p.marketplace, p.draft_url)) return nativeRefusal('Invalid native draft link.');
+  if (p.marketplace === 'vinted') return await runVintedNative(msg);
   if (p.marketplace === 'sellwild') return await runSellwildNative(msg);
   if (p.marketplace === 'depop') return await runDepopNative(msg);
   if (p.marketplace === 'poshmark') return await runPoshmarkApi(msg);

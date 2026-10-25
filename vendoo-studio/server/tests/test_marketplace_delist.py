@@ -64,7 +64,8 @@ class MarketplaceDelistTest(unittest.TestCase):
     def test_delist_needs_confirmation_and_named_marketplaces(self):
         self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["poshmark"]}).status_code, 400)
         self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": [], "confirm": True}).status_code, 422)
-        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["vinted"], "confirm": True}).status_code, 400)
+        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["whatnot"], "confirm": True}).status_code, 400)
+        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["vinted"], "confirm": True}).status_code, 409)
         self.bridge.assert_not_called()
         self.ebay.assert_not_called()
 
@@ -154,7 +155,7 @@ class MarketplaceDelistTest(unittest.TestCase):
             **notes["vendooListingUrls"], "poshmark": "https://poshmark.com/listing/Tee-7aae234280cb08338a8cb592"}})
         self.db.commit()
         self.assertEqual(self.client.get(self.base).json()["poshmark"]["listing_id"], "7aae234280cb08338a8cb592")
-        self.assertEqual(self.client.post(f"{self.base}/vinted/mark", json={"state": "sold"}).status_code, 400)
+        self.assertEqual(self.client.post(f"{self.base}/whatnot/mark", json={"state": "sold"}).status_code, 400)
         self.assertEqual(self.client.post(f"{self.base}/ebay/mark", json={"state": "gone"}).status_code, 400)
 
     def test_marks_settle_unconfirmed_records_and_wait_only_for_a_running_one(self):

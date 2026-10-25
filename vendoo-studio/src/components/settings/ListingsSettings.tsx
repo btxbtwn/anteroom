@@ -119,7 +119,11 @@ function MarketplacesSection() {
                 >
                   <MarketplaceLogo id={item.id} label={item.label} size={16} />
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.label}</span>
-                  {!item.fillable ? (
+                  {item.id === "vinted" ? (
+                    <Badge variant="outline" size="sm" className="shrink-0 text-muted-foreground">
+                      Direct
+                    </Badge>
+                  ) : !item.fillable ? (
                     <Badge variant="outline" size="sm" className="shrink-0 text-muted-foreground">
                       Crosslist only
                     </Badge>

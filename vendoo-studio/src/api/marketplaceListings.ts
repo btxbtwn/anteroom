@@ -1,4 +1,4 @@
-export type DelistMarketplace = "ebay" | "etsy" | "poshmark" | "mercari" | "depop" | "sellwild";
+export type DelistMarketplace = "ebay" | "etsy" | "poshmark" | "mercari" | "depop" | "sellwild" | "vinted";
 export interface MarketplaceListing {
   url: string | null;
   listing_id: string | null;
