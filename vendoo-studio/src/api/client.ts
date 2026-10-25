@@ -55,7 +55,6 @@ import type {
   SourcingState,
 } from "./types";
 import { readSse } from "./sse";
-import type { AdSpendEntry, AdSpendInput, EtsyAdsImport } from "./adSpend";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
@@ -320,20 +319,6 @@ export const api = {
       request<AssistantMessage>(`/assistant/messages/${messageId}/changes/apply`, { method: "POST" }),
     dismissChanges: (messageId: string) =>
       request<AssistantMessage>(`/assistant/messages/${messageId}/changes/dismiss`, { method: "POST" }),
-  },
-  adSpend: {
-    list: () => request<AdSpendEntry[]>("/analytics/ads"),
-    create: (entry: AdSpendInput) => request<AdSpendEntry>("/analytics/ads", { method: "POST", body: JSON.stringify(entry) }),
-    update: (id: string, entry: AdSpendInput) => request<AdSpendEntry>(`/analytics/ads/${id}`, { method: "PUT", body: JSON.stringify(entry) }),
-    remove: (id: string) => request<{ ok: boolean }>(`/analytics/ads/${id}`, { method: "DELETE" }),
-    uploadEtsyCsv: async (file: File): Promise<EtsyAdsImport> => {
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch(`${BASE}/analytics/ads/etsy-csv`, { method: "POST", body: form });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || `Upload failed: ${response.status}`);
-      return data;
-    },
   },
   saleCalendar: {
     record: (record: SaleRecord) => request<{ id: string }>("/analytics/calendar/records", { method: "POST", body: JSON.stringify(record) }),

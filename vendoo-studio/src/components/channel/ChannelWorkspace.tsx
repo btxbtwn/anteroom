@@ -2,60 +2,36 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
-import { AdSpend } from "../AdSpend";
 import { formatDays, formatMoney } from "../analyticsFormat";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { marketplaceName } from "../marketplaceNames";
-import { SaleCalendar } from "../SaleCalendar";
 import { PageError, PageNote } from "../WorkspacePage";
 import { Input } from "../ui/input";
-import { WorkspaceTabs } from "../ebay/WorkspaceTabs";
 import "../ebay/ebay.css";
 
 /** Marketplaces Studio reaches through Vendoo and the extension rather than a direct API connection. */
 export type ChannelMarketplace = "poshmark" | "depop" | "sellwild";
 
-const TABS = ["Dashboard", "Marketing"] as const;
-type Tab = (typeof TABS)[number];
-
-const CHANNELS: Record<ChannelMarketplace, { summary: string; url: string; marketing: string }> = {
-  poshmark: { summary: "Sales and Promoted Closet spend.", url: "https://poshmark.com", marketing: "Record Promoted Closet spend and see what it brought in." },
-  depop: { summary: "Sales and sale planning.", url: "https://www.depop.com", marketing: "Plan sales from when your Depop buyers shop, then set them up in Depop." },
-  sellwild: { summary: "Sales and sale planning.", url: "https://sellwild.com", marketing: "Plan sales from when your Sellwild buyers shop, then set them up in Sellwild." },
+const CHANNEL_URLS: Record<ChannelMarketplace, string> = {
+  poshmark: "https://poshmark.com",
+  depop: "https://www.depop.com",
+  sellwild: "https://sellwild.com",
 };
 
-/** One marketplace's workspace, laid out like eBay's: a channel heading, then the seller tabs. */
-export function ChannelWorkspace({ marketplace, onOpenListing }: {
-  marketplace: ChannelMarketplace; onOpenListing: (id: string) => void;
-}) {
-  const [tab, setTab] = useState<Tab>("Dashboard");
+/** One marketplace's workspace, laid out like eBay's: a channel heading, then its sales dashboard. */
+export function ChannelWorkspace({ marketplace }: { marketplace: ChannelMarketplace }) {
   const name = marketplaceName(marketplace);
-  const channel = CHANNELS[marketplace];
   return <div className="ebay-workspace" data-marketplace={marketplace}>
     <header className="ebay-page-heading">
       <div><p className="ebay-eyebrow mb-3">Sales channel</p>
         <div className="flex items-center gap-3"><MarketplaceLogo id={marketplace} label={name} size={28} /><h2>{name}</h2></div>
-        <p>{channel.summary}</p></div>
+        <p>Sales recorded in Studio.</p></div>
       <div className="ebay-connection">
-        <a className="inline-flex items-center gap-1 text-sm underline" href={channel.url} target="_blank" rel="noreferrer">Open {name}<ExternalLinkIcon className="size-3.5" aria-hidden="true" /></a>
+        <a className="inline-flex items-center gap-1 text-sm underline" href={CHANNEL_URLS[marketplace]} target="_blank" rel="noreferrer">Open {name}<ExternalLinkIcon className="size-3.5" aria-hidden="true" /></a>
       </div>
     </header>
-    <WorkspaceTabs label={`${name} workspace`} main items={TABS} value={tab} onChange={(value) => setTab(value as Tab)}>
-      <div className="ebay-tab-content" key={tab}>
-        {tab === "Dashboard" ? <ChannelDashboard marketplace={marketplace} /> : <ChannelMarketing marketplace={marketplace} onOpenListing={onOpenListing} />}
-      </div>
-    </WorkspaceTabs>
+    <div className="ebay-tab-content"><ChannelDashboard marketplace={marketplace} /></div>
   </div>;
-}
-
-/** Poshmark tracks Promoted Closet spend; Depop and Sellwild plan sales on the calendar. */
-export function ChannelMarketing({ marketplace, onOpenListing }: {
-  marketplace: ChannelMarketplace; onOpenListing: (id: string) => void;
-}) {
-  return <>
-    <div className="ebay-tab-intro"><h2>{marketplace === "poshmark" ? "Promoted Closet" : "Sales and promotions"}</h2><p>{CHANNELS[marketplace].marketing}</p></div>
-    {marketplace === "poshmark" ? <AdSpend marketplace="poshmark" /> : <SaleCalendar marketplace={marketplace} onOpenListing={onOpenListing} />}
-  </>;
 }
 
 function isoDay(date: Date) {

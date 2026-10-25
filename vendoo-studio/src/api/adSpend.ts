@@ -1,24 +1,3 @@
-export type AdMarketplace = "poshmark" | "etsy";
-
-/** What the seller copied from Promoted Closet or Etsy Ads for a stretch of days. */
-export interface AdSpendInput {
-  marketplace: AdMarketplace;
-  start_date: string;
-  end_date: string;
-  spend: number;
-  clicks: number | null;
-  /** Orders and revenue the dashboard credits to the ads, not every sale. */
-  orders: number | null;
-  revenue: number | null;
-  notes: string;
-}
-
-export interface AdSpendEntry extends AdSpendInput {
-  id: string;
-  roas: number | null;
-  cost_per_click: number | null;
-}
-
 export interface AdMarketplaceTotals {
   id: string;
   entries: number;
@@ -42,15 +21,4 @@ export interface AnalyticsAds {
   profit: number | null;
   profit_after_ads: number | null;
   marketplaces: AdMarketplaceTotals[];
-}
-
-/** What an Etsy Ads stats CSV upload added. */
-export interface EtsyAdsImport {
-  /** Days with ad activity; idle days are not recorded. */
-  days: number;
-  start: string;
-  end: string;
-  spend: number;
-  /** Typed Etsy entries that cover some of the same days, left as they were. */
-  overlapping_entries: number;
 }

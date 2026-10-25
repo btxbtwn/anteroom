@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.333 — 2026-10-25
+
+- Etsy, Poshmark, Depop, and Sellwild no longer have a Marketing tab. Only eBay keeps one, since its marketing tools connect to eBay directly. Ad spend you already recorded still counts in Analytics.
+
 
 ## 0.1.332 — 2026-10-24
 
