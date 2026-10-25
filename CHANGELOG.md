@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.374 — 2026-10-25
+## 0.1.375 — 2026-10-25
 
 - List on Vinted uploads the item on Vinted when you confirm it. Send does not list it, and it does not save a Vinted draft.
+
+## 0.1.374 — 2026-10-25
+
+- The Sync button on a listing now syncs your direct listings too: it settles unconfirmed results and checks Poshmark, Mercari, Depop and Sellwild for sales right away. Sales of items you listed directly are now noticed on every marketplace.
 
 ## 0.1.373 — 2026-10-25
 

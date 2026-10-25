@@ -78,6 +78,7 @@ def normalize_sales(marketplace: str, raw: object) -> list[str]:
 def live_listing_ids(marketplace: str, *, session_factory=None) -> list[str]:
     """Listing IDs Anteroom has live on this marketplace: not sold, delisted or marked not listed."""
     from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.marketplace_listing import MarketplaceListing
     from vendoo_studio.services.marketplace_delist import listings
 
     if session_factory is None:
@@ -86,8 +87,12 @@ def live_listing_ids(marketplace: str, *, session_factory=None) -> list[str]:
         session_factory = SessionLocal
     found: list[str] = []
     with session_factory() as db:
-        rows = db.query(Conversation.id).filter(Conversation.notes.contains(_HOST[marketplace])).all()
-        for (conv_id,) in rows:
+        # Vendoo's links and the seller's marks live in the notes; direct listings have their own table.
+        noted = db.query(Conversation.id).filter(Conversation.notes.contains(_HOST[marketplace]))
+        direct = db.query(MarketplaceListing.conversation_id).filter(
+            MarketplaceListing.marketplace == marketplace, MarketplaceListing.listing_url.isnot(None))
+        conv_ids = dict.fromkeys(row[0] for row in [*direct.all(), *noted.all()])
+        for conv_id in conv_ids:
             entry = listings(db, conv_id).get(marketplace) or {}
             listing_id = entry.get("listing_id")
             if listing_id and entry.get("state") == "live" and not entry.get("sold_here") and listing_id not in found:
@@ -118,18 +123,19 @@ def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_f
     return created
 
 
-async def check_marketplace(marketplace: str) -> None:
+async def check_marketplace(marketplace: str) -> bool:
+    """Read this shop's sales. False when Chrome could not check it."""
     from vendoo_studio.services import browser_bridge
     from vendoo_studio.services.marketplace_accounts import announce_sales
 
     if marketplace not in CHROME_MARKETS or not sale_detection_enabled(marketplace):
         clear_check_error(marketplace)
-        return
+        return True
     live = await asyncio.to_thread(live_listing_ids, marketplace)
     listing_ids = live[:MAX_CHECKED]
     if not listing_ids:
         clear_check_error(marketplace)
-        return
+        return True
     try:
         raw = await browser_bridge.request(
             SimpleNamespace(id=None),
@@ -138,20 +144,25 @@ async def check_marketplace(marketplace: str) -> None:
             timeout=90,
         )
     except browser_bridge.BrowserBridgeError:
-        return
+        return False
     if not isinstance(raw, dict) or raw.get("skipped") is True:
-        return
+        return False
     if raw.get("ok") is not True:
         _errors[marketplace] = "Couldn't check sales. Sign in again in Chrome if this keeps happening."
-        return
+        return False
     clear_check_error(marketplace)
     sold = [listing_id for listing_id in normalize_sales(marketplace, raw) if listing_id in live]
-    if not sold:
-        return
-    created = await asyncio.to_thread(record_reported_sales, marketplace, sold)
-    if not created:
-        return
-    await announce_sales(created)
+    if sold:
+        created = await asyncio.to_thread(record_reported_sales, marketplace, sold)
+        if created:
+            await announce_sales(created)
+    return True
+
+
+async def check_now(marketplace: str) -> bool:
+    """Check one shop when the seller asks. Its next timed check moves a full gap out."""
+    arm_next(marketplace, time.time())
+    return await check_marketplace(marketplace)
 
 
 async def check_due() -> None:
