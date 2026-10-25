@@ -237,9 +237,11 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
             values["draft_url"] = None
         elif marketplace in {"depop", "etsy"} and result.get("draft_url"):
             candidate = draft_url(marketplace, result["draft_url"])
-            if record.get("draft_url") and candidate != record["draft_url"]:
-                raise NativeMarketplaceError(502, "Chrome answered for a different marketplace draft.")
-            values["draft_url"] = candidate
+            replaced = marketplace == "depop" and result.get("draft_replaced") is True
+            # A refusal that names some other draft stays on the draft already linked
+            # to this listing. The refusal is known, so List can run again.
+            if replaced or not record.get("draft_url") or candidate == record["draft_url"]:
+                values["draft_url"] = candidate
         values["state"] = _resting_state(marketplace, {**record, **values})
         if action == "save_draft":
             # The draft does not hold this revision.

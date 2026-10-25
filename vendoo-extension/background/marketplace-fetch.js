@@ -164,7 +164,8 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       if (json && text) { try { data = JSON.parse(text); } catch { data = null; } }
       const status = response.status;
       const statusLine = `HTTP ${status}${response.statusText ? ` ${response.statusText}` : ''}`;
-      const ownWords = data ? marketplaceBodyMessage(data) || statusLine : statusLine;
+      const plain = !data && text ? marketplaceScrub(text).slice(0, 180) : '';
+      const ownWords = data ? marketplaceBodyMessage(data) || statusLine : (plain || statusLine);
       // Normal pages carry bot-check scripts too, so only a blocked or
       // unexpected answer is read for challenge markers.
       const unexpected = status < 300 && status !== 204 && expect === 'json' && !data;

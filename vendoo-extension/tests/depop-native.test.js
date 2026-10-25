@@ -248,6 +248,124 @@ test('a Depop description is capped at 1000 characters and read back against the
   assert.equal(requests.filter(request => request.method === 'PUT').length, 1);
 });
 
+test('a direct Depop save writes the listing site\'s draft fields', async () => {
+  const { c, requests, msg } = newDraft();
+  msg.payload.listing = {
+    ...FULL, brand: 'Columbia', department: 'Boys', size: 'XL', price: 17,
+    direct_category_ids: { depop: 'kidswear_jackets' },
+    depop_specifics: { parcelSize: 'Medium', brand: 'Columbia', material: ['Polyester'] },
+    form: { ...FULL.form, ships_from_zip: '70115', specifics: { age: ['modern'], source: ['preloved'], style: ['casual'] },
+      overrides: { condition: 'used_good', brand: 'Columbia', categoryV2: {
+        id: 'kidswear_jackets', path: ['kidswear', 'kidswear_coats-jackets', 'kidswear_jackets'],
+      } } },
+  };
+  const attrs = {
+    ...ATTRIBUTES,
+    group: [...ATTRIBUTES.group, { id: 'coats-jackets', department: ['kidswear'], product_types: [
+      { id: 'jackets', attribute_ids: ['material'] }] }],
+    category_size_mapping: [...ATTRIBUTES.category_size_mapping, {
+      department: 'kidswear', group: 'coats-jackets', product_type: 'jackets', size_set_by_region: { US: 32 } }],
+    brand: [{ id: 'columbia-sportswear', name: 'Columbia Sportswear' }, { id: 'other', name: 'Other' }],
+  };
+  let saved = { id: 555, description: '', price_amount: '17', pictures: [] };
+  c.fetch = async (url, options = {}) => {
+    const { hostname, pathname } = new URL(url);
+    requests.push({ method: options.method, hostname, pathname, body: options.body });
+    if (hostname.endsWith('amazonaws.com')) return reply(200, '');
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/') return reply(200, { id: 555 });
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/pictures/') {
+      return reply(200, { id: 9, url: 'https://media-photos-depop.s3-accelerate.amazonaws.com/p/9.jpg?X-Amz-Signature=private' });
+    }
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { country: 'US' });
+    if (pathname.endsWith('/countries.json')) return reply(200, [{ country: 'United States', countryCode: 'US', address: 'United States', geoLat: 39.3, geoLng: -97.9 }]);
+    if (pathname === '/presentation/api/v1/users/me/settings/shipping/') return reply(200, { shipping_providers: [{ id: 'USPS', active: true }] });
+    if (pathname === '/presentation/api/v1/addresses/') return reply(200, [{ id: 2, last_modified: '2024-01-01T00:00:00Z' }]);
+    if (pathname === '/presentation/api/v1/shipping/providers/depop/') {
+      return reply(200, [{ id: 'USPS', parcel_sizes: [{ id: 'under_1lb', title: 'Medium', cost: { amount: '1.99' } }] }]);
+    }
+    if (options.method === 'PUT') {
+      const body = JSON.parse(options.body);
+      saved = { ...saved, ...body, pictures: (body.pictures || []).map(id => ({ id })) };
+    }
+    return reply(200, saved);
+  };
+  withCatalog(c, { attributes: [200, attrs] });
+  const result = await c.runDepopNative(msg);
+  assert.equal(result.ok, true, result.error);
+  const put = requests.find(request => request.method === 'PUT' && request.pathname.includes('/drafts/'));
+  const body = JSON.parse(put.body);
+  assert.equal(body.department, undefined);
+  assert.equal(body.group, undefined);
+  assert.equal(body.product_type, 'jackets');
+  assert.equal(body.is_kids, true);
+  assert.equal(body.gender, 'male');
+  assert.equal(body.variant_set, 32);
+  assert.deepEqual(body.variants, { 15: 1 });
+  assert.equal(body.address, 'United States');
+  assert.deepEqual(body.shipping_methods, [{
+    payer: 'buyer', parcel_size: 'medium', shipping_provider_id: 'USPS', ship_from_address_id: 41,
+  }]);
+  assert.equal(body.shipping_methods[0].parcel_size_id, undefined);
+});
+
+test('a replaced Depop draft that Depop then refuses keeps the new link', async () => {
+  const gone = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
+  const created = 'https://www.depop.com/sellinghub/drafts/edit/newdraft1/';
+  const { c, msg } = newDraft();
+  msg.payload.draft_url = gone;
+  c.fetch = async (url, options = {}) => {
+    const { hostname, pathname } = new URL(url);
+    if (hostname.endsWith('amazonaws.com')) return reply(200, '');
+    if (pathname === '/presentation/api/v1/drafts/123456/' || pathname === '/presentation/api/v1/drafts/123456') {
+      return reply(404, { message: 'Could not find draft with id: 123456' });
+    }
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/') return reply(201, { id: 'newdraft1' });
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/pictures/') {
+      return reply(200, { id: 9, url: 'https://media-photos-depop.s3-accelerate.amazonaws.com/p/9.jpg?X-Amz-Signature=private' });
+    }
+    if (options.method === 'PUT') return reply(400, 'parcel_size is required', { 'content-type': 'text/plain' });
+    return reply(200, { id: 'newdraft1', description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [] });
+  };
+  withCatalog(c);
+  const result = await c.runDepopNative(msg);
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(result.draft_replaced, true);
+  assert.equal(result.draft_url, created);
+  assert.match(result.error, /HTTP 400/);
+  assert.match(result.marketplace_message, /parcel_size is required/);
+});
+
+test('a Depop save confirms the draft by reading it again when the first read fails', async () => {
+  const { c, msg } = newDraft();
+  msg.payload.listing = { ...FULL, tags: [] };
+  msg.payload.draft_url = DRAFT;
+  let saved = false;
+  let readsAfterSave = 0;
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    if (options.method === 'PUT' && /\/drafts\/[^/]+\/$/.test(pathname)) {
+      saved = true;
+      return reply(200, {});
+    }
+    if ((!options.method || options.method === 'GET') && /\/drafts\/[^/]+\/$/.test(pathname)) {
+      if (saved) {
+        readsAfterSave += 1;
+        // The read is retried on its own. Only a read after those retries is the confirmation.
+        if (readsAfterSave <= 4) throw new Error('Disconnected');
+      }
+      return reply(200, { id: '123456', description: 'Test\n\nPrivate draft', price_amount: '12', pictures: [{ id: 789 }] });
+    }
+    return reply(200, {});
+  };
+  withCatalog(c);
+  const result = await c.runDepopNative(msg);
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.state, 'draft');
+  assert.equal(result.draft_url, DRAFT);
+  assert.equal(readsAfterSave, 5);
+});
+
 test('a deleted Depop draft is replaced once and the missing link is not kept', async () => {
   const gone = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
   const created = 'https://www.depop.com/sellinghub/drafts/edit/newdraft1/';
