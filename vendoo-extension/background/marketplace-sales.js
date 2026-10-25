@@ -1,190 +1,199 @@
-// Read recent sales from a marketplace the seller is already signed into.
-// Returns listing and order IDs only. Prices, names, and messages stay in Chrome.
+// Find which of the seller's listings have sold. Returns listing IDs only.
+// Prices, names, and messages stay in Chrome.
+//
+// Each check costs a few requests however many listings the seller has. The
+// seller's account comes from one of their own listings, so no sign-in is
+// needed. Recorded against live and sold listings on 2026-10-25:
+//   Depop     shop sold list, newest sale first; status "STATUS_PURCHASED" or "STATUS_MARKED_AS_SOLD".
+//   Mercari   the seller's items in "trading" (sold, not yet completed). Every
+//             sale passes through it for days. The item page carries the
+//             access token and seller this search needs.
+//   Poshmark  the seller's live closet; a known listing missing from it is read
+//             on its own, sold when data.inventory.status is "sold_out".
+//   Sellwild  the seller's live listings; a known listing missing from them is
+//             read on its own, sold when listing.status is 5 (1 while live).
 
-const POSHMARK_SALE_ID = /^[a-f0-9]{24}$/;
-const DEPOP_LISTING_ID = /^\d{5,12}$/;
-const DEPOP_ORDER_ID = /^\d{1,20}$/;
-const MERCARI_ITEM_ID = /^m\d{8,14}$/;
-const SELLWILD_ITEM_ID = /^\d{1,12}$/;
+const SALE_LISTING_ID = {
+  poshmark: /^[a-f0-9]{24}$/,
+  mercari: /^m\d{6,}$/,
+  depop: /^[a-z0-9][a-z0-9-]{0,200}$/,
+  sellwild: /^\d{1,15}$/,
+};
+const SALE_MAX_LISTINGS = 5000;
+const SALE_MAX_PAGES = 40;
+const SALE_MAX_CONFIRM = 40;
+const MERCARI_PROFILE_SEARCH = 'ddf46d28377df85dd43bbd8a9750c0eb1c0a95e669d6509ea1b15af6d0fd507f';
 
-function firstMatch(node, keys, pattern) {
-  if (!node || typeof node !== 'object') return null;
-  for (const key of keys) {
-    const value = node[key];
-    if (value == null || typeof value === 'object') continue;
-    const text = String(value);
-    if (pattern.test(text)) return text;
-  }
-  return null;
+// A short wait between requests. Tests replace setTimeout with a stub that
+// returns 0 and never fires, so the wait is skipped there.
+async function salePause(betweenPages) {
+  const ms = betweenPages
+    ? 800 + Math.floor(Math.random() * 1700)
+    : 300 + Math.floor(Math.random() * 600);
+  await new Promise(resolve => {
+    const timer = setTimeout(resolve, ms);
+    if (timer === 0) resolve();
+  });
 }
 
-function collectIdPairs(body, listingKeys, listingPattern, orderKeys, orderPattern) {
+async function saleRead(url, options = {}) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(15000), ...options });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response;
+}
+
+async function saleJson(url, options = {}) {
+  const response = await saleRead(url, { ...options, headers: { Accept: 'application/json', ...options.headers } });
+  return response ? response.json() : null;
+}
+
+// The first of the seller's listings that names its account.
+async function sellerFrom(ids, read) {
+  for (const id of ids.slice(0, 5)) {
+    const seller = await read(id).catch(() => null);
+    if (seller) return seller;
+  }
+  throw new Error('Seller not found');
+}
+
+// Known listings missing from the live list, each confirmed on its own.
+async function soldAmongMissing(ids, live, isSold) {
   const sales = [];
-  const seen = new Set();
-  const push = (orderId, listingId) => {
-    const key = `${orderId}:${listingId}`;
-    if (seen.has(key) || sales.length >= 40) return;
-    seen.add(key);
-    sales.push({ listing_id: listingId, order_id: orderId });
-  };
-  const visit = (node, parentOrder, depth) => {
-    if (!node || typeof node !== 'object' || depth > 6 || sales.length >= 40) return;
-    if (Array.isArray(node)) {
-      node.forEach(item => visit(item, parentOrder, depth + 1));
-      return;
-    }
-    const listingId = firstMatch(node, listingKeys, listingPattern);
-    const orderId = firstMatch(node, orderKeys, orderPattern);
-    const ownOrder = orderId && orderId !== listingId ? orderId : null;
-    if (listingId) push(ownOrder || parentOrder || listingId, listingId);
-    for (const key of ['post', 'listing', 'product']) {
-      const nested = firstMatch(node[key], ['id', ...listingKeys], listingPattern);
-      if (nested) push(ownOrder || parentOrder || nested, nested);
-    }
-    const nextOrder = ownOrder || parentOrder;
-    Object.values(node).forEach(value => visit(value, nextOrder, depth + 1));
-  };
-  visit(body, null, 0);
+  for (const id of ids.filter(id => !live.has(id)).slice(0, SALE_MAX_CONFIRM)) {
+    await salePause(false);
+    if (await isSold(id).catch(() => false)) sales.push({ listing_id: id });
+  }
   return sales;
 }
 
-async function readJson(response) {
-  try { return await response.json(); } catch { return null; }
-}
-
-async function readPoshmarkSales() {
-  const cookie = await chrome.cookies.get({ url: 'https://poshmark.com/', name: 'jwt' });
-  const account = jwtClaims(cookieToken(cookie));
-  const userId = String(account?.user_id || '');
-  if (!POSHMARK_SALE_ID.test(userId)) return { ok: false, error: 'Sign in to Poshmark in Chrome first.' };
-  const request = encodeURIComponent(JSON.stringify({ count: 20 }));
-  let response;
-  try {
-    response = await fetch(`https://poshmark.com/vm-rest/users/${userId}/orders/sales?request=${request}&app_version=2.55&pm_version=2026.43.00`, {
-      credentials: 'include', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20000),
-    });
-  } catch {
-    return { ok: false, error: 'Poshmark did not return sales.' };
-  }
-  if (response.status === 401 || response.status === 403) return { ok: false, error: 'Sign in to Poshmark in Chrome again.' };
-  if (!response.ok) return { ok: false, error: 'Poshmark did not return sales.' };
-  const body = await readJson(response);
-  if (!body) return { ok: false, error: 'Poshmark did not return sales.' };
-  return {
-    ok: true,
-    sales: collectIdPairs(body, ['post_id', 'parent_post_id', 'listing_id'], POSHMARK_SALE_ID, ['order_id', 'id'], POSHMARK_SALE_ID),
-  };
-}
-
-async function readDepopSales() {
-  const cookie = await chrome.cookies.get({ url: 'https://www.depop.com/', name: 'access_token' });
-  const token = cookieToken(cookie);
-  if (!token) return { ok: false, error: 'Sign in to Depop in Chrome first.' };
+async function depopJson(path) {
   await ensureMarketplaceRequestContext();
-  let response;
-  try {
-    response = await fetch('https://webapi.depop.com/api/v1/receipts/?role=seller&limit=24', {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-      credentials: 'omit', signal: AbortSignal.timeout(20000),
+  return saleJson(`https://webapi.depop.com/presentation/api/v1/${path}`, { credentials: 'omit' });
+}
+
+async function depopSales(slugs) {
+  const shop = await sellerFrom(slugs, async slug => {
+    const id = String((await depopJson(`products/by-slug/${slug}/`))?.user_id ?? '');
+    return /^\d{1,15}$/.test(id) ? id : null;
+  });
+  await salePause(true);
+  const sold = await depopJson(`shops/${shop}/products/by-status/sold/?limit=24`);
+  if (!Array.isArray(sold?.objects)) throw new Error('Depop sold items missing');
+  return sold.objects
+    .filter(product => ['STATUS_PURCHASED', 'STATUS_MARKED_AS_SOLD'].includes(product?.status))
+    .map(product => String(product?.slug ?? ''))
+    .filter(slug => SALE_LISTING_ID.depop.test(slug))
+    .map(slug => ({ listing_id: slug }));
+}
+
+function mercariPageData(html) {
+  const match = /<script id="__NEXT_DATA__" type="application\/json"[^>]*>([\s\S]*?)<\/script>/.exec(html);
+  return match ? JSON.parse(match[1])?.props?.pageProps : null;
+}
+
+async function mercariSales(ids) {
+  const { token, seller } = await sellerFrom(ids, async id => {
+    // Mercari answers HTTP 500 when the request asks for text/html explicitly.
+    const response = await saleRead(`https://www.mercari.com/us/item/${id}/`, { credentials: 'include' });
+    const page = response ? mercariPageData(await response.text()) : null;
+    const ref = String(page?.serverState?.[`ItemDetail:${id}`]?.seller?.__ref ?? '');
+    const sellerId = /^PublicUser:(\d{1,15})$/.exec(ref)?.[1];
+    return sellerId && page?.req?.accessToken ? { token: page.req.accessToken, seller: Number(sellerId) } : null;
+  });
+  await salePause(true);
+  await ensureMarketplaceRequestContext();
+  const response = await saleRead('https://www.mercari.com/v1/api', {
+    method: 'POST', credentials: 'include',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-platform': 'web',
+      'x-double-web': '1', 'apollo-require-preflight': 'true' },
+    body: JSON.stringify({ operationName: 'publicProfileSearchQuery',
+      variables: { criteria: { itemStatuses: [2], sellerIds: [seller], length: 200 }, userId: seller },
+      extensions: { persistedQuery: { version: 1, sha256Hash: MERCARI_PROFILE_SEARCH } } }),
+  });
+  const items = response ? (await response.json())?.data?.search?.itemsList : null;
+  if (!Array.isArray(items)) throw new Error('Mercari items missing');
+  return items
+    .filter(item => item?.status === 'trading' && SALE_LISTING_ID.mercari.test(String(item.id)))
+    .map(item => ({ listing_id: item.id }));
+}
+
+async function poshmarkPost(id) {
+  return (await saleJson(`https://poshmark.com/vm-rest/posts/${id}?app_version=2.55`, { credentials: 'include' }))?.data;
+}
+
+async function poshmarkSales(ids) {
+  const seller = await sellerFrom(ids, async id => {
+    const creator = String((await poshmarkPost(id))?.creator_id ?? '');
+    return SALE_LISTING_ID.poshmark.test(creator) ? creator : null;
+  });
+  const pending = new Set(ids);
+  const live = new Set();
+  let maxId = null;
+  for (let page = 0; page < SALE_MAX_PAGES && pending.size; page += 1) {
+    if (page > 0) await salePause(true);
+    const request = { filters: { department: 'All', inventory_status: ['available'] }, sort_by: 'added_desc',
+      experience: 'all', count: 200, ...(maxId ? { max_id: maxId } : {}) };
+    const body = await saleJson(`https://poshmark.com/vm-rest/users/${seller}/posts/filtered?request=${encodeURIComponent(JSON.stringify(request))}&summarize=true&app_version=2.55`, { credentials: 'include' });
+    if (!Array.isArray(body?.data)) throw new Error('Poshmark closet missing');
+    body.data.forEach(post => {
+      const id = String(post?.id ?? '');
+      live.add(id);
+      pending.delete(id);
     });
-  } catch {
-    return { ok: false, error: 'Depop did not return sales.' };
+    maxId = body.more?.next_max_id || null;
+    if (!maxId) break;
   }
-  if (response.status === 401 || response.status === 403) return { ok: false, error: 'Sign in to Depop in Chrome first.' };
-  if (!response.ok) return { ok: false, error: 'Depop did not return sales.' };
-  const body = await readJson(response);
-  if (!body) return { ok: false, error: 'Depop did not return sales.' };
-  return {
-    ok: true,
-    sales: collectIdPairs(body, ['product_id', 'productId'], DEPOP_LISTING_ID, ['purchase_id', 'purchaseId', 'receipt_id'], DEPOP_ORDER_ID),
-  };
+  // A page still waiting means the closet was not finished, so a missing id
+  // might be further down rather than sold.
+  if (pending.size && maxId) throw new Error('Poshmark closet too large to read');
+  return soldAmongMissing(ids, live, async id => (await poshmarkPost(id))?.inventory?.status === 'sold_out');
 }
 
-function mercariPageSold(html, id) {
-  // The status closest to this item's id. A sold item elsewhere on the page
-  // must not mark this listing sold.
-  const at = html.indexOf(`"${id}"`);
-  if (at < 0) return null;
-  const slice = html.slice(Math.max(0, at - 2000), at + id.length + 2000);
-  const center = slice.indexOf(`"${id}"`);
-  let sold = null;
-  let distance = Infinity;
-  for (const [pattern, isSold] of [
-    [/"status"\s*:\s*"sold"/i, true],
-    [/"itemStatus"\s*:\s*"ITEM_STATUS_SOLD"/, true],
-    [/"status"\s*:\s*"on_sale"/i, false],
-    [/"itemStatus"\s*:\s*"ITEM_STATUS_ON_SALE"/, false],
-  ]) {
-    const match = pattern.exec(slice);
-    if (!match || Math.abs(match.index - center) >= distance) continue;
-    distance = Math.abs(match.index - center);
-    sold = isSold;
-  }
-  return sold;
+async function sellwildListing(id) {
+  await ensureMarketplaceRequestContext();
+  return (await saleJson(`https://sellwild.com/api/listings/${id}`, { credentials: 'include' }))?.listing;
 }
 
-async function readMercariSales(listingIds) {
-  const sales = [];
-  let checked = 0;
-  let failed = 0;
-  for (const id of listingIds) {
-    if (!MERCARI_ITEM_ID.test(id) || sales.length >= 40) continue;
-    checked += 1;
-    let response;
-    try {
-      response = await fetch(`https://www.mercari.com/us/item/${id}/`, {
-        credentials: 'include', headers: { Accept: 'text/html' }, signal: AbortSignal.timeout(15000),
-      });
-    } catch { failed += 1; continue; }
-    if (!response.ok) { failed += 1; continue; }
-    let html = '';
-    try { html = (await response.text()).slice(0, 300000); } catch { failed += 1; continue; }
-    if (mercariPageSold(html, id) === true) sales.push({ listing_id: id, order_id: id });
+async function sellwildSales(ids) {
+  const seller = await sellerFrom(ids, async id => {
+    const user = String((await sellwildListing(id))?.user?.id ?? '');
+    return /^\d{1,15}$/.test(user) ? user : null;
+  });
+  const pending = new Set(ids);
+  const live = new Set();
+  let more = true;
+  for (let page = 1; more && pending.size && page <= SALE_MAX_PAGES; page += 1) {
+    if (page > 1) await salePause(true);
+    await ensureMarketplaceRequestContext();
+    const body = await saleJson(`https://sellwild.com/api/search/listings?userId=${seller}&limit=200&page=${page}`, { credentials: 'include' });
+    if (body?.success !== true || !Array.isArray(body.listings)) throw new Error('Sellwild listings missing');
+    body.listings.forEach(listing => {
+      const id = String(listing?.id ?? '');
+      live.add(id);
+      pending.delete(id);
+    });
+    more = body.hasMore === true;
   }
-  if (checked && failed === checked) return { ok: false, error: 'Could not check sales.' };
-  return { ok: true, sales };
+  if (pending.size && more) throw new Error('Sellwild shop too large to read');
+  return soldAmongMissing(ids, live, async id => (await sellwildListing(id))?.status === 5);
 }
 
-function sellwildSold(body) {
-  const listing = body?.listing && typeof body.listing === 'object' ? body.listing : body;
-  if (!listing || typeof listing !== 'object') return null;
-  if (listing.sold === true) return true;
-  const status = String(listing.status || '').toLowerCase();
-  if (status === 'sold' || status === 'sold_out') return true;
-  if (status === 'active' || status === 'published' || status === 'live') return false;
-  return null;
-}
-
-async function readSellwildSales(listingIds) {
-  const sales = [];
-  let checked = 0;
-  let failed = 0;
-  for (const id of listingIds) {
-    if (!SELLWILD_ITEM_ID.test(id) || sales.length >= 40) continue;
-    checked += 1;
-    let response;
-    try {
-      response = await fetch(`https://sellwild.com/api/listings/${id}`, {
-        credentials: 'include', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000),
-      });
-    } catch { failed += 1; continue; }
-    if (!response.ok) { failed += 1; continue; }
-    const body = await readJson(response);
-    if (!body) { failed += 1; continue; }
-    if (sellwildSold(body) === true) sales.push({ listing_id: id, order_id: id });
-  }
-  if (checked && failed === checked) return { ok: false, error: 'Could not check sales.' };
-  return { ok: true, sales };
-}
+const SALE_READERS = { depop: depopSales, mercari: mercariSales, poshmark: poshmarkSales, sellwild: sellwildSales };
 
 async function readMarketplaceSales(marketplace, listingIds) {
   if (activeNativeOperation) return { ok: true, sales: [], skipped: true };
-  const ids = (Array.isArray(listingIds) ? listingIds : []).filter(id => typeof id === 'string').slice(0, 15);
-  if (marketplace === 'poshmark') return readPoshmarkSales();
-  if (marketplace === 'depop') return readDepopSales();
-  if (marketplace === 'mercari') return readMercariSales(ids);
-  if (marketplace === 'sellwild') return readSellwildSales(ids);
-  return { ok: false, error: 'Could not check sales.' };
+  const read = SALE_READERS[marketplace];
+  if (!read) return { ok: false, error: 'Could not check sales.' };
+  const ids = (Array.isArray(listingIds) ? listingIds : [])
+    .filter(id => typeof id === 'string' && SALE_LISTING_ID[marketplace].test(id))
+    .slice(0, SALE_MAX_LISTINGS);
+  if (!ids.length) return { ok: true, sales: [] };
+  try {
+    return { ok: true, sales: await read(ids) };
+  } catch {
+    return { ok: false, error: 'Could not check sales.' };
+  }
 }
 
 async function handleMarketplaceSales(msg) {
