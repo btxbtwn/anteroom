@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.362 — 2026-10-25
+
+- Changing the tag size still updates Depop when Depop was using that same size.
+
 ## 0.1.361 — 2026-10-25
 
 - Depop size stays on Other when you set it there, instead of snapping back to the tag size.
