@@ -8,7 +8,8 @@ export interface EtsyDraftOptions {
 export interface NativeDraft {
   state: "not_saved" | "saving" | "publishing" | "unknown" | "draft" | "published" | "pending_review";
   storage?: "local";
-  review_ready?: boolean;
+  sellwild_category_id?: number;
+  sellwild_condition_id?: number;
   draft_url?: string;
   listing_url?: string;
   revision_id: string | null;
@@ -16,3 +17,9 @@ export interface NativeDraft {
   error?: string | null;
 }
 export type NativeDrafts = Partial<Record<NativeMarketplace, NativeDraft>>;
+export interface SellwildChoice { categoryId: number; conditionId: number }
+export interface SellwildOptions {
+  categories: { id: number; label: string }[];
+  conditions: { id: number; label: string }[];
+  suggested: { category_id: number | null; condition_id: number | null };
+}

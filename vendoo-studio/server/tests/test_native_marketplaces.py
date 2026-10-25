@@ -63,37 +63,57 @@ class NativeMarketplacesTest(unittest.TestCase):
             self.assertEqual(payload["marketplace"], platform)
         self.assertEqual(self.bridge.call_count, len(URLS))
 
+    SELLWILD = {"sellwild_category_id": 272, "sellwild_condition_id": 2}
+
     def test_sellwild_saves_locally_without_chrome_or_a_job(self):
         with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
-            result = self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id})
+            result = self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id, **self.SELLWILD})
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(result.json()["storage"], "local")
         self.assertEqual(result.json()["state"], "draft")
+        self.assertEqual(result.json()["sellwild_category_id"], 272)
         self.assertNotIn("draft_url", result.json())
         self.assertNotIn("job_id", result.json())
         self.bridge.assert_not_called()
         self.assertFalse(JobRepo(self.db).list_all())
 
-    def prepare_sellwild(self):
-        self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id})
-        self.bridge.return_value = {"ok": True, "state": "draft", "review_ready": True}
-        result = self.client.post(f"{self.base}/sellwild/review", json={"revision_id": self.rev.id})
-        self.assertEqual(result.status_code, 200, result.text)
-        self.assertTrue(result.json()["review_ready"])
-        self.assertEqual(self.bridge.call_args.args[2]["action"], "review")
-        self.assertFalse(self.bridge.call_args.args[2]["confirm"])
+    def test_sellwild_save_requires_a_current_category_and_condition(self):
+        for extra in ({}, {"sellwild_category_id": 183, "sellwild_condition_id": 2}, {"sellwild_category_id": 272, "sellwild_condition_id": 9}):
+            result = self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id, **extra})
+            self.assertEqual(result.status_code, 400, extra)
 
-    def test_sellwild_publish_requires_local_save_review_revision_and_confirmation(self):
+    def test_sellwild_options_suggest_from_the_listing(self):
+        listing = {**LISTING, "title": "Vintage Patagonia fleece jacket", "condition": "Pre-Owned - Good",
+                   "marketplace_category_objects": {"sellwild": {"displayPath": ["Fashion", "Mens Clothing"]}}}
+        ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        result = self.client.get(f"{self.base}/sellwild/options").json()
+        self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 2})
+        self.assertIn({"id": 270, "label": "Fashion > Tops & Shirts"}, result["categories"])
+        self.assertEqual(len(result["conditions"]), 5)
+
+    def prepare_sellwild(self):
+        result = self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id, **self.SELLWILD})
+        self.assertEqual(result.status_code, 200, result.text)
+
+    def test_sellwild_publish_requires_local_save_revision_and_confirmation(self):
         body = {"revision_id": self.rev.id, "confirm": True}
         self.assertEqual(self.client.post(f"{self.base}/sellwild/publish", json=body).status_code, 409)
-        self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id})
-        self.assertEqual(self.client.post(f"{self.base}/sellwild/publish", json=body).status_code, 409)
-        self.bridge.assert_not_called()
         self.prepare_sellwild()
-        self.bridge.reset_mock()
         self.assertEqual(self.client.post(f"{self.base}/sellwild/publish", json={**body, "confirm": False}).status_code, 400)
         self.assertEqual(self.client.post(f"{self.base}/sellwild/publish", json={**body, "revision_id": "stale"}).status_code, 409)
         self.bridge.assert_not_called()
+        self.assertIn(self.client.post(f"{self.base}/sellwild/review", json=body).status_code, {404, 405})
+
+    def test_sellwild_publish_sends_the_saved_choice_once(self):
+        self.prepare_sellwild()
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": "https://sellwild.com/product/123/test"}
+        body = {"revision_id": self.rev.id, "confirm": True}
+        result = self.client.post(f"{self.base}/sellwild/publish", json=body)
+        self.assertEqual(result.json()["state"], "published", result.text)
+        self.assertEqual(result.json()["listing_url"], "https://sellwild.com/product/123/test")
+        payload = self.bridge.call_args.args[2]
+        self.assertEqual((payload["action"], payload["confirm"]), ("publish", True))
+        self.assertEqual(payload["sellwild"], {"category_id": 272, "condition_id": 2})
 
     def test_sellwild_reports_moderation_and_never_repeats_publishing(self):
         self.prepare_sellwild()
@@ -104,16 +124,15 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertTrue(self.bridge.call_args.args[2]["confirm"])
         count = self.bridge.call_count
         self.assertEqual(self.client.post(f"{self.base}/sellwild/publish", json=body).status_code, 409)
-        self.assertEqual(self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id}).status_code, 409)
+        self.assertEqual(self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id, **self.SELLWILD}).status_code, 409)
         self.assertEqual(self.bridge.call_count, count)
 
-    def test_sellwild_changed_photos_require_saving_and_reviewing_again(self):
+    def test_sellwild_changed_photos_require_saving_again(self):
         self.prepare_sellwild()
         ConversationRepo(self.db).add_photo(self.conv.id, "second.jpg", "second.jpg", "image/jpeg", 1)
         result = self.client.post(f"{self.base}/sellwild/publish", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(result.status_code, 409)
-        result = self.client.post(f"{self.base}/sellwild/draft", json={"revision_id": self.rev.id})
-        self.assertFalse(result.json()["review_ready"])
+        self.bridge.assert_not_called()
 
     def test_uncertain_sellwild_publish_is_checked_without_another_write(self):
         self.prepare_sellwild()

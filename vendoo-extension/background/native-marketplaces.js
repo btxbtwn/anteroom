@@ -48,7 +48,7 @@ async function recoverNativeMarketplace(context) {
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
   if (!['poshmark', 'mercari', 'depop', 'sellwild'].includes(p.marketplace)
-      || !(p.marketplace === 'sellwild' ? ['review', 'publish'] : ['save_draft', 'publish']).includes(p.action)) {
+      || !(p.marketplace === 'sellwild' ? ['publish'] : ['save_draft', 'publish']).includes(p.action)) {
     return { ok: false, safe_to_retry: true, error: 'Unsupported marketplace action.' };
   }
   if (p.action === 'publish' && (p.confirm !== true || (p.marketplace !== 'sellwild' && !nativeDraftUrl(p.marketplace, p.draft_url)))) {

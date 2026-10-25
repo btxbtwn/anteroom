@@ -1,6 +1,7 @@
 """Seller-operated native marketplace drafts. Publish is never queued or retried."""
 from __future__ import annotations
 
+from functools import cache
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -39,6 +40,8 @@ class DraftRequest(BaseModel):
     shipping_profile_id: str | None = Field(default=None, pattern=r"^[1-9]\d*$")
     readiness_state_id: str | None = Field(default=None, pattern=r"^[1-9]\d*$")
     etsy_package: EtsyPackage | None = None
+    sellwild_category_id: int | None = Field(default=None, ge=1)
+    sellwild_condition_id: int | None = Field(default=None, ge=1)
 
 
 class PublishRequest(DraftRequest):
@@ -122,16 +125,11 @@ def _apply_result(db: Session, conv, marketplace: str, binding: dict, result: di
         expected = "published" if action == "publish" else "draft"
         state = result.get("state")
         matches = state == expected or (marketplace == "sellwild" and action == "publish" and state == "pending_review")
-        if marketplace == "sellwild" and action == "review" and result.get("review_ready") is not True:
-            matches = False
         if matches:
             updated.update(state=state, error=None)
             if marketplace == "etsy":
                 updated.update(etsy_pending_write=None, etsy_photos_complete=True)
-            if marketplace == "sellwild":
-                if action == "review":
-                    updated.update(review_ready=True, review_url="https://sellwild.com/sell")
-            else:
+            if marketplace != "sellwild":
                 updated["draft_url"] = url
             public = urlparse(str(result.get("listing_url") or ""))
             if public.scheme == "https" and public.netloc == {"poshmark": "poshmark.com", "mercari": "www.mercari.com", "depop": "www.depop.com", "etsy": "www.etsy.com", "sellwild": "sellwild.com"}[marketplace]:
@@ -205,15 +203,15 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
             if (binding.get("state") != "draft" or binding.get("draft_url") != body.draft_url
                     or binding.get("revision_id") != body.revision_id):
                 raise NativeMarketplaceError(409, "Save this revision as a draft and review it before publishing.")
-            if marketplace == "sellwild" and not binding.get("review_ready"):
-                raise NativeMarketplaceError(409, "Review this saved draft on Sellwild before publishing.")
         if marketplace == "sellwild":
             if binding.get("state") != "draft" or binding.get("revision_id") != body.revision_id:
                 raise NativeMarketplaceError(409, "Save this revision in Anteroom first.")
             if binding.get("photo_ids") != [p.id for p in photos]:
-                raise NativeMarketplaceError(409, "The photos changed. Save and review this draft again.")
+                raise NativeMarketplaceError(409, "The photos changed. Save this draft in Anteroom again.")
             if not photos:
-                raise NativeMarketplaceError(400, "Add photos before reviewing on Sellwild.")
+                raise NativeMarketplaceError(400, "Add photos before publishing on Sellwild.")
+            if not binding.get("sellwild_category_id") or not binding.get("sellwild_condition_id"):
+                raise NativeMarketplaceError(409, "Choose a Sellwild category and condition, then save in Anteroom again.")
         elif not binding.get("draft_url") and not photos:
             raise NativeMarketplaceError(400, "Add at least one photo before saving a native draft.")
         repo = JobRepo(db)
@@ -224,8 +222,6 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
         binding = {**binding, "state": "publishing" if action == "publish" else "saving", "action": action,
                    "previous_revision_id": binding.get("revision_id"), "revision_id": body.revision_id,
                    "job_id": job.id, "error": None}
-        if marketplace == "sellwild" and action == "review":
-            binding["review_ready"] = False
         _store(db, conv, marketplace, binding)
     try:
         if marketplace == "etsy":
@@ -249,6 +245,8 @@ async def _run(conv_id: str, marketplace: str, body: DraftRequest, action: str, 
             "operation_id": job.id, "draft_url": binding.get("draft_url"), "listing": snapshot,
             "local_draft_id": binding.get("local_draft_id"), "revision_id": body.revision_id,
             "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
+            **({"sellwild": {"category_id": binding["sellwild_category_id"], "condition_id": binding["sellwild_condition_id"]}}
+               if marketplace == "sellwild" else {}),
         }, timeout=180)
         return _apply_result(db, conv, marketplace, binding, result)
     except BaseException:
@@ -270,6 +268,58 @@ async def save_draft(conv_id: str, marketplace: Marketplace, body: DraftRequest,
         raise NativeMarketplaceError(502, UNKNOWN) from exc
 
 
+@cache
+def sellwild_catalog() -> dict:
+    """Sellwild's own categories and conditions. Vendoo's Sellwild IDs are retired there."""
+    import json
+
+    from vendoo_studio.config import skills_dir
+
+    return json.loads((skills_dir() / "list-this" / "references" / "sellwild-native-catalog.json").read_text(encoding="utf-8"))
+
+
+def _sellwild_words(text: str) -> set[str]:
+    import re
+
+    return {word[:-1] if len(word) > 3 and word.endswith("s") else word for word in re.findall(r"[a-z0-9]+", text.lower())}
+
+
+def suggest_sellwild(listing: dict) -> dict:
+    """A starting choice the seller confirms; never sent without their save."""
+    import re
+
+    catalog = sellwild_catalog()
+    path = (listing.get("marketplace_category_objects") or {}).get("sellwild") or {}
+    group = str((path.get("displayPath") or [""])[0] or "").lower()
+    text = " ".join(str(listing.get(key) or "") for key in ("title", "category_path"))
+    words = _sellwild_words(text if isinstance(text, str) else "")
+    best, score = None, 0
+    for option in catalog["categories"]:
+        parent, _, leaf = option["label"].partition(" > ")
+        if group and parent.lower() != group:
+            continue
+        terms = _sellwild_words(leaf.replace("&", " ").replace(",", " "))
+        hits = len(terms & words)
+        if hits > score:
+            best, score = option["id"], hits
+    condition = str(listing.get("condition") or "").lower()
+    condition_id = (1 if re.search(r"poor|major flaw", condition)
+                    else 4 if re.search(r"new without tags|nwot|like new", condition)
+                    else 3 if re.search(r"new with defects|imperfection", condition)
+                    else 5 if re.search(r"new with tags|nwt|brand new|^new\b", condition)
+                    else 2 if re.search(r"pre-owned|used|good|fair|excellent", condition) else None)
+    return {"category_id": best, "condition_id": condition_id}
+
+
+def sellwild_options(conv_id: str, db: Session) -> dict:
+    _conversation(db, conv_id)
+    listing = ListingRepo(db).get_current(conv_id)
+    revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
+    snapshot = revision.listing_json if revision and isinstance(revision.listing_json, dict) else {}
+    catalog = sellwild_catalog()
+    return {"categories": catalog["categories"], "conditions": catalog["conditions"], "suggested": suggest_sellwild(snapshot)}
+
+
 def save_local_sellwild_draft(conv_id: str, body: DraftRequest, db: Session):
     import uuid
 
@@ -280,27 +330,23 @@ def save_local_sellwild_draft(conv_id: str, body: DraftRequest, db: Session):
     snapshot = ListingRepo(db).get_revision(body.revision_id).listing_json
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
+    catalog = sellwild_catalog()
+    if body.sellwild_category_id not in {option["id"] for option in catalog["categories"]}:
+        raise NativeMarketplaceError(400, "Choose a Sellwild category.")
+    if body.sellwild_condition_id not in {option["id"] for option in catalog["conditions"]}:
+        raise NativeMarketplaceError(400, "Choose a Sellwild condition.")
     with start_gate():
         db.refresh(conv)
         previous = _bindings(conv).get("sellwild", {})
         if previous.get("state") in {"saving", "publishing", "unknown", "published", "pending_review"}:
             raise NativeMarketplaceError(409, "Check the previous Sellwild action before saving another draft.")
-        photo_ids = [p.id for p in ConversationRepo(db).get_photos(conv_id)]
-        same = previous.get("revision_id") == body.revision_id and previous.get("photo_ids") == photo_ids
         binding = {"storage": "local", "state": "draft", "revision_id": body.revision_id,
-                   "photo_ids": photo_ids, "local_draft_id": previous.get("local_draft_id") or uuid.uuid4().hex,
-                   "review_ready": bool(same and previous.get("review_ready")), "error": None}
-        if binding["review_ready"]:
-            binding["review_url"] = "https://sellwild.com/sell"
+                   "photo_ids": [p.id for p in ConversationRepo(db).get_photos(conv_id)],
+                   "local_draft_id": previous.get("local_draft_id") or uuid.uuid4().hex,
+                   "sellwild_category_id": body.sellwild_category_id,
+                   "sellwild_condition_id": body.sellwild_condition_id, "error": None}
         _store(db, conv, "sellwild", binding)
     return binding
-
-
-async def review_sellwild(conv_id: str, body: DraftRequest, db: Session):
-    try:
-        return await _run(conv_id, "sellwild", body, "review", db)
-    except browser_bridge.BrowserBridgeError as exc:
-        raise NativeMarketplaceError(502, UNKNOWN) from exc
 
 
 async def publish(conv_id: str, marketplace: Marketplace, body: PublishRequest, db: Session):

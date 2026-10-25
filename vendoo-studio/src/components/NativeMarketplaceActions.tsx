@@ -17,21 +17,28 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
   const [shippingProfile, setShippingProfile] = useState("");
   const [processingProfile, setProcessingProfile] = useState("");
   const [packed, setPacked] = useState({ weight: "", length: "", width: "", height: "" });
+  const [sellwildPick, setSellwildPick] = useState<{ categoryId?: number; conditionId?: number }>({});
   const queryKey = ["native-marketplaces", convId];
   const status = useQuery({ queryKey, queryFn: () => api.nativeMarketplaces.status(convId) });
   const profiles = useQuery({ queryKey: ["etsy-listing-profiles"], queryFn: () => api.etsy.listingProfiles(),
     enabled: expanded && !status.isPending && !status.data?.etsy?.draft_url, staleTime: 60_000, retry: false });
+  const sellwildOptions = useQuery({ queryKey: ["sellwild-options", convId, revisionId], queryFn: () => api.nativeMarketplaces.sellwildOptions(convId),
+    enabled: expanded, staleTime: 60_000, retry: false });
+  const savedSellwild = status.data?.sellwild;
+  const sellwildCategory = sellwildPick.categoryId ?? savedSellwild?.sellwild_category_id ?? sellwildOptions.data?.suggested.category_id ?? undefined;
+  const sellwildCondition = sellwildPick.conditionId ?? savedSellwild?.sellwild_condition_id ?? sellwildOptions.data?.suggested.condition_id ?? undefined;
+  const sellwildChanged = savedSellwild?.state === "draft" && (savedSellwild.sellwild_category_id !== sellwildCategory || savedSellwild.sellwild_condition_id !== sellwildCondition);
   const calculated = profiles.data?.shipping.find((profile) => profile.id === shippingProfile)?.is_calculated;
   const packageReady = Object.values(packed).every((value) => Number(value) > 0 && Number.isFinite(Number(value)));
   const action = useMutation({
-    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: "draft" | "publish" | "check" | "review"; draftUrl?: string }) => {
+    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: "draft" | "publish" | "check"; draftUrl?: string }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
       if (!revisionId) throw new Error("Generate a listing first.");
       if (kind === "draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId,
         marketplace === "etsy" ? { shippingProfileId: shippingProfile, readinessStateId: processingProfile,
           ...(calculated ? { package: { item_weight: Number(packed.weight), item_length: Number(packed.length),
-            item_width: Number(packed.width), item_height: Number(packed.height), item_weight_unit: "oz", item_dimensions_unit: "in" } } : {}) } : undefined);
-      if (kind === "review") return api.nativeMarketplaces.reviewSellwild(convId, revisionId);
+            item_width: Number(packed.width), item_height: Number(packed.height), item_weight_unit: "oz", item_dimensions_unit: "in" } } : {}) } : undefined,
+        marketplace === "sellwild" && sellwildCategory && sellwildCondition ? { categoryId: sellwildCategory, conditionId: sellwildCondition } : undefined);
       const draft = status.data?.[marketplace];
       if (!draft || (marketplace !== "sellwild" && !draft.draft_url)) throw new Error("Save a draft first.");
       return api.nativeMarketplaces.publish(convId, marketplace, revisionId, draft.draft_url);
@@ -47,7 +54,7 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
     const name = marketplaceName(marketplace);
     const approved = await confirmDialog(
       `Publish “${title}” on ${name}?\n${marketplace === "sellwild"
-        ? "This submits the prepared Sellwild form. Review its category, condition, photos, price, quantity, and shipping in Chrome first. Sellwild may hold the listing for review."
+        ? "This creates a live Sellwild listing from the saved title, description, price, photos, category, condition, package size and your Sellwild ship-from address. Sellwild may hold it for review."
         : `This makes the saved ${name} draft public. Open the draft first to review its category, condition, photos, price, quantity, and shipping.`}`,
       { confirmLabel: `Publish on ${name}` },
     );
@@ -64,7 +71,7 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
         const uncertain = draft && ["saving", "publishing", "unknown"].includes(draft.state);
         const published = draft?.state === "published" || draft?.state === "pending_review";
         const local = marketplace === "sellwild";
-        const changed = draft?.state === "draft" && draft.revision_id !== revisionId;
+        const changed = draft?.state === "draft" && (draft.revision_id !== revisionId || (local && sellwildChanged));
         const busy = disabled || action.isPending || !revisionId || status.isPending || status.isError;
         return (
           <div key={marketplace} role="group" aria-label={`${marketplaceName(marketplace)} listing actions`} className="mt-2 flex flex-wrap items-center gap-2">
@@ -81,18 +88,25 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
               <SelectTrigger size="compact" className="w-52" aria-label="Etsy processing profile"><SelectValue placeholder="Choose processing profile" /></SelectTrigger>
               <SelectPopup>{profiles.data?.processing.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.title}</SelectItem>)}</SelectPopup>
             </Select>}
-            <Button size="xs" variant="outline" disabled={busy || uncertain || published || (marketplace === "etsy" && !draft?.draft_url && (!shippingProfile || !processingProfile || (calculated && !packageReady)))}
+            {local && !published && <Select value={sellwildCategory ? String(sellwildCategory) : null}
+              onValueChange={(value) => setSellwildPick({ ...sellwildPick, categoryId: value ? Number(value) : undefined })} disabled={busy || uncertain || !sellwildOptions.data}
+              items={sellwildOptions.data?.categories.map((option) => ({ value: String(option.id), label: option.label }))}>
+              <SelectTrigger size="compact" className="w-56" aria-label="Sellwild category"><SelectValue placeholder="Choose Sellwild category" /></SelectTrigger>
+              <SelectPopup>{sellwildOptions.data?.categories.map((option) => <SelectItem key={option.id} value={String(option.id)}>{option.label}</SelectItem>)}</SelectPopup>
+            </Select>}
+            {local && !published && <Select value={sellwildCondition ? String(sellwildCondition) : null}
+              onValueChange={(value) => setSellwildPick({ ...sellwildPick, conditionId: value ? Number(value) : undefined })} disabled={busy || uncertain || !sellwildOptions.data}
+              items={sellwildOptions.data?.conditions.map((option) => ({ value: String(option.id), label: option.label }))}>
+              <SelectTrigger size="compact" className="w-36" aria-label="Sellwild condition"><SelectValue placeholder="Condition" /></SelectTrigger>
+              <SelectPopup>{sellwildOptions.data?.conditions.map((option) => <SelectItem key={option.id} value={String(option.id)}>{option.label}</SelectItem>)}</SelectPopup>
+            </Select>}
+            <Button size="xs" variant="outline" disabled={busy || uncertain || published || (local && (!sellwildCategory || !sellwildCondition)) || (marketplace === "etsy" && !draft?.draft_url && (!shippingProfile || !processingProfile || (calculated && !packageReady)))}
               onClick={() => action.mutate({ marketplace, kind: "draft" })}>
               {action.isPending && action.variables.marketplace === marketplace && action.variables.kind === "draft" ? "Saving…" : local ? "Save in Anteroom" : changed ? "Save changes" : "Save draft"}
             </Button>
             {(published ? draft.listing_url : draft?.draft_url) && <a className="underline" href={published ? draft.listing_url : draft?.draft_url} target="_blank" rel="noopener noreferrer">{published ? "View listing" : "Open draft"}</a>}
-            {local && !published && <Button size="xs" variant="outline"
-              disabled={busy || draft?.state !== "draft" || draft.revision_id !== revisionId}
-              onClick={() => action.mutate({ marketplace, kind: "review" })}>
-              {action.isPending && action.variables.kind === "review" ? "Preparing…" : draft?.review_ready ? "Open Sellwild review" : "Review on Sellwild"}
-            </Button>}
             <Button size="xs" variant="outline"
-              disabled={busy || draft?.state !== "draft" || draft.revision_id !== revisionId || (local && !draft.review_ready)}
+              disabled={busy || draft?.state !== "draft" || changed}
               onClick={() => draft && void publish(marketplace, draft)}>
               {draft?.state === "pending_review" ? "In review" : published ? "Published" : "Publish…"}
             </Button>
@@ -121,7 +135,7 @@ export function NativeMarketplaceActions({ convId, revisionId, title, disabled }
               <p className="basis-full text-muted-foreground">Etsy calculated postage needs the packed item's weight and dimensions.</p>
             </div>}
             {marketplace === "etsy" && !draft?.draft_url && profiles.error && <p className="basis-full text-destructive">{profiles.error.message}</p>}
-            {local && !published && <p className="basis-full text-muted-foreground">Saved only in Anteroom. Review prepares the Sellwild form; Publish submits it after confirmation.</p>}
+            {local && !published && <p className="basis-full text-muted-foreground">Sellwild has no drafts, so this one is saved only in Anteroom. Publish creates the Sellwild listing after confirmation, without opening a tab. It needs a package weight and size, and your ship-from address on Sellwild.</p>}
           </div>
         );
       })}
