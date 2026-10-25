@@ -5,12 +5,12 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.services.etsy_audit import etsy_not_allowed_live
-from vendoo_studio.services import etsy_listings, etsy_workspace, marketplace_accounts
+from vendoo_studio.services import etsy_listings, etsy_workspace, marketplace_accounts, user_settings
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 from vendoo_studio.services.relay_client import RelayError
 
@@ -68,6 +68,30 @@ async def get_listing_profiles():
         raise HTTPException(409, str(exc)) from exc
     except (httpx.HTTPError, RelayError) as exc:
         raise HTTPException(502, "Could not load Etsy listing profiles. Check the Etsy connection.") from exc
+
+
+class EtsyListingDefaults(BaseModel):
+    shipping_profile_id: str = Field(pattern=r"^[1-9]\d*$")
+    readiness_state_id: str = Field(pattern=r"^[1-9]\d*$")
+
+
+@router.get("/listing-defaults")
+def get_listing_defaults():
+    return user_settings.get_etsy_listing_defaults()
+
+
+@router.put("/listing-defaults")
+async def put_listing_defaults(body: EtsyListingDefaults):
+    """Saved once in Settings; only profiles from the connected shop are accepted."""
+    try:
+        profiles = await etsy_listings.listing_profiles()
+    except (ValueError, marketplace_accounts.SignInRequired) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (httpx.HTTPError, RelayError) as exc:
+        raise HTTPException(502, "Could not load Etsy listing profiles. Check the Etsy connection.") from exc
+    if body.shipping_profile_id not in {p["id"] for p in profiles["shipping"]} or body.readiness_state_id not in {p["id"] for p in profiles["processing"]}:
+        raise HTTPException(400, "Choose profiles from the connected Etsy shop.")
+    return user_settings.set_etsy_listing_defaults(shipping_profile_id=body.shipping_profile_id, readiness_state_id=body.readiness_state_id)
 
 
 class EtsyNotAllowedItem(BaseModel):

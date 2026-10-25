@@ -228,6 +228,11 @@ export const api = {
     listings: (state: EtsyListingState, offset: number) =>
       request<EtsyPage<EtsyListing>>(`/etsy/listings?${new URLSearchParams({ state, offset: String(offset) })}`),
     listingProfiles: () => request<{ shipping: { id: string; title: string; is_calculated: boolean }[]; processing: { id: string; title: string }[] }>("/etsy/listing-profiles"),
+    listingDefaults: () => request<{ shipping_profile_id?: string; readiness_state_id?: string }>("/etsy/listing-defaults"),
+    setListingDefaults: (shippingProfileId: string, readinessStateId: string) =>
+      request<{ shipping_profile_id?: string; readiness_state_id?: string }>("/etsy/listing-defaults", {
+        method: "PUT", body: JSON.stringify({ shipping_profile_id: shippingProfileId, readiness_state_id: readinessStateId }),
+      }),
   },
   analytics: {
     get: (range: AnalyticsRange, custom?: { start: string; end: string }) => {

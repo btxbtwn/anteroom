@@ -145,6 +145,25 @@ def update_settings(mutator) -> dict:
         return payload
 
 
+ETSY_LISTING_DEFAULTS_KEY = "etsy_listing_defaults"
+
+
+def get_etsy_listing_defaults() -> dict[str, str]:
+    """The shop's shipping and processing profiles every new Etsy listing uses."""
+    value = read_settings().get(ETSY_LISTING_DEFAULTS_KEY)
+    value = value if isinstance(value, dict) else {}
+    return {key: str(value[key]) for key in ("shipping_profile_id", "readiness_state_id")
+            if isinstance(value.get(key), str) and value[key].isdigit()}
+
+
+def set_etsy_listing_defaults(*, shipping_profile_id: str, readiness_state_id: str) -> dict[str, str]:
+    def mutator(payload: dict) -> None:
+        payload[ETSY_LISTING_DEFAULTS_KEY] = {"shipping_profile_id": shipping_profile_id, "readiness_state_id": readiness_state_id}
+
+    update_settings(mutator)
+    return get_etsy_listing_defaults()
+
+
 def setup_guide_dismissed() -> bool:
     return bool(read_settings().get(SETUP_GUIDE_DISMISSED_KEY))
 
