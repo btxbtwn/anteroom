@@ -751,18 +751,73 @@ async def reload_extension():
     return {"ok": True, "sent": await request_extension_reload(token) if token else False}
 
 
+_SESSION_MARKETS = ("depop", "poshmark", "mercari", "sellwild")
+_SESSION_STATES = {"signed_in", "expired", "signed_out", "unknown"}
+
+
+def _public_session(raw: object) -> dict:
+    """Sign-in summary only. Cookie values, tokens, and extra fields are dropped."""
+    data = raw if isinstance(raw, dict) else {}
+    state = data.get("state") if data.get("state") in _SESSION_STATES else "unknown"
+    expires = data.get("expires_at")
+    expires_at = int(expires) if isinstance(expires, (int, float)) and not isinstance(expires, bool) else None
+    label = data.get("label")
+    label = label.strip() if isinstance(label, str) else ""
+    if not label or len(label) > 80:
+        label = None
+    if state == "signed_out":
+        expires_at = None
+        label = None
+    return {
+        "state": state,
+        "expires_at": expires_at,
+        "label": label,
+        "expiring": bool(data.get("expiring")) and state == "signed_in",
+    }
+
+
+def _public_connect(raw: object) -> dict:
+    data = raw if isinstance(raw, dict) else {}
+    if data.get("ok") is not True:
+        error = data.get("error")
+        text = error.strip() if isinstance(error, str) else ""
+        if not text or len(text) > 200:
+            text = "Finish signing in in Chrome, then try again."
+        return {"ok": False, "error": text}
+    session = _public_session(data)
+    return {"ok": True, "signed_in": session["state"] == "signed_in", **session}
+
+
+@router.get("/api/marketplaces/sessions")
+async def marketplace_sessions():
+    from types import SimpleNamespace
+
+    from vendoo_studio.services import browser_bridge
+
+    try:
+        raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sessions", {}, timeout=20)
+    except browser_bridge.BrowserBridgeError as exc:
+        status = 409 if "Connect Chrome" in str(exc) else 502
+        raise HTTPException(status, "Connect Chrome, then check marketplace sign-in.") from exc
+    sessions = raw.get("sessions") if isinstance(raw, dict) else None
+    if not isinstance(sessions, dict):
+        raise HTTPException(502, "Chrome did not report marketplace sign-in.")
+    return {"sessions": {name: _public_session(sessions.get(name)) for name in _SESSION_MARKETS}}
+
+
 @router.post("/api/marketplaces/{marketplace}/connect")
 async def connect_marketplace(marketplace: str):
     from types import SimpleNamespace
 
     from vendoo_studio.services import browser_bridge
 
-    if marketplace not in {"depop", "poshmark", "mercari", "sellwild"}:
+    if marketplace not in set(_SESSION_MARKETS):
         raise HTTPException(404, "Unknown marketplace.")
     try:
-        return await browser_bridge.request(SimpleNamespace(id=None), "marketplace.connect", {"marketplace": marketplace}, timeout=40)
+        raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.connect", {"marketplace": marketplace}, timeout=40)
     except browser_bridge.BrowserBridgeError as exc:
         raise HTTPException(502, "Finish signing in in Chrome, then reconnect.") from exc
+    return _public_connect(raw)
 
 
 @router.post("/api/marketplaces/{marketplace}/record")

@@ -60,6 +60,7 @@ import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
 import type { EtsyDraftOptions, NativeDraft, NativeDrafts, NativeMarketplace, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
+import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
@@ -400,6 +401,11 @@ export const api = {
       request<OkResponse>(`/marketplace-accounts/${marketplace}/connect`, { method: "DELETE" }),
     disconnect: (marketplace: DirectMarketplace) =>
       request<OkResponse>(`/marketplace-accounts/${marketplace}`, { method: "DELETE" }),
+  },
+  marketplaceSessions: {
+    status: () => request<ExtensionSessions>("/marketplaces/sessions"),
+    connect: (marketplace: ExtensionSessionMarket) =>
+      request<ExtensionSessionConnect>(`/marketplaces/${marketplace}/connect`, { method: "POST" }),
   },
   marketplaceListings: {
     get: (convId: string) => request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings`),
