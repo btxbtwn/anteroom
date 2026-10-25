@@ -28,8 +28,19 @@ class ListingBusy(RuntimeError):
     """A listing cannot be deleted while automation is running on it."""
 
 
-def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False) -> tuple[int, int]:
-    """Delete a listing's jobs, revisions, messages and photos, keeping the row."""
+def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
+                  keep_marketplace_listings: bool = False) -> tuple[int, int]:
+    """Delete a listing's jobs, revisions, messages and photos, keeping the row.
+
+    ``keep_marketplace_listings`` keeps its direct marketplace records and the
+    jobs they name: their snapshots are what Check reads a result against.
+    """
+    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+    records = MarketplaceListingRepo(db)
+    kept_jobs = records.job_ids(conv_id) if keep_marketplace_listings else set()
+    if not keep_marketplace_listings:
+        records.delete_for_conversation(conv_id)
     repo = ConversationRepo(db)
     photos = [] if keep_photos else repo.get_photos(conv_id)
     deleted_photos = len(photos)
@@ -39,7 +50,7 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False) -> tu
             os.remove(filepath)
         delete_thumbnails(photo.stored_filename)
 
-    job_ids = [row[0] for row in db.query(Job.id).filter(Job.conversation_id == conv_id).all()]
+    job_ids = [row[0] for row in db.query(Job.id).filter(Job.conversation_id == conv_id).all() if row[0] not in kept_jobs]
     if job_ids:
         db.query(FieldObservation).filter(
             FieldObservation.diagnostic_run_id.in_(
@@ -52,7 +63,7 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False) -> tu
         # Synced Vendoo status lives here, one row per job. Leaving it makes
         # DELETE FROM jobs fail the foreign key, and Regenerate never finishes.
         db.query(VendooDraftCache).filter(VendooDraftCache.job_id.in_(job_ids)).delete(synchronize_session=False)
-        db.query(Job).filter(Job.conversation_id == conv_id).delete(synchronize_session=False)
+        db.query(Job).filter(Job.id.in_(job_ids)).delete(synchronize_session=False)
 
     db.query(ListingRevision).filter(ListingRevision.conversation_id == conv_id).delete(synchronize_session=False)
     db.query(Listing).filter(Listing.conversation_id == conv_id).delete(synchronize_session=False)

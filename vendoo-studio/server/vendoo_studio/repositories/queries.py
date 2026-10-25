@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation, Message, Photo, new_id, utcnow
@@ -28,7 +28,8 @@ BULKY_EVENT_KEYS = ("item", "schema", "fill_log", "verification")
 SANITIZED_EVENT_TYPES = ("step_completed", "step_failed")
 # One row each: the newest progress is the only progress worth having, and the
 # stored review already carries every schema section read so far.
-UPSERT_EVENT_TYPES = ("progress", "completion_review", "vendoo_api_checkpoint", "vendoo_api_timing", "vendoo_api_progress")
+UPSERT_EVENT_TYPES = ("progress", "completion_review", "vendoo_api_checkpoint", "vendoo_api_timing", "vendoo_api_progress",
+                      "native_progress")
 
 BUSY_LISTING_STATUSES = ("in_progress", "listing")
 # Vendoo's own inventory labels, plus the one state Vendoo has no name for.
@@ -304,8 +305,11 @@ class ConversationRepo:
         columns it needs rather than whole jobs with their listing snapshots.
         """
         latest: dict[str, tuple[str, Any]] = {}
+        # Direct marketplace jobs are not Vendoo sends: the Marketplaces
+        # section shows them, and their failures never relabel the listing.
         rows = (
             self.db.query(Job.conversation_id, Job.status, Job.updated_at)
+            .filter(or_(Job.current_step.is_(None), ~Job.current_step.like("native\\_%", escape="\\")))
             .order_by(Job.conversation_id, Job.created_at.desc())
             .all()
         )
@@ -617,6 +621,9 @@ class JobRepo:
                     continue
                 job.status = "failed"
                 job.last_error = "Marketplace action interrupted. Check its result before trying again."
+                from vendoo_studio.services.native_marketplaces import mark_interrupted
+
+                mark_interrupted(self.db, job.id)
             elif is_vendoo_api_step(job.current_step):
                 # Must not become a form-filler queue entry — that path opens a
                 # Vendoo tab and fills the SPA instead of calling createItem.

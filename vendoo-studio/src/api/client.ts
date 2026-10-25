@@ -59,7 +59,7 @@ import { AssistantRefused, type AssistantMemory, type AssistantMessage, type Ass
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
-import type { EtsyDraftOptions, NativeDraft, NativeDrafts, NativeMarketplace, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -420,12 +420,6 @@ export const api = {
   },
   nativeMarketplaces: {
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
-    saveDraft: (convId: string, marketplace: NativeMarketplace, revisionId: string, etsy?: EtsyDraftOptions, sellwild?: SellwildChoice) =>
-      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/draft`, {
-        method: "POST", body: JSON.stringify({ revision_id: revisionId, ...(etsy?.shippingProfileId ? { shipping_profile_id: etsy.shippingProfileId } : {}),
-          ...(etsy?.readinessStateId ? { readiness_state_id: etsy.readinessStateId } : {}), ...(etsy?.package ? { etsy_package: etsy.package } : {}),
-          ...(sellwild ? { sellwild_category_id: sellwild.categoryId, sellwild_condition_id: sellwild.conditionId } : {}) }),
-      }),
     sellwildOptions: (convId: string) => request<SellwildOptions>(`/conversations/${convId}/native-marketplaces/sellwild/options`),
     list: (convId: string, marketplace: NativeMarketplace, revisionId: string, sellwild?: SellwildChoice) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/list`, {
@@ -436,9 +430,11 @@ export const api = {
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/update`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true }),
       }),
-    publish: (convId: string, marketplace: NativeMarketplace, revisionId: string, draftUrl?: string) =>
-      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/publish`, {
-        method: "POST", body: JSON.stringify({ revision_id: revisionId, draft_url: draftUrl, confirm: true }),
+    cancel: (convId: string, marketplace: NativeMarketplace) =>
+      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/cancel`, { method: "POST" }),
+    reset: (convId: string, marketplace: NativeMarketplace) =>
+      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/reset`, {
+        method: "POST", body: JSON.stringify({ confirm: true }),
       }),
     check: (convId: string, marketplace: NativeMarketplace, draftUrl?: string) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/check`, {

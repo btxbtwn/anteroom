@@ -102,7 +102,12 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
     for job in running:
         last = heard[job.id]
         quiet = moment - last if last else STALL_AFTER
-        if str(job.current_step or "").startswith("native_") and not api_job_is_live(job.id) and quiet >= ORPHAN_GRACE:
+        native = str(job.current_step or "").startswith("native_")
+        if native and api_job_is_live(job.id):
+            # A direct listing job keeps its own deadlines and must keep the slot
+            # until Chrome or the marketplace answers.
+            continue
+        if native and quiet >= ORPHAN_GRACE:
             error, reason = "Marketplace action interrupted. Check its result before trying again.", "native_interrupted"
         elif is_vendoo_api_step(job.current_step) and not api_job_is_live(job.id) and quiet >= ORPHAN_GRACE:
             error, reason = ABANDONED_SEND, "dead"
@@ -115,6 +120,10 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
         if updated is None or updated.status != "failed" or updated.last_error != error:
             continue
         repo.add_event(job.id, "watchdog_failed", step, {"reason": reason, "quiet_sec": int(quiet.total_seconds())})
+        if native:
+            from vendoo_studio.services.native_marketplaces import mark_interrupted
+
+            mark_interrupted(db, job.id)
         if reason == "dead":
             # Nothing in this process runs it, so resuming cannot double up.
             repo.requeue_interrupted_send(job.id)
@@ -145,12 +154,21 @@ async def sweep() -> list[str]:
 
 
 async def _watch() -> None:
+    from vendoo_studio.services.native_marketplaces import reconcile
+
+    try:
+        await sweep()
+        # Direct listings a restart cut off: read their results (eBay and Etsy
+        # here; Chrome's when it connects). Never writes.
+        await reconcile(chrome=False)
+    except Exception:  # noqa: BLE001 - startup reconcile must not stop the watchdog
+        log.exception("Startup reconcile failed")
     while True:
+        await asyncio.sleep(SWEEP_INTERVAL_SEC)
         try:
             await sweep()
         except Exception:  # noqa: BLE001 - one bad pass must not stop the watchdog
             log.exception("Job watchdog pass failed")
-        await asyncio.sleep(SWEEP_INTERVAL_SEC)
 
 
 def start_job_watchdog() -> asyncio.Task:

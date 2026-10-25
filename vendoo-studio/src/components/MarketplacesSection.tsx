@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, XCircleIcon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, SellwildOptions } from "../api/nativeMarketplaces";
+import { EXTENSION_SESSION_MARKETS, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -24,7 +25,35 @@ const REMOVED: Record<Marketplace, string> = {
 };
 
 type Tone = "live" | "neutral" | "busy" | "attention" | "failed" | "idle";
-type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; detail?: string | null };
+type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; detail?: string | null; said?: string | null };
+
+const BUSY = new Set(["saving", "publishing", "updating"]);
+export const ETSY_NOT_ELIGIBLE = "Etsy only allows vintage (20+ years), handmade or craft supplies. This item doesn't qualify.";
+
+/** A record whose job is running now. A busy state with no job running is unconfirmed until checked. */
+export function isRunning(draft: NativeDraft | undefined): boolean {
+  return Boolean(draft?.running) || (BUSY.has(draft?.state ?? "") && draft?.running === undefined);
+}
+
+/** The words chat gets for a refused List: which marketplace, both explanations, and the fields to fix. */
+export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): string {
+  const name = marketplaceName(marketplace);
+  const lines = [`Listing this item on ${name} failed. Anteroom said: ${draft.error || "the listing was refused."}`];
+  if (draft.marketplace_message) lines.push(`${name} said: ${draft.marketplace_message}`);
+  if (draft.error_fields?.length) lines.push(`Fields: ${draft.error_fields.map((item) => `${item.field} (${item.message})`).join("; ")}`);
+  lines.push(`Fill or fix those fields in this listing so ${name} accepts it. Do not list it; I will press List again.`);
+  return lines.join("\n");
+}
+
+function fieldLabel(field: string): string {
+  const last = field.split(".").pop() || field;
+  return last.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+}
+
+function secondsUntil(iso: string | null | undefined, now: number): number {
+  const at = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(at) ? Math.max(0, Math.ceil((at - now) / 1000)) : 0;
+}
 
 const TONE_ICON: Record<Tone, ReactNode> = {
   live: <CheckCircle2Icon aria-hidden className="size-3.5 text-success" />,
@@ -43,22 +72,29 @@ export function deletable(entry: MarketplaceListing | undefined): boolean {
 export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | undefined, draft: NativeDraft | undefined,
   _revisionId: string | null, etsyEligible: boolean): Status {
   if (live?.sold_here) return { tone: "neutral", label: "Sold here", href: live.url ?? undefined, hrefLabel: "View" };
-  if (draft?.state === "updating") return { tone: "busy", label: "Updating…" };
-  if (draft?.state === "unknown") return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again." };
+  const said = draft?.marketplace_message ? `${marketplaceName(marketplace)} said: ${draft.marketplace_message}` : null;
+  if (draft && isRunning(draft)) {
+    return { tone: "busy", label: draft.state === "updating" ? "Updating…" : "Listing…", detail: draft.progress ? `${draft.progress.label}…` : null };
+  }
+  if (draft && (draft.state === "unknown" || BUSY.has(draft.state))) {
+    return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
+  }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
   if (live?.state === "deleted") return { tone: "neutral", label: REMOVED[marketplace] };
-  if (live?.state === "failed") return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error };
-  if (live?.listing_id) return { tone: "live", label: "Live", href: live.url ?? undefined, hrefLabel: "View" };
+  if (live?.state === "failed") {
+    return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
+      said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
+  }
+  if (live?.listing_id) {
+    return { tone: "live", label: "Live", href: live.url ?? undefined, hrefLabel: "View", detail: draft?.state === "published" ? draft.error : null, said };
+  }
   if (draft && draft.state !== "draft") {
-    if (draft.state === "saving" || draft.state === "publishing") return { tone: "busy", label: "Listing…" };
     if (draft.state === "published") return { tone: "live", label: "Live", href: draft.listing_url, hrefLabel: "View" };
     if (draft.state === "pending_review") return { tone: "attention", label: "In review", href: draft.listing_url, hrefLabel: "View" };
-    if (draft.error) return { tone: "failed", label: "Not listed", detail: draft.error };
+    if (draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
   }
-  if (draft?.state === "draft" && draft.error) return { tone: "failed", label: "Not listed", detail: draft.error };
-  if (marketplace === "etsy" && !etsyEligible) {
-    return { tone: "attention", label: "Not eligible", detail: "Etsy usually takes vintage (20+ years), handmade, craft-supply, or digital items. You can still list this." };
-  }
+  if (draft?.state === "draft" && draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Not eligible", detail: ETSY_NOT_ELIGIBLE };
   return { tone: "idle", label: "Not listed" };
 }
 
@@ -93,10 +129,14 @@ function SellwildCategory({ options, value, onChange, disabled }: {
 
 type MarketplaceProps = {
   convId: string; revisionId: string | null; title: string; disabled: boolean; etsyEligible: boolean;
+  /** Send a prompt to the listing's chat; absent while chat is busy. */
+  onAskChat?: (text: string) => void;
+  /** Open the editor at a listing field, e.g. "price" or "ebay_specifics.category_specifics.Color". */
+  onEditField?: (field: string) => void;
 };
 
 export function MarketplacesLayout({
-  convId, revisionId, title, disabled, etsyEligible, ids, selected, onSelect, children,
+  convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField, ids, selected, onSelect, children,
 }: MarketplaceProps & {
   ids: readonly string[];
   selected: string;
@@ -106,9 +146,28 @@ export function MarketplacesLayout({
   const queryClient = useQueryClient();
   const nativeKey = ["native-marketplaces", convId];
   const liveKey = ["marketplace-listings", convId];
-  const native = useQuery({ queryKey: nativeKey, queryFn: () => api.nativeMarketplaces.status(convId) });
+  // List runs in the background: poll while any marketplace action is running.
+  const native = useQuery({ queryKey: nativeKey, queryFn: () => api.nativeMarketplaces.status(convId),
+    refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? 1500 : false });
   const live = useQuery({ queryKey: liveKey, queryFn: () => api.marketplaceListings.get(convId) });
   const drafts: NativeDrafts = native.data ?? {};
+  const runningKey = Object.entries(drafts).filter(([, draft]) => isRunning(draft)).map(([name]) => name).join(",");
+  const wasRunning = useRef(runningKey);
+  useEffect(() => {
+    // An action just ended: what is live, and the job list, changed with it.
+    if (wasRunning.current && wasRunning.current !== runningKey) {
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      void queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
+    }
+    wasRunning.current = runningKey;
+  });
+  const [now, setNow] = useState(() => Date.now());
+  const waiting = Object.values(drafts).some((draft) => secondsUntil(draft?.retry_after, now) > 0);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [waiting]);
   const listings: MarketplaceListings = live.data ?? {};
   const [draftLinks, setDraftLinks] = useState<Partial<Record<NativeMarketplace, string>>>({});
   const [changingSellwild, setChangingSellwild] = useState(false);
@@ -127,14 +186,19 @@ export function MarketplacesLayout({
   const sellwildCondition = sellwildPick.conditionId ?? savedSellwild?.sellwild_condition_id ?? sellwildOptions.data?.suggested.condition_id ?? undefined;
 
   const action = useMutation({
-    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: "check" | "list" | "update"; draftUrl?: string }) => {
+    mutationFn: async ({ marketplace, kind, draftUrl }: {
+      marketplace: NativeMarketplace; kind: "check" | "list" | "update" | "cancel" | "reset" | "reconnect"; draftUrl?: string;
+    }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
-      if (!revisionId) throw new Error("Generate a listing first.");
-      if (kind === "update") {
-        const updated = await api.nativeMarketplaces.update(convId, marketplace, revisionId);
-        if (updated.error) throw new Error(updated.error);
-        return updated;
+      if (kind === "cancel") return api.nativeMarketplaces.cancel(convId, marketplace);
+      if (kind === "reset") return api.nativeMarketplaces.reset(convId, marketplace);
+      if (kind === "reconnect") {
+        if (marketplace === "ebay" || marketplace === "etsy") await api.directConnections.connect(marketplace);
+        else if ((EXTENSION_SESSION_MARKETS as readonly string[]).includes(marketplace)) await api.marketplaceSessions.connect(marketplace as ExtensionSessionMarket);
+        return drafts[marketplace];
       }
+      if (!revisionId) throw new Error("Generate a listing first.");
+      if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId);
       return api.nativeMarketplaces.list(convId, marketplace, revisionId,
         marketplace === "sellwild" && sellwildCategory && sellwildCondition
           ? { categoryId: sellwildCategory, conditionId: sellwildCondition } : undefined);
@@ -187,14 +251,25 @@ export function MarketplacesLayout({
     if (approved) delist.mutate(marketplaces);
   }
 
+  async function resetNow(marketplace: NativeMarketplace) {
+    const name = marketplaceName(marketplace);
+    if (await confirmDialog(`Did you check ${name} yourself?\nAnteroom will treat “${title}” as not listed on ${name}, so you can List again. Nothing on ${name} changes. If the listing is there, use Mark as listed instead.`,
+      { confirmLabel: "I checked it myself" })) action.mutate({ marketplace, kind: "reset" });
+  }
+
   const busy = disabled || action.isPending || delist.isPending || mark.isPending || native.isPending || native.isError;
   const statuses = ORDER.map((marketplace) => rowStatus(marketplace, listings[marketplace],
     NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined, revisionId, etsyEligible));
   const removable = ORDER.filter((marketplace) => deletable(listings[marketplace]));
   const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
 
+  const running = (marketplace: Marketplace) => isRunning(drafts[marketplace as NativeMarketplace]);
   const unconfirmed = (marketplace: Marketplace) => NATIVE.has(marketplace)
     && ["saving", "publishing", "updating", "unknown"].includes(drafts[marketplace as NativeMarketplace]?.state ?? "");
+  const retryIn = (marketplace: Marketplace) => {
+    const draft = drafts[marketplace as NativeMarketplace];
+    return draft?.error_code === "rate_limited" ? secondsUntil(draft.retry_after, now) : 0;
+  };
   function listable(marketplace: Marketplace, status: Status): boolean {
     if (!NATIVE.has(marketplace) || unconfirmed(marketplace)) return false;
     if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || listings[marketplace]?.listing_id) return false;
@@ -202,6 +277,8 @@ export function MarketplacesLayout({
     return !soldSomewhere;
   }
   function listBlocked(marketplace: Marketplace): boolean {
+    if (retryIn(marketplace) > 0) return true;
+    if (marketplace === "etsy" && !etsyEligible) return true;
     if (marketplace === "etsy") {
       const draft = drafts.etsy;
       const current = draft?.state === "draft" && draft.revision_id === revisionId && Boolean(draft.draft_url);
@@ -216,8 +293,16 @@ export function MarketplacesLayout({
 
   function actions(marketplace: Marketplace, status: Status): ReactNode {
     const m = marketplace as NativeMarketplace;
+    if (running(marketplace)) {
+      return <Button size="xs" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ marketplace: m, kind: "cancel" })}>Cancel</Button>;
+    }
     if (unconfirmed(marketplace)) {
-      return <Button size="xs" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check result</Button>;
+      return (
+        <>
+          <Button size="xs" variant="ghost" disabled={action.isPending} onClick={() => void resetNow(m)}>I checked it myself…</Button>
+          <Button size="xs" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check result</Button>
+        </>
+      );
     }
     if (updatable(marketplace, status)) {
       const pending = action.isPending && action.variables?.marketplace === m && action.variables?.kind === "update";
@@ -225,7 +310,9 @@ export function MarketplacesLayout({
     }
     if (!listable(marketplace, status)) return null;
     const pending = action.isPending && action.variables?.marketplace === m;
-    return <Button size="xs" variant="outline" disabled={busy || listBlocked(marketplace)} onClick={() => void listNow(m)}>{pending ? "Listing…" : "List…"}</Button>;
+    const wait = retryIn(marketplace);
+    return <Button size="xs" variant="outline" disabled={busy || listBlocked(marketplace)} onClick={() => void listNow(m)}>
+      {pending ? "Listing…" : wait > 0 ? `Retry in ${wait}s` : "List…"}</Button>;
   }
 
   function rowMenu(marketplace: Marketplace, status: Status): ReactNode {
@@ -245,15 +332,45 @@ export function MarketplacesLayout({
           {canUpdate && <MenuItem onClick={() => void updateNow(m)}>Update…</MenuItem>}
           {canDelist && <MenuItem variant="destructive" onClick={() => void runDelist([marketplace])}>Delist…</MenuItem>}
           {(canList || canUpdate || canDelist) && <MenuSeparator />}
-          <MenuItem disabled={unconfirmed(marketplace)}
+          <MenuItem disabled={running(marketplace)}
             onClick={() => setLinking({ marketplace, url: entry?.source === "seller" ? entry.url ?? "" : "" })}>Mark as listed…</MenuItem>
-          {!entry?.sold_here && <MenuItem disabled={unconfirmed(marketplace)} onClick={() => mark.mutate({ marketplace, state: "sold" })}>Mark as sold</MenuItem>}
-          {(entry || status.tone === "live") && (
-            <MenuItem disabled={unconfirmed(marketplace)} onClick={() => mark.mutate({ marketplace, state: "not_listed" })}>Mark as not listed</MenuItem>
+          {!entry?.sold_here && <MenuItem disabled={running(marketplace)} onClick={() => mark.mutate({ marketplace, state: "sold" })}>Mark as sold</MenuItem>}
+          {(entry || status.tone === "live" || unconfirmed(marketplace)) && (
+            <MenuItem disabled={running(marketplace)} onClick={() => mark.mutate({ marketplace, state: "not_listed" })}>Mark as not listed</MenuItem>
           )}
         </MenuPopup>
       </Menu>
     );
+  }
+
+  /** The one thing that fixes this refusal, per error code. */
+  function errorActions(marketplace: Marketplace): ReactNode {
+    const m = marketplace as NativeMarketplace;
+    const draft = NATIVE.has(marketplace) ? drafts[m] : undefined;
+    if (!draft?.error || isRunning(draft) || draft.state === "unknown") return null;
+    const name = marketplaceName(marketplace);
+    const code = draft.error_code;
+    const buttons: ReactNode[] = [];
+    if (code === "signed_out") {
+      buttons.push(<Button key="reconnect" size="xs" variant="outline" disabled={action.isPending}
+        onClick={() => action.mutate({ marketplace: m, kind: "reconnect" })}>Reconnect {name}</Button>);
+    }
+    if (code === "challenge") {
+      buttons.push(<Button key="open" size="xs" variant="outline" disabled={action.isPending}
+        onClick={() => action.mutate({ marketplace: m, kind: "reconnect" })}>Open {name}</Button>);
+    }
+    if (code === "missing_fields" && onEditField) {
+      for (const item of draft.error_fields ?? []) {
+        buttons.push(<Button key={`edit-${item.field}`} size="xs" variant="ghost" title={item.message}
+          onClick={() => onEditField(item.field)}>Edit {fieldLabel(item.field)}</Button>);
+      }
+    }
+    if ((code === "missing_fields" || code === "rejected") && onAskChat) {
+      buttons.push(<Button key="ask" size="xs" variant="outline"
+        title="Chat fixes the fields in this listing. It does not list it; press List again after."
+        onClick={() => onAskChat(askChatPrompt(marketplace, draft))}>Ask chat</Button>);
+    }
+    return buttons.length ? <div className="flex flex-wrap items-center gap-1.5">{buttons}</div> : null;
   }
 
   function linkForm(marketplace: Marketplace): ReactNode {
@@ -377,6 +494,8 @@ export function MarketplacesLayout({
             </div>
             {selectedStatus.detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
               role={selectedStatus.tone === "failed" ? "alert" : undefined}>{selectedStatus.detail}</p>}
+            {selectedStatus.said && <p className="whitespace-pre-wrap break-words text-muted-foreground" data-marketplace-message>{selectedStatus.said}</p>}
+            {errorActions(selectedMarketplace)}
             {settings(selectedMarketplace)}
             {linkForm(selectedMarketplace)}
             {(() => {

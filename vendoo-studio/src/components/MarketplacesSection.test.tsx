@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { NativeDrafts } from "../api/nativeMarketplaces";
-import { MarketplacesSection, deletable, rowStatus } from "./MarketplacesSection";
+import { MarketplacesSection, askChatPrompt, deletable, rowStatus } from "./MarketplacesSection";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -14,7 +14,8 @@ const SELLWILD = { categories: [{ id: 272, label: "Fashion > Coats & Jackets" }]
 const live = { url: "https://www.mercari.com/us/item/m70565754838", listing_id: "m70565754838", source: "vendoo", sold_here: false, state: "live" } as const;
 
 function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { error = null as Error | null, pending = false, etsyEligible = true,
-  etsyReady = false, suggested = SELLWILD.suggested as { category_id: number | null; condition_id: number | null }, selected = "" } = {}) {
+  etsyReady = false, suggested = SELLWILD.suggested as { category_id: number | null; condition_id: number | null }, selected = "",
+  onAskChat = undefined as ((text: string) => void) | undefined, onEditField = undefined as ((field: string) => void) | undefined } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
@@ -22,7 +23,8 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
     : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2" } : {}, isSuccess: true, isPending: false }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, error: null, variables: { marketplace: "depop", kind: "draft" } });
-  return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible} selected={selected} />);
+  return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
+    selected={selected} onAskChat={onAskChat} onEditField={onEditField} />);
 }
 
 function row(html: string, name: string) {
@@ -96,11 +98,54 @@ describe("marketplaces section", () => {
     expect(disabledButton(html, "List…")).toBe(true);
   });
 
-  it("warns when an item may not qualify for Etsy and still offers List", () => {
+  it("disables Etsy's List with the reason when the item does not qualify", () => {
     const html = render({}, {}, { etsyEligible: false, etsyReady: true, selected: "etsy" });
     expect(row(html, "Etsy")).toContain("Not eligible");
-    expect(html).toContain("You can still list this");
-    expect(enabledButton(html, "List…")).toBe(true);
+    expect(html).toContain("Etsy only allows vintage (20+ years), handmade or craft supplies.");
+    expect(disabledButton(html, "List…")).toBe(true);
+    expect(html).not.toContain("Ask chat");
+  });
+
+  it("shows progress and Cancel while a List runs, and offers Check or Reset once it is unconfirmed", () => {
+    const running = render({ mercari: { state: "publishing", running: true, progress: { step: "publish", label: "Publishing", index: 1, total: 2 } } },
+      {}, { selected: "mercari" });
+    expect(row(running, "Mercari")).toContain("Listing…");
+    expect(running).toContain("Publishing…");
+    expect(enabledButton(running, "Cancel")).toBe(true);
+    expect(running).not.toContain("List…");
+    const lost = render({ mercari: { state: "unknown", running: false, error: "Chrome has not said whether this Mercari action finished.",
+      error_code: "uncertain" } }, {}, { selected: "mercari" });
+    expect(enabledButton(lost, "Check result")).toBe(true);
+    expect(enabledButton(lost, "I checked it myself…")).toBe(true);
+    // A busy state no job is running any more is unconfirmed, not a spinner.
+    const orphan = render({ depop: { state: "saving", running: false } }, {}, { selected: "depop" });
+    expect(row(orphan, "Depop")).toContain("Unconfirmed");
+  });
+
+  it("shows the marketplace's own words and one action per error code", () => {
+    const fields = [{ field: "ebay_specifics.category_specifics.Color", message: "eBay needs Color." }];
+    const missing = render({ ebay: { state: "not_saved", error: "eBay needs Color.", error_code: "missing_fields", error_fields: fields,
+      marketplace_message: "25002: A user error has occurred. Color is missing." } }, {}, { selected: "ebay", onAskChat: vi.fn(), onEditField: vi.fn() });
+    expect(missing).toContain("eBay said: 25002: A user error has occurred. Color is missing.");
+    expect(enabledButton(missing, "Edit Color")).toBe(true);
+    expect(enabledButton(missing, "Ask chat")).toBe(true);
+    const signedOut = render({ etsy: { state: "not_saved", error: "Reconnect Etsy.", error_code: "signed_out" } }, {}, { selected: "etsy", etsyReady: true });
+    expect(enabledButton(signedOut, "Reconnect Etsy")).toBe(true);
+    const challenge = render({ mercari: { state: "draft", draft_url: "https://www.mercari.com/sell/draft/x/", error: "Finish Mercari's check.",
+      error_code: "challenge" } }, {}, { selected: "mercari" });
+    expect(enabledButton(challenge, "Open Mercari")).toBe(true);
+    const later = new Date(Date.now() + 60_000).toISOString();
+    const limited = render({ poshmark: { state: "not_saved", error: "Poshmark is busy.", error_code: "rate_limited", retry_after: later } }, {}, { selected: "poshmark" });
+    expect(/<button[^>]*disabled=""[^>]*>Retry in \d+s<\/button>/.test(limited)).toBe(true);
+  });
+
+  it("asks chat to fix the named fields, not to list", () => {
+    const prompt = askChatPrompt("ebay", { state: "not_saved", error: "eBay needs Color.", error_code: "missing_fields",
+      marketplace_message: "Color is missing.", error_fields: [{ field: "ebay_specifics.category_specifics.Color", message: "eBay needs Color." }] });
+    expect(prompt).toContain("on eBay failed. Anteroom said: eBay needs Color.");
+    expect(prompt).toContain("eBay said: Color is missing.");
+    expect(prompt).toContain("ebay_specifics.category_specifics.Color (eBay needs Color.)");
+    expect(prompt).toContain("Do not list it");
   });
 
   it("offers Update on a live eBay, Etsy, or Poshmark listing", () => {
