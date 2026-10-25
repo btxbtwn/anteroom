@@ -78,6 +78,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["sku", "sidebar", "rename", "listing title", "name by sku"],
   },
   {
+    id: "vendoo",
+    title: "Send to Vendoo",
+    section: "listings",
+    targetId: "vendoo",
+    searchTerms: ["vendoo", "send to vendoo", "hide vendoo", "turn off vendoo", "disable vendoo"],
+  },
+  {
     id: "marketplaces",
     title: "Marketplaces",
     section: "listings",

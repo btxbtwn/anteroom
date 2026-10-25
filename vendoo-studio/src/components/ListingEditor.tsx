@@ -200,6 +200,11 @@ export function ListingEditor({
     refetchInterval: schemaProbeActive ? 3000 : false,
   });
 
+  const { data: uiPrefs } = useQuery({
+    queryKey: ["settings-ui"],
+    queryFn: api.settings.ui,
+  });
+  const vendooEnabled = uiPrefs?.vendoo_enabled ?? true;
   const { data: marketplaceSettings } = useQuery({
     queryKey: ["settings-marketplaces"],
     queryFn: api.settings.marketplaces,
@@ -491,7 +496,7 @@ export function ListingEditor({
         </>
       </MarketplacesLayout>
 
-      <div className="listing-send-footer flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(28vh,220px)] max-[900px]:pb-[max(10px,env(safe-area-inset-bottom,0px))]">
+      {vendooEnabled && <div className="listing-send-footer flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(28vh,220px)] max-[900px]:pb-[max(10px,env(safe-area-inset-bottom,0px))]">
         <SendToVendooButton
           convId={convId}
           canSend={data?.can_send ?? false}
@@ -505,7 +510,7 @@ export function ListingEditor({
           onSelectBlocker={openBlocker}
           onAskChat={askChat}
         />
-      </div>
+      </div>}
       {historyOpen && data?.current_revision_id && <ListingHistory convId={convId} listing={listing} revisionId={data.current_revision_id}
         busy={generating || Boolean(jobs?.some((job) => ACTIVE_SEND_STATUSES.has(job.status)))} onClose={() => setHistoryOpen(false)} />}
     </div>

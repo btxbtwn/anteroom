@@ -66,6 +66,7 @@ class SetupGuideSettingsTest(unittest.TestCase):
                 "theme": "dark",
                 "listing_names": "title",
                 "model_favorites": [],
+                "vendoo_enabled": True,
             },
         )
         self.assertEqual(
@@ -77,6 +78,7 @@ class SetupGuideSettingsTest(unittest.TestCase):
                 "theme": "light",
                 "listing_names": "title",
                 "model_favorites": [],
+                "vendoo_enabled": True,
             },
         )
         self.assertEqual(
@@ -201,6 +203,10 @@ class SetupGuideRouteTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/settings/ui").json()["listing_names"], "sku")
         bad_names = self.client.put("/api/settings/ui", json={"listing_names": "price"})
         self.assertEqual(bad_names.status_code, 400)
+        self.assertEqual(self.client.get("/api/settings/ui").json()["vendoo_enabled"], True)
+        vendoo_off = self.client.put("/api/settings/ui", json={"vendoo_enabled": False})
+        self.assertEqual(vendoo_off.json()["vendoo_enabled"], False)
+        self.assertEqual(self.client.get("/api/settings/ui").json()["vendoo_enabled"], False)
         self.assertEqual(forgot.json()["hidden_vendoo_labels"], ["Thrifted"])
 
         status = self.client.get("/api/status")

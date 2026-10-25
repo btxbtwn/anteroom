@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.373 — 2026-10-25
+
+- Turn off Send to Vendoo in Settings → Listings → Vendoo to hide the button under every listing when you list without Vendoo.
+
 ## 0.1.372 — 2026-10-25
 
 - Inventory shows a listing as Active, with its marketplace icons, after Anteroom publishes it. Vendoo can still call that item a draft.
