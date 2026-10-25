@@ -72,6 +72,17 @@ function page() {
   return { c, requests, payload: { action: 'save_draft', draft_url: DRAFT, listing, deadline: Date.now() + 30000 } };
 }
 
+test('several Depop addresses at the ships-from ZIP use the one updated most recently', () => {
+  const c = loadWorker();
+  const data = [
+    { id: 1, postalCode: '70115', lastModified: '2026-08-17T06:04:41Z' },
+    { id: 2, postalCode: '70115', lastModified: '2026-08-23T16:17:37Z' },
+    { id: 3, postalCode: '70125', lastModified: '2026-05-20T15:55:18Z' },
+  ];
+  assert.equal(call(c, 'depopAddress', { form: { ships_from_zip: '70115' } }, data), 2);
+  assert.equal(call(c, 'depopAddress', { form: { ships_from_zip: '70125' } }, data), 3);
+});
+
 test('Depop accepts only durable native edit links', () => {
   const c = loadWorker();
   assert.equal(call(c, 'nativeDraftUrl', 'depop', DRAFT), DRAFT);
