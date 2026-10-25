@@ -37,6 +37,8 @@ class Client:
         self.publish_failure = None
         self.locations = locations
         self.location_conflict = False
+        # "saved": the create is stored, then eBay answers 503. "down": it never lands.
+        self.location_fault = None
 
     async def request(self, method, path, **kwargs):
         self.calls.append((method, path, kwargs))
@@ -72,6 +74,11 @@ class Client:
             if self.location_conflict:
                 raise EbayFailure("eBay returned HTTP 409.", 409)
             key = path.rsplit("/", 1)[-1]
+            if self.location_fault:
+                if self.location_fault == "saved":
+                    self.locations = [{"merchantLocationKey": key, "name": key, "merchantLocationStatus": "ENABLED"}]
+                    self.location_fault = None
+                raise EbayFailure("eBay returned HTTP 503.", 503, marketplace_message="HTTP 503 Service Unavailable")
             self.locations = [{"merchantLocationKey": key, "name": key, "merchantLocationStatus": "ENABLED"}]
             return {}
         if path.endswith("create_image_from_file"):
@@ -231,6 +238,34 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"], result)
         self.assertEqual(client.offers["offer-1"]["merchantLocationKey"], "warehouse")
         self.assertFalse(any(call[0] == "POST" and "/location/" in call[1] for call in client.calls))
+
+    async def test_a_503_after_the_location_is_stored_still_lists(self):
+        client = Client(locations=[])
+        client.location_fault = "saved"
+        with patch.object(ebay_listings, "_ship_from_postal_code", return_value="70125"), \
+             patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(client.offers["offer-1"]["merchantLocationKey"], "zip-70125")
+        created = [call for call in client.calls if call[0] == "POST" and call[1].startswith("/sell/inventory/v1/location/")]
+        self.assertEqual(len(created), 1)
+
+    async def test_a_503_when_the_location_never_lands_can_be_tried_again(self):
+        client = Client(locations=[])
+        client.location_fault = "down"
+        with patch.object(ebay_listings, "_ship_from_postal_code", return_value="70125"), \
+             patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", LISTING, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "network")
+        self.assertTrue(result["safe_to_retry"])
+        self.assertEqual(result["error"], "eBay is temporarily unavailable. Try again.")
+        self.assertEqual(result["marketplace_message"], "HTTP 503 Service Unavailable")
+        created = [call for call in client.calls if call[0] == "POST" and call[1].startswith("/sell/inventory/v1/location/")]
+        self.assertEqual(len(created), 2)
+        self.assertEqual(client.uploads, 0)
 
     async def test_creating_the_same_zip_again_uses_that_location(self):
         client = Client(locations=[])

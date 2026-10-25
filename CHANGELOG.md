@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.367 — 2026-10-25
+
+- If eBay saves the ship-from ZIP and then says it is unavailable, listing continues. If that location never lands, Anteroom says eBay is temporarily unavailable so you can press List again.
+
 ## 0.1.366 — 2026-10-25
 
 - Before you press List, Anteroom holds it off when Poshmark does not offer that size, or when the Depop parcel is not one Depop ships.
