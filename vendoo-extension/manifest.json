@@ -28,6 +28,8 @@
     "https://*.s3-accelerate.amazonaws.com/*",
     "https://www.etsy.com/*",
     "https://sellwild.com/*",
+    "https://www.vinted.com/*",
+    "https://vinted.com/*",
     "http://127.0.0.1:4318/*",
     "ws://127.0.0.1:4318/*",
     "https://us.vendoo.co/*",
@@ -83,6 +85,15 @@
       ],
       "js": [
         "content-scripts/depop.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://www.vinted.com/*",
+        "https://vinted.com/*"
+      ],
+      "js": [
+        "content-scripts/vinted.js"
       ]
     }
   ],
