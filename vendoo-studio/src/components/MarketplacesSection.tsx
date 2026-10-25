@@ -362,29 +362,33 @@ export function MarketplacesLayout({
     const draft = NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined;
     if (draft?.error || isRunning(draft) || unconfirmed(marketplace)) return null;
     const gaps = preflightGaps(marketplace);
-    const blocking = gaps.filter((gap) => gap.blocking);
     if (!gaps.length) return null;
+    const name = marketplaceName(marketplace);
+    const blocking = gaps.some((gap) => gap.blocking);
+    const fields = [...new Set(gaps.map((gap) => gap.field))];
     const prompt = [
-      `${marketplaceName(marketplace)} still needs details before this item can be listed.`,
+      blocking
+        ? `${name} still needs details before this item can be listed.`
+        : `${name} will leave these fields empty when this item is listed.`,
       ...gaps.map((gap) => `${gap.field}: ${gap.message}`),
-      "Fill those fields in this listing. Do not list it; I will press List again.",
+      blocking
+        ? "Fill those fields in this listing. Do not list it; I will press List again."
+        : `Set each one to the closest of ${name}'s choices in this listing. Do not list it; I will press List again.`,
     ].join("\n");
     return (
       <>
         {gaps.map((gap) => <p key={`${gap.field}:${gap.message}`} className="text-muted-foreground">{gap.message}</p>)}
-        {blocking.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {onEditField && blocking.map((item) => (
-              <Button key={item.field} size="xs" variant="ghost" title={item.message} onClick={() => onEditField(item.field)}>
-                Edit {fieldLabel(item.field)}
-              </Button>
-            ))}
-            {onAskChat && (
-              <Button size="xs" variant="outline" title="Chat fills these fields. It does not list the item."
-                onClick={() => onAskChat(prompt)}>Ask chat</Button>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {onEditField && fields.map((field) => (
+            <Button key={field} size="xs" variant="ghost" onClick={() => onEditField(field)}>
+              Edit {fieldLabel(field)}
+            </Button>
+          ))}
+          {onAskChat && (
+            <Button size="xs" variant="outline" title="Chat fills these fields. It does not list the item."
+              onClick={() => onAskChat(prompt)}>Ask chat</Button>
+          )}
+        </div>
       </>
     );
   }

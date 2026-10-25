@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.375 — 2026-10-25
+
+- A listing sized XXL now goes to eBay as 2XL, eBay's own spelling, instead of being left empty, and setting eBay's Size to 2XL no longer snaps back to XXL. The same size written another way (XXL, 2XL, 2X) is matched on every marketplace.
+- Notes about a marketplace leaving a field empty now have Edit and Ask chat buttons. A required field that is simply empty now says so.
+
 ## 0.1.374 — 2026-10-25
 
 - The Sync button on a listing now syncs your direct listings too: it settles unconfirmed results and checks Poshmark, Mercari, Depop and Sellwild for sales right away. Sales of items you listed directly are now noticed on every marketplace.

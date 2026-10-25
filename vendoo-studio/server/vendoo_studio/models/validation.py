@@ -663,9 +663,10 @@ def validate_listing(
                     )
         ebay_size = text_value(ebay.get("size"))
         from vendoo_studio.models.ebay_fields import ebay_size_for_type
+        from vendoo_studio.models.sizes import size_key
 
         expected_ebay_size = ebay_size_for_type(size, ebay_optional_raw(ebay, "sizeType") or payload.get("sizeType"))
-        if size and ebay_size and ebay_size.lower() != expected_ebay_size.lower():
+        if size and ebay_size and size_key(ebay_size) != size_key(expected_ebay_size):
             add_issue(result, "ebay_specifics.size", "eBay size must match the general size")
         care = text_value(ebay.get("garmentCare"))
         if care and evidence_unknown(description, "care tag is not shown", "garment care", "unverified"):

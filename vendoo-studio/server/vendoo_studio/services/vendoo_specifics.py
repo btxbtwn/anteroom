@@ -305,6 +305,10 @@ def encode_scaled(spec: FieldSpec, value: Any, department: Any = None) -> tuple[
             code = _coded(scale.get("options") or {}, candidate)
             if code is not None:
                 return scale_id, code, True
+    for scale_id, scale in scales:
+        code = _same_size_code(scale.get("options") or {}, text)
+        if code is not None:
+            return scale_id, code, True
     return "", "", False
 
 
@@ -429,7 +433,20 @@ def _encode_one(spec: FieldSpec, text: str) -> str | None:
     ]
     if len(stripped) == 1:
         return stripped[0]
+    if "size" in _norm(spec.display or spec.key).split():
+        return _same_size_code(spec.options, text)
     return None
+
+
+def _same_size_code(options: dict[str, str], text: str) -> str | None:
+    """The one option that is ``text`` spelled the marketplace's way: Depop's XXL is eBay's 2XL."""
+    from vendoo_studio.models.sizes import letter_size
+
+    wanted = letter_size(text)
+    if not wanted:
+        return None
+    same = [code for code, display in options.items() if letter_size(display) == wanted]
+    return same[0] if len(same) == 1 else None
 
 
 def _other_option(spec: FieldSpec) -> str | None:
