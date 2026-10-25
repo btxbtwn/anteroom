@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation
+from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.services.vendoo_import import parse_notes
 
@@ -45,20 +46,22 @@ def listing_id_from_url(marketplace: str, url: str | None) -> str | None:
 
 
 def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conversation | None:
-    """The Studio listing whose Vendoo-reported or seller-linked URL on ``marketplace`` has this ID."""
+    """The Studio listing whose direct, Vendoo-reported or seller-linked URL on ``marketplace`` has this ID."""
     if not listing_id:
         return None
+    direct = db.query(MarketplaceListing).filter(MarketplaceListing.marketplace == marketplace,
+                                                 MarketplaceListing.listing_url.contains(listing_id)).all()
+    for row in direct:
+        if listing_id_from_url(marketplace, row.listing_url) == listing_id:
+            return db.get(Conversation, row.conversation_id)
     rows = db.query(Conversation).filter(Conversation.notes.contains(listing_id)).all()
     for conv in rows:
         notes = parse_notes(conv.notes)
         urls = notes.get("vendooListingUrls") or {}
         marks = notes.get("marketplaceMarks") or {}
         mark = marks.get(marketplace) if isinstance(marks, dict) else None
-        native = notes.get("nativeMarketplaceDrafts") or {}
-        binding = native.get(marketplace) if isinstance(native, dict) else None
         linked = [urls.get(marketplace) if isinstance(urls, dict) else None,
-                  mark.get("url") if isinstance(mark, dict) and mark.get("state") == "listed" else None,
-                  binding.get("listing_url") if isinstance(binding, dict) else None]
+                  mark.get("url") if isinstance(mark, dict) and mark.get("state") == "listed" else None]
         if any(listing_id_from_url(marketplace, url) == listing_id for url in linked):
             return conv
     return None

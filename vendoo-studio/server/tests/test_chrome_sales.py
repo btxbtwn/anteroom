@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.database import Base
 from vendoo_studio.main import app
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import chrome_sales, user_settings
 
@@ -56,6 +57,19 @@ class ChromeSaleParsingTest(unittest.TestCase):
             db.add(MarketplaceSale(marketplace="depop", order_id="x", line_id="x", conversation_id=reported))
             db.commit()
         self.assertEqual(chrome_sales.live_listing_ids("depop", session_factory=Session), ["shop-live-136d"])
+
+    def test_direct_listings_are_checked_and_their_sales_matched(self):
+        Session = sessionmaker(bind=_engine())
+        slug = "shop-direct-136d"
+        conv_id = _listing(Session, {})
+        with Session() as db:
+            MarketplaceListingRepo(db).save(conv_id, "depop", {"state": "published",
+                                                               "listing_url": f"https://www.depop.com/products/{slug}/"})
+        self.assertEqual(chrome_sales.live_listing_ids("depop", session_factory=Session), [slug])
+        self.assertEqual(len(chrome_sales.record_reported_sales("depop", [slug], session_factory=Session)), 1)
+        with Session() as db:
+            self.assertEqual(db.query(MarketplaceSale).one().conversation_id, conv_id)
+        self.assertEqual(chrome_sales.live_listing_ids("depop", session_factory=Session), [])
 
     def test_a_reported_sale_matches_the_listing_once_and_stops_its_checks(self):
         Session = sessionmaker(bind=_engine())
