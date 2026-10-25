@@ -93,14 +93,13 @@ describe("marketplaces section", () => {
     expect(html).not.toContain("Save draft");
   });
 
-  it("shows live listings with a link and delist selection, never for the one that sold", () => {
+  it("gives every marketplace its own actions menu, and offers Delist everywhere only for more than one listing", () => {
     const html = render({}, { mercari: live, ebay: { ...live, url: "https://www.ebay.com/itm/1", listing_id: "1", sold_here: true } });
     expect(row(html, "Mercari")).toContain("Live");
-    expect(row(html, "Mercari")).toContain('aria-label="Select Mercari to delist"');
     expect(row(html, "eBay")).toContain("Sold here");
-    expect(row(html, "eBay")).not.toContain("to delist");
-    expect(html).toContain("Delist everywhere…");
-    expect(disabledButton(html, "Delist selected…")).toBe(true);
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild"]) expect(row(html, name)).toContain(`aria-label="${name} actions"`);
+    expect(html).not.toContain("Delist everywhere…");
+    expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).toContain("Delist everywhere…");
   });
 
   it("offers no new listings once the item sold somewhere", () => {

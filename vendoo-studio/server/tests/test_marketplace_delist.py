@@ -107,6 +107,55 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "live")
 
+    def test_marking_listed_links_the_pasted_listing_without_touching_the_marketplace(self):
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {"ebay": URLS["ebay"]}})
+        self.db.commit()
+        bad = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": "https://evil.example/us/item/m1"})
+        self.assertEqual(bad.status_code, 400)
+        body = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]}).json()
+        self.assertEqual((body["mercari"]["listing_id"], body["mercari"]["source"], body["mercari"]["state"]), ("m70565754838", "seller", "live"))
+        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()["mercari"]["state"], "deleted")
+        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]})
+        self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "live")
+        self.ebay.assert_not_called()
+
+    def test_a_seller_linked_listing_matches_relay_sales(self):
+        from vendoo_studio.services.relay_sales import find_listing
+
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {}})
+        self.db.commit()
+        self.assertIsNone(find_listing(self.db, "ebay", "377507697747"))
+        self.client.post(f"{self.base}/ebay/mark", json={"state": "listed", "url": URLS["ebay"]})
+        self.assertEqual(find_listing(self.db, "ebay", "377507697747").id, self.conv.id)
+
+    def test_marking_sold_blocks_delist_and_marking_listed_clears_an_older_sale(self):
+        body = self.client.post(f"{self.base}/depop/mark", json={"state": "sold"}).json()
+        self.assertTrue(body["depop"]["sold_here"])
+        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["depop"], "confirm": True}).status_code, 409)
+        self.db.add(MarketplaceSale(marketplace="ebay", order_id="o1", line_id="l1", conversation_id=self.conv.id))
+        self.db.commit()
+        self.assertFalse(self.client.post(f"{self.base}/ebay/mark", json={"state": "listed", "url": URLS["ebay"]}).json()["ebay"]["sold_here"])
+
+    def test_marking_not_listed_hides_the_link_until_a_different_listing_appears(self):
+        self.assertNotIn("poshmark", self.client.post(f"{self.base}/poshmark/mark", json={"state": "not_listed"}).json())
+        self.assertNotIn("sellwild", self.client.post(f"{self.base}/sellwild/mark", json={"state": "not_listed"}).json())
+        notes = parse_notes(self.conv.notes)
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {
+            **notes["vendooListingUrls"], "poshmark": "https://poshmark.com/listing/Tee-7aae234280cb08338a8cb592"}})
+        self.db.commit()
+        self.assertEqual(self.client.get(self.base).json()["poshmark"]["listing_id"], "7aae234280cb08338a8cb592")
+        self.assertEqual(self.client.post(f"{self.base}/vinted/mark", json={"state": "sold"}).status_code, 400)
+        self.assertEqual(self.client.post(f"{self.base}/ebay/mark", json={"state": "gone"}).status_code, 400)
+
+    def test_marking_not_listed_clears_a_published_draft_and_waits_for_unconfirmed_ones(self):
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {}, "nativeMarketplaceDrafts": {
+            "depop": {"state": "published", "listing_url": URLS["depop"]}, "mercari": {"state": "unknown", "job_id": "j1"}}})
+        self.db.commit()
+        self.assertEqual(self.client.post(f"{self.base}/mercari/mark", json={"state": "not_listed"}).status_code, 409)
+        self.assertNotIn("depop", self.client.post(f"{self.base}/depop/mark", json={"state": "not_listed"}).json())
+        self.db.refresh(self.conv)
+        self.assertEqual(set(parse_notes(self.conv.notes)["nativeMarketplaceDrafts"]), {"mercari"})
+
     def test_browser_marketplaces_need_chrome(self):
         with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
             self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["depop"], "confirm": True}).status_code, 409)

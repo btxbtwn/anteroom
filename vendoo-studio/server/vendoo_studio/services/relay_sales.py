@@ -38,13 +38,18 @@ def listing_id_from_url(marketplace: str, url: str | None) -> str | None:
 
 
 def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conversation | None:
-    """The Studio listing whose Vendoo-reported URL on ``marketplace`` has this ID."""
+    """The Studio listing whose Vendoo-reported or seller-linked URL on ``marketplace`` has this ID."""
     if not listing_id:
         return None
     rows = db.query(Conversation).filter(Conversation.notes.contains(listing_id)).all()
     for conv in rows:
-        urls = parse_notes(conv.notes).get("vendooListingUrls") or {}
-        if isinstance(urls, dict) and listing_id_from_url(marketplace, urls.get(marketplace)) == listing_id:
+        notes = parse_notes(conv.notes)
+        urls = notes.get("vendooListingUrls") or {}
+        marks = notes.get("marketplaceMarks") or {}
+        mark = marks.get(marketplace) if isinstance(marks, dict) else None
+        linked = [urls.get(marketplace) if isinstance(urls, dict) else None,
+                  mark.get("url") if isinstance(mark, dict) and mark.get("state") == "listed" else None]
+        if any(listing_id_from_url(marketplace, url) == listing_id for url in linked):
             return conv
     return None
 

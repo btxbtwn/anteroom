@@ -7,6 +7,10 @@ file: Settings → General → About → What's new.
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 
+## 0.1.335 — 2026-10-24
+
+- Each marketplace in the **Marketplaces** section now has its own **⋯** menu: List or Publish, Delist, and Mark as listed, sold or not listed. Marking changes only what Anteroom records, never the marketplace, so you can fix a listing Anteroom got wrong. Mark as listed asks for the listing link; Anteroom then treats that listing as live there, can delist it, and matches eBay and Etsy sales to it. The delist checkboxes are gone; Delist everywhere stays when more than one listing is live.
+
 ## 0.1.334 — 2026-10-24
 
 - Listing and delisting now live in one **Marketplaces** section at the top of a listing's Input tab. Each marketplace has one row with a clear status (Not listed, Draft saved, Live, Sold here, Deleted) and only the actions that apply, with delist checkboxes on live listings. Etsy and Sellwild settings, errors and the Etsy eligibility note appear in their own row instead of long explanations and banners. Sellwild's categories are searchable, and the Forms tab starts straight at the fields.

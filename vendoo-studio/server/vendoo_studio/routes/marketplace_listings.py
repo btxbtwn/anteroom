@@ -17,10 +17,24 @@ class DelistRequest(BaseModel):
     confirm: bool = False
 
 
+class MarkRequest(BaseModel):
+    """The seller's correction for one marketplace; ``url`` is required to mark it listed."""
+    state: str
+    url: str | None = Field(default=None, max_length=500)
+
+
 @router.get("")
 def listings(conv_id: str, db: Session = Depends(get_db)):
     try:
         return marketplace_delist.listings(db, conv_id)
+    except marketplace_delist.DelistError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+@router.post("/{marketplace}/mark")
+def mark(conv_id: str, marketplace: str, body: MarkRequest, db: Session = Depends(get_db)):
+    try:
+        return marketplace_delist.mark(db, conv_id, marketplace, body.state, body.url)
     except marketplace_delist.DelistError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc
 
