@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.415 — 2026-10-26
+
+- eBay listings are now made only from an item in Inventory, with List… under Marketplaces, the same as every other marketplace. The eBay page no longer has its own Create draft and Publish on eBay forms. Importing from eBay, updating inventory price and quantity, and editing a live listing are still there.
+
 ## 0.1.414 — 2026-10-26
 
 - List on eBay as an auction. Choose the auction length eBay offers for the category, a starting bid, and an optional reserve and Buy It Now. Fixed price stays Good 'Til Cancelled, and auctions sell one item without offers.

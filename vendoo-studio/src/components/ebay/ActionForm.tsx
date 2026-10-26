@@ -68,7 +68,7 @@ export function ActionForm({ title, kind, fields = [], context = {}, build, disa
     void queryClient.invalidateQueries({ queryKey: ["ebay"] });
   } });
   const busy = preview.isPending || confirm.isPending;
-  const destructive = ["refund", "publish_offer", "revise", "inventory_revision"].includes(kind);
+  const destructive = ["refund", "revise", "inventory_revision"].includes(kind);
   return <div className="ebay-action">
     <h3><button type="button" className="ebay-action-heading" aria-label={title} aria-expanded={expanded} aria-controls={bodyId} disabled={busy} onClick={() => setExpanded(!expanded)}>
       <span><PencilLineIcon aria-hidden="true" /><span><span className="ebay-action-title">{title}</span><span className="ebay-action-hint">Enter details, then review before confirming</span></span></span>
