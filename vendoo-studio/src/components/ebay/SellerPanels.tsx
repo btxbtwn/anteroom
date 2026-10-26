@@ -43,7 +43,7 @@ export function DashboardPanel() {
         <RemoteList section="payouts" />
       </PageSection>
     </div>
-    <PageSection className="ebay-data-panel" title="Listing performance" description="Live activity for listings imported into Anteroom. Rates are reported by eBay.">
+    <PageSection className="ebay-data-panel" title="Listing performance" description="Performance for your linked eBay listings. Rates are reported by eBay.">
       {valid ? <RemoteList key={`traffic-${start}-${end}`} section="traffic" params={{ start, end }} /> : null}
     </PageSection>
   </>;

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.392 — 2026-10-26
+
+- eBay earnings and listing performance now recognize items imported or linked directly in Anteroom. See original selling fees alongside net proceeds, quantity-adjusted item costs and profit; missing or duplicate links explain what needs review.
+
 ## 0.1.391 — 2026-10-26
 
 - Recover missing eBay and Etsy sales from Orders, including cancellations and refunds on older orders changed during your selected dates. Check pages sequentially, stop and resume, and keep existing links, dismissed alerts and local quantities intact.

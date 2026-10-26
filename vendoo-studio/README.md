@@ -175,6 +175,26 @@ Imports use eBay's read APIs and local storage only. They do not publish, revise
 delist, migrate eBay's listing format, or contact Vendoo. No eBay credentials or
 raw account responses are stored with the imported listing.
 
+### Direct eBay earnings and performance
+
+Open **Marketplaces → eBay → Dashboard** for recorded net order proceeds,
+original selling fees, local item costs and profit after those costs. Direct
+imports, seller-added links and migrated links all identify the local item.
+Costs use each purchased quantity; repeated copies of the same order line do
+not double the cost, and distinct lines still count their own quantities.
+
+The selling-fee amount is shown separately when eBay verifies one original
+sale transaction. Net proceeds already reflect recorded credits and debits,
+including refunds and order charges, so those fees are not deducted again.
+Funding movements are excluded. Missing costs, ambiguous inventory links,
+unverified quantities and conflicting order lines leave profit unavailable
+and explain what needs review. Missing fee detail remains unavailable while
+verified net proceeds can still be shown.
+
+Listing performance also includes direct and seller-linked eBay listings.
+An identity shared by several local items keeps its marketplace ID as the
+title. These reports read eBay and local inventory; no live listings are changed.
+
 ### Importing directly from Etsy
 
 Connect Etsy, then open **Marketplaces → Etsy → Listings → Import from Etsy**.

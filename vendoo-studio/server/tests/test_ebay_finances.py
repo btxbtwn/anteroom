@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vendoo_studio.services.ebay_finances import order_proceeds
+from vendoo_studio.services.ebay_finances import order_financials
 
 pytestmark = pytest.mark.anyio
 
@@ -21,7 +21,8 @@ def transaction(kind="SALE", value="40.00", booking="CREDIT", identifier="sale-1
 async def proceeds(transactions, **changes):
     client = AsyncMock()
     client.request.return_value = {"transactions": transactions, "total": len(transactions), **changes}
-    return await order_proceeds(client, "order-1")
+    result = await order_financials(client, "order-1")
+    return result.net if result else None
 
 
 async def test_recorded_sale_amount_already_includes_selling_fees():
@@ -71,7 +72,7 @@ async def test_all_transaction_pages_use_fixed_paths_and_numeric_offsets():
         {"transactions": [transaction()], "total": 2, "next": "https://untrusted.example/next"},
         {"transactions": [transaction("REFUND", "5", "DEBIT", "refund")], "total": 2},
     ]
-    assert await order_proceeds(client, "order-1") == Decimal("35")
+    assert (await order_financials(client, "order-1")).net == Decimal("35")
     assert [call.args for call in client.request.call_args_list] == [("GET", "/sell/finances/v1/transaction")] * 2
     assert [call.kwargs["params"] for call in client.request.call_args_list] == [
         {"filter": "orderId:{order-1}", "limit": 1000, "offset": 0},
@@ -82,4 +83,27 @@ async def test_all_transaction_pages_use_fixed_paths_and_numeric_offsets():
 async def test_empty_intermediate_page_does_not_return_partial_proceeds():
     client = AsyncMock()
     client.request.side_effect = [{"transactions": [transaction()], "total": 2}, {"transactions": [], "total": 2}]
-    assert await order_proceeds(client, "order-1") is None
+    assert await order_financials(client, "order-1") is None
+
+
+async def test_reported_original_fees_are_separate_from_net_proceeds():
+    client = AsyncMock()
+    client.request.return_value = {"total": 1, "transactions": [transaction(totalFeeAmount={"currency": "USD", "value": "10.00"})]}
+    result = await order_financials(client, "order-1")
+    assert result.net == Decimal("40") and result.original_sale_fees == Decimal("10")
+
+
+@pytest.mark.parametrize("fee", [None, {}, {"currency": "EUR", "value": "10"}, {"currency": "USD", "value": "NaN"}, {"currency": "USD", "value": "-1"}])
+async def test_missing_or_unverified_fees_never_become_zero_or_reduce_net_again(fee):
+    client = AsyncMock()
+    client.request.return_value = {"total": 1, "transactions": [transaction(totalFeeAmount=fee)]}
+    result = await order_financials(client, "order-1")
+    assert result.net == Decimal("40") and result.original_sale_fees is None
+
+
+async def test_multiple_sale_records_do_not_double_an_order_level_fee_total():
+    client = AsyncMock()
+    client.request.return_value = {"total": 2, "transactions": [transaction(identifier="one", value="20", totalFeeAmount={"currency": "USD", "value": "10"}),
+                                                          transaction(identifier="two", value="20", totalFeeAmount={"currency": "USD", "value": "10"})]}
+    result = await order_financials(client, "order-1")
+    assert result.net == Decimal("40") and result.original_sale_fees is None
