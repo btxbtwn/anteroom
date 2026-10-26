@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.385 — 2026-10-26
+
+- Import existing eBay listings and photos straight into Anteroom from eBay → Listings → Import from eBay. Select items from your active listings or enter a listing ID; existing items keep their edits and photos, and partial photo failures are shown. The import leaves live eBay listings unchanged.
+
 ## 0.1.384 — 2026-10-26
 
 - Match previously received sale alerts when you link an item, sync its marketplaces, or refresh Etsy alerts. Other-marketplace warnings now include Anteroom's direct listings and exclude listings already sold or removed, without relying on Vendoo.

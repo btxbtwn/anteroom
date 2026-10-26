@@ -63,7 +63,7 @@ import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./
 import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, PoshmarkOptions, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
-import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
+import type { EbayImportPage, EbayImportResult, EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -364,6 +364,10 @@ export const api = {
       }),
   },
   ebay: {
+    importCandidates: (page: number) => request<EbayImportPage>(`/ebay/import/active?page=${page}`),
+    importListing: (listingId: string) => request<EbayImportResult>("/ebay/import", {
+      method: "POST", body: JSON.stringify({ listing_id: listingId }),
+    }),
     read: (section: string, params: Record<string, string | number> = {}) =>
       request<EbayPageData>(`/ebay/read/${section}?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),
     listing: (id: string) => request<EbayListing>(`/ebay/listing/${encodeURIComponent(id)}`),
