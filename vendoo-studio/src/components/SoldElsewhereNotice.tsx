@@ -21,9 +21,10 @@ function listJoin(names: string[]): string {
   return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; openInVendoo?: ReactNode }) {
+export function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; openInVendoo?: ReactNode }) {
   const queryClient = useQueryClient();
   const soldOn = marketplaceName(sale.marketplace);
+  const exhausted = sale.stockStatus === "sold_out";
   const elsewhere = listJoin(sale.listedElsewhere.map(marketplaceName));
   const done = useMutation({
     mutationFn: () => api.marketplaceSales.dismiss(sale.id),
@@ -40,17 +41,21 @@ function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; openInVendo
       <AlertDescription className="gap-2">
         <p>
           {soldWhen(sale) ? `${soldOn} reported this sale ${soldWhen(sale)}. ` : null}
-          {sale.listedElsewhere.length
-            ? `Vendoo still shows it listed on ${elsewhere}.`
-            : "Vendoo doesn't show it listed anywhere else."}
+          {sale.stockStatus === "remaining"
+            ? `${sale.remainingQuantity} units remain on ${soldOn}. Review quantities on other marketplaces before making changes.`
+            : sale.stockStatus === "unknown"
+              ? "Remaining stock is not verified. Click Sync to check linked marketplace inventory before deciding what to delist."
+              : sale.listedElsewhere.length
+                ? `Anteroom still has listings on ${elsewhere}.`
+                : "Anteroom has no other marketplace listings recorded."}
         </p>
-        {sale.listedElsewhere.length ? (
+        {exhausted && sale.listedElsewhere.length ? (
           <p className="text-xs">
             Take it down under <strong>Marketplaces</strong> below: select {elsewhere} and choose <strong>Delist selected…</strong>.
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          {sale.listedElsewhere.length
+          {exhausted && sale.listedElsewhere.length
             ? openInVendoo ??
               (sale.vendooUrl ? (
                 <a className={buttonVariants({ size: "xs", variant: "outline" })} href={sale.vendooUrl} target="_blank" rel="noreferrer">

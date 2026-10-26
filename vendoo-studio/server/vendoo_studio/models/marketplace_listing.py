@@ -73,6 +73,10 @@ class MarketplaceListing(Base):
     sellwild_category_id = Column(Integer, nullable=True)
     sellwild_condition_id = Column(Integer, nullable=True)
 
+    # Latest verified direct inventory read; listing identity and read-start time
+    # keep a later sale or replacement link from reusing stale stock.
+    inventory_observation = Column(JSON, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=utcnow)
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 

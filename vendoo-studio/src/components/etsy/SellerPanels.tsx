@@ -110,7 +110,7 @@ export function EtsySaleAlerts({ onOpenListing }: { onOpenListing: (id: string) 
     {refresh.data?.matched ? <PageNote>{refresh.data.matched} previously unmatched {refresh.data.matched === 1 ? "sale is" : "sales are"} now linked to inventory.</PageNote> : null}
     {sales.error ? <PageError message={sales.error.message} /> : sales.isPending ? <Loading label="Loading Etsy sale alerts…" />
       : rows.length ? <Panel><ul>{rows.map((sale) => <ListRow key={sale.id} title={sale.title || "Etsy sale"}
-        meta={sale.listedElsewhere.length ? "Review other marketplaces" : "Sale received"}
+        meta={sale.stockStatus === "remaining" ? `${sale.remainingQuantity} remaining` : sale.stockStatus === "unknown" ? "Check remaining stock" : sale.listedElsewhere.length ? "Review other marketplaces" : "Sale received"}
         valueHint={sale.conversationId ? "Open item" : "Unmatched item"}
         onClick={sale.conversationId ? () => onOpenListing(sale.conversationId!) : undefined} />)}</ul></Panel>
         : <EmptyRow>No new Etsy sale alerts.</EmptyRow>}

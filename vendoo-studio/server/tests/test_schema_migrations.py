@@ -362,3 +362,19 @@ def test_linked_listings_get_the_sync_baseline_imports_now_record(engine, snapsh
     assert notes["regenerated"]["vendooSyncedRevision"] == "blank"
     assert notes["synced"] == {"vendooItemId": "itm", "vendooSyncedRevision": "kept"}
     assert notes["unlinked"] == {}
+
+
+def test_previous_release_keeps_listing_identity_when_stock_observations_are_added(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "292cc5d3b9a5")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title) VALUES ('stock-item', 'Multi-unit coat')")
+        connection.execute("INSERT INTO marketplace_listings (id, conversation_id, marketplace, state, listing_id, listing_url, created_at, updated_at) "
+                           "VALUES ('binding', 'stock-item', 'etsy', 'published', '555', 'https://www.etsy.com/listing/555', '2026-10-26', '2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        row = connection.execute("SELECT listing_id, state, inventory_observation FROM marketplace_listings WHERE id='binding'").fetchone()
+    assert row == ("555", "published", None)
+    assert inspect_database(engine.url.database).clean

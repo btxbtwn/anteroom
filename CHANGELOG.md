@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.390 — 2026-10-26
+
+- Multi-unit sales no longer assume the whole item sold out. Sync verifies remaining stock, sale alerts show what remains or ask you to check, and partial or unverified multi-unit sales keep other listings intact.
+
 ## 0.1.389 — 2026-10-26
 
 - Sync now checks linked eBay and Etsy listings directly. Open Marketplace details to see their status, price, available quantity and differences from Anteroom. Your local edits and live listings stay unchanged.

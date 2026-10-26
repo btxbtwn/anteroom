@@ -362,6 +362,12 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
             if not sale.conversation_id:
                 notes[sale.id] = "Anteroom doesn't have this listing, so nothing else was delisted."
                 continue
+            from vendoo_studio.services.sale_inventory import stock_after_sale
+
+            stock = stock_after_sale(db, sale.conversation_id, sale.marketplace, sale.listing_id)
+            if stock["status"] != "sold_out":
+                notes[sale.id] = "Stock remains or could not be verified. Review quantities before delisting elsewhere."
+                continue
             if sale.conversation_id not in groups:
                 groups[sale.conversation_id] = []
                 order.append(sale.conversation_id)

@@ -1,6 +1,7 @@
 """Seller-requested observations of linked listings. Never write to a marketplace."""
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 import math
 
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.repositories.queries import ListingRepo
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.services import ebay_import, ebay_workspace, etsy_import, keychain
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, assert_identity
 from vendoo_studio.services.etsy_workspace import EtsyClient, EtsyFailure
@@ -85,11 +87,12 @@ async def observe(db: Session, conv_id: str, marketplace: str, listing_id: str) 
     """Compare verified public values with the latest local revision, keeping both intact."""
     from vendoo_studio.services.marketplace_delist import listings
 
+    started = datetime.now(UTC).isoformat()
     result = await {"ebay": _ebay, "etsy": _etsy}[marketplace](listing_id)
     # The seller may have replaced the link while the remote read was in flight.
     db.expire_all()
     current = listings(db, conv_id).get(marketplace) or {}
-    if current.get("listing_id") != listing_id or current.get("state") != "live" or current.get("sold_here"):
+    if current.get("listing_id") != listing_id or current.get("state") != "live":
         raise InventoryCheckError("This item's marketplace link or status changed. Sync again.")
     listing = ListingRepo(db).get_current(conv_id)
     revision = db.get(ListingRevision, listing.current_revision_id) if listing and listing.current_revision_id else None
@@ -99,4 +102,8 @@ async def observe(db: Session, conv_id: str, marketplace: str, listing_id: str) 
         remote, local = result[field], _number(snapshot.get(field))
         if remote is not None and remote != local:
             differences.append({"field": field, "local": local, "remote": remote})
+    MarketplaceListingRepo(db).save(conv_id, marketplace, {"inventory_observation": {
+        "listing_id": listing_id, "checked_at": started, "state": result["state"],
+        "quantity": result["quantity"], "price": result["price"],
+    }})
     return {"listing_id": listing_id, **result, "differences": differences}

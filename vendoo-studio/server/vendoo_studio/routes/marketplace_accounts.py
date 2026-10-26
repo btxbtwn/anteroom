@@ -71,8 +71,12 @@ def _other_marketplaces(listings: dict, sold_on: str) -> list[str]:
                   and entry.get("state") not in {"deleted", "deleting"})
 
 
-def _sale_out(sale: MarketplaceSale, conv: Conversation | None, listings: dict) -> dict:
+def _sale_out(db: Session, sale: MarketplaceSale, conv: Conversation | None, listings: dict) -> dict:
+    from vendoo_studio.services.sale_inventory import stock_after_sale
+
+    stock = stock_after_sale(db, conv.id, sale.marketplace, sale.listing_id) if conv else {"status": "unknown", "remaining": None}
     return {
+        "stockStatus": stock["status"], "remainingQuantity": stock["remaining"],
         "id": sale.id,
         "marketplace": sale.marketplace,
         "orderId": sale.order_id,
@@ -101,7 +105,7 @@ def list_sales(state: str | None = "new", conversation_id: str | None = None, db
     # An order can have several lines for one item. Read its current listings
     # once, rather than re-querying inventory for every line in the response.
     listings = {conv_id: marketplace_delist.listings(db, conv_id) for conv_id in convs}
-    return {"sales": [_sale_out(s, convs.get(s.conversation_id), listings.get(s.conversation_id, {})) for s in sales]}
+    return {"sales": [_sale_out(db, s, convs.get(s.conversation_id), listings.get(s.conversation_id, {})) for s in sales]}
 
 
 class ReconcileResponse(BaseModel):
