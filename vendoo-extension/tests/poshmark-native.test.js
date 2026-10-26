@@ -148,7 +148,7 @@ test('private Poshmark drafts save multiple sizes, custom sizes and per-size SKU
 });
 
 test('invalid Poshmark inventory stops before creating or uploading a post', async () => {
-  for (const rows of [[], [{ sizeSetId: 'custom', sizeId: ' ', quantity: 1 }],
+  for (const rows of [null, {}, 'invalid', [], [{ sizeSetId: 'custom', sizeId: ' ', quantity: 1 }],
     [{ sizeSetId: 'custom', sizeId: 'M', quantity: 0 }],
     [{ sizeSetId: 'custom', sizeId: 'M', quantity: 1.5 }],
     [{ sizeSetId: 'missing', sizeId: 'M', quantity: 1 }],

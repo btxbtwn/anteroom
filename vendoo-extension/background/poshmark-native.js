@@ -343,6 +343,9 @@ function poshmarkSmartWarning(post, saved) {
 
 function poshmarkInventory(category, listing) {
   const rows = listing.poshmark_specifics?.inventoryRows;
+  if (Object.hasOwn(listing.poshmark_specifics || {}, 'inventoryRows') && !Array.isArray(rows)) {
+    throw marketplaceMissing('poshmark', [{ field: 'poshmark_specifics.inventoryRows', needs: 'an inventory list of sizes and quantities' }]);
+  }
   if (!Array.isArray(rows)) {
     const picked = poshmarkSize(category.category, listing, { kids: category.department.display === 'Kids', leaf: category.leaf });
     if (!picked?.size) throw marketplaceMissing('poshmark', [{ field: 'size', needs: picked?.problem || 'a size Poshmark offers in this category' }]);
