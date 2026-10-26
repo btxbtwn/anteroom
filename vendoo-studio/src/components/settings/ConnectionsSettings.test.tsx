@@ -49,4 +49,16 @@ describe("Connections settings", () => {
     expect(html).not.toContain("ebay-offers");
     expect(html).not.toContain("Automatic offers check every 30 minutes");
   });
+
+  it("offers to reconnect eBay when eBay refuses the listing policies", () => {
+    const base = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options: { queryKey: string[] }) => {
+      if (options.queryKey[0] === "direct-connections") return { data: { accounts: { ebay: { connected: true, label: "seller" } } } };
+      if (options.queryKey[0] === "ebay-listing-profiles") return { error: new Error("Reconnect eBay to grant it.") };
+      return base(options);
+    });
+    const html = renderToStaticMarkup(<ConnectionsSettings />);
+    expect(html).toContain("Reconnect eBay to grant it.");
+    expect(html).toContain("Reconnect eBay</button>");
+  });
 });

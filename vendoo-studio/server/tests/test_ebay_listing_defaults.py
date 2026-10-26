@@ -52,3 +52,19 @@ class EbayListingDefaultsRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("connected eBay account", response.text)
         self.assertNotIn("pattern", response.text)
+
+
+class EbayListingProfilesPermissionTest(unittest.IsolatedAsyncioTestCase):
+    async def test_a_missing_policy_grant_says_to_reconnect(self):
+        """A sign-in without Listing tools gets 403 from the Account API."""
+        from vendoo_studio.services import ebay_listings
+        from vendoo_studio.services.ebay_client import EbayFailure
+
+        client = AsyncMock()
+        client.request.side_effect = EbayFailure("eBay denied access.", 403, code="rejected",
+                                                 marketplace_message="1100: Access denied")
+        with self.assertRaises(EbayFailure) as caught:
+            await ebay_listings.listing_profiles(client)
+        self.assertEqual((caught.exception.status, caught.exception.code), (403, "needs_permission"))
+        self.assertIn("Reconnect eBay", str(caught.exception))
+        self.assertEqual(caught.exception.marketplace_message, "1100: Access denied")
