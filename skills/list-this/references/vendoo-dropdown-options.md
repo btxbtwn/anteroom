@@ -132,5 +132,5 @@ Material, occasion, and body fit appear after **Show Optional Fields**.
 |---|---|
 | **Facebook** | Delivery method: Shipping only. Shipping option: Use a prepaid shipping label |
 | **Shopify** | No condition dropdown. Location and Collections are account-specific |
-| **Vinted** | BETA; Title, Description, Quantity, Category, Price only on this draft |
+| **Vinted** | BETA on the Vendoo form: Title, Description, Quantity, Category, Price only. Direct listing uses `vinted_specifics.category` (Vinted's breadcrumb), not this Vendoo category |
 | **Whatnot** | Hazmat: No Hazardous Materials, Contains Hazardous Materials, Contains Lithium Batteries. Sales format: Buy It Now, Anytime Auction |

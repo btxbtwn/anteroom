@@ -11,7 +11,7 @@ const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const UNSETTLED = new Set(["saving", "publishing", "updating", "unknown"]);
 const MARKETPLACE_NAMES: Record<string, string> = {
-  ebay: "eBay", etsy: "Etsy", poshmark: "Poshmark", mercari: "Mercari", depop: "Depop", sellwild: "Sellwild",
+  ebay: "eBay", etsy: "Etsy", poshmark: "Poshmark", mercari: "Mercari", depop: "Depop", sellwild: "Sellwild", vinted: "Vinted",
 };
 
 /** "just now", "4m ago", "2h ago", then a date. */

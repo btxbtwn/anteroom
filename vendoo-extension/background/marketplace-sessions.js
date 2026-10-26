@@ -3,8 +3,10 @@ const MARKETPLACE_SIGN_IN = {
   poshmark: 'https://poshmark.com/feed',
   mercari: 'https://www.mercari.com/mypage/',
   sellwild: 'https://sellwild.com/',
+  // Unsigned visitors are sent to Vinted's sign-in and returned to orders.
+  vinted: 'https://www.vinted.com/my_orders',
 };
-const EXTENSION_SESSION_MARKETS = ['depop', 'poshmark', 'mercari', 'sellwild'];
+const EXTENSION_SESSION_MARKETS = ['depop', 'poshmark', 'mercari', 'sellwild', 'vinted'];
 const SESSION_EXPIRING_MS = 24 * 60 * 60 * 1000;
 
 // Cookie and token values stay in Chrome. Callers receive only this summary.
@@ -101,12 +103,47 @@ async function readSellwildSession(now = Date.now()) {
   return publicExtensionSession(Boolean(user), expiresAt, user, now);
 }
 
+// A positive account id with a public login. Anonymous browsing also holds
+// access_token_web, and that response has neither.
+function vintedLogin(user) {
+  const login = typeof user?.login === 'string' ? user.login.trim() : '';
+  if (!login || login.length > 80 || /[\u0000-\u001f]/.test(login)) return '';
+  const id = user?.id;
+  const account = typeof id === 'number' ? id : typeof id === 'string' && /^[1-9]\d*$/.test(id) ? Number(id) : 0;
+  return account > 0 ? login : '';
+}
+
+async function readVintedSession(now = Date.now()) {
+  let response;
+  try {
+    response = await fetch('https://www.vinted.com/api/v2/users/current', {
+      credentials: 'include', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000),
+    });
+  } catch {
+    return unknownExtensionSession();
+  }
+  if (response.status === 401 || response.status === 403) return publicExtensionSession(false, null, null, now);
+  if (!response.ok) return unknownExtensionSession();
+  let body = {};
+  try { body = await response.json(); } catch { return unknownExtensionSession(); }
+  const login = vintedLogin(body?.user);
+  let expiresAt = null;
+  if (login) {
+    try {
+      const cookie = await chrome.cookies.get({ url: 'https://www.vinted.com/', name: 'access_token_web' });
+      expiresAt = soonestExpiry(cookie, cookieToken(cookie));
+    } catch { /* expiry is optional; the current-user response decides signed-in */ }
+  }
+  return publicExtensionSession(Boolean(login), expiresAt, login ? { username: login } : null, now);
+}
+
 async function readExtensionSession(marketplace, now = Date.now()) {
   try {
     if (marketplace === 'depop') return await cookieSession('https://www.depop.com/', 'access_token');
     if (marketplace === 'poshmark') return await cookieSession('https://poshmark.com/', 'jwt');
     if (marketplace === 'mercari') return await readMercariSession(now);
     if (marketplace === 'sellwild') return await readSellwildSession(now);
+    if (marketplace === 'vinted') return await readVintedSession(now);
   } catch { /* one marketplace failing must not blank the others */ }
   return unknownExtensionSession();
 }

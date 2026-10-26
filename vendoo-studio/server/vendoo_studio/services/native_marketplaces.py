@@ -1,8 +1,8 @@
-"""Seller-confirmed direct listings on eBay, Etsy, Poshmark, Mercari, Depop and Sellwild.
+"""Seller-confirmed direct listings on eBay, Etsy, Poshmark, Mercari, Depop, Sellwild and Vinted.
 
 List is one seller-confirmed step. It runs as one background job that holds
 the single automation slot from the first write to the last answer: saving the
-marketplace's own draft (Mercari, Depop, Etsy) and publishing it are steps of
+marketplace's own draft (Mercari, Depop, Etsy, Vinted) and publishing it are steps of
 the same job, so no queued Send can start between them, and a job whose Chrome
 reply is late keeps the slot until Chrome reports what it did.
 
@@ -11,6 +11,11 @@ marketplace). Nothing here retries a write on its own. A reply that never came
 leaves the record ``unknown``; Check reads the marketplace (never writes) and
 runs by itself after a lost reply, on startup and when Chrome reconnects.
 Reset is the seller saying they looked themselves.
+
+Vinted saves a draft and then publishes it, the same as Mercari and Depop.
+Both steps run in the extension background with no Vinted tab, and only after
+the seller confirms List. A lost reply is read back and never creates a second
+draft. Delist deletes the live listing through the signed-in Chrome session.
 """
 from __future__ import annotations
 
@@ -146,11 +151,14 @@ def draft_url(marketplace: str, value: str) -> str:
     pattern, host = (
         (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
         else (r"/sellinghub/drafts/edit/[A-Za-z0-9_-]{1,80}/?", "www.depop.com") if marketplace == "depop"
+        else (r"/items/[1-9]\d{0,14}/edit/?", "www.vinted.com") if marketplace == "vinted"
         else (r"/sell/draft/[A-Za-z0-9_-]+/", "www.mercari.com")
     )
-    if parsed.scheme != "https" or parsed.netloc != host or not re.fullmatch(pattern, parsed.path):
+    if (parsed.scheme != "https" or parsed.netloc != host or not re.fullmatch(pattern, parsed.path)
+            or (marketplace == "vinted" and (parsed.query or parsed.fragment))):
         raise NativeMarketplaceError(502, "Chrome did not return a valid saved draft link.")
-    return f"https://{host}{parsed.path}"
+    path = parsed.path.rstrip("/") if marketplace == "vinted" else parsed.path
+    return f"https://{host}{path}"
 
 
 def listing_url(marketplace: str, value: str) -> str:
@@ -190,8 +198,8 @@ def _contract(result: dict) -> dict:
     }
 
 
-def _depop_draft_gone(result: dict) -> bool:
-    """Depop's own words when the saved draft was deleted."""
+def _draft_gone(result: dict) -> bool:
+    """Depop or Vinted saying the saved draft was deleted."""
     text = f"{result.get('error') or ''} {result.get('marketplace_message') or ''}"
     return "could not find draft" in text.lower()
 
@@ -201,9 +209,9 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
     reason = str(result.get("error") or "").strip()
     if result.get("ok") is True:
         url = None
-        if marketplace not in {"sellwild", "vinted"} and action in {"save_draft", "publish"}:
+        if marketplace != "sellwild" and action in {"save_draft", "publish"}:
             url = draft_url(marketplace, str(result.get("draft_url") or ""))
-            replaced = marketplace == "depop" and result.get("draft_replaced") is True
+            replaced = marketplace in {"depop", "vinted"} and result.get("draft_replaced") is True
             if record.get("draft_url") and url != record["draft_url"] and not replaced:
                 raise NativeMarketplaceError(502, "Chrome answered for a different draft. Check the native listing.")
         expected = "draft" if action == "save_draft" else "published"
@@ -237,11 +245,11 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
             # A refused update leaves the live listing in place. Another Update is the seller's choice.
             return {"state": "published", **contract, "error": reason or "Could not update the live listing."}
         values = {**contract, "error": reason or "Could not finish."}
-        if marketplace == "depop" and _depop_draft_gone(result):
+        if marketplace in {"depop", "vinted"} and _draft_gone(result):
             values["draft_url"] = None
-        elif marketplace in {"depop", "etsy"} and result.get("draft_url"):
+        elif marketplace in {"depop", "etsy", "vinted"} and result.get("draft_url"):
             candidate = draft_url(marketplace, result["draft_url"])
-            replaced = marketplace == "depop" and result.get("draft_replaced") is True
+            replaced = marketplace in {"depop", "vinted"} and result.get("draft_replaced") is True
             # A refusal that names some other draft stays on the draft already linked
             # to this listing. The refusal is known, so List can run again.
             if replaced or not record.get("draft_url") or candidate == record["draft_url"]:
@@ -287,7 +295,7 @@ def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[s
         return ["update"]
     if marketplace in {"ebay", "poshmark"}:
         return ["list"]
-    if marketplace in {"sellwild", "vinted"}:
+    if marketplace == "sellwild":
         return ["publish"]
     current = record.get("state") == "draft" and record.get("revision_id") == revision_id and record.get("draft_url")
     return ["publish"] if current else ["save_draft", "publish"]
@@ -619,8 +627,8 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
             if step == "save_draft" and not (record.get("state") == "draft" and not record.get("error") and record.get("draft_url")):
                 break
             # A confirmed List found the saved draft deleted. Save a new one, then list that, in this same job.
-            if (marketplace == "depop" and step == "publish" and "save_draft" not in steps
-                    and _depop_draft_gone(record)):
+            if (marketplace in {"depop", "vinted"} and step == "publish" and "save_draft" not in steps
+                    and _draft_gone(record)):
                 steps.extend(["save_draft", "publish"])
     except NativeMarketplaceError:
         # A newer action owns the record; leave it as that action wrote it.

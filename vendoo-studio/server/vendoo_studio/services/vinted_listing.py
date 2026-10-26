@@ -311,7 +311,7 @@ def _price(snapshot: dict):
 
 @requirement("vinted")
 def vinted_requirements(snapshot: dict, context: Context) -> list[dict]:
-    """What List on Vinted refuses before Chrome opens the sell form."""
+    """What List on Vinted refuses before the extension writes a draft."""
     del context
     apply_vinted_listing(snapshot)
     found: list[dict] = []

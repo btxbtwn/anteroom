@@ -380,6 +380,31 @@ class AutodelistOptionTest(unittest.TestCase):
         self.assertEqual(seen["call"], (self.tee, ["etsy"], True))
         self.assertEqual(notes[created[0]], "Delisted from Etsy.")
 
+    def test_autodelist_includes_vinted_and_skips_where_it_sold(self):
+        user_settings.set_autodelist(True)
+        created = self.handle(_ebay_event())
+        seen = {}
+
+        async def fake_delist(db, conv_id, markets, confirm):
+            seen["call"] = (list(markets), confirm)
+            return {name: {"state": "deleted"} for name in markets}
+
+        def fake_listings(db, conv_id):
+            return {
+                "ebay": {"state": "live", "listing_id": "1234567890", "sold_here": True},
+                "etsy": {"state": "live", "listing_id": "555", "sold_here": False},
+                "vinted": {"state": "live", "listing_id": "999", "sold_here": False},
+            }
+
+        with (
+            mock.patch("vendoo_studio.services.marketplace_delist.delist", fake_delist),
+            mock.patch("vendoo_studio.services.marketplace_delist.listings", fake_listings),
+        ):
+            notes = asyncio.run(marketplace_accounts.autodelist_for_sales(created, session_factory=self.Session))
+        self.assertEqual(seen["call"], (["etsy", "vinted"], True))
+        self.assertEqual(notes[created[0]], "Delisted from Etsy and Vinted.")
+        self.assertNotIn("ebay", seen["call"][0])
+
     def test_a_delist_that_cannot_start_is_reported_once(self):
         user_settings.set_autodelist(True)
         created = self.handle(_ebay_event())

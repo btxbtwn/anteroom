@@ -7,7 +7,7 @@ function marketplaceHeaderRule(id, headers, regexFilter, requestMethods) {
 }
 
 // Scope each web client's request context to this extension's own Depop,
-// Mercari, Poshmark and Sellwild API calls. Ordinary browsing and requests
+// Mercari, Poshmark, Sellwild and Vinted API calls. Ordinary browsing and requests
 // from other extensions are untouched. A failed setup is tried again next time.
 // One short pattern per rule. Chrome rejects a regexFilter whose compiled
 // form is over 2KB, and one alternation covering every Depop path did that,
@@ -32,7 +32,7 @@ const DEPOP_PAGE_RULES = [
 function ensureMarketplaceRequestContext() {
   if (!marketplaceNetworkReady) {
     marketplaceNetworkReady = chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020, 17021, 17022, 17023],
+      removeRuleIds: [17001, 17002, 17003, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020, 17021, 17022, 17023, 17024, 17025, 17026, 17027, 17028],
       addRules: [
         ...DEPOP_PAGE_RULES.map(([id, regexFilter]) => marketplaceHeaderRule(id, DEPOP_PAGE_HEADERS, regexFilter, DEPOP_PAGE_METHODS)),
         marketplaceHeaderRule(17002, { Origin: 'https://www.mercari.com', Referer: 'https://www.mercari.com/sell/' },
@@ -43,6 +43,16 @@ function ensureMarketplaceRequestContext() {
           '^https://webapi\\.depop\\.com/api/v1/receipts/', ['get']),
         marketplaceHeaderRule(17005, { Origin: 'https://poshmark.com', Referer: 'https://poshmark.com/create-listing' },
           '^https://poshmark\\.com/(vm-rest/|api/|create-listing$)', ['get', 'post', 'put', 'delete']),
+        marketplaceHeaderRule(17024, { Origin: 'https://www.vinted.com', Referer: 'https://www.vinted.com/' },
+          '^https://www\\.vinted\\.com/(items/new|api/v2/users/current|api/v2/items/\\d+(/delete)?)(\\?|$)', ['get', 'post']),
+        marketplaceHeaderRule(17025, { Origin: 'https://www.vinted.com', Referer: 'https://www.vinted.com/items/new' },
+          '^https://www\\.vinted\\.com/api/v2/item_upload/(catalogs|colors|brands|attributes|size_groups|items(/\\d+)?|drafts(/\\d+(/completion)?)?)(\\?|$)', ['get', 'post', 'put']),
+        marketplaceHeaderRule(17026, { Origin: 'https://www.vinted.com', Referer: 'https://www.vinted.com/items/new' },
+          '^https://www\\.vinted\\.com/api/v2/photos(\\?|$)', ['post']),
+        marketplaceHeaderRule(17027, { Origin: 'https://www.vinted.com', Referer: 'https://www.vinted.com/' },
+          '^https://www\\.vinted\\.com/api/v2/wardrobe/\\d+/items(\\?|$)', ['get']),
+        marketplaceHeaderRule(17028, { Origin: 'https://www.vinted.com', Referer: 'https://www.vinted.com/items/new' },
+          '^https://api\\.www\\.vinted\\.com/shipping-estimation/external/catalogs/\\d+/package_sizes(\\?|$)', ['get']),
         // Depop's accelerated photo bucket expects its web app as the referrer.
         marketplaceHeaderRule(17006, { Referer: 'https://web.depop.com/' },
           '^https://[a-z0-9.-]+\\.s3-accelerate\\.amazonaws\\.com/', ['put']),

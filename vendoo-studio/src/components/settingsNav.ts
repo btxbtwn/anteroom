@@ -87,11 +87,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["vendoo", "send to vendoo", "hide vendoo", "turn off vendoo", "disable vendoo"],
   },
   {
-    id: "marketplaces",
-    title: "Marketplaces",
+    id: "where-you-list",
+    title: "Where you list",
     section: "listings",
-    targetId: "marketplaces",
-    searchTerms: ["list to", "ebay", "poshmark", "mercari", "depop", "etsy"],
+    targetId: "where-you-list",
+    searchTerms: ["marketplaces", "list to", "ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "direct", "crosslist"],
   },
   {
     id: "package-dimensions",
@@ -99,6 +99,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "listings",
     targetId: "package-dimensions",
     searchTerms: ["shipping", "box", "length", "width", "height", "size"],
+  },
+  {
+    id: "ships-from-zip",
+    title: "Ships from ZIP",
+    section: "listings",
+    targetId: "package-dimensions",
+    searchTerms: ["zip", "zip code", "ships from", "shipping", "mercari", "depop"],
   },
   {
     id: "hidden-fields",
@@ -227,11 +234,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["categories", "extract", "sync", "taxonomy"],
   },
   {
-    id: "marketplaces",
-    title: "Marketplaces",
+    id: "accounts",
+    title: "Marketplace accounts",
     section: "connections",
-    targetId: "marketplaces",
-    searchTerms: ["depop", "poshmark", "mercari", "sellwild", "ebay", "etsy", "detect sales", "sale detection", "cookie", "sign in"],
+    targetId: "accounts",
+    searchTerms: ["marketplaces", "accounts", "depop", "poshmark", "mercari", "sellwild", "vinted", "ebay", "etsy", "detect sales", "sale detection", "cookie", "sign in"],
   },
   {
     id: "direct-ebay",
@@ -280,7 +287,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     title: "Vendoo API logs",
     section: "logs",
     targetId: "vendoo-api-logs",
-    searchTerms: ["api", "request", "http", "live", "log", "vendoo", "debug"],
+    searchTerms: ["api", "request", "http", "live", "log", "vendoo", "debug", "troubleshooting"],
   },
   {
     id: "help",

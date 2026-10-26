@@ -31,7 +31,7 @@ from vendoo_studio.services.marketplace_identity import listing_id, listing_refe
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
 MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
-BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop", "sellwild"}
+BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop", "sellwild", "vinted"}
 
 class DelistError(RuntimeError):
     def __init__(self, status_code: int, detail: str):
@@ -296,8 +296,6 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         raise DelistError(400, "Confirm the delist before anything is deleted.")
     if not names or any(name not in MARKETPLACES for name in names):
         raise DelistError(400, "Name the marketplaces to delist.")
-    if "vinted" in names:
-        raise DelistError(409, "Delist this item on Vinted. Anteroom does not delete a Vinted listing.")
     known = listings(db, conv_id)
     for name in names:
         entry = known.get(name)
