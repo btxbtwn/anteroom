@@ -223,6 +223,7 @@ export function MarketplacesLayout({
     retry: false,
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: nativeKey });
+      void queryClient.invalidateQueries({ queryKey: ["native-editor-form", convId] });
       void queryClient.invalidateQueries({ queryKey: liveKey });
       void queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
     },

@@ -37,6 +37,8 @@ export function squashFieldKey(value: string): string {
  * Mirrors server ``label_to_json_key``.
  */
 export function labelToJsonKey(fieldLabel: string): string {
+  // Native form paths already name JSON keys; don't turn sizeSetId into sizesetid.
+  if (/^[a-z][A-Za-z0-9]*$/.test(fieldLabel)) return fieldLabel;
   const label = String(fieldLabel || "")
     .toLowerCase()
     .replace(/[_/]+/g, " ")
@@ -138,7 +140,7 @@ export function setListingEditorValue(
     const current = (listing[bucket] && typeof listing[bucket] === "object" && !Array.isArray(listing[bucket]))
       ? { ...(listing[bucket] as Record<string, unknown>) }
       : {};
-    const key = resolveSpecificsKey(current, parts[1]);
+    const key = /^[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*$/.test(parts[1]) ? parts[1] : resolveSpecificsKey(current, parts[1]);
     // Drop schema-label duplicates so we don't keep both Accents and accents.
     const want = squashFieldKey(parts[1]);
     for (const alias of Object.keys(current)) {

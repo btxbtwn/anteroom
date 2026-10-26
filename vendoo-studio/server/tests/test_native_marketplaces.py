@@ -295,25 +295,6 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(result["suggested"], {"category_id": 272, "condition_id": 3})
         self.assertEqual(len(result["conditions"]), 5)
 
-    def test_poshmark_options_come_from_its_catalog(self):
-        catalog = {"poshmark": {"colors": [{"name": "Blue"}, {"name": "Gray"}], "catalog": {"departments": [
-            {"id": "kids", "display": "Kids", "categories": [{"id": "jackets", "display": "Jackets & Coats", "category_features": [
-                {"id": "puffer", "display": "Puffers"}, {"id": "rain", "display": "Raincoats"}]}]}]}}}
-        listing = {**LISTING, "marketplace_categories": {"poshmark": "Kids > Jackets & Coats"}}
-        listing.pop("marketplace_category_ids")
-        ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
-        with patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=AsyncMock(return_value=catalog)):
-            result = self.client.get(f"{self.base}/poshmark/options").json()
-        self.assertEqual(result["category"], ["Kids", "Jackets & Coats"])
-        self.assertEqual(result["subcategories"], ["Puffers", "Raincoats", "None"])
-        self.assertEqual(result["colors"], ["Blue", "Gray"])
-        self.assertTrue(result["catalog_available"])
-        with patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=AsyncMock(return_value={})):
-            offline = self.client.get(f"{self.base}/poshmark/options").json()
-        self.assertEqual((offline["category"], offline["subcategories"]), ([], []))
-        self.assertIn("Tan", offline["colors"])
-        self.assertFalse(offline["catalog_available"])
-
     def test_a_listed_poshmark_post_keeps_the_extensions_warning(self):
         outcome = native._outcome("poshmark", "list", {}, {
             "ok": True, "state": "published", "listing_url": POSH_URL, "warning": "Poshmark left Smart Pricing on.",

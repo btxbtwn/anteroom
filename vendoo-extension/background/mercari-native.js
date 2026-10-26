@@ -102,6 +102,10 @@ function mercariNumberedSizes(wanted, sizes) {
 function mercariSize(listing, categoryId) {
   const sizes = listing.form?.sizes;
   if (!Array.isArray(sizes) || !sizes.length) return { none: !Array.isArray(sizes) ? 'unknown' : 'none' };
+  if (Object.hasOwn(listing.mercari_specifics || {}, 'nativeSizeId')) {
+    const id = Number(listing.mercari_specifics.nativeSizeId);
+    return sizes.some(size => Number(size.id) === id) ? { id } : { problem: 'a size Mercari offers in this category' };
+  }
   const wanted = mercariWantedSize(listing);
   if (!wanted) {
     const coded = Number(listing.form?.aspects?.[`${categoryId}_Size`]);

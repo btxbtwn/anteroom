@@ -5,6 +5,20 @@ const titles = (fields: { key: string; label: string; required?: boolean }[]) =>
   Object.fromEntries(groupFieldsIntoSections(fields).map((s) => [s.title, s.fields.map((f) => f.label)]));
 
 describe("groupFieldsIntoSections", () => {
+  it("keeps dependent sizing in order and places native shipping and pricing controls with their topics", () => {
+    const groups = titles([
+      { key: "poshmark_specifics.nativeSizeId", label: "Size", required: true },
+      { key: "poshmark_specifics.sizeSetId", label: "Size group", required: true },
+      { key: "depop_specifics.parcelSize", label: "Parcel Size" },
+      { key: "poshmark_specifics.smartSell.enabled", label: "Smart Pricing" },
+      { key: "poshmark_specifics.smartSell.minimumPrice", label: "Minimum Price" },
+      { key: "poshmark_specifics.subcategory", label: "Sub-category" },
+    ]);
+    expect(groups["Size & fit"]).toEqual(["Size group", "Size"]);
+    expect(groups.Shipping).toEqual(["Parcel Size"]);
+    expect(groups.Pricing).toEqual(["Smart Pricing", "Minimum Price"]);
+    expect(groups.Item).toEqual(["Sub-category"]);
+  });
   it("groups the general tab by topic in display order", () => {
     const sections = groupFieldsIntoSections([
       { key: "title", label: "Title" },

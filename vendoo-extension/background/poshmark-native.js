@@ -63,7 +63,7 @@ function poshmarkPostStyleTags(listing, known) {
   const byKey = new Map(known.map(tag => [marketplaceNameKey(tag), tag]));
   const spelled = tag => byKey.get(marketplaceNameKey(tag)) || tag;
   const own = valid(Array.isArray(listing.poshmark_specifics?.styleTags) ? listing.poshmark_specifics.styleTags : []);
-  if (own.length) return [...new Set(own.map(spelled))].slice(0, 3);
+  if (Array.isArray(listing.poshmark_specifics?.styleTags)) return [...new Set(own.map(spelled))].slice(0, 3);
   const general = valid(listingTags(listing));
   const matched = [...new Set(general.map(tag => byKey.get(marketplaceNameKey(tag))).filter(Boolean))];
   return (matched.length ? matched : [...new Set(general)]).slice(0, 3);
@@ -238,7 +238,7 @@ function poshmarkWithSubcategory(catalog, found, wanted) {
 const POSHMARK_FIT_LABELS = { petite: 'Petite', plus: 'Plus', 'big_&_tall': 'Big & Tall', maternity: 'Maternity', juniors: 'Juniors' };
 
 // A size inside the category's own size sets, as { set, size } or { problem }.
-// Vendoo's coded size (``<leaf>_size`` with its ``_scale`` set tag) wins.
+// An explicit direct-editor size wins over an older imported coded size.
 // Otherwise the seller's size is matched only inside the sets their listing
 // allows: a kids' size inside the boys' or girls' set the listing names, a
 // fit (Petite, Plus, Big & Tall...) inside that set. Nothing crosses them.
@@ -249,6 +249,14 @@ function poshmarkSize(category, listing, { kids = false, leaf = category.id } = 
   const sizesOf = set => set.size_systems?.us?.sizes || [];
   const all = sets.flatMap(set => sizesOf(set).map(size => ({ set, size })));
   if (all.length && all.every(entry => entry.size.id === 'OS')) return { ...all[0], quantity: true };
+  if (Object.hasOwn(specifics, 'sizeSetId')) {
+    const selected = sets.find(set => set.id === specifics.sizeSetId);
+    if (!selected) return { problem: 'a size group Poshmark offers in this category' };
+    const wanted = String(specifics.nativeSizeId || '').trim();
+    const found = sizesOf(selected).find(size => size.id === wanted)
+      || matchSize(wanted, sizesOf(selected).map(size => ({ size, keys: sizeEntryKeys([size.id, size.display, size.short]) })))[0]?.size;
+    return found ? { set: selected, size: found } : { problem: 'a size from the selected Poshmark size group' };
+  }
   const coded = String(aspects[`${leaf}_size`] ?? '').trim();
   const codedScale = String(aspects[`${leaf}_size_scale`] ?? '').trim();
   if (coded && codedScale === 'customSize') return { set: { tags: [] }, size: { id: coded, display: coded } };
@@ -291,6 +299,11 @@ function poshmarkSize(category, listing, { kids = false, leaf = category.id } = 
 // listing's form decides when it has the setting, off included; otherwise the
 // Poshmark specifics' minimum. A minimum at or above the price is off.
 function poshmarkSmartMinimum(listing, price) {
+  const direct = listing.poshmark_specifics?.smartSell;
+  if (direct && typeof direct.enabled === 'boolean') {
+    const value = direct.enabled ? Math.round(Number(direct.minimumPrice)) : 0;
+    return value > 0 && value < price ? value : 0;
+  }
   const smart = listing.form?.specifics?.smartSell;
   const minimum = smart && typeof smart === 'object'
     ? (smart.enabled ? Math.round(Number(smart.minPrice)) : 0)
@@ -322,6 +335,9 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   if (!condition) missing.push({ field: 'condition', needs: 'a condition' });
   const price = poshmarkPrice(listing);
   if (!(price >= 3)) missing.push({ field: 'price', needs: 'a price of $3 or more' });
+  if (listing.poshmark_specifics?.smartSell?.enabled === true && !poshmarkSmartMinimum(listing, price)) {
+    missing.push({ field: 'poshmark_specifics.smartSell.minimumPrice', needs: 'a Smart Pricing minimum above $0 and below the listing price' });
+  }
   const title = String(listing.title || '').trim();
   if (!title) missing.push({ field: 'title', needs: 'a title' });
   if (title.length > 80) missing.push({ field: 'title', needs: 'a title of 80 characters or fewer' });

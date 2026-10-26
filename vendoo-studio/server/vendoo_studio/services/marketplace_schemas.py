@@ -25,7 +25,7 @@ from typing import Literal
 
 from vendoo_studio.services.category_fields import load_rows, save_rows
 
-EBAY_ASPECTS = "ebay_aspects"
+EBAY_ASPECTS = "ebay_aspects_v2"
 EBAY_CONDITIONS = "ebay_conditions"
 ETSY_PROPERTIES = "etsy_properties"
 _TAXONOMY_MAX_AGE_S = 24 * 3600
@@ -49,9 +49,20 @@ def _ebay_field(aspect: dict) -> dict:
         "mode": "selection" if constraint.get("aspectMode") == "SELECTION_ONLY" else "free_text",
         "multi": constraint.get("itemToAspectCardinality") == "MULTI", "max_values": None,
         "max_length": constraint.get("aspectMaxLength"),
-        "values": [{"id": value["localizedValue"], "label": value["localizedValue"]}
+        "values": [{"id": value["localizedValue"], "label": value["localizedValue"],
+                    **({"constraints": value["valueConstraints"]} if value.get("valueConstraints") else {})}
                    for value in aspect.get("aspectValues") or [] if value.get("localizedValue")],
     }
+
+
+def aspect_options(field: dict, answers: dict[str, list[str]]) -> list[dict]:
+    """eBay value constraints require a matching parent aspect selection."""
+    keyed = {name.casefold(): {str(value).casefold() for value in values} for name, values in answers.items()}
+    return [value for value in field.get("values") or [] if all(
+        keyed.get(str(rule.get("parentName") or "").casefold(), set())
+        & {str(item).casefold() for item in rule.get("parentValues") or []}
+        for rule in value.get("constraints") or []
+    )]
 
 
 async def ebay_aspects(client, category_id: str) -> list[dict]:

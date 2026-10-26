@@ -77,6 +77,14 @@ describe("cloneListing", () => {
 });
 
 describe("schema label ↔ listing JSON keys", () => {
+  it("preserves native JSON key spelling when introducing size-group and size IDs", () => {
+    const listing = { poshmark_specifics: {} };
+    setListingEditorValue(listing, "poshmark_specifics.sizeSetId", "standard");
+    setListingEditorValue(listing, "poshmark_specifics.nativeSizeId", "XL");
+    expect(listing.poshmark_specifics).toEqual({ sizeSetId: "standard", nativeSizeId: "XL" });
+    expect(labelToJsonKey("nativeSizeId")).toBe("nativeSizeId");
+    expect(getListingEditorValue(listing, "poshmark_specifics.nativeSizeId")).toBe("XL");
+  });
   it("maps Vendoo labels onto camelCase listing keys", () => {
     expect(labelToJsonKey("Sleeve Length")).toBe("sleeveLength");
     expect(labelToJsonKey("Brand")).toBe("brand");
