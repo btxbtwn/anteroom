@@ -8,15 +8,46 @@ from pathlib import Path
 import pytest
 
 
+def _postgres_database(worker: str) -> None:
+    """Point the app at a fresh Postgres database for this worker.
+
+    Set ``ANTEROOM_TEST_DATABASE_URL`` to a server URL (any database on it) to
+    run the suite on Postgres; each xdist worker gets its own database there.
+    """
+    import psycopg
+    from sqlalchemy.engine import make_url
+
+    base = make_url(os.environ["ANTEROOM_TEST_DATABASE_URL"])
+    name = f"anteroom_test_{worker}"
+    admin = base.set(drivername="postgresql").render_as_string(hide_password=False)
+    with psycopg.connect(admin, autocommit=True) as connection:
+        connection.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        connection.execute(f'CREATE DATABASE "{name}"')
+    os.environ["ANTEROOM_DATABASE_URL"] = base.set(database=name).render_as_string(hide_password=False)
+
+
 def pytest_configure(config):
     """Give each xdist worker its own data dir before vendoo_studio.config is imported."""
+    config.addinivalue_line("markers", "sqlite_only(reason): needs the Mac's SQLite database file")
     worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if os.environ.get("ANTEROOM_TEST_DATABASE_URL"):
+        _postgres_database(worker or "main")
     if not worker:
         return
     base = Path(os.environ.get("VENDOO_STUDIO_DATA_DIR") or tempfile.mkdtemp(prefix="vendoo-studio-tests-"))
     worker_dir = base / worker
     worker_dir.mkdir(parents=True, exist_ok=True)
     os.environ["VENDOO_STUDIO_DATA_DIR"] = str(worker_dir)
+
+
+def pytest_collection_modifyitems(config, items):
+    if not os.environ.get("ANTEROOM_TEST_DATABASE_URL"):
+        return
+    for item in items:
+        marker = item.get_closest_marker("sqlite_only")
+        if marker is not None:
+            reason = marker.args[0] if marker.args else "needs the Mac's SQLite database file"
+            item.add_marker(pytest.mark.skip(reason=f"SQLite only: {reason}"))
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -26,6 +26,8 @@ from vendoo_studio.services.backups import (
     take_snapshot,
 )
 
+pytestmark = pytest.mark.sqlite_only("snapshots copy the SQLite file with VACUUM INTO")
+
 
 @pytest.fixture
 def source_db(tmp_path):

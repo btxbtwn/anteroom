@@ -19,6 +19,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import json_value
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.etsy_fields import (
     etsy_eligible,
@@ -43,11 +44,11 @@ def etsy_not_allowed_live(db: Session) -> list[dict[str, Any]]:
             Conversation.id,
             Conversation.title,
             Conversation.notes,
-            func.json_extract(doc, "$.title"),
-            func.json_extract(doc, "$.etsy_specifics"),
+            json_value(doc, "title"),
+            json_value(doc, "etsy_specifics"),
             func.coalesce(
-                func.json_extract(doc, "$.ebay_specifics.yearManufactured"),
-                func.json_extract(doc, "$.ebay_specifics.year_manufactured"),
+                json_value(doc, "ebay_specifics.yearManufactured"),
+                json_value(doc, "ebay_specifics.year_manufactured"),
             ),
         )
         .join(Listing, Listing.conversation_id == Conversation.id)
@@ -93,7 +94,7 @@ def etsy_not_allowed_live(db: Session) -> list[dict[str, Any]]:
 
 
 def _json_object(raw: Any) -> dict[str, Any]:
-    """json_extract hands an object back as JSON text."""
+    """``json_value`` hands back a dict; older callers passed JSON text."""
     if isinstance(raw, dict):
         return raw
     try:

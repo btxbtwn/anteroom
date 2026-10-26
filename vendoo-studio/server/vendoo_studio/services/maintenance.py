@@ -31,6 +31,8 @@ def table_sizes(db: Session, *, limit: int = TOP_TABLES) -> list[dict]:
     is growing.
     """
     known = {name for name in inspect(db.get_bind()).get_table_names() if not name.startswith("sqlite_")}
+    if db.get_bind().dialect.name != "sqlite":
+        return _row_counts(db, known, limit=limit)
     try:
         # An index is its own row in dbstat; charge its pages to its table, or
         # the biggest table looks smaller than the index that serves it.
@@ -85,8 +87,14 @@ def prune_event_bloat(db: Session) -> dict:
 
 
 def vacuum_database() -> int:
-    """Rewrite the database without its free pages. Returns bytes reclaimed."""
-    from vendoo_studio.database import engine
+    """Rewrite the database without its free pages. Returns bytes reclaimed.
+
+    SQLite only: Postgres runs autovacuum itself and has no file here to shrink.
+    """
+    from vendoo_studio.database import IS_SQLITE, engine
+
+    if not IS_SQLITE:
+        return 0
 
     before = database_bytes()
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:

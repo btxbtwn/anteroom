@@ -10,7 +10,10 @@ class EbayAction(Base):
     __table_args__ = (
         Index("ix_ebay_actions_fingerprint", "account_id", "fingerprint"),
         # One eBay workspace write at a time, even from concurrent requests.
-        Index("uq_ebay_action_in_flight", "state", unique=True, sqlite_where=text("state = 'sending'")),
+        Index(
+            "uq_ebay_action_in_flight", "state", unique=True,
+            sqlite_where=text("state = 'sending'"), postgresql_where=text("state = 'sending'"),
+        ),
     )
 
     id = Column(String, primary_key=True, default=new_id)

@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import json_value, json_text
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.listing_evidence import SaleSnapshot
@@ -102,22 +103,22 @@ def seller_history_context(
     start = clock - timedelta(days=SALES_WINDOW_DAYS)
 
     # No photos, messages, internal notes, item URLs or whole listing JSON enter
-    # this context. Filter brand in SQLite before examining category/condition.
+    # this context. Filter brand in the database before examining category/condition.
     facets = ("title", "category_path", "department", "condition", "size", "price", "quantity")
     rows = (
         db.query(
             Conversation.id, Conversation.status, Conversation.notes,
-            *(func.json_extract(ListingRevision.listing_json, f"$.{key}") for key in facets),
+            *(json_value(ListingRevision.listing_json, key) for key in facets),
         )
         .join(Listing, Listing.conversation_id == Conversation.id)
         .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
         .filter(
             Conversation.id != conv_id,
             or_(
-                func.lower(func.trim(func.json_extract(ListingRevision.listing_json, "$.brand"))) == brand.lower(),
+                func.lower(func.trim(json_text(ListingRevision.listing_json, "brand"))) == brand.lower(),
                 db.query(SaleSnapshot.id).filter(
                     SaleSnapshot.conversation_id == Conversation.id,
-                    func.lower(func.trim(func.json_extract(SaleSnapshot.listing, "$.brand"))) == brand.lower(),
+                    func.lower(func.trim(json_text(SaleSnapshot.listing, "brand"))) == brand.lower(),
                 ).exists(),
             ),
         )

@@ -62,6 +62,7 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 - **Anteroom frontend build:** `cd vendoo-studio && npm run build`
 - **Anteroom frontend lint and tests:** `cd vendoo-studio && npm run lint && npm test`
 - **Anteroom backend lint and tests:** `cd vendoo-studio && ruff check server && python -m pytest -q -n auto` (install with `pip install -e ".[dev]"`)
+- **Anteroom backend tests on Postgres:** set `ANTEROOM_TEST_DATABASE_URL` to any database on a Postgres 16 server (each test worker creates its own). Without a local server, `pip install pgserver` gives one. Mark tests that need the SQLite file `@pytest.mark.sqlite_only("why")`.
 - **Extension tests:** `node --test 'vendoo-extension/tests/*.test.js'`
 - **Webhook relay tests and deploy:** `cd webhook-relay && npm test`; `npx wrangler deploy` only when the seller asks.
 - **Extension:** **Connect Chrome** opens everyday Chrome. Load unpacked from `vendoo-extension/` in `chrome://extensions/` with Developer mode enabled.
@@ -76,7 +77,7 @@ Use `--content docs` for specs/skills prose, `--content config` for JSON/YAML/TO
 
 ## Database schema
 
-- Anteroom's SQLite schema is owned by Alembic. Revisions live in `vendoo-studio/server/vendoo_studio/migrations/versions/` and ship inside the Mac app.
+- Anteroom's schema is owned by Alembic, on the Mac's SQLite and on the hosted Postgres (`ANTEROOM_DATABASE_URL`) alike. A revision must upgrade both; CI runs the backend suite on each. Revisions live in `vendoo-studio/server/vendoo_studio/migrations/versions/` and ship inside the Mac app.
 - **Every model change needs a revision.** Editing a model without one leaves every existing database short of the change, and the mismatch only surfaces later as a query error. Generate one with `alembic revision --autogenerate` and read what it produced before committing it.
 - Revisions are forward-only in practice. Test a new one against a copy of a database made by the previous release, not only against a fresh one.
 - `init_db` migrates on startup, snapshots first, and refuses to open a database stamped with a revision this build does not know, which is what stops an older build from writing into a newer database.

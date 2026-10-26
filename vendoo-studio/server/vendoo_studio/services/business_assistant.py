@@ -38,6 +38,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import json_value
 from vendoo_studio.models.assistant import NEW_THREAD_TITLE, AssistantMessage, AssistantThread
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
@@ -1097,7 +1098,6 @@ def _shown(value: Any) -> str:
 
 def _price_changes(db: Session) -> list[dict[str, Any]]:
     """Each time a listing's asking price moved between saved revisions, newest first."""
-    from sqlalchemy import func
 
     from vendoo_studio.models.listing import ListingRevision
     from vendoo_studio.services.inventory_analytics import _number
@@ -1107,7 +1107,7 @@ def _price_changes(db: Session) -> list[dict[str, Any]]:
     revisions = (
         db.query(
             ListingRevision.conversation_id,
-            func.json_extract(ListingRevision.listing_json, "$.price"),
+            json_value(ListingRevision.listing_json, "price"),
             ListingRevision.created_at,
         )
         .order_by(ListingRevision.created_at, ListingRevision.id)

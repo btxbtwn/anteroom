@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
-from vendoo_studio.config import DATABASE_PATH
+from vendoo_studio.config import DATABASE_URL
 
 # SQLite serialises writers. Studio writes from the request path *and* from
 # background sweeps (Vendoo label sync, watch, bulk import), so a chat send can
@@ -10,22 +11,40 @@ from vendoo_studio.config import DATABASE_PATH
 # the seller saw the prompt die with "database is locked". Wait instead.
 BUSY_TIMEOUT_SEC = 30
 
-engine = create_engine(
-    f"sqlite:///{DATABASE_PATH}",
-    connect_args={"check_same_thread": False, "timeout": BUSY_TIMEOUT_SEC},
-    # Never make a checkout wait for another session to close. Sweeps open
-    # sessions on the event loop, and a request's session is only returned by
-    # that same loop, so a capped pool that runs dry stalls the whole server
-    # for the pool timeout on every checkout. SQLite connections are cheap;
-    # the bound that matters is SQLite's own write lock.
-    max_overflow=-1,
-    echo=False,
-)
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+def database_url(raw: str = DATABASE_URL) -> str:
+    """The configured URL, with Postgres pointed at the psycopg 3 driver.
+
+    Hosts hand out ``postgres://`` or ``postgresql://`` URLs; SQLAlchemy would
+    pick psycopg2 for those, which this app does not install.
+    """
+    url = make_url(raw)
+    if url.drivername in {"postgres", "postgresql"}:
+        url = url.set(drivername="postgresql+psycopg")
+    return url.render_as_string(hide_password=False)
 
 
-@event.listens_for(engine, "connect")
+def make_engine(url: str):
+    if make_url(url).get_backend_name() == "sqlite":
+        sqlite_engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False, "timeout": BUSY_TIMEOUT_SEC},
+            # Never make a checkout wait for another session to close. Sweeps
+            # open sessions on the event loop, and a request's session is only
+            # returned by that same loop, so a capped pool that runs dry stalls
+            # the whole server for the pool timeout on every checkout. SQLite
+            # connections are cheap; the bound that matters is SQLite's own
+            # write lock.
+            max_overflow=-1,
+            echo=False,
+        )
+        event.listen(sqlite_engine, "connect", enable_wal)
+        return sqlite_engine
+    # Postgres connections are not cheap, so the pool is capped. pre_ping
+    # replaces connections a hosted database dropped while idle.
+    return create_engine(url, pool_size=10, max_overflow=20, pool_pre_ping=True, echo=False)
+
+
 def enable_wal(dbapi_connection, _connection_record):
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
@@ -36,8 +55,37 @@ def enable_wal(dbapi_connection, _connection_record):
     cursor.close()
 
 
+engine = make_engine(database_url())
+IS_SQLITE = engine.dialect.name == "sqlite"
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
 class Base(DeclarativeBase):
     pass
+
+
+def dialect_insert(db):
+    """``insert`` for the session's database, so ``on_conflict_do_nothing`` works on both."""
+    if db.get_bind().dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert
+    return insert
+
+
+def json_value(column, path: str):
+    """The value at ``path`` ("a.b") in a JSON column, typed the same on SQLite and Postgres.
+
+    Strings, numbers, booleans and None come back as themselves; objects and
+    arrays come back decoded, as dicts and lists.
+    """
+    return column[tuple(path.split("."))]
+
+
+def json_text(column, path: str):
+    """The same value as text, for comparing inside SQL (``lower(...) == ...``)."""
+    return json_value(column, path).as_string()
 
 
 def get_db():

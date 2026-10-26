@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.485 — 2026-10-27
+
+- Anteroom's backend can now run on Postgres as well as SQLite. Every query, JSON read, upsert and schema migration goes through one layer that speaks both, so the hosted API can share one database while this Mac keeps using its own file. Nothing about listing changes, and an existing SQLite database opens exactly as before.
+
 ## 0.1.483 — 2026-10-27
 
 - A Depop draft now carries the package size it needs to be posted. Anteroom quoted Depop's shipping when it published but not when it saved the draft, so a draft could be saved without the one field Depop requires, and List left you with a draft Depop never published. Saving and publishing now use the same quote, and a draft that comes back without it is named instead of saved.

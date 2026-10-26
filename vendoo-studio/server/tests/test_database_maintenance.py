@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -151,6 +153,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
+@pytest.mark.sqlite_only("the Mac's SQLite pool is unbounded; Postgres connections are capped")
 class ConnectionPoolTest(unittest.TestCase):
     def test_a_checkout_never_waits_for_another_session_to_close(self):
         # A sweep on the event loop opening one more session than the pool's

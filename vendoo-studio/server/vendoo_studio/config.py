@@ -79,6 +79,8 @@ PHOTOS_DIR = str(user_data_root() / "photos")
 FILL_LOGS_DIR = str(user_data_root() / "fill-logs")
 LOGS_DIR = str(user_data_root() / "logs")
 DATABASE_PATH = str(user_data_root() / "vendoo_studio.db")
+# The Mac app keeps its SQLite file. The hosted API points this at Postgres.
+DATABASE_URL = os.environ.get("ANTEROOM_DATABASE_URL") or f"sqlite:///{DATABASE_PATH}"
 BACKUPS_DIR = str(user_data_root() / "backups")
 PAIRING_FILE = str(user_data_root() / "pairing_token.txt")
 
