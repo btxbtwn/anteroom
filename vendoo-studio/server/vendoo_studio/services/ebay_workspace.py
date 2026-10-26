@@ -298,7 +298,7 @@ async def read(client: EbayClient, section: str, offset: int = 0, target: str = 
     if section == "categories":
         body = await client.request("GET", "/commerce/taxonomy/v1/category_tree/0/get_category_suggestions", params={"q": query}, app=True)
         return {"rows": [row(c["category"]["categoryId"], c["category"]["categoryName"],
-                              subtitle=" › ".join(a["categoryName"] for a in c.get("categoryTreeNodeAncestors", [])))
+                              subtitle=" › ".join(a["categoryName"] for a in reversed(c.get("categoryTreeNodeAncestors", []))))
                          for c in body.get("categorySuggestions", [])]}
     if section == "aspects":
         from vendoo_studio.services.marketplace_schemas import ebay_aspects

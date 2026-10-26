@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -71,9 +72,12 @@ async def cancel(conv_id: str, marketplace: Marketplace, db: Session = Depends(g
     return await _reply(native.cancel(conv_id, marketplace, db))
 
 
-@router.get("/poshmark/options")
-async def poshmark_options(conv_id: str, db: Session = Depends(get_db)):
-    return await _reply(native.poshmark_options(conv_id, db))
+@router.get("/{marketplace}/form")
+async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "sellwild"],
+                      revision_id: str | None = None, db: Session = Depends(get_db)):
+    from vendoo_studio.services.native_editor import editor_form as load_form
+
+    return await _reply(load_form(conv_id, marketplace, revision_id, db))
 
 
 @router.get("/sellwild/options")

@@ -6,9 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.392 — 2026-10-26
+## 0.1.394 — 2026-10-26
 
 - eBay earnings and listing performance now recognize items imported or linked directly in Anteroom. See original selling fees alongside net proceeds, quantity-adjusted item costs and profit; missing or duplicate links explain what needs review.
+
+## 0.1.393 — 2026-10-26
+
+- Direct listing forms now use the catalogs the marketplaces actually list with. Size groups update their size choices, Depop shows each category’s attributes, and Smart Pricing keeps your choice. Fields controlled by Item Details or Settings explain where to change them.
+
+## 0.1.392 — 2026-10-26
+
+- Connecting eBay from Settings now grants access to your shipping, payment, and return policies, so the eBay card no longer shows "eBay denied access" right after you sign in. If eBay still refuses, the card says why and offers a Reconnect eBay button.
 
 ## 0.1.391 — 2026-10-26
 

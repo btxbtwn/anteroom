@@ -83,6 +83,9 @@ CONDITION_IDS = {
 def ebay_condition(listing: dict) -> str:
     specifics = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
     text = str(specifics.get("condition") or listing.get("condition") or "").strip()
+    native = next((code for code, condition_id in CONDITION_IDS.items() if condition_id == text), None)
+    if native:
+        return native
     if text.upper() in CONDITION_IDS:
         return text.upper()
     for pattern, code in _CONDITION:
@@ -183,9 +186,12 @@ def ebay_aspects(listing: dict, form: dict) -> dict[str, list[str]]:
         if key.lower() in _SKIP or _aspect_key(str(key)) in _SKIP or isinstance(value, dict):
             continue
         add(_aspect_name(str(key)), value)
-    add("Brand", (form.get("overrides") or {}).get("brand"))
+    explicit = {_aspect_key(_aspect_name(str(key))) for key in specifics}
+    if "brand" not in explicit:
+        add("Brand", (form.get("overrides") or {}).get("brand"))
     for name, keys in _GENERAL_ASPECTS.items():
-        add(name, next((listing.get(key) for key in keys if str(listing.get(key) or "").strip()), None))
+        if _aspect_key(name) not in explicit:
+            add(name, next((listing.get(key) for key in keys if str(listing.get(key) or "").strip()), None))
     return aspects
 
 
@@ -442,8 +448,15 @@ async def _create_ship_from_location(client: EbayClient) -> dict:
 async def listing_profiles(client: EbayClient | None = None) -> dict[str, list[dict]]:
     """The account's business policies and enabled locations, names and IDs only."""
     client = client or await EbayClient.connect()
-    return {"fulfillment": await _policies(client, "fulfillment"), "payment": await _policies(client, "payment"),
-            "return": await _policies(client, "return"), "locations": await _locations(client)}
+    try:
+        return {"fulfillment": await _policies(client, "fulfillment"), "payment": await _policies(client, "payment"),
+                "return": await _policies(client, "return"), "locations": await _locations(client)}
+    except EbayFailure as exc:
+        if exc.status != 403:
+            raise
+        raise EbayFailure("eBay has not given Anteroom access to your shipping, payment, and return policies. "
+                          "Reconnect eBay to grant it.", 403, code="needs_permission",
+                          marketplace_message=exc.marketplace_message) from exc
 
 
 def _pick(options: list[dict], chosen: str | None, kind: str, setting: str) -> str:
@@ -516,9 +529,14 @@ def _match_aspects(schema: list[dict], aspects: dict[str, list[str]]) -> dict[st
     problems: list[tuple[str, str]] = []
     for field in schema:
         name = field["name"]
-        allowed = [value["label"] for value in field["values"]]
+        parent_answers = {row["name"]: given.get(_aspect_key(row["name"]), []) for row in schema}
+        allowed = [value["label"] for value in marketplace_schemas.aspect_options(field, parent_answers)]
         values = list(given.get(_aspect_key(name)) or [])
         values = _split_values(values, allowed)[:MAX_ASPECT_VALUES] if field["multi"] else values[:1]
+        constrained = {value["label"] for value in field["values"] if value.get("constraints")}
+        if any(value in constrained and value not in allowed for value in values):
+            problems.append((name, f"Choose {name} for the selected parent aspects."))
+            continue
         if field["mode"] == "selection" and values:
             matched = [_choice(value, allowed) for value in values]
             if not all(matched) and field["required"]:
