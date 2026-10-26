@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.413 — 2026-10-26
+
+- eBay listings are now made only from an item in Inventory, with List… under Marketplaces, the same as every other marketplace. The eBay page no longer has its own Create draft and Publish on eBay forms. Importing from eBay, updating inventory price and quantity, and editing a live listing are still there.
+
 ## 0.1.412 — 2026-10-26
 
 - Save selected listing fields as reusable templates. Apply one with a before-and-after review, or create a separate local draft with its own SKU and quantity. Manage templates in Settings → Listings; photos, videos and marketplace links stay with the original item.

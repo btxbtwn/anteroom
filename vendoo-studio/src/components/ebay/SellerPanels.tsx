@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PageNote, PageSection } from "../WorkspacePage";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
-import { ImageUploader, RemoteList } from "./shared";
+import { EvidenceUploader, RemoteList } from "./shared";
 import { ActionForm } from "./ActionForm";
 import { displayMoney, summarizeDisplayedEarnings } from "./dashboardSummary";
 import { WorkspaceTabs } from "./WorkspaceTabs";
@@ -104,7 +104,7 @@ export function OrdersPanel() {
       <RemoteList section="disputes" selected={dispute?.id} onSelect={(row) => { setDispute(row); setFileId(""); }} />
       {dispute ? <div className="space-y-4">
         <RemoteList key={dispute.id} section="dispute" params={{ target: dispute.id }} />
-        <ImageUploader key={`upload-${dispute.id}`} disputeId={dispute.id} onResult={(result) => setFileId(result.receiptId || "")} />
+        <EvidenceUploader key={`upload-${dispute.id}`} disputeId={dispute.id} onResult={(result) => setFileId(result.receiptId || "")} />
         <ActionForm defaultOpen={false} key={`evidence-${dispute.id}-${fileId}`} draftId={`${dispute.id}-${fileId}`} title="Attach dispute evidence" kind="evidence" context={{ dispute_id: dispute.id }}
           fields={[{ name: "file_id", label: "Uploaded evidence file ID", initial: fileId },
                    { name: "evidence_type", label: "Evidence type", options: ["PROOF_OF_DELIVERY", "PROOF_OF_AUTHENTICITY", "PROOF_OF_ITEM_AS_DESCRIBED", "PROOF_OF_CREDIT_NOT_DUE", "PROOF_OF_RETURN_NOT_RECEIVED", "OPTIONAL_SUPPORTING_DOCUMENTS"] }]} />

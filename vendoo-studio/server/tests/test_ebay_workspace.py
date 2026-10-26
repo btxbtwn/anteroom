@@ -35,7 +35,7 @@ def test_plain_keeps_description_inside_literal_cdata(description):
 def example_image():
     stream = io.BytesIO()
     Image.new("RGB", (4, 4), "blue").save(stream, format="JPEG")
-    return {"data": base64.b64encode(stream.getvalue()).decode(), "mime": "image/jpeg", "dispute_id": ""}
+    return {"data": base64.b64encode(stream.getvalue()).decode(), "mime": "image/jpeg"}
 
 
 @pytest.fixture
@@ -124,14 +124,9 @@ def action_cases():
         "campaign_control": {"resource_id": "campaign-1", "action": "pause"},
         "promotion_control": {"resource_id": "promo-1", "action": "pause"},
         "email": {"subject": "Coat sale", "message": "See our coats", "audience_codes": ["FOLLOWERS"], "listing_ids": [ITEM_ID], "schedule": future},
-        "draft": {"sku": "new-sku", "title": "Wool coat", "description": "A nice wool coat", "category_id": "123", "price": "45.00", "quantity": 1,
-                  "condition": "USED_EXCELLENT", "image_urls": ["https://i.ebayimg.com/images/g/test/s-l1600.jpg"], "aspects": {"Brand": ["Acme"]},
-                  "fulfillment_policy_id": "ship", "payment_policy_id": "pay", "return_policy_id": "return", "merchant_location_key": "warehouse"},
         "revise": {"listing_id": ITEM_ID, "title": "New title", "description": "Updated description", "price": "40", "quantity": 2},
-        "publish_offer": {"offer_id": "offer-1", "marketplace": "ebay"},
         "inventory_revision": {"offer_id": "offer-1", "price": "40", "quantity": 2},
         "ad_report": {"campaign_id": "campaign-1", "start": "2026-09-01", "end": "2026-09-30"},
-        "upload_image": example_image(),
         "upload_evidence": {**example_image(), "dispute_id": "dispute-1"},
     }
 
@@ -150,11 +145,10 @@ def test_each_write_requires_review_then_confirmation_and_never_repeats(workspac
     assert response.status_code == 200, response.text
     assert response.json()["state"] == "sent", response.text
     count = len(workspace.remote.writes)
-    assert count == (2 if kind == "draft" else 1)
+    assert count == 1
     assert confirm(workspace, review, kind, payload).status_code == 409
     assert len(workspace.remote.writes) == count
-    if kind != "publish_offer":
-        assert not any(path.endswith("/publish") for _, path, _ in workspace.remote.writes)
+    assert not any(path.endswith("/publish") for _, path, _ in workspace.remote.writes)
 
 
 @pytest.mark.parametrize("section,target", [("traffic", ""), ("finances", ""), ("payouts", ""), ("inbox", ""), ("messages", "chat-1"),
@@ -435,7 +429,7 @@ def test_snad_contest_requires_return_address_and_binds_it(workspace):
 
 @pytest.mark.parametrize("kind,changes", [("markdown", {"percent": 90}), ("quantity_discount", {"percent": 90}),
     ("campaign", {"bid_percent": "2.25"}), ("ad", {"bid_percent": "2.25"}), ("email", {"subject": "x" * 71}),
-    ("campaign", {"bid_percent": "bad"}), ("ad", {"bid_percent": "2.00"}), ("draft", {"weight_oz": "bad"}),
+    ("campaign", {"bid_percent": "bad"}), ("ad", {"bid_percent": "2.00"}),
     ("markdown", {"end": (datetime.now(UTC) + timedelta(days=70)).isoformat()}),
     ("markdown", {"end": (datetime.now(UTC) + timedelta(days=1, hours=1)).isoformat(), "start": (datetime.now(UTC) + timedelta(days=1)).isoformat()}),
 ])
