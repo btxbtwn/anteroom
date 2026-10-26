@@ -497,6 +497,10 @@ export const api = {
       return request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight${query ? `?${query}` : ""}`);
     },
     sellwildOptions: (convId: string) => request<SellwildOptions>(`/conversations/${convId}/native-marketplaces/sellwild/options`),
+    saveDraft: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
+      request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/draft`, {
+        method: "POST", body: JSON.stringify({ revision_id: revisionId }),
+      }),
     list: (convId: string, marketplace: NativeMarketplace, revisionId: string, sellwild?: SellwildChoice) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/list`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId, confirm: true,

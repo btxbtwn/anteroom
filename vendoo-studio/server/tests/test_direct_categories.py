@@ -88,7 +88,7 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields[0], {
             "key": "season", "label": "Season", "required": False, "multi": True,
             "selection_only": False, "options": [], "max_values": 4, "max_length": 65,
-            "options_source": "marketplace",
+            "options_source": "marketplace", "on_form": True,
         })
 
     def test_the_generation_prompt_names_live_fields_and_keeps_vendoo_names(self):

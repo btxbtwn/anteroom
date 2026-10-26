@@ -44,6 +44,11 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
+    // Runtime files (the database, logs, settings) live under data/. Watching
+    // them reloads the page on every API call, which never lets the form settle.
+    watch: {
+      ignored: ["**/data/**", "**/.venv/**", "**/__pycache__/**"],
+    },
     proxy: {
       "/api": {
         // Same variable the backend reads, so a second Studio can run beside the

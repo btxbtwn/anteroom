@@ -29,6 +29,21 @@ const FULL = { ...listing, brand: 'Nike', size: '2XL', condition: 'Pre-Owned - G
   form: { overrides: { condition: 'used_good', brand: 'Nike', categoryV2: { id: 'menswear_tshirts', path: ['menswear', 'menswear_tops', 'menswear_tshirts'] } },
     specifics: { style: ['casual'] }, aspects: {}, ships_from_zip: '70115' } };
 
+test('Depop sends and verifies exact SKU and quantity, including clearing an Item Details SKU', async () => {
+  const { c } = newDraft();
+  withCatalog(c);
+  const item = { ...FULL, quantity: 3, sku: 'item-details', depop_specifics: { ...FULL.depop_specifics, sku: '' } };
+  const fields = await c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 });
+  assert.equal(fields.sku, '');
+  assert.deepEqual(JSON.parse(JSON.stringify(Object.values(fields.variants))), [3]);
+  const draft = { ...fields, description: c.depopDescription(item), price_amount: String(item.price), variant_set_id: fields.variant_set };
+  assert.deepEqual(Array.from(c.depopDraftMismatch(draft, item, fields)), []);
+  const size = Object.keys(fields.variants)[0];
+  assert.ok(c.depopDraftMismatch({ ...draft, variants: { [size]: 1 } }, item, fields).includes('quantity'));
+  assert.ok(c.depopDraftMismatch({ ...draft, sku: 'old-sku' }, item, fields).includes('SKU'));
+  await assert.rejects(c.depopResolvedFields({ listing: { ...item, quantity: 0 }, deadline: Date.now() + 30000 }), /whole-number quantity/);
+});
+
 // Answers Depop's catalog and the seller's shipping reads; other requests go on.
 function withCatalog(c, { attributes = [200, ATTRIBUTES], addresses = [200, [{ id: 41, postal_code: '70115' }, { id: 42, postal_code: '10001' }]],
   providers = [200, [{ id: 'USPS', parcelSizes: [{ id: 'small', title: 'Extra small' }, { id: 'medium', title: 'Medium' }] }]] } = {}) {
@@ -644,4 +659,55 @@ test('Depop publish refuses a draft whose size or type is not the one sent', asy
   assert.match((await c.depopApiAction('publish', approved)).error, /different jacket type/);
   draft.attributes = { 'jacket-type': ['windbreaker'] };
   assert.equal((await c.depopApiAction('publish', approved)).publish_job_id, 'job-1');
+});
+
+test('a locked Depop price wins and nine photos stay within eight', () => {
+  const c = loadWorker();
+  assert.equal(call(c, 'depopPrice', {
+    price: 29.99, depop_specifics: { price: 23 }, seller_fields: ['depop_specifics.price'],
+  }), 23);
+  assert.equal(call(c, 'depopPrice', { price: 29.99, depop_specifics: { price: 23 } }), 29.99);
+  const photos = Array.from({ length: 9 }, (_, index) => ({ id: String(index + 1) }));
+  const chosen = call(c, 'depopChosenPhotos', photos, {});
+  assert.equal(chosen.photos.length, 8);
+  assert.equal(chosen.omitted, 1);
+  assert.deepEqual(call(c, 'depopMeasurementBody', {
+    depop_specifics: { measurements: { unit: 'in', values: [
+      { id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' },
+      { id: 'length', label: 'Length', value: '  ', unit: 'in' },
+    ] } },
+  }), { measurements: [{ id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' }] });
+});
+
+test('a live Depop update sends the price and measurements', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  const requests = [];
+  c.fetch = async (url, options = {}) => {
+    requests.push({ url, method: options.method, body: options.body });
+    if (String(url).includes('/by-slug/')) return reply(200, { id: 99, price_amount: '23.00', price_currency: 'USD' });
+    if (options.method === 'PUT') return reply(200, {});
+    return reply(200, { id: 99, price_amount: '29.99', price_currency: 'USD' });
+  };
+  const result = await c.depopApiAction('update', {
+    action: 'update',
+    confirm: true,
+    listing_id: 'studio-works-fleece',
+    listing: {
+      description: 'Fleece',
+      price: 29.99,
+      depop_specifics: { measurements: { unit: 'in', values: [
+        { id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' },
+      ] } },
+    },
+    deadline: Date.now() + 30000,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'published');
+  assert.match(result.listing_url, /\/products\/studio-works-fleece\/$/);
+  const put = requests.find((item) => item.method === 'PUT');
+  assert.match(put.url, /\/presentation\/api\/v1\/products\/99\/$/);
+  const body = JSON.parse(put.body);
+  assert.equal(body.price_amount, '29.99');
+  assert.deepEqual(body.measurements, [{ id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' }]);
 });

@@ -123,22 +123,16 @@ def build_parser(catalog: dict[str, Any]) -> argparse.ArgumentParser:
     _add_api(sub, nested)
     _add_commands(sub, nested)
     _add_mcp(sub, nested)
+    _add_logs(sub, nested)
+    _add_set_price(sub, nested)
     version = sub.add_parser("version", help="Print the Anteroom version", parents=[nested])
     version.set_defaults(handler=_cmd_version)
 
-    for group, commands in _by_group(catalog).items():
-        group_parser = sub.add_parser(group, help=f"{group.replace('-', ' ')} routes", parents=[nested])
-        actions = group_parser.add_subparsers(dest="action", required=True, metavar="action")
-        for command in commands:
-            action = actions.add_parser(
-                command["action"],
-                help=_short(command),
-                description=command_help(command),
-                formatter_class=argparse.RawDescriptionHelpFormatter,
-                parents=[nested],
-            )
-            _add_flags(action, command)
-            action.set_defaults(handler=_cmd_http, command=command)
+    grouped = _by_group(catalog)
+    # Recent log lines and the relist-gap route share ``anteroom errors``.
+    _add_errors(sub, nested, grouped.pop("errors", []))
+    for group, commands in grouped.items():
+        _add_generated_group(sub, nested, group, commands)
     return parser
 
 
@@ -192,6 +186,125 @@ def _add_api(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -
 def _add_commands(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
     commands = sub.add_parser("commands", help="List every command. Use --json for the machine-readable catalog.", parents=[common])
     commands.set_defaults(handler=_cmd_commands)
+
+
+def _add_generated_group(sub: argparse._SubParsersAction, common: argparse.ArgumentParser, group: str, commands: list[dict[str, Any]], *, actions: argparse._SubParsersAction | None = None) -> None:
+    if actions is None:
+        group_parser = sub.add_parser(group, help=f"{group.replace('-', ' ')} routes", parents=[common])
+        actions = group_parser.add_subparsers(dest="action", required=True, metavar="action")
+    for command in commands:
+        action = actions.add_parser(
+            command["action"],
+            help=_short(command),
+            description=command_help(command),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            parents=[common],
+        )
+        _add_flags(action, command)
+        action.set_defaults(handler=_cmd_http, command=command)
+
+
+def _add_logs(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    logs = sub.add_parser("logs", help="Server and extension logs. --level error|warning|info --since --grep --follow", parents=[common])
+    logs.add_argument("--level", default="info", choices=("error", "warning", "info"))
+    logs.add_argument("--since", default="", help="Only lines at or after this timestamp")
+    logs.add_argument("--grep", default="", help="Only lines whose message contains this text")
+    logs.add_argument("--follow", action="store_true", help="Keep printing new lines")
+    logs.add_argument("--limit", type=int, default=200)
+    logs.set_defaults(handler=_cmd_logs)
+
+
+def _add_errors(sub: argparse._SubParsersAction, common: argparse.ArgumentParser, commands: list[dict[str, Any]]) -> None:
+    errors = sub.add_parser(
+        "errors",
+        help="Recent errors and warnings. `errors list` shows listings a relist left down.",
+        parents=[common],
+    )
+    errors.add_argument("--since", default="")
+    errors.add_argument("--grep", default="")
+    errors.add_argument("--limit", type=int, default=200)
+    errors.set_defaults(handler=_cmd_errors)
+    if not commands:
+        return
+    actions = errors.add_subparsers(dest="action", required=False, metavar="action")
+    _add_generated_group(sub, common, "errors", commands, actions=actions)
+
+
+def _add_set_price(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
+    command = sub.add_parser(
+        "set-price",
+        help="Set the item price. Unlocked marketplace prices follow it. --push writes a live listing and needs --confirm.",
+        parents=[common],
+    )
+    command.add_argument("--conversation", required=True, help="Conversation id")
+    command.add_argument("--price", required=True, type=float)
+    command.add_argument("--all-marketplaces", action="store_true", help="Clear per-marketplace price overrides")
+    command.add_argument("--marketplace", default="", help="Also set this marketplace's price")
+    command.add_argument("--marketplace-price", type=float, default=None, help="Override amount for --marketplace")
+    command.add_argument("--push", action="store_true", help="Update a live eBay, Poshmark, Etsy, or Depop listing")
+    command.set_defaults(handler=_cmd_set_price)
+
+
+def _cmd_logs(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
+    return _print_logs(args, level=args.level)
+
+
+def _cmd_errors(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
+    return _print_logs(args, level="warning")
+
+
+def _print_logs(args: argparse.Namespace, *, level: str) -> int:
+    import time
+
+    client = _client(args)
+    seen: set[str] = set()
+
+    def once() -> list[dict[str, Any]]:
+        result = client.call("GET", "/api/settings/app-logs", query={
+            "level": level, "since": args.since or "", "grep": args.grep or "", "limit": args.limit,
+        })
+        rows = result["data"].get("entries") if isinstance(result.get("data"), dict) else []
+        return rows if isinstance(rows, list) else []
+
+    rows = once()
+    for row in reversed(rows):
+        seen.add(json.dumps(row, sort_keys=True))
+    if args.json and not getattr(args, "follow", False):
+        emit(envelope(ok=True, status=200, data={"entries": rows}), as_json=True)
+        return EXIT_OK
+    human = "\n".join(f"{row.get('at', '')} {row.get('level', '')} {row.get('source', '')}: {row.get('message', '')}" for row in reversed(rows))
+    if not getattr(args, "follow", False):
+        emit(envelope(ok=True, status=200, data={"entries": rows}), as_json=args.json, human=human or "No log lines.")
+        return EXIT_OK
+    note(human)
+    while True:
+        time.sleep(2)
+        for row in reversed(once()):
+            key = json.dumps(row, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            note(f"{row.get('at', '')} {row.get('level', '')} {row.get('source', '')}: {row.get('message', '')}")
+
+
+def _cmd_set_price(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
+    del catalog
+    if args.push and not args.confirm:
+        raise ConfirmRequired("pushing a price updates a live listing")
+    client = _client(args)
+    body: dict[str, Any] = {
+        "price": args.price,
+        "all_marketplaces": bool(args.all_marketplaces),
+        "push": bool(args.push),
+        "confirmed": bool(args.confirm),
+    }
+    if args.marketplace:
+        body["marketplace"] = args.marketplace
+    if args.marketplace_price is not None:
+        body["marketplace_price"] = args.marketplace_price
+    result = client.call("POST", f"/api/conversations/{args.conversation}/set-price", json_body=body)
+    emit(envelope(ok=True, status=result["status"], data=result["data"], command="set-price"), as_json=args.json)
+    return EXIT_OK
 
 
 def _add_mcp(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
@@ -285,6 +398,10 @@ def _cmd_commands(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     lines.append("api schema    OpenAPI schema from the local code")
     lines.append("commands      This list")
     lines.append("mcp serve     MCP server on stdin/stdout")
+    lines.append("logs          Server logs (--level --since --grep --follow)")
+    lines.append("errors        Recent errors and warnings. errors list shows listings a relist left down")
+    lines.append("set-price     Set the item price. --push needs --confirm")
+    lines.append("jobs logs     One job's events and fill log")
     lines.append("version")
     lines.append("")
     current = None

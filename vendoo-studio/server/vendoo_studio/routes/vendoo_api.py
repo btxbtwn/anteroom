@@ -274,6 +274,7 @@ def _scraped_only_fields(
             "selection_only": False,
             "options": list(options),
             "options_source": "reference",
+            "on_form": False,
         })
     return extra
 
@@ -318,6 +319,7 @@ def _listing_only_fields(
             "selection_only": False,
             "options": [],
             "options_source": "saved",
+            "on_form": False,
         })
     return extra
 
@@ -331,32 +333,15 @@ async def _with_live_schema(listing: dict, marketplace: str, fields: list[dict])
     return await overlay_live_fields(listing, marketplace, fields)
 
 
-async def _with_mercari_sizes(listing: dict, marketplace: str, category_id: str, fields: list[dict]) -> list[dict]:
-    """Mercari's own sizes for the category a direct list sends, when no Size row has choices."""
-    if marketplace != "mercari" or any(_fold_field_name(row["label"]) == "size" and row["options"] for row in fields):
-        return fields
-    from vendoo_studio.services.native_form import mercari_sizes
-
-    direct = listing.get("direct_category_ids") if isinstance(listing.get("direct_category_ids"), dict) else {}
-    sizes = await asyncio.to_thread(mercari_sizes, str(direct.get("mercari") or "").strip() or category_id)
-    if not sizes:
-        return fields
-    specifics = listing.get("mercari_specifics") if isinstance(listing.get("mercari_specifics"), dict) else {}
-    row = {"key": "size", "label": "Size", "value": str(specifics.get("size") or listing.get("size") or ""),
-           "required": True, "multi": False, "selection_only": True,
-           "options_source": "marketplace",
-           "options": list(dict.fromkeys(size["name"] for size in sizes if size["name"]))}
-    return [*(field for field in fields if _fold_field_name(field["label"]) != "size"), row]
-
-
 @router.get("/api/conversations/{conv_id}/vendoo-api/fields")
 async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
-    """Every field each marketplace form renders for *this* listing's categories.
+    """Every field each marketplace can hold for this listing's categories.
 
-    One row per field with what the listing currently answers, so the app can
-    show a form per marketplace rather than a flat blob: the label Vendoo uses,
-    whether it insists on it, whether it takes several values, and the exact
-    options it accepts.
+    ``on_form`` is true for the fields that marketplace's listing form uses for
+    this category, department, and condition — the same set the editor shows
+    and chat is given. A row with ``on_form`` false stays here, and on the
+    listing, so a saved value is never dropped. Choices are that marketplace's
+    own options when it publishes a list.
     """
     from vendoo_studio.services.category_fields import listing_category_ids
     from vendoo_studio.services.fill_log import listing_value_for_field
@@ -400,18 +385,19 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
             fallback = _scraped_only_fields(listing, marketplace, static, [])
             fallback.extend(_listing_only_fields(listing, marketplace, fallback))
             fallback = await _with_live_schema(listing, marketplace, fallback)
-            fallback = await _with_mercari_sizes(listing, marketplace, category_id, fallback)
             fallback.sort(key=lambda row: row["label"])
             out.append({
                 "marketplace": marketplace, "category_id": category_id,
                 "known": False, "fields": fallback,
             })
             continue
+        from vendoo_studio.services.form_schema import field_applies, labels_for_spec
+
         fields = []
         for spec in specs.values():
             label = spec.display or spec.key
-            options = sorted(spec.options.values())
-            options_source = "vendoo" if options else "reference"
+            options = labels_for_spec(spec, listing)
+            options_source = "vendoo" if options and (spec.options or spec.scales) else "reference"
             if not options:
                 # Category schema sometimes omits the closed list; fall back to
                 # the skill scrape so the Forms editor still offers choices.
@@ -428,14 +414,14 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
                 "value": listing_value_for_field(listing, marketplace, label),
                 "required": spec.required,
                 "multi": spec.multi,
-                "selection_only": spec.selection_only,
+                "selection_only": spec.selection_only or bool(spec.scales),
                 "options": options,
                 "options_source": options_source,
+                "on_form": field_applies(label, listing),
             })
         fields.extend(_scraped_only_fields(listing, marketplace, static, fields))
         fields.extend(_listing_only_fields(listing, marketplace, fields))
         fields = await _with_live_schema(listing, marketplace, fields)
-        fields = await _with_mercari_sizes(listing, marketplace, category_id, fields)
         fields.sort(key=lambda row: (not row["required"], row["label"]))
         out.append({
             "marketplace": marketplace, "category_id": category_id,

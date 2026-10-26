@@ -58,12 +58,16 @@ async function recoverNativeMarketplace(context) {
 
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
+  const depopUpdate = p.marketplace === 'depop' && p.action === 'update';
   if (!['poshmark', 'mercari', 'depop', 'sellwild', 'vinted'].includes(p.marketplace)
-      || !({ sellwild: ['publish'], poshmark: ['list', 'update'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action)) {
+      || !(depopUpdate || ({ sellwild: ['publish'], poshmark: ['list', 'update'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action))) {
     return nativeRefusal('Unsupported marketplace action.');
   }
   if (p.action === 'list' && p.confirm !== true) return nativeRefusal('Confirm listing on this marketplace.');
-  if (p.action === 'update' && (p.confirm !== true || !/^[a-f0-9]{24}$/.test(String(p.listing_id || '')))) {
+  if (depopUpdate && (p.confirm !== true || !/^[a-z0-9][a-z0-9-]{0,200}$/i.test(String(p.listing_id || '')))) {
+    return nativeRefusal('Confirm updating the live Depop listing.');
+  }
+  if (p.action === 'update' && p.marketplace !== 'depop' && (p.confirm !== true || !/^[a-f0-9]{24}$/.test(String(p.listing_id || '')))) {
     return nativeRefusal('Confirm updating the live Poshmark listing.');
   }
   if (p.action === 'publish' && (p.confirm !== true || (p.marketplace !== 'sellwild' && !nativeDraftUrl(p.marketplace, p.draft_url)))) {

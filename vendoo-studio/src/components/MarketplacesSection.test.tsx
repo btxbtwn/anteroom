@@ -54,21 +54,22 @@ describe("marketplaces section", () => {
     expect(enabledButton(html, "List…")).toBe(true);
     expect(html).not.toContain("Save draft");
     expect(html).not.toContain("Publish…");
-    expect(row(render({ poshmark: { state: "draft", revision_id: "current", draft_url: "https://poshmark.com/edit-listing/x" } }), "Poshmark")).toContain("Not listed");
+    expect(row(render({ poshmark: { state: "draft", revision_id: "current", draft_url: "https://poshmark.com/edit-listing/x" } }), "Poshmark")).toContain("Draft");
   });
 
-  it("lists every marketplace from its form, with no draft to save", () => {
+  it("saves native private drafts separately from listing and shows unsaved draft edits", () => {
     const mercari = render({}, {}, { selected: "mercari" });
     expect(enabledButton(mercari, "List…")).toBe(true);
-    expect(mercari).not.toContain("Save draft");
+    expect(enabledButton(mercari, "Save draft")).toBe(true);
     expect(mercari).not.toContain("Publish…");
     const saved = render({ mercari: { state: "draft", revision_id: "current", draft_url: "https://www.mercari.com/sell/draft/x/" } }, {}, { selected: "mercari" });
-    expect(row(saved, "Mercari")).toContain("Not listed");
+    expect(row(saved, "Mercari")).toContain("Draft");
     expect(saved).not.toContain("Draft saved");
     expect(saved).not.toContain("Open draft");
     expect(enabledButton(saved, "List…")).toBe(true);
     const stale = render({ depop: { state: "draft", revision_id: "older", draft_url: "https://www.depop.com/sellinghub/drafts/edit/1/" } }, {}, { selected: "depop" });
-    expect(row(stale, "Depop")).toContain("Not listed");
+    expect(row(stale, "Depop")).toContain("Draft");
+    expect(stale).toContain("Changes in Anteroom have not been saved");
     expect(stale).not.toContain("Save changes");
     expect(enabledButton(stale, "List…")).toBe(true);
   });

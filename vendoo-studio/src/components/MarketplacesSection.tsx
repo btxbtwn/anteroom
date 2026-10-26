@@ -19,6 +19,7 @@ import { Spinner } from "./ui/spinner";
 type Marketplace = DelistMarketplace;
 const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
 const NATIVE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]);
+const REMOTE_DRAFT = new Set<Marketplace>(["mercari", "depop", "etsy"]);
 // What Delist does on each marketplace: eBay has no delete; Sellwild offers only its own delist.
 // Vinted is deleted through the signed-in Chrome session, the same as Depop, Poshmark and Mercari.
 const REMOVED: Record<Marketplace, string> = {
@@ -80,7 +81,7 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   if (live?.sold_here) return { tone: "neutral", label: "Sold here", href: live.url ?? undefined, hrefLabel: "View" };
   const said = draft?.marketplace_message ? `${marketplaceName(marketplace)} said: ${draft.marketplace_message}` : null;
   if (draft && isRunning(draft)) {
-    return { tone: "busy", label: draft.state === "updating" ? "Updating…" : "Listing…", detail: draft.progress ? `${draft.progress.label}…` : null };
+    return { tone: "busy", label: draft.state === "updating" ? "Updating…" : draft.action === "save_draft" ? "Saving draft…" : "Listing…", detail: draft.progress ? `${draft.progress.label}…` : null };
   }
   if (draft && (draft.state === "unknown" || BUSY.has(draft.state))) {
     return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
@@ -100,6 +101,8 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     if (draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
   }
   if (draft?.state === "draft" && draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
+  if (draft?.state === "draft" && draft.draft_url) return { tone: "neutral", label: "Draft", href: draft.draft_url, hrefLabel: "View draft",
+    detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to this draft." : null };
   if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Not eligible", detail: ETSY_NOT_ELIGIBLE };
   return { tone: "idle", label: "Not listed" };
 }
@@ -205,7 +208,7 @@ export function MarketplacesLayout({
 
   const action = useMutation({
     mutationFn: async ({ marketplace, kind, draftUrl }: {
-      marketplace: NativeMarketplace; kind: "check" | "list" | "update" | "cancel" | "reset" | "reconnect"; draftUrl?: string;
+      marketplace: NativeMarketplace; kind: "check" | "list" | "save_draft" | "update" | "cancel" | "reset" | "reconnect"; draftUrl?: string;
     }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
       if (kind === "cancel") return api.nativeMarketplaces.cancel(convId, marketplace);
@@ -216,6 +219,7 @@ export function MarketplacesLayout({
         return drafts[marketplace];
       }
       if (!revisionId) throw new Error("Generate a listing first.");
+      if (kind === "save_draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId);
       if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId);
       return api.nativeMarketplaces.list(convId, marketplace, revisionId,
         marketplace === "sellwild" ? sellwildChoice : undefined);
@@ -250,7 +254,7 @@ export function MarketplacesLayout({
     },
   });
 
-  const UPDATABLE = new Set<Marketplace>(["ebay", "etsy", "poshmark"]);
+  const UPDATABLE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "depop"]);
 
   async function updateNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
@@ -338,8 +342,12 @@ export function MarketplacesLayout({
     if (!listable(marketplace, status)) return null;
     const pending = action.isPending && action.variables?.marketplace === m;
     const wait = retryIn(marketplace);
-    return <Button size="xs" variant="outline" disabled={busy || listBlocked(marketplace)} onClick={() => void listNow(m)}>
-      {pending ? "Listing…" : wait > 0 ? `Retry in ${wait}s` : "List…"}</Button>;
+    return <>
+      {REMOTE_DRAFT.has(marketplace) && <Button size="xs" variant="ghost" disabled={busy || listBlocked(marketplace)}
+        onClick={() => action.mutate({ marketplace: m, kind: "save_draft" })}>Save draft</Button>}
+      <Button size="xs" variant="outline" disabled={busy || listBlocked(marketplace)} onClick={() => void listNow(m)}>
+        {pending ? "Working…" : wait > 0 ? `Retry in ${wait}s` : "List…"}</Button>
+    </>;
   }
 
   function rowMenu(marketplace: Marketplace, status: Status): ReactNode {
@@ -356,6 +364,8 @@ export function MarketplacesLayout({
         </MenuTrigger>
         <MenuPopup align="end" width="content">
           {canList && <MenuItem disabled={listBlocked(marketplace)} onClick={() => void listNow(m)}>List…</MenuItem>}
+          {canList && REMOTE_DRAFT.has(marketplace) && <MenuItem disabled={listBlocked(marketplace)}
+            onClick={() => action.mutate({ marketplace: m, kind: "save_draft" })}>Save draft</MenuItem>}
           {canUpdate && <MenuItem onClick={() => void updateNow(m)}>Update…</MenuItem>}
           {canDelist && <MenuItem variant="destructive" onClick={() => void runDelist([marketplace])}>Delist…</MenuItem>}
           {(canList || canUpdate || canDelist) && <MenuSeparator />}

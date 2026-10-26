@@ -113,6 +113,35 @@ export function formFieldValues(value: unknown, options: readonly string[] = [])
   return [...new Set(text.split(",").map((v) => v.trim()).filter(Boolean))];
 }
 
+/**
+ * A multi-value saved as one comma-joined string ("Casual, Minimalist, Indie")
+ * becomes separate choices when each piece is itself a choice, or when no
+ * choice list is loaded yet. An array element that is one real choice stays one.
+ */
+export function expandJoinedChoices(value: unknown, options: readonly string[] = []): string[] {
+  const values = formFieldValues(value, options);
+  if (values.length !== 1 || !values[0].includes(",")) return values;
+  const parts = [...new Set(values[0].split(",").map((part) => part.trim()).filter(Boolean))];
+  if (parts.length < 2) return values;
+  if (!options.length || parts.every((part) => options.includes(part))) return parts;
+  return values;
+}
+
+/** Keep a field the seller just cleared when a refresh reloads the old server value. */
+export function nextFieldDraft(
+  server: Record<string, string | string[]>,
+  dirty: Record<string, string | string[]>,
+): { local: Record<string, string | string[]>; dirty: Record<string, string | string[]> } {
+  const local = { ...server };
+  const kept: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(dirty)) {
+    if (formFieldText(server[key]) === formFieldText(value)) continue;
+    local[key] = value;
+    kept[key] = value;
+  }
+  return { local, dirty: kept };
+}
+
 /** Read a Forms-tab field, matching schema labels to camelCase listing keys. */
 export function getListingEditorValue(listing: ListingData | undefined, path: string): unknown {
   const direct = getNestedValue(listing, path);

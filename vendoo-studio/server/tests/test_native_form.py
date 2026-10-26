@@ -80,15 +80,16 @@ class MercariFormTest(unittest.TestCase):
         self.assertIsNone(tree_leaf("mercari", "Kids > Boys coats & jackets"))
         self.assertEqual(tree_leaf("mercari", "Kids > Boys coats & jackets > Boys (4+)")["id"], "1931")
 
-    def test_sizes_are_read_for_the_category_the_direct_list_sends(self):
+    def test_direct_mercari_does_not_read_vendoo_fields_or_mirrored_sizes(self):
         from unittest import mock
 
         from vendoo_studio.services import native_form
 
         listing = {**LISTING, "size": "XL (18/20)", "direct_category_ids": {"mercari": "1931"},
                    "marketplace_category_ids": {"mercari": "1881"}}
-        with mock.patch.object(native_form, "mercari_sizes", return_value=[{"id": 168}]) as sizes, \
+        with mock.patch.object(native_form, "vendoo_form") as vendoo, \
                 mock.patch("vendoo_studio.services.user_settings.get_ships_from_zip", return_value=""):
             snapshot = native_form.attach_form(listing, "mercari")
-        sizes.assert_called_once_with("1931")
-        self.assertEqual(snapshot["form"]["sizes"], [{"id": 168}])
+        vendoo.assert_not_called()
+        self.assertNotIn("sizes", snapshot["form"])
+        self.assertEqual(snapshot["direct_category_ids"]["mercari"], "1931")
