@@ -253,8 +253,6 @@ def _cmd_http(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
 
 def _cmd_request(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     client = _client(args)
-    if args.stream_seconds is None:
-        args.stream_seconds = DEFAULT_STREAM_SECONDS
     result = run_raw(args.method, args.path, args, client, catalog)
     payload = envelope(ok=True, status=result["status"], data=result["data"], method=args.method.upper(), path=args.path)
     emit(payload, as_json=args.json)
@@ -447,6 +445,7 @@ def _catalog_or_empty() -> dict[str, Any]:
 
 
 def _wants_json(argv: list[str] | None) -> bool:
-    if not argv:
-        return False
-    return "--json" in argv
+    # The console script calls main() with no argv. Handlers then see sys.argv,
+    # and the error path has to see the same --json or it prints human text.
+    source = sys.argv[1:] if argv is None else argv
+    return "--json" in source

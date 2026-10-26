@@ -256,7 +256,7 @@ def argparse_namespace(arguments: dict[str, Any]):
         body=json.dumps(body) if isinstance(body, (dict, list)) else body,
         header=None,
         output=arguments.get("output"),
-        stream_seconds=arguments.get("stream_seconds", DEFAULT_STREAM_SECONDS),
+        stream_seconds=arguments.get("stream_seconds"),
         query=_query_items(arguments.get("query")),
     )
 
