@@ -368,8 +368,8 @@ export const api = {
       request<AutomationRun>(`/automations/${id}/run`, { method: "POST", body: JSON.stringify({ dry_run: dryRun }) }),
     history: (id: string) => request<AutomationHistory>(`/automations/${id}/history`),
     approvals: () => request<AutomationApproval[]>("/automations/approvals"),
-    approve: (id: string) =>
-      request<AutomationApproval>(`/automations/approvals/${id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+    approve: (row: AutomationApproval) =>
+      request<AutomationApproval>(`/automations/approvals/${row.id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true, action: row.action, marketplaces: row.marketplaces, revision_id: row.revision_id, review_token: row.review_token }) }),
   },
   errors: {
     list: () => request<RelistGap[]>("/errors"),

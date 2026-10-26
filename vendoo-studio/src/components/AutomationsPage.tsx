@@ -51,7 +51,7 @@ function Check({
   );
 }
 
-export function AutomationsPage() {
+export function AutomationsPage({onOpenListing}:{onOpenListing:(id:string)=>void}) {
   const queryClient = useQueryClient();
   const list = useQuery({ queryKey: LIST_KEY, queryFn: () => api.automations.list() });
   const approvals = useQuery({ queryKey: APPROVAL_KEY, queryFn: () => api.automations.approvals() });
@@ -149,7 +149,6 @@ export function AutomationsPage() {
       actions: task.actions,
       marketplaces: task.marketplaces,
       price_repeat: task.price_repeat,
-      require_approval: task.require_approval,
       issues: [],
       ready: task.status !== "draft",
     }));
@@ -159,15 +158,18 @@ export function AutomationsPage() {
 
   const approve = async (row: AutomationApproval) => {
     const where = row.marketplaces.length ? row.marketplaces.join(", ") : "the marketplaces this task names";
-    const ok = await confirmDialog(`Publish “${row.title || "this listing"}” on ${where}?`, { confirmLabel: "Publish" });
+    const label = row.action === "publish" ? "List" : row.action === "delist" ? "Delist" : "Relist";
+    const ok = await confirmDialog(`${label} “${row.title || "this listing"}” on ${where}? This approval makes one attempt per marketplace.`, { confirmLabel: label });
     if (!ok) return;
     setError("");
     try {
-      const result = await api.automations.approve(row.id);
-      if (result.publish?.state) setError(`${row.title || "Listing"}: ${result.publish.state}`);
+      const result = await api.automations.approve(row);
+      if (result.result?.state || result.result?.error) setError(`${row.title || "Listing"}: ${result.result.state || result.result.error}`);
       refresh();
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      refresh();
     }
   };
 
@@ -178,12 +180,12 @@ export function AutomationsPage() {
     <WorkspacePage>
       <PageHeader
         title="Automations"
-        description="Delist, relist, regenerate, or drop a price on a schedule. Nothing runs until you confirm the actions and the marketplaces by name."
+        description="Schedule local draft preparation and price edits. Listing, delisting and relisting wait for your review of each item and named marketplace."
       />
 
       <section className="rounded-xl border border-border bg-card p-4">
         <h2 className="font-medium">Waiting for approval</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Regenerated listings stay here until you approve them. Approve publishes them on the marketplaces that task names.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Review each item, action and marketplace before approving one attempt. Scheduling never publishes or delists on its own.</p>
         {(approvals.data ?? []).length === 0 ? (
           <p className="mt-2 text-sm text-muted-foreground">Nothing is waiting for approval.</p>
         ) : (
@@ -193,9 +195,10 @@ export function AutomationsPage() {
                 <span>
                   {row.title || row.conversation_id}
                   {row.marketplaces.length ? ` · ${row.marketplaces.join(", ")}` : ""}
-                  {` · ${row.state}`}
+                  {` · ${row.action === "publish" ? "list" : row.action} · ${row.state}`}
                 </span>
-                <Button size="sm" onClick={() => void approve(row)}>Approve</Button>
+                <Button size="sm" onClick={() => void approve(row)}>Review and approve</Button>
+                {Object.entries(row.targets || {}).map(([name,target])=>target.url?<a key={name} href={target.url} target="_blank" rel="noreferrer" className="text-xs underline">{name} listing</a>:null)}
               </li>
             ))}
           </ul>
@@ -210,6 +213,7 @@ export function AutomationsPage() {
               <li key={gap.id}>
                 {gap.title || gap.conversation_id} · {gap.marketplace} · {gap.state}
                 {gap.error ? ` · ${gap.error}` : ""}
+                <Button size="xs" variant="ghost" onClick={()=>onOpenListing(gap.conversation_id)}>Open item</Button>
               </li>
             ))}
           </ul>
@@ -296,13 +300,6 @@ export function AutomationsPage() {
         </div>
         <div className="flex flex-wrap gap-4">
           <Check label="Regenerate" checked={form.regenerate} onChange={(regenerate) => patch({ regenerate })} />
-          {form.regenerate ? (
-            <Check
-              label="Require approval before publishing"
-              checked={form.requireApproval}
-              onChange={(requireApproval) => patch({ requireApproval })}
-            />
-          ) : null}
           <Check label="Delist" checked={form.delist} onChange={(delist) => patch({ delist })} />
           <Check label="Relist" checked={form.relist} onChange={(relist) => patch({ relist })} />
           <Check label="Drop the price" checked={form.priceOn} onChange={(priceOn) => patch({ priceOn })} />
@@ -403,9 +400,7 @@ export function AutomationsPage() {
                 {task.summary || describeSchedule(task.schedule, task.timezone)}
                 {" · "}
                 {describeActions(task.actions)}
-                {task.actions.some((action) => action.type === "regenerate")
-                  ? task.require_approval ? " · approval required" : " · publishes when it regenerates"
-                  : ""}
+                {" · marketplace writes require item approval"}
                 {task.marketplaces.length ? ` · ${task.marketplaces.join(", ")}` : ""}
               </p>
               {task.next_run_at ? <p className="mt-1 text-xs text-muted-foreground">Next run {task.next_run_at}</p> : null}

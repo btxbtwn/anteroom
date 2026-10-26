@@ -818,7 +818,7 @@ export function App() {
                 </Suspense>
               ) : activeView === "automations" ? (
                 <Suspense fallback={pageLoading}>
-                  <AutomationsPage />
+                  <AutomationsPage onOpenListing={openListing} />
                 </Suspense>
               ) : activeView === "assistant" ? (
                 <Suspense fallback={pageLoading}>

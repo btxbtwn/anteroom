@@ -242,8 +242,8 @@ async def _one_item(db: Session, run: AutomationRun, automation: Automation, ite
     local_actions = [action for action in actions if action["type"] in {"price", "update_fields"}]
     regenerate = next((action for action in actions if action["type"] == "regenerate"), None)
     publish_actions = [action for action in actions if action["type"] in {"delist", "relist"}]
-    hold = regenerate is not None and bool(automation.require_approval)
     markets = list(automation.marketplaces or [])
+    hold = bool(publish_actions) or (regenerate is not None and bool(markets))
     remote: list[dict] = []
     error = None
     state = None
@@ -282,34 +282,13 @@ async def _one_item(db: Session, run: AutomationRun, automation: Automation, ite
     if error is None and hold:
         if not markets:
             error = "Name the marketplaces. An automation does not publish a regenerated listing everywhere by default."
-        elif not local.get("revision_id"):
-            error = "Regenerate did not save a listing."
+        elif not local.get("revision_id") and (not publish_actions or publish_actions[0]["type"] != "delist"):
+            error = "Save a listing before proposing a publish or relist."
         else:
-            approval = enqueue_approval(db, automation, run.id, item, local["revision_id"], markets)
+            approval = enqueue_approval(db, automation, run.id, item, local["revision_id"], markets,
+                                        publish_actions[0]["type"] if publish_actions else "publish")
             state = WAITING_APPROVAL
             remote.append({"type": "approval", "ok": True, "approval_id": approval.id, "state": state})
-    elif error is None:
-        for action in publish_actions:
-            stepped = await _run_remote(db, run, automation, item, executor, action, markets, local.get("revision_id"))
-            if stepped.get("busy"):
-                return stepped
-            remote.append(stepped["remote"])
-            error = stepped.get("error")
-            state = stepped.get("state") or state
-            down = stepped.get("down") if stepped.get("down") is not None else down
-            if error:
-                break
-        # Approval is off, and regenerate is the only way this task publishes.
-        if error is None and regenerate and not publish_actions:
-            from vendoo_studio.services.automation_actions import publish_revision
-
-            result = await publish_revision(db, item["conversation_id"], markets, local.get("revision_id"))
-            remote.append({"type": "publish", **result})
-            note_relist_result(db, automation.id, run.id, item, result)
-            if not result.get("ok"):
-                error = result.get("error") or "Publish failed."
-                state = result.get("state")
-                down = result.get("down")
 
     return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down)
 
@@ -353,7 +332,8 @@ def _finish_item(db, run, automation, item, local, remote, *, error, state, down
         "down": down or [],
     }
     job_id = log_item_job(db, item["conversation_id"], local.get("revision_id"), payload, ok=ok, error=error)
-    if ok and not run.dry_run and state != DOWN_STATE and (automation.filters or {}).get("min_age_days"):
+    if (ok and not run.dry_run and state != DOWN_STATE and (automation.filters or {}).get("min_age_days")
+            and (state != WAITING_APPROVAL or any(action["type"] in {"price", "update_fields", "regenerate"} for action in automation.actions or []))):
         listed = _parse_time(item.get("listed_at"))
         record_application(db, automation.id, item["conversation_id"], listed, utcnow())
     return _outcome(item, local, remote, error=error, job_id=job_id, dry_run=bool(run.dry_run), state=state, down=down)

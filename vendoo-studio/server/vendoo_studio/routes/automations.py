@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
@@ -51,6 +51,7 @@ class FiltersBody(BaseModel):
 
 
 class AutomationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     name: str | None = None
     prompt: str | None = Field(default=None, max_length=8000)
     timezone: str | None = None
@@ -59,10 +60,6 @@ class AutomationBody(BaseModel):
     actions: list[ActionBody] | None = None
     marketplaces: list[str] | None = None
     price_repeat: Literal["step", "once"] | None = Field(default=None, description="step walks the original price down each cycle. once drops a single time.")
-    require_approval: bool | None = Field(
-        default=None,
-        description="Regenerated listings wait for approval before they publish. On unless you turn it off for this task.",
-    )
     activate: bool = Field(default=False, description="Confirm this automation and let it run. Leave this off to save a draft.")
 
 
@@ -76,7 +73,12 @@ class RunBody(BaseModel):
 
 
 class ConfirmBody(BaseModel):
-    confirm: bool = Field(default=False, description="Publish this regenerated listing on the marketplaces the task names.")
+    model_config = ConfigDict(extra="forbid", strict=True)
+    confirm: bool = False
+    action: Literal["publish", "delist", "relist"]
+    marketplaces: list[str] = Field(min_length=1, max_length=7)
+    revision_id: str | None
+    review_token: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 def _fail(exc: AutomationError) -> HTTPException:
@@ -117,27 +119,41 @@ def list_approvals(db: Session = Depends(get_db)):
 
 @router.post("/approvals/{approval_id}/approve")
 async def approve_listing(approval_id: str, body: ConfirmBody, db: Session = Depends(get_db)):
-    """Publish a regenerated listing the seller just approved."""
-    from vendoo_studio.services.automation_actions import publish_revision
+    """Perform the one item/action/revision/marketplace set the seller reviewed."""
+    from vendoo_studio.services.automation_actions import perform, publish_revision
+    from vendoo_studio.services.api_job_lock import start_gate
 
     if body.confirm is not True:
-        raise HTTPException(400, "Confirm publishing this listing.")
+        raise HTTPException(400, "Confirm this item's marketplace action.")
+    row = None
     try:
-        row = automations.get_approval(db, approval_id)
-        if JobRepo(db).get_active():
-            raise AutomationError("A marketplace job is running. Wait for it to finish.", 409)
-        result = await publish_revision(db, row.conversation_id, list(row.marketplaces or []), row.revision_id)
+        with start_gate():
+            db.expire_all()
+            row = automations.get_approval(db, approval_id)
+            if JobRepo(db).get_active():
+                raise AutomationError("A marketplace job is running. Wait for it to finish.", 409)
+            automations.claim_approval(db, row, review_token=body.review_token, action=body.action,
+                                      marketplaces=body.marketplaces, revision_id=body.revision_id)
         item = {"conversation_id": row.conversation_id, "title": row.title}
+        if row.action == "publish":
+            result = await publish_revision(db, row.conversation_id, list(row.marketplaces), row.revision_id)
+        else:
+            result = await perform(db, item, {"type": row.action}, list(row.marketplaces), row.revision_id, confirm=True)
         automations.note_relist_result(db, row.automation_id, row.run_id, item, result)
-        if result.get("state") == automations.DOWN_STATE or result.get("ok"):
-            view = automations.mark_approval(db, row, "approved")
-            view["publish"] = result
-            return view
-        raise AutomationError(result.get("error") or "The listing was not published.", 409)
+        view = automations.mark_approval(db, row, "approved" if result.get("ok") else "failed")
+        automations.record_approval_result(db, row, result)
+        view["result"] = result
+        return view
     except AutomationBusy as exc:
-        raise HTTPException(409, str(exc) or "A marketplace job is running. Wait for it to finish.") from exc
+        if row is not None and row.status == "executing":
+            automations.mark_approval(db, row, "failed")
+        raise HTTPException(409, str(exc) or "A marketplace job is running. Review a new action after it finishes.") from exc
     except AutomationError as exc:
         raise _fail(exc) from exc
+    except BaseException:
+        if row is not None and row.status == "executing":
+            automations.mark_approval(db, row, "failed")
+        raise
 
 
 @router.post("")

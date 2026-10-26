@@ -8,9 +8,8 @@ job, a Vendoo date, then the marketplace row).
 from that original price. ``price_repeat`` on the task says whether each cycle
 steps down again or the drop happens once.
 
-A regenerated listing stays in ``automation_approvals`` until the seller
-approves it, unless that task turns approval off. A relist that is still down
-after retries is an open row in ``automation_relist_gaps``.
+Marketplace writes stay in ``automation_approvals`` until the seller approves
+a specific item and action. A failed relist is recorded for manual recovery.
 """
 from __future__ import annotations
 
@@ -36,8 +35,6 @@ class Automation(Base):
     # step walks the original price down each cycle. once drops a single time.
     # Empty means the price action's own repeat still applies.
     price_repeat = Column(String, nullable=True)
-    # Regenerated listings wait here for an explicit approve before they publish.
-    require_approval = Column(Boolean, nullable=False, default=True, server_default="1")
     confirmed_at = Column(DateTime, nullable=True)
     next_run_at = Column(DateTime, nullable=True, index=True)
     last_run_at = Column(DateTime, nullable=True)
@@ -123,7 +120,10 @@ class AutomationApproval(Base):
     run_id = Column(String, nullable=True)
     conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String, nullable=True)
-    revision_id = Column(String, nullable=False)
+    revision_id = Column(String, nullable=True)
+    action = Column(String, nullable=False, server_default="publish")
+    targets = Column(JSON, nullable=False, server_default="{}")
+    review_basis = Column(String, nullable=False, server_default="")
     marketplaces = Column(JSON, nullable=False)
     # pending, approved, dismissed
     status = Column(String, nullable=False, default="pending")

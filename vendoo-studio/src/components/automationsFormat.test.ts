@@ -54,17 +54,16 @@ describe("automations form", () => {
     expect(body.filters?.min_age_days).toBe(60);
     expect(body.activate).toBe(true);
     expect(body.price_repeat).toBe("step");
-    expect(body.require_approval).toBe(true);
+    expect(body).not.toHaveProperty("require_approval");
   });
 
-  it("sends a one-time drop and approval turned off when the seller chooses that", () => {
+  it("keeps regeneration as draft preparation without an approval-off option", () => {
     const form = formFromDraft(draft);
     form.priceRepeat = "once";
     form.regenerate = true;
-    form.requireApproval = false;
     const body = bodyFromForm(form, true);
     expect(body.price_repeat).toBe("once");
-    expect(body.require_approval).toBe(false);
+    expect(body).not.toHaveProperty("require_approval");
     expect(body.actions?.some((action) => action.type === "regenerate")).toBe(true);
   });
 });
