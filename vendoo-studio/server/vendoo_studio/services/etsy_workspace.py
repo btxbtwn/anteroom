@@ -42,15 +42,28 @@ class EtsyClient:
         self.identity = _identity()
         self.shop_id = self.identity[0]
 
-    async def read(self, suffix: str = "", params: dict | None = None) -> dict:
+    def assert_current(self) -> None:
         if _identity() != self.identity:
             raise EtsyFailure("The Etsy connection changed. Refresh this view.", 409)
-        result = await marketplace_accounts.etsy_api("GET", f"shops/{self.shop_id}{suffix}", params=params)
-        if _identity() != self.identity:
-            raise EtsyFailure("The Etsy connection changed. Refresh this view.", 409)
+
+    async def _get(self, path: str, params: dict | None = None) -> dict:
+        self.assert_current()
+        result = await marketplace_accounts.etsy_api("GET", path, params=params)
+        self.assert_current()
         if not isinstance(result, dict):
             raise EtsyFailure("Etsy returned an unreadable response. Try again.")
         return result
+
+    async def read(self, suffix: str = "", params: dict | None = None) -> dict:
+        return await self._get(f"shops/{self.shop_id}{suffix}", params)
+
+    async def listing(self, listing_id: str) -> dict:
+        return await self._get(f"listings/{_id(listing_id)}", {"includes": "Images"})
+
+    async def inventory(self, listing_id: str) -> dict:
+        # Inventory is a dedicated endpoint; includes=Inventory was removed.
+        # https://developers.etsy.com/documentation/tutorials/inventory-shipping-migration/
+        return await self._get("listings/batch/inventory", {"listing_ids": _id(listing_id)})
 
 
 def _text(value) -> str:
