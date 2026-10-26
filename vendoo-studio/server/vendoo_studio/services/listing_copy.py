@@ -126,13 +126,12 @@ def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
                 created_files.append(Path(photos.PHOTOS_DIR) / meta["stored_filename"])
                 meta["original_filename"] = image.original_filename
                 db.add(Photo(conversation_id=new.id, display_order=index, **meta))
-            if revision:
-                copied_revision = ListingRevision(conversation_id=new.id, listing_json=data, source="copy")
-                db.add(copied_revision)
-                db.flush()
-                validation = validate_listing(data, len(images) if body.include_photos else 0, require_photos=True)
-                db.add(Listing(conversation_id=new.id, current_revision_id=copied_revision.id,
-                               validation_status="valid" if validation.valid else "error", validation_errors=validation.errors + validation.warnings))
+            copied_revision = ListingRevision(conversation_id=new.id, listing_json=data, source="copy")
+            db.add(copied_revision)
+            db.flush()
+            validation = validate_listing(data, len(images) if body.include_photos else 0, require_photos=True)
+            db.add(Listing(conversation_id=new.id, current_revision_id=copied_revision.id,
+                           validation_status="valid" if validation.valid else "error", validation_errors=validation.errors + validation.warnings))
             new_id = new.id
             db.commit()
             return new_id

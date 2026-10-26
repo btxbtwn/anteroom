@@ -14,7 +14,6 @@ from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation, Message, Photo
 from vendoo_studio.models.job import Job
-from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
@@ -105,7 +104,7 @@ def test_photos_are_independent_and_keep_their_order(source, monkeypatch):
     key = response.json()["id"]
     old, copied = ConversationRepo(source.db).get_photos("source"), ConversationRepo(source.db).get_photos(key)
     assert [row.original_filename for row in copied] == ["red.png", "blue.png"]
-    assert all(a.id != b.id and a.stored_filename != b.stored_filename and a.checksum == b.checksum for a, b in zip(old, copied))
+    assert all(a.id != b.id and a.stored_filename != b.stored_filename and a.checksum == b.checksum for a, b in zip(old, copied, strict=True))
     original_bytes = [(source.directory / row.stored_filename).read_bytes() for row in old]
     copied_names = [row.stored_filename for row in copied]
     delete_listing(source.db, key)
@@ -161,3 +160,16 @@ def test_running_marketplace_action_and_missing_source_are_rejected(source, monk
 def test_invalid_requests_cannot_create_copies(source, change):
     assert duplicate(source, **change).status_code == 422
     assert source.db.query(Conversation).count() == 1
+
+
+
+def test_photo_only_item_becomes_a_partial_draft_with_its_new_sku_and_quantity(source):
+    source.db.add(Conversation(id="empty", title="Photos next", notes='{"sellerNotes":"Known fact"}'))
+    source.db.commit()
+    response = source.client.get("/api/conversations/empty/copy-preview")
+    assert response.status_code == 200 and response.json()["has_listing"] is False
+    copied = source.client.post("/api/conversations/empty/copy", json={"expected_basis": response.json()["expected_basis"], "title": "New partial", "sku": "NEW", "quantity": 3})
+    assert copied.status_code == 200, copied.text
+    listing = ListingRepo(source.db).get_revisions(copied.json()["id"])[0].listing_json
+    assert listing == {"sku": "NEW", "quantity": 3}
+    assert copied.json()["status"] == "draft"

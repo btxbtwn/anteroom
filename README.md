@@ -28,6 +28,12 @@ Edits to an existing listing have two separate steps: **Update Vendoo** writes t
 
 Open **Marketplaces** for each marketplace’s tools, sales planning, and ad history. eBay’s API marketing controls live under eBay; Etsy has a shop dashboard, orders, listings, and a Marketing tab for its sale calendar and ad CSV imports. Inventory-wide discount suggestions are in **Analytics → Inventory analytics**.
 
+### Copy an item into a new draft
+
+Choose the **Copy listing** action on an inventory row (the copy icon on desktop, or the row’s menu on a phone). Set the new inventory name, SKU and quantity. The SKU starts empty and quantity starts at one. You can copy the saved local photos and explicitly keep the recorded cost; cost starts unknown. The new item has its own draft, revision and photo files, with no sourcing-box assignment, marketplace links, jobs, chats or sales history. Deleting or rotating a copied photo leaves the original alone.
+
+Saved listing fields, categories, form answers and seller Item Details are the starting point; review the copy’s description, condition, measurements and shipping before listing it. Creating the copy never contacts a marketplace. If the source changes while the dialog is open, reload its review before copying. A missing local photo stops the copy and removes any partial files/rows; restore the source photo or copy without photos. An item without saved listing fields can still become a partial draft from its Item Details and photos.
+
 ### Bulk field and label editing
 
 Choose **Select** in inventory, pick up to 300 items and choose **Edit fields**. Check the fields you want to replace: title, description, brand, size, SKU, price, cost or quantity. Unchecked fields stay as they are. Empty description, brand or SKU clears that field; empty cost means unknown. Prices and quantities are positive whole numbers. Choose whether to add, remove or replace labels; replacing with an empty list clears them.
