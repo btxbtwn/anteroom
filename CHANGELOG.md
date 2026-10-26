@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.400 — 2026-10-26
+
+- Copy an inventory item into a separate local draft, with a new SKU and quantity and optional photos or cost. Photos stay independent, and marketplace links and sales history stay with the original. Review the item’s details before listing the copy.
+
 ## 0.1.399 — 2026-10-26
 
 - Select inventory items and choose Edit fields to review price, cost, quantity, title, description, brand, size or SKU changes together. Add, remove or replace labels in the same review; changed or busy items are skipped, and saved edits stay in Anteroom until you choose a marketplace action.
