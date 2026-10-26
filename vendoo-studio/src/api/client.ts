@@ -57,6 +57,7 @@ import type {
 import { readSse } from "./sse";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
+import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, PoshmarkOptions, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
@@ -1037,6 +1038,8 @@ export const api = {
         default_title: string;
         default_description: string;
       }>("/settings/formulas", { method: "PUT", body: JSON.stringify(body) }),
+    agent: () => request<AgentConnectionStatus>("/settings/agent"),
+    testAgent: () => request<AgentConnectionTest>("/settings/agent/test", { method: "POST" }),
     tailscale: () =>
       request<{
         available: boolean;
