@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 import { cn } from "../../lib/utils";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
@@ -222,8 +223,13 @@ function VendooApiLogSection() {
     <SettingsSection id="logs" title="Vendoo API">
       <SettingsRow
         id="vendoo-api-logs"
-        title="Live requests"
-        description="Calls the extension makes to Vendoo while Anteroom is open. Click a request to see its full URL, headers, and bodies. Tokens, API keys, and cookies are masked. The list clears when Anteroom restarts."
+        title={
+          <span className="flex items-center gap-2">
+            Live requests
+            <Badge variant="outline" size="sm">Troubleshooting</Badge>
+          </span>
+        }
+        description="For troubleshooting. Calls the extension makes to Vendoo while Anteroom is open. Click a request to see its full URL, headers, and bodies. Tokens, API keys, and cookies are masked. The list clears when Anteroom restarts."
         status={entries.length ? `${entries.length} ${entries.length === 1 ? "call" : "calls"}` : undefined}
         control={
           <Button

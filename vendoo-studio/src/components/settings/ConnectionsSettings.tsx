@@ -320,7 +320,7 @@ function EbayInventoryLocationRow() {
         </Button>
       </div>
       <SettingsNote>
-        ZIP code eBay ships from. Anteroom writes it on every listing, and creates the eBay inventory location from a 5-digit ZIP when eBay does not have one yet.
+        ZIP code eBay ships from. Anteroom writes it on every listing, and creates the eBay inventory location from a 5-digit ZIP when eBay does not have one yet. Mercari and Depop use the ships-from ZIP under Settings → Listings.
       </SettingsNote>
       {error ? <SettingsNote tone="error">{(error as Error).message || "Could not load inventory location"}</SettingsNote> : null}
       {save.error ? <SettingsNote tone="error">{(save.error as Error).message}</SettingsNote> : null}
@@ -501,7 +501,7 @@ function MarketplaceSection() {
     .filter((marketplace) => accounts?.[marketplace.id]?.connected && enabled(marketplace.id))
     .map((marketplace) => marketplace.name);
   return (
-    <SettingsSection id="marketplaces" title="Marketplaces">
+    <SettingsSection id="accounts" title="Accounts">
       {DIRECT_MARKETPLACES.map((marketplace) => (
         <DirectConnectionRow
           key={marketplace.id}

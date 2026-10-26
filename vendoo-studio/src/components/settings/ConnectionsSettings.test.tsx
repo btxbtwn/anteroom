@@ -32,11 +32,12 @@ beforeEach(() => {
 describe("Connections settings", () => {
   it("groups every marketplace at the top with a sale detection switch", () => {
     const html = renderToStaticMarkup(<ConnectionsSettings />);
-    const marketplaces = html.indexOf('id="marketplaces"');
+    const accounts = html.indexOf('id="accounts"');
     const vendoo = html.indexOf('id="connections"');
-    expect(marketplaces).toBeGreaterThanOrEqual(0);
-    expect(marketplaces).toBeLessThan(vendoo);
-    const section = html.slice(marketplaces, vendoo);
+    expect(accounts).toBeGreaterThanOrEqual(0);
+    expect(accounts).toBeLessThan(vendoo);
+    const section = html.slice(accounts, vendoo);
+    expect(section).toContain(">Accounts<");
     let cursor = 0;
     for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
       const at = section.indexOf(name, cursor);

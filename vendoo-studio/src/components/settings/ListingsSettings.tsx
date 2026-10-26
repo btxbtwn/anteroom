@@ -76,7 +76,7 @@ function MarketplacesSection() {
   const save = (next: Iterable<string>) => mutation.mutate(orderedSelection(available, next));
 
   return (
-    <SettingsSection id="marketplaces" title="Marketplaces">
+    <SettingsSection id="where-you-list" title="Where you list">
       <SettingsRow
         title="List to"
         description="Every marketplace Vendoo lists to. The thread status popup and sidebar logos show only the ones you check; empty-field prompts and Send to Vendoo fill the checked ones Anteroom supports."
@@ -145,8 +145,8 @@ function MarketplacesSection() {
             </div>
             {available.some((item) => !item.fillable) ? (
               <SettingsNote>
-                Anteroom doesn’t fill forms for “Crosslist only” marketplaces yet — Send skips them and you
-                crosslist to them from Vendoo. Their live status still shows on the thread.
+                Direct means Anteroom lists there when you confirm it. Crosslist only means Send skips that
+                form and you crosslist from Vendoo. Live status still shows on the thread.
               </SettingsNote>
             ) : null}
           </>
@@ -250,7 +250,7 @@ function ShipsFromZipRow() {
   return (
     <SettingsRow
       title="Ships from ZIP"
-      description="Mercari and Depop use it as the ships-from address when Anteroom lists there directly."
+      description="Mercari and Depop use it as the ships-from address when Anteroom lists there directly. eBay’s inventory location is under Settings → Connections."
     >
       {isPending ? (
         <LoadingNote>Loading ZIP</LoadingNote>
