@@ -12,6 +12,9 @@ import type {
   ListingNames,
   ChatAttachmentUpload,
   ListingProviderId,
+  AIKeyModels,
+  AIKeyProvider,
+  KeyProviderId,
   ModelFavorite,
   ProviderUsageLimits,
   PhotoProviderChoice,
@@ -838,6 +841,22 @@ export const api = {
         method: "DELETE",
       }),
     testCursor: () => request<{ ok: boolean; error?: string | null }>("/settings/cursor/test", { method: "POST" }),
+    aiKeys: () => request<{ providers: AIKeyProvider[] }>("/settings/ai-keys"),
+    setAIKey: (id: KeyProviderId, apiKey: string) =>
+      request<{ ok: boolean }>(`/settings/ai-keys/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ api_key: apiKey }),
+      }),
+    deleteAIKey: (id: KeyProviderId) => request<{ ok: boolean }>(`/settings/ai-keys/${id}`, { method: "DELETE" }),
+    testAIKey: (id: KeyProviderId) =>
+      request<{ ok: boolean; error?: string | null }>(`/settings/ai-keys/${id}/test`, { method: "POST" }),
+    aiKeyModels: (id: KeyProviderId) => request<AIKeyModels>(`/settings/ai-keys/${id}/models`),
+    setAIKeyModels: (id: KeyProviderId, models: { vision_model?: string; listing_model?: string }) =>
+      request<{ ok: boolean; vision_model?: string; listing_model?: string }>(`/settings/ai-keys/${id}/models`, {
+        method: "PUT",
+        body: JSON.stringify(models),
+      }),
+    openRouterSignIn: () => request<{ authorize_url: string }>("/settings/ai-keys/openrouter/sign-in", { method: "POST" }),
     chatgptLogin: () => request<ChatGPTPendingLogin>("/settings/chatgpt/login", { method: "POST" }),
     chatgptCancelLogin: () => request<OkResponse>("/settings/chatgpt/login", { method: "DELETE" }),
     chatgptLogout: () => request<OkResponse>("/settings/chatgpt", { method: "DELETE" }),

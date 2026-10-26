@@ -11,20 +11,23 @@ import { memo } from "react";
 
 import type { ListingProviderId } from "../../api/types";
 import { cn } from "../../lib/utils";
+import { isListingProviderId } from "../keyProviders";
 import { ClaudeAI, CursorIcon, MiMoIcon, OpenAI, type Icon } from "../providerIcons";
 
-const PROVIDER_ICON_BY_PROVIDER: Record<ListingProviderId, Icon> = {
+// Providers without a mark here show their initial.
+const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ListingProviderId, Icon>> = {
   chatgpt: OpenAI,
   claude: ClaudeAI,
+  openai: OpenAI,
+  anthropic: ClaudeAI,
   cursor: CursorIcon,
   mimo: MiMoIcon,
 };
 
 /** Settings ids, plus the names the provider status reports (`xiaomi-mimo`). */
 export function resolveProviderId(provider: string | null | undefined): ListingProviderId | null {
-  if (provider === "chatgpt" || provider === "claude" || provider === "cursor") return provider;
-  if (provider === "mimo" || provider === "xiaomi-mimo") return "mimo";
-  return null;
+  if (provider === "xiaomi-mimo") return "mimo";
+  return isListingProviderId(provider) ? provider : null;
 }
 
 function providerInitials(displayName: string): string {
@@ -38,7 +41,7 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   iconClassName?: string;
 }) {
   const provider = resolveProviderId(props.driverKind);
-  const Icon = provider ? PROVIDER_ICON_BY_PROVIDER[provider] : null;
+  const Icon = provider ? (PROVIDER_ICON_BY_PROVIDER[provider] ?? null) : null;
   return (
     <span
       className={cn(

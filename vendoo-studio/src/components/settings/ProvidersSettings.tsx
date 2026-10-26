@@ -3,13 +3,14 @@
 // https://github.com/pingdotgg/t3code, MIT License, (c) 2026 T3 Tools Inc.):
 // a provider list beside the selected provider's editor, with Studio's own
 // sign-in flows, API keys, listing order and per-provider models mapped onto it.
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, ExternalLinkIcon, KeyRoundIcon, LogInIcon, PlugZapIcon, TerminalIcon, Trash2Icon } from "lucide-react";
 import { api } from "../../api/client";
-import type { ListingProviderId, PhotoProviderChoice, ProviderStatus } from "../../api/types";
+import type { AIKeyProvider, KeyProviderId, ListingProviderId, PhotoProviderChoice, ProviderStatus } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { ClaudeLoginTerminal } from "../ClaudeLoginTerminal";
+import { KEY_PROVIDER_IDS, KEY_PROVIDER_LABELS, LISTING_PROVIDER_IDS, isKeyProviderId, isListingProviderId } from "../keyProviders";
 import { ProviderInstanceIcon, resolveProviderId } from "../chat/ProviderInstanceIcon";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -30,13 +31,16 @@ type ListingFallbackId = ListingProviderId | "none";
 type ModelOption = { value: string; label: string };
 type StatusTone = "ready" | "idle" | "warning" | "error";
 
-const PROVIDER_IDS: readonly ListingProviderId[] = ["chatgpt", "claude", "mimo", "cursor"];
+const PROVIDER_IDS = LISTING_PROVIDER_IDS;
 
 const PROVIDER_LABELS: Record<ListingProviderId, { short: string; full: string }> = {
   chatgpt: { short: "ChatGPT", full: "ChatGPT" },
   claude: { short: "Claude", full: "Claude" },
   mimo: { short: "MiMo", full: "Xiaomi MiMo" },
   cursor: { short: "Cursor", full: "Cursor" },
+  ...(Object.fromEntries(
+    KEY_PROVIDER_IDS.map((id) => [id, { short: KEY_PROVIDER_LABELS[id], full: KEY_PROVIDER_LABELS[id] }]),
+  ) as Record<KeyProviderId, { short: string; full: string }>),
 };
 
 const REASONING_LABELS: Record<string, string> = {
@@ -331,7 +335,17 @@ function BraveSearchSection({ chatgptSignedIn }: { chatgptSignedIn: boolean }) {
 
 type ProviderSummary = { tone: StatusTone; headline: string; detail?: string };
 
-function summarizeProvider(id: ListingProviderId, provider: ProviderStatus | undefined): ProviderSummary {
+function summarizeProvider(
+  id: ListingProviderId,
+  provider: ProviderStatus | undefined,
+  keyProvider: AIKeyProvider | undefined,
+): ProviderSummary {
+  if (isKeyProviderId(id)) {
+    if (!keyProvider) return { tone: "idle", headline: "Checking" };
+    return keyProvider.masked_key
+      ? { tone: "ready", headline: keyProvider.sign_in ? "Connected" : "API key saved", detail: keyProvider.masked_key }
+      : { tone: "idle", headline: keyProvider.sign_in ? "Not connected" : "No API key" };
+  }
   if (!provider) return { tone: "idle", headline: "Checking" };
   if (id === "chatgpt") {
     const chatgpt = provider.chatgpt;
@@ -430,6 +444,155 @@ function ProviderListRow({
   );
 }
 
+/** Setup and models for a provider the seller connects with their own API key. */
+function KeyProviderEditor({
+  id,
+  entry,
+  role,
+  onChanged,
+}: {
+  id: KeyProviderId;
+  entry: AIKeyProvider | undefined;
+  role: string;
+  onChanged: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const label = KEY_PROVIDER_LABELS[id];
+  const configured = Boolean(entry?.masked_key);
+  const test = useConnectionTest(() => api.settings.testAIKey(id));
+  const [signInUrl, setSignInUrl] = useState<string | null>(null);
+  const changed = () => {
+    test.clear();
+    onChanged();
+  };
+  const setKey = useMutation({ mutationFn: (key: string) => api.settings.setAIKey(id, key), onSuccess: changed });
+  const deleteKey = useMutation({ mutationFn: () => api.settings.deleteAIKey(id), onSuccess: changed });
+  const signIn = useMutation({
+    mutationFn: () => api.settings.openRouterSignIn(),
+    onSuccess: ({ authorize_url }) => setSignInUrl(authorize_url),
+  });
+  const { data: models } = useQuery({
+    queryKey: ["ai-key-models", id],
+    queryFn: () => api.settings.aiKeyModels(id),
+    enabled: configured,
+    staleTime: 5 * 60_000,
+  });
+  const setModels = useMutation({
+    mutationFn: (model: { vision_model: string } | { listing_model: string }) => api.settings.setAIKeyModels(id, model),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["ai-key-models", id] });
+      onChanged();
+    },
+  });
+
+  // The browser finishes the sign-in; check back until the key arrives.
+  const waiting = Boolean(signInUrl) && !configured;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(onChanged, 2000);
+    const stop = window.setTimeout(() => setSignInUrl(null), 10 * 60_000);
+    return () => {
+      window.clearInterval(timer);
+      window.clearTimeout(stop);
+    };
+  }, [waiting, onChanged]);
+
+  const error = setKey.error ?? deleteKey.error ?? signIn.error;
+  const searchNote = entry?.web_search
+    ? ` When ${label} writes your listings it also searches the web for sold comps.`
+    : " Sold comps need a Brave Search key, since this provider does not search the web here.";
+
+  return (
+    <>
+      <SettingsSection title="Setup">
+        {entry?.sign_in ? (
+          <SettingsRow
+            title={`Sign in with ${label}`}
+            description={`Approve Anteroom in your browser and ${label} hands it a key that bills your own account.`}
+            status={
+              waiting ? (
+                <span className="inline-flex flex-wrap items-center gap-1.5">
+                  <Spinner /> Waiting for you to approve in the browser.
+                  <a className="underline" href={signInUrl ?? undefined} target="_blank" rel="noreferrer">
+                    Open the page again
+                  </a>
+                </span>
+              ) : null
+            }
+            control={
+              configured ? null : (
+                <Button size="xs" variant="outline" onClick={() => signIn.mutate()} disabled={signIn.isPending || waiting}>
+                  {signIn.isPending ? <Spinner /> : <LogInIcon />}
+                  Sign in
+                </Button>
+              )
+            }
+          />
+        ) : null}
+        <SettingsRow
+          title="API key"
+          description={
+            <>
+              Stored in macOS Keychain and never sent to the browser. Usage is billed by {label} to your account, apart
+              from any chat subscription.{searchNote}{" "}
+              <a className="inline-flex items-center gap-0.5 underline" href={entry?.key_url} target="_blank" rel="noreferrer">
+                Get a key
+                <ExternalLinkIcon className="size-3" />
+              </a>
+            </>
+          }
+          status={
+            test.result ? (
+              <TestResult result={test.result} />
+            ) : error ? (
+              <span className="text-destructive-foreground">{(error as Error).message}</span>
+            ) : configured ? (
+              <span className="inline-flex items-center gap-1.5">
+                Saved · <SettingsCode>{entry?.masked_key}</SettingsCode> · {role}
+              </span>
+            ) : (
+              "Not configured"
+            )
+          }
+          control={
+            configured ? (
+              <>
+                <TestButton testing={test.testing} onClick={test.test} />
+                <Button size="xs" variant="ghost-destructive" onClick={() => deleteKey.mutate()}>
+                  <Trash2Icon />
+                  Remove
+                </Button>
+              </>
+            ) : null
+          }
+        >
+          <ApiKeyField
+            label={`${label} API key`}
+            placeholder={entry?.key_hint || "API key"}
+            saving={setKey.isPending}
+            onSave={(key) => setKey.mutate(key)}
+          />
+        </SettingsRow>
+      </SettingsSection>
+      {configured ? (
+        <SettingsSection title="Models">
+          <ProviderModelRows
+            provider={id}
+            models={(models?.models ?? []).map((slug) => ({ value: slug, label: slug }))}
+            visionModel={models?.vision_model ?? entry?.vision_model ?? ""}
+            listingModel={models?.listing_model ?? entry?.listing_model ?? ""}
+            onModel={(model) => setModels.mutate(model)}
+            reasoning={null}
+            reasoningDescription=""
+            pending={setModels.isPending}
+            error={models?.error || setModels.error?.message}
+          />
+        </SettingsSection>
+      ) : null}
+    </>
+  );
+}
+
 export function ProvidersSettings() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<ListingProviderId | null>(null);
@@ -463,14 +626,19 @@ export function ProvidersSettings() {
     queryFn: api.settings.cursorModels,
     enabled: cursorConfigured,
   });
+  const { data: aiKeys } = useQuery({ queryKey: ["ai-keys"], queryFn: api.settings.aiKeys });
+  const keyEntries = new Map((aiKeys?.providers ?? []).map((entry) => [entry.id, entry]));
 
-  const refreshProvider = () => {
+  // Stable, so the OpenRouter sign-in's polling effect does not restart on every render.
+  const refreshProvider = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["settings-provider"] });
     queryClient.invalidateQueries({ queryKey: ["chatgpt-models"] });
     queryClient.invalidateQueries({ queryKey: ["claude-models"] });
     queryClient.invalidateQueries({ queryKey: ["cursor-models"] });
+    queryClient.invalidateQueries({ queryKey: ["ai-keys"] });
+    queryClient.invalidateQueries({ queryKey: ["ai-key-models"] });
     queryClient.invalidateQueries({ queryKey: ["status"] });
-  };
+  }, [queryClient]);
   const refreshModels = (key: string) => () => {
     queryClient.invalidateQueries({ queryKey: ["settings-provider"] });
     queryClient.invalidateQueries({ queryKey: [key] });
@@ -546,23 +714,18 @@ export function ProvidersSettings() {
   const chatgptPending = chatgpt?.pending;
   const pendingCode = chatgptPending?.user_code;
   const claude = provider?.claude;
-  const primary: ListingProviderId =
-    provider?.primary === "claude" || provider?.primary === "mimo" || provider?.primary === "cursor"
-      ? provider.primary
-      : "chatgpt";
+  const primary: ListingProviderId = isListingProviderId(provider?.primary) ? provider.primary : "chatgpt";
   const fallback: ListingFallbackId =
-    provider?.fallback === "chatgpt" ||
-    provider?.fallback === "claude" ||
-    provider?.fallback === "mimo" ||
-    provider?.fallback === "cursor" ||
-    provider?.fallback === "none"
+    provider?.fallback === "none" || isListingProviderId(provider?.fallback)
       ? provider.fallback
       : primary === "chatgpt"
         ? "mimo"
         : "chatgpt";
   const activeChoice = resolveProviderId(provider?.provider);
   const choiceReady = (choice: ListingFallbackId) =>
-    choice === "chatgpt"
+    isKeyProviderId(choice)
+      ? Boolean(keyEntries.get(choice)?.masked_key)
+      : choice === "chatgpt"
       ? chatgptSignedIn
       : choice === "claude"
         ? claudeSignedIn
@@ -627,6 +790,12 @@ export function ProvidersSettings() {
     activeTest.result && provider?.provider === id ? <TestResult result={activeTest.result} /> : null;
 
   const editors: Record<ListingProviderId, ReactNode> = {
+    ...(Object.fromEntries(
+      KEY_PROVIDER_IDS.map((id) => [
+        id,
+        <KeyProviderEditor key={id} id={id} entry={keyEntries.get(id)} role={roleSentence(id)} onChanged={refreshProvider} />,
+      ]),
+    ) as Record<KeyProviderId, ReactNode>),
     chatgpt: (
       <>
         <SettingsSection title="Account">
@@ -1025,7 +1194,7 @@ export function ProvidersSettings() {
                   <ProviderListRow
                     key={id}
                     id={id}
-                    summary={summarizeProvider(id, provider)}
+                    summary={summarizeProvider(id, provider, isKeyProviderId(id) ? keyEntries.get(id) : undefined)}
                     selected={selected === id}
                     onSelect={() => setSelectedId(id)}
                     badges={<RoleBadges id={id} primary={primary} fallback={fallback} photoProvider={photoProvider} />}

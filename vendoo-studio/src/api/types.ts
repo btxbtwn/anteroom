@@ -332,7 +332,32 @@ export interface ClaudeStatus {
   install_command: string;
 }
 
-export type ListingProviderId = "chatgpt" | "claude" | "mimo" | "cursor";
+/** Providers the seller connects with their own API key (server: ai_key_catalog.py). */
+export type KeyProviderId = "openai" | "anthropic" | "gemini" | "xai" | "mistral" | "openrouter";
+
+export type ListingProviderId = "chatgpt" | "claude" | "mimo" | "cursor" | KeyProviderId;
+
+/** One API-key provider as Settings lists it. The key itself never leaves the server. */
+export interface AIKeyProvider {
+  id: KeyProviderId;
+  label: string;
+  key_url: string;
+  key_hint: string;
+  /** Searches the web itself, so sold comps need no Brave key. */
+  web_search: boolean;
+  /** Offers its own sign-in that hands Anteroom a key (OpenRouter). */
+  sign_in: boolean;
+  masked_key: string | null;
+  vision_model: string;
+  listing_model: string;
+}
+
+export interface AIKeyModels {
+  models: string[];
+  vision_model: string;
+  listing_model: string;
+  error: string | null;
+}
 
 /** A starred model in the composer picker, synced through the UI preferences. */
 export interface ModelFavorite {

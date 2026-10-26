@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from vendoo_studio.config import user_data_root
+from vendoo_studio.services.ai_key_catalog import KEY_PROVIDER_IDS, key_provider
 
 _lock = threading.Lock()
 SETUP_GUIDE_DISMISSED_KEY = "setup_guide_dismissed"
@@ -26,15 +27,18 @@ MAX_MODEL_SLUG_LENGTH = 200
 LISTING_NAME_CHOICES = frozenset({"title", "sku"})
 MAX_RECENT_LABELS = 12
 MAX_HIDDEN_LABELS = 200
-LISTING_PROVIDER_CHOICES = frozenset({"chatgpt", "claude", "mimo", "cursor"})
-LISTING_FALLBACK_CHOICES = frozenset({"chatgpt", "claude", "mimo", "cursor", "none"})
+SIGN_IN_PROVIDER_CHOICES = ("chatgpt", "claude", "mimo", "cursor")
+LISTING_PROVIDER_CHOICES = frozenset({*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS})
+LISTING_FALLBACK_CHOICES = frozenset({*LISTING_PROVIDER_CHOICES, "none"})
 # "same" reads photos with whichever provider writes the listing.
-PHOTO_PROVIDER_CHOICES = frozenset({"same", "chatgpt", "claude", "mimo", "cursor"})
+PHOTO_PROVIDER_CHOICES = frozenset({"same", *LISTING_PROVIDER_CHOICES})
+_PROVIDER_NAMES = ", ".join(f'"{choice}"' for choice in (*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS))
 THEME_CHOICES = frozenset({"dark", "light", "system"})
-DEFAULT_LISTING_PROVIDER: Literal["chatgpt", "claude", "mimo", "cursor"] = "chatgpt"
-DEFAULT_LISTING_FALLBACK: Literal["chatgpt", "claude", "mimo", "cursor", "none"] = "mimo"
+DEFAULT_LISTING_PROVIDER = "chatgpt"
+DEFAULT_LISTING_FALLBACK = "mimo"
 CURSOR_MODELS_KEY = "cursor_models"
 CLAUDE_MODELS_KEY = "claude_models"
+KEY_PROVIDER_MODELS_KEY = "key_provider_models"
 DEFAULT_CLAUDE_MODEL = "sonnet"
 DEFAULT_CURSOR_MODEL = "composer-2.5"
 AUTO_CURSOR_MODEL = "auto"
@@ -47,9 +51,10 @@ _INVENTORY_LOCATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,'#-]{0,79}$")
 DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
 DEFAULT_THEME: Literal["dark", "light", "system"] = "dark"
 
-ListingProviderChoice = Literal["chatgpt", "claude", "mimo", "cursor"]
-ListingFallbackChoice = Literal["chatgpt", "claude", "mimo", "cursor", "none"]
-PhotoProviderChoice = Literal["same", "chatgpt", "claude", "mimo", "cursor"]
+# Any id in LISTING_PROVIDER_CHOICES; key providers come from ai_key_catalog.
+ListingProviderChoice = str
+ListingFallbackChoice = str
+PhotoProviderChoice = str
 ThemeChoice = Literal["dark", "light", "system"]
 
 
@@ -319,7 +324,7 @@ def set_listing_provider_order(
     fallback: object | None = None,
 ) -> dict[str, str]:
     if not isinstance(primary, str) or primary.strip().lower() not in LISTING_PROVIDER_CHOICES:
-        raise ValueError('Primary listing provider must be "chatgpt", "claude", "mimo", or "cursor".')
+        raise ValueError(f"Primary listing provider must be one of {_PROVIDER_NAMES}.")
     primary_choice = normalize_listing_provider(primary)
 
     if fallback is None:
@@ -333,9 +338,9 @@ def set_listing_provider_order(
                 raise ValueError('Fallback must differ from primary, or be "none".')
             fallback_choice = cleaned  # type: ignore[assignment]
         else:
-            raise ValueError('Fallback must be "chatgpt", "claude", "mimo", "cursor", or "none".')
+            raise ValueError(f'Fallback must be one of {_PROVIDER_NAMES}, or "none".')
     else:
-        raise ValueError('Fallback must be "chatgpt", "claude", "mimo", "cursor", or "none".')
+        raise ValueError(f'Fallback must be one of {_PROVIDER_NAMES}, or "none".')
 
     def mutator(payload: dict) -> None:
         payload[LISTING_PROVIDER_KEY] = {
@@ -356,7 +361,7 @@ def get_photo_provider_choice() -> PhotoProviderChoice:
 
 def set_photo_provider_choice(choice: object) -> PhotoProviderChoice:
     if not isinstance(choice, str) or choice.strip().lower() not in PHOTO_PROVIDER_CHOICES:
-        raise ValueError('Photo analysis provider must be "same", "chatgpt", "claude", "mimo", or "cursor".')
+        raise ValueError(f'Photo analysis provider must be "same" or one of {_PROVIDER_NAMES}.')
     cleaned = choice.strip().lower()
 
     def mutator(payload: dict) -> None:
@@ -494,6 +499,54 @@ def resolved_claude_models() -> tuple[str, str]:
     return (
         prefs.get("vision_model") or DEFAULT_CLAUDE_MODEL,
         prefs.get("listing_model") or DEFAULT_CLAUDE_MODEL,
+    )
+
+
+def get_key_provider_models(provider_id: str) -> dict[str, str]:
+    """Saved models for one API-key provider: ``vision_model`` and ``listing_model``."""
+    raw = read_settings().get(KEY_PROVIDER_MODELS_KEY)
+    entry = raw.get(provider_id) if isinstance(raw, dict) else None
+    if not isinstance(entry, dict):
+        return {}
+    return {
+        key: value.strip()
+        for key in ("vision_model", "listing_model")
+        if isinstance((value := entry.get(key)), str) and value.strip()
+    }
+
+
+def set_key_provider_models(
+    provider_id: str,
+    *,
+    vision_model: str | None = None,
+    listing_model: str | None = None,
+) -> dict[str, str]:
+    key_provider(provider_id)
+    choices = {"vision_model": vision_model, "listing_model": listing_model}
+    changes = {key: value.strip() for key, value in choices.items() if value and value.strip()}
+    if not changes:
+        raise ValueError("Choose a photo model or a listing model.")
+    for value in changes.values():
+        if len(value) > MAX_MODEL_SLUG_LENGTH:
+            raise ValueError("Model name is too long.")
+    current = {**get_key_provider_models(provider_id), **changes}
+
+    def mutator(payload: dict) -> None:
+        models = payload.get(KEY_PROVIDER_MODELS_KEY)
+        models = models if isinstance(models, dict) else {}
+        models[provider_id] = current
+        payload[KEY_PROVIDER_MODELS_KEY] = models
+
+    update_settings(mutator)
+    return current
+
+
+def resolved_key_provider_models(provider_id: str) -> tuple[str, str]:
+    spec = key_provider(provider_id)
+    prefs = get_key_provider_models(provider_id)
+    return (
+        prefs.get("vision_model") or spec.vision_model,
+        prefs.get("listing_model") or spec.listing_model,
     )
 
 

@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 
 from vendoo_studio.config import skills_dir
 from vendoo_studio.services import live_trace, model_slots
+from vendoo_studio.services.ai_key_catalog import KEY_PROVIDERS
 from vendoo_studio.services.brave_search import (
     brave_active_queries,
     brave_sold_queries,
@@ -117,11 +118,13 @@ _PROVIDER_LABELS = {
 
 
 def model_search() -> ModelSearch | None:
-    """The listing model's native web search, or None when no model is connected."""
+    """The listing model's native web search, or None when it has none."""
     provider = get_listing_provider()
-    if provider is None:
+    search = getattr(provider, "web_search", None)
+    if not callable(search):
         return None
-    return ModelSearch(_PROVIDER_LABELS.get(provider.name, provider.name), provider.web_search)
+    label = _PROVIDER_LABELS.get(provider.name) or getattr(KEY_PROVIDERS.get(provider.name), "label", provider.name)
+    return ModelSearch(label, search)
 
 
 def comps_search_available() -> bool:

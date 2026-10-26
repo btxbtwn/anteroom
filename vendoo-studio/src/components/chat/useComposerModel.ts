@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import type { ListingProviderId, ModelFavorite, ProviderStatus } from "../../api/types";
+import type { KeyProviderId, ListingProviderId, ModelFavorite, ProviderStatus } from "../../api/types";
+import { KEY_PROVIDER_IDS, KEY_PROVIDER_LABELS, isKeyProviderId, isListingProviderId } from "../keyProviders";
 import type { ModelEsque } from "./providerIconUtils";
 
 /**
@@ -27,6 +28,7 @@ export const PROVIDER_LABELS: Record<ListingProviderId, string> = {
   claude: "Claude",
   cursor: "Cursor",
   mimo: "Xiaomi MiMo",
+  ...KEY_PROVIDER_LABELS,
 };
 
 const MIMO_LISTING_MODEL = "mimo-v2.5-pro";
@@ -58,7 +60,7 @@ export function activeProviderId(status: Pick<ProviderStatus, "provider" | "prim
   if (!status) return null;
   const name = status.provider;
   if (name === "xiaomi-mimo") return "mimo";
-  if (name === "chatgpt" || name === "claude" || name === "cursor") return name;
+  if (isListingProviderId(name) && name !== "mimo") return name;
   return status.primary ?? null;
 }
 
@@ -165,6 +167,20 @@ export function useComposerModel() {
   const chatgpt = useQuery({ queryKey: ["chatgpt-models"], queryFn: api.settings.chatgptModels, enabled: chatgptReady, staleTime: 5 * 60_000 });
   const claude = useQuery({ queryKey: ["claude-models"], queryFn: api.settings.claudeModels, enabled: claudeReady, staleTime: 5 * 60_000 });
   const cursor = useQuery({ queryKey: ["cursor-models"], queryFn: api.settings.cursorModels, enabled: cursorReady, staleTime: 5 * 60_000 });
+  const aiKeys = useQuery({ queryKey: ["ai-keys"], queryFn: api.settings.aiKeys, staleTime: 30_000 });
+  const keyEntries = new Map((aiKeys.data?.providers ?? []).map((entry) => [entry.id, entry]));
+  const keyReady = (id: KeyProviderId) => Boolean(keyEntries.get(id)?.masked_key);
+  const activeKey = (() => {
+    const id = activeProviderId(status.data);
+    return isKeyProviderId(id) && keyReady(id) ? id : null;
+  })();
+  // Only the provider in use lists its models here; Settings lists each one's.
+  const activeKeyModels = useQuery({
+    queryKey: ["ai-key-models", activeKey],
+    queryFn: () => api.settings.aiKeyModels(activeKey as KeyProviderId),
+    enabled: activeKey !== null,
+    staleTime: 5 * 60_000,
+  });
 
   const active = activeProviderId(status.data);
 
@@ -199,6 +215,16 @@ export function useComposerModel() {
       ready: mimoReady,
       message: mimoReady ? null : "Not ready. Add a Xiaomi MiMo API key in Settings → Providers.",
     },
+    ...KEY_PROVIDER_IDS.map((id) => ({
+      instanceId: id,
+      displayName: PROVIDER_LABELS[id],
+      ready: keyReady(id),
+      message: keyReady(id)
+        ? id === activeKey
+          ? activeKeyModels.data?.error || errorMessage(activeKeyModels.error)
+          : null
+        : `Not ready. Add a ${PROVIDER_LABELS[id]} API key in Settings → Providers.`,
+    })),
   ];
 
   const savedModel: Record<ListingProviderId, string> = {
@@ -206,6 +232,10 @@ export function useComposerModel() {
     claude: claude.data?.listing_model ?? "",
     cursor: cursor.data?.listing_model ?? "",
     mimo: MIMO_LISTING_MODEL,
+    ...(Object.fromEntries(KEY_PROVIDER_IDS.map((id) => [id, keyEntries.get(id)?.listing_model ?? ""])) as Record<
+      KeyProviderId,
+      string
+    >),
   };
 
   const modelOptionsByInstance = new Map<ListingProviderId, ModelEsque[]>([
@@ -240,6 +270,19 @@ export function useComposerModel() {
         : [],
     ],
     ["mimo", mimoReady ? [{ slug: MIMO_LISTING_MODEL, name: modelNameFromSlug(MIMO_LISTING_MODEL) }] : []],
+    ...KEY_PROVIDER_IDS.map((id): [ListingProviderId, ModelEsque[]] => [
+      id,
+      !keyReady(id)
+        ? []
+        : id === activeKey && activeKeyModels.data
+          ? providerModelOptions(
+              activeKeyModels.data.models.map((slug) => ({ slug, name: slug })),
+              savedModel[id],
+            )
+          : savedModel[id]
+            ? [{ slug: savedModel[id], name: savedModel[id] }]
+            : [],
+    ]),
   ]);
 
   const model = active ? savedModel[active] || status.data?.listing_model || "" : "";
@@ -260,7 +303,7 @@ export function useComposerModel() {
   })();
 
   const refresh = () => {
-    for (const key of ["settings-provider", "chatgpt-models", "claude-models", "cursor-models", "status"]) {
+    for (const key of ["settings-provider", "chatgpt-models", "claude-models", "cursor-models", "ai-keys", "ai-key-models", "status"]) {
       void queryClient.invalidateQueries({ queryKey: [key] });
     }
   };
@@ -273,6 +316,7 @@ export function useComposerModel() {
       if (provider === "chatgpt") await api.settings.setChatGPTModels({ listing_model: next });
       else if (provider === "claude") await api.settings.setClaudeModels({ listing_model: next });
       else if (provider === "cursor") await api.settings.setCursorModels({ listing_model: next });
+      else if (isKeyProviderId(provider)) await api.settings.setAIKeyModels(provider, { listing_model: next });
     },
     onSettled: refresh,
   });

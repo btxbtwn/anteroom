@@ -16,6 +16,7 @@ from vendoo_studio.version import app_version
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
 from vendoo_studio.routes import ebay_offers
 from vendoo_studio.routes import ebay
+from vendoo_studio.routes import ai_keys
 
 
 @asynccontextmanager
@@ -166,6 +167,7 @@ app.include_router(measurements.router)
 app.include_router(listings.router)
 app.include_router(jobs.router)
 app.include_router(imports.router)
+app.include_router(ai_keys.router)
 app.include_router(settings.router)
 app.include_router(extension.router)
 app.include_router(chat.router)
