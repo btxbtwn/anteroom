@@ -14,12 +14,15 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.repositories.queries import JobRepo
-from vendoo_studio.services.automations import AutomationBusy
+from vendoo_studio.services.automations import DOWN_STATE, AutomationBusy
 
 log = logging.getLogger("vendoo_studio.automations")
 
 # How long one item waits for the Bridge slot to clear before this run steps aside.
 IDLE_TIMEOUT_S = 8 * 60
+# After a marketplace fails to come back up: 1 minute, 5 minutes, 15 minutes.
+# Tests replace this with zeros. The sleeps are the only wait between attempts.
+RELIST_BACKOFF_S = (60, 300, 900)
 
 
 async def perform(db: Session, item: dict, action: dict, marketplaces: list[str], revision_id: str | None) -> dict:
@@ -50,28 +53,143 @@ async def _delist(db: Session, conv_id: str, marketplaces: list[str]) -> dict:
 
 
 async def _relist(db: Session, conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
-    """Take the named listings down, then list those same items again. List reuses the saved marketplace id."""
-    from vendoo_studio.services.native_marketplaces import ListRequest, NativeMarketplaceError, list_now
+    """Take the named listings down, then list those same items again.
 
+    A marketplace that fails to list does not stop the others. Failures are
+    retried with backoff. Anything still down is reported as ``down, needs relist``
+    and is not treated as a reason to skip the marketplaces that already succeeded.
+    A delist that itself fails returns before anything is marked down, because
+    the listings may still be up.
+    """
     taken_down = await _delist(db, conv_id, marketplaces)
     if not taken_down.get("ok"):
         return taken_down
+    return await _list_remaining(db, conv_id, marketplaces, revision_id)
+
+
+async def publish_revision(db: Session, conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
+    """Publish one saved revision on the named marketplaces.
+
+    A marketplace that is already live is relisted (delist, then list) so
+    ``list_now`` does not refuse it as already listed. A marketplace with no
+    live listing is listed. Sold listings are left alone. The same retry and
+    down state as relist apply to whichever listings fail to come back.
+    """
+    if not marketplaces:
+        return {"ok": False, "error": "Name the marketplaces. An automation does not publish everywhere by default."}
+    if not revision_id:
+        return {"ok": False, "error": "Publish needs the listing that was just saved."}
+    live, fresh = _partition(db, conv_id, marketplaces)
+    detail: list[dict] = []
+    down: list[str] = []
+    errors: dict[str, str] = {}
+    hard_error = None
+    if live:
+        relisted = await _relist(db, conv_id, live, revision_id)
+        detail.extend(relisted.get("detail") or [])
+        down.extend(relisted.get("down") or [])
+        errors.update(relisted.get("errors") or {})
+        if not relisted.get("ok") and not relisted.get("down"):
+            hard_error = relisted.get("error") or "Relist failed."
+    if fresh:
+        listed = await _list_remaining(db, conv_id, fresh, revision_id)
+        detail.extend(listed.get("detail") or [])
+        down.extend(listed.get("down") or [])
+        errors.update(listed.get("errors") or {})
+        if not listed.get("ok") and not listed.get("down"):
+            hard_error = hard_error or listed.get("error") or "Relist failed."
+    if down:
+        return {
+            "ok": False,
+            "state": DOWN_STATE,
+            "down": down,
+            "error": _down_message(down),
+            "detail": detail,
+            "errors": errors,
+        }
+    if hard_error:
+        return {"ok": False, "error": hard_error, "detail": detail}
+    return {"ok": True, "detail": detail}
+
+
+def _partition(db: Session, conv_id: str, marketplaces: list[str]) -> tuple[list[str], list[str]]:
+    """Live listings are relisted. Ones with no listing are listed. Sold listings are skipped."""
+    from vendoo_studio.services.marketplace_delist import DelistError, listings
+
+    try:
+        known = listings(db, conv_id)
+    except DelistError:
+        known = {}
+    live = []
+    fresh = []
+    for name in marketplaces:
+        entry = known.get(name) or {}
+        if entry.get("sold_here"):
+            continue
+        if entry.get("listing_id") and entry.get("state") != "deleted":
+            live.append(name)
+        else:
+            fresh.append(name)
+    return live, fresh
+
+
+async def _list_remaining(db: Session, conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
     if not revision_id:
         return {"ok": False, "error": "Relist needs the listing that was just saved."}
-    results = []
-    for name in marketplaces:
-        if JobRepo(db).get_active():
+    pending = list(marketplaces)
+    detail: list[dict] = []
+    errors: dict[str, str] = {}
+    for delay in (0, *RELIST_BACKOFF_S):
+        if not pending:
+            break
+        if delay:
+            await asyncio.sleep(delay)
+        still = []
+        for name in pending:
+            outcome = await _list_one(db, conv_id, name, revision_id)
+            if outcome.get("ok"):
+                detail.append(outcome)
+            else:
+                errors[name] = outcome.get("error") or "Relist failed."
+                still.append(name)
+        pending = still
+    if pending:
+        return {
+            "ok": False,
+            "state": DOWN_STATE,
+            "down": pending,
+            "error": _down_message(pending),
+            "detail": detail,
+            "errors": errors,
+        }
+    return {"ok": True, "detail": detail}
+
+
+async def _list_one(db: Session, conv_id: str, name: str, revision_id: str) -> dict:
+    from vendoo_studio.services.native_marketplaces import ListRequest, NativeMarketplaceError, list_now
+
+    if JobRepo(db).get_active() and not await _wait_until_idle(db):
+        return {"ok": False, "marketplace": name, "error": f"The {name} relist was still running when this automation stopped waiting."}
+    try:
+        # confirm=True is the seller's confirmed automation, for this marketplace only.
+        result = await list_now(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
+    except NativeMarketplaceError as exc:
+        if exc.status_code == 409 and "another automation" in str(exc).lower():
             if not await _wait_until_idle(db):
-                raise AutomationBusy()
-        try:
-            # confirm=True is the seller's confirmed automation, for this marketplace only.
-            result = await list_now(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
-        except NativeMarketplaceError as exc:
-            return {"ok": False, "error": str(exc), "marketplace": name}
-        results.append({"marketplace": name, "ok": True, "detail": _brief(result)})
-        if not await _wait_until_idle(db):
-            return {"ok": False, "error": f"The {name} relist was still running when this automation stopped waiting."}
-    return {"ok": True, "detail": results}
+                return {"ok": False, "marketplace": name, "error": str(exc)}
+            try:
+                result = await list_now(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
+            except NativeMarketplaceError as again:
+                return {"ok": False, "marketplace": name, "error": str(again)}
+        else:
+            return {"ok": False, "marketplace": name, "error": str(exc)}
+    if not await _wait_until_idle(db):
+        return {"ok": False, "marketplace": name, "error": f"The {name} relist was still running when this automation stopped waiting."}
+    return {"marketplace": name, "ok": True, "detail": _brief(result)}
+
+
+def _down_message(names: list[str]) -> str:
+    return f"{', '.join(names)}: {DOWN_STATE}"
 
 
 async def _regenerate(conv_id: str) -> dict:

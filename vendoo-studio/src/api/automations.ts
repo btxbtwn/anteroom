@@ -39,6 +39,8 @@ export interface Automation {
   filters: AutomationFilters;
   actions: AutomationAction[];
   marketplaces: string[];
+  price_repeat?: "once" | "step" | null;
+  require_approval: boolean;
   summary: string;
   confirmed_at: string | null;
   next_run_at: string | null;
@@ -58,6 +60,8 @@ export interface AutomationDraft {
   filters: AutomationFilters;
   actions: AutomationAction[];
   marketplaces: string[];
+  price_repeat?: "once" | "step" | null;
+  require_approval?: boolean;
   issues: string[];
   ready: boolean;
   summary?: string;
@@ -90,6 +94,8 @@ export interface AutomationRunItem {
   title?: string;
   ok: boolean;
   error?: string | null;
+  state?: string | null;
+  down?: string[];
   price?: number | null;
   next_price?: number | null;
 }
@@ -123,6 +129,8 @@ export interface AutomationBody {
   filters?: AutomationFilters;
   actions?: AutomationAction[];
   marketplaces?: string[];
+  price_repeat?: "once" | "step";
+  require_approval?: boolean;
   activate?: boolean;
 }
 
@@ -131,4 +139,28 @@ export interface AssistantAutomation {
   status: "proposed" | "confirmed" | "dismissed";
   proposal?: AutomationDraft;
   automation_id?: string;
+}
+
+/** A regenerated listing waiting for the seller to publish it. */
+export interface AutomationApproval {
+  id: string;
+  automation_id: string;
+  conversation_id: string;
+  title: string | null;
+  revision_id: string;
+  marketplaces: string[];
+  status: string;
+  state: string;
+  publish?: { ok?: boolean; state?: string | null; error?: string | null; down?: string[] };
+}
+
+/** A marketplace a relist left offline. */
+export interface RelistGap {
+  id: string;
+  state: string;
+  title: string | null;
+  marketplace: string;
+  automation_id: string;
+  conversation_id: string;
+  error: string | null;
 }

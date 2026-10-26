@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarClockIcon } from "lucide-react";
 
 import { api } from "../api/client";
-import type { Automation, AutomationDraft, AutomationPreview, AutomationRun } from "../api/automations";
+import type { Automation, AutomationApproval, AutomationDraft, AutomationPreview, AutomationRun, RelistGap } from "../api/automations";
 import { confirmDialog } from "../ui/confirmDialog";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -28,6 +28,8 @@ import {
 } from "./automationsFormat";
 
 const LIST_KEY = ["automations"] as const;
+const APPROVAL_KEY = ["automation-approvals"] as const;
+const GAP_KEY = ["automation-gaps"] as const;
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -52,6 +54,8 @@ function Check({
 export function AutomationsPage() {
   const queryClient = useQueryClient();
   const list = useQuery({ queryKey: LIST_KEY, queryFn: () => api.automations.list() });
+  const approvals = useQuery({ queryKey: APPROVAL_KEY, queryFn: () => api.automations.approvals() });
+  const gaps = useQuery({ queryKey: GAP_KEY, queryFn: () => api.errors.list() });
   const [form, setForm] = useState<AutomationForm>(() => emptyForm());
   const [editing, setEditing] = useState<string | null>(null);
   const [issues, setIssues] = useState<string[]>([]);
@@ -99,7 +103,11 @@ export function AutomationsPage() {
     onError: (err: Error) => setError(err.message),
   });
 
-  const refresh = () => void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+    void queryClient.invalidateQueries({ queryKey: APPROVAL_KEY });
+    void queryClient.invalidateQueries({ queryKey: GAP_KEY });
+  };
 
   const pause = async (task: Automation) => {
     const ok = await confirmDialog(`Pause “${task.name}”? It will not start a new run.`, { confirmLabel: "Pause" });
@@ -140,11 +148,27 @@ export function AutomationsPage() {
       filters: task.filters,
       actions: task.actions,
       marketplaces: task.marketplaces,
+      price_repeat: task.price_repeat,
+      require_approval: task.require_approval,
       issues: [],
       ready: task.status !== "draft",
     }));
     setPreview(null);
     setIssues([]);
+  };
+
+  const approve = async (row: AutomationApproval) => {
+    const where = row.marketplaces.length ? row.marketplaces.join(", ") : "the marketplaces this task names";
+    const ok = await confirmDialog(`Publish “${row.title || "this listing"}” on ${where}?`, { confirmLabel: "Publish" });
+    if (!ok) return;
+    setError("");
+    try {
+      const result = await api.automations.approve(row.id);
+      if (result.publish?.state) setError(`${row.title || "Listing"}: ${result.publish.state}`);
+      refresh();
+    } catch (err) {
+      setError((err as Error).message);
+    }
   };
 
   const included = preview?.items.filter((item) => item.include) ?? [];
@@ -156,6 +180,41 @@ export function AutomationsPage() {
         title="Automations"
         description="Delist, relist, regenerate, or drop a price on a schedule. Nothing runs until you confirm the actions and the marketplaces by name."
       />
+
+      <section className="rounded-xl border border-border bg-card p-4">
+        <h2 className="font-medium">Waiting for approval</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Regenerated listings stay here until you approve them. Approve publishes them on the marketplaces that task names.</p>
+        {(approvals.data ?? []).length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">Nothing is waiting for approval.</p>
+        ) : (
+          <ul className="mt-3 flex flex-col gap-2 text-sm">
+            {(approvals.data ?? []).map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  {row.title || row.conversation_id}
+                  {row.marketplaces.length ? ` · ${row.marketplaces.join(", ")}` : ""}
+                  {` · ${row.state}`}
+                </span>
+                <Button size="sm" onClick={() => void approve(row)}>Approve</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {(gaps.data ?? []).length ? (
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="font-medium">Down, needs relist</h2>
+          <ul className="mt-2 flex flex-col gap-1 text-sm">
+            {(gaps.data ?? []).map((gap: RelistGap) => (
+              <li key={gap.id}>
+                {gap.title || gap.conversation_id} · {gap.marketplace} · {gap.state}
+                {gap.error ? ` · ${gap.error}` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
         <h2 className="flex items-center gap-2 font-medium">
@@ -237,6 +296,13 @@ export function AutomationsPage() {
         </div>
         <div className="flex flex-wrap gap-4">
           <Check label="Regenerate" checked={form.regenerate} onChange={(regenerate) => patch({ regenerate })} />
+          {form.regenerate ? (
+            <Check
+              label="Require approval before publishing"
+              checked={form.requireApproval}
+              onChange={(requireApproval) => patch({ requireApproval })}
+            />
+          ) : null}
           <Check label="Delist" checked={form.delist} onChange={(delist) => patch({ delist })} />
           <Check label="Relist" checked={form.relist} onChange={(relist) => patch({ relist })} />
           <Check label="Drop the price" checked={form.priceOn} onChange={(priceOn) => patch({ priceOn })} />
@@ -337,6 +403,9 @@ export function AutomationsPage() {
                 {task.summary || describeSchedule(task.schedule, task.timezone)}
                 {" · "}
                 {describeActions(task.actions)}
+                {task.actions.some((action) => action.type === "regenerate")
+                  ? task.require_approval ? " · approval required" : " · publishes when it regenerates"
+                  : ""}
                 {task.marketplaces.length ? ` · ${task.marketplaces.join(", ")}` : ""}
               </p>
               {task.next_run_at ? <p className="mt-1 text-xs text-muted-foreground">Next run {task.next_run_at}</p> : null}
@@ -366,7 +435,8 @@ export function AutomationsPage() {
                         {run.items.map((item) => (
                           <li key={item.conversation_id}>
                             {item.title || item.conversation_id}
-                            {item.ok ? "" : ` — ${item.error || "failed"}`}
+                            {item.state ? ` — ${item.state}` : item.ok ? "" : ` — ${item.error || "failed"}`}
+                            {item.down?.length ? ` · ${item.down.join(", ")}` : ""}
                             {item.next_price != null ? ` · ${money(item.price)} → ${money(item.next_price)}` : ""}
                           </li>
                         ))}

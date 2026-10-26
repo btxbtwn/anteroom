@@ -7,6 +7,7 @@ at that point. Run now only works after that confirmation.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -57,6 +58,11 @@ class AutomationBody(BaseModel):
     filters: FiltersBody | None = None
     actions: list[ActionBody] | None = None
     marketplaces: list[str] | None = None
+    price_repeat: Literal["step", "once"] | None = Field(default=None, description="step walks the original price down each cycle. once drops a single time.")
+    require_approval: bool | None = Field(
+        default=None,
+        description="Regenerated listings wait for approval before they publish. On unless you turn it off for this task.",
+    )
     activate: bool = Field(default=False, description="Confirm this automation and let it run. Leave this off to save a draft.")
 
 
@@ -67,6 +73,10 @@ class DraftBody(BaseModel):
 
 class RunBody(BaseModel):
     dry_run: bool = Field(default=False, description="Show the items and the price change without delisting, relisting, or saving.")
+
+
+class ConfirmBody(BaseModel):
+    confirm: bool = Field(default=False, description="Publish this regenerated listing on the marketplaces the task names.")
 
 
 def _fail(exc: AutomationError) -> HTTPException:
@@ -95,6 +105,37 @@ def preview_automation(body: AutomationBody, db: Session = Depends(get_db)):
     """Which items a task would touch, and the price each would become. Nothing is saved or sent."""
     try:
         return automations.preview(db, _payload(body))
+    except AutomationError as exc:
+        raise _fail(exc) from exc
+
+
+@router.get("/approvals")
+def list_approvals(db: Session = Depends(get_db)):
+    """Regenerated listings waiting for approval before they publish."""
+    return automations.list_pending_approvals(db)
+
+
+@router.post("/approvals/{approval_id}/approve")
+async def approve_listing(approval_id: str, body: ConfirmBody, db: Session = Depends(get_db)):
+    """Publish a regenerated listing the seller just approved."""
+    from vendoo_studio.services.automation_actions import publish_revision
+
+    if body.confirm is not True:
+        raise HTTPException(400, "Confirm publishing this listing.")
+    try:
+        row = automations.get_approval(db, approval_id)
+        if JobRepo(db).get_active():
+            raise AutomationError("A marketplace job is running. Wait for it to finish.", 409)
+        result = await publish_revision(db, row.conversation_id, list(row.marketplaces or []), row.revision_id)
+        item = {"conversation_id": row.conversation_id, "title": row.title}
+        automations.note_relist_result(db, row.automation_id, row.run_id, item, result)
+        if result.get("state") == automations.DOWN_STATE or result.get("ok"):
+            view = automations.mark_approval(db, row, "approved")
+            view["publish"] = result
+            return view
+        raise AutomationError(result.get("error") or "The listing was not published.", 409)
+    except AutomationBusy as exc:
+        raise HTTPException(409, str(exc) or "A marketplace job is running. Wait for it to finish.") from exc
     except AutomationError as exc:
         raise _fail(exc) from exc
 

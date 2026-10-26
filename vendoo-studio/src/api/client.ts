@@ -63,7 +63,7 @@ import type {
 } from "./types";
 import { readSse } from "./sse";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
-import type { Automation, AutomationBody, AutomationDraft, AutomationHistory, AutomationPreview, AutomationRun } from "./automations";
+import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, AutomationHistory, AutomationPreview, AutomationRun, RelistGap } from "./automations";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
@@ -367,6 +367,12 @@ export const api = {
     run: (id: string, dryRun = false) =>
       request<AutomationRun>(`/automations/${id}/run`, { method: "POST", body: JSON.stringify({ dry_run: dryRun }) }),
     history: (id: string) => request<AutomationHistory>(`/automations/${id}/history`),
+    approvals: () => request<AutomationApproval[]>("/automations/approvals"),
+    approve: (id: string) =>
+      request<AutomationApproval>(`/automations/approvals/${id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+  },
+  errors: {
+    list: () => request<RelistGap[]>("/errors"),
   },
   saleCalendar: {
     record: (record: SaleRecord) => request<{ id: string }>("/analytics/calendar/records", { method: "POST", body: JSON.stringify(record) }),

@@ -21,13 +21,18 @@ from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services.automation_schedule import as_utc
 from vendoo_studio.services.automations import (
     STALE_RUN,
+    WAITING_APPROVAL,
+    DOWN_STATE,
     AutomationBusy,
+    actions_for_run,
     apply_local,
     claim_scheduled_run,
+    enqueue_approval,
     finish_run,
     log_item_job,
     mark_retry,
     mark_waiting,
+    note_relist_result,
     record_application,
     select_items,
 )
@@ -202,9 +207,10 @@ async def _execute(db: Session, run: AutomationRun, automation: Automation, now:
 
 
 async def _execute_items(db: Session, run: AutomationRun, automation: Automation, now: datetime, executor) -> None:
+    actions = actions_for_run(automation)
     spec = {
         "filters": automation.filters or {},
-        "actions": automation.actions or [],
+        "actions": actions,
         "marketplaces": automation.marketplaces or [],
     }
     items = select_items(db, spec, now, automation_id=automation.id, persist_price=False)
@@ -219,7 +225,7 @@ async def _execute_items(db: Session, run: AutomationRun, automation: Automation
             run.summary = summary
             db.commit()
             raise AutomationBusy()
-        outcome = await _one_item(db, run, automation, item, executor)
+        outcome = await _one_item(db, run, automation, item, executor, actions)
         if outcome.get("busy"):
             run.summary = summary
             db.commit()
@@ -232,60 +238,142 @@ async def _execute_items(db: Session, run: AutomationRun, automation: Automation
     finish_run(db, run, automation, now, status="completed")
 
 
-async def _one_item(db: Session, run: AutomationRun, automation: Automation, item: dict, executor) -> dict:
-    actions = automation.actions or []
+async def _one_item(db: Session, run: AutomationRun, automation: Automation, item: dict, executor, actions: list[dict]) -> dict:
     local_actions = [action for action in actions if action["type"] in {"price", "update_fields"}]
-    remote_actions = [action for action in actions if action["type"] in {"delist", "relist", "regenerate"}]
-    local = apply_local(db, item["conversation_id"], local_actions, dry_run=bool(run.dry_run)) if local_actions else {
-        "ok": True, "revision_id": None, "notes": [],
-    }
-    if local.get("ok") and not local.get("revision_id"):
-        from vendoo_studio.services.automations import _current
+    regenerate = next((action for action in actions if action["type"] == "regenerate"), None)
+    publish_actions = [action for action in actions if action["type"] in {"delist", "relist"}]
+    hold = regenerate is not None and bool(automation.require_approval)
+    markets = list(automation.marketplaces or [])
+    remote: list[dict] = []
+    error = None
+    state = None
+    down = None
+    local = {"ok": True, "revision_id": None, "notes": []}
 
-        revision, _listing = _current(db, item["conversation_id"])
-        if revision is not None:
-            local["revision_id"] = revision.id
-    error = None if local.get("ok") else local.get("error")
-    remote = []
-    if local.get("ok") and not run.dry_run:
-        for action in remote_actions:
-            try:
-                result = await executor(db, item, action, list(automation.marketplaces or []), local.get("revision_id"))
-            except AutomationBusy:
-                return {**_outcome(item, local, remote, error="Waiting for the current marketplace job.", dry_run=bool(run.dry_run)), "busy": True, "acted": False}
-            remote.append({"type": action["type"], **result})
-            if not result.get("ok"):
-                error = result.get("error") or f"{action['type']} failed."
+    if run.dry_run:
+        if local_actions:
+            local = apply_local(db, item["conversation_id"], local_actions, dry_run=True)
+        if local.get("ok") and not local.get("revision_id"):
+            local["revision_id"] = _revision_id(db, item["conversation_id"])
+        kinds = []
+        if regenerate:
+            kinds.append("regenerate")
+        kinds.extend(action["type"] for action in publish_actions)
+        remote = [{"type": kind, "ok": True, "dry_run": True} for kind in kinds]
+        if hold:
+            state = WAITING_APPROVAL
+        error = None if local.get("ok") else local.get("error")
+        return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down)
+
+    if regenerate:
+        stepped = await _run_remote(db, run, automation, item, executor, regenerate, markets, None)
+        if stepped.get("busy"):
+            return stepped
+        remote.append(stepped["remote"])
+        error = stepped.get("error")
+
+    if error is None and local_actions:
+        local = apply_local(db, item["conversation_id"], local_actions, dry_run=False)
+        if not local.get("ok"):
+            error = local.get("error")
+    if error is None and not local.get("revision_id"):
+        local["revision_id"] = _revision_id(db, item["conversation_id"])
+
+    if error is None and hold:
+        if not markets:
+            error = "Name the marketplaces. An automation does not publish a regenerated listing everywhere by default."
+        elif not local.get("revision_id"):
+            error = "Regenerate did not save a listing."
+        else:
+            approval = enqueue_approval(db, automation, run.id, item, local["revision_id"], markets)
+            state = WAITING_APPROVAL
+            remote.append({"type": "approval", "ok": True, "approval_id": approval.id, "state": state})
+    elif error is None:
+        for action in publish_actions:
+            stepped = await _run_remote(db, run, automation, item, executor, action, markets, local.get("revision_id"))
+            if stepped.get("busy"):
+                return stepped
+            remote.append(stepped["remote"])
+            error = stepped.get("error")
+            state = stepped.get("state") or state
+            down = stepped.get("down") if stepped.get("down") is not None else down
+            if error:
                 break
-    elif run.dry_run:
-        remote = [{"type": action["type"], "ok": True, "dry_run": True} for action in remote_actions]
+        # Approval is off, and regenerate is the only way this task publishes.
+        if error is None and regenerate and not publish_actions:
+            from vendoo_studio.services.automation_actions import publish_revision
+
+            result = await publish_revision(db, item["conversation_id"], markets, local.get("revision_id"))
+            remote.append({"type": "publish", **result})
+            note_relist_result(db, automation.id, run.id, item, result)
+            if not result.get("ok"):
+                error = result.get("error") or "Publish failed."
+                state = result.get("state")
+                down = result.get("down")
+
+    return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down)
+
+
+async def _run_remote(db, run, automation, item, executor, action, markets, revision_id) -> dict:
+    if JobRepo(db).get_active():
+        return {
+            **_outcome(item, {"notes": []}, [], error="Waiting for the current marketplace job.", dry_run=bool(run.dry_run)),
+            "busy": True,
+            "acted": False,
+        }
+    try:
+        result = await executor(db, item, action, markets, revision_id)
+    except AutomationBusy:
+        return {
+            **_outcome(item, {"notes": []}, [], error="Waiting for the current marketplace job.", dry_run=bool(run.dry_run)),
+            "busy": True,
+            "acted": False,
+        }
+    if action["type"] in {"relist", "delist"} or result.get("down") or result.get("detail"):
+        note_relist_result(db, automation.id, run.id, item, result)
+    error = None if result.get("ok") else (result.get("error") or f"{action['type']} failed.")
+    return {"remote": {"type": action["type"], **result}, "error": error, "state": result.get("state"), "down": result.get("down")}
+
+
+def _finish_item(db, run, automation, item, local, remote, *, error, state, down) -> dict:
     ok = error is None
     payload = {
         "automation_id": automation.id,
         "run_id": run.id,
         "dry_run": bool(run.dry_run),
         "title": item.get("title"),
-        "actions": [action["type"] for action in actions],
+        "actions": [action["type"] for action in (automation.actions or [])],
         "marketplaces": item.get("marketplaces"),
         "price": item.get("price"),
         "next_price": local.get("price", item.get("next_price")),
         "original_price": item.get("original_price"),
         "notes": local.get("notes") or [],
         "remote": remote,
+        "state": state,
+        "down": down or [],
     }
     job_id = log_item_job(db, item["conversation_id"], local.get("revision_id"), payload, ok=ok, error=error)
-    if ok and not run.dry_run and (automation.filters or {}).get("min_age_days"):
+    if ok and not run.dry_run and state != DOWN_STATE and (automation.filters or {}).get("min_age_days"):
         listed = _parse_time(item.get("listed_at"))
         record_application(db, automation.id, item["conversation_id"], listed, utcnow())
-    return _outcome(item, local, remote, error=error, job_id=job_id, dry_run=bool(run.dry_run))
+    return _outcome(item, local, remote, error=error, job_id=job_id, dry_run=bool(run.dry_run), state=state, down=down)
 
 
-def _outcome(item, local, remote, *, error, job_id=None, busy=False, dry_run=False) -> dict:
+def _revision_id(db: Session, conv_id: str) -> str | None:
+    from vendoo_studio.services.automations import _current
+
+    revision, _listing = _current(db, conv_id)
+    return revision.id if revision is not None else None
+
+
+def _outcome(item, local, remote, *, error, job_id=None, busy=False, dry_run=False, state=None, down=None) -> dict:
     return {
         "conversation_id": item["conversation_id"],
         "title": item.get("title"),
         "ok": error is None and not busy,
         "error": error,
+        "state": state,
+        "down": list(down or []),
         "acted": True,
         "job_id": job_id,
         "price": item.get("price"),

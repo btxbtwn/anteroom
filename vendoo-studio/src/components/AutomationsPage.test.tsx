@@ -19,5 +19,7 @@ describe("AutomationsPage", () => {
     expect(html).toContain("Save and confirm");
     expect(html).toContain("60 days listed on eBay and Poshmark");
     expect(html).toContain("No automations yet.");
+    expect(html).toContain("Waiting for approval");
+    expect(html).toContain("Nothing is waiting for approval.");
   });
 });

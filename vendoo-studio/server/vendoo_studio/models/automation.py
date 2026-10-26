@@ -1,12 +1,16 @@
 """Scheduled automations and the original asking price they drop from.
 
 The task and each run live here. Per-item outcomes are written to the existing
-``jobs`` table. Listing age is read from ``marketplace_listings.created_at``
-(when that row was first inserted), not from this table.
+``jobs`` table. Listing age comes from the first real listed date (a publish
+job, a Vendoo date, then the marketplace row).
 
-``item_price_baselines`` keeps the first asking price. A relist that inserts a
-new marketplace row starts the age clock over, and a later 10% drop is still
-taken from this original price rather than from the reduced one.
+``item_price_baselines`` keeps the first asking price. A later drop is taken
+from that original price. ``price_repeat`` on the task says whether each cycle
+steps down again or the drop happens once.
+
+A regenerated listing stays in ``automation_approvals`` until the seller
+approves it, unless that task turns approval off. A relist that is still down
+after retries is an open row in ``automation_relist_gaps``.
 """
 from __future__ import annotations
 
@@ -29,6 +33,11 @@ class Automation(Base):
     filters = Column(JSON, nullable=False)
     actions = Column(JSON, nullable=False)
     marketplaces = Column(JSON, nullable=False)
+    # step walks the original price down each cycle. once drops a single time.
+    # Empty means the price action's own repeat still applies.
+    price_repeat = Column(String, nullable=True)
+    # Regenerated listings wait here for an explicit approve before they publish.
+    require_approval = Column(Boolean, nullable=False, default=True, server_default="1")
     confirmed_at = Column(DateTime, nullable=True)
     next_run_at = Column(DateTime, nullable=True, index=True)
     last_run_at = Column(DateTime, nullable=True)
@@ -81,6 +90,45 @@ class AutomationApplication(Base):
     conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     listed_at = Column(DateTime, nullable=True)
     applied_at = Column(DateTime, nullable=False, default=utcnow)
+
+
+class AutomationRelistGap(Base):
+    """A marketplace that stayed down after a relist retried it.
+
+    ``state`` is the seller-facing words. An open row (``resolved_at`` empty)
+    is what ``anteroom errors list`` and the Automations page show.
+    """
+
+    __tablename__ = "automation_relist_gaps"
+
+    id = Column(String, primary_key=True, default=new_id)
+    automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id = Column(String, nullable=True)
+    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String, nullable=True)
+    marketplace = Column(String, nullable=False)
+    error = Column(Text, nullable=True)
+    state = Column(String, nullable=False, default="down, needs relist")
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+
+
+class AutomationApproval(Base):
+    """A regenerated draft waiting for the seller to publish it."""
+
+    __tablename__ = "automation_approvals"
+
+    id = Column(String, primary_key=True, default=new_id)
+    automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id = Column(String, nullable=True)
+    conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String, nullable=True)
+    revision_id = Column(String, nullable=False)
+    marketplaces = Column(JSON, nullable=False)
+    # pending, approved, dismissed
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(DateTime, nullable=False, default=utcnow)
+    decided_at = Column(DateTime, nullable=True)
 
 
 class ItemPriceBaseline(Base):

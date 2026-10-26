@@ -31,6 +31,7 @@ export interface AutomationForm {
   priceOn: boolean;
   priceMode: "amount" | "percent";
   priceRepeat: "once" | "step";
+  requireApproval: boolean;
   priceValue: string;
   floor: string;
   marketplaces: string[];
@@ -65,6 +66,7 @@ export function emptyForm(timezone = browserTimezone()): AutomationForm {
     priceOn: false,
     priceMode: "percent",
     priceRepeat: "step",
+    requireApproval: true,
     priceValue: "",
     floor: "",
     marketplaces: [],
@@ -89,6 +91,7 @@ export function formFromDraft(draft: AutomationDraft): AutomationForm {
   form.status = draft.filters?.status || "";
   form.itemIds = (draft.filters?.conversation_ids || []).join(", ");
   form.marketplaces = [...(draft.marketplaces || [])];
+  form.requireApproval = draft.require_approval !== false;
   for (const action of draft.actions || []) {
     if (action.type === "regenerate") form.regenerate = true;
     if (action.type === "delist") form.delist = true;
@@ -96,11 +99,12 @@ export function formFromDraft(draft: AutomationDraft): AutomationForm {
     if (action.type === "price") {
       form.priceOn = true;
       form.priceMode = action.mode === "amount" ? "amount" : "percent";
-      form.priceRepeat = action.repeat === "step" || (action.repeat !== "once" && form.kind !== "once") ? "step" : "once";
+      form.priceRepeat = action.repeat === "once" ? "once" : "step";
       form.priceValue = action.value != null ? String(action.value) : "";
       form.floor = action.floor != null ? String(action.floor) : "";
     }
   }
+  if (draft.price_repeat === "once" || draft.price_repeat === "step") form.priceRepeat = draft.price_repeat;
   return form;
 }
 
@@ -156,6 +160,8 @@ export function bodyFromForm(form: AutomationForm, activate: boolean): Automatio
   body.filters = filters;
   body.actions = actions;
   body.marketplaces = form.marketplaces;
+  body.price_repeat = form.priceRepeat;
+  body.require_approval = form.requireApproval;
   return body;
 }
 
