@@ -70,6 +70,11 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
 
     listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv_repo.get(conv_id).notes))
     validation = validate_listing(listing_data, photo_count, require_photos=True)
+    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
+
+    offer_problem = best_offer_error(listing_data)
+    if offer_problem:
+        raise HTTPException(400, offer_problem)
 
     # Generation pins the SKU in Item Details over the model's, so a SKU the
     # seller edits here goes there too, or Regenerate would bring the old one back.

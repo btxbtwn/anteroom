@@ -679,6 +679,11 @@ def validate_listing(
         expected_ebay_size = ebay_spelling(payload, ebay, size) if size else ""
         if size and ebay_size and ebay_size != expected_ebay_size and size_key(ebay_size) != size_key(expected_ebay_size):
             add_issue(result, "ebay_specifics.size", "eBay size must match the general size")
+        from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
+
+        offer_problem = best_offer_error(payload)
+        if offer_problem:
+            add_issue(result, "ebay_specifics.bestOffer.minimumOfferPrice", offer_problem)
         care = text_value(ebay.get("garmentCare"))
         if care and evidence_unknown(description, "care tag is not shown", "garment care", "unverified"):
             if "unknown" in description.lower() or "not shown" in description.lower() or "unverified" in description.lower():

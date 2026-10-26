@@ -248,7 +248,19 @@ def _field_commands(text: str) -> list[dict] | None:
     return None
 
 
+def _reject_best_offer(db: Session, conv_id: str, listing: dict) -> bool:
+    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
+
+    problem = best_offer_error(listing)
+    if not problem:
+        return False
+    ConversationRepo(db).add_message(conv_id, "system", problem, provider="system", model="")
+    return True
+
+
 def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[list[dict] | None, bool]:
+    from fastapi import HTTPException
+
     from vendoo_studio.services.fill_log import extract_missing_fields
     from vendoo_studio.services.seller_overrides import apply_field_updates
 
@@ -261,7 +273,11 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
         apply_field_updates(updated, commands)
         from vendoo_studio.routes.listings import ListingUpdate, update_listing
 
-        update_listing(conv_id, ListingUpdate(listing=updated), db)
+        try:
+            update_listing(conv_id, ListingUpdate(listing=updated), db)
+        except HTTPException as exc:
+            ConversationRepo(db).add_message(conv_id, "system", str(exc.detail), provider="system", model="")
+            return commands, False
         ConversationRepo(db).add_message(
             conv_id, "system", "Saved those field changes to the listing.", provider="system", model="",
         )
@@ -278,6 +294,8 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
         if not revisions:
             return None, False
         updated = apply_json_patch(dict(revisions[0].listing_json), parsed_ops)
+        if _reject_best_offer(db, conv_id, updated):
+            return parsed_ops, False
         save_listing_revision(db, conv_id, updated, operations=parsed_ops)
         ConversationRepo(db).add_message(
             conv_id,
@@ -290,6 +308,8 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
 
     parsed = extract_listing_json(full_text)
     if parsed:
+        if _reject_best_offer(db, conv_id, parsed):
+            return None, False
         saved = save_listing_revision(db, conv_id, parsed)
         ConversationRepo(db).add_message(
             conv_id,

@@ -23,6 +23,7 @@ import {
 } from "./relistStatus";
 import { ETSY_CATEGORY_OPTIONALS, depopSizeGroupingApplies } from "../marketplaceFields";
 import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
+import { applyBottomsFields, isBottomsListing } from "../bottomsSizes";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
 import { MarketplacesLayout } from "./MarketplacesSection";
@@ -243,6 +244,9 @@ export function ListingEditor({
       if ((listing.sku || "") !== (data?.listing?.sku || "")) {
         queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
       }
+    },
+    onError: (err: Error) => {
+      toastManager.add({ type: "error", title: "Could not save", description: err.message || "Try that field again." });
     },
   });
 
@@ -626,7 +630,9 @@ export function StructuredEditor({
       const shown = followed && listing?.price != null
         ? formFieldText(listing.price)
         : f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
-      init[f.key] = shown;
+      init[f.key] = f.key === "ebay_specifics.bestOffer.enabled"
+        ? (/^(no|false|0|off)$/i.test(formFieldText(shown)) ? "No" : "Yes")
+        : shown;
     });
     const next = nextFieldDraft(init, dirty.current);
     dirty.current = next.dirty;
@@ -852,6 +858,29 @@ function withMarketplacePrice(rows: EditorField[], tab: string): EditorField[] {
   return [...rows, priceRow];
 }
 
+const BEST_OFFER_ROWS: EditorField[] = [
+  { key: "ebay_specifics.bestOffer.enabled", label: "Best Offer enabled", options: ["Yes", "No"], selectionOnly: true, optionsSource: "marketplace", defaultValue: "Yes" },
+  { key: "ebay_specifics.bestOffer.autoAcceptPrice", label: "Auto Accept Price", type: "number" },
+  { key: "ebay_specifics.bestOffer.minimumOfferPrice", label: "Minimum Offer Price", type: "number" },
+];
+
+function finishMarketplaceRows(rows: EditorField[], listing: ListingData | undefined, tab: string): EditorField[] {
+  let visible = rows;
+  if (tab === "depop" && !depopSizeGroupingApplies(listing) && !isBottomsListing(listing)) {
+    visible = visible.filter((field) => field.key !== "depop_specifics.sizeGrouping");
+  }
+  if (tab === "ebay") {
+    for (const row of BEST_OFFER_ROWS) {
+      if (!visible.some((field) => field.key === row.key)) visible = [...visible, row];
+    }
+  }
+  const respectMarketplaceSize = visible.some((field) => {
+    const leaf = (field.key.split(".").pop() || "").toLowerCase().replace(/[^a-z]/g, "");
+    return leaf === "size" && field.key.startsWith(`${tab}_specifics`) && field.optionsSource === "marketplace";
+  });
+  return applyBottomsFields(visible, listing, tab, { respectMarketplaceSize });
+}
+
 function depopMeasurementFields(listing: ListingData | undefined): EditorField[] {
   const depop = listing?.depop_specifics;
   const block = depop && typeof depop === "object" ? (depop as Record<string, unknown>).measurements : null;
@@ -877,16 +906,11 @@ export function fieldsForMarketplaceForm(
     const native = forms?.some((form) => form.marketplace === tab && form.native);
     let rows = native ? schemaFieldsForTab(forms, tab) || [] : [];
     rows = withMarketplacePrice(rows, tab);
-    if (tab === "depop") {
-      rows = [...rows, ...depopMeasurementFields(listing)];
-      if (!depopSizeGroupingApplies(listing)) {
-        rows = rows.filter((field) => field.key !== "depop_specifics.sizeGrouping");
-      }
-    }
+    if (tab === "depop") rows = [...rows, ...depopMeasurementFields(listing)];
     if (tab === "mercari") {
       rows = rows.filter((field) => !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()));
     }
-    return rows;
+    return finishMarketplaceRows(rows, listing, tab);
   }
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
@@ -910,11 +934,7 @@ export function fieldsForMarketplaceForm(
           optionsSource: field.optionsSource === "marketplace" ? field.optionsSource : match.optionsSource }
       : field;
   });
-  let rows = withoutObjects(withMarketplacePrice(named, tab));
-  if (tab === "depop" && !depopSizeGroupingApplies(listing)) {
-    rows = rows.filter((field) => field.key !== "depop_specifics.sizeGrouping");
-  }
-  return rows;
+  return finishMarketplaceRows(withoutObjects(withMarketplacePrice(named, tab)), listing, tab);
 }
 
 /** Fields for this tab from Vendoo's own schema, or null when it has none. */

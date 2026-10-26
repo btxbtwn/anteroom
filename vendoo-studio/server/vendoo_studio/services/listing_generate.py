@@ -745,6 +745,10 @@ def align_size_fields(listing: dict, *, previous_size: str | None = None) -> boo
         changed = True
     if sync_title_size(listing):
         changed = True
+    from vendoo_studio.services.bottoms_sizes import apply_bottoms_sizes
+
+    if apply_bottoms_sizes(listing):
+        changed = True
     return changed
 
 

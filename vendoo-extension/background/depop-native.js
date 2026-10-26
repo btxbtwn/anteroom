@@ -359,7 +359,7 @@ function depopBrand(listing, attributes) {
   return depopBrandId(brands, wanted);
 }
 
-const DEPOP_FIT_ATTRIBUTE = { petite: 'petite', plus: 'plussize', 'big_&_tall': 'tall', maternity: 'maternity' };
+const DEPOP_FIT_ATTRIBUTE = { petite: 'petite', plus: 'plussize', 'big_&_tall': 'tall', tall: 'tall', maternity: 'maternity' };
 
 // Material, occasion, body fit and the product type's own type attribute
 // (jacket-type, dress-type, …) as Depop's attribute value ids, limited to the
