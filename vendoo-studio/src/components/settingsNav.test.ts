@@ -23,7 +23,9 @@ describe("searchSettings", () => {
 
   it("only points at real sections", () => {
     for (const item of SETTINGS_SEARCH_ITEMS) expect(isSettingsSectionId(item.section)).toBe(true);
-    expect(SETTINGS_NAV_ITEMS.map((item) => item.id)).toEqual(["general", "listings", "assistant", "providers", "connections", "data", "logs", "help"]);
+    expect(SETTINGS_NAV_ITEMS.map((item) => item.id)).toEqual(["general", "listings", "assistant", "providers", "connections", "agents", "data", "logs", "help"]);
+    expect(searchSettings("mcp").map((item) => item.id)).toEqual(["agent-cli"]);
+    expect(searchSettings("claude desktop").map((item) => item.id)).toEqual(["agent-cli"]);
     expect(searchSettings("api logs").map((item) => item.id)).toEqual(["vendoo-api-logs"]);
     expect(searchSettings("inventory location").map((item) => item.id)).toEqual(["ebay-inventory-location"]);
     expect(searchSettings("automatic offers")).toEqual([]);

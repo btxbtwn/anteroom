@@ -122,6 +122,8 @@ WebSocket routes (the extension socket and the Claude sign-in terminal) are list
 
 ### Hooking up an agent
 
+Settings → Agents shows whether `anteroom` is installed, the address to use, copy-ready setup for Cursor, Claude Desktop, and Claude Code, and a connection test. The same setup is below.
+
 Point the agent at the catalog, or at the MCP server. Both expose the same routes.
 
 ```bash

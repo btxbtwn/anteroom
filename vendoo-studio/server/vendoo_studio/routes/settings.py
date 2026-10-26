@@ -974,6 +974,51 @@ def put_listing_formulas(config: ListingFormulasConfig):
     return {"ok": True, **_listing_formulas_payload()}
 
 
+class AgentClientSnippet(BaseModel):
+    id: str
+    label: str
+    where: str
+    snippet: str
+    command: str | None = None
+
+
+class AgentConnectionStatus(BaseModel):
+    installed: bool
+    on_path: bool
+    path: str | None
+    version: str | None
+    version_error: str | None = None
+    base_url: str
+    remote_base_url: str | None
+    login_command: str
+    remote_login_command: str | None
+    install_command: str | None
+    hint: str | None
+    clients: list[AgentClientSnippet]
+
+
+class AgentConnectionTest(BaseModel):
+    ok: bool
+    detail: str
+    version: str | None = None
+    base_url: str | None = None
+
+
+@router.get("/agent", response_model=AgentConnectionStatus)
+def get_agent_connection():
+    from vendoo_studio.services.agent_connection import describe
+
+    return describe()
+
+
+@router.post("/agent/test", response_model=AgentConnectionTest)
+def test_agent_connection():
+    """Ask the anteroom command to call this app's health route. Nothing is published."""
+    from vendoo_studio.services.agent_connection import test_connection
+
+    return test_connection()
+
+
 @router.get("/tailscale")
 def get_tailscale():
     from vendoo_studio.services.tailscale_serve import status as tailscale_status
