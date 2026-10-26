@@ -1100,7 +1100,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         kind = fields["format"]["format"]
         offer = await _offer_for(client, sku, binding, kind)
         if offer:
-            record({"ebay_sku": sku, "ebay_offer_id": str(offer.get("offerId") or binding["ebay_offer_id"]), "ebay_format": kind})
+            record({"ebay_sku": sku, "ebay_offer_id": str(offer.get("offerId") or binding["ebay_offer_id"])})
             live = _published(offer, record)
             if live:
                 return live
@@ -1123,7 +1123,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             offer_id = str(created.get("offerId") or "")
             if not offer_id:
                 raise EbayFailure("eBay did not confirm the offer. Check eBay before listing again.")
-            record({"ebay_offer_id": offer_id, "ebay_format": kind})
+            record({"ebay_offer_id": offer_id})
             pending = None
         if action == "save_draft":
             # Saved on eBay, not listed: an unpublished offer buyers cannot see. Read it back.
@@ -1155,7 +1155,12 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
         client = await EbayClient.connect()
         if binding.get("action") == "update" and snapshot:
             return await _check_update(client, binding, snapshot)
-        offer = await _offer_for(client, sku, binding, str(binding.get("ebay_format") or FIXED_PRICE))
+        # The format is the revision's: a lost reply may have left an offer only eBay knows about.
+        try:
+            kind = listing_format(snapshot)["format"] if snapshot else FIXED_PRICE
+        except ListingProblem:
+            kind = FIXED_PRICE
+        offer = await _offer_for(client, sku, binding, kind)
         if offer:
             record({"ebay_offer_id": str(offer.get("offerId") or binding.get("ebay_offer_id"))})
             live = _published(offer, record)

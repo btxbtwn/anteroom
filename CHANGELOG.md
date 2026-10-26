@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.415 — 2026-10-26
+
+- Saving an eBay draft no longer stops after eBay saves the offer with “eBay did not confirm the listing”. Check finds an auction draft whose reply was lost, and saving again reuses it.
+
 ## 0.1.414 — 2026-10-26
 
 - List on eBay as an auction. Choose the auction length eBay offers for the category, a starting bid, and an optional reserve and Buy It Now. Fixed price stays Good 'Til Cancelled, and auctions sell one item without offers.
