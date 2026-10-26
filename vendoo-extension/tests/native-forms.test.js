@@ -132,7 +132,11 @@ test('Mercari shows the seller’s brand and an unavailable parent label without
     id: '1877', displayPath: ['Kids', 'Girls tops & t-shirts'], hasChildren: true,
   } } } };
   const form = clean(call(c, 'mercariEditorForm', listing, MERCARI));
-  assert.equal(form.fields.find(row => row.label === 'Brand').value, 'GB Girls');
+  const brand = form.fields.find(row => row.label === 'Brand');
+  assert.equal(brand.path, 'mercari_specifics.brand');
+  assert.equal(brand.value, 'GB Girls');
+  assert.equal(brand.option_values['No brand'], 'No Brand/Not sure');
+  assert.ok(form.fields.some(row => row.path === 'mercari_specifics.sizeType'));
   const category = form.fields.find(row => row.label === 'Category');
   assert.equal(category.option_values['Kids > Girls tops & t-shirts'], '1877');
   assert.ok(!category.options.includes('Kids > Girls tops & t-shirts'));

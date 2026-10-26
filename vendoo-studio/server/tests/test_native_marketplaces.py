@@ -332,6 +332,19 @@ class NativeMarketplacesTest(unittest.TestCase):
         })
         self.assertEqual((outcome["state"], outcome["error"], outcome["error_code"]), ("published", "Poshmark left Smart Pricing on.", None))
 
+    def test_a_depop_category_change_keeps_the_rewritten_slug(self):
+        old = "https://www.depop.com/products/vassarette-womens-tan-vest/"
+        new = "https://www.depop.com/products/vassarette-womens-tan-sweater/"
+        outcome = native._outcome("depop", "update", {
+            "state": "published", "listing_id": "vassarette-womens-tan-vest", "listing_url": old,
+        }, {"ok": True, "state": "published", "listing_url": new, "previous_slug": "vassarette-womens-tan-vest"})
+        self.assertEqual(outcome["listing_id"], "vassarette-womens-tan-sweater")
+        self.assertEqual(outcome["listing_url"], new)
+        with self.assertRaises(native.NativeMarketplaceError):
+            native._outcome("depop", "update", {
+                "state": "published", "listing_id": "vassarette-womens-tan-vest", "listing_url": old,
+            }, {"ok": True, "state": "published", "listing_url": new, "previous_slug": "someone-elses-vest"})
+
     def test_a_depop_publish_keeps_the_public_product_link(self):
         url = "https://www.depop.com/products/seller-columbia-xl/"
         outcome = native._outcome("depop", "publish", {"state": "draft", "draft_url": URLS["depop"]}, {

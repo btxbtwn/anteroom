@@ -165,6 +165,44 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["ebay_specifics.Season"]["max_length"], 65)
         self.assertEqual(ebay_listings.ebay_condition({"ebay_specifics": {"condition": "1000"}}), "NEW")
 
+    def test_ebay_size_follows_size_type_from_taxonomys_parent_constraints(self):
+        size = {
+            "name": "Size", "required": True, "multi": False, "mode": "selection", "max_length": None,
+            "values": [
+                {"id": "M", "label": "M", "constraints": [{
+                    "applicableForLocalizedAspectName": "Size Type",
+                    "applicableForLocalizedAspectValues": ["Regular"],
+                }]},
+                {"id": "M", "label": "M", "constraints": [{
+                    "applicableForLocalizedAspectName": "Size Type",
+                    "applicableForLocalizedAspectValues": ["Petites"],
+                }]},
+                {"id": "S", "label": "S", "constraints": [{
+                    "applicableForLocalizedAspectName": "Size Type",
+                    "applicableForLocalizedAspectValues": ["Regular"],
+                }]},
+            ],
+        }
+        size_type = {"name": "Size Type", "required": True, "multi": False, "mode": "selection", "max_length": None,
+                     "values": [{"id": "Regular", "label": "Regular"}, {"id": "Petites", "label": "Petites"}]}
+        stored = marketplace_schemas._ebay_field({
+            "localizedAspectName": "Size", "aspectConstraint": {"aspectMode": "SELECTION_ONLY", "aspectRequired": True},
+            "aspectValues": [{"localizedValue": "M", "valueConstraints": size["values"][0]["constraints"]},
+                             {"localizedValue": "M", "valueConstraints": size["values"][1]["constraints"]}]})
+        self.assertEqual(stored["values"][0]["constraints"], [{"parentName": "Size Type", "parentValues": ["Regular"]}])
+        self.assertEqual(marketplace_schemas.constraints_by_label(stored["values"])["M"],
+                         [{"parentName": "Size Type", "parentValues": ["Regular", "Petites"]}])
+        matched = ebay_listings._match_aspects([size_type, size], {"Size": ["M"], "Size Type": ["Regular"]})
+        self.assertEqual(matched["Size"], ["M"])
+        self.assertEqual(matched["Size Type"], ["Regular"])
+        listing = {"size": "S", "sizeType": "Petites", "ebay_specifics": {"size": "M", "sizeType": "Regular"}}
+        aspects = ebay_listings.ebay_aspects(listing, {})
+        self.assertEqual(aspects["Size"], ["M"])
+        self.assertEqual(aspects["Size Type"], ["Regular"])
+        with self.assertRaises(ListingProblem) as caught:
+            ebay_listings._match_aspects([size_type, size], {"Size": ["S"], "Size Type": ["Petites"]})
+        self.assertIn("Choose Size for the selected parent aspects", str(caught.exception))
+
     def test_ebay_parent_constraints_are_preserved_and_enforced_before_posting(self):
         field = marketplace_schemas._ebay_field({"localizedAspectName": "Model", "aspectConstraint": {"aspectMode": "SELECTION_ONLY"},
             "aspectValues": [{"localizedValue": "Air Max", "valueConstraints": [{"parentName": "Brand", "parentValues": ["Nike"]}]},

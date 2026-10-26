@@ -154,6 +154,16 @@ class DepopStyleClearTest(unittest.TestCase):
         self.assertEqual(listing["depop_specifics"]["style"], [])
         self.assertEqual(listing["sku"], "A21")
 
+    def test_clearing_mercari_brand_stays_cleared_and_leaves_the_main_brand(self):
+        listing = {"brand": "BRIGGS", "mercari_specifics": {"brand": "BRIGGS"}}
+        apply_field_updates(listing, [{"path": "mercari_specifics.brand", "value": ""}])
+        self.assertNotIn("brand", listing["mercari_specifics"])
+        self.assertEqual(listing["brand"], "BRIGGS")
+        self.assertIn("mercari_specifics.brand", listing["seller_fields"])
+        apply_field_updates(listing, [{"path": "mercari_specifics.brand", "value": "No Brand/Not sure"}])
+        self.assertEqual(listing["mercari_specifics"]["brand"], "No Brand/Not sure")
+        self.assertEqual(listing["brand"], "BRIGGS")
+
 
 class DepopMeasurementsTest(unittest.TestCase):
     def test_stored_inches_become_depop_rows(self):
