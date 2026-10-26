@@ -63,8 +63,9 @@ def test_ended_listing_is_not_proof_multiunit_stock_is_exhausted(etsy_imported):
 
 
 def test_single_item_sale_can_be_checked_again_to_detect_remaining_stock(etsy_imported):
+    etsy_imported.remote.offering["quantity"] = 1
     conv_id, _ = prepare(etsy_imported)
-    ListingRepo(etsy_imported.db).save_revision(conv_id, {"title": "Coat", "quantity": 1}, "user")
+    etsy_imported.remote.offering["quantity"] = 3
     assert stock(etsy_imported, conv_id)["status"] == "sold_out"
     result = inventory_tests.sync(etsy_imported, conv_id)
     assert result["etsy"]["ok"]
@@ -107,3 +108,9 @@ def test_observation_contains_only_public_inventory_fields(etsy_imported):
     assert set(saved) == {"listing_id", "checked_at", "state", "quantity", "price"}
     assert "fixture-token" not in str(saved)
     assert saved["checked_at"] <= utcnow().isoformat() + "+00:00"
+
+
+def test_local_quantity_edit_does_not_erase_multiunit_publication_evidence(etsy_imported):
+    conv_id, _ = prepare(etsy_imported)
+    ListingRepo(etsy_imported.db).save_revision(conv_id, {"title": "Coat", "quantity": 1}, "user")
+    assert stock(etsy_imported, conv_id)["status"] == "unknown"

@@ -50,8 +50,11 @@ def stock_after_sale(db: Session, conv_id: str, marketplace: str, listing_id: st
         return unknown
     listing = ListingRepo(db).get_current(conv_id)
     revision = db.get(ListingRevision, listing.current_revision_id) if listing and listing.current_revision_id else None
-    quantity = revision.listing_json.get("quantity") if revision else None
-    if type(quantity) is int and quantity > 1:
+    published = db.get(ListingRevision, record["revision_id"]) if record.get("revision_id") else None
+    quantities = [revision.listing_json.get("quantity") if revision else None,
+                  published.listing_json.get("quantity") if published else None,
+                  observed.get("quantity"), latest.quantity]
+    if any(type(quantity) is int and quantity > 1 for quantity in quantities):
         return unknown
     # Keep the established single-item sale behavior until a direct read says
     # otherwise. A multi-unit item always needs a fresh marketplace stock read.
