@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.415 — 2026-10-26
+
+- Depop drafts now keep everything Anteroom sends: category, size, condition, brand, photos, location and shipping. Anteroom no longer sends a blank SKU, which made Depop quietly keep only the description and price, and it waits until Depop has finished processing new photos before adding them.
+- Changing a listing's Depop category now moves it everywhere Anteroom stores it, so the next update to the live listing uses the new category and its own sizes instead of the old ones. A size picked for the old category is cleared.
+- Updating a live Depop listing sends the same fields Depop's own edit page sends. If Depop refuses, the item's error shows Depop's reply and which fields were sent, with addresses and sign-in details hidden.
+
 ## 0.1.414 — 2026-10-26
 
 - List on eBay as an auction. Choose the auction length eBay offers for the category, a starting bid, and an optional reserve and Buy It Now. Fixed price stays Good 'Til Cancelled, and auctions sell one item without offers.
