@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.models.listing import Listing, ListingRevision
+from vendoo_studio.models.listing_copy import ListingCopyReceipt
 from vendoo_studio.models.schema import ListingSchema
 from vendoo_studio.models.validation import validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
@@ -38,6 +39,7 @@ class CopyError(ValueError):
 
 class CopyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     expected_basis: str = Field(pattern=r"^[a-f0-9]{64}$")
     title: str = Field(min_length=1, max_length=200)
     sku: str = Field(default="", max_length=120)
@@ -89,9 +91,39 @@ def preview(db: Session, conv_id: str) -> dict:
             "title": f"Copy of {conv.title or 'Untitled'}"[:200]}
 
 
+class BatchPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conversation_ids: list[str] = Field(min_length=1, max_length=300)
+
+
+def batch_preview(db: Session, body: BatchPreviewRequest) -> dict:
+    rows = []
+    for conv_id in dict.fromkeys(body.conversation_ids):
+        try:
+            rows.append({**preview(db, conv_id), "skip_reason": None})
+        except CopyError as exc:
+            rows.append({"source_id": conv_id, "source_title": "Unavailable item", "skip_reason": str(exc)})
+    return {"rows": rows}
+
+
+def copy_result(db: Session, source_id: str, request_id: str) -> str:
+    receipt = db.get(ListingCopyReceipt, request_id, populate_existing=True)
+    if receipt is None or receipt.source_id != source_id:
+        raise CopyError("No completed copy was found for this request.", 404)
+    if not receipt.conversation_id or db.get(Conversation, receipt.conversation_id) is None:
+        raise CopyError("This copy was already created and then removed. Start a new copy if needed.", 410)
+    return receipt.conversation_id
+
+
 def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
     created_files = []
+    fingerprint = hashlib.sha256(json.dumps([conv_id, body.model_dump(exclude={"request_id"})], sort_keys=True).encode()).hexdigest()
     with start_gate():
+        receipt = db.get(ListingCopyReceipt, body.request_id, populate_existing=True)
+        if receipt is not None:
+            if receipt.source_id != conv_id or receipt.fingerprint != fingerprint:
+                raise CopyError("This request already created a different copy. Check its result or start a new review.")
+            return copy_result(db, conv_id, body.request_id)
         source, revision, images, basis = _source(db, conv_id)
         if basis != body.expected_basis:
             raise CopyError("The source listing or its photos changed. Reload the review before copying.")
@@ -133,6 +165,7 @@ def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
             db.add(Listing(conversation_id=new.id, current_revision_id=copied_revision.id,
                            validation_status="valid" if validation.valid else "error", validation_errors=validation.errors + validation.warnings))
             new_id = new.id
+            db.add(ListingCopyReceipt(request_id=body.request_id, fingerprint=fingerprint, source_id=conv_id, conversation_id=new_id))
             db.commit()
             return new_id
         except BaseException:

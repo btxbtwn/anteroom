@@ -37,6 +37,7 @@ export function useListingSelection({
   >(null);
   const [pickedIds, setPickedIds] = useState<Set<string>>(() => new Set());
   const [markdownIds, setMarkdownIds] = useState<string[] | null>(null);
+  const [copyIds, setCopyIds] = useState<string[] | null>(null);
   const [editIds, setEditIds] = useState<string[] | null>(null);
   const selectionAnchor = useRef<string | null>(null);
 
@@ -55,14 +56,14 @@ export function useListingSelection({
   useEffect(() => {
     if (!selecting || bulk.running) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds || editIds) return;
+      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds || editIds || copyIds) return;
       setSelecting(false);
       setPickedIds(new Set());
       selectionAnchor.current = null;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds, editIds]);
+  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds, editIds, copyIds]);
 
   const exitSelecting = useCallback(() => {
     setSelecting(false);
@@ -153,5 +154,7 @@ export function useListingSelection({
     setMarkdownIds,
     editIds,
     setEditIds,
+    copyIds,
+    setCopyIds,
   };
 }

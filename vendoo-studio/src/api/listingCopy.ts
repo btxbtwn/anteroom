@@ -7,6 +7,7 @@ export interface CopyPreview {
   title: string;
 }
 export interface CopyListingRequest {
+  request_id: string;
   expected_basis: string;
   title: string;
   sku: string;
@@ -14,3 +15,5 @@ export interface CopyListingRequest {
   include_photos: boolean;
   include_cost: boolean;
 }
+
+export type BatchCopyPreviewRow = Partial<CopyPreview> & { source_id: string; source_title: string; skip_reason: string | null };

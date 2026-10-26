@@ -195,6 +195,17 @@ def copy_conversation(conv_id: str, body: CopyRequest, db: Session = Depends(get
     return _conv_response(ConversationRepo(db).get(new_id), _extras_for(db, new_id))
 
 
+@router.get("/{conv_id}/copy-result/{request_id}", response_model=ConversationResponse)
+def copy_result(conv_id: str, request_id: str, db: Session = Depends(get_db)):
+    from vendoo_studio.services import listing_copy
+
+    try:
+        new_id = listing_copy.copy_result(db, conv_id, request_id)
+    except listing_copy.CopyError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    return _conv_response(ConversationRepo(db).get(new_id), _extras_for(db, new_id))
+
+
 class ConversationUpdate(BaseModel):
     """Title, notes and box only: a listing's status is Vendoo's to report."""
 
