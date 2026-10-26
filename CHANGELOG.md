@@ -6,9 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.405 — 2026-10-26
+## 0.1.406 — 2026-10-26
 
 - Scheduled listing, delisting and relisting now wait for your review of each item and named marketplace. Changed drafts, photos or links need a new review, and failed marketplace actions stay visible without automatic retries. List never takes down a live listing; choose Relist explicitly.
+
+## 0.1.405 — 2026-10-26
+
+- eBay accepts Size when Size Type matches. A Medium in Regular is no longer blocked with “Choose Size for the selected parent aspects.”
+- Mercari can be listed with no brand. Choose No brand on the Mercari form, clear the Mercari brand from the command line or the assistant, and the brand on General stays. A brand Mercari does not list is left off instead of stopping the listing.
+- When Mercari has the same size in more than one group, such as several M (8-10), Anteroom uses the Mercari size type if you set one, and otherwise the size type on the item, such as Petite, Plus, or Tall. With no size type at all, it uses the regular or standard group. If it still cannot tell them apart, the message names the groups.
+- Depop keeps the fields and photos on the draft, including after the eight-photo limit, and listing again finishes that draft instead of starting another. When more than one draft matches, Anteroom uses the draft it already saved, and otherwise the same draft each time.
+- Changing the category on a live Depop listing updates the product type, colour, and the title Depop builds from them, and keeps every photo already on the listing. If this item has no measurements, the ones on Depop stay. If Depop gives the listing a new link, that link is kept.
 
 ## 0.1.404 — 2026-10-26
 

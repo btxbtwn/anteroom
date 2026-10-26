@@ -383,14 +383,29 @@ test('Mercari sizes come from the category and never cross a fit the listing nam
   assert.deepEqual(size({ size: 'XL' }), { id: 105 });
   assert.deepEqual(size({ size: 'L (42-44)' }, MEN_TOP_SIZES), { id: 11 });
   assert.deepEqual(size({ size: '2XL' }), { id: 168 });
-  assert.deepEqual(size({ size: 'XL' }, MEN_TOP_SIZES), { id: 12 });
-  assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'XL', sizeType: 'Regular',
-    form: { aspects: { '303_Size': '342' }, sizes: MEN_TOP_SIZES } }, 303))), { id: 12 });
+  assert.match(size({ size: 'XL' }, MEN_TOP_SIZES).problem, /XL \(46-48\) \(group 20\) or XL \(group 21\)/);
+  assert.match(c.mercariSize({ size: 'XL', sizeType: 'Regular',
+    form: { aspects: { '303_Size': '342' }, sizes: MEN_TOP_SIZES } }, 303).problem, /group 20/);
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({
     form: { aspects: { '303_Size': '342' }, sizes: MEN_TOP_SIZES } }, 303))), { id: 342 });
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'XL (18/20)',
     form: { aspects: { '1934_Size': '105' }, sizes: BOYS_SIZES } }, 1934))), { id: 168 });
-  assert.match(size({ size: 'XL', sizeType: 'Big & Tall' }, MEN_TOP_SIZES).problem, /XL \(46-48\) or XL/);
+  assert.match(size({ size: 'XL', sizeType: 'Big & Tall' }, MEN_TOP_SIZES).problem, /XL \(46-48\) \(group 20\) or XL \(group 21\)/);
+  const women = [
+    { id: 4, name: 'M (8-10)', group: 11, group_name: "Women's" },
+    { id: 293, name: 'M (8-10)', group: 12, group_name: 'Petite' },
+    { id: 294, name: 'M (8-10)', group: 13, group_name: 'Plus' },
+    { id: 295, name: 'M (8-10)', group: 14, group_name: 'Regular' },
+    { id: 353, name: 'M (7-9)', group: 15, group_name: 'Juniors' },
+  ];
+  assert.deepEqual(size({ size: 'M (8-10)', sizeType: 'Petites', mercari_specifics: { size: 'M (8-10)' } }, women), { id: 293 });
+  assert.deepEqual(size({ size: 'M (8-10)', sizeType: 'Petites', mercari_specifics: { size: 'M (8-10)' } },
+    women.filter(row => row.group_name !== 'Regular')), { id: 293 });
+  assert.deepEqual(size({ size: 'M (8-10)', mercari_specifics: { size: 'M (8-10)' } }, women), { id: 295 });
+  assert.deepEqual(size({ size: 'M (8-10)', sizeType: 'Petites', mercari_specifics: { size: 'M (8-10)', sizeType: 'Regular' } }, women), { id: 295 });
+  assert.deepEqual(size({ mercari_specifics: { size: 'M (8-10)', sizeType: 'Petite' } }, women), { id: 293 });
+  assert.match(size({ mercari_specifics: { size: 'M (8-10)', sizeGroup: 'Not a group' } }, women).problem, /Women's/);
+  assert.match(size({ mercari_specifics: { size: 'M (8-10)', sizeGroup: 'Not a group' } }, women).problem, /Petite/);
   assert.deepEqual(size({ size: 'L/XL' }), { problem: 'a size Mercari offers in this category' });
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: { '1934_Size': '103' }, sizes: BOYS_SIZES } }, 1934))), { id: 103 });
   assert.deepEqual(size({ size: 'M' }, []), { none: 'none' });
@@ -445,17 +460,35 @@ test('a Mercari listing Mercari would refuse stops before any upload and names e
   }
 });
 
-test('a brand Mercari\'s index cannot read or does not list exactly stops the save, before any upload', async () => {
-  for (const [answer, named] of [[[503, {}], /could not read/], [[200, [{ value: '9', label: 'Nike SB' }]], /Nike is not one/], [[200, []], /Nike is not one/]]) {
-    const { c, requests, journal } = worker();
-    withVendooBrand(c, journal, answer);
-    const result = await c.runMercariNative(message({ listing: clothing() }));
-    assert.equal(result.error_code, 'missing_fields');
-    assert.equal(result.safe_to_retry, true);
-    assert.deepEqual(JSON.parse(JSON.stringify(result.fields.map(entry => entry.field))), ['brandId']);
-    assert.match(result.error, named);
-    assert.equal(requests.length, 0);
-  }
+test('a Mercari brand catalog failure stops before any upload', async () => {
+  const { c, requests, journal } = worker();
+  withVendooBrand(c, journal, [503, {}]);
+  const result = await c.runMercariNative(message({ listing: clothing() }));
+  assert.equal(result.error_code, 'missing_fields');
+  assert.equal(result.safe_to_retry, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.fields.map(entry => entry.field))), ['brandId']);
+  assert.match(result.error, /could not read/);
+  assert.equal(requests.length, 0);
+});
+
+test('Mercari lists with no brand when the seller clears it, and omits a name it does not list', async () => {
+  const { c } = worker();
+  const deadline = Date.now() + 30000;
+  c.mercariCatalogData = async () => { throw new Error('should not read brands'); };
+  assert.equal(await c.mercariBrandId({ brand: 'BRIGGS', mercari_specifics: {}, seller_fields: ['mercari_specifics.brand'] }, deadline), null);
+  assert.equal(await c.mercariBrandId({ brand: 'BRIGGS', mercari_specifics: { brand: 'No Brand/Not sure' } }, deadline), null);
+  assert.equal(await c.mercariBrandId({ brand: 'BRIGGS', mercari_specifics: { noBrand: true, brand: 'Nike' } }, deadline), null);
+  c.mercariCatalogData = async () => ({ itemBrands: [{ id: 30138, name: 'GB Girls' }, { id: 5813, name: 'Nike' }] });
+  assert.equal(await c.mercariBrandId({ brand: 'BRIGGS', mercari_specifics: { brand: 'GB girls' } }, deadline), 30138);
+  assert.equal(await c.mercariBrandId({ brand: 'BRIGGS' }, deadline), null);
+  const { c: run, requests, setDraft } = worker();
+  setDraft({ ...CLOTHING_DRAFT, brand: null });
+  run.mercariCatalogData = async () => ({ itemBrands: [{ id: 9, name: 'Nike SB' }] });
+  const result = await run.runMercariNative(message({ listing: clothing({ brand: 'BRIGGS', mercari_specifics: { brand: '' }, seller_fields: ['mercari_specifics.brand'] }) }));
+  assert.equal(result.ok, true, result.error);
+  const common = requests.find(row => row.body.operationName === 'addDraftItemMutation').body.variables.input.common;
+  assert.equal(common.brandId, null);
+  assert.equal(common.name, 'Boys graphic tee');
 });
 
 test('a Mercari draft input it no longer accepts is reported as a form change, safe to retry', async () => {
