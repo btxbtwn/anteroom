@@ -1,3 +1,4 @@
+import type { CopyPreview, CopyListingRequest } from "./listingCopy";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
@@ -568,6 +569,8 @@ export const api = {
     }>("/status"),
 
   conversations: {
+    copyPreview: (id: string) => request<CopyPreview>(`/conversations/${id}/copy-preview`),
+    copy: (id: string, body: CopyListingRequest) => request<Conversation>(`/conversations/${id}/copy`, { method: "POST", body: JSON.stringify(body) }),
     duplicateVendooLinks: () => request<{
       vendoo_item_id: string;
       vendoo_url: string;

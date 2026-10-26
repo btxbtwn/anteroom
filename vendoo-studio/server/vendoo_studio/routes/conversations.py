@@ -16,6 +16,7 @@ from vendoo_studio.repositories.queries import (
 )
 from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.services import boxes
+from vendoo_studio.services.listing_copy import CopyRequest
 from vendoo_studio.services.listing_delete import ListingBusy, delete_listing, wipe_contents
 from vendoo_studio.services.photos import cover_thumb_url, delete_thumbnails, photo_url
 
@@ -171,6 +172,27 @@ def get_conversation(conv_id: str, db: Session = Depends(get_db)):
     if not conv:
         raise HTTPException(404, "Conversation not found")
     return _conv_response(conv, _extras_for(db, conv_id))
+
+
+@router.get("/{conv_id}/copy-preview")
+def preview_copy(conv_id: str, db: Session = Depends(get_db)):
+    from vendoo_studio.services import listing_copy
+
+    try:
+        return listing_copy.preview(db, conv_id)
+    except listing_copy.CopyError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+@router.post("/{conv_id}/copy", response_model=ConversationResponse)
+def copy_conversation(conv_id: str, body: CopyRequest, db: Session = Depends(get_db)):
+    from vendoo_studio.services import listing_copy
+
+    try:
+        new_id = listing_copy.create_copy(db, conv_id, body)
+    except listing_copy.CopyError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    return _conv_response(ConversationRepo(db).get(new_id), _extras_for(db, new_id))
 
 
 class ConversationUpdate(BaseModel):
