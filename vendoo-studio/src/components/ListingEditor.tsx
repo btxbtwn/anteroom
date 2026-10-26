@@ -882,7 +882,7 @@ const BEST_OFFER_ROWS: EditorField[] = [
 
 function finishMarketplaceRows(rows: EditorField[], listing: ListingData | undefined, tab: string): EditorField[] {
   let visible = tab === "mercari"
-    ? rows.filter((field) => !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()))
+    ? rows.filter((field) => field.native || !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()))
     : rows;
   if (tab === "depop") {
     for (const row of depopMeasurementFields(listing)) {

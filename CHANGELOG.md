@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.404 — 2026-10-26
+
+- Save private Mercari, Depop and Etsy drafts from the listing form without publishing. Draft links show which edits still need saving.
+- Mercari categories, brands, sizes and shipping labels now come from Mercari, with current label prices, a choice of who pays shipping, and Smart Pricing with a floor price. Vendoo sign-in is no longer needed for direct Mercari listings. Offer settings are no longer shown as off without checking them.
+- Reopening a listing keeps the choices you cleared and the quantity you entered. Send SKU and quantity to Depop, and edit Poshmark quantity, original price and SKU without generated defaults replacing your picks.
+
 ## 0.1.403 — 2026-10-26
 
 - Marketplace form edits stay where you put them: Depop style, size, SKU, category, photos, and package dimensions no longer snap back. Each marketplace price follows the item price unless you set that marketplace's own price. Depop can be updated in place, including measurements from the item, and a jacket is no longer filed as a vest. Ship-from stays blank until you save your own location.

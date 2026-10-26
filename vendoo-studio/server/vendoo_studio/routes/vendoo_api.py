@@ -333,24 +333,6 @@ async def _with_live_schema(listing: dict, marketplace: str, fields: list[dict])
     return await overlay_live_fields(listing, marketplace, fields)
 
 
-async def _with_mercari_sizes(listing: dict, marketplace: str, category_id: str, fields: list[dict]) -> list[dict]:
-    """Mercari's own sizes for the category a direct list sends, when no Size row has choices."""
-    if marketplace != "mercari" or any(_fold_field_name(row["label"]) == "size" and row["options"] for row in fields):
-        return fields
-    from vendoo_studio.services.native_form import mercari_sizes
-
-    direct = listing.get("direct_category_ids") if isinstance(listing.get("direct_category_ids"), dict) else {}
-    sizes = await asyncio.to_thread(mercari_sizes, str(direct.get("mercari") or "").strip() or category_id)
-    if not sizes:
-        return fields
-    specifics = listing.get("mercari_specifics") if isinstance(listing.get("mercari_specifics"), dict) else {}
-    row = {"key": "size", "label": "Size", "value": str(specifics.get("size") or listing.get("size") or ""),
-           "required": True, "multi": False, "selection_only": True,
-           "options_source": "marketplace", "on_form": True,
-           "options": list(dict.fromkeys(size["name"] for size in sizes if size["name"]))}
-    return [*(field for field in fields if _fold_field_name(field["label"]) != "size"), row]
-
-
 @router.get("/api/conversations/{conv_id}/vendoo-api/fields")
 async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
     """Every field each marketplace can hold for this listing's categories.
@@ -403,7 +385,6 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
             fallback = _scraped_only_fields(listing, marketplace, static, [])
             fallback.extend(_listing_only_fields(listing, marketplace, fallback))
             fallback = await _with_live_schema(listing, marketplace, fallback)
-            fallback = await _with_mercari_sizes(listing, marketplace, category_id, fallback)
             fallback.sort(key=lambda row: row["label"])
             out.append({
                 "marketplace": marketplace, "category_id": category_id,
@@ -441,7 +422,6 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
         fields.extend(_scraped_only_fields(listing, marketplace, static, fields))
         fields.extend(_listing_only_fields(listing, marketplace, fields))
         fields = await _with_live_schema(listing, marketplace, fields)
-        fields = await _with_mercari_sizes(listing, marketplace, category_id, fields)
         fields.sort(key=lambda row: (not row["required"], row["label"]))
         out.append({
             "marketplace": marketplace, "category_id": category_id,

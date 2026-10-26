@@ -173,6 +173,11 @@ function poshmarkPrice(listing) {
   return Math.round(Number(listing?.poshmark_specifics?.poshmarkPrice || listing?.price));
 }
 
+function poshmarkOriginalPrice(listing) {
+  return Array.isArray(listing.seller_fields) && listing.seller_fields.includes('poshmark_specifics.originalPrice')
+    ? Number(listing.poshmark_specifics?.originalPrice ?? 0) : 0;
+}
+
 function poshmarkKey(value) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -344,23 +349,27 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   const description = String(listing.description || '').trim();
   if (!description) missing.push({ field: 'description', needs: 'a description' });
   if (description.length > 1500) missing.push({ field: 'description', needs: 'a description of 1500 characters or fewer' });
+  const quantity = Number(listing.quantity ?? 1);
+  if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: 'quantity', needs: 'a positive whole-number quantity' });
+  const originalPrice = poshmarkOriginalPrice(listing);
+  if (!Number.isSafeInteger(originalPrice) || originalPrice < 0) missing.push({ field: 'originalPrice', needs: 'an original price in whole dollars, or 0 if unknown' });
   if (missing.length) throw marketplaceMissing('poshmark', missing);
   const colorNames = new Set((catalog.colors || []).map(color => color.name));
   const colors = [listing.poshmark_specifics?.poshmarkColor || listing.primaryColor,
     listing.poshmark_specifics?.poshmarkSecondaryColor || listing.secondaryColor]
     .map(value => ({ Grey: 'Gray', Beige: 'Tan' })[value] || value).filter(value => colorNames.has(value));
   const minimum = poshmarkSmartMinimum(listing, price);
-  const sku = String(listing.sku || listing.poshmark_specifics?.poshmarkSku || '').trim().slice(0, 50);
+  const sku = String(listing.poshmark_specifics?.poshmarkSku ?? listing.sku ?? '').trim().slice(0, 50);
   // The item's cost (Anteroom's share of the box price), in dollars and cents as Poshmark's editor keeps it.
   const cost = Number(listing.cost);
   return {
     title, description,
     catalog: category.catalog,
-    inventory: { status: 'available', multi_item: false, size_quantity_revision: 0, size_quantities: [{
-      size_id: size.size.id, size_obj: size.size, size_system: 'us', quantity_available: 1, quantity_sold: 0,
+    inventory: { status: 'available', multi_item: quantity > 1, size_quantity_revision: 0, size_quantities: [{
+      size_id: size.size.id, size_obj: size.size, size_system: 'us', quantity_available: quantity, quantity_sold: 0,
       size_set_tags: size.set.tags || [], seller_inventory_private_info: {} }] },
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
-    original_price_amount: { val: '0', currency_code: 'USD', currency_symbol: '$' },
+    original_price_amount: { val: String(originalPrice), currency_code: 'USD', currency_symbol: '$' },
     condition,
     ...(brand ? { brand } : {}),
     colors: [...new Set(colors)].slice(0, 2),

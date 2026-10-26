@@ -106,7 +106,10 @@ def prepare_listing_snapshot(
     poshmark = listing_snapshot.get("poshmark_specifics") or {}
     if not isinstance(poshmark, dict):
         poshmark = {}
-    poshmark["originalPrice"] = 0
+    from vendoo_studio.services.seller_overrides import is_locked
+
+    if not is_locked(listing_snapshot, "poshmark_specifics.originalPrice"):
+        poshmark["originalPrice"] = 0
     listing_snapshot["poshmark_specifics"] = poshmark
     align_listing_gender(listing_snapshot)
     ensure_listing_defaults(listing_snapshot)

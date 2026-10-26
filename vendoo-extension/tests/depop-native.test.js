@@ -29,6 +29,21 @@ const FULL = { ...listing, brand: 'Nike', size: '2XL', condition: 'Pre-Owned - G
   form: { overrides: { condition: 'used_good', brand: 'Nike', categoryV2: { id: 'menswear_tshirts', path: ['menswear', 'menswear_tops', 'menswear_tshirts'] } },
     specifics: { style: ['casual'] }, aspects: {}, ships_from_zip: '70115' } };
 
+test('Depop sends and verifies exact SKU and quantity, including clearing an Item Details SKU', async () => {
+  const { c } = newDraft();
+  withCatalog(c);
+  const item = { ...FULL, quantity: 3, sku: 'item-details', depop_specifics: { ...FULL.depop_specifics, sku: '' } };
+  const fields = await c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 });
+  assert.equal(fields.sku, '');
+  assert.deepEqual(JSON.parse(JSON.stringify(Object.values(fields.variants))), [3]);
+  const draft = { ...fields, description: c.depopDescription(item), price_amount: String(item.price), variant_set_id: fields.variant_set };
+  assert.deepEqual(Array.from(c.depopDraftMismatch(draft, item, fields)), []);
+  const size = Object.keys(fields.variants)[0];
+  assert.ok(c.depopDraftMismatch({ ...draft, variants: { [size]: 1 } }, item, fields).includes('quantity'));
+  assert.ok(c.depopDraftMismatch({ ...draft, sku: 'old-sku' }, item, fields).includes('SKU'));
+  await assert.rejects(c.depopResolvedFields({ listing: { ...item, quantity: 0 }, deadline: Date.now() + 30000 }), /whole-number quantity/);
+});
+
 // Answers Depop's catalog and the seller's shipping reads; other requests go on.
 function withCatalog(c, { attributes = [200, ATTRIBUTES], addresses = [200, [{ id: 41, postal_code: '70115' }, { id: 42, postal_code: '10001' }]],
   providers = [200, [{ id: 'USPS', parcelSizes: [{ id: 'small', title: 'Extra small' }, { id: 'medium', title: 'Medium' }] }]] } = {}) {

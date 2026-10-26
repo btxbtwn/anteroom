@@ -68,12 +68,6 @@ def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
             found.append(gap("price", f"Poshmark lists this at ${whole}.", blocking=False))
         if whole < 3:
             found.append(gap("price", "Poshmark needs a price of $3 or more."))
-    try:
-        quantity = int(str(snapshot.get("quantity") or 1).strip())
-    except ValueError:
-        quantity = 1
-    if quantity > 1:
-        found.append(gap("quantity", "Poshmark lists a quantity of 1.", blocking=False))
     dropped = []
     for value in (snapshot.get("primaryColor") or snapshot.get("color"), snapshot.get("secondaryColor")):
         text = str(value or "").strip()
@@ -115,11 +109,6 @@ def _mercari_parent(snapshot: dict, context: Context, chosen: str, category: dic
     return None
 
 
-def _mercari_size(snapshot: dict) -> str:
-    specifics = snapshot.get("mercari_specifics") if isinstance(snapshot.get("mercari_specifics"), dict) else {}
-    return str(specifics.get("size") or snapshot.get("size") or "").strip()
-
-
 @requirement("mercari")
 def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
     found: list[dict] = []
@@ -140,15 +129,8 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
                          f"That Mercari category has subcategories{listed}. Choose the most specific one."))
     elif not chosen:
         found.append(gap("direct_category_ids.mercari", "Mercari needs a category."))
-    elif _mercari_size(snapshot) and "sizes" not in form:
-        found.append(gap("mercari_specifics.size",
-                         "Anteroom could not read Mercari's sizes, so the size would be left off. Try again."))
-    sizes = form.get("sizes")
-    if isinstance(sizes, list) and sizes and not _mercari_size(snapshot):
-        aspects = form.get("aspects") if isinstance(form.get("aspects"), dict) else {}
-        coded = str(aspects.get(f"{chosen}_Size") or "")
-        if not any(str(size.get("id")) == coded for size in sizes if isinstance(size, dict)):
-            found.append(gap("size", "Mercari needs a size in this category."))
+    # Chrome checks the selected leaf and size against Mercari's own master
+    # catalog before uploading. Vendoo's mirrored size table is not consulted.
     return found
 
 

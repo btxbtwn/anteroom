@@ -87,6 +87,19 @@ test('Poshmark lists in one step with every field, no draft save, no tab', async
   assert.equal(journal['native_operation_op-1'].poshmark_post_id, POST);
 });
 
+test('Poshmark sends the selected quantity, original price and explicit SKU instead of generated defaults', () => {
+  const c = loadWorker();
+  const listing = { ...LISTING, quantity: 3, sku: 'item-details-sku', seller_fields: ['poshmark_specifics.originalPrice'], poshmark_specifics: {
+    ...LISTING.poshmark_specifics, originalPrice: 55, poshmarkSku: '',
+  } };
+  const post = c.poshmarkPostFields(CATALOG.data, listing, { brand: 'Hanes', styleTags: [] });
+  assert.equal(post.inventory.multi_item, true);
+  assert.equal(post.inventory.size_quantities[0].quantity_available, 3);
+  assert.equal(post.original_price_amount.val, '55');
+  assert.equal(post.seller_private_info, undefined);
+  assert.throws(() => c.poshmarkPostFields(CATALOG.data, { ...listing, quantity: 1.5 }, {}), /whole-number quantity/);
+});
+
 test('an update writes the live Poshmark post and does not create or publish another', async () => {
   const { c, msg, requests } = setup();
   let saved = false;
