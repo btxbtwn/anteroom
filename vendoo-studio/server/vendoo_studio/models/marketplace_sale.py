@@ -1,7 +1,7 @@
 """Direct order-line ledger and seller-reviewed sale alerts. No buyer details."""
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import new_id, utcnow
@@ -30,6 +30,8 @@ class MarketplaceSale(Base):
     order_status = Column(String, nullable=False, default="paid", server_default="paid")
     order_updated_at = Column(DateTime, nullable=True)
     order_observed_at = Column(DateTime, nullable=True)
+    financials = Column(JSON, nullable=True)
+    financial_revision = Column(Integer, nullable=False, default=0, server_default="0")
     # The local item matched by its validated marketplace listing identity.
     conversation_id = Column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
     state = Column(String, nullable=False, default="new")

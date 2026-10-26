@@ -1073,6 +1073,7 @@ def apply_unified_macos_chrome(window, *_args, **_kwargs) -> None:
 
 
 def create_studio_window(webview_module):
+    webview_module.settings["ALLOW_DOWNLOADS"] = True
     window = webview_module.create_window(
         APP_NAME,
         html=splash_html(),

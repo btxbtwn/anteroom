@@ -4,7 +4,7 @@ version = "0.1.394"
 description = "Local web app for generating and automating Vendoo marketplace listings"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.0",
+    "fastapi>=0.121.0",
     "uvicorn[standard]>=0.30.0",
     "pydantic>=2.9.0",
     "sqlalchemy>=2.0.0",

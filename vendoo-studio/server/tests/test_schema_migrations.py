@@ -393,3 +393,18 @@ def test_existing_sale_alerts_keep_identity_and_dismissal_when_order_ledger_is_a
         row = connection.execute("SELECT order_id, line_id, state, quantity, order_status, order_observed_at FROM marketplace_sales WHERE id='keep-sale'").fetchone()
     assert row == ("100", "200", "dismissed", 2, "paid", None)
     assert inspect_database(engine.url.database).clean
+
+
+def test_existing_orders_keep_identity_and_state_when_financial_records_are_added(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "6bc19d8ea678")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO marketplace_sales (id, marketplace, order_id, line_id, listing_id, state, quantity, order_status, received_at) "
+                           "VALUES ('keep-financial-sale', 'etsy', '100', '200', '555', 'dismissed', 2, 'refunded', '2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        row = connection.execute("SELECT order_id, line_id, listing_id, state, quantity, order_status, financials, financial_revision FROM marketplace_sales WHERE id='keep-financial-sale'").fetchone()
+    assert row == ("100", "200", "555", "dismissed", 2, "refunded", None, 0)
+    assert inspect_database(engine.url.database).clean

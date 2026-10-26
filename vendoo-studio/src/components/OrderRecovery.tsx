@@ -52,7 +52,7 @@ export function OrderRecovery({ marketplace, connectedAt }: { marketplace: Direc
     retry: false,
     onSettled: () => {
       setStopping(false);
-      for (const key of ["marketplace-sales", "marketplace-listings", "marketplace-statuses", "conversations", "ebay-offers"]) {
+      for (const key of ["sales-ledger", "marketplace-sales", "marketplace-listings", "marketplace-statuses", "conversations", "ebay-offers"]) {
         void queryClient.invalidateQueries({ queryKey: [key] });
       }
     },

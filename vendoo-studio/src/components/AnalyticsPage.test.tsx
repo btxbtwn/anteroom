@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { InventoryAnalytics, VendooBulkImport } from "../api/types";
-import { AnalyticsPage } from "./AnalyticsPage";
+import { InventoryAnalyticsView } from "./AnalyticsPage";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -64,10 +64,10 @@ function render(
     queryKey[0] === "vendoo-bulk-import" ? { data: run }
       : { data: payload, isLoading: false, isError: false, isFetching: false },
   );
-  return renderToStaticMarkup(<AnalyticsPage onOpenListing={vi.fn()} />);
+  return renderToStaticMarkup(<InventoryAnalyticsView onOpenListing={vi.fn()} />);
 }
 
-describe("AnalyticsPage", () => {
+describe("InventoryAnalyticsView", () => {
   it("shows the last completed Vendoo sync and offers a real resync", () => {
     const html = render(data);
     expect(html).toContain("Last updated on");

@@ -1,3 +1,4 @@
+import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
 import type {
   SendPreview,
@@ -484,6 +485,13 @@ export const api = {
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/check`, {
         method: "POST", body: JSON.stringify(draftUrl ? { draft_url: draftUrl } : {}),
       }),
+  },
+  salesLedger: {
+    list: (filters: SalesLedgerFilters, page = 1) => request<SalesLedgerPage>(`/sales-ledger?${salesLedgerParams(filters, page)}`),
+    get: (saleId: string) => request<SalesLedgerRow>(`/sales-ledger/${encodeURIComponent(saleId)}`),
+    save: (saleId: string, body: FinancialSave) => request<SalesLedgerRow>(`/sales-ledger/${encodeURIComponent(saleId)}/financials`, { method: "PUT", body: JSON.stringify(body) }),
+    salesCsv: (filters: SalesLedgerFilters) => `${BASE}/sales-ledger/export/sales.csv?${salesLedgerParams(filters)}`,
+    inventoryCsv: () => `${BASE}/sales-ledger/export/inventory.csv`,
   },
   marketplaceSales: {
     recover: (body: OrderRecoveryRequest) => request<OrderRecoveryResult>("/marketplace-sales/recover", { method: "POST", body: JSON.stringify(body) }),
