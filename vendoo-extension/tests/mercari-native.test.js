@@ -499,7 +499,7 @@ test('Mercari lists with no brand when the seller clears it, and omits a name it
   assert.equal(await c.mercariBrandId({ brand: 'BRIGGS', mercari_specifics: { brand: 'GB girls' } }, deadline), 30138);
   assert.equal(await c.mercariBrandId({ brand: 'BRIGGS' }, deadline), null);
   const { c: run, requests, setDraft } = worker();
-  setDraft({ ...CLOTHING_DRAFT, brand: null });
+  setDraft({ ...CLOTHING_DRAFT, brand: { id: 0 } });
   run.mercariCatalogData = async () => ({ itemBrands: [{ id: 9, name: 'Nike SB' }] });
   const result = await run.runMercariNative(message({ listing: clothing({ brand: 'BRIGGS', mercari_specifics: { brand: '' }, seller_fields: ['mercari_specifics.brand'] }) }));
   assert.equal(result.ok, true, result.error);
