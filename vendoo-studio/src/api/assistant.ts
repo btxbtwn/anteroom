@@ -1,4 +1,7 @@
+import type { AssistantAutomation } from "./automations";
 import type { ChatAttachment } from "./types";
+
+export type { AssistantAutomation };
 
 /** Query keys for what the seller told the assistant and what it remembers (Settings → Assistant). */
 export const ASSISTANT_NOTE_KEY = ["assistant", "note"] as const;
@@ -27,6 +30,8 @@ export interface AssistantMessage {
   created_at: string | null;
   /** Changes this answer proposed, and what the seller did with them. */
   changes?: AssistantChanges | null;
+  /** An automation this answer drafted, and whether the seller confirmed it. */
+  automation?: AssistantAutomation | null;
   /** Images attached to a question. */
   attachments?: ChatAttachment[];
 }

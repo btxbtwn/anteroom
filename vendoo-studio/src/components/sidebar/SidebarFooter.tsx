@@ -2,6 +2,7 @@ import { Fragment, type ComponentType, type ReactNode } from "react";
 import {
   ArrowLeftIcon,
   BoxIcon,
+  CalendarClockIcon,
   ChartColumnIcon,
   GaugeIcon,
   MessageCircleIcon,
@@ -33,6 +34,7 @@ export const SIDEBAR_FOOTER_BUTTONS = [
   "sourcing",
   "analytics",
   "marketplaces",
+  "automations",
   "usage",
   "settings",
   "update",
@@ -90,6 +92,7 @@ export function SidebarFooter({
   onOpenSourcing,
   onOpenAnalytics,
   onOpenMarketplaces,
+  onOpenAutomations,
   onOpenAssistant,
   onOpenSettings,
   onOpenUsage,
@@ -100,6 +103,7 @@ export function SidebarFooter({
   onOpenSourcing: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketplaces: () => void;
+  onOpenAutomations: () => void;
   onOpenAssistant: () => void;
   onOpenSettings: () => void;
   onOpenUsage: () => void;
@@ -113,6 +117,7 @@ export function SidebarFooter({
       <FooterButton label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} onClick={onOpenAnalytics} />
     ),
     marketplaces: <FooterButton label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />,
+    automations: <FooterButton label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} onClick={onOpenAutomations} />,
     usage: <FooterButton label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
     settings: <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: <UpdateButton />,

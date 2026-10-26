@@ -93,8 +93,8 @@ INSTRUCTIONS = (
     "- Give advice when asked — what to source, reprice, discount or drop — and tie each point to the numbers behind it. "
     "Fit it to what the seller says about their business and to what you remember about them.\n"
     "- You can propose changes to listings, described below, and the seller applies them. You cannot change a setting, "
-    "and you cannot list, delist, publish or send anything to Vendoo or a marketplace. "
-    "When the seller wants one of those, tell them where in Anteroom to do it.\n"
+    "and you cannot list, delist, publish or send anything yourself. When the seller asks for a scheduled "
+    "automation, propose it as described below; it runs only after they confirm it.\n"
     "- When you name a specific listing, link it so the seller can open it: [its title](#listing-ID), "
     "with the id from its row. Use only ids that appear in the summary or in a lookup result.\n"
     "- Other ids only tie rows together. Name a box by its store and title, never by its id.\n"
@@ -186,6 +186,20 @@ CHANGES_INSTRUCTIONS = (
     "link the listing instead.\n"
     "- An Anteroom note after one of your earlier replies says what you proposed and whether the seller applied it. "
     "Never write such a note yourself.\n"
+)
+
+AUTOMATION_INSTRUCTIONS = (
+    "Scheduled automations: when the seller asks you to schedule a delist, relist, regenerate, or price drop, "
+    "or a rule such as relisting an item after a number of days, say in a sentence what you will set up and end "
+    "the reply with one ```automation block. It is one JSON object:\n"
+    "```automation\n"
+    '{"prompt": "When an item reaches 60 days listed on eBay and Poshmark, delist and relist it and drop the price by 10%. Don\'t go below $15."}\n'
+    "```\n"
+    "- Name every marketplace in the prompt. Never say all marketplaces. Never include sold items.\n"
+    "- Anteroom shows a preview. Nothing runs until the seller presses Confirm.\n"
+    "- To change one, {\"op\": \"update\", \"id\": \"TASK-ID\", \"prompt\": \"...\"}. To pause one, "
+    "{\"op\": \"pause\", \"id\": \"TASK-ID\"}. Ids are listed under Scheduled automations. Do not invent one.\n"
+    "- Propose only an automation the seller asked for.\n"
 )
 
 BREAKDOWN_PERIODS = ("30d", "90d", "12m", "all")
@@ -362,12 +376,12 @@ def list_messages(db: Session, thread_id: str | None = None) -> list[AssistantMe
 def add_message(
     db: Session, role: str, text: str, *, provider: str | None = None, model: str | None = None,
     changes: dict[str, Any] | None = None, attachments: list[dict[str, Any]] | None = None,
-    thread_id: str | None = None,
+    automation: dict[str, Any] | None = None, thread_id: str | None = None,
 ):
     thread = resolve_thread(db, thread_id)
     row = AssistantMessage(
         thread_id=thread.id, role=role, text=text, provider=provider, model=model,
-        changes=changes, attachments=attachments or None,
+        changes=changes, attachments=attachments or None, automation=automation,
     )
     if role == "user" and thread.title == NEW_THREAD_TITLE:
         titled = thread_title_from(text)
@@ -380,6 +394,21 @@ def add_message(
     return row
 
 
+def _automation_lines(db: Session) -> str:
+    from vendoo_studio.services.automations import brief_lines
+
+    return brief_lines(db)
+
+
+def _automation_note(payload: dict | None) -> str:
+    if not payload:
+        return ""
+    proposal = payload.get("proposal") if isinstance(payload, dict) else None
+    name = (proposal or {}).get("name") or "an automation"
+    status = payload.get("status") or "proposed"
+    return f"\n\n[Anteroom note: you drafted {name}. It is {status}.]"
+
+
 def message_view(row: AssistantMessage) -> dict[str, Any]:
     created = row.created_at
     if created is not None and created.tzinfo is None:
@@ -390,6 +419,7 @@ def message_view(row: AssistantMessage) -> dict[str, Any]:
         "text": row.text,
         "created_at": created.isoformat() if created else None,
         "changes": row.changes,
+        "automation": row.automation,
         "attachments": row.attachments or [],
     }
 
@@ -485,6 +515,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         _sourcing_box_rows(tab_boxes),
         _section("Ad spend the seller recorded", ads),
         _section("Sale events", events),
+        _automation_lines(db),
         _section("Sourcing checks (is this worth buying?)", {
             "track_record": scout.track_record(db, scout_sales),
             "recent": [
@@ -586,7 +617,7 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     History is that conversation only, never another thread or a listing's chat.
     """
     earlier = [
-        {"role": row.role, "content": row.text + assistant_changes.history_note(row.changes)}
+        {"role": row.role, "content": row.text + assistant_changes.history_note(row.changes) + _automation_note(row.automation)}
         for row in list_messages(db, thread_id)[-(HISTORY_MESSAGES + 1):]
     ]
     if not earlier or earlier[-1] != {"role": "user", "content": question}:
@@ -596,6 +627,7 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     system = (
         f"{INSTRUCTIONS}\n{lookups}\n"
         f"{CHANGES_INSTRUCTIONS.format(limit=assistant_changes.MAX_CHANGES)}\n"
+        f"{AUTOMATION_INSTRUCTIONS}\n"
         f"{assistant_memory.INSTRUCTIONS}\n{shop.brief}"
     )
     return [{"role": "system", "content": system}, *earlier]
@@ -647,7 +679,7 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
                     lead, written = "", True
         lookup = find_lookup(reply)
         if lookup is None:
-            words, memory, changes = assistant_memory.peel(reply)
+            words, memory, changes, automation = assistant_memory.peel(reply)
             if memory is not None and not words.strip() and not written:
                 words = "I'll remember that."
             rest = links.clean(words[released:]) if len(words) > released else ""
@@ -657,6 +689,8 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
                 yield "memory", memory
             if changes is not None:
                 yield "changes", changes
+            if automation is not None:
+                yield "automation", automation
             return
         before = assistant_memory.visible_text(reply[:lookup.start]).rstrip()
         if len(before) > released:

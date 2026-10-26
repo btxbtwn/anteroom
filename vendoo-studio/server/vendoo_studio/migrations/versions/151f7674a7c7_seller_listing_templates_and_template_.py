@@ -1,7 +1,7 @@
 """Seller listing templates and template draft receipts
 
 Revision ID: 151f7674a7c7
-Revises: 2af6da7c6db1
+Revises: c4d8e2b71a05
 Create Date: 2026-10-26 07:17:40.386667
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = '151f7674a7c7'
-down_revision = '2af6da7c6db1'
+down_revision = 'c4d8e2b71a05'
 branch_labels = None
 depends_on = None
 

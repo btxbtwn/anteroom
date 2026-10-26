@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.402 — 2026-10-26
+
+- Automations lets you schedule a one-time job or a daily or weekly one: delist, relist, regenerate, or drop the price by a dollar amount or a percent, with a floor. A repeating 10% steps down the original price (90%, then 80%, then 70%) and stops at the floor. A one-time drop stays on the first step. That choice lives on the task, so you can switch a task between each cycle and a one-time drop.
+- If a relist fails on one marketplace, the others still go back up. The failed ones are tried again, and anything still down is marked “down, needs relist” in the run history and in `anteroom errors list`.
+- A task that regenerates a listing waits for your approval before it publishes. Approve publishes it on the marketplaces that task names. You can turn that off for a task when you want the regenerated listing to publish on its own.
+- A rule can wait until an item has been listed for a number of days. That date comes from the first successful publish or the Vendoo listing date, and the day a marketplace row was backfilled is used only when nothing earlier is on record. Preview shows the date and where it came from. Sold items are left alone, and each run is kept in the history. A dry run is marked as a dry run.
+- You can ask the assistant to set one up and confirm it before it is saved. Nothing runs until you confirm the actions and the marketplaces by name.
+
 ## 0.1.401 — 2026-10-26
 
 - Select inventory items and choose Copy items to review separate names, SKUs, quantities, photos and costs. See each result, stop after the current item, and continue or retry the remaining copies without creating duplicates when a reply is lost.

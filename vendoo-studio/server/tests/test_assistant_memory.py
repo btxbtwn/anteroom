@@ -31,7 +31,7 @@ def workspace(monkeypatch):
 
 
 def test_a_reply_keeps_its_words_and_hands_over_memory_and_changes():
-    words, memory, changes = assistant_memory.peel(
+    words, memory, changes, _automation = assistant_memory.peel(
         'Three sold.\n```changes\n[{"listing": "abc"}]\n```\n'
         '```memory\n[{"op": "add", "text": "Ships from Austin."}]\n```'
     )
