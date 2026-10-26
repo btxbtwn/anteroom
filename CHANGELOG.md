@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.413 — 2026-10-26
+## 0.1.414 — 2026-10-26
 
 - List on eBay as an auction. Choose the auction length eBay offers for the category, a starting bid, and an optional reserve and Buy It Now. Fixed price stays Good 'Til Cancelled, and auctions sell one item without offers.
 - Save an eBay draft without listing it. eBay keeps it out of sight of buyers, Anteroom checks the format, duration and prices eBay saved, and List publishes that same draft.
+
+## 0.1.413 — 2026-10-26
+
+- Select items in the sidebar and choose List / delist to list, delist or relist them on the marketplaces you name. You review what happens to each item and confirm once; items then run one at a time, each marketplace once. An item already live is never taken down by List, a marketplace where it sold is left alone, and a failed item is shown instead of retried.
 
 ## 0.1.412 — 2026-10-26
 
