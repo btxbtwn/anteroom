@@ -99,7 +99,10 @@ class NativeEditorTest(unittest.TestCase):
         fields = {row["path"]: row for row in form["fields"]}
         self.assertNotIn("brand", fields)
         self.assertNotIn("quantity", fields)
-        self.assertTrue(fields["sellwild_specifics.nativeCategoryId"]["locked"])
+        self.assertNotIn("locked", fields["sellwild_specifics.nativeCategoryId"])
+        self.assertTrue(fields["sellwild_specifics.nativeCategoryId"]["selection_only"])
+        self.assertIn("246", fields["sellwild_specifics.nativeCategoryId"]["option_values"].values())
+        self.assertFalse(fields["description"]["required"])
         self.bridge.assert_not_called()
 
     def test_direct_depop_attribute_edits_survive_generated_style_padding(self):
@@ -163,6 +166,9 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["ebay_specifics.Season"]["value"], ["Spring", "Summer"])
         self.assertTrue(fields["ebay_specifics.Season"]["multi"])
         self.assertEqual(fields["ebay_specifics.Season"]["max_length"], 65)
+        self.assertEqual(fields["ebay_specifics.bestOffer.enabled"]["input_type"], "boolean")
+        self.assertNotIn("locked", fields["ebay_specifics.conditionDescription"])
+        self.assertEqual(fields["ebay_specifics.conditionDescription"]["max_length"], 1000)
         self.assertEqual(ebay_listings.ebay_condition({"ebay_specifics": {"condition": "1000"}}), "NEW")
 
     def test_ebay_size_follows_size_type_from_taxonomys_parent_constraints(self):

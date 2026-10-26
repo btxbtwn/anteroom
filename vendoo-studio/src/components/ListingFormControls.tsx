@@ -166,7 +166,12 @@ export function SearchableSelect({
         value={value || null}
         inputValue={query}
         disabled={disabled}
-        onValueChange={(next) => onChange(next ?? "")}
+        onValueChange={(next, details) => {
+          // Replacing the search text is not a committed clear. Autosaving that
+          // intermediate null remounts the category form and interrupts typing.
+          if (next === null && details.reason === "input-clear") { details.cancel(); return; }
+          onChange(next ?? "");
+        }}
         onInputValueChange={(next) => { setQuery(next); onSearch?.(next); }}
       >
         <ComboboxInput

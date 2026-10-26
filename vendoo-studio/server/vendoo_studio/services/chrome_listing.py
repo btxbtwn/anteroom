@@ -138,6 +138,13 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
 def depop_requirements(snapshot: dict, context: Context) -> list[dict]:
     found: list[dict] = []
     specifics = snapshot.get("depop_specifics") if isinstance(snapshot.get("depop_specifics"), dict) else {}
+    worldwide = specifics.get("worldwideShipping") or {}
+    if worldwide.get("enabled") is True:
+        amount = _money(worldwide.get("price"))
+        if amount is None or not 0 <= amount < 100 or amount != amount.quantize(Decimal("0.01")):
+            found.append(gap("depop_specifics.worldwideShipping.price", "Depop needs a worldwide shipping price from $0 to $99.99, in dollars and cents."))
+    if len(str(specifics.get("sku", snapshot.get("sku")) or "")) > 50:
+        found.append(gap("depop_specifics.sku", "Depop SKUs are at most 50 characters."))
     label = str(specifics.get("parcelSize") or specifics.get("parcel_size") or "").strip()
     if not label:
         found.append(gap("depop_specifics.parcelSize", "Depop needs a parcel size."))

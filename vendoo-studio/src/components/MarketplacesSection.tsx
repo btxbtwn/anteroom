@@ -3,23 +3,21 @@ import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, External
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark } from "../api/marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap, SellwildOptions } from "../api/nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
-import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "./ui/combobox";
 import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
 
 type Marketplace = DelistMarketplace;
 const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
 const NATIVE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]);
-const REMOTE_DRAFT = new Set<Marketplace>(["mercari", "depop", "etsy"]);
+const REMOTE_DRAFT = new Set<Marketplace>(["mercari", "depop", "etsy", "poshmark"]);
 // What Delist does on each marketplace: eBay has no delete; Sellwild offers only its own delist.
 // Vinted is deleted through the signed-in Chrome session, the same as Depop, Poshmark and Mercari.
 const REMOVED: Record<Marketplace, string> = {
@@ -107,7 +105,6 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   return { tone: "idle", label: "Not listed" };
 }
 
-type Option = { id: number; label: string };
 
 function railLabel(id: string): string {
   if (id === "general") return "General";
@@ -115,26 +112,6 @@ function railLabel(id: string): string {
 }
 
 const MANAGED = new Set<string>(ORDER);
-
-function SellwildCategory({ options, value, onChange, disabled }: {
-  options: SellwildOptions["categories"]; value: number | undefined; onChange: (id: number | undefined) => void; disabled: boolean;
-}) {
-  const selected = options.find((option) => option.id === value) ?? null;
-  return (
-    <Combobox<Option> items={options} value={selected} disabled={disabled}
-      itemToStringLabel={(option) => option.label}
-      isItemEqualToValue={(a, b) => a.id === b.id}
-      onValueChange={(option) => onChange(option?.id)}>
-      <ComboboxInput size="sm" aria-label="Sellwild category" placeholder="Search Sellwild categories" />
-      <ComboboxPopup>
-        <ComboboxEmpty>No matching category.</ComboboxEmpty>
-        <ComboboxList>
-          {(option: Option) => <ComboboxItem key={option.id} value={option}>{option.label}</ComboboxItem>}
-        </ComboboxList>
-      </ComboboxPopup>
-    </Combobox>
-  );
-}
 
 type MarketplaceProps = {
   convId: string; revisionId: string | null; title: string; disabled: boolean; etsyEligible: boolean;
@@ -179,29 +156,15 @@ export function MarketplacesLayout({
   }, [waiting]);
   const listings: MarketplaceListings = live.data ?? {};
   const [draftLinks, setDraftLinks] = useState<Partial<Record<NativeMarketplace, string>>>({});
-  const [changingSellwild, setChangingSellwild] = useState(false);
-  const [sellwildPick, setSellwildPick] = useState<{ categoryId?: number; conditionId?: number }>({});
   const [linking, setLinking] = useState<{ marketplace: Marketplace; url: string } | null>(null);
 
   const etsyCreating = !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
   const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
     enabled: etsyCreating, staleTime: 60_000, retry: false });
   const etsyReady = Boolean(etsyDefaults.data?.shipping_profile_id && etsyDefaults.data?.readiness_state_id && etsyDefaults.data?.return_policy_id);
-  const sellwildOpen = !listings.sellwild?.listing_id && !["published", "pending_review"].includes(drafts.sellwild?.state ?? "");
-  const sellwildOptions = useQuery({ queryKey: ["sellwild-options", convId, revisionId], queryFn: () => api.nativeMarketplaces.sellwildOptions(convId),
-    enabled: sellwildOpen, staleTime: 60_000, retry: false });
-  const savedSellwild = drafts.sellwild;
-  // Only what the seller chose is sent and saved; Anteroom's match is shown and
-  // worked out again from the listing on every List.
-  const sellwildChoice = {
-    categoryId: sellwildPick.categoryId ?? savedSellwild?.sellwild_category_id,
-    conditionId: sellwildPick.conditionId ?? savedSellwild?.sellwild_condition_id,
-  };
-  const sellwildCategory = sellwildChoice.categoryId ?? sellwildOptions.data?.suggested.category_id ?? undefined;
-  const sellwildCondition = sellwildChoice.conditionId ?? sellwildOptions.data?.suggested.condition_id ?? undefined;
   const preflight = useQuery({
-    queryKey: ["native-preflight", convId, revisionId, sellwildChoice.categoryId ?? null, sellwildChoice.conditionId ?? null],
-    queryFn: () => api.nativeMarketplaces.preflight(convId, sellwildChoice),
+    queryKey: ["native-preflight", convId, revisionId],
+    queryFn: () => api.nativeMarketplaces.preflight(convId),
     enabled: Boolean(revisionId),
     staleTime: 15_000,
   });
@@ -221,8 +184,7 @@ export function MarketplacesLayout({
       if (!revisionId) throw new Error("Generate a listing first.");
       if (kind === "save_draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId);
       if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId);
-      return api.nativeMarketplaces.list(convId, marketplace, revisionId,
-        marketplace === "sellwild" ? sellwildChoice : undefined);
+      return api.nativeMarketplaces.list(convId, marketplace, revisionId);
     },
     retry: false,
     onSettled: () => {
@@ -315,7 +277,7 @@ export function MarketplacesLayout({
       const current = draft?.state === "draft" && draft.revision_id === revisionId && Boolean(draft.draft_url);
       return !current && !etsyReady;
     }
-    return marketplace === "sellwild" && (!sellwildCategory || !sellwildCondition);
+    return false;
   }
 
   function updatable(marketplace: Marketplace, status: Status): boolean {
@@ -466,33 +428,7 @@ export function MarketplacesLayout({
     if (marketplace === "etsy" && etsyCreating && etsyDefaults.isSuccess && !etsyReady) {
       return <p className="text-muted-foreground">Choose Etsy's default shipping, processing, and return profiles in Settings → Connections.</p>;
     }
-    if (marketplace !== "sellwild" || !sellwildOpen || !sellwildOptions.data) return null;
-    const category = sellwildOptions.data.categories.find((option) => option.id === sellwildCategory);
-    const condition = sellwildOptions.data.conditions.find((option) => option.id === sellwildCondition);
-    if (category && condition && !changingSellwild) {
-      return (
-        <p className="text-muted-foreground">
-          {category.label} · {condition.label}
-          <button type="button" className="ms-2 text-foreground/80 hover:text-foreground hover:underline" disabled={busy}
-            onClick={() => setChangingSellwild(true)}>Change</button>
-        </p>
-      );
-    }
-    return (
-      <>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="min-w-40 flex-1 basis-0"><SellwildCategory options={sellwildOptions.data.categories} value={sellwildCategory} disabled={busy}
-            onChange={(categoryId) => setSellwildPick({ ...sellwildPick, categoryId })} /></div>
-          <Select value={sellwildCondition ? String(sellwildCondition) : null} disabled={busy}
-            onValueChange={(value) => setSellwildPick({ ...sellwildPick, conditionId: value ? Number(value) : undefined })}
-            items={sellwildOptions.data.conditions.map((option) => ({ value: String(option.id), label: option.label }))}>
-            <SelectTrigger size="compact" className="w-36" aria-label="Sellwild condition"><SelectValue placeholder="Condition" /></SelectTrigger>
-            <SelectPopup>{sellwildOptions.data.conditions.map((option) => <SelectItem key={option.id} value={String(option.id)}>{option.label}</SelectItem>)}</SelectPopup>
-          </Select>
-        </div>
-        {(!category || !condition) && <p className="text-muted-foreground">Anteroom couldn't match this item to Sellwild. Choose a category and condition.</p>}
-      </>
-    );
+    return null;
   }
 
   const statusById = new Map(ORDER.map((marketplace, index) => [marketplace, statuses[index]]));

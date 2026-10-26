@@ -34,6 +34,13 @@ class SellwildConditionTest(unittest.TestCase):
 
 
 class ChromePreflightTest(unittest.TestCase):
+    def test_depop_worldwide_shipping_requires_a_native_fee_and_accepts_free_shipping(self):
+        for price, valid in [(0, True), ("15.25", True), ("", False), (-1, False), (100, False), ("1.111", False)]:
+            listing = {"direct_category_ids": {"depop": "menswear_tshirts"}, "depop_specifics": {
+                "parcelSize": "Medium", "worldwideShipping": {"enabled": True, "price": price}}}
+            fields = {row["field"] for row in depop_requirements(listing, Context())}
+            self.assertEqual("depop_specifics.worldwideShipping.price" not in fields, valid)
+
     def test_poshmark_says_what_it_will_change_and_still_allows_list(self):
         gaps = poshmark_requirements({
             "title": "Tee", "description": "Soft cotton", "price": "18.40", "quantity": 2,

@@ -9,18 +9,15 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery, useMutation, useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
 }));
 
-const SELLWILD = { categories: [{ id: 272, label: "Fashion > Coats & Jackets" }], conditions: [{ id: 2, label: "Gently Used" }],
-  suggested: { category_id: 272, condition_id: 2 } };
 const live = { url: "https://www.mercari.com/us/item/m70565754838", listing_id: "m70565754838", source: "vendoo", sold_here: false, state: "live" } as const;
 
 function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { error = null as Error | null, pending = false, etsyEligible = true,
-  etsyReady = false, suggested = SELLWILD.suggested as { category_id: number | null; condition_id: number | null }, selected = "",
+  etsyReady = false, selected = "",
   onAskChat = undefined as ((text: string) => void) | undefined, onEditField = undefined as ((field: string) => void) | undefined,
   preflight = undefined as { marketplaces: Record<string, { ready: boolean; gaps: { field: string; message: string; blocking: boolean }[] }> } | undefined } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
-    : queryKey[0] === "sellwild-options" ? { data: { ...SELLWILD, suggested }, isPending: false }
     : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2", return_policy_id: "3" } : {}, isSuccess: true, isPending: false }
     : queryKey[0] === "native-preflight" ? { data: preflight, isPending: false }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
@@ -52,7 +49,7 @@ describe("marketplaces section", () => {
     const html = render({}, {}, { selected: "poshmark" });
     expect(row(html, "Poshmark")).toContain('aria-selected="true"');
     expect(enabledButton(html, "List…")).toBe(true);
-    expect(html).not.toContain("Save draft");
+    expect(enabledButton(html, "Save draft")).toBe(true);
     expect(html).not.toContain("Publish…");
     expect(row(render({ poshmark: { state: "draft", revision_id: "current", draft_url: "https://poshmark.com/edit-listing/x" } }), "Poshmark")).toContain("Draft");
   });
@@ -91,16 +88,15 @@ describe("marketplaces section", () => {
     expect(enabledButton(render({}, {}, { selected: "vinted" }), "List…")).toBe(true);
   });
 
-  it("uses Sellwild's matched category and condition, with Change to override", () => {
+  it("uses the Sellwild form selections and blocks listing when its category is missing", () => {
     const html = render({}, {}, { selected: "sellwild" });
-    expect(html).toContain("Fashion &gt; Coats &amp; Jackets · Gently Used");
-    expect(html).toContain(">Change</button>");
+    expect(html).not.toContain(">Change</button>");
     expect(html).not.toContain('aria-label="Sellwild category"');
     expect(enabledButton(html, "List…")).toBe(true);
-    const unmatched = render({}, {}, { suggested: { category_id: null, condition_id: 2 }, selected: "sellwild" });
+    const unmatched = render({}, {}, { selected: "sellwild", preflight: { marketplaces: { sellwild: { ready: false,
+      gaps: [{ field: "sellwild_specifics.nativeCategoryId", message: "Choose a Sellwild category.", blocking: true }] } } } });
     expect(disabledButton(unmatched, "List…")).toBe(true);
-    expect(unmatched).toContain('aria-label="Sellwild category"');
-    expect(unmatched).toContain("couldn&#x27;t match");
+    expect(unmatched).toContain("Choose a Sellwild category.");
   });
 
   it("asks for Etsy's shop defaults in Settings instead of per listing", () => {

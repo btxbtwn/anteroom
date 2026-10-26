@@ -67,8 +67,9 @@ function sellwildCreateBody(listing, choice, address, photoCount) {
   // Sellwild's own client sends 0 for both outside vehicle categories.
   return { title: String(listing.title || '').trim(), text: String(listing.description || ''),
     price: Number(listing.price), categoryId: Number(choice.category_id), itemCondition: Number(choice.condition_id),
-    ...address, shippable: true, parcelTemplate: '',
-    ...(vehicle ? {} : { weight: sellwildWeightLb(listing), ...sellwildBox(listing) }),
+    ...address, shippable: true, parcelTemplate: vehicle ? '' : choice.parcel_template || '',
+    ...(vehicle ? {} : { ...(sellwildWeightLb(listing) ? { weight: sellwildWeightLb(listing) } : {}),
+      ...(choice.package_dimensions || sellwildBox(listing)) }),
     vin: vehicle ? String(specifics.vin || '').trim() : 0, mileage: vehicle ? String(specifics.mileage || '').trim() : 0,
     photos: photoCount };
 }
@@ -96,18 +97,17 @@ async function runSellwildNative(msg, recovery = false) {
     const listing = p.listing || {};
     const photos = p.photos || [];
     const choice = p.sellwild || {};
-    const box = sellwildBox(listing);
+    const box = p.sellwild?.package_dimensions || sellwildBox(listing);
     const vehicle = SELLWILD_VEHICLES.has(Number(choice.category_id));
     const specifics = listing.sellwild_specifics || {};
     const title = String(listing.title || '').trim();
     const missing = [(title.length < 3 || title.length > 255) && { field: 'title', needs: 'a title of 3 to 255 characters' },
-      !String(listing.description || '').trim() && { field: 'description', needs: 'a description' },
       !(Number(listing.price) >= 5 && Number(listing.price) <= SELLWILD_MAX_PRICE) && { field: 'price', needs: 'a price from $5 to $999,999' },
-      !Number.isInteger(Number(choice.category_id)) && { field: 'category', needs: 'a Sellwild category' },
-      !Number.isInteger(Number(choice.condition_id)) && { field: 'condition', needs: 'a Sellwild condition' },
+      !(Number.isInteger(Number(choice.category_id)) && Number(choice.category_id) > 0) && { field: 'sellwild_specifics.nativeCategoryId', needs: 'a Sellwild category' },
+      !(Number.isInteger(Number(choice.condition_id)) && Number(choice.condition_id) > 0) && { field: 'sellwild_specifics.nativeConditionId', needs: 'a Sellwild condition' },
       vehicle && !String(specifics.vin || '').trim() && { field: 'sellwild_specifics.vin', needs: "the vehicle's VIN" },
       vehicle && !String(specifics.mileage || '').trim() && { field: 'sellwild_specifics.mileage', needs: "the vehicle's mileage" },
-      !vehicle && !sellwildWeightLb(listing) && { field: 'weight', needs: 'a package weight' },
+      !vehicle && !choice.fixed_package && !sellwildWeightLb(listing) && { field: 'weight', needs: 'a package weight' },
       !vehicle && !box && { field: 'dimensions', needs: 'package dimensions' },
       !vehicle && box && Math.max(box.depth, box.width, box.height) >= SELLWILD_MAX_SIDE_IN
         && { field: 'dimensions', needs: `a package under ${SELLWILD_MAX_SIDE_IN} inches on every side` },

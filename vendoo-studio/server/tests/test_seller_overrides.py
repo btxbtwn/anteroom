@@ -45,6 +45,24 @@ def _prices(general, marketplace):
 
 
 class PriceFollowTest(unittest.TestCase):
+    def test_shipping_fees_do_not_follow_or_override_the_item_price(self):
+        import copy
+
+        previous = {"price": 12, "depop_specifics": {"price": 12, "worldwideShipping": {"enabled": True, "price": 12}}}
+        submitted = copy.deepcopy(previous)
+        submitted["depop_specifics"]["worldwideShipping"]["price"] = 15.25
+        prepare_user_listing(previous, submitted)
+        materialize_prices(submitted)
+        self.assertEqual(submitted["depop_specifics"]["worldwideShipping"]["price"], 15.25)
+        self.assertEqual(price_for(submitted, "depop"), 12)
+        previous = copy.deepcopy(submitted)
+        submitted["price"] = 20
+        submitted["depop_specifics"]["worldwideShipping"]["price"] = 0
+        prepare_user_listing(previous, submitted)
+        materialize_prices(submitted)
+        self.assertEqual(submitted["depop_specifics"]["worldwideShipping"]["price"], 0)
+        self.assertEqual(price_for(submitted, "depop"), 20)
+
     def test_a_new_general_price_replaces_the_recommended_price_on_every_marketplace(self):
         # Recommended price was $23. The seller set the item price to $29.99
         # while each marketplace row still showed $23.

@@ -52,7 +52,7 @@ class NativeMarketplaceError(RuntimeError):
 Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]
 InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
 API_MARKETPLACES = frozenset({"ebay", "etsy"})
-DRAFT_MARKETPLACES = frozenset({"mercari", "depop", "etsy"})
+DRAFT_MARKETPLACES = frozenset({"mercari", "depop", "etsy", "poshmark"})
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
 UNKNOWN = "Anteroom could not confirm what happened. Check the result before trying again."
 # How long Chrome has to answer one step, and how long a job then keeps the
@@ -153,10 +153,11 @@ def draft_url(marketplace: str, value: str) -> str:
         (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
         else (r"/sellinghub/drafts/edit/[A-Za-z0-9_-]{1,80}/?", "www.depop.com") if marketplace == "depop"
         else (r"/items/[1-9]\d{0,14}/edit/?", "www.vinted.com") if marketplace == "vinted"
+        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.com") if marketplace == "poshmark"
         else (r"/sell/draft/[A-Za-z0-9_-]+/", "www.mercari.com")
     )
     if (parsed.scheme != "https" or parsed.netloc != host or not re.fullmatch(pattern, parsed.path)
-            or (marketplace == "vinted" and (parsed.query or parsed.fragment))):
+            or (marketplace in {"vinted", "poshmark"} and (parsed.query or parsed.fragment))):
         raise NativeMarketplaceError(502, "Chrome did not return a valid saved draft link.")
     path = parsed.path.rstrip("/") if marketplace == "vinted" else parsed.path
     return f"https://{host}{path}"
@@ -399,13 +400,15 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         if record.get("state") in UNSETTLED_STATES:
             raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
         extra: dict = {}
+        if marketplace == "poshmark":
+            extra["photo_ids"] = [photo.id for photo in photos]
         if kind == "update":
             from vendoo_studio.services.marketplace_delist import listings as live_listings
 
             live = live_listings(db, conv_id).get(marketplace) or {}
             if live.get("sold_here") or live.get("state") != "live" or not live.get("listing_id"):
                 raise NativeMarketplaceError(409, f"This item is not live on {name}.")
-            extra = {"listing_id": live["listing_id"], "listing_url": live.get("url")}
+            extra.update(listing_id=live["listing_id"], listing_url=live.get("url"))
         elif record.get("state") in {"published", "pending_review"}:
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
         if marketplace == "sellwild":
@@ -551,13 +554,21 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
         sent, warning = _depop_photos(snapshot, photos)
         if warning:
             extra["photo_warning"] = warning
+    if marketplace == "sellwild":
+        from vendoo_studio.services.sellwild_listing import package_sides, sellwild_catalog
+
+        template = str((snapshot.get("sellwild_specifics") or {}).get("parcelTemplate") or "")
+        preset = next((row for row in sellwild_catalog()["parcel_templates"] if row["id"] == template), None)
+        sides = package_sides(snapshot)
+        extra["sellwild"] = {**chosen(snapshot, record), "parcel_template": template,
+                             "fixed_package": bool(preset and all(preset[side] > 0 for side in ("length", "width", "height"))),
+                             "package_dimensions": dict(zip(("depth", "width", "height"), sides, strict=True)) if sides else None}
     return {
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
         "listing": snapshot, "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
         "photos": [{"id": p.id, "mime_type": p.mime_type} for p in sent],
         **extra,
-        **({"sellwild": chosen(snapshot, record)} if marketplace == "sellwild" else {}),
     }
 
 
@@ -566,8 +577,9 @@ def _result_context(db: Session, conv_id: str, marketplace: str, record: dict, s
     return {"marketplace": marketplace, "action": record.get("action"), "operation_id": record.get("operation_id"),
             "draft_url": candidate, "listing_id": record.get("listing_id"), "local_draft_id": record.get("local_draft_id"),
             "revision_id": record.get("revision_id"), "photo_ids": record.get("photo_ids"),
-            "expected_photo_count": len(ConversationRepo(db).get_photos(conv_id)) if first_save else None,
-            "listing": {key: snapshot.get(key) for key in ("title", "description", "price")}}
+            "expected_photo_count": (len(record["photo_ids"]) if marketplace == "poshmark" and record.get("photo_ids") is not None
+                                     else len(ConversationRepo(db).get_photos(conv_id)) if first_save or marketplace == "poshmark" else None),
+            "listing": snapshot if marketplace == "poshmark" else {key: snapshot.get(key) for key in ("title", "description", "price")}}
 
 
 async def _send_cancel(operation_id: str) -> None:
