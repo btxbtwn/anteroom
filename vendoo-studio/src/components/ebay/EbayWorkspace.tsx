@@ -50,7 +50,7 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
     {account?.connected ? <WorkspaceTabs label="eBay workspace" main items={TABS} value={tab} onChange={(value) => setTab(value as Tab)}>
       <div className="ebay-tab-content" key={`${account.connectedAt}-${tab}`}>
         {tab === "Dashboard" ? <DashboardPanel /> : tab === "Inbox" ? <InboxPanel /> : tab === "Orders" ? <OrdersPanel />
-          : tab === "Marketing" ? <><MarketingPanel /><SaleCalendar marketplace="ebay" onOpenListing={onOpenListing} /></> : tab === "Listings" ? <ListingsPanel /> : tab === "Research" ? <ResearchPanel />
+          : tab === "Marketing" ? <><MarketingPanel /><SaleCalendar marketplace="ebay" onOpenListing={onOpenListing} /></> : tab === "Listings" ? <ListingsPanel accountKey={`${account.label}:${account.connectedAt}`} onOpenListing={onOpenListing} /> : tab === "Research" ? <ResearchPanel />
             : tab === "Offers" ? <><div className="ebay-tab-intro"><h2>Offers to interested buyers</h2><p>Set each listing’s minimum price before sending or enabling automatic offers.</p></div><EbayOffersSettings /></> : <ActivityPanel />}
       </div>
     </WorkspaceTabs> : <div className="ebay-data-panel space-y-4">

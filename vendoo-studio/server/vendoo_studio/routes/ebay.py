@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.models.ebay_action import EbayAction
-from vendoo_studio.services import ebay_actions, ebay_listings, ebay_workspace, user_settings
+from vendoo_studio.services import ebay_actions, ebay_import, ebay_listings, ebay_workspace, user_settings
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, identity
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 
@@ -55,6 +55,27 @@ async def read(section: Section, offset: int = Query(0, ge=0, le=100000), target
 async def listing(listing_id: str):
     try:
         return await ebay_actions.owned_listing(await EbayClient.connect(), listing_id)
+    except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
+        raise failure(exc) from exc
+
+
+class ImportRequest(BaseModel):
+    listing_id: str = Field(pattern=r"^[0-9]{9,15}$")
+
+
+@router.get("/import/active")
+async def import_candidates(page: int = Query(1, ge=1, le=10000), db: Session = Depends(get_db)):
+    try:
+        return await ebay_import.active_listings(await EbayClient.connect(), db, page)
+    except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
+        raise failure(exc) from exc
+
+
+@router.post("/import")
+async def import_item(body: ImportRequest, db: Session = Depends(get_db)):
+    """Read an owned eBay listing into Anteroom. This never changes eBay."""
+    try:
+        return await ebay_import.import_listing(await EbayClient.connect(), db, body.listing_id)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
 

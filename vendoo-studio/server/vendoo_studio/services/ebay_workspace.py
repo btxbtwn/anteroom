@@ -271,16 +271,28 @@ def research_page(body: dict, offset: int) -> dict:
 async def listing(client: EbayClient, listing_id: str) -> dict:
     if not listing_id.isdigit():
         raise EbayFailure("Enter an eBay listing ID.", 422)
-    result = await client.trading("GetItem", {"ItemID": listing_id, "DetailLevel": "ReturnAll"})
+    # eBay's GetItem reference requires this flag for ItemSpecifics even when
+    # ReturnAll is used: https://developer.ebay.com/devzone/xml/docs/reference/ebay/getitem.html
+    result = await client.trading("GetItem", {"ItemID": listing_id, "DetailLevel": "ReturnAll", "IncludeItemSpecifics": "true"})
     item = result["xml"].find("e:Item", NS)
     if item is None:
         raise EbayFailure("eBay did not return the listing.")
     def text(path):
         return item.findtext(path, namespaces=NS) or ""
     price = item.find("e:SellingStatus/e:CurrentPrice", NS)
+    specifics = {}
+    for aspect in item.findall("e:ItemSpecifics/e:NameValueList", NS):
+        name = aspect.findtext("e:Name", namespaces=NS)
+        values = [node.text for node in aspect.findall("e:Value", NS) if node.text]
+        if name and values:
+            specifics[name] = values
     return {"id": text("e:ItemID"), "title": text("e:Title"), "description": plain(text("e:Description")),
             "price": price.text if price is not None and price.get("currencyID") == "USD" else None,
             "quantity": text("e:Quantity"), "soldQuantity": text("e:SellingStatus/e:QuantitySold"),
             "status": text("e:SellingStatus/e:ListingStatus"), "type": text("e:ListingType"),
             "seller": text("e:Seller/e:UserID"), "sku": text("e:SKU"), "site": text("e:Site"),
-            "categoryId": text("e:PrimaryCategory/e:CategoryID"), "variations": item.find("e:Variations", NS) is not None}
+            "categoryId": text("e:PrimaryCategory/e:CategoryID"), "variations": item.find("e:Variations", NS) is not None,
+            "categoryName": text("e:PrimaryCategory/e:CategoryName"),
+            "condition": text("e:ConditionDisplayName"), "conditionDescription": text("e:ConditionDescription"),
+            "specifics": specifics,
+            "images": [node.text for node in item.findall("e:PictureDetails/e:PictureURL", NS) if node.text]}

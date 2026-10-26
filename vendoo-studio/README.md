@@ -156,6 +156,25 @@ Each HTTP route is a tool. Destructive tools require `"confirm": true` and still
 6. Click **Send to Vendoo**. Anteroom opens a background Vendoo tab in everyday Chrome, fills and saves a draft, closes the tab, and stops before publishing.
 7. Open the Vendoo draft to review and publish manually.
 
+### Importing directly from eBay
+
+Connect eBay, then open **Marketplaces → eBay → Listings → Import from eBay**.
+Select listings from a page of your active inventory or enter an eBay listing ID.
+Imports run one at a time and can stop after the current listing. **Open item**
+opens the saved item in Anteroom.
+
+The first version supports active US fixed-price listings in USD without
+variations. It verifies the connected seller owns each listing, saves the
+description, available quantity (total minus sold), price, SKU, category and
+specifics, and downloads its photos. Failed photos are reported so they can be
+added before crosslisting. Existing items matched by listing ID are reused;
+their edits and photos are never replaced. Conflicting duplicate inventory is
+reported instead of guessing an owner.
+
+Imports use eBay's read APIs and local storage only. They do not publish, revise,
+delist, migrate eBay's listing format, or contact Vendoo. No eBay credentials or
+raw account responses are stored with the imported listing.
+
 ### Editing something that is already listed
 
 Anteroom writes the Vendoo **form**. Vendoo carries a form change onto a live

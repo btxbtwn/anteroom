@@ -8,10 +8,11 @@ import { ImageUploader, RemoteList, RowCards, fileBase64 } from "./shared";
 import { ActionForm } from "./ActionForm";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 import { useFormDraft } from "./FormDrafts";
+import { InventoryImport } from "./InventoryImport";
 
-export function ListingsPanel() {
+export function ListingsPanel({ accountKey, onOpenListing }: { accountKey: string; onOpenListing: (id: string) => void }) {
   const aspectId = useId();
-  const [task, setTask] = useFormDraft("listings:task", () => "Create draft");
+  const [task, setTask] = useFormDraft("listings:task", () => "Import from eBay");
   const [search, setSearch] = useFormDraft("listings:search", () => "");
   const [keywords, setKeywords] = useFormDraft("listings:keywords", () => "");
   const [category, setCategory] = useFormDraft("listings:category", () => "");
@@ -25,7 +26,8 @@ export function ListingsPanel() {
   const policies = useQuery({ queryKey: ["ebay", "policies"], queryFn: () => api.ebay.read("policies"), retry: false });
   const locations = useQuery({ queryKey: ["ebay", "locations"], queryFn: () => api.ebay.read("locations"), retry: false });
   const policyOptions = (kind: string) => policies.data?.rows.filter((row) => row.status === kind).map((row) => ({ value: row.id, label: row.title })) ?? [];
-  return <WorkspaceTabs label="Listing tools" items={["Create draft", "Inventory", "Edit live listing"]} value={task} onChange={setTask}>
+  return <WorkspaceTabs label="Listing tools" items={["Import from eBay", "Create draft", "Inventory", "Edit live listing"]} value={task} onChange={setTask}>
+    {task === "Import from eBay" ? <InventoryImport accountKey={accountKey} onOpenListing={onOpenListing} /> : null}
     {task === "Create draft" ? <>
     <PageSection title="Category suggestions" description="Use eBay's own category and item-specific requirements.">
       <form className="ebay-search-form" onSubmit={(event) => { event.preventDefault(); setKeywords(search); }}>

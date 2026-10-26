@@ -67,7 +67,6 @@ def process_bytes(contents: bytes, filename: str | None = None, content_type: st
 
     stored_name = f"{uuid.uuid4().hex}{ext}"
     filepath = Path(PHOTOS_DIR) / stored_name
-    filepath.write_bytes(contents)
 
     checksum = hashlib.sha256(contents).hexdigest()
 
@@ -80,6 +79,9 @@ def process_bytes(contents: bytes, filename: str | None = None, content_type: st
     except Exception as exc:
         if mime_type in {"image/jpeg", "image/png", "image/webp"}:
             raise ValueError("File is not a valid image") from exc
+
+    # Invalid downloads must not leave an untracked file on disk.
+    filepath.write_bytes(contents)
 
     return {
         "original_filename": filename or stored_name,
