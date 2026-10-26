@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.403 — 2026-10-26
+
+- Marketplace form edits stay where you put them: Depop style, size, SKU, category, photos, and package dimensions no longer snap back. Each marketplace price follows the item price unless you set that marketplace's own price. Depop can be updated in place, including measurements from the item, and a jacket is no longer filed as a vest. Ship-from stays blank until you save your own location.
+- Bottoms now use each marketplace's own sizes: waist and inseam, women's 0–24, and Petite, Plus, or Tall. eBay Best Offer can be turned on, with an auto-accept price and a minimum offer that has to sit below it and below the item price.
+- Each marketplace form shows only the fields that marketplace uses for this item's category, department, and condition, and a field with a fixed list opens as that marketplace's own choices. Show all fields opens everything else. Hidden values stay saved.
+- Checking men's or women's from the photos works from the command line on its own, and can write that department onto the draft.
+
 ## 0.1.402 — 2026-10-26
 
 - Automations lets you schedule a one-time job or a daily or weekly one: delist, relist, regenerate, or drop the price by a dollar amount or a percent, with a floor. A repeating 10% steps down the original price (90%, then 80%, then 70%) and stops at the floor. A one-time drop stays on the first step. That choice lives on the task, so you can switch a task between each cycle and a one-time drop.
