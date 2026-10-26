@@ -124,6 +124,43 @@ test('Save Draft refuses a read-back mismatch and never falls through to publish
   assert.ok(!requests.some(r => r.path.endsWith('/status/published') || r.method === 'DELETE'));
 });
 
+test('private Poshmark drafts save multiple sizes, custom sizes and per-size SKUs', async () => {
+  const { c, msg, requests } = setup({ status: 'user_draft' });
+  const catalog = structuredClone(CATALOG.data);
+  catalog.catalog.departments[0].categories[0].size_sets[0].id = 'standard';
+  c.poshmarkCatalogData = async () => catalog;
+  msg.payload = { ...msg.payload, action: 'save_draft', confirm: false,
+    listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, inventoryRows: [
+      { sizeSetId: 'standard', sizeId: 'M', quantity: 2, sku: 'MEDIUM-2' },
+      { sizeSetId: 'custom', sizeId: 'Custom XL', quantity: 1, sku: 'CUSTOM-1' },
+    ] } } };
+  const result = await c.runNativeMarketplace(msg);
+  assert.equal(result.ok, true);
+  const post = savedPost(requests);
+  assert.equal(post.inventory.multi_item, true);
+  assert.deepEqual(post.inventory.size_quantities.map(row => [row.size_id, row.quantity_available, row.seller_inventory_private_info.sku]),
+    [['M', 2, 'MEDIUM-2'], ['Custom XL', 1, 'CUSTOM-1']]);
+  assert.deepEqual(post.inventory.size_quantities[1].size_set_tags, []);
+  assert.ok(!requests.some(row => row.path.includes('/status/published')));
+  const changed = structuredClone(post);
+  changed.inventory.size_quantities[1].seller_inventory_private_info.sku = 'WRONG';
+  assert.ok(c.poshmarkPostDifferences(changed, post, 2).includes('sizes'));
+});
+
+test('invalid Poshmark inventory stops before creating or uploading a post', async () => {
+  for (const rows of [[], [{ sizeSetId: 'custom', sizeId: ' ', quantity: 1 }],
+    [{ sizeSetId: 'custom', sizeId: 'M', quantity: 0 }],
+    [{ sizeSetId: 'custom', sizeId: 'M', quantity: 1.5 }],
+    [{ sizeSetId: 'missing', sizeId: 'M', quantity: 1 }],
+    [{ sizeSetId: 'custom', sizeId: 'M', quantity: 1 }, { sizeSetId: 'custom', sizeId: 'M', quantity: 2 }]]) {
+    const { c, msg, requests } = setup({ status: 'user_draft' });
+    msg.payload = { ...msg.payload, action: 'save_draft', confirm: false,
+      listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, inventoryRows: rows } } };
+    assert.equal((await c.runNativeMarketplace(msg)).ok, false);
+    assert.ok(requests.every(row => row.method === 'GET'));
+  }
+});
+
 test('an existing Poshmark draft is reused but a live or foreign post is never changed', async () => {
   for (const [status, owner, allowed] of [['user_draft', USER, true], ['published', USER, false], ['user_draft', 'f'.repeat(24), false]]) {
     const { c, msg, requests } = setup({ status: 'user_draft' });
@@ -245,8 +282,8 @@ test('an update writes the live Poshmark post and does not create or publish ano
     if (path.endsWith('/media/scratch')) return reply(200, { data: { id: 'c'.repeat(24) } });
     if (method === 'POST' && path === `/vm-rest/posts/${POST}`) { saved = true; return reply(200, { data: {} }); }
     if (method === 'GET' && path === `/vm-rest/posts/${POST}`) {
-      return reply(200, { data: { id: POST, status: 'published', creator_id: USER, title: saved ? 'Vintage tee' : 'Old title',
-        price_amount: { val: saved ? '18.0' : '10' }, inventory: { size_quantity_revision: 3, size_quantities: [{ quantity_sold: 0 }] } } });
+      return reply(200, { data: { ...(saved ? savedPost(requests) : {}), id: POST, status: 'published', creator_id: USER, title: saved ? 'Vintage tee' : 'Old title',
+        price_amount: { val: saved ? '18.0' : '10' }, ...(!saved ? { inventory: { size_quantity_revision: 3, size_quantities: [{ quantity_sold: 0 }] } } : {}) } });
     }
     return reply(500, {});
   };
@@ -271,6 +308,30 @@ test('Poshmark gets whole dollars, rounded the way Vendoo rounds', async () => {
   assert.equal(savedPost(requests).price_amount.val, '18');
   assert.equal(c.poshmarkPrice({ price: 19.49 }), 19);
   assert.equal(c.poshmarkPrice({ price: 19.99, poshmark_specifics: { poshmarkPrice: '24.5' } }), 25);
+});
+
+test('a live update refuses a read-back that lost inventory even when title and price match', async () => {
+  for (const lost of ['quantity', 'SKU']) {
+    const { c, msg, requests } = setup({ status: 'published' });
+    const fetch = c.fetch;
+    c.fetch = async (url, options = {}) => {
+      const saved = savedPost(requests);
+      if (saved && (options.method || 'GET') === 'GET' && new URL(url).pathname === `/vm-rest/posts/${POST}`) {
+        const changed = structuredClone(saved);
+        if (lost === 'quantity') changed.inventory.size_quantities[0].quantity_available += 1;
+        else changed.inventory.size_quantities[0].seller_inventory_private_info.sku = 'WRONG';
+        return response(200, { data: { ...changed, id: POST, status: 'published', creator_id: USER } });
+      }
+      return fetch(url, options);
+    };
+    msg.payload.action = 'update';
+    msg.payload.listing_id = POST;
+    const result = await c.runPoshmarkApi(msg);
+    assert.equal(result.ok, false);
+    assert.equal(result.safe_to_retry, false);
+    assert.match(result.error, /did not keep this listing revision/);
+    assert.ok(!requests.some(row => row.path.endsWith('/status/published')));
+  }
 });
 
 test('Poshmark conditions use its own codes and never drop a plain New', () => {

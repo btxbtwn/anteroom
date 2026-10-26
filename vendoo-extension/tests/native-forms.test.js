@@ -38,9 +38,11 @@ test('Poshmark form uses native category, group and size IDs and only supported 
   assert.deepEqual(fields['poshmark_specifics.availability'].option_values, { 'For Sale': 'available', 'Not For Sale': 'not_for_sale' });
   assert.equal(fields['poshmark_specifics.sellerNotes'].value, '');
   assert.equal(fields['direct_category_ids.poshmark'].value, 'men/shirts');
-  assert.deepEqual(fields['poshmark_specifics.sizeSetId'].option_values, { standard: 'standard', 'big_&_tall': 'tall' });
-  assert.equal(fields['poshmark_specifics.nativeSizeId'].value, 'M');
-  assert.deepEqual(fields['poshmark_specifics.nativeSizeId'].options, ['M', 'XL']);
+  const inventory = fields['poshmark_specifics.inventoryRows'];
+  assert.equal(inventory.input_type, 'inventory');
+  assert.deepEqual(inventory.value, [{ sizeSetId: 'standard', sizeId: 'M', quantity: 1, sku: '' }]);
+  assert.deepEqual(inventory.inventory_groups.map(row => row.id), ['standard', 'tall', 'custom']);
+  assert.deepEqual(inventory.inventory_groups[0].sizes.map(row => row.id), ['M', 'XL']);
   assert.equal(fields['poshmark_specifics.smartSell.enabled'].input_type, 'boolean');
   assert.ok(fields.cost.locked);
   assert.ok(!form.fields.some(row => /shipping label|size scale/i.test(row.label)));
@@ -61,7 +63,9 @@ test('changing Poshmark category replaces the size list and refuses the previous
   const c = loadWorker();
   const listing = { ...POSH_LISTING, direct_category_ids: { poshmark: 'men/shoes' }, poshmark_specifics: { sizeSetId: 'standard', nativeSizeId: 'XL' } };
   const form = call(c, 'poshmarkEditorForm', listing, POSH);
-  assert.deepEqual(clean(form.fields.find(row => row.label === 'Size').options), []);
+  const inventory = form.fields.find(row => row.input_type === 'inventory');
+  assert.equal(inventory.value[0].sizeId, '');
+  assert.deepEqual(clean(inventory.inventory_groups[0].sizes.map(row => row.id)), ['10', '11']);
   assert.ok(call(c, 'poshmarkSize', POSH.catalog.departments[0].categories[1], listing).problem);
 });
 

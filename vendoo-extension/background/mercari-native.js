@@ -585,7 +585,9 @@ async function readMercariDraft(id, deadline) {
   if (!draft) throw marketplaceError('Mercari did not return the saved draft.', { code: 'schema_drift' });
   return { name: draft.name, description: draft.description, price: draft.price,
     conditionId: draft.itemCondition?.id ?? null, photo_count: draft.photos?.length || 0,
-    categoryId: draft.itemCategory?.id ?? null, brandId: draft.brand?.id ?? null, sizeId: draft.itemSize?.id ?? null,
+    categoryId: draft.itemCategory?.id ?? null,
+    // Mercari reads an explicitly cleared brand back as its No Brand id, 0.
+    brandId: Number(draft.brand?.id) === 0 ? null : draft.brand?.id ?? null, sizeId: draft.itemSize?.id ?? null,
     payerId: draft.shippingPayer?.id ?? null,
     isAutoPriceDrop: draft.isAutoPriceDrop === true, minPriceForAutoPriceDrop: draft.minPriceForAutoPriceDrop,
     classIds: (draft.shippingClasses || []).map(entry => Number(entry?.id)).filter(classId => classId > 0),

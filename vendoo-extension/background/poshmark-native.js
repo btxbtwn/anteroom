@@ -341,12 +341,43 @@ function poshmarkSmartWarning(post, saved) {
     : 'Poshmark left Smart Pricing on. Turn it off in the listing if you do not want it.';
 }
 
+function poshmarkInventory(category, listing) {
+  const rows = listing.poshmark_specifics?.inventoryRows;
+  if (!Array.isArray(rows)) {
+    const picked = poshmarkSize(category.category, listing, { kids: category.department.display === 'Kids', leaf: category.leaf });
+    if (!picked?.size) throw marketplaceMissing('poshmark', [{ field: 'size', needs: picked?.problem || 'a size Poshmark offers in this category' }]);
+    return [{ size_id: picked.size.id, size_obj: picked.size, size_system: 'us', quantity_available: Number(listing.quantity ?? 1),
+      quantity_sold: 0, size_set_tags: picked.set.tags || [], seller_inventory_private_info: {} }];
+  }
+  const missing = [];
+  if (!rows.length) missing.push({ field: 'poshmark_specifics.inventoryRows', needs: 'at least one size and quantity' });
+  const seen = new Set();
+  const inventory = rows.map((row, index) => {
+    const field = `poshmark_specifics.inventoryRows.${index}`;
+    const custom = row?.sizeSetId === 'custom';
+    const set = category.category.size_sets?.find(set => set.id === row?.sizeSetId);
+    const id = String(row?.sizeId ?? '').trim();
+    const size = custom && id ? { id, display: id, display_with_size_set: id, size_system: 'us' }
+      : set?.size_systems?.us?.sizes?.find(size => size.id === id);
+    if (!size) missing.push({ field: `${field}.sizeId`, needs: 'a size from this category and group, or a nonblank custom size' });
+    if (seen.has(id)) missing.push({ field: `${field}.sizeId`, needs: 'a size that is not already in this inventory' });
+    seen.add(id);
+    const quantity = Number(row?.quantity);
+    if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: `${field}.quantity`, needs: 'a positive whole-number quantity' });
+    const sku = String(row?.sku ?? '').trim();
+    if (sku.length > 50) missing.push({ field: `${field}.sku`, needs: 'a SKU of 50 characters or fewer' });
+    return { size_id: id, size_obj: size, size_system: 'us', quantity_available: quantity, quantity_sold: 0,
+      size_set_tags: custom ? [] : set?.tags || [], seller_inventory_private_info: { sku } };
+  });
+  if (missing.length) throw marketplaceMissing('poshmark', missing);
+  return inventory;
+}
+
 function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {}) {
   const missing = [];
   const category = poshmarkCategory(catalog, listing);
   if (!category) missing.push({ field: 'category', needs: 'a Poshmark category' });
-  const size = category ? poshmarkSize(category.category, listing, { kids: category.department.display === 'Kids', leaf: category.leaf }) : null;
-  if (category && !size?.size) missing.push({ field: 'size', needs: size?.problem || 'a size Poshmark offers in this category' });
+  const sizes = category ? poshmarkInventory(category, listing) : [];
   const condition = poshmarkCondition(listing);
   if (!condition) missing.push({ field: 'condition', needs: 'a condition' });
   const price = poshmarkPrice(listing);
@@ -361,7 +392,7 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   const description = String(listing.description || '').trim();
   if (!description) missing.push({ field: 'description', needs: 'a description' });
   if (description.length > 1500) missing.push({ field: 'description', needs: 'a description of 1500 characters or fewer' });
-  const quantity = Number(listing.quantity ?? 1);
+  const quantity = sizes.reduce((total, row) => total + row.quantity_available, 0);
   if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: 'quantity', needs: 'a positive whole-number quantity' });
   const originalPrice = poshmarkOriginalPrice(listing);
   if (!Number.isSafeInteger(originalPrice) || originalPrice < 0) missing.push({ field: 'originalPrice', needs: 'an original price in whole dollars, or 0 if unknown' });
@@ -389,9 +420,7 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   return {
     title, description,
     catalog: category.catalog,
-    inventory: { status: availability, multi_item: quantity > 1, size_quantity_revision: 0, size_quantities: [{
-      size_id: size.size.id, size_obj: size.size, size_system: 'us', quantity_available: quantity, quantity_sold: 0,
-      size_set_tags: size.set.tags || [], seller_inventory_private_info: {} }] },
+    inventory: { status: availability, multi_item: sizes.length > 1 || quantity > 1, size_quantity_revision: 0, size_quantities: sizes },
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
     original_price_amount: { val: String(originalPrice), currency_code: 'USD', currency_symbol: '$' },
     condition,
@@ -434,7 +463,7 @@ function poshmarkPostDifferences(actual, expected, photoCount) {
   const strings = values => (values || []).map(value => String(value?.name ?? value)).sort();
   const sizes = inventory => (inventory?.size_quantities || []).map(row => ({
     id: String(row.size_id ?? row.size_obj?.id ?? ''), quantity: Number(row.quantity_available),
-    tags: strings(row.size_set_tags),
+    tags: strings(row.size_set_tags), sku: String(row.seller_inventory_private_info?.sku ?? ''),
   })).sort((a, b) => a.id.localeCompare(b.id));
   const fields = {
     title: [text(actual.title), text(expected.title)],
@@ -477,9 +506,6 @@ async function updatePoshmarkPost(msg, recovery = false) {
   const id = String(p.listing_id || '');
   const key = `native_operation_${p.operation_id}`;
   let stage = 'prepare';
-  const matches = post => post.status === 'published'
-    && marketplaceText(post.title) === marketplaceText(String(p.listing?.title || '').trim())
-    && Number(post.price_amount?.val) === poshmarkPrice(p.listing);
   try {
     if (!/^[a-f0-9]{24}$/.test(id) || (p.confirm !== true && !recovery)) {
       return marketplaceFailure(marketplaceError('Confirm updating the live Poshmark listing.'), true);
@@ -490,12 +516,14 @@ async function updatePoshmarkPost(msg, recovery = false) {
     if (String(existing.creator_id) !== account.user_id) throw marketplaceError('This Poshmark listing belongs to another account.');
     const sold = (existing.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
     if (sold || existing.status !== 'published') throw marketplaceError('This Poshmark listing is not live. It was not changed.');
+    const post = await poshmarkPreparedPost(p.listing || {}, deadline);
+    const matches = saved => saved.status === 'published'
+      && !poshmarkPostDifferences(saved, post, p.photos?.length ?? p.expected_photo_count).length;
     if (recovery) {
       if (!matches(existing)) return marketplaceFailure(new Error('Poshmark has not confirmed the update. Check the live listing before trying again.'), false);
       return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id) };
     }
     poshmarkPhotoCount(p.photos);
-    const post = await poshmarkPreparedPost(p.listing || {}, deadline);
     post.inventory.size_quantity_revision = Number(existing.inventory?.size_quantity_revision) || 0;
     client.csrf = await poshmarkCsrf(deadline);
     const ids = [];
@@ -507,7 +535,7 @@ async function updatePoshmarkPost(msg, recovery = false) {
       { step: 'save', what: 'the update' });
     stage = 'saved';
     const saved = await client.call('GET', `/vm-rest/posts/${id}`, undefined, { step: 'read-back' });
-    if (!matches(saved)) throw new Error('Poshmark did not keep this listing\'s title and price. Check the live listing before trying again.');
+    if (!matches(saved)) throw new Error('Poshmark did not keep this listing revision. Check the live listing before trying again.');
     const warning = poshmarkSmartWarning(post, saved);
     return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id), ...(warning ? { warning } : {}) };
   } catch (error) {
