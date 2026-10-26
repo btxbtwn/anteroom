@@ -899,6 +899,15 @@ class PersistListingTest(unittest.TestCase):
         }
         self.assertFalse(sync_title_size(packed))
 
+        petite = {
+            "title": "Studio Works PM Shirt",
+            "brand": "Studio Works",
+            "size": "M",
+            "sizeType": "Petites",
+        }
+        self.assertFalse(sync_title_size(petite))
+        self.assertEqual(petite["title"], "Studio Works PM Shirt")
+
     def test_sync_title_size_is_idempotent_for_multiword_sizes(self):
         from vendoo_studio.services.listing_generate import sync_title_size
 

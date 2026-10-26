@@ -118,7 +118,10 @@ export function withDropdownOptions<T extends { key: string; options?: string[];
 ): T[] {
   if (!forms) return fields;
   return fields.map((field) => {
-    if (field.options?.length || field.optionsSource === "marketplace") return field;
+    const leafName = leafKey(field.key).toLowerCase();
+    // A live size list that came back empty stays empty. Other empty marketplace
+    // lists fall through to the reference choices so the menu is not blank.
+    if (field.options?.length || (field.optionsSource === "marketplace" && leafName === "size")) return field;
     const leaf = leafKey(field.key);
     let options: string[] | undefined;
     if (tab === "general") {

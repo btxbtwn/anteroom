@@ -589,10 +589,32 @@ FAMILY_OF_GARMENT: dict[str, str] = {
 }
 
 
+_PARENT_VEST_PHRASE = re.compile(
+    r"\bcoats?,?\s+jackets?\s+(?:&|and)\s+vests?\b|\bjackets?\s+(?:&|and)\s+vests?\b",
+    re.I,
+)
+_JACKET_WORD = re.compile(r"\b(?:jackets?|coats?|blazers?)\b", re.I)
+_VEST_WORD = re.compile(r"\b(?:vests?|gilets?)\b", re.I)
+
+
+def without_parent_vest_phrase(haystack: str) -> str:
+    """Drop a category name like "Coats, Jackets & Vests" so it cannot make a jacket a vest."""
+    return _PARENT_VEST_PHRASE.sub(" ", haystack or "")
+
+
 def family_kind(family: str, haystack: str) -> str:
     """The cut this listing names within its family, or "" when it names none."""
-    for kind, pattern in FAMILY_KIND_RULES.get(family, ()):
-        if pattern.search(haystack):
+    rules = FAMILY_KIND_RULES.get(family, ())
+    text = haystack or ""
+    if family == "jacket":
+        # "Full Zip Fleece Jacket" filed under "Coats, Jackets & Vests" is a jacket.
+        # A vest still matches when the garment word that remains is vest or gilet.
+        stripped = without_parent_vest_phrase(text)
+        if _JACKET_WORD.search(stripped) and not _VEST_WORD.search(stripped):
+            rules = tuple(rule for rule in rules if rule[0] != "vest")
+            text = stripped
+    for kind, pattern in rules:
+        if pattern.search(text):
             return kind
     return ""
 

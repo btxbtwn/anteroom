@@ -43,8 +43,13 @@ def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operation
     previous_size = None
     if revisions and isinstance(revisions[0].listing_json, dict):
         previous_size = revisions[0].listing_json.get("size")
-    align_size_fields(stamped, previous_size=None if previous_size is None else str(previous_size))
-    normalize_listing_dropdowns(stamped)
+    from vendoo_studio.services.seller_overrides import preserving_locks
+
+    def _normalize(candidate: dict) -> None:
+        align_size_fields(candidate, previous_size=None if previous_size is None else str(previous_size))
+        normalize_listing_dropdowns(candidate)
+
+    preserving_locks(stamped, _normalize)
     parent_id = revisions[0].id if revisions else None
     ListingRepo(db).save_revision(
         conv_id,
@@ -158,8 +163,13 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) 
             continue
         updated = candidate
         accepted.append(field)
-    align_size_fields(updated)
-    normalize_listing_dropdowns(updated)
+    from vendoo_studio.services.seller_overrides import preserving_locks
+
+    def _normalize(candidate: dict) -> None:
+        align_size_fields(candidate)
+        normalize_listing_dropdowns(candidate)
+
+    preserving_locks(updated, _normalize)
     # Report the saved value when normalization restored a cleared required
     # field or completed a size-first title.
     for index, field in enumerate(accepted):
@@ -211,8 +221,67 @@ def recover_saved_chat_clears(db: Session, conv_id: str, revision) -> dict:
     return remember_chat_clears(listing, clears)
 
 
+def _field_commands(text: str) -> list[dict] | None:
+    import json
+    import re
+
+    if not text:
+        return None
+    candidates = []
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if fenced:
+        candidates.append(fenced.group(1).strip())
+    match = re.search(r"\{[\s\S]*\}", text)
+    if match:
+        candidates.append(match.group(0))
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        rows = parsed.get("fields") if isinstance(parsed, dict) else None
+        if not isinstance(rows, list):
+            continue
+        cleaned = [row for row in rows if isinstance(row, dict) and str(row.get("path") or "").strip()]
+        if cleaned:
+            return cleaned
+    return None
+
+
+def _reject_best_offer(db: Session, conv_id: str, listing: dict) -> bool:
+    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
+
+    problem = best_offer_error(listing)
+    if not problem:
+        return False
+    ConversationRepo(db).add_message(conv_id, "system", problem, provider="system", model="")
+    return True
+
+
 def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[list[dict] | None, bool]:
+    from fastapi import HTTPException
+
     from vendoo_studio.services.fill_log import extract_missing_fields
+    from vendoo_studio.services.seller_overrides import apply_field_updates
+
+    commands = _field_commands(full_text)
+    if commands:
+        revisions = ListingRepo(db).get_revisions(conv_id)
+        if not revisions or not isinstance(revisions[0].listing_json, dict):
+            return None, False
+        updated = copy.deepcopy(revisions[0].listing_json)
+        apply_field_updates(updated, commands)
+        from vendoo_studio.routes.listings import ListingUpdate, update_listing
+
+        try:
+            update_listing(conv_id, ListingUpdate(listing=updated), db)
+        except HTTPException as exc:
+            ConversationRepo(db).add_message(conv_id, "system", str(exc.detail), provider="system", model="")
+            return commands, False
+        ConversationRepo(db).add_message(
+            conv_id, "system", "Saved those field changes to the listing.", provider="system", model="",
+        )
+        return commands, True
 
     missing_fields = extract_missing_fields(full_text)
     if missing_fields:
@@ -225,6 +294,8 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
         if not revisions:
             return None, False
         updated = apply_json_patch(dict(revisions[0].listing_json), parsed_ops)
+        if _reject_best_offer(db, conv_id, updated):
+            return parsed_ops, False
         save_listing_revision(db, conv_id, updated, operations=parsed_ops)
         ConversationRepo(db).add_message(
             conv_id,
@@ -237,6 +308,8 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
 
     parsed = extract_listing_json(full_text)
     if parsed:
+        if _reject_best_offer(db, conv_id, parsed):
+            return None, False
         saved = save_listing_revision(db, conv_id, parsed)
         ConversationRepo(db).add_message(
             conv_id,

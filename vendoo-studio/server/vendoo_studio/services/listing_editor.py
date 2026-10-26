@@ -27,16 +27,23 @@ def reject_corrupt_listing(listing: dict) -> None:
             raise HTTPException(422, f"{key} must be an object")
 
 
-def prepared_listing(previous: dict, listing: dict) -> dict:
+def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None) -> dict:
     from vendoo_studio.services.chrome_catalog import keep_direct_categories
     from vendoo_studio.services.listing_generate import align_size_fields, sanitize_listing_sizes
+    from vendoo_studio.services.seller_overrides import prepare_user_listing, preserving_locks
 
     updated = copy.deepcopy(listing)
     reject_corrupt_listing(updated)
     keep_direct_categories(previous, updated)
+    prepare_user_listing(previous, updated, notes=notes)
     sanitize_listing_sizes(updated)
-    align_size_fields(updated, previous_size=None if previous.get("size") is None else str(previous["size"]))
-    normalize_listing_dropdowns(updated)
+    previous_size = None if previous.get("size") is None else str(previous.get("size"))
+
+    def _normalize(current: dict) -> None:
+        align_size_fields(current, previous_size=previous_size)
+        normalize_listing_dropdowns(current)
+
+    preserving_locks(updated, _normalize)
     return updated
 
 
@@ -59,8 +66,20 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     previous = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
     previous_json = previous.listing_json if previous and isinstance(previous.listing_json, dict) else {}
     changes = explicit_changes(previous_json, listing_data)
-    listing_data = prepared_listing(previous_json, listing_data)
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv_repo.get(conv_id).notes))
+    from vendoo_studio.services.seller_overrides import capture_locked, restore_locked
+
+    # Validation rewrites dropdown keys. A value the seller owns is put back.
+    locked = capture_locked(listing_data)
     validation = validate_listing(listing_data, photo_count, require_photos=True)
+    restore_locked(listing_data, locked)
+    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
+
+    offer_problem = best_offer_error(listing_data)
+    if offer_problem:
+        raise HTTPException(400, offer_problem)
 
     # Generation pins the SKU in Item Details over the model's, so a SKU the
     # seller edits here goes there too, or Regenerate would bring the old one back.
@@ -76,7 +95,9 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         expected_revision_id=expected_revision_id,
     )
 
-    note_updates = {}
+    from vendoo_studio.services.seller_overrides import notes_for_listing_edits
+
+    note_updates = notes_for_listing_edits(previous_json, listing_data)
     if sku != previous_sku:
         note_updates["sku"] = sku
     # Item Details feeds snapshots and regeneration. Keep explicitly changed

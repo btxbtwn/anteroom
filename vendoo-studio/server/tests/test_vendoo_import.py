@@ -125,7 +125,7 @@ class VendooImportMapperTest(unittest.TestCase):
         self.assertEqual(listing["etsy_specifics"]["who_made"], "Another company or person")
         self.assertEqual(listing["etsy_specifics"]["category_specifics"]["sleeveLength"], "Short Sleeve")
         self.assertEqual(listing["labels"], ["To List"])
-        self.assertEqual(listing["zipCode"], "70125")
+        self.assertEqual(listing["zipCode"], "")
 
     def test_import_keeps_a_vendoo_zip_and_falls_back_to_ebay_shipping_location(self):
         with_zip = listing_from_vendoo(

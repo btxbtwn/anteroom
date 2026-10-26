@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   cloneListing,
+  expandJoinedChoices,
   formFieldText,
   formFieldValues,
   getListingEditorValue,
+  nextFieldDraft,
   getNestedValue,
   labelToJsonKey,
   resolveSpecificsKey,
@@ -35,6 +37,26 @@ describe("multi-value form fields", () => {
     expect(formFieldValues("Blue, Green", ["Blue, Green", "Red"])).toEqual(["Blue, Green"]);
     expect(formFieldValues(["Blue, Green", "Red"])).toEqual(["Blue, Green", "Red"]);
     expect(formFieldValues("Spring, Summer")).toEqual(["Spring", "Summer"]);
+  });
+
+  it("splits a comma-joined Depop style into the reference choices", () => {
+    const choices = ["Casual", "Minimalist", "Indie", "Streetwear"];
+    expect(expandJoinedChoices("Casual, Minimalist, Indie", choices)).toEqual(["Casual", "Minimalist", "Indie"]);
+    expect(expandJoinedChoices(["Casual, Minimalist, Indie"], choices)).toEqual(["Casual", "Minimalist", "Indie"]);
+    expect(expandJoinedChoices(["Casual"], choices)).toEqual(["Casual"]);
+  });
+
+  it("keeps a cleared style when a refresh reloads the saved value", () => {
+    const server = { "depop_specifics.style": ["Casual, Minimalist, Indie"] as string[] };
+    const cleared = nextFieldDraft(server, { "depop_specifics.style": [] });
+    expect(cleared.local["depop_specifics.style"]).toEqual([]);
+    expect(cleared.dirty["depop_specifics.style"]).toEqual([]);
+    const echoed = nextFieldDraft(
+      { "depop_specifics.style": [] },
+      cleared.dirty,
+    );
+    expect(echoed.local["depop_specifics.style"]).toEqual([]);
+    expect(echoed.dirty).toEqual({});
   });
 });
 

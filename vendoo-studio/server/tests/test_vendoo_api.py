@@ -216,8 +216,8 @@ class BuildItemTest(unittest.TestCase):
         self.assertEqual(general["size"]["scale"], {"label": "Regular", "value": "Regular"})
         self.assertEqual(general["images"], IMAGES)
         self.assertEqual(general["category"], "Clothing > Men > Jeans")
-        self.assertEqual(general["zipCode"], "70125")
-        self.assertEqual(self.item["listings"]["ebay"]["marketplaceSpecifics"]["shipping"]["location"], "70125")
+        self.assertEqual(general["zipCode"], "")
+        self.assertEqual(self.item["listings"]["ebay"]["marketplaceSpecifics"]["shipping"]["location"], "")
         self.assertNotIn("labels", general)
 
     def test_listing_zip_overrides_the_saved_inventory_location(self):

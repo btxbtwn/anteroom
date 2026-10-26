@@ -250,7 +250,7 @@ export function MarketplacesLayout({
     },
   });
 
-  const UPDATABLE = new Set<Marketplace>(["ebay", "etsy", "poshmark"]);
+  const UPDATABLE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "depop"]);
 
   async function updateNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);

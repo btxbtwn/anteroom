@@ -249,7 +249,11 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
 def requirements(snapshot: dict, context: Context) -> list[dict]:
     """What Etsy would refuse, read from the listing alone. Shop profiles are chosen in Settings."""
     if not etsy_eligible(snapshot):
-        return [gap("etsy_specifics.when_made", NOT_ELIGIBLE)]
+        return [gap(
+            "etsy_specifics.when_made",
+            NOT_ELIGIBLE + " If it is vintage or handmade, set When made (Before 2007 counts as vintage) "
+            "and Who made it. Otherwise leave Etsy off this item.",
+        )]
     found = []
     try:
         fields = draft_fields(snapshot, creating=True)

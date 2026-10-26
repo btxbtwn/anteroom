@@ -111,13 +111,13 @@ class SetupGuideSettingsTest(unittest.TestCase):
             user_settings.set_package_dimensions(length=0, width=10, height=3)
 
     def test_ebay_inventory_location_persists(self):
-        self.assertEqual(user_settings.get_ebay_inventory_location(), "70125")
+        self.assertEqual(user_settings.get_ebay_inventory_location(), "")
         self.assertEqual(user_settings.set_ebay_inventory_location("New Orleans, LA"), "New Orleans, LA")
         self.assertEqual(user_settings.get_ebay_inventory_location(), "New Orleans, LA")
         stored = json.loads(Path(self.tmp.name, "settings.json").read_text())
         self.assertEqual(stored["ebay_inventory_location"], "New Orleans, LA")
-        with self.assertRaises(ValueError):
-            user_settings.set_ebay_inventory_location("  ")
+        self.assertEqual(user_settings.set_ebay_inventory_location("  "), "")
+        self.assertEqual(user_settings.get_ebay_inventory_location(), "")
 
     def test_forgotten_label_stays_hidden_until_restored(self):
         user_settings.remember_vendoo_labels("Vintage, Nike")
@@ -236,13 +236,14 @@ class SetupGuideRouteTest(unittest.TestCase):
     def test_ebay_inventory_location_endpoint(self):
         default = self.client.get("/api/settings/ebay-inventory-location")
         self.assertEqual(default.status_code, 200)
-        self.assertEqual(default.json(), {"location": "70125"})
+        self.assertEqual(default.json(), {"location": ""})
         saved = self.client.put("/api/settings/ebay-inventory-location", json={"location": "10001"})
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(saved.json(), {"ok": True, "location": "10001"})
         self.assertEqual(self.client.get("/api/settings/ebay-inventory-location").json(), {"location": "10001"})
         blank = self.client.put("/api/settings/ebay-inventory-location", json={"location": "  "})
-        self.assertEqual(blank.status_code, 400)
+        self.assertEqual(blank.status_code, 200)
+        self.assertEqual(blank.json(), {"ok": True, "location": ""})
 
     def test_listing_formulas_endpoint_defaults_and_persists(self):
         from vendoo_studio.services.skill_formulas import (

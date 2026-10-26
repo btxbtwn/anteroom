@@ -504,6 +504,10 @@ def _leaf_named_by_listing(leaf: str, listing: dict) -> bool:
     }
     if not words:
         return False
+    from vendoo_studio.services.garment_categories import without_parent_vest_phrase
+
+    if words <= {"vest", "vests", "gilet", "gilets"}:
+        garment = without_parent_vest_phrase(garment)
     return all(re.search(rf"\b{re.escape(word.rstrip('s'))}s?\b", garment, re.I) for word in words)
 
 

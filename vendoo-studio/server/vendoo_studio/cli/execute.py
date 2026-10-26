@@ -154,7 +154,11 @@ def _collect_json(command: dict[str, Any], args: argparse.Namespace) -> Any:
         if value is None:
             continue
         body[parameter["name"]] = _coerce(parameter, value)
-    return body or None
+    if body:
+        return body
+    # A model whose fields all have defaults still requires a JSON object.
+    # Dropping {} makes the server answer 422 (gender check with no --apply).
+    return {} if fields else None
 
 
 def _collect_form(command: dict[str, Any], args: argparse.Namespace) -> tuple[dict[str, Any], list[tuple[str, Path]]]:

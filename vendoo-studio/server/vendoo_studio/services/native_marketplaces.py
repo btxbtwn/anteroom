@@ -345,7 +345,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
     name = NAMES[marketplace]
     if body.confirm is not True:
         raise NativeMarketplaceError(400, f"Confirm updating the live {name} listing." if kind == "update" else f"Confirm listing on {name}.")
-    if kind == "update" and marketplace not in {"ebay", "etsy", "poshmark"}:
+    if kind == "update" and marketplace not in {"ebay", "etsy", "poshmark", "depop"}:
         raise NativeMarketplaceError(409, f"A live {name} listing cannot be updated from Anteroom yet.")
     if kind == "list":
         from vendoo_studio.services.marketplace_delist import listings as live_listings
@@ -474,6 +474,17 @@ async def preflight(conv_id: str, db: Session, sellwild_category_id: int | None 
                                   _context(db, conv_id, marketplace, body)),
             preview, marketplace,
         )
+        if marketplace == "depop":
+            photos = ConversationRepo(db).get_photos(conv_id)
+            picked = prepared.get("marketplace_photos") if isinstance(prepared.get("marketplace_photos"), dict) else {}
+            chosen = picked.get("depop") if isinstance(picked.get("depop"), list) else []
+            if len(photos) > 8 and not chosen:
+                found.append(direct_preflight.gap(
+                    "marketplace_photos.depop",
+                    f"Depop keeps 8 photos. This item has {len(photos)}; the first 8 are sent unless you pick which ones.",
+                    blocking=False,
+                ))
+        found = [direct_preflight.with_fix(item) for item in found]
         out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found}
     return {"revision_id": revision.id, "marketplaces": out}
 
@@ -498,12 +509,36 @@ def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
             and _record(db, conv_id, marketplace).get("job_id") == job_id)
 
 
+def _depop_photos(snapshot: dict, photos: list) -> tuple[list, str]:
+    """Depop keeps eight photos. An ordered pick wins; otherwise the first eight, with a warning."""
+    ordered = snapshot.get("marketplace_photos") if isinstance(snapshot.get("marketplace_photos"), dict) else {}
+    chosen_ids = ordered.get("depop") if isinstance(ordered.get("depop"), list) else []
+    chosen_ids = [str(item).strip() for item in chosen_ids if str(item).strip()]
+    if chosen_ids:
+        by_id = {str(photo.id): photo for photo in photos}
+        picked = [by_id[item] for item in chosen_ids if item in by_id][:8]
+        omitted = max(0, len(chosen_ids) - 8)
+        warning = f"Depop kept the first 8 of the {len(chosen_ids)} photos selected for it." if omitted else ""
+        return picked or list(photos)[:8], warning
+    warning = ""
+    if len(photos) > 8:
+        warning = f"Depop keeps 8 photos. The first 8 of {len(photos)} were sent. Pick photos on the Depop form to choose which ones."
+    return list(photos)[:8], warning
+
+
 def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, photos: list, job_id: str) -> dict:
+    sent = photos
+    extra: dict = {}
+    if marketplace == "depop":
+        sent, warning = _depop_photos(snapshot, photos)
+        if warning:
+            extra["photo_warning"] = warning
     return {
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
         "listing": snapshot, "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
-        "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
+        "photos": [{"id": p.id, "mime_type": p.mime_type} for p in sent],
+        **extra,
         **({"sellwild": chosen(snapshot, record)} if marketplace == "sellwild" else {}),
     }
 

@@ -310,6 +310,8 @@ test('Poshmark sizes stay inside the department, gender and fit the listing name
   assert.equal(size(shirts, { size: 'Large' }), 'L:standard');
   const jeans = liveCategory('Men', 'Jeans').category;
   assert.equal(size(jeans, { size: '32x30' }), '32:standard');
+  assert.equal(size(jeans, { size: 'Waist 32', poshmark_specifics: { sizeType: 'Regular' } }), '32:standard');
+  assert.equal(size(tops, { size: 'M', poshmark_specifics: { sizeType: 'Petite' } }), 'MP:petite');
   assert.equal(size(jeans, { size: 'W38 L32', sizeType: 'Big & Tall' }), '38BT:big_&_tall');
   assert.equal(size(liveCategory('Women', 'Jeans').category, { size: 'US 10' }), '10:standard');
 });
