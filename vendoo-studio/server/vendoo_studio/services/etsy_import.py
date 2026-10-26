@@ -44,7 +44,7 @@ async def active_listings(client: EtsyClient, db: Session, page_number: int) -> 
     return {"rows": rows, "page": page_number, "total": page["total"], "has_more": page["nextOffset"] is not None}
 
 
-def _inventory(raw: dict, item: dict) -> tuple[str | None, dict, int, float]:
+def single_offering(raw: dict, item: dict) -> tuple[str | None, dict, int, float]:
     """Return the one SKU and offering, refusing to flatten variation inventory."""
     results = raw.get("results")
     if (not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict)
@@ -116,7 +116,7 @@ async def import_listing(client: EtsyClient, db: Session, listing_id: str) -> di
         raise EtsyFailure("This import supports active physical Etsy listings without variations.", 409)
     if not isinstance(item.get("title"), str) or not item["title"].strip() or type(item.get("taxonomy_id")) is not int or item["taxonomy_id"] <= 0:
         raise EtsyFailure("Etsy did not return a title and category for this listing.", 409)
-    sku, offering, quantity, price = _inventory(await client.inventory(listing_id), item)
+    sku, offering, quantity, price = single_offering(await client.inventory(listing_id), item)
     properties = await client.read(f"/listings/{listing_id}/properties")
     snapshot = _snapshot(item, sku, quantity, price, properties)
     if offering.get("readiness_state_id") is not None:

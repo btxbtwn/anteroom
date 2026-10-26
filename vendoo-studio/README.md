@@ -191,6 +191,24 @@ Existing linked items keep their edits and photos. Conflicting identities are
 reported, and missing photos are shown for follow-up. Importing reads Etsy and
 saves local inventory; it never changes a live listing or contacts Vendoo.
 
+### Checking linked marketplace inventory
+
+Open an item and click **Sync** to check its linked eBay and Etsy listings
+directly. **Marketplace details** shows the listing status, USD price and
+available quantity, alongside any differences from the current local item.
+**Marketplace differs** flags changed values or a listing that is no longer
+active. **Partly checked** means the status was read but price or quantity
+could not be verified, such as a variation listing. Failed checks identify the
+marketplace and let you retry without hiding other successful checks.
+
+These checks read only. They do not replace local edits, mark an item sold,
+publish, update, or delist anything. Ended, expired and inactive listings do
+not establish a sale. Existing sale alerts still handle verified sales.
+Price and quantity checks support US fixed-price eBay listings and physical
+Etsy listings in USD without variations; other listings show status and an
+explanation. Check results describe the moment you clicked Sync; click again
+after making changes locally or on a marketplace.
+
 ### Editing something that is already listed
 
 Anteroom writes the Vendoo **form**. Vendoo carries a form change onto a live

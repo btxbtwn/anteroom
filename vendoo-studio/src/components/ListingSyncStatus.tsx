@@ -5,6 +5,8 @@ import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { NativeDrafts, NativeSync } from "../api/nativeMarketplaces";
 import { pollMs } from "../api/polling";
 
+import { DirectSyncDetails, directSyncDiffers, directSyncIncomplete } from "./DirectSyncDetails";
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const UNSETTLED = new Set(["saving", "publishing", "updating", "unknown"]);
@@ -49,8 +51,8 @@ export function directSyncErrors(result: NativeSync | undefined): string[] {
  * stays and this line says so. Nothing pops up; this line says when Studio last checked.
  *
  * Direct listings are checked only on click: unconfirmed results are settled
- * and the Chrome marketplaces are asked for sales now instead of on their next
- * timed check.
+ * eBay/Etsy state, price and quantity are read directly, and Chrome marketplaces
+ * are asked for sales now instead of on their next timed check.
  */
 export function ListingSyncStatus({ convId, bound }: { convId: string; bound: boolean }) {
   const queryClient = useQueryClient();
@@ -172,11 +174,16 @@ export function ListingSyncStatus({ convId, bound }: { convId: string; bound: bo
   const failed = vendooFailed || directErrors.length > 0;
   const checkedAt = bound ? status?.checked_at : directSync.data?.checked_at;
   const conflict = bound && Boolean(status?.conflict);
+  const differs = directSyncDiffers(directSync.data);
+  const incomplete = directSyncIncomplete(directSync.data);
   let label: string;
   if (busy) label = "Syncing…";
   else if (conflict) label = "Vendoo differs";
+  else if (failed) label = "Not synced";
+  else if (differs) label = "Marketplace differs";
+  else if (incomplete) label = "Partly checked";
   else if (checkedAt) label = `Synced ${checkedAgo(checkedAt, now)}`;
-  else label = failed ? "Not synced" : bound ? "Syncing…" : "Sync";
+  else label = bound ? "Syncing…" : "Sync";
 
   const title = [
     bound
@@ -196,7 +203,7 @@ export function ListingSyncStatus({ convId, bound }: { convId: string; bound: bo
       <span aria-hidden="true">·</span>
       <button
         type="button"
-        className={`pr-vendoo-sync-btn${(failed || conflict) && !busy ? " is-stale" : ""}`}
+        className={`pr-vendoo-sync-btn${(failed || conflict || differs || incomplete) && !busy ? " is-stale" : ""}`}
         disabled={busy}
         title={title}
         onMouseDown={(event) => event.stopPropagation()}
@@ -204,6 +211,7 @@ export function ListingSyncStatus({ convId, bound }: { convId: string; bound: bo
       >
         {label}
       </button>
+      {direct ? <DirectSyncDetails result={directSync.data} /> : null}
     </span>
   );
 }
