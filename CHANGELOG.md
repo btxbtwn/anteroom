@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.395 — 2026-10-26
+
+- Settings → Listings calls the marketplace checklist Where you list, and Settings → Connections calls the sign-ins Accounts.
+- The ships-from ZIP and eBay’s inventory location point at each other. Search finds both from “zip”.
+- The live Vendoo request log is marked Troubleshooting.
+
 ## 0.1.394 — 2026-10-26
 
 - Sign in to Vinted from Settings → Connections, the same way as Depop and Sellwild. Anteroom shows whether that Chrome sign-in is there. The cookies stay in Chrome, and listing still waits until you confirm List on Vinted.
