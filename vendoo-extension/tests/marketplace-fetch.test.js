@@ -93,7 +93,8 @@ test('marketplace words are scrubbed of tokens and capped', () => {
   const c = loadWorker();
   const text = c.marketplaceScrub(`Bad token eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc session_id=abc123; Bearer secret-value ${'word '.repeat(200)}`);
   assert.ok(!/eyJ|abc123|secret-value/.test(text));
-  assert.ok(text.length <= 500);
+  assert.ok(text.length > 500);
+  assert.ok(text.length <= 4000);
 });
 
 test('every failure maps to a contract error code, and unsafe is always uncertain', () => {
