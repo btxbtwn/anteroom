@@ -101,7 +101,11 @@ Quit another running Anteroom instance before starting from source; both use por
 ./vendoo-studio/scripts/doctor.sh
 ```
 
-See the [Anteroom README](vendoo-studio/README.md) for backups, database migrations, packaging, and backend development.
+See the [Anteroom README](vendoo-studio/README.md) for backups, database migrations, packaging, backend development, and the `anteroom` command-line client.
+
+## Command line
+
+With the backend installed (`pip install -e .` from `vendoo-studio`), `anteroom` calls the local API. It prints `--json` for an assistant, and it will not delete, publish, or delist unless you pass `--confirm`. The app does not use an API key on loopback; save a base URL with `anteroom auth login`. An agent can read `anteroom commands --json` or connect to `anteroom mcp serve`. Details: [Command line](vendoo-studio/README.md#command-line).
 
 ## What's in the repo
 
