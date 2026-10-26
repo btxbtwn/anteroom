@@ -1,7 +1,7 @@
 // Seller-confirmed delisting from the extension worker, with no marketplace tab.
 // Each step reads the listing first: one already gone counts as deleted, so a
 // delete whose reply was lost is safe to repeat. Requests come from each
-// marketplace's own web client (read 2026-10-24).
+// marketplace's own web client (read 2026-10-24; Vinted's delete on 2026-10-26).
 const DELETE_DEADLINE_MS = 60000;
 
 async function deletePoshmark(id, deadline) {
@@ -74,6 +74,73 @@ async function deleteDepop(slug, deadline) {
     marketplace_message: left ? `status ${left}` : '' });
 }
 
+function vintedCsrfToken(html) {
+  const match = String(html || '').match(/"CSRF_TOKEN"\s*:\s*"([^"]+)"/);
+  const token = match ? match[1] : '';
+  if (!token || token.length > 200 || /[\s\u0000-\u001f]/.test(token)) return '';
+  return token;
+}
+
+function vintedAccountId(body) {
+  const user = body?.user;
+  const login = typeof user?.login === 'string' ? user.login.trim() : '';
+  if (!login || login.length > 80 || /[\u0000-\u001f]/.test(login)) return '';
+  const id = user?.id;
+  const account = typeof id === 'number' ? id : typeof id === 'string' && /^[1-9]\d*$/.test(id) ? Number(id) : 0;
+  return account > 0 ? String(account) : '';
+}
+
+function vintedOwnerId(item) {
+  const id = item?.user?.id ?? item?.user_id;
+  const account = typeof id === 'number' ? id : typeof id === 'string' && /^[1-9]\d*$/.test(id) ? Number(id) : 0;
+  return account > 0 ? String(account) : '';
+}
+
+async function deleteVinted(id, deadline) {
+  // Vinted's own closet delete: read the item, then POST /api/v2/items/{id}/delete
+  // with the page's CSRF token. Cookies stay in Chrome.
+  const headers = { Accept: 'application/json' };
+  const call = async (method, path, step) => {
+    try {
+      const { data } = await marketplaceFetch(`https://www.vinted.com${path}`, {
+        marketplace: 'vinted', step, method, credentials: 'include', deadline, headers,
+      });
+      return data;
+    } catch (error) {
+      if (method === 'GET' && error.status === 404) return null;
+      throw error;
+    }
+  };
+  const account = vintedAccountId(await call('GET', '/api/v2/users/current', 'read'));
+  if (!account) throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
+  const read = step => call('GET', `/api/v2/items/${id}`, step);
+  const body = await read('read');
+  if (!body) return { ok: true, state: 'deleted', already: true };
+  const item = body.item;
+  if (!item || item.id == null) throw marketplaceError('Vinted answered in a way Anteroom does not recognise.', { code: 'schema_drift' });
+  if (vintedOwnerId(item) !== account) throw marketplaceError('This Vinted listing belongs to another account.');
+  if (item.is_reserved === true) throw marketplaceError('This Vinted listing is reserved. It was not deleted.');
+  // A sold item stays on Vinted, closed. A hidden listing is still the seller's to delete.
+  if (item.is_closed === true && item.is_hidden !== true) throw marketplaceError('This Vinted listing has sold. It was not deleted.');
+  const page = await marketplaceFetch('https://www.vinted.com/items/new', {
+    marketplace: 'vinted', step: 'session', expect: 'text', credentials: 'include', deadline,
+  });
+  const csrf = vintedCsrfToken(page.data);
+  if (!csrf) throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
+  headers['x-csrf-token'] = csrf;
+  try {
+    await call('POST', `/api/v2/items/${id}/delete`, 'delete');
+  } catch (error) {
+    if (error.status === 404) return { ok: true, state: 'deleted', already: true };
+    throw error;
+  }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!await read('read-back')) return { ok: true, state: 'deleted' };
+    if (attempt < 2) await marketplaceSleep(700);
+  }
+  throw marketplaceError('Vinted has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false });
+}
+
 async function deleteSellwild(id, deadline) {
   // Sellwild gives sellers delist, not delete; a delisted item leaves the site.
   const result = await sellwildFetch('/api/seller/listings/bulk-status', { method: 'POST', deadline, step: 'delist',
@@ -93,6 +160,7 @@ const MARKETPLACE_DELETE = {
   mercari: [/^m\d{6,}$/, deleteMercari],
   depop: [/^[a-z0-9][a-z0-9-]{0,200}$/, deleteDepop],
   sellwild: [/^\d{1,15}$/, deleteSellwild],
+  vinted: [/^\d{1,15}$/, deleteVinted],
 };
 
 async function runMarketplaceDelete(payload) {

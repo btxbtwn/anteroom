@@ -1,84 +1,455 @@
-// Publishes on the seller's own Vinted session. Upload is the only control
-// that is clicked. Save draft is never used. A lost reply is not retried.
+// Vinted drafts and publishing from the extension worker, with no marketplace tab.
+// The calls are the ones Vinted's own sell form makes (read 2026-10-26):
+//   POST /api/v2/item_upload/drafts                         save a draft
+//   GET  /api/v2/item_upload/items/{id}                     read it back
+//   POST /api/v2/item_upload/drafts/{id}/completion         publish that draft
+//   GET  /api/v2/wardrobe/{user}/items                      the seller's closet
+// Cookies stay in Chrome. A lost reply is read back and never creates a second draft.
 
-const VINTED_NEW_ITEM = 'https://www.vinted.com/items/new';
+const VINTED_ORIGIN = 'https://www.vinted.com';
+const VINTED_MAX_PHOTOS = 20;
 
-function vintedListingUrl(raw) {
+function vintedDraftUrl(id) {
+  return `${VINTED_ORIGIN}/items/${id}/edit`;
+}
+
+function vintedPublicUrl(id) {
+  return `${VINTED_ORIGIN}/items/${id}`;
+}
+
+function vintedDraftId(draftUrl) {
+  return String(draftUrl || '').match(/^https:\/\/www\.vinted\.com\/items\/([1-9]\d{0,14})\/edit\/?$/)?.[1] || '';
+}
+
+function vintedAmount(value) {
+  const raw = value && typeof value === 'object' ? (value.amount ?? value.price) : value;
+  const amount = Number(raw);
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function vintedFlatten(options, out = []) {
+  for (const option of options || []) {
+    if (!option || typeof option !== 'object') continue;
+    if (Array.isArray(option.options) && option.options.length) vintedFlatten(option.options, out);
+    else if (option.id != null && option.title) out.push({ id: Number(option.id), title: String(option.title) });
+  }
+  return out.filter(option => Number.isInteger(option.id) && option.id > 0);
+}
+
+function vintedMatch(options, wanted) {
+  const text = marketplaceText(wanted).toLowerCase();
+  if (!text) return null;
+  const exact = options.filter(option => marketplaceText(option.title).toLowerCase() === text);
+  return exact.length === 1 ? exact[0] : null;
+}
+
+function vintedFindCatalog(nodes, parts, index = 0) {
+  const want = parts[index];
+  const matches = (nodes || []).filter(node => marketplaceText(node?.title).toLowerCase() === want);
+  if (matches.length !== 1) return null;
+  if (index === parts.length - 1) {
+    const id = Number(matches[0].id);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }
+  return vintedFindCatalog(matches[0].catalogs || matches[0].children || [], parts, index + 1);
+}
+
+function vintedView(item) {
+  if (!item || typeof item !== 'object' || item.id == null) return null;
+  const photos = Array.isArray(item.assigned_photos) ? item.assigned_photos : Array.isArray(item.photos) ? item.photos : null;
+  const photoIds = photos ? photos.map(photo => Number(photo?.id)).filter(photoId => Number.isInteger(photoId) && photoId > 0) : null;
+  const condition = (item.item_attributes || []).find(attribute => attribute?.code === 'condition');
+  const conditionId = condition?.ids?.[0] ?? item.status_id;
+  return {
+    id: String(item.id),
+    title: item.title ?? null,
+    description: item.description ?? null,
+    price: vintedAmount(item.price ?? item.price_numeric),
+    catalog_id: item.catalog_id != null ? Number(item.catalog_id) : null,
+    condition_id: conditionId != null ? Number(conditionId) : null,
+    size_id: item.size_id != null ? Number(item.size_id) : null,
+    photo_count: photos ? photos.length : null,
+    photo_ids: photoIds,
+    is_draft: item.is_draft === true ? true : item.is_draft === false ? false : null,
+    is_closed: item.is_closed === true,
+    is_hidden: item.is_hidden === true,
+    is_reserved: item.is_reserved === true,
+  };
+}
+
+function vintedDifferences(view, expected) {
+  const differ = [];
+  if (view.title == null || marketplaceText(view.title) !== marketplaceText(expected.title)) differ.push('title');
+  if (expected.description != null && (view.description == null || marketplaceText(view.description) !== marketplaceText(expected.description))) differ.push('description');
+  if (expected.price != null && view.price !== expected.price) differ.push('price');
+  if (expected.catalog_id != null && view.catalog_id !== expected.catalog_id) differ.push('category');
+  if (expected.condition_id != null && view.condition_id !== expected.condition_id) differ.push('condition');
+  if (expected.size_id != null && view.size_id !== expected.size_id) differ.push('size');
+  if (expected.photo_count != null && view.photo_count !== expected.photo_count) differ.push('photos');
+  return differ;
+}
+
+function vintedLive(view) {
+  return Boolean(view && view.is_draft === false && !view.is_closed && !view.is_hidden && !view.is_reserved);
+}
+
+function vintedAllowed(method, url, action, confirm) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return false; }
+  const path = parsed.pathname;
+  if (parsed.hostname === 'api.www.vinted.com') {
+    return method === 'GET' && /^\/shipping-estimation\/external\/catalogs\/[1-9]\d{0,14}\/package_sizes$/.test(path);
+  }
+  if (parsed.hostname !== 'www.vinted.com') return false;
+  if (method === 'GET' && (path === '/items/new' || path === '/api/v2/users/current' || path === '/api/v2/item_upload/catalogs'
+      || path === '/api/v2/item_upload/colors' || path === '/api/v2/item_upload/brands' || path === '/api/v2/item_upload/size_groups'
+      || /^\/api\/v2\/item_upload\/items\/[1-9]\d{0,14}$/.test(path) || /^\/api\/v2\/items\/[1-9]\d{0,14}$/.test(path)
+      || /^\/api\/v2\/wardrobe\/[1-9]\d{0,14}\/items$/.test(path))) return true;
+  if (method === 'POST' && path === '/api/v2/item_upload/attributes') return true;
+  if (action === 'save_draft' && method === 'POST' && (path === '/api/v2/photos' || path === '/api/v2/item_upload/drafts')) return true;
+  if (action === 'save_draft' && method === 'PUT' && /^\/api\/v2\/item_upload\/drafts\/[1-9]\d{0,14}$/.test(path)) return true;
+  return action === 'publish' && confirm === true && method === 'POST'
+    && /^\/api\/v2\/item_upload\/drafts\/[1-9]\d{0,14}\/completion$/.test(path);
+}
+
+async function vintedAnonId() {
   try {
-    const url = new URL(String(raw || ''));
-    if (url.protocol !== 'https:' || url.hostname !== 'www.vinted.com') return '';
-    const match = /^\/items\/(\d+)(?:-[^/]*)?\/?$/.exec(url.pathname);
-    return match ? `https://www.vinted.com/items/${match[1]}` : '';
+    const cookie = await chrome.cookies.get({ url: `${VINTED_ORIGIN}/`, name: 'anon_id' });
+    const value = String(cookie?.value || '');
+    return /^[A-Za-z0-9-]{8,80}$/.test(value) ? value : '';
   } catch {
     return '';
   }
 }
 
-async function runVintedNative(msg, recover = false) {
-  if (recover) {
-    return marketplaceFailure(marketplaceError(
-      'Chrome has not said whether this Vinted listing was uploaded. Look on Vinted before listing again.',
-      { code: 'uncertain', rejected: false }), false);
-  }
-  const payload = msg.payload || {};
-  if (payload.action !== 'publish' || payload.confirm !== true) {
-    return marketplaceFailure(marketplaceError('Confirm listing on Vinted.', { code: 'rejected' }), true);
-  }
-  const listing = payload.listing && typeof payload.listing === 'object' ? payload.listing : {};
-  if (!String(listing.title || '').trim()) {
-    return marketplaceFailure(marketplaceMissing('vinted', [{ field: 'title', needs: 'a title' }]), true);
-  }
-  const photos = Array.isArray(payload.photos) ? payload.photos.slice(0, 20) : [];
-  if (!photos.length) {
-    return marketplaceFailure(marketplaceMissing('vinted', [{ field: 'photos', needs: 'a photo' }]), true);
-  }
-  const deadline = Date.now() + 110000;
+async function vintedSession(deadline) {
+  const page = await marketplaceFetch(`${VINTED_ORIGIN}/items/new`, {
+    marketplace: 'vinted', step: 'session', expect: 'text', credentials: 'include', deadline,
+  });
+  const csrf = vintedCsrfToken(page.data);
+  const anon = await vintedAnonId();
+  if (!csrf) throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
+  const headers = {
+    Accept: 'application/json, text/plain, */*',
+    'x-csrf-token': csrf,
+    'x-enable-multiple-size-groups': 'true',
+    ...(anon ? { 'x-anon-id': anon } : {}),
+  };
+  const call = async (method, url, { step, body, retry, action, confirm }) => {
+    if (!vintedAllowed(method, url, action, confirm)) throw marketplaceError('Unsupported Vinted action.');
+    const json = body !== undefined && !(body instanceof FormData);
+    const { data } = await marketplaceFetch(url, {
+      marketplace: 'vinted', step, method, credentials: 'include', deadline,
+      retry: retry ?? method === 'GET', expect: 'json',
+      headers: { ...headers, ...(json ? { 'Content-Type': 'application/json', 'x-upload-form': 'true' } : {}) },
+      ...(body === undefined ? {} : { body: json ? JSON.stringify(body) : body }),
+    });
+    return data;
+  };
+  let account;
   try {
-    const files = [];
-    for (const photo of photos) {
-      const loaded = await nativePhoto(msg.job_id || payload.operation_id, photo, deadline);
-      files.push({ data: loaded.base64, name: loaded.name, type: loaded.mime_type });
-    }
-    if (activeNativeOperation?.cancelled || Date.now() >= deadline) throw marketplaceStopped('vinted');
-    const tab = await chrome.tabs.create({ url: VINTED_NEW_ITEM, active: false });
-    if (activeNativeOperation) activeNativeOperation.tabId = tab.id;
-    await nativeWait(tab.id, value => value.status === 'complete', deadline);
-    let response = null;
-    let lastError = null;
-    for (let attempt = 0; attempt < 8 && Date.now() < deadline; attempt += 1) {
-      if (activeNativeOperation?.cancelled) throw marketplaceStopped('vinted');
-      try {
-        response = await chrome.tabs.sendMessage(tab.id, { type: 'START_VINTED', confirm: true, data: listing, files });
-        lastError = null;
-        break;
-      } catch (error) {
-        lastError = error;
-        await new Promise(resolve => setTimeout(resolve, 400));
-      }
-    }
-    if (lastError) {
-      return marketplaceFailure(marketplaceError(
-        'Vinted\'s listing form was not on the page. Nothing was published.', { code: 'rejected' }), true);
-    }
-    if (!response?.ok) {
-      const text = String(response?.error || 'Vinted did not publish this item. Nothing was published.');
-      return marketplaceFailure(marketplaceError(text, { code: /sign in/i.test(text) ? 'signed_out' : 'rejected' }), true);
-    }
-    let landed = null;
-    try {
-      landed = await nativeWait(tab.id, value => Boolean(vintedListingUrl(value.url)), deadline);
-    } catch {
-      landed = null;
-    }
-    const listingUrl = landed ? vintedListingUrl(landed.url) : '';
-    if (!listingUrl) {
-      return marketplaceFailure(marketplaceError(
-        'Upload was clicked, but Vinted did not open the new listing. Check Vinted before listing again.',
-        { code: 'uncertain', rejected: false }), false);
-    }
-    return { ok: true, state: 'published', listing_url: listingUrl };
+    account = await call('GET', `${VINTED_ORIGIN}/api/v2/users/current`, { step: 'session' });
   } catch (error) {
-    const safe = error?.rejected !== false && error?.code !== 'uncertain';
-    return marketplaceFailure(error?.code ? error : marketplaceError(String(error?.message || error), { code: 'rejected' }), safe);
+    if (error.code === 'signed_out' || error.status === 401 || error.status === 403) {
+      throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
+    }
+    throw error;
+  }
+  const userId = vintedAccountId(account);
+  if (!userId) throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
+  const currency = String(account?.user?.currency || 'USD').toUpperCase();
+  return { call, userId, currency: /^[A-Z]{3}$/.test(currency) ? currency : 'USD' };
+}
+
+async function vintedRead(call, id) {
+  let found = null;
+  for (const path of [`/api/v2/item_upload/items/${id}`, `/api/v2/items/${id}`]) {
+    try {
+      const body = await call('GET', `${VINTED_ORIGIN}${path}`, { step: 'read' });
+      const view = vintedView(body?.item || body?.draft || body);
+      if (!view || view.id !== String(id)) continue;
+      if (!found) found = view;
+      else {
+        found = {
+          ...found,
+          ...view,
+          photo_ids: view.photo_ids?.length ? view.photo_ids : found.photo_ids,
+          photo_count: view.photo_ids?.length ? view.photo_count : found.photo_count,
+          is_draft: view.is_draft != null ? view.is_draft : found.is_draft,
+        };
+      }
+      if (found.photo_ids?.length && found.is_draft != null) return found;
+    } catch (error) {
+      if (error.status !== 404) throw error;
+    }
+  }
+  return found;
+}
+
+async function vintedWardrobe(call, userId) {
+  const found = [];
+  for (let page = 1; page <= 8; page += 1) {
+    const body = await call('GET', `${VINTED_ORIGIN}/api/v2/wardrobe/${userId}/items?page=${page}&per_page=96&order=newest_first`, { step: 'read' });
+    if (!Array.isArray(body?.items)) throw marketplaceError('Vinted answered in a way Anteroom does not recognise.', { code: 'schema_drift' });
+    found.push(...body.items);
+    const total = Number(body.pagination?.total_pages) || page;
+    if (page >= total || !body.items.length) break;
+  }
+  return found;
+}
+
+function vintedSame(item, expected) {
+  const view = vintedView(item);
+  if (!view) return false;
+  if (marketplaceText(view.title) !== marketplaceText(expected.title)) return false;
+  return view.price == null || expected.price == null || view.price === expected.price;
+}
+
+async function vintedFields(call, listing, currency) {
+  const specifics = listing.vinted_specifics && typeof listing.vinted_specifics === 'object' ? listing.vinted_specifics : {};
+  const title = String(listing.title || '').trim();
+  const description = String(listing.description || '').trim();
+  const price = vintedAmount(specifics.price ?? listing.price);
+  const missing = [];
+  if (!title) missing.push({ field: 'title', needs: 'a title' });
+  if (title.length > 100) missing.push({ field: 'title', needs: 'a title of at most 100 characters' });
+  if (!description) missing.push({ field: 'description', needs: 'a description' });
+  if (!(price > 0)) missing.push({ field: 'price', needs: 'a price' });
+  const parts = String(specifics.category || '').split('>').map(part => marketplaceText(part).toLowerCase()).filter(Boolean);
+  if (!parts.length) missing.push({ field: 'vinted_specifics.category', needs: 'a category' });
+  if (!String(specifics.condition || '').trim()) missing.push({ field: 'vinted_specifics.condition', needs: 'a condition' });
+  if (missing.length) throw marketplaceMissing('vinted', missing);
+  const catalogs = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/catalogs`, { step: 'category' });
+  const catalogId = vintedFindCatalog(catalogs?.catalogs || catalogs, parts);
+  if (!catalogId) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.category', needs: 'a category Vinted offers' }]);
+  const attributes = await call('POST', `${VINTED_ORIGIN}/api/v2/item_upload/attributes`, {
+    step: 'category', body: { attributes: [{ code: 'category', value: [catalogId] }] }, retry: true,
+  });
+  const byCode = code => vintedFlatten((attributes?.attributes || []).find(row => row?.code === code)?.configuration?.options);
+  let sizes = byCode('size');
+  if (!sizes.length) {
+    const groups = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/size_groups?catalog_ids[]=${catalogId}`, { step: 'category' });
+    sizes = vintedFlatten((groups?.size_groups || []).flatMap(group => group?.sizes || group?.options || []));
+  }
+  const condition = vintedMatch(byCode('condition').concat(byCode('status')), specifics.condition);
+  if (!condition) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.condition', needs: 'a condition Vinted offers' }]);
+  const size = vintedMatch(sizes, specifics.size);
+  if (String(specifics.size || '').trim() && !size) {
+    throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.size', needs: 'a size Vinted offers in this category' }]);
+  }
+  if (!size && sizes.length) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.size', needs: 'a size' }]);
+  let brandId = null;
+  let brand = null;
+  const brandName = String(specifics.brand || '').trim();
+  if (brandName) {
+    const found = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/brands?keyword=${encodeURIComponent(brandName)}&category_id=${catalogId}`, { step: 'brand' });
+    const match = vintedMatch((found?.brands || []).map(row => ({ id: Number(row.id), title: row.title })), brandName);
+    if (!match) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.brand', needs: 'a brand Vinted offers' }]);
+    brandId = match.id;
+    brand = match.title;
+  }
+  const colorIds = [];
+  const colorName = String(specifics.color || '').trim();
+  if (colorName) {
+    const colors = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/colors`, { step: 'color' });
+    const match = vintedMatch((colors?.colors || []).map(row => ({ id: Number(row.id), title: row.title })), colorName);
+    if (!match) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.color', needs: 'a color Vinted offers' }]);
+    colorIds.push(match.id);
+  }
+  const packages = await call('GET', `https://api.www.vinted.com/shipping-estimation/external/catalogs/${catalogId}/package_sizes`, { step: 'package' });
+  const packageSize = vintedMatch((packages?.package_sizes || []).map(row => ({
+    id: Number(row.id), title: row.title || row.name || row.code,
+  })), specifics.packageSize || 'Medium');
+  if (!packageSize) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.packageSize', needs: 'a package size Vinted offers' }]);
+  const itemAttributes = [{ code: 'condition', ids: [condition.id] }];
+  if (size) itemAttributes.push({ code: 'size', ids: [size.id] });
+  return {
+    title, description, price, currency, catalog_id: catalogId, condition_id: condition.id, size_id: size ? size.id : null,
+    brand_id: brandId, brand, color_ids: colorIds, package_size_id: packageSize.id, item_attributes: itemAttributes,
+  };
+}
+
+function vintedForm(fields, photos, sessionId, id = null) {
+  return {
+    id, currency: fields.currency, temp_uuid: sessionId, title: fields.title, description: fields.description,
+    brand_id: fields.brand_id, brand: fields.brand, size_id: fields.size_id, catalog_id: fields.catalog_id,
+    isbn: null, is_unisex: false, status_id: fields.condition_id, price: fields.price,
+    package_size_id: fields.package_size_id, shipment_prices: { domestic: null, international: null },
+    color_ids: fields.color_ids, assigned_photos: photos, item_attributes: fields.item_attributes,
+    manufacturer: null, manufacturer_labelling: null,
+  };
+}
+
+function vintedExpected(fields, photoCount) {
+  return {
+    title: fields.title, description: fields.description, price: fields.price, catalog_id: fields.catalog_id,
+    condition_id: fields.condition_id, size_id: fields.size_id, photo_count: photoCount,
+  };
+}
+
+async function vintedUploadPhotos(call, jobId, photos, sessionId, deadline) {
+  const assigned = [];
+  for (const photo of photos) {
+    const loaded = await nativePhoto(jobId, photo, deadline);
+    const bytes = Uint8Array.from(atob(loaded.base64), char => char.charCodeAt(0));
+    const form = new FormData();
+    form.append('photo[type]', 'item');
+    form.append('photo[temp_uuid]', sessionId);
+    form.append('photo[file]', new Blob([bytes], { type: loaded.mime_type || 'image/jpeg' }), 'photo.jpg');
+    const uploaded = await call('POST', `${VINTED_ORIGIN}/api/v2/photos`, { step: 'photo', body: form, retry: true, action: 'save_draft' });
+    const id = Number(uploaded?.id ?? uploaded?.photo?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      throw marketplaceError('Vinted did not confirm a photo. Check the draft before trying again.', { code: 'schema_drift', rejected: false });
+    }
+    assigned.push({ id, orientation: Number(uploaded?.orientation) || 0 });
+  }
+  return assigned;
+}
+
+async function runVintedNative(msg, recovery = false) {
+  const payload = { ...(msg.payload || {}), deadline: Date.now() + 120000 };
+  const listing = payload.listing && typeof payload.listing === 'object' ? payload.listing : {};
+  const key = `native_operation_${payload.operation_id}`;
+  const photos = Array.isArray(payload.photos) ? payload.photos.slice(0, VINTED_MAX_PHOTOS) : [];
+  let wrote = false;
+  let replacedDraft = false;
+  const storeReceipt = async receipt => {
+    const journal = (await chrome.storage.local.get(key))[key] || {};
+    await chrome.storage.local.set({ [key]: { ...journal, ...receipt } });
+  };
+  const fail = (error, extra = {}) => marketplaceFailure(error, error?.rejected === true && !wrote, {
+    ...(payload.draft_url ? { draft_url: payload.draft_url } : {}),
+    ...(replacedDraft && payload.draft_url ? { draft_replaced: true } : {}),
+    ...extra,
+  });
+  try {
+    if (!['save_draft', 'publish'].includes(payload.action)) return marketplaceFailure(marketplaceError('Unsupported Vinted action.'), true);
+    if (payload.action === 'publish' && !recovery && payload.confirm !== true) {
+      return marketplaceFailure(marketplaceError('Confirm listing on Vinted.'), true);
+    }
+    const session = await vintedSession(payload.deadline);
+    const call = (method, url, options = {}) => session.call(method, url, { ...options, action: payload.action, confirm: payload.confirm });
+    const id = vintedDraftId(payload.draft_url);
+    if (payload.draft_url && !id) return marketplaceFailure(marketplaceError('Invalid native draft link.'), true);
+    if (recovery && payload.action === 'publish') {
+      const journal = (await chrome.storage.local.get(key))[key] || {};
+      if (journal.listing_url) return { ok: true, state: 'published', draft_url: payload.draft_url, listing_url: journal.listing_url };
+      const view = id ? await vintedRead(call, id) : null;
+      if (vintedLive(view)) return { ok: true, state: 'published', draft_url: payload.draft_url, listing_url: vintedPublicUrl(view.id) };
+      return fail(marketplaceError('Vinted did not confirm the listing. Check your Vinted listings before trying again.', { code: 'uncertain', rejected: false }));
+    }
+    if (recovery && payload.action === 'save_draft') {
+      let view = id ? await vintedRead(call, id) : null;
+      if (!view && !id) {
+        const expected = { title: listing.title, price: vintedAmount(listing.vinted_specifics?.price ?? listing.price) };
+        const matches = (await vintedWardrobe(call, session.userId)).filter(item => item?.is_draft === true && vintedSame(item, expected));
+        if (matches.length === 1) {
+          payload.draft_url = vintedDraftUrl(matches[0].id);
+          view = vintedView(matches[0]);
+        }
+      }
+      if (!view) return fail(marketplaceError('Vinted did not confirm a draft. Check your Vinted drafts before trying again.', { code: 'uncertain', rejected: false }));
+      const expected = {
+        title: listing.title, description: listing.description, price: vintedAmount(listing.vinted_specifics?.price ?? listing.price),
+        photo_count: payload.expected_photo_count ?? null,
+      };
+      const differ = vintedDifferences(view, expected);
+      if (differ.length) {
+        return fail(marketplaceError(`Vinted's listing does not match this revision (${differ.join(', ')}). List again.`, { code: 'uncertain', rejected: false }));
+      }
+      payload.draft_url = vintedDraftUrl(view.id);
+      return { ok: true, state: 'draft', draft_url: payload.draft_url };
+    }
+    if (!photos.length || photos.length > VINTED_MAX_PHOTOS) {
+      throw marketplaceMissing('vinted', [{ field: 'photos', needs: `between one and ${VINTED_MAX_PHOTOS} photos` }]);
+    }
+    const fields = await vintedFields(call, listing, session.currency);
+    if (payload.action === 'publish') {
+      if (!id) return marketplaceFailure(marketplaceError('Vinted did not confirm a listing to publish. List again.'), true);
+      const view = await vintedRead(call, id);
+      if (vintedLive(view)) return { ok: true, state: 'published', draft_url: payload.draft_url, listing_url: vintedPublicUrl(view.id) };
+      if (!view) {
+        throw marketplaceError('Could not find draft on Vinted. List again.', { marketplace_message: 'Could not find draft' });
+      }
+      const differ = vintedDifferences(view, vintedExpected(fields, photos.length));
+      if (view.is_draft === false || differ.length) {
+        throw marketplaceError(`Vinted's draft does not match this revision${differ.length ? ` (${differ.join(', ')})` : ''}. List again.`);
+      }
+      const completionPhotos = (view.photo_ids || []).map(photoId => ({ id: photoId, orientation: 0 }));
+      if (completionPhotos.length !== photos.length) {
+        throw marketplaceError('Vinted\'s draft does not match this revision (photos). List again.');
+      }
+      const form = vintedForm(fields, completionPhotos, crypto.randomUUID(), Number(id));
+      const { assigned_photos: attached, ...rest } = form;
+      wrote = true;
+      const completed = await call('POST', `${VINTED_ORIGIN}/api/v2/item_upload/drafts/${id}/completion`, {
+        step: 'publish', retry: false, body: {
+          draft: { ...rest, photos: attached },
+          push_up: false, parcel: null, upload_session_id: form.temp_uuid,
+        },
+      });
+      const publishedId = String(completed?.item?.id || completed?.draft?.id || id);
+      if (!/^[1-9]\d{0,14}$/.test(publishedId)) {
+        throw marketplaceError('Vinted did not confirm the new listing. Check your Vinted listings before trying again.', { code: 'uncertain', rejected: false });
+      }
+      const after = await vintedRead(call, publishedId);
+      if (!vintedLive(after)) {
+        throw marketplaceError('Vinted did not confirm the listing. Check your Vinted listings before trying again.', { code: 'uncertain', rejected: false });
+      }
+      const listingUrl = vintedPublicUrl(publishedId);
+      await storeReceipt({ listing_url: listingUrl });
+      return { ok: true, state: 'published', draft_url: payload.draft_url, listing_url: listingUrl };
+    }
+    const sessionId = crypto.randomUUID();
+    const assigned = await vintedUploadPhotos(call, msg.job_id || payload.operation_id, photos, sessionId, payload.deadline);
+    const form = vintedForm(fields, assigned, sessionId, id ? Number(id) : null);
+    let draftId = id;
+    try {
+      if (draftId) {
+        wrote = true;
+        const saved = await call('PUT', `${VINTED_ORIGIN}/api/v2/item_upload/drafts/${draftId}`, {
+          step: 'save', retry: false, body: { draft: form, parcel: null, upload_session_id: sessionId },
+        });
+        draftId = String(saved?.draft?.id || saved?.item?.id || draftId);
+      } else {
+        wrote = true;
+        const saved = await call('POST', `${VINTED_ORIGIN}/api/v2/item_upload/drafts`, {
+          step: 'save', retry: false, body: { draft: form, parcel: null, upload_session_id: sessionId },
+        });
+        draftId = String(saved?.draft?.id || saved?.item?.id || '');
+      }
+    } catch (error) {
+      if (id && error.status === 404) {
+        payload.draft_url = '';
+        replacedDraft = true;
+        wrote = true;
+        const saved = await call('POST', `${VINTED_ORIGIN}/api/v2/item_upload/drafts`, {
+          step: 'save', retry: false, body: { draft: { ...form, id: null }, parcel: null, upload_session_id: sessionId },
+        });
+        draftId = String(saved?.draft?.id || saved?.item?.id || '');
+      } else throw error;
+    }
+    if (!/^[1-9]\d{0,14}$/.test(draftId)) {
+      throw marketplaceError('Vinted did not confirm its new draft. Check your Vinted drafts before trying again.', { code: 'schema_drift', rejected: false });
+    }
+    payload.draft_url = vintedDraftUrl(draftId);
+    await storeReceipt({ receipt_url: payload.draft_url, expected_photo_count: photos.length });
+    let view = null;
+    for (let attempt = 0; attempt < 3 && !view; attempt += 1) {
+      view = await vintedRead(call, draftId);
+      if (!view && attempt < 2) await marketplaceSleep(400);
+    }
+    if (!view) {
+      const matches = (await vintedWardrobe(call, session.userId)).filter(item => String(item?.id) === draftId);
+      view = matches.length === 1 ? vintedView(matches[0]) : null;
+    }
+    const differ = view ? vintedDifferences(view, vintedExpected(fields, photos.length)) : ['draft'];
+    if (!view || differ.length) {
+      throw marketplaceError(`Vinted did not keep everything this listing sent${differ.length ? ` (${differ.join(', ')})` : ''}. Check the draft and list again.`,
+        { code: 'uncertain', rejected: false });
+    }
+    return { ok: true, state: 'draft', draft_url: payload.draft_url, ...(replacedDraft ? { draft_replaced: true } : {}) };
+  } catch (error) {
+    return fail(error?.code ? error : marketplaceError(String(error?.message || error), { code: 'rejected' }));
   }
 }

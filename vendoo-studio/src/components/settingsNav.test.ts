@@ -28,7 +28,18 @@ describe("searchSettings", () => {
     expect(searchSettings("claude desktop").map((item) => item.id)).toEqual(["agent-cli"]);
     expect(searchSettings("api logs").map((item) => item.id)).toEqual(["vendoo-api-logs"]);
     expect(searchSettings("inventory location").map((item) => item.id)).toEqual(["ebay-inventory-location"]);
+    expect(searchSettings("ships from").map((item) => item.id)).toEqual(["ships-from-zip"]);
+    expect(searchSettings("zip").map((item) => item.id).sort()).toEqual(["ebay-inventory-location", "ships-from-zip"]);
     expect(searchSettings("automatic offers")).toEqual([]);
     expect(isSettingsSectionId("billing")).toBe(false);
+  });
+
+  it("gives every search result its own id", () => {
+    const ids = SETTINGS_SEARCH_ITEMS.map((item) => item.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("finds both the listing checklist and the sign-in accounts", () => {
+    expect(searchSettings("marketplaces").map((item) => item.id).sort()).toEqual(["accounts", "where-you-list"]);
   });
 });

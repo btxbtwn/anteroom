@@ -107,7 +107,7 @@ export function withDirectListings(
   return [...byId.values()].sort((left, right) => statusOrderIndex(left.id) - statusOrderIndex(right.id));
 }
 
-/** Listing status per marketplace, limited to `visible` (Settings → Listings → Marketplaces) when given. */
+/** Listing status per marketplace, limited to `visible` (Settings → Listings → Where you list) when given. */
 export function marketplaceStatusesFromDraft(
   draft: unknown,
   visible?: Set<string>,

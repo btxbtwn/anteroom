@@ -115,7 +115,7 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
   },
 ];
 
-const CHROME_MARKET_ORDER: ExtensionSessionMarket[] = ["poshmark", "mercari", "depop", "sellwild"];
+const CHROME_MARKET_ORDER: ExtensionSessionMarket[] = ["poshmark", "mercari", "depop", "sellwild", "vinted"];
 
 function MarketplaceSalesSwitch({
   name,
@@ -320,7 +320,7 @@ function EbayInventoryLocationRow() {
         </Button>
       </div>
       <SettingsNote>
-        ZIP code eBay ships from. Anteroom writes it on every listing, and creates the eBay inventory location from a 5-digit ZIP when eBay does not have one yet.
+        ZIP code eBay ships from. Anteroom writes it on every listing, and creates the eBay inventory location from a 5-digit ZIP when eBay does not have one yet. Mercari and Depop use the ships-from ZIP under Settings → Listings.
       </SettingsNote>
       {error ? <SettingsNote tone="error">{(error as Error).message || "Could not load inventory location"}</SettingsNote> : null}
       {save.error ? <SettingsNote tone="error">{(save.error as Error).message}</SettingsNote> : null}
@@ -387,6 +387,7 @@ const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
   poshmark: "Lists on Poshmark with the account signed in to Chrome.",
   mercari: "Saves the Mercari sign-in on this Mac so listing keeps working after Chrome restarts.",
   sellwild: "Lists on Sellwild with the account signed in to Chrome.",
+  vinted: "Lists on Vinted with the account signed in to Chrome. List saves a draft, then publishes it only after you confirm.",
 };
 
 function ChromeSessionRow({
@@ -500,7 +501,7 @@ function MarketplaceSection() {
     .filter((marketplace) => accounts?.[marketplace.id]?.connected && enabled(marketplace.id))
     .map((marketplace) => marketplace.name);
   return (
-    <SettingsSection id="marketplaces" title="Marketplaces">
+    <SettingsSection id="accounts" title="Accounts">
       {DIRECT_MARKETPLACES.map((marketplace) => (
         <DirectConnectionRow
           key={marketplace.id}
@@ -521,12 +522,12 @@ function MarketplaceSection() {
       ))}
       <SettingsRow
         title="Where the sign-in lives"
-        description="Depop, Poshmark, and Sellwild stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
+        description="Depop, Poshmark, Sellwild, and Vinted stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
       />
       <SettingsRow
         id="sale-detection"
         title="Sale detection"
-        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark and Sellwild closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
+        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark, Sellwild, and Vinted closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
         status={
           listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -420,11 +420,16 @@ Before outputting ANY listing, verify:
 - Condition is required and uses Mercari labels (see `vendoo-dropdown-options.md`)
 - shippingLabel must be `USPS Ground Advantage`
 
-**Grailed / Vinted / Facebook / Sellwild:**
+**Grailed / Facebook / Sellwild:**
 - No category of their own to choose: Vendoo maps the general category to each one
-- Fields come from that mapped category's live schema; put answers in `grailed_specifics`, `vinted_specifics`, `facebook_specifics`, or `sellwild_specifics`
+- Fields come from that mapped category's live schema; put answers in `grailed_specifics`, `facebook_specifics`, or `sellwild_specifics`
 - Grailed's Designer is the listing brand; it must be the real maker, never a store or reseller name
 - Condition follows the general condition; do not set it per marketplace
+
+**Vinted (direct listing):**
+- Put Vinted's own catalog breadcrumb in `vinted_specifics.category`, such as `Women > Clothing > Jeans > Straight jeans`. Do not copy that breadcrumb into `marketplace_categories.vinted`. That field is Vendoo's category, and Send fills it on Vendoo's form.
+- Condition, brand, size, color, package size, and material go in `vinted_specifics` when the photos or seller notes support them
+- Listing on Vinted saves a draft, then publishes only after the seller confirms List. Do not publish or delist
 
 ## Examples
 

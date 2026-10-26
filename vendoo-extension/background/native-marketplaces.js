@@ -6,7 +6,8 @@ function nativeDraftUrl(platform, raw) {
   try {
     const url = new URL(raw);
     const valid = platform === 'mercari' ? url.origin === 'https://www.mercari.com' && /^\/sell\/draft\/[A-Za-z0-9_-]+\/$/.test(url.pathname)
-      : platform === 'depop' && url.origin === 'https://www.depop.com' && /^\/sellinghub\/drafts\/edit\/[A-Za-z0-9_-]{1,80}\/?$/.test(url.pathname);
+      : platform === 'depop' ? url.origin === 'https://www.depop.com' && /^\/sellinghub\/drafts\/edit\/[A-Za-z0-9_-]{1,80}\/?$/.test(url.pathname)
+      : platform === 'vinted' && url.origin === 'https://www.vinted.com' && /^\/items\/[1-9]\d{0,14}\/edit\/?$/.test(url.pathname);
     return valid ? `${url.origin}${url.pathname}` : '';
   } catch { return ''; }
 }
@@ -57,17 +58,16 @@ async function recoverNativeMarketplace(context) {
 
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
-  const vintedPublish = p.marketplace === 'vinted' && p.action === 'publish';
   if (!['poshmark', 'mercari', 'depop', 'sellwild', 'vinted'].includes(p.marketplace)
-      || !(vintedPublish || ({ sellwild: ['publish'], poshmark: ['list', 'update'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action))) {
+      || !({ sellwild: ['publish'], poshmark: ['list', 'update'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action)) {
     return nativeRefusal('Unsupported marketplace action.');
   }
   if (p.action === 'list' && p.confirm !== true) return nativeRefusal('Confirm listing on this marketplace.');
   if (p.action === 'update' && (p.confirm !== true || !/^[a-f0-9]{24}$/.test(String(p.listing_id || '')))) {
     return nativeRefusal('Confirm updating the live Poshmark listing.');
   }
-  if (p.action === 'publish' && (p.confirm !== true || (!['sellwild', 'vinted'].includes(p.marketplace) && !nativeDraftUrl(p.marketplace, p.draft_url)))) {
-    return nativeRefusal(p.marketplace === 'vinted' ? 'Confirm listing on Vinted.' : 'Confirm publishing an existing native draft.');
+  if (p.action === 'publish' && (p.confirm !== true || (p.marketplace !== 'sellwild' && !nativeDraftUrl(p.marketplace, p.draft_url)))) {
+    return nativeRefusal('Confirm publishing an existing native draft.');
   }
   if (p.draft_url && !nativeDraftUrl(p.marketplace, p.draft_url)) return nativeRefusal('Invalid native draft link.');
   if (p.marketplace === 'vinted') return await runVintedNative(msg);

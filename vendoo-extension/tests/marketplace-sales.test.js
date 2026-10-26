@@ -117,6 +117,26 @@ test('a removed listing is not a sale, and a check that cannot read the shop fai
   assert.equal((await read(c, 'sellwild', ['105232291'])).ok, false);
 });
 
+test('Vinted reports a known listing missing from the live wardrobe when that listing is closed', async () => {
+  const { c, calls } = worker({
+    '/api/v2/users/current': [200, { user: { id: 7, login: 'seller', email: 'seller@example.com' } }],
+    '/api/v2/wardrobe/7/items': [200, { items: [
+      { id: 100, title: 'Live jacket', is_draft: false, is_closed: false, is_hidden: false },
+      { id: 204, title: 'Draft jacket', is_draft: true, is_closed: false },
+    ], pagination: { total_pages: 1 } }],
+    '/api/v2/items/200': [200, { item: { id: 200, title: 'Sold jacket', price: 12, is_closed: true, is_hidden: false, is_reserved: false, is_draft: false } }],
+    '/api/v2/items/202': [200, { item: { id: 202, is_closed: true, is_hidden: true, is_reserved: false, is_draft: false } }],
+    '/api/v2/items/203': [200, { item: { id: 203, is_closed: true, is_hidden: false, is_reserved: true, is_draft: false } }],
+    '/api/v2/items/204': [200, { item: { id: 204, is_closed: false, is_hidden: false, is_reserved: false, is_draft: true } }],
+  });
+  const result = await read(c, 'vinted', ['100', '200', '201', '202', '203', '204']);
+  assert.deepEqual(result, { ok: true, sales: [{ listing_id: '200' }] });
+  assert.equal(JSON.stringify(result).includes('Sold jacket'), false);
+  assert.equal(JSON.stringify(result).includes('seller@example.com'), false);
+  assert.equal(calls.some(url => url.includes('/api/v2/wardrobe/7/items?page=1&per_page=96&order=newest_first')), true);
+  assert.equal(calls.some(url => url.includes('/api/v2/items/100')), false);
+});
+
 test('a sale check waits while another marketplace action is running', async () => {
   const { c } = worker({});
   c.fetch = async () => { throw new Error('should not read'); };

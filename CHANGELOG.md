@@ -6,9 +6,26 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.394 — 2026-10-26
+## 0.1.397 — 2026-10-26
 
 - eBay earnings and listing performance now recognize items imported or linked directly in Anteroom. See original selling fees alongside net proceeds, quantity-adjusted item costs and profit; missing or duplicate links explain what needs review.
+
+## 0.1.396 — 2026-10-26
+
+- List on Vinted saves a draft in the background, the same way as Depop and Mercari, then publishes it only after you confirm List. No Vinted tab opens. If Chrome loses the reply, Check result reads Vinted and does not create it again. You can paste the draft link.
+- Detect sales for Vinted is in Settings → Connections with the other Chrome marketplaces. A sale there gets the same notice. Delist the other marketplaces still leaves the place it sold up.
+
+## 0.1.395 — 2026-10-26
+
+- Settings → Listings calls the marketplace checklist Where you list, and Settings → Connections calls the sign-ins Accounts.
+- The ships-from ZIP and eBay’s inventory location point at each other. Search finds both from “zip”.
+- The live Vendoo request log is marked Troubleshooting.
+
+## 0.1.394 — 2026-10-26
+
+- Sign in to Vinted from Settings → Connections, the same way as Depop and Sellwild. Anteroom shows whether that Chrome sign-in is there. The cookies stay in Chrome, and listing still waits until you confirm List on Vinted.
+- Delist on Vinted deletes the listing through that Chrome sign-in, the same way as Depop, Poshmark, and Mercari. A listing that is already gone counts as deleted, and doing it again is safe. When something sells and Delist the other marketplaces is on, Vinted comes down with the others. The place it sold stays up.
+- A Vinted listing uses Vinted's own category. The category Vendoo would fill is not typed into Vinted's form.
 
 ## 0.1.393 — 2026-10-26
 

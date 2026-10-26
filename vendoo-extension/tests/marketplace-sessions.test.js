@@ -86,6 +86,37 @@ test('Sellwild uses the session response and hides the account payload', async (
   assert.equal(text.includes('user-secret'), false);
 });
 
+test('Vinted sign-in is the current user login and hides the token', async () => {
+  const token = jwt({ exp: Math.floor(Date.now() / 1000) + 86400 * 10, sub: '42' });
+  const { c } = worker({
+    cookies: { 'https://www.vinted.com/ access_token_web': { value: token, expirationDate: Math.floor(Date.now() / 1000) + 86400 * 10 } },
+    fetch: async url => (url === 'https://www.vinted.com/api/v2/users/current'
+      ? reply(200, { user: { id: 42, login: 'ada', email: 'secret@example.com', real_name: 'Ada Lovelace' } })
+      : reply(404, {})),
+  });
+  const summary = await c.readExtensionSession('vinted');
+  assert.equal(summary.state, 'signed_in');
+  assert.equal(summary.label, 'ada');
+  assert.equal(summary.expiring, false);
+  const text = JSON.stringify(summary);
+  assert.equal(text.includes(token), false);
+  assert.equal(text.includes('secret@example.com'), false);
+  assert.equal(text.includes('Ada Lovelace'), false);
+});
+
+test('an anonymous Vinted token is signed out, and a failed check is unknown', async () => {
+  const anonymous = worker({
+    fetch: async () => reply(200, { user: { id: null, login: null, anon_id: 'anon-secret', email: 'secret@example.com' } }),
+  });
+  const signedOut = await anonymous.c.readExtensionSession('vinted');
+  assert.equal(signedOut.state, 'signed_out');
+  assert.equal(JSON.stringify(signedOut).includes('anon-secret'), false);
+  const rejected = worker({ fetch: async () => reply(401, { message_code: 'invalid_authentication_token', access_token_web: 'secret-token' }) });
+  assert.equal((await rejected.c.readExtensionSession('vinted')).state, 'signed_out');
+  const offline = worker({ fetch: async () => { throw new Error('offline'); } });
+  assert.deepEqual(JSON.parse(JSON.stringify(await offline.c.readExtensionSession('vinted'))), { state: 'unknown', expires_at: null, label: null, expiring: false });
+});
+
 test('Sellwild is unknown when the check cannot reach the site', async () => {
   const { c } = worker({ fetch: async () => { throw new Error('offline'); } });
   assert.deepEqual(JSON.parse(JSON.stringify(await c.readExtensionSession('sellwild'))), { state: 'unknown', expires_at: null, label: null, expiring: false });
