@@ -21,7 +21,8 @@ import {
   relistCallout,
   relistStage,
 } from "./relistStatus";
-import { ETSY_CATEGORY_OPTIONALS, depopSizeGroupingApplies } from "../marketplaceFields";
+import { ETSY_CATEGORY_OPTIONALS } from "../marketplaceFields";
+import { depopSizeGroupingApplies } from "../marketplaceFields";
 import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
 import { applyBottomsFields, isBottomsListing } from "../bottomsSizes";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
