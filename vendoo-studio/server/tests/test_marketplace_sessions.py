@@ -24,7 +24,7 @@ def test_session_summary_drops_cookies_and_tokens():
     assert _public_connect({"ok": True, "state": "expired", "signed_in": True, "access_token": "secret"})["signed_in"] is False
 
 
-def test_session_status_returns_only_the_four_summaries():
+def test_session_status_returns_only_the_chrome_summaries():
     def request(job, message_type, payload=None, timeout=20):
         assert message_type == "marketplace.sessions"
         assert job.id is None
@@ -40,11 +40,12 @@ def test_session_status_returns_only_the_four_summaries():
         response = TestClient(app).get("/api/marketplaces/sessions")
     assert response.status_code == 200
     body = response.json()
-    assert set(body["sessions"]) == {"depop", "poshmark", "mercari", "sellwild"}
+    assert set(body["sessions"]) == {"depop", "poshmark", "mercari", "sellwild", "vinted"}
     assert body["sessions"]["depop"]["label"] == "ada"
     assert body["sessions"]["poshmark"]["label"] is None
     assert body["sessions"]["mercari"]["state"] == "unknown"
     assert body["sessions"]["sellwild"]["state"] == "unknown"
+    assert body["sessions"]["vinted"]["state"] == "unknown"
     assert "secret" not in response.text
 
 
@@ -66,6 +67,21 @@ def test_connect_response_cannot_carry_a_token():
     assert response.json()["signed_in"] is True
     assert "secret" not in response.text
     assert "page_read_status" not in response.json()
+
+
+def test_vinted_connect_is_a_session_summary():
+    def request(job, message_type, payload=None, timeout=40):
+        assert message_type == "marketplace.connect"
+        assert payload["marketplace"] == "vinted"
+        assert job.id is None
+        return {"ok": True, "state": "signed_in", "label": "ada", "access_token_web": "secret-token"}
+
+    with patch("vendoo_studio.services.browser_bridge.request", new=AsyncMock(side_effect=request)):
+        response = TestClient(app).post("/api/marketplaces/vinted/connect")
+    assert response.status_code == 200
+    assert response.json()["signed_in"] is True
+    assert response.json()["label"] == "ada"
+    assert "secret" not in response.text
 
 
 def test_unknown_marketplace_connect_is_rejected():

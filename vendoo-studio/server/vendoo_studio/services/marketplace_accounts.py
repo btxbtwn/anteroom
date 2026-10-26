@@ -354,7 +354,7 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
 
         session_factory = SessionLocal
     from vendoo_studio.models.marketplace_sale import MarketplaceSale
-    from vendoo_studio.services.marketplace_delist import MARKETPLACES, DelistError, delist, listings
+    from vendoo_studio.services.marketplace_delist import MARKETPLACES, NOT_REMOVED, DelistError, delist, listings
 
     notes: dict[str, str] = {}
     groups: dict[str, list[str]] = {}
@@ -385,14 +385,18 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
         except DelistError as exc:
             text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
         else:
-            others = [
+            live = [
                 name for name in MARKETPLACES
                 if (entry := known.get(name))
                 and entry.get("state") == "live"
                 and entry.get("listing_id")
                 and not entry.get("sold_here")
             ]
-            if not others:
+            manual = [name for name in live if name in NOT_REMOVED]
+            others = [name for name in live if name not in NOT_REMOVED]
+            if not others and manual:
+                text = "Delist it on Vinted. Anteroom does not delete a Vinted listing."
+            elif not others:
                 text = "It isn't listed anywhere else."
             else:
                 try:
@@ -408,6 +412,8 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
                     }
                     done = [name for name in others if name not in failed]
                     text = _delist_sentence(done, failed)
+                if manual:
+                    text = f"{text} Vinted stays up; delist it there."
         for sale_id in groups[conv_id]:
             notes[sale_id] = text
     return notes

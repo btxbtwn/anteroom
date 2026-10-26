@@ -115,7 +115,7 @@ const DIRECT_MARKETPLACES: { id: DirectMarketplace; name: string; what: string }
   },
 ];
 
-const CHROME_MARKET_ORDER: ExtensionSessionMarket[] = ["poshmark", "mercari", "depop", "sellwild"];
+const CHROME_MARKET_ORDER: ExtensionSessionMarket[] = ["poshmark", "mercari", "depop", "sellwild", "vinted"];
 
 function MarketplaceSalesSwitch({
   name,
@@ -387,6 +387,7 @@ const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
   poshmark: "Lists on Poshmark with the account signed in to Chrome.",
   mercari: "Saves the Mercari sign-in on this Mac so listing keeps working after Chrome restarts.",
   sellwild: "Lists on Sellwild with the account signed in to Chrome.",
+  vinted: "Lists on Vinted with the account signed in to Chrome. Upload runs only after you confirm List on Vinted. Sales on Vinted are not detected.",
 };
 
 function ChromeSessionRow({
@@ -515,13 +516,13 @@ function MarketplaceSection() {
           key={marketplace}
           marketplace={marketplace}
           chromeReady={chromeReady}
-          salesSwitch={salesSwitch(marketplace, EXTENSION_SESSION_NAMES[marketplace])}
-          checkError={detection.data?.checks?.[marketplace]}
+          salesSwitch={marketplace === "vinted" ? undefined : salesSwitch(marketplace, EXTENSION_SESSION_NAMES[marketplace])}
+          checkError={marketplace === "vinted" ? null : detection.data?.checks?.[marketplace]}
         />
       ))}
       <SettingsRow
         title="Where the sign-in lives"
-        description="Depop, Poshmark, and Sellwild stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
+        description="Depop, Poshmark, Sellwild, and Vinted stay signed in through Chrome's cookies. Mercari's listing sign-in is saved in the extension on this Mac. Anteroom never stores those cookies or tokens. When one expires, Anteroom asks you to sign in again."
       />
       <SettingsRow
         id="sale-detection"
@@ -543,7 +544,7 @@ function MarketplaceSection() {
       <SettingsRow
         id="sale-autodelist"
         title="Delist the other marketplaces"
-        description="When something sells, take it off the other marketplaces where Anteroom still has it listed. The place it sold stays as it is. This stays off until you turn it on. If a delist can't finish, the sale notice says so and you can delist from the item."
+        description="When something sells, take it off the other marketplaces where Anteroom still has it listed. The place it sold stays as it is. Vinted is not taken down; delist it on Vinted. This stays off until you turn it on. If a delist can't finish, the sale notice says so and you can delist from the item."
         control={
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Switch

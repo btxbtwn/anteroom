@@ -1,4 +1,4 @@
-"""Seller-confirmed direct listings on eBay, Etsy, Poshmark, Mercari, Depop and Sellwild.
+"""Seller-confirmed direct listings on eBay, Etsy, Poshmark, Mercari, Depop, Sellwild and Vinted.
 
 List is one seller-confirmed step. It runs as one background job that holds
 the single automation slot from the first write to the last answer: saving the
@@ -11,6 +11,10 @@ marketplace). Nothing here retries a write on its own. A reply that never came
 leaves the record ``unknown``; Check reads the marketplace (never writes) and
 runs by itself after a lost reply, on startup and when Chrome reconnects.
 Reset is the seller saying they looked themselves.
+
+Vinted publishes with Upload only, after the seller confirms. It has no draft
+and Anteroom does not delete the listing. A lost reply stays unknown; Check
+does not click Upload again.
 """
 from __future__ import annotations
 

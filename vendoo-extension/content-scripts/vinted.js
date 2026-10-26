@@ -13,6 +13,11 @@ function vintedListControl(label) {
   return classifyVintedControl(label) === 'publish';
 }
 
+function vintedCategoryPath(data) {
+  const specifics = data?.vinted_specifics && typeof data.vinted_specifics === 'object' ? data.vinted_specifics : {};
+  return String(specifics.category || '').trim();
+}
+
 function vintedConditionCandidates(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const table = {
@@ -30,7 +35,7 @@ function vintedConditionCandidates(value) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { classifyVintedControl, vintedListControl, vintedConditionCandidates };
+  module.exports = { classifyVintedControl, vintedListControl, vintedCategoryPath, vintedConditionCandidates };
 }
 
 if (typeof document !== 'undefined') {
@@ -168,7 +173,7 @@ if (typeof document !== 'undefined') {
         await new Promise((resolve) => setTimeout(resolve, 300));
         clickMatching([brandValue, 'No brand']);
       }
-      const category = specifics.category || data.marketplace_categories?.vinted || '';
+      const category = vintedCategoryPath(data);
       if (category) await chooseCategory(category);
       const conditions = vintedConditionCandidates(specifics.condition || data.condition);
       if (conditions.length) clickMatching(conditions);

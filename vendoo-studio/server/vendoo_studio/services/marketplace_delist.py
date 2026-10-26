@@ -32,6 +32,8 @@ from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
 MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
 BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop", "sellwild"}
+# A live link can be recorded. Anteroom does not delete the listing.
+NOT_REMOVED = frozenset({"vinted"})
 
 class DelistError(RuntimeError):
     def __init__(self, status_code: int, detail: str):

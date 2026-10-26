@@ -14,7 +14,7 @@ Anteroom combines a listing editor, inventory, a business assistant, sales analy
 
 ## Direct marketplace listing
 
-The local build supports direct drafts and seller-confirmed publishing to **Depop, Etsy, Poshmark, Mercari, and Sellwild**, without requiring Vendoo. Use **Marketplaces** at the top of a listing's Input tab. Etsy uses its official API; Depop, Poshmark, Mercari and Sellwild use your signed-in Chrome session. Those browser connections have no confirmed marketplace authorization and carry account-enforcement risk. eBay's separate workspace uses its official API.
+The local build supports direct drafts and seller-confirmed publishing to **Depop, Etsy, Poshmark, Mercari, Sellwild, and Vinted**, without requiring Vendoo. Use **Marketplaces** at the top of a listing's Input tab. Etsy uses its official API; Depop, Poshmark, Mercari, Sellwild, and Vinted use your signed-in Chrome session. Those browser connections have no confirmed marketplace authorization and carry account-enforcement risk. eBay's separate workspace uses its official API. Sign in to the Chrome marketplaces under **Settings → Connections**.
 
 ## From photos to a saved draft
 
@@ -38,9 +38,11 @@ Use **Marketplaces** on a listing's Input tab to send directly to Poshmark, Merc
 
 After an interrupted response, use **Check result** or paste the saved draft link. Checking only reads the saved result. Save a changed Anteroom revision again before publishing it.
 
-**Marketplaces** has one row per marketplace with its status (Not listed, Draft saved, Live, Sold here, Deleted) and the actions that apply. **Delist** works from the same rows. It lists every marketplace listing Anteroom knows for the item, including Vendoo's links, and removes the ones you pick after a confirmation: deleted on Etsy (official API), Poshmark, Mercari and Depop, ended on eBay (Trading API `EndFixedPriceItem`; eBay has no delete), and delisted on Sellwild (its only seller removal). Each step reads the listing first, so a listing already gone counts as delisted and a delist is safe to repeat. The marketplace where the item sold is never touched, and nothing delists on its own.
+**Marketplaces** has one row per marketplace with its status (Not listed, Draft saved, Live, Sold here, Deleted) and the actions that apply. **Delist** works from the same rows. It lists every marketplace listing Anteroom knows for the item, including Vendoo's links, and removes the ones you pick after a confirmation: deleted on Etsy (official API), Poshmark, Mercari and Depop, ended on eBay (Trading API `EndFixedPriceItem`; eBay has no delete), and delisted on Sellwild (its only seller removal). Vinted is not deleted from here; take it down on Vinted, then mark the row if you want Anteroom to match. Each step reads the listing first, so a listing already gone counts as delisted and a delist is safe to repeat. The marketplace where the item sold is never touched, and nothing delists on its own.
 
 Sellwild has no drafts, so Sellwild drafts stay in Anteroom. Choose a Sellwild category and condition (Anteroom suggests both from the listing), then **Save in Anteroom**. This works without Chrome and sends nothing to Sellwild. **Publish…** requires a separate confirmation. It then creates the listing once from the Bridge with your Sellwild session, without opening a tab: it uploads the photos and activates the listing, the same three steps Sellwild's own sell page takes. Publishing needs a package weight and `package_dimensions_in`, and a ship-from address saved on Sellwild. If Sellwild holds the listing for moderation, Anteroom shows **In review**. If a reply is lost after the listing was created, Anteroom shows its Sellwild ID and never creates it again.
+
+Vinted has no draft either. **List…** asks you to confirm, then opens Vinted's upload form in Chrome and clicks Upload. It does not save a draft and does not list through Vendoo. Sign in under **Settings → Connections**. If Chrome never says whether Upload finished, Anteroom does not upload again. Look on Vinted, then use **I checked it myself** or **Mark as listed**.
 
 ## Inside Anteroom
 
