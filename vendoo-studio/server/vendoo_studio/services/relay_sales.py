@@ -10,7 +10,6 @@ waits for the seller.
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -21,39 +20,25 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
+from vendoo_studio.services.marketplace_identity import listing_id as listing_id_from_url
 from vendoo_studio.services.vendoo_import import parse_notes
 
 log = logging.getLogger("vendoo_studio.relay_sales")
 
-# Listing IDs in the URLs Vendoo reports for each marketplace.
-LISTING_URL_ID = {
-    "ebay": re.compile(r"ebay\.[a-z.]+/itm/(?:[^/?#]+/)?(\d{6,})", re.I),
-    "etsy": re.compile(r"etsy\.com/(?:[a-z-]+/)?listing/(\d+)", re.I),
-    "poshmark": re.compile(r"poshmark\.com/listing/(?:[^/?#]+-)?([a-f0-9]{24})(?:[/?#]|$)", re.I),
-    "mercari": re.compile(r"mercari\.com/(?:us/)?item/(m\d{8,14})(?:[/?#]|$)", re.I),
-    "depop": re.compile(r"depop\.com/products/([a-z0-9][a-z0-9-]{0,200})(?:[/?#]|$)"),
-    "sellwild": re.compile(r"sellwild\.com/product/(\d{1,12})(?:[/?#]|$)", re.I),
-}
-
-
-def listing_id_from_url(marketplace: str, url: str | None) -> str | None:
-    pattern = LISTING_URL_ID.get(marketplace)
-    match = pattern.search(url or "") if pattern else None
-    if not match:
-        return None
-    found = match.group(1)
-    return found.lower() if marketplace == "poshmark" else found
-
-
-def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conversation | None:
-    """The Studio listing whose direct, Vendoo-reported or seller-linked URL on ``marketplace`` has this ID."""
+def matching_listings(db: Session, marketplace: str, listing_id: str | None) -> list[Conversation]:
+    """Exact identity matches across direct records, saved imports, and seller links."""
     if not listing_id:
-        return None
+        return []
+    if marketplace == "poshmark":
+        listing_id = listing_id.lower()
+    matches: dict[str, Conversation] = {}
     direct = db.query(MarketplaceListing).filter(MarketplaceListing.marketplace == marketplace,
                                                  MarketplaceListing.listing_url.contains(listing_id)).all()
     for row in direct:
         if listing_id_from_url(marketplace, row.listing_url) == listing_id:
-            return db.get(Conversation, row.conversation_id)
+            conv = db.get(Conversation, row.conversation_id)
+            if conv:
+                matches[conv.id] = conv
     rows = db.query(Conversation).filter(Conversation.notes.contains(listing_id)).all()
     for conv in rows:
         notes = parse_notes(conv.notes)
@@ -63,8 +48,16 @@ def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conve
         linked = [urls.get(marketplace) if isinstance(urls, dict) else None,
                   mark.get("url") if isinstance(mark, dict) and mark.get("state") == "listed" else None]
         if any(listing_id_from_url(marketplace, url) == listing_id for url in linked):
-            return conv
-    return None
+            matches[conv.id] = conv
+    return list(matches.values())
+
+
+def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conversation | None:
+    """Assign a sale only when exactly one local item owns its listing reference."""
+    matches = matching_listings(db, marketplace, listing_id)
+    if len(matches) > 1:
+        log.warning("%s sale has ambiguous listing ownership across %s items; left unmatched", marketplace, len(matches))
+    return matches[0] if len(matches) == 1 else None
 
 
 def _parse_time(value: Any) -> datetime | None:

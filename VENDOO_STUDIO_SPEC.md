@@ -1159,3 +1159,25 @@ delists or publishes, and never calls Vendoo or a marketplace: a listing already
 on Vendoo keeps its old values there until the seller sends it again. Asking a
 question still writes nothing but the conversation and the seller's note.
 Photos and secrets are in neither the brief nor the copy.
+
+## Direct marketplace transition scope
+
+Anteroom owns inventory and connects directly to marketplaces. Vendoo is a
+temporary migration source, not a dependency for new marketplace workflows.
+Extend the direct connections, listing records and sales reconciliation already
+implemented here; do not introduce parallel identity or connection systems.
+
+The agreed scope includes direct account connections and connection health;
+listing links, imports and duplicate reconciliation; sales recording, fees,
+quantities, partial sales and cancellations; direct drafts and updates; bulk
+field and label editing, copying and seller-approved list/delist/relist; saved
+seller templates and CSV inventory/sales exports; photo editing, background
+removal and listing videos; and offers, sharing, refreshing, bumping and broader
+marketplace coverage. Deliver working increments on the existing implementation.
+Listing rules remain canonical in `skills/`.
+
+Public URLs identify listings but do not verify ownership or current status.
+Direct actions and sales matching use the same validated reference. Seller
+linking rejects references already attached to another item, and an ambiguous
+sale remains unmatched rather than being assigned to the first duplicate found.
+Linking and reconciliation are local operations and do not publish or delist.
