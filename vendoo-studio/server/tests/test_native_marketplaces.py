@@ -172,6 +172,14 @@ class NativeMarketplacesTest(unittest.TestCase):
             with self.subTest(url=bad), self.assertRaises(native.NativeMarketplaceError):
                 native.draft_url("poshmark", bad)
 
+    def test_recovery_keeps_category_size_shipping_and_the_sent_photo_count(self):
+        for market in ("mercari", "depop", "poshmark"):
+            context = native._result_context(self.db, self.conv.id, market,
+                                            {"action": "save_draft", "previous_revision_id": "older", "photo_ids": ["sent-1", "sent-2"]},
+                                            LISTING, None)
+            self.assertEqual(context["listing"], LISTING)
+            self.assertEqual(context["expected_photo_count"], 2)
+
     def test_list_saves_then_publishes_in_one_job_that_holds_the_slot(self):
         for platform in URLS:
             seen = []

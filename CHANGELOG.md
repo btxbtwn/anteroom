@@ -6,11 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.408 — 2026-10-26
+## 0.1.409 — 2026-10-26
 
 - Listing again on Depop fills the draft you already saved, including category, size, colour, brand, and photos.
 - Choosing no brand on Mercari clears a brand that was already on the draft.
 - Leaving SKU empty keeps it empty in Anteroom. eBay still needs its own inventory key, and that key is not saved as your SKU.
+
+## 0.1.408 — 2026-10-26
+
+- Add Poshmark sizes to an inventory list, including custom sizes, with a separate quantity and SKU for each. The rows fit the editor panel, and saved drafts check every size and SKU.
+- Mercari accepts its own No Brand response instead of reporting a mismatch after you clear a brand.
+- Check compares Mercari and Depop against the full revision sent, including shipping and size, and keeps the number of photos sent with the action.
+- Direct listing progress names the marketplace and action instead of calling it a Vendoo draft. Poshmark updates check all saved fields, including inventory.
 
 ## 0.1.407 — 2026-10-26
 

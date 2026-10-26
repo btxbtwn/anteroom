@@ -30,12 +30,15 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
   const category = resolved?.category;
   const nativeSize = category ? poshmarkSize(category, listing, { kids: resolved.department.display === 'Kids', leaf: resolved.leaf }) : null;
   const sets = category?.size_sets || [];
-  const pickedSet = sets.find(set => set.id === listing.poshmark_specifics?.sizeSetId) || nativeSize?.set;
   const specifics = listing.poshmark_specifics || {};
+  const inventoryRows = Array.isArray(specifics.inventoryRows) ? specifics.inventoryRows : [{
+    sizeSetId: nativeSize?.set?.id || (nativeSize?.size ? 'custom' : ''), sizeId: nativeSize?.size?.id || '',
+    quantity: listing.quantity ?? 1, sku: '',
+  }];
   const fields = [
     ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1500, minPrice: 3, priceStep: 1 }),
     nativeEditorChoice('direct_category_ids.poshmark', 'Category', resolved ? `${resolved.department.id}/${category.id}` : '', categoryChoices,
-      { required: true, clears: ['poshmark_specifics.subcategory', 'poshmark_specifics.sizeSetId', 'poshmark_specifics.nativeSizeId'],
+      { required: true, clears: ['poshmark_specifics.subcategory', 'poshmark_specifics.sizeSetId', 'poshmark_specifics.nativeSizeId', 'poshmark_specifics.inventoryRows'],
         help: 'Changing category clears its sub-category and size selections.' }),
     nativeEditorChoice('poshmark_specifics.subcategory', 'Sub-category',
       specifics.subcategory || (category?.category_features || []).find(row => row.id === resolved?.leaf)?.display || 'None',
@@ -45,11 +48,12 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
       { label: 'New With Tags (NWT)', value: 'nwt' }, { label: 'Like New', value: 'uln' },
       { label: 'Good', value: 'ug' }, { label: 'Fair', value: 'uf' },
     ], { required: true }),
-    nativeEditorChoice('poshmark_specifics.sizeSetId', 'Size group', pickedSet?.id || '',
-      sets.map(set => ({ label: set.name || set.tags?.join(' / ') || set.id, value: set.id })),
-      { required: sets.length > 1, clears: ['poshmark_specifics.nativeSizeId'], help: 'Size choices follow this group.' }),
-    nativeEditorChoice('poshmark_specifics.nativeSizeId', 'Size', nativeSize?.size?.id || specifics.nativeSizeId || specifics.size || '',
-      (pickedSet?.size_systems?.us?.sizes || []).map(size => ({ label: size.display || size.id, value: size.id })), { required: true }),
+    nativeEditorField('poshmark_specifics.inventoryRows', 'Size and inventory', inventoryRows,
+      { input_type: 'inventory', required: true, inventory_groups: [
+        ...sets.map(set => ({ id: set.id, label: set.name || set.tags?.join(' / ') || set.id,
+          sizes: (set.size_systems?.us?.sizes || []).map(size => ({ id: size.id, label: size.display || size.id })) })),
+        { id: 'custom', label: 'Custom size', sizes: [] },
+      ], help: 'Add each size with its quantity and optional inventory SKU. Custom sizes are supported.' }),
     nativeEditorChoice('poshmark_specifics.poshmarkColor', 'Primary Color', specifics.poshmarkColor ?? (({ Grey: 'Gray', Beige: 'Tan' })[listing.primaryColor] || listing.primaryColor),
       (catalog.colors || []).map(color => color.name)),
     nativeEditorChoice('poshmark_specifics.poshmarkSecondaryColor', 'Secondary Color', specifics.poshmarkSecondaryColor ?? (({ Grey: 'Gray', Beige: 'Tan' })[listing.secondaryColor] || listing.secondaryColor),
@@ -71,7 +75,6 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
     nativeEditorField('poshmark_specifics.sellerNotes', 'Additional Details', specifics.sellerNotes || '',
       { input_type: 'textarea', help: 'Private seller notes; buyers cannot see them.' }),
     nativeEditorField('poshmark_specifics.poshmarkSku', 'SKU', specifics.poshmarkSku ?? listing.sku ?? '', { max_length: 50 }),
-    nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
     nativeEditorField('poshmark_specifics.originalPrice', 'Original Price', poshmarkOriginalPrice(listing), { input_type: 'number', min_value: 0, step: 1 }),
   ];
   return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields,
