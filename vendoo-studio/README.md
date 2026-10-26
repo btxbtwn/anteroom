@@ -175,6 +175,22 @@ Imports use eBay's read APIs and local storage only. They do not publish, revise
 delist, migrate eBay's listing format, or contact Vendoo. No eBay credentials or
 raw account responses are stored with the imported listing.
 
+### Importing directly from Etsy
+
+Connect Etsy, then open **Marketplaces → Etsy → Listings → Import from Etsy**.
+Select listings from your active inventory or enter a listing ID. Imports run
+one at a time; you can stop after the current item and open each saved item.
+
+The first version supports active physical listings in USD without variations.
+It verifies shop ownership and reads the exact inventory offering, SKU, available
+quantity, price, category, item properties, tags, materials and photos. Listings
+that have never used Etsy's inventory tools use Etsy's explicit legacy quantity
+and price. Multiple products or offerings are rejected instead of being combined.
+
+Existing linked items keep their edits and photos. Conflicting identities are
+reported, and missing photos are shown for follow-up. Importing reads Etsy and
+saves local inventory; it never changes a live listing or contacts Vendoo.
+
 ### Editing something that is already listed
 
 Anteroom writes the Vendoo **form**. Vendoo carries a form change onto a live

@@ -66,7 +66,8 @@ import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./
 import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, PoshmarkOptions, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
-import type { EbayImportPage, EbayImportResult, EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
+import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
+import type { MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -226,6 +227,10 @@ export const api = {
     list: () => request<SuggestionsResponse>("/suggestions"),
   },
   etsy: {
+    importCandidates: (page: number) => request<MarketplaceImportPage>(`/etsy/import/active?page=${page}`),
+    importListing: (listingId: string) => request<MarketplaceImportResult>("/etsy/import", {
+      method: "POST", body: JSON.stringify({ listing_id: listingId }),
+    }),
     notAllowed: () => request<EtsyNotAllowedResponse>("/etsy/not-allowed"),
     shop: () => request<EtsyShop>("/etsy/shop"),
     orders: (params: { start: string; end: string; offset: number; status: EtsyOrderStatus }) =>
@@ -367,8 +372,8 @@ export const api = {
       }),
   },
   ebay: {
-    importCandidates: (page: number) => request<EbayImportPage>(`/ebay/import/active?page=${page}`),
-    importListing: (listingId: string) => request<EbayImportResult>("/ebay/import", {
+    importCandidates: (page: number) => request<MarketplaceImportPage>(`/ebay/import/active?page=${page}`),
+    importListing: (listingId: string) => request<MarketplaceImportResult>("/ebay/import", {
       method: "POST", body: JSON.stringify({ listing_id: listingId }),
     }),
     read: (section: string, params: Record<string, string | number> = {}) =>

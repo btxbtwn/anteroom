@@ -1,21 +1,26 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../../api/client";
-import type { EbayImportResult } from "../../api/ebay";
-import { PageError, PageNote, PageSection } from "../WorkspacePage";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
+import { api } from "../api/client";
+import type { ImportMarketplace, MarketplaceImportResult } from "../api/inventoryImport";
+import { marketplaceName } from "./marketplaceNames";
+import { PageError, PageNote, PageSection } from "./WorkspacePage";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 
-export function InventoryImport({ accountKey, onOpenListing }: { accountKey: string; onOpenListing: (id: string) => void }) {
+export function InventoryImport({ marketplace, accountKey, onOpenListing }: { marketplace: ImportMarketplace; accountKey: string; onOpenListing: (id: string) => void }) {
   const queryClient = useQueryClient();
+  const name = marketplaceName(marketplace);
+  const importer = api[marketplace];
+  const idPattern = marketplace === "ebay" ? "[0-9]{9,15}" : "[1-9][0-9]{0,19}";
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string[]>([]);
   const [itemId, setItemId] = useState("");
-  const [results, setResults] = useState<Record<string, EbayImportResult>>({});
+  const validId = new RegExp(`^${idPattern}$`).test(itemId.trim());
+  const [results, setResults] = useState<Record<string, MarketplaceImportResult>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const stop = useRef(false);
   const [stopping, setStopping] = useState(false);
-  const candidates = useQuery({ queryKey: ["ebay", "import-active", accountKey, page], queryFn: () => api.ebay.importCandidates(page), retry: false });
+  const candidates = useQuery({ queryKey: ["inventory-import", marketplace, accountKey, page], queryFn: () => importer.importCandidates(page), retry: false });
   const run = useMutation({
     mutationFn: async (ids: string[]) => {
       stop.current = false;
@@ -24,7 +29,7 @@ export function InventoryImport({ accountKey, onOpenListing }: { accountKey: str
         if (stop.current) break;
         setErrors((previous) => { const next = { ...previous }; delete next[id]; return next; });
         try {
-          const result = await api.ebay.importListing(id);
+          const result = await importer.importListing(id);
           setResults((previous) => ({ ...previous, [id]: result }));
           setSelected((previous) => previous.filter((value) => value !== id));
         } catch (error) {
@@ -36,7 +41,7 @@ export function InventoryImport({ accountKey, onOpenListing }: { accountKey: str
     onSettled: () => {
       setStopping(false);
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      void queryClient.invalidateQueries({ queryKey: ["ebay", "import-active"] });
+      void queryClient.invalidateQueries({ queryKey: ["inventory-import", marketplace] });
       void queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] });
     },
   });
@@ -44,14 +49,14 @@ export function InventoryImport({ accountKey, onOpenListing }: { accountKey: str
   const available = rows.filter((row) => !row.reason && !row.conversation_id && !results[row.id]).map((row) => row.id);
   const imported = Object.values(results);
 
-  return <PageSection title="Import from eBay" description="Bring your active eBay listings and photos into Anteroom. This reads eBay and saves local inventory; it does not change or publish listings.">
-    <PageNote>Supports active US fixed-price listings in USD without variations. Existing Anteroom items are opened again without replacing their edits or photos.</PageNote>
+  return <PageSection title={`Import from ${name}`} description={`Bring your active ${name} listings and photos into Anteroom. This reads ${name} and saves local inventory; it does not change or publish listings.`}>
+    <PageNote>{marketplace === "ebay" ? "Supports active US fixed-price listings in USD without variations." : "Supports active physical Etsy listings in USD without variations."} Existing Anteroom items are opened again without replacing their edits or photos.</PageNote>
     <form className="ebay-search-form" onSubmit={(event) => { event.preventDefault(); if (!run.isPending) run.mutate([itemId.trim()]); }}>
-      <label className="min-w-48 flex-1 space-y-1 text-xs">eBay listing ID
-        <Input required inputMode="numeric" pattern="[0-9]{9,15}" maxLength={15} value={itemId} disabled={run.isPending}
+      <label className="min-w-48 flex-1 space-y-1 text-xs">{name} listing ID
+        <Input required inputMode="numeric" pattern={idPattern} maxLength={marketplace === "ebay" ? 15 : 20} value={itemId} disabled={run.isPending}
           onChange={(event) => setItemId(event.target.value)} placeholder="123456789012" />
       </label>
-      <Button type="submit" size="sm" variant="outline" disabled={run.isPending || !/^\d{9,15}$/.test(itemId.trim())}>Import listing</Button>
+      <Button type="submit" size="sm" variant="outline" disabled={run.isPending || !validId}>Import listing</Button>
     </form>
     {candidates.error ? <PageError message={candidates.error.message} /> : null}
     <div className="flex flex-wrap items-center gap-2 text-xs">

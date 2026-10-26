@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.388 — 2026-10-26
+
+- Import your active Etsy listings and photos directly into Anteroom from Etsy → Listings → Import from Etsy. Select a page or enter a listing ID; existing edits and photos stay intact, and live Etsy listings are left unchanged.
+
 ## 0.1.387 — 2026-10-26
 
 - Import existing eBay listings and photos straight into Anteroom from eBay → Listings → Import from eBay. Select items from your active listings or enter a listing ID; existing items keep their edits and photos, and partial photo failures are shown. The import leaves live eBay listings unchanged.

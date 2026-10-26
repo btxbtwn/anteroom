@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.services.etsy_audit import etsy_not_allowed_live
-from vendoo_studio.services import etsy_listings, etsy_workspace, marketplace_accounts, user_settings
+from vendoo_studio.services import etsy_import, etsy_listings, etsy_workspace, marketplace_accounts, user_settings
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 from vendoo_studio.services.relay_client import RelayError
 
@@ -68,6 +68,21 @@ async def get_listing_profiles():
         raise HTTPException(409, str(exc)) from exc
     except (httpx.HTTPError, RelayError) as exc:
         raise HTTPException(502, "Could not load Etsy listing profiles. Check the Etsy connection.") from exc
+
+
+class ImportRequest(BaseModel):
+    listing_id: str = Field(pattern=r"^[1-9][0-9]{0,19}$")
+
+
+@router.get("/import/active")
+async def import_candidates(response: Response, page: int = Query(1, ge=1, le=4001), db: Session = Depends(get_db)):
+    return await _read_workspace(lambda client: etsy_import.active_listings(client, db, page), response)
+
+
+@router.post("/import")
+async def import_item(body: ImportRequest, response: Response, db: Session = Depends(get_db)):
+    """Read one owned Etsy listing into local inventory; never change Etsy."""
+    return await _read_workspace(lambda client: etsy_import.import_listing(client, db, body.listing_id), response)
 
 
 class EtsyListingDefaults(BaseModel):

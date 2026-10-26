@@ -16,9 +16,9 @@ from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
-from vendoo_studio.repositories import ebay_imports
+from vendoo_studio.repositories import inventory_imports
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-from vendoo_studio.services import ebay_import, keychain, photos
+from vendoo_studio.services import ebay_import, inventory_import, keychain, photos
 from vendoo_studio.services.ebay_client import EbayFailure, NS
 
 ITEM_ID = "123456789012"
@@ -99,7 +99,7 @@ def imported(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ebay_import.EbayClient, "connect", connect)
     monkeypatch.setattr(ebay_import, "assert_identity", lambda seller: None)
-    monkeypatch.setattr(ebay_import, "PHOTOS_DIR", str(tmp_path))
+    monkeypatch.setattr(inventory_import, "PHOTOS_DIR", str(tmp_path))
     monkeypatch.setattr(photos, "PHOTOS_DIR", str(tmp_path))
     image = BytesIO()
     Image.new("RGB", (16, 12), "red").save(image, format="JPEG")
@@ -109,7 +109,7 @@ def imported(tmp_path, monkeypatch):
         downloads.append(url)
         return image.getvalue(), "image/jpeg", url
 
-    monkeypatch.setattr(ebay_import, "fetch_public", fetch)
+    monkeypatch.setattr(inventory_import, "fetch_public", fetch)
     app.dependency_overrides[get_db] = lambda: db
     client = TestClient(app)
     yield SimpleNamespace(client=client, db=db, remote=remote, downloads=downloads, directory=tmp_path)
@@ -200,14 +200,14 @@ def test_variation_listings_are_not_collapsed_into_one_item(imported):
 
 
 def test_partial_photo_failure_reports_warning_without_dropping_the_item(imported, monkeypatch):
-    fetch = ebay_import.fetch_public
+    fetch = inventory_import.fetch_public
 
     async def fail_second(client, url, **kwargs):
         if "second" in url:
             raise httpx.ConnectError("offline")
         return await fetch(client, url, **kwargs)
 
-    monkeypatch.setattr(ebay_import, "fetch_public", fail_second)
+    monkeypatch.setattr(inventory_import, "fetch_public", fail_second)
     response = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID})
     assert response.status_code == 200
     assert response.json()["photo_count"] == 1
@@ -258,20 +258,20 @@ def test_import_database_write_is_atomic(imported):
 
     event.listen(imported.db, "before_commit", fail, once=True)
     with pytest.raises(RuntimeError, match="Simulated"):
-        ebay_imports.create_import(imported.db, {"title": "Coat"}, ITEM_ID, [])
+        inventory_imports.create_import(imported.db, "ebay", {"title": "Coat"}, ITEM_ID, [])
     assert imported.db.query(Conversation).count() == 0
     assert imported.db.query(ListingRevision).count() == 0
 
 
 def test_two_requests_finishing_the_same_import_reuse_one_item_and_clean_unused_photos(imported, monkeypatch):
-    original = ebay_import.download_photos
+    original = inventory_import.download_photos
 
     async def other_request_finishes(urls):
         meta = await original(urls)
-        ebay_imports.create_import(imported.db, {"title": "First request won"}, ITEM_ID, [])
+        inventory_imports.create_import(imported.db, "ebay", {"title": "First request won"}, ITEM_ID, [])
         return meta
 
-    monkeypatch.setattr(ebay_import, "download_photos", other_request_finishes)
+    monkeypatch.setattr(inventory_import, "download_photos", other_request_finishes)
     result = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID}).json()
     assert result["reused"] and imported.db.query(Conversation).count() == 1
     assert list(imported.directory.iterdir()) == []

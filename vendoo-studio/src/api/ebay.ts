@@ -41,28 +41,6 @@ export interface EbayListing {
   categoryId: string;
 }
 
-export interface EbayImportPage {
-  page: number;
-  total: number | null;
-  has_more: boolean;
-  rows: {
-    id: string;
-    title: string;
-    price: string | null;
-    quantity: number | null;
-    reason: string | null;
-    conversation_id: string | null;
-  }[];
-}
-
-export interface EbayImportResult {
-  conversation_id: string;
-  listing_id: string;
-  reused: boolean;
-  photo_count: number;
-  warnings: string[];
-}
-
 export type EbayPayload = Record<string, unknown>;
 
 /** The policies and locations on the connected eBay account, by id and name. */

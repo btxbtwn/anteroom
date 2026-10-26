@@ -1,24 +1,15 @@
 """Read a seller's existing eBay listings into local inventory. Never write to eBay."""
 from __future__ import annotations
 
-import asyncio
 from decimal import Decimal, InvalidOperation
 import math
-from pathlib import Path
 import xml.etree.ElementTree as ET
 
-import httpx
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import MAX_PHOTO_COUNT, PHOTOS_DIR
 from vendoo_studio.models.schema import ListingSchema
-from vendoo_studio.repositories import ebay_imports
-from vendoo_studio.repositories.queries import ConversationRepo
-from vendoo_studio.services import ebay_actions, photos
-from vendoo_studio.services.api_job_lock import start_gate
+from vendoo_studio.services import ebay_actions, inventory_import
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, NS, assert_identity, trading_xml
-from vendoo_studio.services.relay_sales import matching_listings, reconcile_unmatched
-from vendoo_studio.services.safe_fetch import DOWNLOAD_TIMEOUT_SEC, fetch_public, is_image_type
 
 PAGE_SIZE = 25
 
@@ -29,14 +20,6 @@ def _number(value: str | None) -> int | None:
         return number if number is not None and number >= 0 else None
     except (ValueError, TypeError):
         return None
-
-
-def _owner(db: Session, listing_id: str):
-    matches = list({conv.id: conv for conv in [*matching_listings(db, "ebay", listing_id),
-                                             *ebay_imports.owners_by_id(db, listing_id)]}.values())
-    if len(matches) > 1:
-        raise EbayFailure("This eBay listing matches more than one Anteroom item. Resolve the duplicate inventory first.", 409)
-    return matches[0] if matches else None
 
 
 async def active_listings(client: EbayClient, db: Session, page_number: int) -> dict:
@@ -68,8 +51,8 @@ async def active_listings(client: EbayClient, db: Session, page_number: int) -> 
         elif price is None or price.get("currencyID") != "USD":
             reason = "This import supports listings priced in USD."
         try:
-            existing = _owner(db, identifier)
-        except EbayFailure as exc:
+            existing = inventory_import.owner(db, "ebay", identifier)
+        except inventory_import.ImportConflict as exc:
             existing, reason = None, str(exc)
         rows.append({"id": identifier, "title": item.findtext("e:Title", namespaces=NS) or identifier,
                      "price": price.text if price is not None and price.get("currencyID") == "USD" else None,
@@ -108,55 +91,14 @@ def _snapshot(info: dict) -> dict:
             "ebay_specifics": {**specifics, **({"conditionDescription": info["conditionDescription"]} if info.get("conditionDescription") else {})}}
 
 
-async def download_photos(urls: list[str]) -> list[dict]:
-    limit = asyncio.Semaphore(4)
-    async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SEC, follow_redirects=False, trust_env=False) as client:
-        async def download(index: int, url: str):
-            async with limit:
-                try:
-                    content, content_type, _ = await fetch_public(client, url, accept=is_image_type)
-                    return await asyncio.to_thread(photos.process_bytes, content, f"ebay-{index + 1}.jpg", content_type)
-                except (httpx.HTTPError, ValueError, OSError):
-                    return None
-        result = await asyncio.gather(*(download(index, url) for index, url in enumerate(urls[:MAX_PHOTO_COUNT])))
-    return [meta for meta in result if meta]
-
-
-def _result(db: Session, conv_id: str, listing_id: str, *, reused: bool, warnings: list[str]) -> dict:
-    return {"conversation_id": conv_id, "listing_id": listing_id, "reused": reused,
-            "photo_count": len(ConversationRepo(db).get_photos(conv_id)), "warnings": warnings}
-
-
 async def import_listing(client: EbayClient, db: Session, listing_id: str) -> dict:
     info = await ebay_actions.owned_listing(client, listing_id)
     if info.get("id") != listing_id:
         raise EbayFailure("eBay returned a different listing. Nothing was imported.", 409)
     snapshot = _snapshot(info)
-    assert_identity(client.seller)
-    existing = _owner(db, listing_id)
-    if existing:
-        return _result(db, existing.id, listing_id, reused=True, warnings=["Already in Anteroom. Existing edits and photos were kept."])
-    urls = list(dict.fromkeys(url for url in info.get("images", []) if isinstance(url, str) and url))
-    downloaded = await download_photos(urls)
-    retained = False
     try:
-        assert_identity(client.seller)
-        with start_gate():
-            # Re-check after photo downloads: another request may have imported
-            # the same listing while this request was waiting for the network.
-            existing = _owner(db, listing_id)
-            if existing:
-                return _result(db, existing.id, listing_id, reused=True, warnings=["Already in Anteroom. Existing edits and photos were kept."])
-            conv = ebay_imports.create_import(db, snapshot, listing_id, downloaded)
-            retained = True
-        warnings = []
-        if len(downloaded) < len(urls):
-            warnings.append(f"Imported {len(downloaded)} of {len(urls)} photos. Add the missing photos before crosslisting.")
-        elif not downloaded:
-            warnings.append("eBay did not provide photos. Add photos before crosslisting.")
-        reconcile_unmatched(db, conversation_id=conv.id)
-        return _result(db, conv.id, listing_id, reused=False, warnings=warnings)
-    finally:
-        if not retained:
-            for meta in downloaded:
-                (Path(PHOTOS_DIR) / meta["stored_filename"]).unlink(missing_ok=True)
+        return await inventory_import.save_owned_listing(
+            db, "ebay", listing_id, snapshot, info.get("images", []), lambda: assert_identity(client.seller),
+        )
+    except inventory_import.ImportConflict as exc:
+        raise EbayFailure(str(exc), 409) from exc

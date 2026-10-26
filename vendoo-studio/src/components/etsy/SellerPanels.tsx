@@ -10,6 +10,8 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
+import { InventoryImport } from "../InventoryImport";
+import { WorkspaceTabs } from "../ebay/WorkspaceTabs";
 
 export interface OrderPeriod { start: string; end: string; valid: boolean }
 const ORDER_STATUSES: { id: EtsyOrderStatus; label: string }[] = [
@@ -143,7 +145,9 @@ function OrderCards({ rows }: { rows: EtsyOrder[] }) {
 
 export function EtsyListings({ scope, onOpenListing }: { scope: string; onOpenListing: (id: string) => void }) {
   const [state, setState] = useState<EtsyListingState>("active");
-  return <>
+  const [task, setTask] = useState("Shop listings");
+  return <WorkspaceTabs label="Etsy listing tools" items={["Shop listings", "Import from Etsy"]} value={task} onChange={setTask}>
+    {task === "Import from Etsy" ? <InventoryImport key={scope} marketplace="etsy" accountKey={scope} onOpenListing={onOpenListing} /> : <>
     <PageSection title="Shop listings" actions={<a className="text-xs underline" href="https://www.etsy.com/your/shops/me/tools/listings" target="_blank" rel="noreferrer">Open Etsy listing manager</a>}>
       <Select value={state} onValueChange={(value) => setState(value as EtsyListingState)}>
         <SelectTrigger aria-label="Etsy listing state" className="w-fit"><SelectValue>{LISTING_STATES.find((item) => item.id === state)?.label}</SelectValue></SelectTrigger>
@@ -152,7 +156,8 @@ export function EtsyListings({ scope, onOpenListing }: { scope: string; onOpenLi
       <ListingResults key={state} scope={scope} state={state} />
     </PageSection>
     <EtsyNotAllowed onOpenListing={onOpenListing} />
-  </>;
+    </>}
+  </WorkspaceTabs>;
 }
 
 function ListingResults({ scope, state }: { scope: string; state: EtsyListingState }) {
