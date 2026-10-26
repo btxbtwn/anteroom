@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.484 — 2026-10-27
+
+- Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.
+
 ## 0.1.483 — 2026-10-27
 
 - A Depop draft now carries the package size it needs to be posted. Anteroom quoted Depop's shipping when it published but not when it saved the draft, so a draft could be saved without the one field Depop requires, and List left you with a draft Depop never published. Saving and publishing now use the same quote, and a draft that comes back without it is named instead of saved.

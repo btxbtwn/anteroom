@@ -9,8 +9,6 @@ import httpx
 
 from vendoo_studio.services.comp_research import comps_search_messages
 from vendoo_studio.providers.chatgpt_codex import (
-    MODELS_CLIENT_VERSION,
-    USER_AGENT,
     ChatGPTCodexProvider,
     _messages_to_input,
     _responses_text,
@@ -23,7 +21,7 @@ from vendoo_studio.providers.chatgpt_codex import (
     web_search_answer,
     web_search_sources,
 )
-from vendoo_studio.services.chatgpt_oauth import jwt_auth_claims, profile_from_tokens
+from vendoo_studio.services.chatgpt_oauth import profile_from_tokens
 
 
 def _jwt(payload: dict) -> str:
@@ -32,19 +30,11 @@ def _jwt(payload: dict) -> str:
 
 
 class ChatGPTOAuthTest(unittest.TestCase):
-    def test_profile_from_id_token(self):
-        token = _jwt({
-            "email": "seller@example.com",
-            "https://api.openai.com/auth": {
-                "chatgpt_account_id": "acct_123",
-                "chatgpt_plan_type": "plus",
-            },
-        })
-        profile = profile_from_tokens({"id_token": token, "access_token": "a", "refresh_token": "r"})
-        self.assertEqual(profile["email"], "seller@example.com")
-        self.assertEqual(profile["plan"], "plus")
-        self.assertEqual(profile["account_id"], "acct_123")
-        self.assertEqual(jwt_auth_claims(token)["chatgpt_account_id"], "acct_123")
+    def test_profile_from_the_saved_connection(self):
+        token = _jwt({"https://api.openai.com/auth": {"chatgpt_plan_type": "plus"}})
+        profile = profile_from_tokens({"id_token": token, "email": "seller@example.com"})
+        self.assertEqual(profile, {"email": "seller@example.com", "plan": "plus"})
+        self.assertEqual(profile_from_tokens(None), {"email": None, "plan": None})
 
     def test_responses_text_delta(self):
         self.assertEqual(
@@ -234,53 +224,30 @@ class WebSearchRequestTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ChatGPTCatalogFetchTest(unittest.IsolatedAsyncioTestCase):
-    async def test_fetch_sends_client_version(self):
-        captured: dict = {}
+    async def test_fetch_lists_the_plans_models_from_the_public_api(self):
+        captured: list[httpx.Request] = []
 
-        class _Resp:
-            status_code = 200
-            text = '{"models":[]}'
+        def respond(request):
+            captured.append(request)
+            return httpx.Response(200, json={"models": [
+                {"slug": "gpt-6.1-sol", "visibility": "list", "priority": 4},
+                {"slug": "codex-auto-review", "visibility": "hide", "priority": 43},
+            ]})
 
-            def json(self):
-                return {
-                    "models": [
-                        {"slug": "gpt-5.6-sol", "visibility": "list", "priority": 4},
-                        {"slug": "codex-auto-review", "visibility": "hide", "priority": 43},
-                    ]
-                }
-
-        class _Client:
-            def __init__(self, *args, **kwargs):
-                pass
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *args):
-                return False
-
-            async def get(self, url, params=None, headers=None, timeout=None):
-                captured["url"] = url
-                captured["params"] = params
-                captured["headers"] = headers
-                return _Resp()
-
-        tokens = {
-            "access_token": _jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acct_123"}}),
-            "refresh_token": "r",
-        }
         from vendoo_studio.providers import chatgpt_codex
 
+        real = httpx.AsyncClient
         with (
-            patch("vendoo_studio.providers.chatgpt_codex.refresh_chatgpt_tokens", new=AsyncMock(return_value=tokens)),
-            patch("vendoo_studio.providers.chatgpt_codex.httpx.AsyncClient", _Client),
+            patch("vendoo_studio.providers.chatgpt_codex.refresh_chatgpt_tokens", new=AsyncMock(return_value={"access_token": "tok"})),
+            patch("vendoo_studio.providers.chatgpt_codex.httpx.AsyncClient", lambda *a, **k: real(transport=httpx.MockTransport(respond))),
         ):
-            slugs = await chatgpt_codex.fetch_codex_models(force=True)
-        self.assertEqual(slugs, ["gpt-5.6-sol"])
-        self.assertTrue(str(captured["url"]).endswith("/models"))
-        self.assertEqual(captured["params"], {"client_version": MODELS_CLIENT_VERSION})
-        self.assertEqual(captured["headers"]["User-Agent"], USER_AGENT)
-        self.assertEqual(captured["headers"]["ChatGPT-Account-ID"], "acct_123")
+            slugs = await chatgpt_codex.fetch_chatgpt_models(force=True)
+        self.assertEqual(slugs, ["gpt-6.1-sol"])
+        self.assertEqual(str(captured[0].url), "https://api.openai.com/v1/models")
+        self.assertEqual(captured[0].headers["authorization"], "Bearer tok")
+
+    def test_plain_api_model_lists_are_read_too(self):
+        self.assertEqual(visible_model_slugs({"data": [{"id": "gpt-6-luna"}, {"id": "gpt-6.1-sol"}]}), ["gpt-6-luna", "gpt-6.1-sol"])
 
 
 class ListingProviderPrefersChatGPTTest(unittest.TestCase):
@@ -481,15 +448,12 @@ class SettingsChatGPTRouteTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(resp.json()["masked_key"])
 
-    def test_login_returns_device_code(self):
+    def test_login_returns_the_sign_in_page(self):
         from fastapi.testclient import TestClient
 
         from vendoo_studio.main import app
 
-        pending = {
-            "verification_url": "https://auth.openai.com/codex/device",
-            "user_code": "ABCD-1234",
-        }
+        pending = {"authorize_url": "https://auth.openai.com/api/accounts/authorize?client_id=dynamic_agent_client"}
         with patch(
             "vendoo_studio.services.chatgpt_oauth.start_login",
             new=AsyncMock(return_value=pending),

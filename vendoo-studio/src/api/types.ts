@@ -343,10 +343,9 @@ export interface VendooItemResult {
   statuses?: Record<string, unknown> | null;
 }
 
+/** A Sign in with ChatGPT waiting on the browser; the page can open it again. */
 export interface ChatGPTPendingLogin {
-  verification_url: string;
-  user_code: string;
-  error?: string | null;
+  authorize_url: string;
 }
 
 export interface ChatGPTStatus {

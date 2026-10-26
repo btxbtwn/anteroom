@@ -34,14 +34,12 @@ PROVIDER_LABELS = {"chatgpt": "ChatGPT", "claude": "Claude", "cursor": "Cursor",
 
 SESSION_MINS = 5 * 60
 WEEK_MINS = 7 * 24 * 60
-MONTH_MINS = 30 * 24 * 60
 KIND_ORDER = {"session": 0, "weekly": 1, "monthly": 2, "other": 3}
 
 SUCCESS_TTL_S = 60.0
 FAILURE_TTL_S = 15.0
 PROBE_TIMEOUT_S = 20.0
 
-CHATGPT_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 CURSOR_API = "https://api2.cursor.sh"
 CURSOR_EXCHANGE_URL = f"{CURSOR_API}/auth/exchange_user_api_key"
 CURSOR_USAGE_URL = f"{CURSOR_API}/aiserver.v1.DashboardService/GetCurrentPeriodUsage"
@@ -56,16 +54,6 @@ CURSOR_USAGE_WINDOWS = (
     ),
 )
 
-CODEX_PLAN_LABELS = {
-    "free": "Free",
-    "go": "Go",
-    "plus": "Plus",
-    "pro": "Pro",
-    "team": "Team",
-    "business": "Business",
-    "enterprise": "Enterprise",
-    "edu": "Edu",
-}
 CLAUDE_PLAN_LABELS = {"pro": "Pro", "max": "Max", "team": "Team", "enterprise": "Enterprise"}
 
 
@@ -137,97 +125,26 @@ def iso_from_string(value: object) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# ChatGPT / Codex (codexUsageLimits.ts, cliproxyApi.ts)
-
-
-def _kind_for_duration(mins: float) -> str:
-    if mins >= MONTH_MINS:
-        return "monthly"
-    if mins >= WEEK_MINS:
-        return "weekly"
-    return "session"
-
-
-def _label_for_kind(kind: str) -> str:
-    return {"session": "Session", "weekly": "Weekly"}.get(kind, "Monthly")
-
-
-def codex_plan_label(plan_type: object) -> str | None:
-    if not isinstance(plan_type, str) or not plan_type.strip():
-        return None
-    key = plan_type.strip().lower()
-    return CODEX_PLAN_LABELS.get(key, key.replace("_", " ").title())
-
-
-def chatgpt_usage_to_limits(body: object, checked_at: str) -> dict:
-    """`/wham/usage`: primary and secondary are positions, not durations. Paid plans
-    expose the 5-hour and weekly pair; Free and Go expose one monthly allowance."""
-    data = body if isinstance(body, dict) else {}
-    plan_type = data.get("plan_type") if isinstance(data.get("plan_type"), str) else None
-    rate_limit = data.get("rate_limit") if isinstance(data.get("rate_limit"), dict) else {}
-    monthly_plan = plan_type in ("free", "go")
-    positions = (
-        ("primary", rate_limit.get("primary_window"), MONTH_MINS if monthly_plan else SESSION_MINS),
-        ("secondary", rate_limit.get("secondary_window"), WEEK_MINS),
-    )
-    windows: list[dict] = []
-    for window_id, window, fallback_mins in positions:
-        if not isinstance(window, dict) or not _finite(window.get("used_percent")):
-            continue
-        seconds = window.get("limit_window_seconds")
-        duration = int(seconds / 60) if _finite(seconds) and seconds > 0 else fallback_mins
-        kind = _kind_for_duration(duration)
-        entry: dict[str, Any] = {
-            "id": window_id,
-            "kind": kind,
-            "label": _label_for_kind(kind),
-            "used_percent": clamp_percent(window["used_percent"]),
-            "window_duration_mins": duration,
-        }
-        resets_at = iso_from_epoch_seconds(window.get("reset_at"))
-        if resets_at:
-            entry["resets_at"] = resets_at
-        windows.append(entry)
-    return make_limits("chatgpt", checked_at, windows, codex_plan_label(plan_type))
+# ChatGPT
 
 
 async def fetch_chatgpt() -> dict:
-    from vendoo_studio.services.chatgpt_oauth import (
-        ORIGINATOR,
-        account_id_from_tokens,
-        chatgpt_signed_in,
-        refresh_chatgpt_tokens,
-    )
+    """ChatGPT's plan usage is not readable with Sign in with ChatGPT.
+
+    OpenAI tracks it across every app the seller connects, on its own usage
+    page, as T3 Code tells its users too (CodexManagedProvider.ts).
+    """
+    from vendoo_studio.services.chatgpt_oauth import chatgpt_signed_in
 
     checked_at = now_iso()
     if not chatgpt_signed_in():
         return make_unavailable("chatgpt", checked_at, "unsupported", "Sign in to ChatGPT in Settings → Providers.")
-    try:
-        tokens = await refresh_chatgpt_tokens()
-        if not tokens:
-            return make_unavailable("chatgpt", checked_at, "unsupported", "Sign in to ChatGPT in Settings → Providers.")
-        headers = {
-            "Authorization": f"Bearer {tokens['access_token']}",
-            "Accept": "application/json",
-            "originator": ORIGINATOR,
-        }
-        account_id = account_id_from_tokens(tokens)
-        if account_id:
-            headers["ChatGPT-Account-ID"] = account_id
-        async with httpx.AsyncClient(timeout=PROBE_TIMEOUT_S) as client:
-            response = await client.get(CHATGPT_USAGE_URL, headers=headers)
-        if response.status_code >= 400:
-            log.info("ChatGPT usage request failed (HTTP %s)", response.status_code)
-            return make_unavailable(
-                "chatgpt",
-                checked_at,
-                "probeFailed",
-                f"ChatGPT could not read usage limits (HTTP {response.status_code}).",
-            )
-        return chatgpt_usage_to_limits(response.json(), checked_at)
-    except Exception as exc:  # noqa: BLE001 - every failure is reported, never raised
-        log.info("ChatGPT usage request failed (%s)", type(exc).__name__)
-        return make_unavailable("chatgpt", checked_at, "probeFailed", "ChatGPT could not read usage limits.")
+    return make_unavailable(
+        "chatgpt",
+        checked_at,
+        "unsupported",
+        "ChatGPT tracks plan usage across the apps you connect. See it in ChatGPT → Settings → Usage.",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -163,7 +163,7 @@ def get_provider():
             masked_cursor_key=masked_cursor,
             vision_model=vision_model,
             listing_model=listing_model,
-            base_url="https://chatgpt.com/backend-api/codex",
+            base_url="https://api.openai.com/v1",
             chatgpt=chatgpt,
             claude=claude,
         )
@@ -317,7 +317,7 @@ async def test_mimo():
 async def chatgpt_models():
     from vendoo_studio.providers.chatgpt_codex import (
         clamp_reasoning_effort,
-        fetch_codex_models,
+        fetch_chatgpt_models,
         resolved_chatgpt_models,
         resolved_chatgpt_reasoning,
         supported_reasoning_efforts,
@@ -330,7 +330,7 @@ async def chatgpt_models():
     vision_model, listing_model = resolved_chatgpt_models()
     error = None
     try:
-        slugs = await fetch_codex_models()
+        slugs = await fetch_chatgpt_models()
     except Exception as exc:
         slugs = []
         error = str(exc)
@@ -753,8 +753,8 @@ async def chatgpt_logout():
     from vendoo_studio.services import chatgpt_oauth
 
     await chatgpt_oauth.cancel_login()
-    chatgpt_oauth.logout()
-    return {"ok": True}
+    revoked = await chatgpt_oauth.logout()
+    return {"ok": True, "revoked": revoked}
 
 
 @router.websocket("/claude/terminal")
