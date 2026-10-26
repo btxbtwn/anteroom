@@ -354,7 +354,7 @@ class ModelFavoritesTest(unittest.TestCase):
 
     def test_invalid_favorites_are_rejected(self):
         for bad in (
-            [{"provider": "gemini", "model": "x"}],
+            [{"provider": "bogus-ai", "model": "x"}],
             [{"provider": "claude", "model": "  "}],
             [{"provider": "claude", "model": "m" * 201}],
             [{"provider": "claude"}],

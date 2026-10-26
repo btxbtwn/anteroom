@@ -10,8 +10,16 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
+from vendoo_studio.services.ai_key_catalog import KEY_PROVIDER_IDS, KEY_PROVIDERS
+from vendoo_studio.services.user_settings import SIGN_IN_PROVIDER_CHOICES
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+_PROVIDER_IDS = (*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS)
+ProviderChoice = Literal[_PROVIDER_IDS]  # type: ignore[valid-type]
+FallbackChoice = Literal[(*_PROVIDER_IDS, "none")]  # type: ignore[valid-type]
+PhotoChoice = Literal[("same", *_PROVIDER_IDS)]  # type: ignore[valid-type]
 
 
 class ChatGPTModelsConfig(BaseModel):
@@ -80,9 +88,9 @@ class ClaudeStatus(BaseModel):
 
 class ProviderStatus(BaseModel):
     provider: str
-    primary: Literal["chatgpt", "claude", "mimo", "cursor"]
-    fallback: Literal["chatgpt", "claude", "mimo", "cursor", "none"]
-    photo_provider: Literal["same", "chatgpt", "claude", "mimo", "cursor"] = "same"
+    primary: ProviderChoice
+    fallback: FallbackChoice
+    photo_provider: PhotoChoice = "same"
     configured: bool
     masked_key: str | None
     masked_cursor_key: str | None = None
@@ -94,12 +102,12 @@ class ProviderStatus(BaseModel):
 
 
 class PhotoProviderConfig(BaseModel):
-    choice: Literal["same", "chatgpt", "claude", "mimo", "cursor"]
+    choice: PhotoChoice
 
 
 class PreferredProviderConfig(BaseModel):
-    primary: Literal["chatgpt", "claude", "mimo", "cursor"]
-    fallback: Literal["chatgpt", "claude", "mimo", "cursor", "none"] | None = None
+    primary: ProviderChoice
+    fallback: FallbackChoice | None = None
 
 
 def _chatgpt_status() -> ChatGPTStatus:
@@ -189,6 +197,22 @@ def get_provider():
             claude=claude,
         )
 
+    if active_name in KEY_PROVIDERS:
+        return ProviderStatus(
+            provider=active_name,
+            primary=primary,
+            fallback=fallback,
+            photo_provider=photo_provider,
+            configured=True,
+            masked_key=masked,
+            masked_cursor_key=masked_cursor,
+            vision_model=active.vision_model,
+            listing_model=active.listing_model,
+            base_url=active.base_url,
+            chatgpt=chatgpt,
+            claude=claude,
+        )
+
     return ProviderStatus(
         provider="xiaomi-mimo",
         primary=primary,
@@ -251,7 +275,7 @@ async def test_connection():
     if provider is None:
         raise HTTPException(
             400,
-            "Sign in with ChatGPT or Claude in Settings, or add a MiMo or Cursor API key.",
+            "Sign in with ChatGPT or Claude in Settings, or add an API key for any provider.",
         )
 
     name = getattr(provider, "name", "xiaomi-mimo")

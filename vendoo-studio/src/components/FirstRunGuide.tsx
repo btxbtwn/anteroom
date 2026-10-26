@@ -6,6 +6,8 @@ import { dismissSetupGuide } from "../onboarding";
 import { ClaudeLoginTerminal } from "./ClaudeLoginTerminal";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import { ExtensionLoadPath } from "./ExtensionLoadPath";
+import { KEY_PROVIDER_IDS, KEY_PROVIDER_LABELS, isKeyProviderId, isListingProviderId } from "./keyProviders";
+import type { KeyProviderId, ListingProviderId } from "../api/types";
 
 export const SETUP_GUIDE_STEPS = [
   { id: "welcome", label: "Welcome" },
@@ -18,7 +20,7 @@ export const SETUP_GUIDE_STEPS = [
 ] as const;
 
 type StepId = (typeof SETUP_GUIDE_STEPS)[number]["id"];
-type ListingChoice = "chatgpt" | "claude" | "mimo" | "cursor";
+type ListingChoice = ListingProviderId;
 
 type FirstRunGuideProps = {
   providerConfigured: boolean;
@@ -47,6 +49,10 @@ export function FirstRunGuide({
   const [mimoMessage, setMimoMessage] = useState<string | null>(null);
   const [cursorMessage, setCursorMessage] = useState<string | null>(null);
   const [braveMessage, setBraveMessage] = useState<string | null>(null);
+  const [keyProvider, setKeyProvider] = useState<KeyProviderId>("openai");
+  const [aiKey, setAIKey] = useState("");
+  const [aiKeyMessage, setAIKeyMessage] = useState<string | null>(null);
+  const [openRouterWaiting, setOpenRouterWaiting] = useState(false);
 
   const { data: provider } = useQuery({
     queryKey: ["settings-provider"],
@@ -55,6 +61,17 @@ export function FirstRunGuide({
     refetchInterval: (query) =>
       pollMs(query.state.data?.chatgpt?.pending ? BUSY_POLL_MS : IDLE_POLL_MS),
   });
+  const { data: aiKeys } = useQuery({
+    queryKey: ["ai-keys"],
+    queryFn: api.settings.aiKeys,
+    // Fast only while OpenRouter's sign-in waits on the browser for its key.
+    refetchInterval: (query) =>
+      openRouterWaiting && !query.state.data?.providers.some((entry) => entry.id === "openrouter" && entry.masked_key)
+        ? BUSY_POLL_MS
+        : false,
+  });
+  const savedKeyIds = (aiKeys?.providers ?? []).filter((entry) => entry.masked_key).map((entry) => entry.id);
+  const keyEntry = aiKeys?.providers.find((entry) => entry.id === keyProvider);
   const { data: brave } = useQuery({
     queryKey: ["settings-brave"],
     queryFn: api.settings.brave,
@@ -66,13 +83,7 @@ export function FirstRunGuide({
   const mimoConfigured = Boolean(provider?.masked_key);
   const cursorConfigured = Boolean(provider?.masked_cursor_key);
   const braveConfigured = Boolean(brave?.configured);
-  const preferred =
-    provider?.primary === "mimo" ||
-    provider?.primary === "cursor" ||
-    provider?.primary === "chatgpt" ||
-    provider?.primary === "claude"
-      ? provider.primary
-      : null;
+  const preferred = isListingProviderId(provider?.primary) ? provider.primary : null;
   const selectedListing =
     listingChoice ??
     preferred ??
@@ -84,7 +95,8 @@ export function FirstRunGuide({
           ? "mimo"
           : cursorConfigured
             ? "cursor"
-            : "chatgpt");
+            : (savedKeyIds[0] ?? "chatgpt"));
+  const keyCardSelected = isKeyProviderId(selectedListing);
 
   const refreshProvider = () => {
     queryClient.invalidateQueries({ queryKey: ["settings-provider"] });
@@ -136,6 +148,31 @@ export function FirstRunGuide({
     },
     onError: (err: Error) => setCursorMessage(err.message),
   });
+  const saveAIKey = useMutation({
+    mutationFn: ({ id, key }: { id: KeyProviderId; key: string }) => api.settings.setAIKey(id, key),
+    onSuccess: (_result, { id }) => {
+      setAIKey("");
+      setAIKeyMessage(`${KEY_PROVIDER_LABELS[id]} key saved in Keychain.`);
+      setPreferred.mutate(id);
+      queryClient.invalidateQueries({ queryKey: ["ai-keys"] });
+      refreshProvider();
+    },
+    onError: (err: Error) => setAIKeyMessage(err.message),
+  });
+  const openRouterSignIn = useMutation({
+    mutationFn: () => api.settings.openRouterSignIn(),
+    onSuccess: () => {
+      setOpenRouterWaiting(true);
+      setPreferred.mutate("openrouter");
+    },
+    onError: (err: Error) => setAIKeyMessage(err.message),
+  });
+  const chooseKeyProvider = (id: KeyProviderId) => {
+    setKeyProvider(id);
+    setAIKeyMessage(null);
+    setListingChoice(id);
+    if (savedKeyIds.includes(id)) setPreferred.mutate(id);
+  };
   const saveBrave = useMutation({
     mutationFn: (key: string) => api.settings.setBrave(key),
     onSuccess: () => {
@@ -149,7 +186,7 @@ export function FirstRunGuide({
   const stepIndex = SETUP_GUIDE_STEPS.findIndex((item) => item.id === step);
   const isLast = step === "ready";
   const listingReady =
-    chatgptSignedIn || claudeSignedIn || mimoConfigured || cursorConfigured || providerConfigured;
+    chatgptSignedIn || claudeSignedIn || mimoConfigured || cursorConfigured || savedKeyIds.length > 0 || providerConfigured;
   const canCreateListing = true;
   const chromeReady = extensionConnected;
   const canAdvance =
@@ -321,6 +358,17 @@ export function FirstRunGuide({
                     <span>Paste a Cursor API key to use Composer for listings.</span>
                     {cursorConfigured ? <em>Key saved · {provider?.masked_cursor_key}</em> : null}
                   </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={keyCardSelected}
+                    className={`setup-guide-choice${keyCardSelected ? " selected" : ""}`}
+                    onClick={() => chooseKeyProvider(isKeyProviderId(selectedListing) ? selectedListing : keyProvider)}
+                  >
+                    <strong>Your own API key</strong>
+                    <span>OpenAI, Anthropic, Google Gemini, xAI, Mistral or OpenRouter. The provider bills you per use.</span>
+                    {savedKeyIds.length ? <em>Key saved · {savedKeyIds.map((id) => KEY_PROVIDER_LABELS[id]).join(", ")}</em> : null}
+                  </button>
                 </div>
                 {selectedListing === "chatgpt" ? (
                   <div className="setup-guide-task">
@@ -388,6 +436,74 @@ export function FirstRunGuide({
                         </button>
                       </>
                     )}
+                  </div>
+                ) : isKeyProviderId(selectedListing) ? (
+                  <div className="setup-guide-task">
+                    <label className="setup-guide-field">
+                      <span>Provider</span>
+                      <select
+                        className="input"
+                        value={selectedListing}
+                        onChange={(e) => chooseKeyProvider(e.target.value as KeyProviderId)}
+                      >
+                        {KEY_PROVIDER_IDS.map((id) => (
+                          <option key={id} value={id}>
+                            {KEY_PROVIDER_LABELS[id]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {keyEntry?.masked_key && keyEntry.id === selectedListing ? (
+                      <p className="setup-guide-copy">
+                        {KEY_PROVIDER_LABELS[selectedListing]} is ready · {keyEntry.masked_key}. Continue when you want.
+                      </p>
+                    ) : (
+                      <>
+                        {selectedListing === "openrouter" ? (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            onClick={() => openRouterSignIn.mutate()}
+                            disabled={openRouterSignIn.isPending || openRouterWaiting}
+                          >
+                            {openRouterWaiting ? "Waiting for the browser…" : "Sign in with OpenRouter"}
+                          </button>
+                        ) : null}
+                        <label className="setup-guide-field">
+                          <span>{KEY_PROVIDER_LABELS[selectedListing]} API key</span>
+                          <input
+                            className="input font-mono"
+                            type="password"
+                            value={aiKey}
+                            onChange={(e) => setAIKey(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && aiKey.trim()) saveAIKey.mutate({ id: selectedListing, key: aiKey });
+                            }}
+                            placeholder={keyEntry?.key_hint || "API key"}
+                            autoComplete="off"
+                            spellCheck={false}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={!aiKey.trim() || saveAIKey.isPending}
+                          onClick={() => saveAIKey.mutate({ id: selectedListing, key: aiKey })}
+                        >
+                          {saveAIKey.isPending ? "Saving…" : "Save key"}
+                        </button>
+                        {keyEntry?.key_url ? (
+                          <p className="setup-guide-note">
+                            Get a key at{" "}
+                            <a href={keyEntry.key_url} target="_blank" rel="noreferrer">
+                              {new URL(keyEntry.key_url).host}
+                            </a>
+                            . Usage is billed by the provider, apart from any chat subscription.
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                    {aiKeyMessage ? <p className="setup-guide-note">{aiKeyMessage}</p> : null}
                   </div>
                 ) : selectedListing === "cursor" ? (
                   <div className="setup-guide-task">
@@ -609,7 +725,7 @@ export function FirstRunGuide({
                 className="btn btn-primary btn-sm"
                 onClick={goNext}
                 disabled={!canAdvance}
-                title={!canAdvance ? "Choose ChatGPT, MiMo, or Cursor first" : undefined}
+                title={!canAdvance ? "Set up a listing AI first" : undefined}
               >
                 {isLast ? "Done" : (step === "brave" && !braveConfigured) || (step === "chrome" && !chromeReady) ? "Skip for now" : "Continue"}
               </button>

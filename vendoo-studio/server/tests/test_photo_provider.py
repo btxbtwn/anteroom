@@ -28,7 +28,7 @@ class PhotoProviderChoiceTest(unittest.TestCase):
 
     def test_rejects_an_unknown_provider(self):
         with self.assertRaises(ValueError):
-            user_settings.set_photo_provider_choice("gemini")
+            user_settings.set_photo_provider_choice("bogus-ai")
 
 
 class GetPhotoProviderTest(unittest.TestCase):
@@ -66,4 +66,4 @@ class PhotoProviderRouteTest(unittest.TestCase):
             saved = client.put("/api/settings/provider/photos", json={"choice": "chatgpt"})
             self.assertEqual(saved.json(), {"ok": True, "photo_provider": "chatgpt"})
             self.assertEqual(user_settings.get_photo_provider_choice(), "chatgpt")
-            self.assertEqual(client.put("/api/settings/provider/photos", json={"choice": "gemini"}).status_code, 422)
+            self.assertEqual(client.put("/api/settings/provider/photos", json={"choice": "bogus-ai"}).status_code, 422)

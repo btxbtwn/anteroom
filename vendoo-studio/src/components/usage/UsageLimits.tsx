@@ -29,7 +29,8 @@ const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof Ga
 };
 
 /** T3's usage colours (components/usage/usageProviders.ts); MiMo reports no bars. */
-const PROVIDER_COLOR: Record<ListingProviderId, string> = {
+// Only plan providers report usage windows; API-key providers have none.
+const PROVIDER_COLOR: Partial<Record<ListingProviderId, string>> = {
   chatgpt: "var(--contrast-foreground)",
   claude: "#d97757",
   cursor: "#8b8b8b",

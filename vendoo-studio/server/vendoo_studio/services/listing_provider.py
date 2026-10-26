@@ -4,10 +4,15 @@ from vendoo_studio.providers.chatgpt_codex import ChatGPTCodexProvider
 from vendoo_studio.providers.claude_agent import ClaudeProvider
 from vendoo_studio.providers.cursor_agent import CursorProvider
 from vendoo_studio.providers.xiaomi_mimo import MiMoProvider
+from vendoo_studio.services.ai_key_catalog import KEY_PROVIDER_IDS, KEY_PROVIDERS
 from vendoo_studio.services.chatgpt_oauth import chatgpt_signed_in
 from vendoo_studio.services.claude_auth import claude_signed_in
-from vendoo_studio.services.keychain import get_api_key, get_cursor_api_key
-from vendoo_studio.services.user_settings import get_listing_provider_order, get_photo_provider_choice
+from vendoo_studio.services.keychain import get_ai_key, get_ai_keys, get_api_key, get_cursor_api_key
+from vendoo_studio.services.user_settings import (
+    get_listing_provider_order,
+    get_photo_provider_choice,
+    resolved_key_provider_models,
+)
 
 
 def _mimo_provider():
@@ -36,7 +41,33 @@ def _cursor_provider():
     return CursorProvider(api_key=key)
 
 
+def key_provider_instance(provider_id: str, api_key: str):
+    """The provider for one API-key entry in ``ai_key_catalog``."""
+    from vendoo_studio.providers.anthropic_api import AnthropicAPIProvider
+    from vendoo_studio.providers.chat_completions import ChatCompletionsProvider, OpenRouterProvider
+    from vendoo_studio.providers.openai_api import OpenAIAPIProvider
+
+    spec = KEY_PROVIDERS[provider_id]
+    vision, listing = resolved_key_provider_models(provider_id)
+    if spec.api == "responses":
+        return OpenAIAPIProvider(api_key, vision, listing)
+    if spec.api == "anthropic":
+        return AnthropicAPIProvider(api_key, vision, listing)
+    if spec.id == "openrouter":
+        return OpenRouterProvider(spec, api_key, vision, listing)
+    return ChatCompletionsProvider(spec, api_key, vision, listing)
+
+
+def _key_provider(provider_id: str):
+    key = get_ai_key(provider_id)
+    if not key:
+        return None
+    return key_provider_instance(provider_id, key)
+
+
 def _provider_for(choice: str):
+    if choice in KEY_PROVIDERS:
+        return _key_provider(choice)
     if choice == "mimo":
         return _mimo_provider()
     if choice == "chatgpt":
@@ -49,7 +80,7 @@ def _provider_for(choice: str):
 
 
 # Tried after the seller's primary and fallback, when neither is ready.
-PROVIDER_CHOICES = ("chatgpt", "claude", "cursor", "mimo")
+PROVIDER_CHOICES = ("chatgpt", "claude", "cursor", "mimo", *KEY_PROVIDER_IDS)
 
 
 def get_listing_provider():
@@ -98,4 +129,5 @@ def provider_is_configured() -> bool:
         or bool(get_api_key())
         or bool(get_cursor_api_key())
         or claude_signed_in()
+        or bool(get_ai_keys())
     )

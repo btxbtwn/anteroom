@@ -130,3 +130,16 @@ describe("provider settings", () => {
     expect(effortOptions(["low"], false)).toEqual([{ value: "low", label: "Low" }]);
   });
 });
+
+describe("API-key providers", () => {
+  it("reports the key provider the server is using", () => {
+    expect(activeProviderId({ provider: "openrouter", primary: "chatgpt" })).toBe("openrouter");
+    expect(activeProviderId({ provider: "xiaomi-mimo", primary: "gemini" })).toBe("mimo");
+    expect(activeProviderId({ provider: "unknown", primary: "anthropic" })).toBe("anthropic");
+  });
+
+  it("keeps the old primary as fallback when a key provider takes over", () => {
+    expect(providerOrderFor("gemini", { primary: "chatgpt", fallback: "mimo" })).toEqual({ primary: "gemini", fallback: "mimo" });
+    expect(providerOrderFor("openai", { primary: "chatgpt", fallback: "openai" })).toEqual({ primary: "openai", fallback: "chatgpt" });
+  });
+});

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.385 — 2026-10-26
+
+- Listings can now be written by OpenAI, Anthropic, Google Gemini, xAI Grok, Mistral or OpenRouter using your own API key, added in Settings → Providers or the setup guide. OpenRouter can also connect by signing in. Each provider bills you per use, separately from a ChatGPT or Claude subscription, and your ChatGPT and Claude sign-ins keep working as before.
+
 ## 0.1.384 — 2026-10-26
 
 - Match previously received sale alerts when you link an item, sync its marketplaces, or refresh Etsy alerts. Other-marketplace warnings now include Anteroom's direct listings and exclude listings already sold or removed, without relying on Vendoo.

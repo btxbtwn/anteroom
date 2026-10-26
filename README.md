@@ -64,7 +64,7 @@ Ask about the shop across listings, sales, and sourcing. Each listing also has i
 <details>
 <summary>AI provider settings</summary>
 
-Choose ChatGPT, Claude, Xiaomi MiMo, or Cursor. Configure the primary listing provider, fallback, and photo analysis provider in **Settings → Providers**.
+Sign in with ChatGPT or Claude, or use your own API key for OpenAI, Anthropic, Google Gemini, xAI Grok, Mistral, OpenRouter (which can also connect by signing in), Xiaomi MiMo, or Cursor. API keys are billed by the provider per use and stay in macOS Keychain. Configure the primary listing provider, fallback, and photo analysis provider in **Settings → Providers**.
 
 ![Anteroom provider settings showing ChatGPT, Claude, Xiaomi MiMo, and Cursor alongside sign-in and listing provider controls](docs/screenshots/anteroom-providers.png)
 
@@ -76,7 +76,7 @@ You need **macOS 13+**, **Google Chrome**, a Vendoo account, and access to one o
 
 1. Download `Anteroom-macos.zip` from the [Mac release](https://github.com/btxbtwn/list-this-vendoo-suite/releases/tag/studio-macos), unzip it, and read **How to Open.txt**.
 2. Drag **Anteroom.app** into Applications. Control-click it and choose **Open** the first time; follow the included instructions if macOS warns about the developer.
-3. Follow the setup guide or open **Settings → Providers**. Sign in with ChatGPT or Claude, or enter a Xiaomi MiMo or Cursor API key.
+3. Follow the setup guide or open **Settings → Providers**. Sign in with ChatGPT, Claude, or OpenRouter, or enter an API key for any listed provider.
 4. Click **Connect Chrome**, then load Anteroom's unpacked extension once: open `chrome://extensions/`, enable **Developer mode**, and choose **Load unpacked**. Use the folder shown in **Settings → Connections** (normally `~/Library/Application Support/Anteroom/vendoo-extension` for the Mac app).
 5. Sign in to Vendoo in that Chrome window. Confirm Anteroom shows the extension as connected before sending a listing.
 
