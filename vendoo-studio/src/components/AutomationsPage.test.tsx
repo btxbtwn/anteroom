@@ -11,9 +11,10 @@ vi.mock("@tanstack/react-query", () => ({
 
 describe("AutomationsPage", () => {
   it("asks for a sentence and does not run anything until it is confirmed", () => {
-    const html = renderToStaticMarkup(<AutomationsPage />);
+    const html = renderToStaticMarkup(<AutomationsPage onOpenListing={vi.fn()} />);
     expect(html).toContain("Automations");
-    expect(html).toContain("Nothing runs until you confirm");
+    expect(html).toContain("Listing, delisting and relisting wait for your review");
+    expect(html).not.toContain("Require approval before publishing");
     expect(html).toContain("Draft from prompt");
     expect(html).toContain("Preview");
     expect(html).toContain("Save and confirm");

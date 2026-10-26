@@ -6,11 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.407 — 2026-10-26
+## 0.1.408 — 2026-10-26
 
 - Listing again on Depop fills the draft you already saved, including category, size, colour, brand, and photos.
 - Choosing no brand on Mercari clears a brand that was already on the draft.
 - Leaving SKU empty keeps it empty in Anteroom. eBay still needs its own inventory key, and that key is not saved as your SKU.
+
+## 0.1.407 — 2026-10-26
+
+- Scheduled listing, delisting and relisting now wait for your review of each item and named marketplace. Changed drafts, photos or links need a new review, and failed marketplace actions stay visible without automatic retries. List never takes down a live listing; choose Relist explicitly.
 
 ## 0.1.406 — 2026-10-26
 
