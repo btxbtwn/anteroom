@@ -17,7 +17,7 @@ import re
 ERROR_CODES = frozenset({
     "signed_out", "challenge", "rate_limited", "missing_fields", "rejected", "schema_drift", "network", "uncertain",
 })
-MESSAGE_LIMIT = 500
+MESSAGE_LIMIT = 4000
 
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 # Bearer tokens, cookies, signed URLs: long unbroken runs of token characters.

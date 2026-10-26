@@ -33,10 +33,11 @@ function marketplaceScrub(text) {
     .replace(/\bBearer\s+\S+/gi, 'Bearer [hidden]')
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)?/g, '[token]')
     .replace(/\b([\w-]*(?:token|session|cookie|csrf|secret|key|auth)[\w-]*)\s*[=:]\s*["']?[^\s"';,]+/gi, '$1=[hidden]')
+    .replace(/("(?:[^"\\]|\\)*(?:token|session|cookie|csrf|secret|key|auth)(?:[^"\\]|\\)*"\s*:\s*")(?:[^"\\]|\\)*(")/gi, '$1[hidden]$2')
     .replace(/\b[A-Za-z0-9+/_-]{32,}={0,2}/g, '[hidden]')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 500);
+    .slice(0, 4000);
 }
 
 // Message-like fields of a marketplace error body, never the whole body.
@@ -195,6 +196,9 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
           ? marketplaceError(`${label} asked to sign in again. Reconnect ${label} in Anteroom.`, { code: 'signed_out', status, marketplace_message: statusLine })
           : marketplaceError(`${label} answered in a way Anteroom does not recognise.`, { code: 'schema_drift', rejected: !write, status, marketplace_message: statusLine });
       }
+      // The marketplace's own body, not only the one message field it picked.
+      // Callers surface this on the job so a refusal names the field.
+      if (failure && data && typeof data === 'object') failure.response_body = marketplaceScrub(JSON.stringify(data));
       marketplaceLog(marketplace, step, { method, status, attempt: attempt || null, error_code: failure?.code, ms });
       if (!failure) return { status, data: expect === 'text' ? text : (data ?? {}), headers: response.headers };
     } else {
