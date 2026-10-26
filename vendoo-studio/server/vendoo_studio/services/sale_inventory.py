@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.listing import ListingRevision
-from vendoo_studio.models.marketplace_sale import MarketplaceSale
+from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.vendoo_import import parse_notes
@@ -23,10 +23,11 @@ def _time(value):
 def stock_after_sale(db: Session, conv_id: str, marketplace: str, listing_id: str | None) -> dict:
     """Use stock read after the latest sale notice; never subtract sales from edited/imported quantities."""
     unknown = {"status": "unknown", "remaining": None}
-    latest = db.query(MarketplaceSale).filter_by(conversation_id=conv_id, marketplace=marketplace,
-                                               listing_id=listing_id).order_by(MarketplaceSale.received_at.desc()).first()
-    if latest is None:
+    lines = db.query(MarketplaceSale).filter_by(conversation_id=conv_id, marketplace=marketplace, listing_id=listing_id).all()
+    paid = [line for line in lines if line.order_status in PAID_STATUSES]
+    if not paid:
         return unknown
+    changed_at = max(filter(None, (_time(value) for line in lines for value in (line.received_at, line.order_observed_at))), default=None)
     record = MarketplaceListingRepo(db).get(conv_id, marketplace)
     from vendoo_studio.services.marketplace_identity import listing_id as reference_id
 
@@ -39,7 +40,7 @@ def stock_after_sale(db: Session, conv_id: str, marketplace: str, listing_id: st
     if current_id and listing_id and current_id != listing_id:
         return unknown
     observed = record.get("inventory_observation") or {}
-    checked, received = _time(observed.get("checked_at")), _time(latest.received_at)
+    checked, received = _time(observed.get("checked_at")), changed_at
     if observed.get("listing_id") == listing_id and checked and received and checked >= received:
         quantity = observed.get("quantity")
         if observed.get("state") == "active" and type(quantity) is int and quantity >= 0:
@@ -53,7 +54,7 @@ def stock_after_sale(db: Session, conv_id: str, marketplace: str, listing_id: st
     published = db.get(ListingRevision, record["revision_id"]) if record.get("revision_id") else None
     quantities = [revision.listing_json.get("quantity") if revision else None,
                   published.listing_json.get("quantity") if published else None,
-                  observed.get("quantity"), latest.quantity]
+                  observed.get("quantity"), *[line.quantity for line in paid]]
     if any(type(quantity) is int and quantity > 1 for quantity in quantities):
         return unknown
     # Keep the established single-item sale behavior until a direct read says

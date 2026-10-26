@@ -1,3 +1,4 @@
+import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
 import type {
   SendPreview,
   BackupSnapshot,
@@ -484,6 +485,7 @@ export const api = {
       }),
   },
   marketplaceSales: {
+    recover: (body: OrderRecoveryRequest) => request<OrderRecoveryResult>("/marketplace-sales/recover", { method: "POST", body: JSON.stringify(body) }),
     reconcile: (marketplace?: string) => request<{ matched: number; unmatched: number }>(
       `/marketplace-sales/reconcile${marketplace ? `?${new URLSearchParams({ marketplace })}` : ""}`, { method: "POST" },
     ),

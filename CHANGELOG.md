@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.391 — 2026-10-26
+
+- Recover missing eBay and Etsy sales from Orders, including cancellations and refunds on older orders changed during your selected dates. Check pages sequentially, stop and resume, and keep existing links, dismissed alerts and local quantities intact.
+
 ## 0.1.390 — 2026-10-26
 
 - Multi-unit sales no longer assume the whole item sold out. Sync verifies remaining stock, sale alerts show what remains or ask you to check, and partial or unverified multi-unit sales keep other listings intact.

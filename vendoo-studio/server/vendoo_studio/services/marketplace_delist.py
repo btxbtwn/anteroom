@@ -21,7 +21,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.marketplace_listing import UNSETTLED_STATES
-from vendoo_studio.models.marketplace_sale import MarketplaceSale
+from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import browser_bridge, marketplace_accounts
@@ -64,15 +64,18 @@ def _sold_on(db: Session, conv_id: str, notes: dict) -> dict[str, datetime | Non
     from vendoo_studio.services.sale_inventory import stock_after_sale
 
     native = MarketplaceListingRepo(db).for_conversation(conv_id)
-    for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id):
+    stocks = {}
+    for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)):
         mark = _notes_dict(notes, "marketplaceMarks").get(row.marketplace) or {}
         url, _source = _current_listing(row.marketplace, (native.get(row.marketplace) or {}).get("listing_url"),
                                        _notes_dict(notes, "vendooListingUrls").get(row.marketplace), mark)
         current_id = listing_id(row.marketplace, url)
         if current_id and row.listing_id and current_id != row.listing_id:
             continue
-        stock = stock_after_sale(db, conv_id, row.marketplace, row.listing_id)
-        if stock["status"] == "sold_out":
+        key = (row.marketplace, row.listing_id)
+        if key not in stocks:
+            stocks[key] = stock_after_sale(db, conv_id, row.marketplace, row.listing_id)
+        if stocks[key]["status"] == "sold_out":
             add(row.marketplace, row.received_at)
     sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
     if sale.get("marketplace"):

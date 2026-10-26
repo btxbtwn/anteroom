@@ -378,3 +378,18 @@ def test_previous_release_keeps_listing_identity_when_stock_observations_are_add
         row = connection.execute("SELECT listing_id, state, inventory_observation FROM marketplace_listings WHERE id='binding'").fetchone()
     assert row == ("555", "published", None)
     assert inspect_database(engine.url.database).clean
+
+
+def test_existing_sale_alerts_keep_identity_and_dismissal_when_order_ledger_is_added(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "5f761d58b211")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO marketplace_sales (id, marketplace, order_id, line_id, listing_id, state, quantity, received_at) "
+                           "VALUES ('keep-sale', 'etsy', '100', '200', '555', 'dismissed', 2, '2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        row = connection.execute("SELECT order_id, line_id, state, quantity, order_status, order_observed_at FROM marketplace_sales WHERE id='keep-sale'").fetchone()
+    assert row == ("100", "200", "dismissed", 2, "paid", None)
+    assert inspect_database(engine.url.database).clean

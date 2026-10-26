@@ -209,6 +209,33 @@ Etsy listings in USD without variations; other listings show status and an
 explanation. Check results describe the moment you clicked Sync; click again
 after making changes locally or on a marketplace.
 
+### Recovering direct marketplace orders
+
+Connect eBay or Etsy, then open **Marketplaces → eBay/Etsy → Orders → Recover orders**.
+Choose a UTC range of up to 30 days within the last 90 days. Recovery reads orders
+**modified** in that period, so it also finds updates to older orders. Pages run
+sequentially; stop after the current page and use **Continue from page** to resume.
+A failed page can be retried without replaying successful pages. Reconnecting the
+account stops the old recovery session. All pages reuse the first page's upper
+time boundary. Run recovery again to include orders changed while it was running.
+
+The local order-line ledger reuses webhook identities, preserves dismissed
+alerts and existing assignments, and reports identity conflicts without guessing.
+Unpaid and unsupported order states are counted as skipped. eBay uses Trading
+order-line IDs, matching its notifications; Etsy uses receipt and transaction IDs.
+Completed cancellations and refunds update order status and stop treating those
+lines as active sales. A pending cancellation stays visible for review. Partial refunds remain paid sales. eBay payment/refund status is verified through
+its order API while retaining the Trading line IDs used by notifications.
+
+Recovery never notifies, restocks, relists, delists, or subtracts historical orders
+from your edited/imported local quantities. Review stock with **Sync** before any
+marketplace action. A quantity/status update makes older stock observations stale.
+Counts cover the pages checked; identity conflicts and limits remain visible for
+follow-up. Only order/listing/line IDs, quantity, status and dates enter this ledger;
+buyer names, contact information, addresses and raw order bodies are not stored.
+[eBay recovery](https://developer.ebay.com/DevZone/XML/Docs/Reference/ebay/GetOrders.html)
+covers its 90-day retained sales history, with at most 30 days per modification window.
+
 ### Partial sales and remaining stock
 
 A multi-unit sale keeps the item listed until its remaining stock is verified.
