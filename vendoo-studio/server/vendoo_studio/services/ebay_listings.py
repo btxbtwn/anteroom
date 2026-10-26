@@ -501,21 +501,41 @@ def best_offer_terms(form: dict, price: str, listing: dict | None = None) -> dic
     if chosen and not best_offer_enabled(chosen):
         return {"bestOfferEnabled": False}
     floors = offer_floors(price) or ("", "")
-    amounts = {
-        "autoAcceptPrice": chosen.get("autoAcceptPrice") or fixed.get("acceptOffersOfAtLeast") or floors[0],
-        "autoDeclinePrice": chosen.get("minimumOfferPrice") or chosen.get("autoDeclinePrice") or fixed.get("declineOffersLowerThan") or floors[1],
-    }
-    terms: dict = {"bestOfferEnabled": True}
-    parsed: dict[str, Decimal] = {}
-    for name, raw in amounts.items():
+
+    def _amount(raw) -> Decimal | None:
         try:
-            amount = Decimal(str(raw or ""))
+            amount = Decimal(str(raw or "").replace("$", "").replace(",", "").strip())
         except ArithmeticError:
-            continue
-        if 0 < amount < Decimal(str(price or "0") or "0"):
-            parsed[name] = amount
-    if "autoAcceptPrice" in parsed and "autoDeclinePrice" in parsed and not parsed["autoDeclinePrice"] < parsed["autoAcceptPrice"]:
-        parsed.clear()
+            return None
+        return amount if amount > 0 else None
+
+    def _seller_amount(*keys: str) -> Decimal | None:
+        for key in keys:
+            if key not in chosen:
+                continue
+            if str(chosen.get(key) or "").strip() == "":
+                return None
+            return _amount(chosen.get(key))
+        return None
+
+    seller_accept = _seller_amount("autoAcceptPrice")
+    seller_minimum = _seller_amount("minimumOfferPrice", "autoDeclinePrice")
+    accept = seller_accept if seller_accept is not None else _amount(fixed.get("acceptOffersOfAtLeast")) or _amount(floors[0])
+    minimum = seller_minimum if seller_minimum is not None else _amount(fixed.get("declineOffersLowerThan")) or _amount(floors[1])
+    # A formula floor on the wrong side of a price the seller set is left off.
+    if seller_accept is not None and seller_minimum is None and minimum is not None and not minimum < seller_accept:
+        minimum = None
+    if seller_minimum is not None and seller_accept is None and accept is not None and not seller_minimum < accept:
+        accept = None
+    if accept is not None and minimum is not None and not minimum < accept:
+        accept = minimum = None
+    price_amount = _amount(price)
+    parsed: dict[str, Decimal] = {}
+    if accept is not None and price_amount is not None and accept < price_amount:
+        parsed["autoAcceptPrice"] = accept
+    if minimum is not None and price_amount is not None and minimum < price_amount:
+        parsed["autoDeclinePrice"] = minimum
+    terms: dict = {"bestOfferEnabled": True}
     for name, amount in parsed.items():
         terms[name] = {"value": format(amount.quantize(Decimal("0.01")), "f"), "currency": "USD"}
     return terms

@@ -675,6 +675,15 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
 
         backwards = {**listing, "ebay_specifics": {"bestOffer": {"autoAcceptPrice": 12, "minimumOfferPrice": 15}}}
         self.assertIn("minimum offer", best_offer_error(backwards) or "")
+        # The formula minimum (list - $4) can sit above an auto-accept the seller is still typing.
+        alone = {**LISTING, "price": "40", "ebay_specifics": {"bestOffer": {"autoAcceptPrice": 15}}}
+        self.assertIsNone(best_offer_error(alone))
+        held = {"specifics": {"pricingFormatDetails": {"fixedPrice": {
+            "allowBestOffer": True, "acceptOffersOfAtLeast": "38.00", "declineOffersLowerThan": "36.00",
+        }}}}
+        one_side = ebay_listings.best_offer_terms(held, "40.00", alone)
+        self.assertEqual(one_side["autoAcceptPrice"]["value"], "15.00")
+        self.assertNotIn("autoDeclinePrice", one_side)
 
     async def test_a_401_refreshes_the_token_once_and_a_second_401_is_signed_out(self):
         import httpx

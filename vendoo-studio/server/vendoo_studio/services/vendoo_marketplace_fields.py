@@ -144,12 +144,8 @@ def best_offer_error(listing: dict[str, Any] | None) -> str | None:
         return "The minimum offer must be below the item price."
     if accept is not None and minimum is not None and not minimum < accept:
         return "Best Offer needs the minimum offer below the auto-accept price, and the auto-accept price below the item price."
-    floors = offer_floors(price)
-    if floors and (accept is not None or minimum is not None):
-        formula_accept = accept if accept is not None else Decimal(floors[0])
-        formula_minimum = minimum if minimum is not None else Decimal(floors[1])
-        if not (formula_minimum < formula_accept < price):
-            return "Best Offer needs the minimum offer below the auto-accept price, and the auto-accept price below the item price."
+    # A blank side stays on the formula. It is checked when the offer is built, so the
+    # seller can save the auto-accept price before typing the minimum.
     return None
 
 
