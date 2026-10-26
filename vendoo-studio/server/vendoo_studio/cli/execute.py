@@ -9,6 +9,7 @@ from typing import Any
 
 from vendoo_studio.cli.catalog import is_destructive, match_command
 from vendoo_studio.cli.client import AnteroomClient
+from vendoo_studio.cli.constants import DEFAULT_STREAM_SECONDS
 from vendoo_studio.cli.errors import ConfirmRequired, UsageError
 
 
@@ -74,13 +75,16 @@ def run_raw(method: str, path: str, args: argparse.Namespace, client: AnteroomCl
     # Split them so httpx does not drop the path query.
     bare, embedded = _split_query(path)
     embedded.update(query)
+    stream_seconds = args.stream_seconds
+    if stream_seconds is None and matched and matched.get("stream"):
+        stream_seconds = DEFAULT_STREAM_SECONDS
     return client.call(
         method,
         bare,
         query=embedded,
         json_body=body,
         headers=_headers(args),
-        stream_seconds=args.stream_seconds,
+        stream_seconds=stream_seconds,
         output=args.output,
     )
 

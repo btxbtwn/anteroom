@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import stat
+import sys
 from io import StringIO
 from pathlib import Path
 
@@ -211,6 +213,78 @@ def test_api_request_escape_hatch(catalog_file, config_dir, capsys):
     assert code == 4
 
 
+def test_api_request_reads_gzip_json_and_still_streams_events(catalog_file, config_dir, capsys):
+    del catalog_file, config_dir
+    payload = {"version": "1.2.3", "entries": ["note " * 400]}
+    raw = json.dumps(payload).encode()
+
+    def gzip_json(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/changelog"
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json", "content-encoding": "gzip"},
+            content=gzip.compress(raw),
+        )
+
+    code = main(
+        ["api", "request", "GET", "/api/changelog", "--json", "--base-url", "http://anteroom.test"],
+        transport=_transport(gzip_json),
+    )
+    body = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert body["data"]["version"] == "1.2.3"
+
+    code = main(
+        ["api", "request", "GET", "/api/changelog", "--json", "--base-url", "http://anteroom.test", "--stream-seconds", "5"],
+        transport=_transport(gzip_json),
+    )
+    body = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert body["data"]["version"] == "1.2.3"
+
+    def stream(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/jobs/j1/preview"
+        text = 'data: {"step": 1}\n\ndata: [DONE]\n\n'
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=text.encode())
+
+    code = main(
+        ["api", "request", "GET", "/api/jobs/j1/preview", "--json", "--base-url", "http://anteroom.test"],
+        transport=_transport(stream),
+    )
+    body = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert body["data"]["events"] == [{"step": 1}, {"done": True}]
+
+
+def test_process_argv_errors_honor_json(catalog_file, config_dir, capsys, monkeypatch):
+    del catalog_file, config_dir
+
+    def refused(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(sys, "argv", ["anteroom", "health", "get", "--json", "--base-url", "http://127.0.0.1:9"])
+    code = main(transport=_transport(refused))
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert code == 3
+    assert payload["ok"] is False
+    assert "Could not reach" in payload["error"]
+    assert captured.err == ""
+
+    def missing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    monkeypatch.setattr(sys, "argv", ["anteroom", "api", "request", "GET", "/api/missing", "--json"])
+    code = main(transport=_transport(missing))
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert code == 1
+    assert payload["ok"] is False
+    assert payload["status"] == 404
+    assert payload["error"] == "Not Found"
+    assert captured.err == ""
+
+
 def test_commands_json_lists_the_catalog(catalog_file, config_dir, capsys):
     _path, catalog = catalog_file
     del config_dir
@@ -347,6 +421,27 @@ def test_mcp_lists_tools_and_calls_health(catalog_file, config_dir):
     assert called["result"]["isError"] is False
     body = json.loads(called["result"]["content"][0]["text"])
     assert body["data"]["status"] == "ok"
+
+    raw = json.dumps({"version": "1.2.3", "entries": ["note " * 400]}).encode()
+
+    def gzip_json(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json", "content-encoding": "gzip"},
+            content=gzip.compress(raw),
+        )
+
+    via_api = handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {"name": "anteroom_api_request", "arguments": {"method": "GET", "path": "/api/changelog"}},
+        },
+        transport=_transport(gzip_json),
+    )
+    assert via_api["result"]["isError"] is False
+    assert json.loads(via_api["result"]["content"][0]["text"])["data"]["version"] == "1.2.3"
 
     stdin = StringIO(json.dumps({"jsonrpc": "2.0", "id": 7, "method": "ping"}) + "\n")
     stdout = StringIO()

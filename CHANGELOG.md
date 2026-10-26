@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.382 — 2026-10-26
+
+- `anteroom api request` can read the changelog and other ordinary pages again, and a failed command still prints `--json` when you asked for it.
+
 ## 0.1.381 — 2026-10-26
 
 - Link existing marketplace listings with consistent URL checks and without tracking parameters. Anteroom catches links already attached to another item and leaves sales unmatched when duplicate inventory makes their owner unclear.
