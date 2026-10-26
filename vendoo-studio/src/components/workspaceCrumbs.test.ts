@@ -4,6 +4,7 @@ import { workspaceCrumbs } from "./workspaceCrumbs";
 describe("workspaceCrumbs", () => {
   it("names the marketplace hub and its selected channel", () => {
     expect(workspaceCrumbs("marketplaces", "", null)).toEqual({ context: "Marketplaces", title: null });
+    expect(workspaceCrumbs("automations", "", null)).toEqual({ context: "Automations", title: null });
     expect(workspaceCrumbs("marketplaces", "", null, "Etsy")).toEqual({ context: "Marketplaces", title: "Etsy" });
   });
 
