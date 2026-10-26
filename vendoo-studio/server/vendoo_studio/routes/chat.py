@@ -3,17 +3,16 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.database import SessionLocal, get_db
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import activity
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.chat_citations import (
     citations_to_plain_text,
     expand_citations_for_provider,
@@ -309,7 +308,7 @@ async def analyze_photos(conv_id: str, db: Session = Depends(get_db)):
     if not photos:
         raise HTTPException(400, "No photos to analyze")
 
-    paths = [str(Path(PHOTOS_DIR) / p.stored_filename) for p in photos]
+    paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]
 
     try:
         result = await analyze_photos_with_tag_retry(provider, paths, notes=conv.notes or "")
@@ -366,7 +365,7 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
     seller_answers = "\n".join(message.text for message in repo.get_messages(conv_id) if message.role == "user")
     if seller_answers:
         item_details += "\nSeller answers:\n" + seller_answers
-    paths = [str(Path(PHOTOS_DIR) / p.stored_filename) for p in photos]
+    paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]
     photo_count = len(photos)
     # Release the request-scoped session before background work opens its own.
     db.close()

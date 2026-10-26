@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo
@@ -156,7 +157,7 @@ class ReadSavedMeasurementsRouteTest(unittest.TestCase):
         photos = tempfile.TemporaryDirectory()
         self.addCleanup(photos.cleanup)
         folder = Path(photos.name)
-        directory = patch.object(route, "PHOTOS_DIR", str(folder))
+        directory = patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(folder)))
         directory.start()
         self.addCleanup(directory.stop)
         repo = ConversationRepo(self.db)

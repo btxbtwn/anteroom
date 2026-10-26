@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation, Photo
@@ -1317,7 +1318,7 @@ class PhotoMimeTest(unittest.TestCase):
         from vendoo_studio.services.photos import process_bytes
 
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("vendoo_studio.services.photos.PHOTOS_DIR", tmp):
+            with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(tmp)):
                 with self.assertRaises(ValueError):
                     process_bytes(b"not-an-image", "fake.jpg", "image/jpeg")
 
@@ -1335,7 +1336,7 @@ class PhotoMimeTest(unittest.TestCase):
         exif[0x0112] = 6  # stored sideways, shown rotated 90°
         Image.new("RGB", (40, 20), "red").save(buf, format="HEIF", exif=exif.tobytes())
         with tempfile.TemporaryDirectory() as tmp:
-            with patch("vendoo_studio.services.photos.PHOTOS_DIR", tmp):
+            with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(tmp)):
                 info = process_bytes(buf.getvalue(), "IMG_0001.HEIC", "image/heic")
                 stored = Path(tmp) / info["stored_filename"]
                 self.assertEqual(stored.suffix, ".jpg")

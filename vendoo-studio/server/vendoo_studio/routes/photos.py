@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
-from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes.conversations import _photo_response
 from vendoo_studio.services import marketplace_media, photo_edits
@@ -16,9 +12,11 @@ from vendoo_studio.services.photo_edits import BackgroundRemovalError, PhotoEdit
 from vendoo_studio.services.photos import (
     THUMBNAIL_MIME,
     THUMBNAIL_SIZES,
+    delete_photo_file,
     get_or_create_thumbnail,
     process_upload,
 )
+from vendoo_studio.services.photo_store import photo_store
 
 router = APIRouter(tags=["photos"])
 
@@ -75,9 +73,7 @@ async def upload_photos(
                 marketplace=marketplace,
             )
         except Exception:
-            filepath = Path(PHOTOS_DIR) / meta["stored_filename"]
-            if filepath.exists():
-                os.remove(filepath)
+            photo_store().delete(meta["stored_filename"])
             failures.append(f"{f.filename or 'file'}: Failed to persist photo record")
             continue
 
@@ -174,10 +170,10 @@ def serve_photo(photo_id: str, db: Session = Depends(get_db)):
     if not photo:
         raise HTTPException(404, "Photo not found")
 
-    filepath = Path(PHOTOS_DIR) / photo.stored_filename
-    if not filepath.exists():
-        raise HTTPException(404, "Photo file not found")
-
+    try:
+        filepath = photo_store().local_path(photo.stored_filename)
+    except FileNotFoundError:
+        raise HTTPException(404, "Photo file not found") from None
     return FileResponse(str(filepath), media_type=photo.mime_type)
 
 
@@ -199,8 +195,9 @@ def serve_photo_thumbnail(photo_id: str, size: int = 96, db: Session = Depends(g
         raise HTTPException(404, "Photo file not found") from None
     except Exception:
         # HEIC and other formats Pillow cannot decode fall back to the original.
-        filepath = Path(PHOTOS_DIR) / photo.stored_filename
-        if not filepath.exists():
+        try:
+            filepath = photo_store().local_path(photo.stored_filename)
+        except FileNotFoundError:
             raise HTTPException(404, "Photo file not found") from None
         return FileResponse(str(filepath), media_type=photo.mime_type)
 

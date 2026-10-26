@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shutil
 import statistics
 import uuid
 from datetime import UTC, datetime
@@ -21,7 +20,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import PHOTOS_DIR
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.scout import ScoutCheck
 
@@ -83,7 +82,7 @@ async def run_check(check_id: str) -> None:
             provider = get_photo_provider()
             if provider is None:
                 raise RuntimeError("Connect ChatGPT, Cursor or MiMo in Settings to check items.")
-            paths = [str(Path(PHOTOS_DIR) / name) for name in check.photos]
+            paths = [str(path) for path in photo_store().local_paths(list(check.photos))]
             try:
                 evidence, analysis = require_photo_analysis(await analyze_photos_with_tag_retry(provider, paths))
             except PhotoAnalysisError as exc:
@@ -152,19 +151,20 @@ def _start_listing(db: Session, check: ScoutCheck) -> Conversation:
     repo = ConversationRepo(db)
     notes = json.dumps({"cog": f"{check.asking_price:g}"}) if check.asking_price is not None else None
     conv = repo.create(title=check.title or "New Listing", notes=notes)
+    store = photo_store()
     for name in check.photos:
-        source = Path(PHOTOS_DIR) / name
-        if not source.is_file():
+        if not store.exists(name):
             continue
         # A copy, so deleting the listing leaves the check's photos alone.
-        copy = f"{uuid.uuid4().hex}{source.suffix}"
-        shutil.copyfile(source, Path(PHOTOS_DIR) / copy)
+        suffix = Path(name).suffix
+        copy = f"{uuid.uuid4().hex}{suffix}"
+        store.copy(name, copy)
         repo.add_photo(
             conv_id=conv.id,
             original_filename=name,
             stored_filename=copy,
-            mime_type=_mime(source.suffix),
-            size_bytes=source.stat().st_size,
+            mime_type=_mime(suffix),
+            size_bytes=store.local_path(copy).stat().st_size,
         )
     if check.analysis:
         # Generation reuses a photo analysis it finds in the chat instead of asking again.

@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.services import ebay_listings
 from vendoo_studio.services.ebay_client import EbayFailure, NS
 from vendoo_studio.services.listing_result import ListingProblem
@@ -132,7 +133,7 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.temp = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(patch.object(ebay_listings, "PHOTOS_DIR", self.temp))
+        self.enterContext(patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(self.temp)))
         Path(self.temp, "tee.jpg").write_bytes(b"image")
         Path(self.temp, "back.jpg").write_bytes(b"back")
         self.photo = SimpleNamespace(id="p1", stored_filename="tee.jpg", mime_type="image/jpeg")

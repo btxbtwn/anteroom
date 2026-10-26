@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo
@@ -78,7 +79,7 @@ class PhotoThumbnailTest(unittest.TestCase):
 
     def test_thumbnail_is_smaller_than_the_original_and_cached(self):
         photo_id = self.photos[0].id
-        with patch("vendoo_studio.services.photos.PHOTOS_DIR", str(self.photos_dir)):
+        with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(self.photos_dir))):
             first = self.client.get(f"/api/photos/{photo_id}/thumb?size=96")
             self.assertEqual(first.status_code, 200, first.text)
             self.assertEqual(first.headers["content-type"], "image/jpeg")
@@ -101,7 +102,7 @@ class PhotoThumbnailTest(unittest.TestCase):
 
     def test_deleting_a_photo_removes_its_thumbnail(self):
         photo_id = self.photos[0].id
-        with patch("vendoo_studio.services.photos.PHOTOS_DIR", str(self.photos_dir)):
+        with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(self.photos_dir))):
             self.client.get(f"/api/photos/{photo_id}/thumb?size=96")
             self.assertTrue(list((self.photos_dir / "thumbs").glob("*.jpg")))
 

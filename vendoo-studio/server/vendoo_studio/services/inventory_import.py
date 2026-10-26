@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from pathlib import Path
 
 import httpx
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import MAX_PHOTO_COUNT, PHOTOS_DIR
+from vendoo_studio.config import MAX_PHOTO_COUNT
 from vendoo_studio.repositories import inventory_imports
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import photos
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.api_job_lock import start_gate
 from vendoo_studio.services.relay_sales import matching_listings, reconcile_unmatched
 from vendoo_studio.services.safe_fetch import DOWNLOAD_TIMEOUT_SEC, fetch_public, is_image_type
@@ -76,4 +76,4 @@ async def save_owned_listing(db: Session, marketplace: str, listing_id: str, sna
     finally:
         if not retained:
             for meta in downloaded:
-                (Path(PHOTOS_DIR) / meta["stored_filename"]).unlink(missing_ok=True)
+                photo_store().delete(meta["stored_filename"])

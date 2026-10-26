@@ -17,11 +17,10 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 import time
 from typing import Any
 
-from vendoo_studio.config import PHOTOS_DIR
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.models.ebay_fields import EBAY_CONDITION_DESCRIPTION
 from vendoo_studio.services.ebay_api import dollars, money_cents
 import httpx
@@ -793,14 +792,18 @@ def _split_values(values: list[str], allowed: list[str]) -> list[str]:
     return out
 
 
+def _photo_bytes(photo) -> bytes:
+    try:
+        return photo_store().read(photo.stored_filename)
+    except (FileNotFoundError, ValueError):
+        raise missing("An eBay photo is missing from Anteroom. Restore it before listing.", "photos") from None
+
+
 def _photo_upload(photo) -> dict:
-    path = (Path(PHOTOS_DIR) / photo.stored_filename).resolve()
-    root = Path(PHOTOS_DIR).resolve()
-    if not path.is_relative_to(root) or not path.is_file():
-        raise missing("An eBay photo is missing from Anteroom. Restore it before listing.", "photos")
+    data = _photo_bytes(photo)
     if photo.mime_type not in {"image/jpeg", "image/png"}:
         raise missing("eBay photos need to be JPEG or PNG.", "photos")
-    return {"field": "image", "data": base64.b64encode(path.read_bytes()).decode("ascii"), "mime": photo.mime_type}
+    return {"field": "image", "data": base64.b64encode(data).decode("ascii"), "mime": photo.mime_type}
 
 
 def ebay_picture_url(url: str) -> str:
@@ -828,10 +831,7 @@ async def _image_url(client: EbayClient, photo) -> str:
 
 
 def _photo_checksum(photo) -> str:
-    path = (Path(PHOTOS_DIR) / photo.stored_filename).resolve()
-    if not path.is_relative_to(Path(PHOTOS_DIR).resolve()) or not path.is_file():
-        raise missing("An eBay photo is missing from Anteroom. Restore it before listing.", "photos")
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashlib.sha256(_photo_bytes(photo)).hexdigest()
 
 
 async def _image_urls(client: EbayClient, photos: list, binding: dict, record: Callable[[dict], None],

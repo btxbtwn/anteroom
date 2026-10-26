@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
@@ -168,13 +169,13 @@ class JobPhotoRouteTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_job_photo_is_served_for_matching_conversation(self):
-        with patch("vendoo_studio.routes.jobs.PHOTOS_DIR", self.tmp.name):
+        with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(self.tmp.name)):
             response = self.client.get(f"/api/jobs/{self.job.id}/photos/{self.photo.id}")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.content, JPEG_BYTES)
         self.assertIn("image/jpeg", response.headers.get("content-type", ""))
 
     def test_job_photo_rejects_unknown_photo(self):
-        with patch("vendoo_studio.routes.jobs.PHOTOS_DIR", self.tmp.name):
+        with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(self.tmp.name)):
             response = self.client.get(f"/api/jobs/{self.job.id}/photos/does-not-exist")
         self.assertEqual(response.status_code, 404)

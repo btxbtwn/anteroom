@@ -12,6 +12,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.main import app
 
 from vendoo_studio.services import backups
@@ -370,7 +371,7 @@ class BackupRoutesTest(unittest.TestCase):
 def photos(tmp_path, monkeypatch):
     directory = tmp_path / "photos"
     directory.mkdir()
-    monkeypatch.setattr(backups, "PHOTOS_DIR", str(directory))
+    monkeypatch.setattr("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(directory)))
     return directory
 
 

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.database import get_db
 from vendoo_studio.models.scout import ScoutCheck
 from vendoo_studio.services import scout
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.photos import process_bytes
 
 router = APIRouter(prefix="/api/scout", tags=["scout"])
@@ -120,7 +119,8 @@ def serve_photo(check_id: str, index: int, db: Session = Depends(get_db)):
     check = _check(db, check_id)
     if not 0 <= index < len(check.photos or []):
         raise HTTPException(404, "Photo not found")
-    path = Path(PHOTOS_DIR) / check.photos[index]
-    if not path.is_file():
-        raise HTTPException(404, "Photo not found")
+    try:
+        path = photo_store().local_path(check.photos[index])
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(404, "Photo not found") from None
     return FileResponse(path)

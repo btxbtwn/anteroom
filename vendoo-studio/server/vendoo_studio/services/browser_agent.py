@@ -335,11 +335,10 @@ class FixAgent:
         return await browser_bridge.act(job, payload)
 
     def _context(self) -> tuple[dict, str, list[str]]:
-        from pathlib import Path
 
-        from vendoo_studio.config import PHOTOS_DIR
         from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
         from vendoo_studio.services.listing_generate import latest_photo_analysis
+        from vendoo_studio.services.photo_store import photo_store
 
         db = self.db_factory()
         try:
@@ -347,10 +346,10 @@ class FixAgent:
             listing = dict(revisions[0].listing_json) if revisions and isinstance(revisions[0].listing_json, dict) else {}
             conversations = ConversationRepo(db)
             evidence = latest_photo_analysis(conversations.get_messages(self.request.conversation_id)) or ""
-            paths = [str(Path(PHOTOS_DIR) / photo.stored_filename) for photo in conversations.get_photos(self.request.conversation_id)]
+            keys = [photo.stored_filename for photo in conversations.get_photos(self.request.conversation_id)]
         finally:
             db.close()
-        return listing, evidence, [path for path in paths if Path(path).is_file()][:MAX_AGENT_PHOTOS]
+        return listing, evidence, [str(path) for path in photo_store().local_paths(keys)][:MAX_AGENT_PHOTOS]
 
     async def _load_photos(self, paths: list[str]) -> None:
         if not paths or not callable(getattr(self.provider, "vision_chat", None)):
