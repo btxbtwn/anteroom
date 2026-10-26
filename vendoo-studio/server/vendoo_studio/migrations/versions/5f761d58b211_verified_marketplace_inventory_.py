@@ -25,4 +25,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     with op.batch_alter_table('marketplace_listings', schema=None) as batch_op:
         batch_op.drop_column('inventory_observation')
-
