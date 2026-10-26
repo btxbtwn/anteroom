@@ -301,7 +301,11 @@ def apply_vinted_listing(listing: dict) -> bool:
 
 def _price(snapshot: dict):
     specifics = snapshot.get("vinted_specifics") if isinstance(snapshot.get("vinted_specifics"), dict) else {}
-    raw = specifics.get("price", snapshot.get("price"))
+    from vendoo_studio.services.seller_overrides import price_for
+
+    raw = price_for(snapshot, "vinted")
+    if raw is None:
+        raw = specifics.get("price", snapshot.get("price"))
     try:
         amount = float(str(raw).strip())
     except (TypeError, ValueError):

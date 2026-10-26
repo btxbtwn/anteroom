@@ -10,7 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
 from vendoo_studio.database import init_db, SessionLocal
 from vendoo_studio.static_files import FrontendFiles
-from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports
+from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports, listing_commands
 from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, browser, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
@@ -174,6 +174,7 @@ app.include_router(native_marketplaces.router)
 app.include_router(marketplace_schemas.router)
 app.include_router(marketplace_listings.router)
 app.include_router(conversations.router)
+app.include_router(listing_commands.router)
 app.include_router(photos.router)
 app.include_router(measurements.router)
 app.include_router(listings.router)

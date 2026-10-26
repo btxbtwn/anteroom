@@ -80,9 +80,29 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
             listing_data = recovered
             changed = True
     if isinstance(listing_data, dict):
-        if align_size_fields(listing_data):
+        from vendoo_studio.services.depop_measurements import sync_depop_measurements
+        from vendoo_studio.services.seller_overrides import (
+            expand_depop_multi,
+            preserving_locks,
+            sync_unlocked_prices,
+        )
+        from vendoo_studio.services.vendoo_import import parse_notes
+
+        notes = parse_notes(conv_repo.get(conv_id).notes)
+
+        def _normalize(listing: dict) -> None:
+            align_size_fields(listing)
+            normalize_listing_dropdowns(listing)
+
+        if expand_depop_multi(listing_data):
             changed = True
-        if normalize_listing_dropdowns(listing_data):
+        if sync_depop_measurements(listing_data, notes):
+            changed = True
+        before = copy.deepcopy(listing_data)
+        preserving_locks(listing_data, _normalize)
+        if listing_data != before:
+            changed = True
+        if sync_unlocked_prices(listing_data):
             changed = True
     if changed:
         revision = listing_repo.save_revision(

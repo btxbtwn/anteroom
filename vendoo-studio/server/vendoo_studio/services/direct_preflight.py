@@ -60,6 +60,35 @@ def gap(field_path: str, message: str, *, blocking: bool = True) -> dict:
     return {"field": field_path, "message": message, "blocking": blocking}
 
 
+_GAP_FIXES = {
+    "marketplace_category_ids.mercari": "anteroom conversations fields --conv-id CONV --path marketplace_category_ids.mercari --value CATEGORY_ID",
+    "direct_category_ids.mercari": "anteroom conversations fields --conv-id CONV --path marketplace_category_ids.mercari --value CATEGORY_ID",
+    "mercari_specifics.size": "anteroom conversations fields --conv-id CONV --path mercari_specifics.size --value M",
+    "size": "anteroom conversations fields --conv-id CONV --path size --value M",
+    "mercari_specifics.brand": 'anteroom conversations fields --conv-id CONV --path mercari_specifics.brand --value "No Brand/Not sure"',
+    "depop_specifics.parcelSize": "anteroom conversations fields --conv-id CONV --path depop_specifics.parcelSize --value Medium",
+    "depop_specifics.style": "anteroom conversations fields --conv-id CONV --path depop_specifics.style --clear",
+    "package_dimensions_in": "anteroom conversations fields --conv-id CONV --path package_dimensions_in --value 13x10x3",
+    "sku": "anteroom conversations fields --conv-id CONV --path sku --value NEW-SKU",
+    "etsy_specifics.when_made": 'anteroom conversations fields --conv-id CONV --path etsy_specifics.when_made --value "Before 2007 (Vintage)"',
+    "marketplace_photos.depop": 'anteroom conversations fields --conv-id CONV --path marketplace_photos.depop --value ["PHOTO_ID"]',
+    "price": "anteroom set-price --conversation CONV --price 29.99 --all-marketplaces",
+}
+
+
+def with_fix(item: dict) -> dict:
+    """Attach the anteroom command that fills this gap, when one is known."""
+    if not isinstance(item, dict) or item.get("fix"):
+        return item
+    command = _GAP_FIXES.get(str(item.get("field") or ""))
+    if not command:
+        return item
+    message = str(item.get("message") or "")
+    if command not in message:
+        message = f"{message} Fix: {command}".strip()
+    return {**item, "message": message, "fix": {"field": item.get("field"), "command": command}}
+
+
 def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
     """The snapshot a direct List sends: Send's preparation plus this marketplace's form."""
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot

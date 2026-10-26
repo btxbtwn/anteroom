@@ -57,9 +57,9 @@ def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
         found.append(gap("description", "Poshmark needs a description."))
     elif len(description) > 1500:
         found.append(gap("description", "Poshmark descriptions are at most 1,500 characters."))
-    amount = _money(snapshot.get("poshmark_specifics", {}).get("poshmarkPrice") if isinstance(snapshot.get("poshmark_specifics"), dict) else None)
-    if amount is None:
-        amount = _money(snapshot.get("price"))
+    from vendoo_studio.services.seller_overrides import price_for
+
+    amount = _money(price_for(snapshot, "poshmark"))
     if amount is None or amount <= 0:
         found.append(gap("price", "Poshmark needs a price of $3 or more."))
     else:

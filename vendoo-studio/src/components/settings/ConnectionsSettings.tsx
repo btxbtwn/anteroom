@@ -305,14 +305,14 @@ function EbayInventoryLocationRow() {
           size="sm"
           className="w-52"
           aria-label="eBay inventory location"
-          placeholder="70125"
+          placeholder="ZIP or city"
           value={isPending ? "" : value}
           disabled={isPending}
           onChange={(event) => setDraft(event.target.value)}
         />
         <Button
           size="sm"
-          disabled={isPending || !value.trim() || !dirty || save.isPending}
+          disabled={isPending || !dirty || save.isPending}
           onClick={() => save.mutate(value.trim())}
         >
           {save.isPending ? <Spinner /> : null}

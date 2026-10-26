@@ -41,9 +41,16 @@ describe("marketplace form fields", () => {
     expect(nativeEditorDependencies(fields, { ebay_specifics: { brand: "" } })[1].options).toEqual([]);
   });
   it("never substitutes a Vendoo or reference form for a direct marketplace", () => {
+    const priceKey: Record<string, string> = {
+      ebay: "ebay_specifics.price",
+      poshmark: "poshmark_specifics.poshmarkPrice",
+      mercari: "mercari_specifics.price",
+      depop: "depop_specifics.price",
+      sellwild: "sellwild_specifics.price",
+    };
     for (const tab of ["ebay", "poshmark", "mercari", "depop", "sellwild"]) {
-      expect(fieldsForMarketplaceForm(listing, tab, undefined)).toEqual([]);
-      expect(fieldsForMarketplaceForm(listing, tab, [{ marketplace: tab, known: true, category_id: "1", fields: [] }])).toEqual([]);
+      expect(fieldsForMarketplaceForm(listing, tab, undefined).map((field) => field.key)).toEqual([priceKey[tab]]);
+      expect(fieldsForMarketplaceForm(listing, tab, [{ marketplace: tab, known: true, category_id: "1", fields: [] }]).map((field) => field.key)).toEqual([priceKey[tab]]);
     }
   });
 
@@ -54,5 +61,24 @@ describe("marketplace form fields", () => {
     const etsy = fieldsForMarketplaceForm({ ...listing, etsy_specifics: { whoMade: "Another company or person" } }, "etsy", undefined);
     expect(etsy.find((field) => field.key === "etsy_specifics.whoMade")?.label).toBe("Who Made It?");
     expect(etsy.filter((field) => field.key === "title")).toHaveLength(1);
+  });
+
+  it("shows an eBay price row and Depop measurement rows beside the native catalog", () => {
+    const priced = fieldsForMarketplaceForm({
+      ...listing,
+      price: 29.99,
+      ebay_specifics: { price: 23 },
+    }, "ebay", undefined);
+    expect(priced.find((field) => field.label === "eBay price")).toMatchObject({ key: "ebay_specifics.price" });
+    const measured = fieldsForMarketplaceForm({
+      ...listing,
+      depop_specifics: {
+        measurements: { unit: "in", values: [{ id: "pit_to_pit", label: "Pit to pit", value: "22", unit: "in" }] },
+      },
+    }, "depop", undefined);
+    expect(measured.find((field) => field.label === "Pit to pit")).toMatchObject({
+      key: "depop_specifics.measurements.values.0.value",
+    });
+    expect(measured.find((field) => field.label === "Depop price")?.key).toBe("depop_specifics.price");
   });
 });

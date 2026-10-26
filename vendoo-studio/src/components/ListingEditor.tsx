@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Job, ListingData, MarketplaceForm } from "../api/types";
-import { cloneListing, formFieldText, formFieldValues, getListingEditorValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
@@ -21,7 +21,7 @@ import {
   relistCallout,
   relistStage,
 } from "./relistStatus";
-import { ETSY_CATEGORY_OPTIONALS } from "../marketplaceFields";
+import { ETSY_CATEGORY_OPTIONALS, depopSizeGroupingApplies } from "../marketplaceFields";
 import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
@@ -603,6 +603,7 @@ export function StructuredEditor({
     [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
   );
   const [local, setLocal] = React.useState<Record<string, string | string[]>>({});
+  const dirty = React.useRef<Record<string, string | string[]>>({});
   React.useEffect(() => {
     if (!target) return;
     const key = matchingEditorField(fields, target.field);
@@ -620,9 +621,16 @@ export function StructuredEditor({
       // the fields API already resolved the value — use it when the path miss.
       const value = (f.native || f.locked) && f.defaultValue !== undefined ? f.defaultValue : (val ?? f.defaultValue);
       const label = (v: string) => Object.entries(f.optionValues || {}).find(([, id]) => id === v)?.[0] ?? v;
-      init[f.key] = f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
+      const followed = f.label.endsWith(" price") && f.key.includes("_specifics.")
+        && !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(f.key));
+      const shown = followed && listing?.price != null
+        ? formFieldText(listing.price)
+        : f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
+      init[f.key] = shown;
     });
-    setLocal(init);
+    const next = nextFieldDraft(init, dirty.current);
+    dirty.current = next.dirty;
+    setLocal(next.local);
   }, [listing, revisionId, tab, fields]);
 
   const handleBlur = (key: string) => {
@@ -640,7 +648,9 @@ export function StructuredEditor({
 
   const commitField = (key: string, value: string | string[] | boolean) => {
     if (typeof value === "string" && value.trim() === "[object Object]") return;
-    const nextLocal = { ...local, [key]: typeof value === "boolean" ? String(value) : value };
+    const shown = typeof value === "boolean" ? String(value) : value;
+    const nextLocal = { ...local, [key]: shown };
+    dirty.current = { ...dirty.current, [key]: shown };
     setLocal(nextLocal);
     const updated = cloneListing(listing);
     const field = fields.find((entry) => entry.key === key);
@@ -670,7 +680,7 @@ export function StructuredEditor({
       return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} maxLength={f.maxLength ?? undefined} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />;
     }
     if (f.multi) return <SearchableMultiSelect id={id} fieldKey={f.key}
-      value={formFieldValues(local[f.key], f.options)} options={f.options ?? []}
+      value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
       selectionOnly={f.selectionOnly ?? Boolean(f.options?.length)} disabled={f.locked}
       choicesVerified={f.optionsSource === "marketplace"}
       maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined}
@@ -818,13 +828,66 @@ function sameField(a: EditorField, b: EditorField): boolean {
   return fieldIdentities(b).some((id) => ids.has(id));
 }
 
+const MERCARI_DERIVED_LABELS = new Set(["quantity", "shipping label", "delivery method", "who will pay for delivery?", "payer", "who pays"]);
+
+const MARKETPLACE_PRICE_KEYS: Record<string, string> = {
+  ebay: "ebay_specifics.price",
+  poshmark: "poshmark_specifics.poshmarkPrice",
+  mercari: "mercari_specifics.price",
+  depop: "depop_specifics.price",
+  etsy: "etsy_specifics.price",
+  vinted: "vinted_specifics.price",
+  sellwild: "sellwild_specifics.price",
+};
+
+function marketplacePriceField(tab: string): EditorField | null {
+  const key = MARKETPLACE_PRICE_KEYS[tab];
+  if (!key) return null;
+  return { key, label: `${marketplaceName(tab)} price`, type: "number" };
+}
+
+function withMarketplacePrice(rows: EditorField[], tab: string): EditorField[] {
+  const priceRow = marketplacePriceField(tab);
+  if (!priceRow || rows.some((field) => field.key === priceRow.key)) return rows;
+  return [...rows, priceRow];
+}
+
+function depopMeasurementFields(listing: ListingData | undefined): EditorField[] {
+  const depop = listing?.depop_specifics;
+  const block = depop && typeof depop === "object" ? (depop as Record<string, unknown>).measurements : null;
+  const values = block && typeof block === "object" ? (block as { values?: unknown }).values : null;
+  if (!Array.isArray(values)) return [];
+  return values.map((row, index) => {
+    const item = row && typeof row === "object" ? row as Record<string, unknown> : {};
+    return {
+      key: `depop_specifics.measurements.values.${index}.value`,
+      label: String(item.label || item.id || "Measurement"),
+      type: "number" as const,
+    };
+  });
+}
+
 /** Every field that marketplace submits, shared listing values first, then its own. */
 export function fieldsForMarketplaceForm(
   listing: ListingData | undefined,
   tab: string,
   forms: MarketplaceForm[] | undefined,
 ): EditorField[] {
-  if (DIRECT_FORM_MARKETS.has(tab)) return forms?.some((form) => form.marketplace === tab && form.native) ? schemaFieldsForTab(forms, tab) || [] : [];
+  if (DIRECT_FORM_MARKETS.has(tab)) {
+    const native = forms?.some((form) => form.marketplace === tab && form.native);
+    let rows = native ? schemaFieldsForTab(forms, tab) || [] : [];
+    rows = withMarketplacePrice(rows, tab);
+    if (tab === "depop") {
+      rows = [...rows, ...depopMeasurementFields(listing)];
+      if (!depopSizeGroupingApplies(listing)) {
+        rows = rows.filter((field) => field.key !== "depop_specifics.sizeGrouping");
+      }
+    }
+    if (tab === "mercari") {
+      rows = rows.filter((field) => !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()));
+    }
+    return rows;
+  }
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
   if (tab === "general") return withoutObjects(own);
@@ -847,7 +910,11 @@ export function fieldsForMarketplaceForm(
           optionsSource: field.optionsSource === "marketplace" ? field.optionsSource : match.optionsSource }
       : field;
   });
-  return withoutObjects(named);
+  let rows = withoutObjects(withMarketplacePrice(named, tab));
+  if (tab === "depop" && !depopSizeGroupingApplies(listing)) {
+    rows = rows.filter((field) => field.key !== "depop_specifics.sizeGrouping");
+  }
+  return rows;
 }
 
 /** Fields for this tab from Vendoo's own schema, or null when it has none. */

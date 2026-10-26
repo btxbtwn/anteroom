@@ -36,4 +36,15 @@ describe("marketplace choice controls", () => {
     expect(html).toContain("Unavailable saved values: Obsolete");
     expect(html).toContain("Choose at most 2 values.");
   });
+
+  it("offers a clear control for a saved Depop style", () => {
+    const html = renderToStaticMarkup(<SearchableMultiSelect id="style" fieldKey="depop_specifics.style"
+      value={["Casual", "Minimalist", "Indie"]}
+      options={["Casual", "Minimalist", "Indie", "Streetwear"]}
+      onChange={() => { throw new Error("Rendering must not save"); }} />);
+    expect(html).toContain('aria-label="Clear values"');
+    expect(html).toContain("Casual");
+    expect(html).toContain("Minimalist");
+    expect(html).toContain("Indie");
+  });
 });

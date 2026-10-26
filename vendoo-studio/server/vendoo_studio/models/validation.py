@@ -465,7 +465,9 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
                     mapped.append(hit)
             elif str(style or "").strip():
                 had_invalid = True
-        if styles and had_invalid:
+        from vendoo_studio.services.seller_overrides import is_locked
+
+        if styles and had_invalid and not is_locked(listing, "depop_specifics.style"):
             if len(mapped) < 3:
                 inferred = infer_depop_styles(listing, limit=3, exclude=mapped)
                 for style in inferred:

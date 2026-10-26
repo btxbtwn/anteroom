@@ -75,11 +75,13 @@ def prepare_listing_snapshot(
     labels = split_vendoo_labels(conv_notes.get("vendooLabels"))
     if labels:
         listing_snapshot["labels"] = labels
+    from vendoo_studio.services.seller_overrides import is_locked, materialize_prices
+
     seller_sku = str(conv_notes.get("sku") or "").strip()
-    if seller_sku:
+    if seller_sku and not is_locked(listing_snapshot, "sku"):
         listing_snapshot["sku"] = seller_sku
     package = str(conv_notes.get("packageDimensions") or "").strip()
-    if package:
+    if package and not is_locked(listing_snapshot, "package_dimensions_in"):
         listing_snapshot["package_dimensions_in"] = package
     # Item Details COG and Notes are Vendoo's Cost of Goods and Internal Notes.
     cog_raw = str(conv_notes.get("cog") or "").strip()
@@ -97,7 +99,9 @@ def prepare_listing_snapshot(
         listing_snapshot["internal_notes"] = seller_notes
     listing_category = str(listing_snapshot.get("category_path") or "").strip()
     category_override = str(conv_notes.get("categoryOverride") or "").strip()
-    if category_override and (not prefer_listing_category or not listing_category):
+    if category_override and not is_locked(listing_snapshot, "category_path") and (
+        not prefer_listing_category or not listing_category
+    ):
         listing_snapshot["category_path"] = category_override
     poshmark = listing_snapshot.get("poshmark_specifics") or {}
     if not isinstance(poshmark, dict):
@@ -106,6 +110,10 @@ def prepare_listing_snapshot(
     listing_snapshot["poshmark_specifics"] = poshmark
     align_listing_gender(listing_snapshot)
     ensure_listing_defaults(listing_snapshot)
+    from vendoo_studio.services.depop_measurements import sync_depop_measurements
+
+    sync_depop_measurements(listing_snapshot, conv_notes)
+    materialize_prices(listing_snapshot)
     registry = RegistryService(db)
     registry.merge_learned_fields(listing_snapshot)
     for marketplace in selected_fillable_platforms():
@@ -144,8 +152,13 @@ def ensure_listing_defaults(listing_snapshot: dict) -> None:
     from vendoo_studio.models.validation import normalize_listing_dropdowns
     from vendoo_studio.services.listing_generate import align_size_fields
 
-    align_size_fields(listing_snapshot)
-    normalize_listing_dropdowns(listing_snapshot)
+    from vendoo_studio.services.seller_overrides import preserving_locks
+
+    def _normalize(listing: dict) -> None:
+        align_size_fields(listing)
+        normalize_listing_dropdowns(listing)
+
+    preserving_locks(listing_snapshot, _normalize)
     from vendoo_studio.services.vinted_listing import apply_vinted_listing
 
     apply_vinted_listing(listing_snapshot)

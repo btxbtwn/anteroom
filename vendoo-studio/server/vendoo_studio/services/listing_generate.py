@@ -783,7 +783,13 @@ def sync_title_size(listing: dict) -> bool:
     if end > slot:
         tokens[slot:end] = size_tokens
     elif slot < len(tokens) and _TITLE_SIZE_TOKEN_RE.match(tokens[slot].strip(",")):
-        tokens[slot:slot + 1] = size_tokens
+        existing = tokens[slot].strip(",")
+        # Petite "PM" is the tag. Replacing it with the letter "M" drops the P.
+        size_type = str(listing.get("sizeType") or "").casefold()
+        if size_type in {"petite", "petites"} and existing.casefold() == f"p{size.casefold()}":
+            pass
+        else:
+            tokens[slot:slot + 1] = size_tokens
     else:
         tokens[slot:slot] = size_tokens
     updated = " ".join(tokens)
@@ -894,8 +900,10 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
         listing["package_dimensions_in"] = package_dimensions_string()
         changed = True
     if not str(listing.get("zipCode") or listing.get("zip_code") or "").strip():
-        listing["zipCode"] = get_ebay_inventory_location()
-        changed = True
+        location = get_ebay_inventory_location()
+        if location:
+            listing["zipCode"] = location
+            changed = True
     return changed
 
 
@@ -1271,7 +1279,11 @@ def persist_generated_listing(
     from vendoo_studio.services.user_settings import get_ebay_inventory_location, package_dimensions_string
 
     listing["package_dimensions_in"] = package_dimensions_string()
-    listing["zipCode"] = get_ebay_inventory_location()
+    location = get_ebay_inventory_location()
+    if location:
+        listing["zipCode"] = location
+    elif str(listing.get("zipCode") or "") == "70125":
+        listing.pop("zipCode", None)
     apply_send_readiness_fixes(listing)
     from vendoo_studio.services.vinted_listing import apply_vinted_listing
 
@@ -1299,9 +1311,17 @@ def persist_generated_listing(
         package = str(seller.get("packageDimensions") or "").strip()
         if package:
             listing["package_dimensions_in"] = package
+        from vendoo_studio.services.seller_overrides import is_locked, materialize_prices
+
+        previous_listing = revisions[0].listing_json if revisions and isinstance(revisions[0].listing_json, dict) else {}
+        if previous_listing.get("seller_fields"):
+            listing["seller_fields"] = list(previous_listing["seller_fields"])
         asking = _asking_price(seller)
-        if asking:
+        if asking and not is_locked(listing, "price"):
             listing["price"] = asking
+        elif is_locked(listing, "price") and previous_listing.get("price") is not None:
+            listing["price"] = previous_listing.get("price")
+        materialize_prices(listing)
         specifics = listing.get("poshmark_specifics")
         if not isinstance(specifics, dict):
             specifics = {}

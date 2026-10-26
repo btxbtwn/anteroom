@@ -681,8 +681,10 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
         quantity = 0
     if not 1 <= quantity <= 10000:
         raise missing("Enter an eBay quantity from 1 to 10000.", "quantity")
+    from vendoo_studio.services.seller_overrides import price_for
+
     try:
-        price = dollars(money_cents(str(snapshot.get("price"))))
+        price = dollars(money_cents(str(price_for(snapshot, "ebay"))))
     except (ValueError, ArithmeticError) as exc:
         raise missing("Set a positive eBay price before listing.", "price") from exc
     category_id = ebay_category_id(snapshot)

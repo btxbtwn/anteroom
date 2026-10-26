@@ -367,13 +367,16 @@ def ensure_depop_category_optionals(listing: dict) -> bool:
             age = "y2k"
         set_key("age", age)
 
+    from vendoo_studio.services.seller_overrides import is_locked
+
     styles = as_list(depop.get("style"))
     mapped: list[str] = []
     for style in styles:
         hit = canonical_option(style, VALID_DEPOP_STYLE)
         if hit and hit not in mapped:
             mapped.append(hit)
-    if len(mapped) < 3:
+    # A seller who cleared or chose style owns that list, including fewer than three.
+    if not is_locked(listing, "depop_specifics.style") and len(mapped) < 3:
         inferred = infer_depop_styles(listing, ebay=ebay, limit=3, exclude=mapped)
         padded = _pad_depop_tags(mapped, tuple(inferred) + DEPOP_STYLE_FALLBACKS, limit=3)
         if padded != styles:
@@ -502,8 +505,19 @@ def depop_kids_size(size: Any) -> str:
 
 
 def depop_size_for(size: Any, listing: dict) -> str:
-    """The general tag size as Depop's size for this listing's category."""
-    return depop_kids_size(size) if depop_is_kids(listing) else text_value(size)
+    """The general tag size as Depop's size for this listing's category.
+
+    Petite tags keep the letter Depop lists (PM is M) and the grouping is Petite.
+    """
+    if depop_is_kids(listing):
+        return depop_kids_size(size)
+    text = text_value(size)
+    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    size_type = text_value(listing.get("sizeType") or ebay.get("sizeType")).casefold()
+    petite = re.fullmatch(r"p([sml])", text, re.I)
+    if size_type in {"petite", "petites"} and petite:
+        return petite.group(1).upper()
+    return text
 
 
 def depop_offers_sizes(listing: dict) -> bool:

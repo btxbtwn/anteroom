@@ -156,6 +156,10 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             '{"missing_fields":[{"marketplace":"etsy","field":"Pattern","value":"Solid"}]}\n'
             "```\n"
             "Use the marketplace ids and field names from the seller request exactly. "
+            "To set or clear one saved field, including a value outside the reference list, use this shape instead:\n"
+            '{"fields":[{"path":"depop_specifics.style","value":[]}]}\n'
+            "Paths look like sku, price, mercari_specifics.brand, depop_specifics.measurements, "
+            "or marketplace_category_ids.mercari. An empty value clears the field and it stays cleared.\n"
             "Do not use a JSON Patch array. Do not rewrite unrelated listing fields.\n"
             "Anteroom saves the listing JSON and refreshes the Forms/Fields UI; "
             "filling the live Vendoo draft is a separate later step.\n\n"
@@ -204,7 +208,9 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             "- Fill every discovered category/marketplace field in the JSON. Do not leave applicable fields empty.\n"
             "- Never tell the seller the listing is complete, ready, or done while any discovered field is still empty.\n"
             "- Estimate packaged shipping weight and mailer dimensions from the item type; do not ask the seller for those.\n"
-            "- Depop: exactly 3 style tags from the allowed values list.\n"
+            "- Depop style is up to 3 tags. Leave it empty when the seller cleared it. Do not invent tags to fill three.\n"
+            "- A marketplace price follows the item price unless the seller set that marketplace's own price.\n"
+            "- Depop measurements use the inches already stored for the garment. Do not invent measurements.\n"
             + (f"\n{photo_analysis_text}\n\n" if photo_analysis_text else "") +
             comps_block +
             (f"\n--- Listing Rules ---\n\n{skill_rules}" if skill_rules else "")

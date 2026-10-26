@@ -26,6 +26,40 @@ function depopColour(value) {
 
 // Age, style, and source use the same codes Vendoo writes. Colour and condition
 // are Depop's own slugs. Brand stays on the draft until Depop's brand id is known.
+function depopPrice(listing) {
+  const locked = Array.isArray(listing?.seller_fields) && listing.seller_fields.some(path => String(path) === 'depop_specifics.price' || String(path).startsWith('depop_specifics.') && /price$/i.test(String(path).split('.').pop()));
+  const override = listing?.depop_specifics?.price;
+  if (locked && override != null && override !== '') return override;
+  return listing?.price;
+}
+
+// Depop's add-measurements ids are not published in this extension. Send the
+// structured rows Anteroom stored; the form filler matches them by label.
+function depopMeasurementBody(listing) {
+  const block = listing?.depop_specifics?.measurements;
+  const values = Array.isArray(block?.values) ? block.values : [];
+  const rows = values.filter(row => row && String(row.value ?? '').trim()).map(row => ({
+    id: String(row.id || ''),
+    label: String(row.label || ''),
+    value: String(row.value).trim(),
+    unit: String(row.unit || block.unit || 'in'),
+  }));
+  return rows.length ? { measurements: rows } : {};
+}
+
+function depopChosenPhotos(photos, listing) {
+  const list = Array.isArray(photos) ? photos : [];
+  const picked = listing?.marketplace_photos?.depop;
+  let chosen = list;
+  if (Array.isArray(picked) && picked.length) {
+    const ids = new Set(picked.map(id => String(id)));
+    const matched = list.filter(photo => ids.has(String(photo?.id)));
+    if (matched.length) chosen = matched;
+  }
+  const capped = chosen.slice(0, 8);
+  return { photos: capped, omitted: Math.max(0, chosen.length - capped.length) };
+}
+
 function depopFormFields(listing, attributes) {
   const specifics = listing?.form?.specifics || {};
   const fields = {};
@@ -458,7 +492,7 @@ function depopAttributeIds(values) {
 function depopDraftMismatch(draft, listing, fields) {
   const wrong = [];
   if (marketplaceText(draft.description) !== marketplaceText(depopDescription(listing))) wrong.push('description');
-  if (listing.price != null && Number(draft.price_amount ?? draft.price) !== Number(listing.price)) wrong.push('price');
+  if (depopPrice(listing) != null && Number(draft.price_amount ?? draft.price) !== Number(depopPrice(listing))) wrong.push('price');
   if (!fields) return wrong;
   if (fields.product_type != null && String(draft.product_type ?? '') !== String(fields.product_type)) wrong.push('category');
   if (fields.variant_set != null) {
@@ -504,7 +538,11 @@ async function depopApiAction(action, payload) {
         || (action === 'save' && method === 'PUT' && /^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)));
       const publishWrite = action === 'publish' && payload.action === 'publish' && payload.confirm === true
         && method === 'POST' && path === '/presentation/api/v1/drafts/products/';
-      if (!allowedRead && !draftWrite && !publishWrite) throw marketplaceError('Unsupported Depop action.');
+      // Live edit: read the product by slug, then PUT it. The body shape needs a live check.
+      const updateRead = action === 'update' && method === 'GET' && /^\/presentation\/api\/v1\/products\/(?:by-slug\/[a-z0-9][a-z0-9-]{0,200}\/|[0-9]+\/)$/i.test(path);
+      const updateWrite = action === 'update' && payload.confirm === true && method === 'PUT'
+        && /^\/presentation\/api\/v1\/products\/[0-9]+\/$/.test(path);
+      if (!allowedRead && !draftWrite && !publishWrite && !updateRead && !updateWrite) throw marketplaceError('Unsupported Depop action.');
       const headers = { Accept: 'application/json', Authorization: await depopBearer(), ...extraHeaders };
       if (method !== 'GET') {
         headers['Content-Type'] = 'application/json';
@@ -541,12 +579,12 @@ async function depopApiAction(action, payload) {
     }
     if (action === 'create') {
       const draft = await request('POST', '/presentation/api/v1/drafts/', {
-        description, price_amount: String(payload.listing.price ?? ''), price_currency: 'USD', pictures: [], quantity: 1,
+        description, price_amount: String(depopPrice(payload.listing) ?? ''), price_currency: 'USD', pictures: [], quantity: 1,
       });
       if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(draft.id))) throw marketplaceError('Depop did not confirm its new draft ID. Check drafts before trying again.', { code: 'schema_drift', rejected: false });
       return { draft_url: `https://www.depop.com/sellinghub/drafts/edit/${draft.id}/` };
     }
-    if (!id && action !== 'publish_status') throw marketplaceError('A saved Depop draft link is required.');
+    if (!id && action !== 'publish_status' && action !== 'update') throw marketplaceError('A saved Depop draft link is required.');
     if (action === 'read') return summary(await request('GET', path));
     if (action === 'photo') {
       const signed = await request('POST', '/presentation/api/v1/pictures/', {
@@ -577,16 +615,16 @@ async function depopApiAction(action, payload) {
       const existing = await request('GET', path);
       const draft = {};
       for (const key of ['address', 'age', 'attributes', 'brand', 'colour', 'condition', 'country', 'country_code',
-        'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids', 'national_shipping_cost',
+        'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids', 'measurements', 'national_shipping_cost',
         'price_currency', 'product_type', 'quantity', 'repop_metadata', 'shipping_methods', 'sku', 'source', 'style', 'variants', 'videos']) {
         if (existing[key] != null) draft[key] = existing[key];
       }
       if (existing.variant_set_id != null) draft.variant_set = existing.variant_set_id;
       draft.description = description;
-      draft.price_amount = String(payload.listing.price ?? existing.price_amount ?? '');
+      draft.price_amount = String(depopPrice(payload.listing) ?? existing.price_amount ?? '');
       draft.price_currency ||= 'USD';
       draft.pictures = payload.uploaded_photo_ids || (existing.pictures || []).map(photo => photo.id);
-      Object.assign(draft, depopFormFields(payload.listing), payload.depop_fields || {});
+      Object.assign(draft, depopFormFields(payload.listing), depopMeasurementBody(payload.listing), payload.depop_fields || {});
       // A direct save has no precomputed fields. Fill category, brand, location, and shipping here.
       if (!payload.depop_fields) Object.assign(draft, await depopListingFields(request, payload.listing, payload.deadline));
       else if (DEPOP_LOCATION_KEYS.some(key => draft[key] == null)) {
@@ -609,7 +647,7 @@ async function depopApiAction(action, payload) {
       }
       for (const key of Object.keys(draft)) {
         if (!['address', 'age', 'attributes', 'brand', 'colour', 'condition', 'country', 'country_code',
-          'description', 'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids',
+          'description', 'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids', 'measurements',
           'national_shipping_cost', 'pictures', 'price_amount', 'price_currency', 'product_type', 'quantity',
           'repop_metadata', 'shipping_methods', 'sku', 'source', 'style', 'variant_set', 'variants', 'videos'].includes(key)) delete draft[key];
       }
@@ -634,6 +672,27 @@ async function depopApiAction(action, payload) {
       const job = await request('POST', '/presentation/api/v1/drafts/products/', { draft_ids: [id] });
       if (!/^[A-Za-z0-9_-]+$/.test(String(job.id))) throw marketplaceError('Depop did not confirm the publish result. Check its result before trying again.', { code: 'schema_drift', rejected: false });
       return { publish_job_id: String(job.id) };
+    }
+    if (action === 'update') {
+      if (payload.confirm !== true) throw marketplaceError('Confirm updating the live Depop listing.');
+      const slug = String(payload.listing_id || '').trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9-]{0,200}$/.test(slug)) throw marketplaceError('A Depop listing link is required before updating.');
+      const product = await request('GET', `/presentation/api/v1/products/by-slug/${slug}/`);
+      const productId = String(product?.id || '');
+      if (!/^[0-9]+$/.test(productId)) throw marketplaceError('Depop did not confirm this listing. Check it on Depop before trying again.', { code: 'schema_drift', rejected: false });
+      const body = {
+        description,
+        price_amount: String(depopPrice(payload.listing) ?? product.price_amount ?? ''),
+        price_currency: product.price_currency || 'USD',
+        ...depopMeasurementBody(payload.listing),
+      };
+      await request('PUT', `/presentation/api/v1/products/${productId}/`, body);
+      const saved = await request('GET', `/presentation/api/v1/products/${productId}/`);
+      const price = saved?.price_amount ?? saved?.price;
+      if (depopPrice(payload.listing) != null && Number(price) !== Number(depopPrice(payload.listing))) {
+        throw marketplaceError('Depop did not keep the updated price. Check the live listing.', { code: 'schema_drift', rejected: false });
+      }
+      return { ok: true, state: 'published', listing_url: `https://www.depop.com/products/${slug}/`, price };
     }
     if (action === 'publish_status') {
       if (!/^[A-Za-z0-9_-]+$/.test(String(payload.publish_job_id))) throw marketplaceError('A Depop publish receipt is required.');
@@ -814,11 +873,18 @@ async function runDepopNative(msg, recovery = false) {
       await storeReceipt({ receipt_url: payload.draft_url, expected_photo_count: payload.expected_photo_count });
     };
   const photosChosen = () => {
-    if (!payload.photos?.length || payload.photos.length > 8) {
+    const chosen = depopChosenPhotos(payload.photos, payload.listing);
+    payload.photos = chosen.photos;
+    if (!payload.photos?.length) {
       throw marketplaceMissing('depop', [{ field: 'photos', needs: 'between one and eight photos' }]);
     }
+    if (chosen.omitted) payload.photo_warning = `Depop kept 8 photos and left ${chosen.omitted} off.`;
   };
   try {
+    if (payload.action === 'update') {
+      const updated = await depopAction('update', payload);
+      return { ...updated, ...(payload.photo_warning ? { warning: payload.photo_warning } : {}) };
+    }
     if (payload.action === 'save_draft') {
       if (!recovery) payload.depop_fields = await depopResolvedFields(payload);
       if (recovery) {
