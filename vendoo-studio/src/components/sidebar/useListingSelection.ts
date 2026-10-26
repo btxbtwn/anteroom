@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   bulkRegenerateToast,
+  listingCanRegenerate,
   toggleListingSelection,
   type BulkPriceDrop,
   type BulkRegenerateListing,
@@ -36,6 +37,7 @@ export function useListingSelection({
   >(null);
   const [pickedIds, setPickedIds] = useState<Set<string>>(() => new Set());
   const [markdownIds, setMarkdownIds] = useState<string[] | null>(null);
+  const [editIds, setEditIds] = useState<string[] | null>(null);
   const selectionAnchor = useRef<string | null>(null);
 
   const selectedIds = useMemo(() => {
@@ -53,14 +55,14 @@ export function useListingSelection({
   useEffect(() => {
     if (!selecting || bulk.running) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds) return;
+      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds || editIds) return;
       setSelecting(false);
       setPickedIds(new Set());
       selectionAnchor.current = null;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds]);
+  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds, editIds]);
 
   const exitSelecting = useCallback(() => {
     setSelecting(false);
@@ -109,8 +111,12 @@ export function useListingSelection({
     toastManager.add(bulkRegenerateToast(result));
   }, [bulk, exitSelecting, listingsById, suggestions]);
 
+  const regenerateIds = useMemo(() => eligibleIds.filter((id) => selectedIds.has(id) && (
+    listingsById.has(id) ? listingCanRegenerate(listingsById.get(id)!) : Boolean(suggestions.find((row) => row.conversation_id === id)?.cover_photo_url)
+  )), [eligibleIds, listingsById, selectedIds, suggestions]);
+
   const regenerateSelected = useCallback(async () => {
-    const ids = eligibleIds.filter((id) => selectedIds.has(id));
+    const ids = regenerateIds;
     if (!ids.length || bulk.running) return;
     const rows: BulkRegenerateListing[] = ids.map((id) => {
       const listing = listingsById.get(id);
@@ -127,7 +133,7 @@ export function useListingSelection({
       return;
     }
     setPricePrompt(rows);
-  }, [bulk.running, eligibleIds, listingsById, selectedIds, suggestions]);
+  }, [bulk.running, regenerateIds, listingsById, suggestions]);
 
   return {
     selecting,
@@ -137,6 +143,7 @@ export function useListingSelection({
     toggleSelect,
     toggleSelectAll,
     regenerateSelected,
+    regenerateIds,
     finishRegenerate,
     pricePrompt,
     setPricePrompt,
@@ -144,5 +151,7 @@ export function useListingSelection({
     setReviewPrompt,
     markdownIds,
     setMarkdownIds,
+    editIds,
+    setEditIds,
   };
 }

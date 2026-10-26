@@ -1,3 +1,4 @@
+import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
 import type {
@@ -485,6 +486,10 @@ export const api = {
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/check`, {
         method: "POST", body: JSON.stringify(draftUrl ? { draft_url: draftUrl } : {}),
       }),
+  },
+  bulkEdit: {
+    preview: (conversationIds: string[], edits: BulkEdits) => request<{ rows: BulkReviewRow[] }>("/listings/bulk-edit/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds, edits }) }),
+    apply: (edits: BulkEdits, rows: BulkReviewToken[]) => request<BulkEditResult>("/listings/bulk-edit/apply", { method: "POST", body: JSON.stringify({ edits, rows }) }),
   },
   salesLedger: {
     list: (filters: SalesLedgerFilters, page = 1) => request<SalesLedgerPage>(`/sales-ledger?${salesLedgerParams(filters, page)}`),
