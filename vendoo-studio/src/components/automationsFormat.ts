@@ -31,7 +31,6 @@ export interface AutomationForm {
   priceOn: boolean;
   priceMode: "amount" | "percent";
   priceRepeat: "once" | "step";
-  requireApproval: boolean;
   priceValue: string;
   floor: string;
   marketplaces: string[];
@@ -66,7 +65,6 @@ export function emptyForm(timezone = browserTimezone()): AutomationForm {
     priceOn: false,
     priceMode: "percent",
     priceRepeat: "step",
-    requireApproval: true,
     priceValue: "",
     floor: "",
     marketplaces: [],
@@ -91,7 +89,6 @@ export function formFromDraft(draft: AutomationDraft): AutomationForm {
   form.status = draft.filters?.status || "";
   form.itemIds = (draft.filters?.conversation_ids || []).join(", ");
   form.marketplaces = [...(draft.marketplaces || [])];
-  form.requireApproval = draft.require_approval !== false;
   for (const action of draft.actions || []) {
     if (action.type === "regenerate") form.regenerate = true;
     if (action.type === "delist") form.delist = true;
@@ -161,7 +158,6 @@ export function bodyFromForm(form: AutomationForm, activate: boolean): Automatio
   body.actions = actions;
   body.marketplaces = form.marketplaces;
   body.price_repeat = form.priceRepeat;
-  body.require_approval = form.requireApproval;
   return body;
 }
 

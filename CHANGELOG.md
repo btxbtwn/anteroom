@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.407 — 2026-10-26
+
+- Scheduled listing, delisting and relisting now wait for your review of each item and named marketplace. Changed drafts, photos or links need a new review, and failed marketplace actions stay visible without automatic retries. List never takes down a live listing; choose Relist explicitly.
+
 ## 0.1.406 — 2026-10-26
 
 - Save a private Poshmark draft, reuse it, and review shipping discounts, availability, cost, quantity, and private notes before listing. Later edits keep the revision already sent so Check verifies the right copy.

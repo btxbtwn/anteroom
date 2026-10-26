@@ -234,3 +234,14 @@ CI on pull requests and `main` lints, tests, and builds Anteroom, lints and test
 Anteroom includes code adapted from [T3 Code](https://github.com/pingdotgg/t3code), including UI components, theme styles, chat controls, and usage-limit helpers. Thanks to T3 Tools Inc. and the T3 Code contributors for making that work available under the MIT license.
 
 The full copyright and license text is in the [third-party notices](vendoo-studio/public/third-party-notices.txt), which are also included in Anteroom app builds. Original attribution comments remain in the adapted source files.
+
+
+### Scheduled marketplace reviews
+
+Automations may prepare local drafts and price edits on a schedule. Listing,
+delisting and relisting stop at a separate approval card for each item and named
+marketplace. Open the item to review its saved draft, then confirm the action.
+Changing the draft, photos, item details or marketplace links requires a new
+proposal. Each confirmation makes one attempt per marketplace; failed writes
+are not retried automatically. An existing live listing requires explicit
+Relist approval rather than being deleted as a side effect of List.

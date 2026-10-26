@@ -1,9 +1,7 @@
-"""Marketplace steps an automation is allowed to take.
+"""Marketplace actions called only after a seller confirms a specific proposal.
 
-Delist and relist call the same seller-confirmed paths a person uses. The
-confirmation is the automation the seller created and confirmed, and only
-for the marketplaces that task names. Price and field edits are saved on
-the listing first, by the caller, and are not published here by themselves.
+The scheduler never calls these writes. One explicit confirmation makes one
+attempt per named marketplace; a failed result stays visible for recovery.
 """
 from __future__ import annotations
 
@@ -20,12 +18,11 @@ log = logging.getLogger("vendoo_studio.automations")
 
 # How long one item waits for the Bridge slot to clear before this run steps aside.
 IDLE_TIMEOUT_S = 8 * 60
-# After a marketplace fails to come back up: 1 minute, 5 minutes, 15 minutes.
-# Tests replace this with zeros. The sleeps are the only wait between attempts.
-RELIST_BACKOFF_S = (60, 300, 900)
 
 
-async def perform(db: Session, item: dict, action: dict, marketplaces: list[str], revision_id: str | None) -> dict:
+async def perform(db: Session, item: dict, action: dict, marketplaces: list[str], revision_id: str | None, *, confirm: bool = False) -> dict:
+    if action["type"] in {"delist", "relist"} and confirm is not True:
+        return {"ok": False, "error": "Review and confirm this item’s marketplace action first."}
     if JobRepo(db).get_active():
         raise AutomationBusy()
     kind = action["type"]
@@ -49,31 +46,36 @@ async def _delist(db: Session, conv_id: str, marketplaces: list[str]) -> dict:
         return {"ok": False, "error": str(exc)}
     if not await _wait_until_idle(db):
         return {"ok": False, "error": "The delist was still running when this automation stopped waiting."}
-    return {"ok": True, "detail": _brief(result)}
+    failed = {name: (result.get(name) or {}).get("error") or "The marketplace did not confirm deletion."
+              for name in marketplaces if (result.get(name) or {}).get("state") != "deleted"}
+    if failed:
+        return {"ok": False, "error": "; ".join(f"{name}: {error}" for name, error in failed.items()), "errors": failed, "detail": result}
+    return {"ok": True, "detail": result}
 
 
 async def _relist(db: Session, conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
     """Take the named listings down, then list those same items again.
 
-    A marketplace that fails to list does not stop the others. Failures are
-    retried with backoff. Anything still down is reported as ``down, needs relist``
+    A marketplace that fails to list does not stop the others. Each is tried
+    once. Anything still down is reported as ``down, needs relist``
     and is not treated as a reason to skip the marketplaces that already succeeded.
     A delist that itself fails returns before anything is marked down, because
     the listings may still be up.
     """
     taken_down = await _delist(db, conv_id, marketplaces)
     if not taken_down.get("ok"):
+        confirmed = [name for name in marketplaces if (taken_down.get("detail", {}).get(name) or {}).get("state") == "deleted"]
+        if confirmed:
+            return {**taken_down, "state": DOWN_STATE, "down": confirmed}
         return taken_down
     return await _list_remaining(db, conv_id, marketplaces, revision_id)
 
 
 async def publish_revision(db: Session, conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
-    """Publish one saved revision on the named marketplaces.
+    """List a saved revision on named marketplaces after explicit approval.
 
-    A marketplace that is already live is relisted (delist, then list) so
-    ``list_now`` does not refuse it as already listed. A marketplace with no
-    live listing is listed. Sold listings are left alone. The same retry and
-    down state as relist apply to whichever listings fail to come back.
+    An existing live listing needs a separate Relist approval; List never
+    takes it down as a side effect. Sold marketplaces are left alone.
     """
     if not marketplaces:
         return {"ok": False, "error": "Name the marketplaces. An automation does not publish everywhere by default."}
@@ -85,12 +87,7 @@ async def publish_revision(db: Session, conv_id: str, marketplaces: list[str], r
     errors: dict[str, str] = {}
     hard_error = None
     if live:
-        relisted = await _relist(db, conv_id, live, revision_id)
-        detail.extend(relisted.get("detail") or [])
-        down.extend(relisted.get("down") or [])
-        errors.update(relisted.get("errors") or {})
-        if not relisted.get("ok") and not relisted.get("down"):
-            hard_error = relisted.get("error") or "Relist failed."
+        return {"ok": False, "error": "Already listed on " + ", ".join(live) + ". Choose and approve Relist explicitly."}
     if fresh:
         listed = await _list_remaining(db, conv_id, fresh, revision_id)
         detail.extend(listed.get("detail") or [])
@@ -113,7 +110,7 @@ async def publish_revision(db: Session, conv_id: str, marketplaces: list[str], r
 
 
 def _partition(db: Session, conv_id: str, marketplaces: list[str]) -> tuple[list[str], list[str]]:
-    """Live listings are relisted. Ones with no listing are listed. Sold listings are skipped."""
+    """Classify live and fresh targets, excluding marketplaces where the item sold."""
     from vendoo_studio.services.marketplace_delist import DelistError, listings
 
     try:
@@ -139,20 +136,15 @@ async def _list_remaining(db: Session, conv_id: str, marketplaces: list[str], re
     pending = list(marketplaces)
     detail: list[dict] = []
     errors: dict[str, str] = {}
-    for delay in (0, *RELIST_BACKOFF_S):
-        if not pending:
-            break
-        if delay:
-            await asyncio.sleep(delay)
-        still = []
-        for name in pending:
-            outcome = await _list_one(db, conv_id, name, revision_id)
-            if outcome.get("ok"):
-                detail.append(outcome)
-            else:
-                errors[name] = outcome.get("error") or "Relist failed."
-                still.append(name)
-        pending = still
+    still = []
+    for name in pending:
+        outcome = await _list_one(db, conv_id, name, revision_id)
+        if outcome.get("ok"):
+            detail.append(outcome)
+        else:
+            errors[name] = outcome.get("error") or "Relist failed."
+            still.append(name)
+    pending = still
     if pending:
         return {
             "ok": False,
@@ -171,20 +163,17 @@ async def _list_one(db: Session, conv_id: str, name: str, revision_id: str) -> d
     if JobRepo(db).get_active() and not await _wait_until_idle(db):
         return {"ok": False, "marketplace": name, "error": f"The {name} relist was still running when this automation stopped waiting."}
     try:
-        # confirm=True is the seller's confirmed automation, for this marketplace only.
+        # This call follows the seller's consumed item-specific approval.
         result = await list_now(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
     except NativeMarketplaceError as exc:
-        if exc.status_code == 409 and "another automation" in str(exc).lower():
-            if not await _wait_until_idle(db):
-                return {"ok": False, "marketplace": name, "error": str(exc)}
-            try:
-                result = await list_now(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
-            except NativeMarketplaceError as again:
-                return {"ok": False, "marketplace": name, "error": str(again)}
-        else:
-            return {"ok": False, "marketplace": name, "error": str(exc)}
+        return {"ok": False, "marketplace": name, "error": str(exc)}
     if not await _wait_until_idle(db):
         return {"ok": False, "marketplace": name, "error": f"The {name} relist was still running when this automation stopped waiting."}
+    db.expire_all()
+    job = JobRepo(db).get(result["job_id"]) if result.get("job_id") else None
+    if (job is not None and job.status != "completed") or (job is None and result.get("state") not in {"published", "pending_review"}):
+        return {"marketplace": name, "ok": False,
+                "error": (job.last_error if job else result.get("error")) or "The marketplace did not confirm publication."}
     return {"marketplace": name, "ok": True, "detail": _brief(result)}
 
 
