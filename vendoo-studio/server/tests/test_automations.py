@@ -325,6 +325,7 @@ def test_run_now_dry_run_logs_a_job_without_calling_the_marketplace(db, client):
     assert body["dry_run"] is True
     assert body["status"] == "completed"
     assert body["items"][0]["ok"] is True
+    assert body["items"][0]["dry_run"] is True
     job = db.query(Job).one()
     assert job.status == "completed"
     assert job.listing_snapshot["dry_run"] is True

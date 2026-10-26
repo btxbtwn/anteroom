@@ -252,7 +252,7 @@ async def _one_item(db: Session, run: AutomationRun, automation: Automation, ite
             try:
                 result = await executor(db, item, action, list(automation.marketplaces or []), local.get("revision_id"))
             except AutomationBusy:
-                return {**_outcome(item, local, remote, error="Waiting for the current marketplace job."), "busy": True, "acted": False}
+                return {**_outcome(item, local, remote, error="Waiting for the current marketplace job.", dry_run=bool(run.dry_run)), "busy": True, "acted": False}
             remote.append({"type": action["type"], **result})
             if not result.get("ok"):
                 error = result.get("error") or f"{action['type']} failed."
@@ -277,10 +277,10 @@ async def _one_item(db: Session, run: AutomationRun, automation: Automation, ite
     if ok and not run.dry_run and (automation.filters or {}).get("min_age_days"):
         listed = _parse_time(item.get("listed_at"))
         record_application(db, automation.id, item["conversation_id"], listed, utcnow())
-    return _outcome(item, local, remote, error=error, job_id=job_id)
+    return _outcome(item, local, remote, error=error, job_id=job_id, dry_run=bool(run.dry_run))
 
 
-def _outcome(item, local, remote, *, error, job_id=None, busy=False) -> dict:
+def _outcome(item, local, remote, *, error, job_id=None, busy=False, dry_run=False) -> dict:
     return {
         "conversation_id": item["conversation_id"],
         "title": item.get("title"),
@@ -293,7 +293,7 @@ def _outcome(item, local, remote, *, error, job_id=None, busy=False) -> dict:
         "original_price": item.get("original_price"),
         "notes": local.get("notes") if isinstance(local, dict) else [],
         "remote": remote,
-        "dry_run": False,
+        "dry_run": bool(dry_run),
     }
 
 
