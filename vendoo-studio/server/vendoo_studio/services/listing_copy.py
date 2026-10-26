@@ -69,7 +69,7 @@ def reusable_listing(raw: dict) -> dict:
             for key, value in raw.items() if key in fields}
 
 
-def _source(db: Session, conv_id: str):
+def read_source(db: Session, conv_id: str):
     db.expire_all()
     conv = db.get(Conversation, conv_id)
     if conv is None:
@@ -85,7 +85,7 @@ def _source(db: Session, conv_id: str):
 
 
 def preview(db: Session, conv_id: str) -> dict:
-    conv, revision, images, basis = _source(db, conv_id)
+    conv, revision, images, basis = read_source(db, conv_id)
     return {"source_id": conv.id, "source_title": conv.title or "Untitled", "expected_basis": basis,
             "photo_count": len(images), "has_listing": revision is not None,
             "title": f"Copy of {conv.title or 'Untitled'}"[:200]}
@@ -108,25 +108,48 @@ def batch_preview(db: Session, body: BatchPreviewRequest) -> dict:
     return {"rows": rows}
 
 
-def copy_result(db: Session, source_id: str, request_id: str) -> str:
+def copy_result(db: Session, source_id: str, request_id: str, *, source_kind: str = "listing") -> str:
     receipt = db.get(ListingCopyReceipt, request_id, populate_existing=True)
-    if receipt is None or receipt.source_id != source_id:
+    if receipt is None or receipt.source_id != source_id or receipt.source_kind != source_kind:
         raise CopyError("No completed copy was found for this request.", 404)
     if not receipt.conversation_id or db.get(Conversation, receipt.conversation_id) is None:
         raise CopyError("This copy was already created and then removed. Start a new copy if needed.", 410)
     return receipt.conversation_id
 
 
+def completed_copy(db: Session, source_kind: str, source_id: str, request_id: str, fingerprint: str) -> str | None:
+    receipt = db.get(ListingCopyReceipt, request_id, populate_existing=True)
+    if receipt is None:
+        return None
+    if receipt.source_kind != source_kind or receipt.source_id != source_id or receipt.fingerprint != fingerprint:
+        raise CopyError("This request already created a different draft. Check its result or start a new review.")
+    return copy_result(db, source_id, request_id, source_kind=source_kind)
+
+
+def add_draft(db: Session, title: str, notes: dict, listing: dict, images: list[dict], source: str) -> str:
+    """Stage a clean local draft. The caller commits it with its creation receipt."""
+    conv = Conversation(title=title, notes=json.dumps(notes), status="draft")
+    db.add(conv)
+    db.flush()
+    for index, image in enumerate(images):
+        db.add(Photo(conversation_id=conv.id, display_order=index, **image))
+    revision = ListingRevision(conversation_id=conv.id, listing_json=listing, source=source)
+    db.add(revision)
+    db.flush()
+    validation = validate_listing(listing, len(images), require_photos=True)
+    db.add(Listing(conversation_id=conv.id, current_revision_id=revision.id,
+                   validation_status="valid" if validation.valid else "error", validation_errors=validation.errors + validation.warnings))
+    return conv.id
+
+
 def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
     created_files = []
     fingerprint = hashlib.sha256(json.dumps([conv_id, body.model_dump(exclude={"request_id"})], sort_keys=True).encode()).hexdigest()
     with start_gate():
-        receipt = db.get(ListingCopyReceipt, body.request_id, populate_existing=True)
-        if receipt is not None:
-            if receipt.source_id != conv_id or receipt.fingerprint != fingerprint:
-                raise CopyError("This request already created a different copy. Check its result or start a new review.")
-            return copy_result(db, conv_id, body.request_id)
-        source, revision, images, basis = _source(db, conv_id)
+        existing = completed_copy(db, "listing", conv_id, body.request_id, fingerprint)
+        if existing:
+            return existing
+        source, revision, images, basis = read_source(db, conv_id)
         if basis != body.expected_basis:
             raise CopyError("The source listing or its photos changed. Reload the review before copying.")
         raw = revision.listing_json if revision and isinstance(revision.listing_json, dict) else {}
@@ -146,10 +169,8 @@ def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
         if body.include_photos and len(images) > 20:
             raise CopyError("A copied listing can have at most 20 photos.", 422)
         try:
-            new = Conversation(title=body.title, notes=json.dumps(notes), status="draft")
-            db.add(new)
-            db.flush()
-            for index, image in enumerate(images if body.include_photos else []):
+            copied_images = []
+            for image in images if body.include_photos else []:
                 if Path(image.stored_filename).name != image.stored_filename:
                     raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422)
                 path = Path(photos.PHOTOS_DIR) / image.stored_filename
@@ -159,15 +180,9 @@ def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
                     raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422) from exc
                 created_files.append(Path(photos.PHOTOS_DIR) / meta["stored_filename"])
                 meta["original_filename"] = image.original_filename
-                db.add(Photo(conversation_id=new.id, display_order=index, **meta))
-            copied_revision = ListingRevision(conversation_id=new.id, listing_json=data, source="copy")
-            db.add(copied_revision)
-            db.flush()
-            validation = validate_listing(data, len(images) if body.include_photos else 0, require_photos=True)
-            db.add(Listing(conversation_id=new.id, current_revision_id=copied_revision.id,
-                           validation_status="valid" if validation.valid else "error", validation_errors=validation.errors + validation.warnings))
-            new_id = new.id
-            db.add(ListingCopyReceipt(request_id=body.request_id, fingerprint=fingerprint, source_id=conv_id, conversation_id=new_id))
+                copied_images.append(meta)
+            new_id = add_draft(db, body.title, notes, data, copied_images, "copy")
+            db.add(ListingCopyReceipt(request_id=body.request_id, fingerprint=fingerprint, source_kind="listing", source_id=conv_id, conversation_id=new_id))
             db.commit()
             return new_id
         except BaseException:

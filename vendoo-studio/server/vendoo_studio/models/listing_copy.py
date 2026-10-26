@@ -10,6 +10,7 @@ class ListingCopyReceipt(Base):
 
     request_id = Column(String, primary_key=True)
     fingerprint = Column(String, nullable=False)
+    source_kind = Column(String, nullable=False, server_default="listing")
     source_id = Column(String, nullable=False)
     # Deleting a copy keeps its receipt: retrying the old request must not recreate it.
     conversation_id = Column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True)
