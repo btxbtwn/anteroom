@@ -128,19 +128,11 @@ def build_parser(catalog: dict[str, Any]) -> argparse.ArgumentParser:
     version = sub.add_parser("version", help="Print the Anteroom version", parents=[nested])
     version.set_defaults(handler=_cmd_version)
 
-    for group, commands in _by_group(catalog).items():
-        group_parser = sub.add_parser(group, help=f"{group.replace('-', ' ')} routes", parents=[nested])
-        actions = group_parser.add_subparsers(dest="action", required=True, metavar="action")
-        for command in commands:
-            action = actions.add_parser(
-                command["action"],
-                help=_short(command),
-                description=command_help(command),
-                formatter_class=argparse.RawDescriptionHelpFormatter,
-                parents=[nested],
-            )
-            _add_flags(action, command)
-            action.set_defaults(handler=_cmd_http, command=command)
+    grouped = _by_group(catalog)
+    # Recent log lines and the relist-gap route share ``anteroom errors``.
+    _add_errors(sub, nested, grouped.pop("errors", []))
+    for group, commands in grouped.items():
+        _add_generated_group(sub, nested, group, commands)
     return parser
 
 
@@ -196,6 +188,22 @@ def _add_commands(sub: argparse._SubParsersAction, common: argparse.ArgumentPars
     commands.set_defaults(handler=_cmd_commands)
 
 
+def _add_generated_group(sub: argparse._SubParsersAction, common: argparse.ArgumentParser, group: str, commands: list[dict[str, Any]], *, actions: argparse._SubParsersAction | None = None) -> None:
+    if actions is None:
+        group_parser = sub.add_parser(group, help=f"{group.replace('-', ' ')} routes", parents=[common])
+        actions = group_parser.add_subparsers(dest="action", required=True, metavar="action")
+    for command in commands:
+        action = actions.add_parser(
+            command["action"],
+            help=_short(command),
+            description=command_help(command),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            parents=[common],
+        )
+        _add_flags(action, command)
+        action.set_defaults(handler=_cmd_http, command=command)
+
+
 def _add_logs(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
     logs = sub.add_parser("logs", help="Server and extension logs. --level error|warning|info --since --grep --follow", parents=[common])
     logs.add_argument("--level", default="info", choices=("error", "warning", "info"))
@@ -204,11 +212,22 @@ def _add_logs(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) 
     logs.add_argument("--follow", action="store_true", help="Keep printing new lines")
     logs.add_argument("--limit", type=int, default=200)
     logs.set_defaults(handler=_cmd_logs)
-    errors = sub.add_parser("errors", help="Recent errors and warnings", parents=[common])
+
+
+def _add_errors(sub: argparse._SubParsersAction, common: argparse.ArgumentParser, commands: list[dict[str, Any]]) -> None:
+    errors = sub.add_parser(
+        "errors",
+        help="Recent errors and warnings. `errors list` shows listings a relist left down.",
+        parents=[common],
+    )
     errors.add_argument("--since", default="")
     errors.add_argument("--grep", default="")
     errors.add_argument("--limit", type=int, default=200)
     errors.set_defaults(handler=_cmd_errors)
+    if not commands:
+        return
+    actions = errors.add_subparsers(dest="action", required=False, metavar="action")
+    _add_generated_group(sub, common, "errors", commands, actions=actions)
 
 
 def _add_set_price(sub: argparse._SubParsersAction, common: argparse.ArgumentParser) -> None:
@@ -380,7 +399,7 @@ def _cmd_commands(args: argparse.Namespace, catalog: dict[str, Any]) -> int:
     lines.append("commands      This list")
     lines.append("mcp serve     MCP server on stdin/stdout")
     lines.append("logs          Server logs (--level --since --grep --follow)")
-    lines.append("errors        Recent errors and warnings")
+    lines.append("errors        Recent errors and warnings. errors list shows listings a relist left down")
     lines.append("set-price     Set the item price. --push needs --confirm")
     lines.append("jobs logs     One job's events and fill log")
     lines.append("version")

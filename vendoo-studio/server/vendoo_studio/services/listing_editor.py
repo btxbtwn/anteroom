@@ -69,7 +69,12 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     from vendoo_studio.services.vendoo_import import parse_notes
 
     listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv_repo.get(conv_id).notes))
+    from vendoo_studio.services.seller_overrides import capture_locked, restore_locked
+
+    # Validation rewrites dropdown keys. A value the seller owns is put back.
+    locked = capture_locked(listing_data)
     validation = validate_listing(listing_data, photo_count, require_photos=True)
+    restore_locked(listing_data, locked)
     from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
 
     offer_problem = best_offer_error(listing_data)

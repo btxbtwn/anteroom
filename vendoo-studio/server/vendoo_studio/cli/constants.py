@@ -12,7 +12,9 @@ DEFAULT_STREAM_SECONDS = 20.0
 
 # Groups the CLI reserves for its own commands. A generated route group that
 # collides with one of these is prefixed so the route commands stay reachable.
-RESERVED_GROUPS = frozenset({"auth", "api", "commands", "mcp", "version", "help", "logs", "errors", "set-price"})
+# ``errors`` is also the relist-gap route (``anteroom errors list``). The log
+# command shares that parser, so the generated group keeps the name ``errors``.
+RESERVED_GROUPS = frozenset({"auth", "api", "commands", "mcp", "version", "help", "logs", "set-price"})
 
 AUTH_NOTE = (
     "Anteroom's HTTP API does not check a bearer token. It is built to listen "
