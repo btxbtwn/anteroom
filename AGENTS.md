@@ -97,9 +97,13 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 ## Security and Product Invariants
 
 - Never commit API keys, OAuth credentials, listing photos, generated diagnostics, or private exports.
-- API keys remain in macOS Keychain and never enter SQLite, logs, frontend responses, or extension messages.
-- Bind Anteroom only to `127.0.0.1`. Optional private Tailscale Serve (Settings → Connections) may proxy Tailnet HTTPS to that loopback port; never Funnel and never bind to `0.0.0.0`.
+- API keys and sign-in tokens never enter the database in plain text, logs, frontend responses, or extension messages. On the Mac they live in macOS Keychain. When the hosted API takes over generation (step 4 of `docs/cloud-architecture.md`), they move to Supabase Vault, encrypted at rest, and are never returned to any client.
+- On the Mac, bind Anteroom only to `127.0.0.1`. The hosted API on Fly.io is the only part that accepts connections from outside, and it requires a Supabase session on every request except health checks and marketplace webhooks. The Mac worker connects to it outbound and binds nothing. Optional private Tailscale Serve (Settings → Connections) may proxy Tailnet HTTPS to that loopback port; never Funnel and never bind to `0.0.0.0`.
 - Require human approval before sending to Vendoo.
 - Allow one automation job at a time. Additional approved Sends may wait in a FIFO queue and start when the current job finishes, fails, or is cancelled.
-- Do not introduce Redis, MongoDB, Celery, Docker, cloud hosting, or provider substitutions unless explicitly requested.
-- The one approved cloud service is `webhook-relay/` on Cloudflare Workers. It never calls Studio and never acts on a listing. It stores only device IDs, token hashes, linked marketplace account IDs and event IDs, plus sign-in tokens for at most 15 minutes until the device collects them: no buyer names, addresses, prices or listing text. Etsy API calls pass through it unstored. Studio reaches it outbound only, so the loopback-only rule still holds.
+- Do not introduce Redis, MongoDB, Celery, or provider substitutions unless explicitly requested.
+- Approved cloud services (2026-10-26, see `docs/cloud-architecture.md`):
+  - **Supabase** for accounts, Postgres, photo storage, Realtime and Vault. Every seller table has row-level security keyed to the seller's `user_id`.
+  - **Fly.io** for the hosted Anteroom API, built from a Dockerfile. Docker is for the hosted API only; the Mac app does not need it.
+  - **`webhook-relay/` on Cloudflare Workers**, as below.
+- `webhook-relay/` on Cloudflare Workers It never calls Studio and never acts on a listing. It stores only device IDs, token hashes, linked marketplace account IDs and event IDs, plus sign-in tokens for at most 15 minutes until the device collects them: no buyer names, addresses, prices or listing text. Etsy API calls pass through it unstored. Studio reaches it outbound only, so the loopback-only rule still holds.
