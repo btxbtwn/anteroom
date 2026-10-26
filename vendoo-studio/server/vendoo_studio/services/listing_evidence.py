@@ -65,11 +65,11 @@ def explicit_changes(previous: dict, submitted: dict) -> dict:
     return changes
 
 
-def record_correction(db: Session, conv_id: str, revision_id: str, listing: dict, changes: dict) -> None:
+def record_correction(db: Session, conv_id: str, revision_id: str, listing: dict, changes: dict, *, source: str = "user_form") -> None:
     if changes:
         db.add(ListingCorrection(conversation_id=conv_id, revision_id=revision_id,
                                  category_path=str(listing.get("category_path") or ""),
-                                 brand=str(listing.get("brand") or ""), changes=changes))
+                                 brand=str(listing.get("brand") or ""), changes=changes, source=source))
 
 
 def corrections_context(db: Session, conv_id: str, listing: dict) -> dict:

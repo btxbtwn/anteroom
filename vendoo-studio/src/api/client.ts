@@ -1,3 +1,4 @@
+import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
 import type { ListingVideo, ListingVideoLibrary } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
@@ -533,6 +534,16 @@ export const api = {
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/check`, {
         method: "POST", body: JSON.stringify(draftUrl ? { draft_url: draftUrl } : {}),
       }),
+  },
+  templates: {
+    list: () => request<{templates: ListingTemplate[]}>("/listing-templates"),
+    source: (id: string) => request<TemplateSource>(`/listing-templates/source/${id}`),
+    save: (body: TemplateSave, id?: string) => request<ListingTemplate>(id ? `/listing-templates/${id}` : "/listing-templates", { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
+    remove: (id: string, revision: number) => request<OkResponse>(`/listing-templates/${id}?expected_revision=${revision}`, {method:"DELETE"}),
+    draft: (id: string, body: TemplateDraft) => request<{conversation_id:string}>(`/listing-templates/${id}/draft`, {method:"POST",body:JSON.stringify(body)}),
+    draftResult: (id: string, requestId: string) => request<{conversation_id:string}>(`/listing-templates/${id}/draft-result/${requestId}`),
+    preview: (id: string, body: TemplateApply) => request<TemplateReview>(`/listing-templates/${id}/apply-preview`, {method:"POST",body:JSON.stringify(body)}),
+    apply: (id: string, body: TemplateApproval) => request<{ok:boolean;changed:boolean}>(`/listing-templates/${id}/apply`, {method:"POST",body:JSON.stringify(body)}),
   },
   bulkEdit: {
     preview: (conversationIds: string[], edits: BulkEdits) => request<{ rows: BulkReviewRow[] }>("/listings/bulk-edit/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds, edits }) }),
