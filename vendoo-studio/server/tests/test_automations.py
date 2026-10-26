@@ -16,7 +16,7 @@ from vendoo_studio.cli.catalog import build_catalog_from_app
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.models.automation import AutomationRun, ItemPriceBaseline
 from vendoo_studio.models.conversation import Conversation
-from vendoo_studio.models.job import Job
+from vendoo_studio.models.job import Job, JobEvent
 from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.repositories.queries import ListingRepo
@@ -106,7 +106,13 @@ def test_prompt_drafts_the_sixty_day_rule_and_refuses_every_marketplace():
     assert draft["filters"]["min_age_days"] == 60
     assert draft["marketplaces"] == ["ebay", "poshmark"]
     price = next(action for action in draft["actions"] if action["type"] == "price")
-    assert price == {"type": "price", "mode": "percent", "value": 10.0, "floor": 15.0}
+    assert price == {"type": "price", "mode": "percent", "value": 10.0, "floor": 15.0, "repeat": "step"}
+    one_time = draft_from_prompt(
+        "On 2026-11-03 at 9:00am, drop men's t-shirts by 10% on eBay. Don't go below $15.",
+        now=NOW,
+    )
+    once_price = next(action for action in one_time["actions"] if action["type"] == "price")
+    assert once_price["repeat"] == "once"
     assert any(action["type"] == "relist" for action in draft["actions"])
     assert all(action["type"] != "delist" for action in draft["actions"])
     assert draft["schedule"]["kind"] == "daily"
@@ -128,6 +134,15 @@ def test_price_drop_uses_the_original_and_does_not_compound():
     assert again == 35.0
     _basis, held = drop_price(100, 81, mode="percent", value=10, floor=15)
     assert held == 81.0
+    _basis, first_step = drop_price(100, 100, mode="percent", value=10, floor=15, repeat="step")
+    _basis, second_step = drop_price(100, first_step, mode="percent", value=10, floor=15, repeat="step")
+    _basis, third_step = drop_price(100, second_step, mode="percent", value=10, floor=15, repeat="step")
+    assert (first_step, second_step, third_step) == (90.0, 80.0, 70.0)
+    assert second_step != round(first_step * 0.9, 2)
+    _basis, floored_step = drop_price(100, 80, mode="percent", value=10, floor=75, repeat="step")
+    assert floored_step == 75.0
+    _basis, held_floor = drop_price(100, 75, mode="percent", value=10, floor=75, repeat="step")
+    assert held_floor == 75.0
 
 
 def test_a_saved_task_is_still_there_in_a_new_session(db):
@@ -163,11 +178,116 @@ def test_age_filter_uses_marketplace_created_at_and_skips_sold_and_women(db):
     items = {item["conversation_id"]: item for item in automations.select_items(db, spec, NOW)}
     assert items[old.id]["include"] is True
     assert items[old.id]["age_days"] == 70
+    assert items[old.id]["listed_source"] == "marketplace_listing"
     assert items[young.id]["include"] is False
     assert "under 60" in items[young.id]["skip_reason"]
     assert items[women.id]["include"] is False
     assert items[sold.id]["include"] is False
     assert "Sold" in items[sold.id]["skip_reason"]
+
+
+def test_age_uses_the_real_listed_date_not_a_backfilled_row(db):
+    """The shop's shape: Vendoo imports have no marketplace row, and the rows that exist were backfilled together."""
+    imported = _conversation(db, title="Imported tee", price=40, listed="2026-08-01T12:00:00+00:00")
+    _vendoo_job(db, imported.id, created_at=datetime(2026, 10, 26, 8, 0))
+    _conversation(db, title="Notes only tee", price=40, listed="2026-07-01T12:00:00+00:00", job=False)
+    backfilled = _item(db, title="Backfilled tee", price=40, department="Men", category="Tops > T-Shirts", marketplace="ebay", days=1)
+    db.add(Job(
+        conversation_id=backfilled.id, approved_revision_id="rev", listing_snapshot={},
+        status="completed", current_step="native_ebay_list",
+        created_at=datetime(2026, 8, 1, 12, 0), updated_at=datetime(2026, 8, 1, 12, 5),
+    ))
+    failed = _item(db, title="Failed publish tee", price=40, department="Men", category="Tops > T-Shirts", marketplace="ebay", days=1)
+    failed_job = Job(
+        conversation_id=failed.id, approved_revision_id="rev", listing_snapshot={},
+        status="failed", current_step="native_ebay_list", created_at=datetime(2026, 8, 1, 12, 0),
+    )
+    db.add(failed_job)
+    db.flush()
+    db.add(JobEvent(
+        job_id=failed_job.id, event_type="native_result", step="native_ebay_list",
+        payload={"ok": False, "action": "list", "state": "unknown", "marketplace": "ebay"},
+        created_at=datetime(2026, 8, 1, 12, 0),
+    ))
+    db.commit()
+
+    spec = automations.compile_spec({"prompt": PROMPT, "timezone": "UTC"}, now=NOW)
+    items = {item["title"]: item for item in automations.select_items(db, spec, NOW)}
+    assert items["Imported tee"]["include"] is True
+    assert items["Imported tee"]["listed_source"] == "vendoo_job"
+    assert items["Imported tee"]["age_days"] == 86
+    assert items["Imported tee"]["marketplaces"] == ["ebay", "poshmark"]
+    assert items["Notes only tee"]["include"] is True
+    assert items["Notes only tee"]["listed_source"] == "item_listed"
+    assert items["Notes only tee"]["age_days"] == 117
+    assert items["Backfilled tee"]["include"] is True
+    assert items["Backfilled tee"]["listed_source"] == "publish_job"
+    assert items["Backfilled tee"]["age_days"] == 86
+    assert items["Failed publish tee"]["include"] is False
+    assert items["Failed publish tee"]["listed_source"] == "marketplace_listing"
+    assert "under 60" in items["Failed publish tee"]["skip_reason"]
+    depop = _conversation(db, title="Depop only tee", price=40, listed="2026-08-01T12:00:00+00:00", markets=["depop"])
+    _vendoo_job(db, depop.id, created_at=NOW)
+    again = {item["title"]: item for item in automations.select_items(db, spec, NOW)}
+    assert again["Depop only tee"]["include"] is False
+    assert again["Depop only tee"]["age_days"] is None
+    assert "not listed" in again["Depop only tee"]["skip_reason"]
+
+
+def test_a_one_time_drop_does_not_step_on_the_next_cycle(db):
+    conv = _item(db, title="Nike Men's Tee", price=100, department="Men", category="T-Shirts", marketplace="ebay", days=70)
+
+    async def executor(*_args, **_kwargs):
+        return {"ok": True}
+
+    created = automations.create_automation(db, {
+        "timezone": "UTC",
+        "schedule": {"kind": "daily", "time": "09:00"},
+        "filters": {"conversation_ids": [conv.id]},
+        "actions": [{"type": "price", "mode": "percent", "value": 10, "floor": 15, "repeat": "once"}],
+        "marketplaces": ["ebay"],
+        "activate": True,
+    }, now=NOW)
+    row = automations.get_automation(db, created["id"])
+    row.next_run_at = NOW - timedelta(hours=1)
+    db.commit()
+    assert asyncio.run(tick(db, now=NOW, executor=executor)) == 1
+    row = automations.get_automation(db, created["id"])
+    row.next_run_at = NOW + timedelta(days=61)
+    db.commit()
+    assert asyncio.run(tick(db, now=NOW + timedelta(days=61, hours=1), executor=executor)) == 1
+    price = ListingRepo(db).get_revision(ListingRepo(db).get_current(conv.id).current_revision_id).listing_json["price"]
+    assert price == 90.0
+
+
+def _conversation(db, *, title, price, listed, job=True, markets=("ebay", "poshmark")):
+    conv = Conversation(title=title, status="active", notes=json.dumps({
+        "vendooStatus": "active",
+        "vendooItemId": f"vendoo-{title}",
+        "vendooMarketplaces": list(markets),
+        "vendooDates": {
+            "listed": listed,
+            "listedByMarketplace": {name: listed for name in markets},
+        },
+    }))
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    ListingRepo(db).save_revision(conv.id, {
+        "title": title, "price": price, "department": "Men", "category_path": "Tops > T-Shirts", "brand": "Nike",
+    }, "test")
+    if job:
+        _vendoo_job(db, conv.id, created_at=NOW)
+    return conv
+
+
+def _vendoo_job(db, conv_id, *, created_at):
+    db.add(Job(
+        conversation_id=conv_id, approved_revision_id="rev", listing_snapshot={"price": 40},
+        status="imported", current_step="imported", vendoo_item_id=f"vendoo-{conv_id}",
+        created_at=created_at, updated_at=created_at,
+    ))
+    db.commit()
 
 
 def test_a_run_drops_from_the_stored_original_and_a_second_pass_does_not(db):
@@ -218,14 +338,14 @@ def test_a_run_drops_from_the_stored_original_and_a_second_pass_does_not(db):
     assert price == 90.0
     assert len(calls) == 1
 
-    # After the cooldown, the drop is still 10% of 100, not another 10% of 90.
+    # After the cooldown, the next rung is 80% of 100, not 90% of 90.
     row = automations.get_automation(db, created["id"])
     row.next_run_at = NOW + timedelta(days=61)
     db.commit()
     much_later = NOW + timedelta(days=61, hours=1)
     assert asyncio.run(tick(db, now=much_later, executor=executor)) == 1
     price = ListingRepo(db).get_revision(ListingRepo(db).get_current(conv.id).current_revision_id).listing_json["price"]
-    assert price == 90.0
+    assert price == 80.0
     assert len(calls) == 2
     assert db.query(Job).filter(Job.current_step == "automation").count() == 2
 
@@ -327,7 +447,7 @@ def test_run_now_dry_run_logs_a_job_without_calling_the_marketplace(db, client):
     assert body["items"][0]["ok"] is True
     assert body["items"][0]["dry_run"] is True
     job = db.query(Job).one()
-    assert job.status == "completed"
+    assert job.status == "dry_run"
     assert job.listing_snapshot["dry_run"] is True
     history = client.get(f"/api/automations/{automation_id}/history").json()
     assert history["runs"][0]["id"] == body["id"]

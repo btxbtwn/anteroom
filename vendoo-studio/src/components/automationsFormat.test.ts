@@ -10,7 +10,7 @@ const draft: AutomationDraft = {
   schedule: { kind: "daily", time: "09:00" },
   filters: { min_age_days: 60 },
   actions: [
-    { type: "price", mode: "percent", value: 10, floor: 15 },
+    { type: "price", mode: "percent", value: 10, floor: 15, repeat: "step" },
     { type: "relist" },
   ],
   marketplaces: ["ebay", "poshmark"],
@@ -31,7 +31,8 @@ describe("automations form", () => {
     expect(form.relist).toBe(true);
     expect(form.marketplaces).toEqual(["ebay", "poshmark"]);
     expect(describeSchedule(draft.schedule, draft.timezone)).toBe("Daily at 09:00 (America/Los_Angeles)");
-    expect(describeActions(draft.actions)).toBe("drop 10%, floor $15, relist");
+    expect(form.priceRepeat).toBe("step");
+    expect(describeActions(draft.actions)).toBe("drop 10% each cycle, floor $15, relist");
   });
 
   it("sends a bare sentence for the server to parse", () => {
@@ -48,7 +49,7 @@ describe("automations form", () => {
     const body = bodyFromForm(formFromDraft(draft), true);
     expect(body.schedule).toEqual({ kind: "daily", time: "09:00" });
     expect(body.actions?.map((action) => action.type)).toEqual(["price", "relist"]);
-    expect(body.actions?.[0]).toMatchObject({ mode: "percent", value: 10, floor: 15 });
+    expect(body.actions?.[0]).toMatchObject({ mode: "percent", value: 10, floor: 15, repeat: "step" });
     expect(body.marketplaces).toEqual(["ebay", "poshmark"]);
     expect(body.filters?.min_age_days).toBe(60);
     expect(body.activate).toBe(true);

@@ -2,14 +2,17 @@
 
 A task the seller confirmed is approval for the actions it names, on the
 marketplaces it names, and for nothing else. Sold items are left alone.
-Listing age is ``marketplace_listings.created_at``: the moment that row was
-inserted, which is when Anteroom first recorded the listing. There is no
-separate published-at column, and an ordinary update does not move it.
+
+Listing age is the earliest real listed date: the first successful publish,
+the date on the Vendoo job, then the item's own listed timestamp.
+``marketplace_listings.created_at`` counts only when nothing earlier exists,
+because a backfill stamp is not when the item was listed.
 
 Runs are claimed by ``(automation, scheduled slot)`` so a restart cannot
 fire the same slot twice. Missed slots catch up once. One run is in
 progress at a time, and it waits while any marketplace job is already
-using the Bridge. Each item's outcome is a row in ``jobs``.
+using the Bridge. Each item's outcome is a row in ``jobs``. A dry run is
+recorded as ``dry_run``, not as a completed send.
 """
 from __future__ import annotations
 
@@ -28,7 +31,9 @@ from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from vendoo_studio.repositories.queries import JobRepo, ListingRepo
+from vendoo_studio.services.automation_age import listed_markets, load_listed_index, resolve_listed_at
 from vendoo_studio.services.automation_pricing import PriceError, drop_price
+from vendoo_studio.services.vendoo_import import parse_notes
 from vendoo_studio.services.automation_prompt import MARKETPLACES, draft_from_prompt
 from vendoo_studio.services.automation_schedule import (
     ScheduleError,
@@ -284,7 +289,7 @@ def compile_spec(body: dict, *, now: datetime | None = None, allow_incomplete: b
         else:
             raise AutomationError(str(exc)) from exc
     try:
-        actions = _normalize_actions(base.get("actions") or [])
+        actions = _normalize_actions(base.get("actions") or [], schedule)
     except AutomationError:
         if allow_incomplete:
             actions = []
@@ -326,16 +331,22 @@ def select_items(db: Session, spec: dict, now: datetime, *, automation_id: str |
     by_item: dict[str, list[MarketplaceListing]] = {}
     for row in rows:
         by_item.setdefault(row.conversation_id, []).append(row)
+    listed = load_listed_index(db)
     items = []
     for conv in conversations:
         listing = listings.get(conv.id) or {}
+        notes = parse_notes(conv.notes)
         live = [row for row in by_item.get(conv.id, []) if row.state in LIVE_STATES]
         sold_on = _sold_marketplaces(db, conv.id)
         if wanted:
             live_here = [row for row in live if row.marketplace in wanted and row.marketplace not in sold_on]
         else:
             live_here = [row for row in live if row.marketplace not in sold_on]
-        listed_at = _earliest(live_here or live)
+        markets = sorted(
+            name for name in listed_markets(notes, live_here)
+            if (not wanted or name in wanted) and name not in sold_on
+        )
+        listed_at, listed_source = resolve_listed_at(listed, conv, live_here, wanted)
         age = _age_days(listed_at, moment)
         price = _number(listing.get("price"))
         original = _original_price(db, conv.id, price, persist=persist_price and price is not None)
@@ -345,8 +356,9 @@ def select_items(db: Session, spec: dict, now: datetime, *, automation_id: str |
             "title": (listing.get("title") or conv.title or "Untitled listing"),
             "status": conv.status,
             "listed_at": listed_at.isoformat() if listed_at else None,
+            "listed_source": listed_source,
             "age_days": age,
-            "marketplaces": sorted({row.marketplace for row in live_here}),
+            "marketplaces": markets,
             "sold_marketplaces": sorted(sold_on & wanted) if wanted else sorted(sold_on),
             "price": price,
             "original_price": original,
@@ -387,6 +399,7 @@ def apply_local(db: Session, conv_id: str, actions: list[dict], *, dry_run: bool
                 _basis, target = drop_price(
                     original, current, mode=action["mode"], value=action["value"],
                     floor=action.get("floor"), floor_percent=action.get("floor_percent"),
+                    repeat=action.get("repeat") or "once",
                 )
             except PriceError as exc:
                 return {"ok": False, "error": str(exc), "revision_id": revision.id if revision else None}
@@ -401,11 +414,15 @@ def apply_local(db: Session, conv_id: str, actions: list[dict], *, dry_run: bool
 
 def log_item_job(db: Session, conv_id: str, revision_id: str | None, payload: dict, *, ok: bool, error: str | None) -> str:
     """One terminal job per item. It is not queued, so it never takes the Bridge slot."""
+    if payload.get("dry_run"):
+        status = "dry_run"
+    else:
+        status = "completed" if ok else "failed"
     job = JobRepo(db).create(
         conv_id,
         revision_id or "automation",
         payload,
-        status="completed" if ok else "failed",
+        status=status,
         current_step="automation",
     )
     if error and not ok:
@@ -601,7 +618,7 @@ def _readiness(actions: list[dict], marketplaces: list[str], schedule: dict | No
     return issues
 
 
-def _normalize_actions(actions: list) -> list[dict]:
+def _normalize_actions(actions: list, schedule: dict | None = None) -> list[dict]:
     if not isinstance(actions, list):
         raise AutomationError("Actions must be a list.")
     found: dict[str, dict] = {}
@@ -624,6 +641,7 @@ def _normalize_actions(actions: list) -> list[dict]:
                 action["floor"] = float(raw["floor"])
             if raw.get("floor_percent") is not None:
                 action["floor_percent"] = float(raw["floor_percent"])
+            action["repeat"] = _price_repeat(raw.get("repeat"), schedule)
         if kind == "update_fields":
             fields = raw.get("fields") or {}
             if not isinstance(fields, dict):
@@ -637,6 +655,19 @@ def _normalize_actions(actions: list) -> list[dict]:
     if "relist" in found:
         found.pop("delist", None)
     return [found[name] for name in ACTION_ORDER if name in found]
+
+
+def _price_repeat(raw, schedule: dict | None) -> str:
+    text = str(raw or "").strip().lower().replace("-", "_")
+    if text in {"once", "one", "one_time", "single"}:
+        return "once"
+    if text in {"step", "stepped", "recurring", "each"}:
+        return "step"
+    if text:
+        raise AutomationError("A price drop happens once, or it steps down each cycle.")
+    if schedule and schedule.get("kind") in {"daily", "weekly"}:
+        return "step"
+    return "once"
 
 
 def _normalize_marketplaces(values) -> list[str]:
@@ -746,6 +777,7 @@ def _plan_price(actions: list[dict], original: float | None, current: float | No
         basis, target = drop_price(
             original, current, mode=action["mode"], value=float(action["value"]),
             floor=action.get("floor"), floor_percent=action.get("floor_percent"),
+            repeat=action.get("repeat") or "once",
         )
     except PriceError as exc:
         return {"error": str(exc)}
@@ -772,7 +804,7 @@ def _skip_reason(db, conv, listing, item, filters, wanted, needs_live, now, auto
         return "It is not listed on " + ", ".join(wanted) + "."
     if filters.get("min_age_days") is not None:
         if item["age_days"] is None:
-            return "It has no marketplace listing date."
+            return "It has no listed date."
         if item["age_days"] < int(filters["min_age_days"]):
             return f"Listed {item['age_days']} days, under {filters['min_age_days']}."
         if automation_id and _cooled_down(db, automation_id, conv.id, int(filters["min_age_days"]), now):
@@ -848,11 +880,6 @@ def _category_matches(text: str, want: str) -> bool:
     if want in {"t-shirt", "tshirt", "tee", "tees"}:
         return bool(re.search(r"t-?\s*shirts?|\btees?\b", text))
     return want in text
-
-
-def _earliest(rows: list[MarketplaceListing]) -> datetime | None:
-    stamps = [as_utc(row.created_at) for row in rows if row.created_at is not None]
-    return min(stamps) if stamps else None
 
 
 def _age_days(listed_at: datetime | None, now: datetime) -> int | None:

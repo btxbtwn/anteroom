@@ -19,6 +19,7 @@ import {
   WEEKDAY_LABELS,
   bodyFromForm,
   describeActions,
+  listedSourceLabel,
   describeSchedule,
   emptyForm,
   formFromDraft,
@@ -181,7 +182,10 @@ export function AutomationsPage() {
             <Input nativeInput value={form.timezone} onChange={(event) => patch({ timezone: event.target.value })} />
           </Field>
           <Field label="When">
-            <select className="h-9 rounded-md border border-border bg-background px-2 text-sm" value={form.kind} onChange={(event) => patch({ kind: event.target.value as AutomationForm["kind"] })}>
+            <select className="h-9 rounded-md border border-border bg-background px-2 text-sm" value={form.kind} onChange={(event) => {
+              const kind = event.target.value as AutomationForm["kind"];
+              patch({ kind, priceRepeat: kind === "once" ? "once" : "step" });
+            }}>
               <option value="once">One time</option>
               <option value="daily">Every day</option>
               <option value="weekly">Every week</option>
@@ -251,6 +255,12 @@ export function AutomationsPage() {
             <Field label="Floor ($)">
               <Input nativeInput inputMode="decimal" value={form.floor} onChange={(event) => patch({ floor: event.target.value })} />
             </Field>
+            <Field label="How often">
+              <select className="h-9 rounded-md border border-border bg-background px-2 text-sm" value={form.priceRepeat} onChange={(event) => patch({ priceRepeat: event.target.value as AutomationForm["priceRepeat"] })}>
+                <option value="step">Each cycle, off the original price</option>
+                <option value="once">One-time drop</option>
+              </select>
+            </Field>
           </div>
         ) : null}
         <div className="flex flex-wrap gap-3">
@@ -295,7 +305,7 @@ export function AutomationsPage() {
                 <li key={item.conversation_id}>
                   {item.title}
                   {item.next_price != null ? ` · ${money(item.price)} → ${money(item.next_price)} from ${money(item.original_price)}` : ""}
-                  {item.age_days != null ? ` · ${item.age_days} days` : ""}
+                  {item.age_days != null ? ` · ${item.age_days} days (${listedSourceLabel(item.listed_source)}${item.listed_at ? `, ${item.listed_at.slice(0, 10)}` : ""})` : ""}
                   {item.marketplaces.length ? ` · ${item.marketplaces.join(", ")}` : ""}
                 </li>
               ))}

@@ -27,6 +27,7 @@ class ActionBody(BaseModel):
     value: float | None = None
     floor: float | None = None
     floor_percent: float | None = None
+    repeat: str | None = Field(default=None, description="step walks the original price down each cycle. once drops a single time.")
     fields: dict[str, str] | None = None
 
 

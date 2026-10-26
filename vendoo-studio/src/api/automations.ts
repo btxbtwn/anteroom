@@ -8,6 +8,7 @@ export interface AutomationAction {
   value?: number | null;
   floor?: number | null;
   floor_percent?: number | null;
+  repeat?: "once" | "step";
   fields?: Record<string, string>;
 }
 
@@ -68,6 +69,8 @@ export interface AutomationPreviewItem {
   include: boolean;
   skip_reason: string | null;
   age_days: number | null;
+  listed_at?: string | null;
+  listed_source?: string | null;
   price: number | null;
   next_price: number | null;
   original_price: number | null;

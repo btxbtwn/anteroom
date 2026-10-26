@@ -50,6 +50,7 @@ def draft_from_prompt(prompt: str, *, timezone: str = "UTC", now: datetime | Non
         issues.append("Name each marketplace. \"All marketplaces\" is not a confirmation.")
     if "sold" in filters.get("status", ""):
         issues.append("Sold items are never changed.")
+    _mark_price_repeat(actions, schedule, lowered)
     name = _name(text, filters, actions)
     spec = {
         "op": "create",
@@ -137,6 +138,21 @@ def _price(lowered: str) -> dict | None:
     if floor_percent:
         action["floor_percent"] = float(floor_percent.group(1))
     return action
+
+
+def _mark_price_repeat(actions: list[dict], schedule: dict | None, lowered: str) -> None:
+    """A daily or weekly rule steps down each cycle. A one-time drop stays put."""
+    one_time = bool(re.search(r"\bone-?time\b|\bsingle drop\b|\bdrop once\b|\bonly once\b", lowered))
+    kind = (schedule or {}).get("kind")
+    for action in actions:
+        if action.get("type") != "price":
+            continue
+        if one_time or kind == "once":
+            action["repeat"] = "once"
+        elif kind in {"daily", "weekly"}:
+            action["repeat"] = "step"
+        else:
+            action["repeat"] = "once"
 
 
 def _marketplaces(lowered: str) -> list[str]:

@@ -30,6 +30,7 @@ export interface AutomationForm {
   relist: boolean;
   priceOn: boolean;
   priceMode: "amount" | "percent";
+  priceRepeat: "once" | "step";
   priceValue: string;
   floor: string;
   marketplaces: string[];
@@ -63,6 +64,7 @@ export function emptyForm(timezone = browserTimezone()): AutomationForm {
     relist: false,
     priceOn: false,
     priceMode: "percent",
+    priceRepeat: "step",
     priceValue: "",
     floor: "",
     marketplaces: [],
@@ -94,6 +96,7 @@ export function formFromDraft(draft: AutomationDraft): AutomationForm {
     if (action.type === "price") {
       form.priceOn = true;
       form.priceMode = action.mode === "amount" ? "amount" : "percent";
+      form.priceRepeat = action.repeat === "step" || (action.repeat !== "once" && form.kind !== "once") ? "step" : "once";
       form.priceValue = action.value != null ? String(action.value) : "";
       form.floor = action.floor != null ? String(action.floor) : "";
     }
@@ -117,6 +120,7 @@ function actionsFromForm(form: AutomationForm): AutomationAction[] {
       value: form.priceValue === "" ? null : Number(form.priceValue),
     };
     if (form.floor !== "") action.floor = Number(form.floor);
+    action.repeat = form.priceRepeat;
     actions.push(action);
   }
   if (form.delist) actions.push({ type: "delist" });
@@ -169,9 +173,18 @@ export function describeActions(actions: AutomationAction[]): string {
   return actions.map((action) => {
     if (action.type !== "price") return action.type.replace("_", " ");
     const amount = action.mode === "amount" ? `$${action.value}` : `${action.value}%`;
+    const cadence = action.repeat === "step" ? " each cycle" : action.repeat === "once" ? " once" : "";
     const floor = action.floor != null ? `, floor $${action.floor}` : "";
-    return `drop ${amount}${floor}`;
+    return `drop ${amount}${cadence}${floor}`;
   }).join(", ");
+}
+
+export function listedSourceLabel(source: string | null | undefined): string {
+  if (source === "publish_job") return "publish job";
+  if (source === "vendoo_job") return "Vendoo";
+  if (source === "item_listed") return "item date";
+  if (source === "marketplace_listing") return "marketplace record";
+  return "listed date";
 }
 
 export function money(value: number | null | undefined): string {
