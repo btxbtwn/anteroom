@@ -1,4 +1,5 @@
 import copy
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -141,3 +142,22 @@ def test_direct_marketplace_action_starting_after_review_is_skipped(inventory, m
     result = apply(inventory, edits, rows).json()
     assert [row["conversation_id"] for row in result["applied"]] == ["shirt"]
     assert "generating or sending" in result["skipped"][0]["reason"]
+
+
+
+def test_saved_cost_and_labels_reach_item_details_and_direct_snapshots(inventory):
+    from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
+
+    conv = inventory.db.get(Conversation, "coat")
+    conv.notes = json.dumps({"cog": "99", "vendooLabels": "Old label", "private": "keep"})
+    inventory.db.commit()
+    edits = {"values": {"cost": 4.25}, "labels_mode": "replace", "labels": ["New label"]}
+    assert apply(inventory, edits, preview(inventory, edits)).json()["applied"]
+    notes = json.loads(conv.notes)
+    assert notes["cog"] == "4.25" and notes["vendooLabels"] == "New label" and notes["private"] == "keep"
+    snapshot = prepare_listing_snapshot(inventory.db, conv, current(inventory).listing_json)
+    assert snapshot["cost"] == 4.25 and snapshot["labels"] == ["New label"]
+    cleared = {"values": {"cost": None}, "labels_mode": "replace", "labels": []}
+    assert apply(inventory, cleared, preview(inventory, cleared)).json()["applied"]
+    snapshot = prepare_listing_snapshot(inventory.db, conv, current(inventory).listing_json)
+    assert snapshot["cost"] is None and snapshot["labels"] == []

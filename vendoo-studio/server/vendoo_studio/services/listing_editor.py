@@ -76,10 +76,20 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         expected_revision_id=expected_revision_id,
     )
 
+    note_updates = {}
     if sku != previous_sku:
+        note_updates["sku"] = sku
+    # Item Details feeds snapshots and regeneration. Keep explicitly changed
+    # costs and labels level with the same fields saved by the editor.
+    if listing_data.get("cost") != previous_json.get("cost"):
+        note_updates["cog"] = "" if listing_data.get("cost") is None else str(listing_data["cost"])
+    if listing_data.get("labels") != previous_json.get("labels"):
+        note_updates["vendooLabels"] = ", ".join(str(label) for label in listing_data.get("labels") or [])
+    if note_updates:
         from vendoo_studio.services.vendoo_import import merge_notes
 
-        conv_repo.write_notes(conv_id, merge_notes(conv_repo.get(conv_id).notes, {"sku": sku}))
+        conv_repo.write_notes(conv_id, merge_notes(conv_repo.get(conv_id).notes, note_updates))
+
 
     record_correction(db, conv_id, revision.id, listing_data, changes)
 
