@@ -150,6 +150,7 @@ async def _answer(
     answer = ""
     changes = None
     memory_block = None
+    automation_block = None
     shop = None
     try:
         run.publish(sse_event("status", "Reading your shop…"))
@@ -167,6 +168,12 @@ async def _answer(
                 run.publish(sse_data(text))
             elif kind == "memory":
                 memory_block = text
+            elif kind == "automation":
+                automation_block = text
+                if not answer.strip():
+                    note = "This automation is ready for you to review. Nothing runs until you confirm it."
+                    answer += note
+                    run.publish(sse_data(note))
             elif kind == "changes":
                 changes = await asyncio.to_thread(_propose, text)
                 if changes is None:
@@ -192,10 +199,13 @@ async def _answer(
         # Off the event loop: a save that waits on SQLite's write lock must not
         # freeze every other request, or hold this answer's stream open.
         if answer.strip():
-            await asyncio.to_thread(_save_answer, provider, answer, changes, memory_block, thread_id)
+            await asyncio.to_thread(_save_answer, provider, answer, changes, memory_block, automation_block, thread_id)
 
 
-def _save_answer(provider, answer: str, changes: dict | None, memory_block: str | None, thread_id: str | None) -> None:
+def _save_answer(
+    provider, answer: str, changes: dict | None, memory_block: str | None,
+    automation_block: str | None, thread_id: str | None,
+) -> None:
     save_db = SessionLocal()
     try:
         if memory_block:
@@ -204,11 +214,21 @@ def _save_answer(provider, answer: str, changes: dict | None, memory_block: str 
             except Exception:
                 log.exception("could not update assistant memory")
                 save_db.rollback()
+        automation = None
+        if automation_block:
+            from vendoo_studio.services import automations
+
+            try:
+                automation = {"status": "proposed", "proposal": automations.proposal_from_block(save_db, automation_block)}
+            except Exception:
+                log.exception("could not read the automation the assistant drafted")
+                automation = {"status": "proposed", "proposal": {"ready": False, "issues": ["That automation could not be read."], "actions": []}}
         business_assistant.add_message(
             save_db, "assistant", answer,
             provider=getattr(provider, "name", None),
             model=getattr(provider, "listing_model", None),
             changes=changes,
+            automation=automation,
             thread_id=thread_id,
         )
     finally:
@@ -322,6 +342,39 @@ def apply_changes(message_id: str, db: Session = Depends(get_db)):
         skipped = _apply_to_listing(item, db)
         items.append({**item, "skipped": skipped} if skipped else item)
     row.changes = {"status": "applied", "items": items}
+    db.commit()
+    return business_assistant.message_view(row)
+
+
+def _automation_message(message_id: str, db: Session) -> AssistantMessage:
+    row = db.get(AssistantMessage, message_id)
+    if row is None or not row.automation:
+        raise HTTPException(404, "That automation is no longer in the conversation.")
+    if row.automation.get("status") != "proposed":
+        raise HTTPException(409, "That automation was already confirmed or dismissed.")
+    return row
+
+
+@router.post("/messages/{message_id}/automation/confirm")
+def confirm_automation_message(message_id: str, db: Session = Depends(get_db)):
+    """Save the automation an answer drafted, now that the seller has confirmed it."""
+    from vendoo_studio.services import automations
+    from vendoo_studio.services.automations import AutomationError
+
+    row = _automation_message(message_id, db)
+    try:
+        saved = automations.confirm_proposal(db, row.automation.get("proposal") or {})
+    except AutomationError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    row.automation = {"status": "confirmed", "proposal": row.automation.get("proposal"), "automation_id": saved.get("id")}
+    db.commit()
+    return business_assistant.message_view(row)
+
+
+@router.post("/messages/{message_id}/automation/dismiss")
+def dismiss_automation_message(message_id: str, db: Session = Depends(get_db)):
+    row = _automation_message(message_id, db)
+    row.automation = {**row.automation, "status": "dismissed"}
     db.commit()
     return business_assistant.message_view(row)
 

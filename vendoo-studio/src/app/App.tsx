@@ -70,12 +70,15 @@ const MarketplacesPage = lazy(loadMarketplacesPage);
 const loadUsagePage = () =>
   import("../components/UsagePage").then((module) => ({ default: module.UsagePage }));
 const UsagePage = lazy(loadUsagePage);
+const loadAutomationsPage = () =>
+  import("../components/AutomationsPage").then((module) => ({ default: module.AutomationsPage }));
+const AutomationsPage = lazy(loadAutomationsPage);
 const loadSourcingPage = () =>
   import("../components/SourcingPage").then((module) => ({ default: module.SourcingPage }));
 const SourcingPage = lazy(loadSourcingPage);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
-const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketplacesPage, loadUsagePage, loadSourcingPage];
+const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketplacesPage, loadUsagePage, loadSourcingPage, loadAutomationsPage];
 const pageLoading = (
   <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading">
     <Spinner className="size-5 text-muted-foreground" />
@@ -289,6 +292,8 @@ export function App() {
         ? marketplaceName(marketplace)
       : activeView === "usage"
         ? "Usage"
+      : activeView === "automations"
+        ? "Automations"
       : activeView === "assistant"
         ? (assistantThreads.data?.find((thread) => thread.id === assistantThreadId)?.title || "Assistant")
       : activeView === "sourcing"
@@ -339,7 +344,7 @@ export function App() {
   };
 
   // Analytics, Marketplaces, Usage and Sourcing toggle back to whichever of home or inventory was open.
-  const togglePage = (view: "analytics" | "marketplaces" | "usage" | "sourcing") => {
+  const togglePage = (view: "analytics" | "marketplaces" | "usage" | "sourcing" | "automations") => {
     setMobilePane("workspace");
     if (activeView === view) {
       setActiveView(shell.current);
@@ -368,6 +373,7 @@ export function App() {
     closeMobileSidebar();
   };
   const openUsage = () => togglePage("usage");
+  const openAutomations = () => togglePage("automations");
   const openSourcing = () => togglePage("sourcing");
 
   const openListing = (id: string) => {
@@ -698,6 +704,7 @@ export function App() {
             onOpenUsage={openUsage}
             onOpenAnalytics={openAnalytics}
             onOpenMarketplaces={openMarketplaces}
+            onOpenAutomations={openAutomations}
             onOpenAssistant={openAssistant}
             onOpenSourcing={openSourcing}
             onOpenMobileNav={() => setMobileNavOpen(true)}
@@ -808,6 +815,10 @@ export function App() {
               ) : activeView === "usage" ? (
                 <Suspense fallback={pageLoading}>
                   <UsagePage />
+                </Suspense>
+              ) : activeView === "automations" ? (
+                <Suspense fallback={pageLoading}>
+                  <AutomationsPage />
                 </Suspense>
               ) : activeView === "assistant" ? (
                 <Suspense fallback={pageLoading}>

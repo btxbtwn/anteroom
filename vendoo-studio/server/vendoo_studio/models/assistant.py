@@ -54,6 +54,8 @@ class AssistantMessage(Base):
     model = Column(String, nullable=True)
     # {"status": proposed | applied | dismissed, "items": [...]}; see services/assistant_changes.py.
     changes = Column(JSON, nullable=True)
+    # {"status": proposed | confirmed | dismissed, "proposal": {...}}; see services/automations.py.
+    automation = Column(JSON, nullable=True)
     # Images attached to a question; see services/chat_attachments.py.
     attachments = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow, index=True)

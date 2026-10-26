@@ -25,8 +25,8 @@ MAX_MEMORIES = 200
 MAX_FACT_CHARS = 280
 MEMORY_FENCE = "```memory"
 # The changes block lives in the same reply. Both stay out of what the seller reads.
-_FENCES = (MEMORY_FENCE, "```changes")
-_BLOCK = re.compile(r"```(memory|changes)\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+_FENCES = (MEMORY_FENCE, "```changes", "```automation")
+_BLOCK = re.compile(r"```(memory|changes|automation)\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 
 INSTRUCTIONS = (
     "Remembering: you keep durable facts about how this seller runs the shop. They are listed in the snapshot "
@@ -72,9 +72,9 @@ def visible_text(reply: str) -> str:
     return reply[:-hold] if hold else reply
 
 
-def peel(reply: str) -> tuple[str, str | None, str | None]:
-    """A finished reply as words, the memory block, and the changes block."""
-    found = {"memory": None, "changes": None}
+def peel(reply: str) -> tuple[str, str | None, str | None, str | None]:
+    """A finished reply as words, the memory block, the changes block, and the automation block."""
+    found = {"memory": None, "changes": None, "automation": None}
 
     def take(match: re.Match[str]) -> str:
         kind = match.group(1).lower()
@@ -85,7 +85,7 @@ def peel(reply: str) -> tuple[str, str | None, str | None]:
     words = _BLOCK.sub(take, reply)
     lowered = words.lower()
     cut = len(words)
-    for fence, kind in ((MEMORY_FENCE, "memory"), ("```changes", "changes")):
+    for fence, kind in ((MEMORY_FENCE, "memory"), ("```changes", "changes"), ("```automation", "automation")):
         at = lowered.find(fence)
         if at < 0:
             continue
@@ -94,7 +94,7 @@ def peel(reply: str) -> tuple[str, str | None, str | None]:
         cut = min(cut, at)
     if cut < len(words):
         words = words[:cut]
-    return words.rstrip(), found["memory"] or None, found["changes"] or None
+    return words.rstrip(), found["memory"] or None, found["changes"] or None, found["automation"] or None
 
 
 def section(db: Session) -> str:

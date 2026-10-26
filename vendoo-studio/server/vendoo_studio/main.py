@@ -17,6 +17,8 @@ from vendoo_studio.routes import marketplace_listings, marketplace_schemas, nati
 from vendoo_studio.routes import ebay_offers
 from vendoo_studio.routes import ebay
 from vendoo_studio.routes import ai_keys, sales_ledger, bulk_edit, listing_copies
+from vendoo_studio.routes import automations as automations_route
+from vendoo_studio.routes import errors as errors_route
 
 
 @asynccontextmanager
@@ -53,6 +55,11 @@ async def lifespan(app: FastAPI):
     try:
         from vendoo_studio.services.job_watchdog import start_job_watchdog
         start_job_watchdog()
+    except Exception:
+        pass
+    try:
+        from vendoo_studio.services.automation_scheduler import start_automation_scheduler
+        start_automation_scheduler()
     except Exception:
         pass
     try:
@@ -122,6 +129,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        from vendoo_studio.services.automation_scheduler import stop_automation_scheduler
+        stop_automation_scheduler()
+    except Exception:
+        pass
+    try:
         from vendoo_studio.services.chrome_sales import stop_chrome_sales
         stop_chrome_sales()
     except Exception:
@@ -183,6 +195,8 @@ app.include_router(boxes.router)
 app.include_router(sale_calendar.router)
 app.include_router(ad_spend.router)
 app.include_router(assistant.router)
+app.include_router(automations_route.router)
+app.include_router(errors_route.router)
 app.include_router(attachments.router)
 app.include_router(scout.router)
 app.include_router(browser.router)

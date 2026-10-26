@@ -63,6 +63,7 @@ import type {
 } from "./types";
 import { readSse } from "./sse";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
+import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, AutomationHistory, AutomationPreview, AutomationRun, RelistGap } from "./automations";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
@@ -344,6 +345,34 @@ export const api = {
       request<AssistantMessage>(`/assistant/messages/${messageId}/changes/apply`, { method: "POST" }),
     dismissChanges: (messageId: string) =>
       request<AssistantMessage>(`/assistant/messages/${messageId}/changes/dismiss`, { method: "POST" }),
+    /** Save the automation an answer drafted. It does not run until its schedule is due, or you run it. */
+    confirmAutomation: (messageId: string) =>
+      request<AssistantMessage>(`/assistant/messages/${messageId}/automation/confirm`, { method: "POST" }),
+    dismissAutomation: (messageId: string) =>
+      request<AssistantMessage>(`/assistant/messages/${messageId}/automation/dismiss`, { method: "POST" }),
+  },
+  automations: {
+    list: () => request<Automation[]>("/automations"),
+    draft: (prompt: string, timezone?: string) =>
+      request<AutomationDraft>("/automations/draft", { method: "POST", body: JSON.stringify({ prompt, timezone }) }),
+    preview: (body: AutomationBody) =>
+      request<AutomationPreview>("/automations/preview", { method: "POST", body: JSON.stringify(body) }),
+    create: (body: AutomationBody) =>
+      request<Automation>("/automations", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: AutomationBody) =>
+      request<Automation>(`/automations/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    pause: (id: string) => request<Automation>(`/automations/${id}/pause`, { method: "POST" }),
+    resume: (id: string) => request<Automation>(`/automations/${id}/resume`, { method: "POST" }),
+    remove: (id: string) => request<{ ok: boolean; id: string }>(`/automations/${id}`, { method: "DELETE" }),
+    run: (id: string, dryRun = false) =>
+      request<AutomationRun>(`/automations/${id}/run`, { method: "POST", body: JSON.stringify({ dry_run: dryRun }) }),
+    history: (id: string) => request<AutomationHistory>(`/automations/${id}/history`),
+    approvals: () => request<AutomationApproval[]>("/automations/approvals"),
+    approve: (id: string) =>
+      request<AutomationApproval>(`/automations/approvals/${id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+  },
+  errors: {
+    list: () => request<RelistGap[]>("/errors"),
   },
   saleCalendar: {
     record: (record: SaleRecord) => request<{ id: string }>("/analytics/calendar/records", { method: "POST", body: JSON.stringify(record) }),

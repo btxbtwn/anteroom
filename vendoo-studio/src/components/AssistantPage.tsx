@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage } from "../api/assistant";
 import type { ChatAttachment, ChatAttachmentUpload } from "../api/types";
 import { addToast } from "../ui/toast";
+import { AssistantAutomationCard } from "./AssistantAutomationCard";
 import { AssistantChangesCard } from "./AssistantChangesCard";
 import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { newQueuedChatMessage, type QueuedChatMessage } from "./chatMessageQueue";
@@ -353,6 +354,12 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     if (applied) void queryClient.invalidateQueries();
   };
 
+  const automationSettled = (message: AssistantMessage) => {
+    queryClient.setQueryData<AssistantMessage[]>(messagesKey(threadId ?? ""), (saved) =>
+      saved?.map((turn) => (turn.id === message.id ? message : turn)));
+    void queryClient.invalidateQueries({ queryKey: ["automations"] });
+  };
+
   // Answers link the listings they name; open those in Studio instead of a new tab.
   const openLinkedListing = (event: MouseEvent<HTMLDivElement>) => {
     const link = (event.target as HTMLElement).closest("a");
@@ -443,6 +450,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
                   <AssistantMessageRow text={turn.text} createdAt={turn.created_at}>
                     {turn.changes ? (
                       <AssistantChangesCard message={turn} changes={turn.changes} onSettled={changesSettled} />
+                    ) : null}
+                    {turn.automation ? (
+                      <AssistantAutomationCard message={turn} automation={turn.automation} onSettled={automationSettled} />
                     ) : null}
                   </AssistantMessageRow>
                 )}
