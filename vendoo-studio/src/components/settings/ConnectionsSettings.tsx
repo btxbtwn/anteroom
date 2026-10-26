@@ -544,7 +544,7 @@ function MarketplaceSection() {
       <SettingsRow
         id="sale-autodelist"
         title="Delist the other marketplaces"
-        description="When something sells, take it off the other marketplaces where Anteroom still has it listed. The place it sold stays as it is. Vinted is not taken down; delist it on Vinted. This stays off until you turn it on. If a delist can't finish, the sale notice says so and you can delist from the item."
+        description="When something sells, take it off the other marketplaces where Anteroom still has it listed. The place it sold stays as it is. This stays off until you turn it on. If a delist can't finish, the sale notice says so and you can delist from the item."
         control={
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Switch

@@ -12,9 +12,9 @@ leaves the record ``unknown``; Check reads the marketplace (never writes) and
 runs by itself after a lost reply, on startup and when Chrome reconnects.
 Reset is the seller saying they looked themselves.
 
-Vinted publishes with Upload only, after the seller confirms. It has no draft
-and Anteroom does not delete the listing. A lost reply stays unknown; Check
-does not click Upload again.
+Vinted publishes with Upload only, after the seller confirms. It has no draft.
+A lost reply stays unknown; Check does not click Upload again. Delist deletes
+the live listing through the signed-in Chrome session, the same as Depop.
 """
 from __future__ import annotations
 

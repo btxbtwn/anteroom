@@ -208,7 +208,7 @@ describe("marketplaces section", () => {
     const html = render({}, { mercari: live, ebay: { ...live, url: "https://www.ebay.com/itm/1", listing_id: "1", sold_here: true } });
     expect(row(html, "Mercari")).toContain("Live");
     expect(row(html, "eBay")).toContain("Sold here");
-    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild"]) expect(row(html, name)).toContain(`aria-label="${name} actions"`);
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) expect(row(html, name)).toContain(`aria-label="${name} actions"`);
     expect(html).not.toContain("Delist everywhere…");
     expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).toContain("Delist everywhere…");
   });
@@ -235,6 +235,10 @@ describe("marketplaces section", () => {
   it("derives removal wording per marketplace", () => {
     expect(rowStatus("ebay", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Ended");
     expect(rowStatus("sellwild", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
+    expect(rowStatus("vinted", { ...live, state: "deleted", url: "https://www.vinted.com/items/42", listing_id: "42" }, undefined, "current", true).label).toBe("Deleted");
+    const vinted = { ...live, url: "https://www.vinted.com/items/42-tee", listing_id: "42" };
+    expect(render({}, { vinted })).not.toContain("Delist everywhere…");
+    expect(render({}, { mercari: live, vinted })).toContain("Delist everywhere…");
     expect(deletable({ ...live, state: "failed" })).toBe(true);
     expect(deletable({ ...live, sold_here: true })).toBe(false);
   });
