@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.397 — 2026-10-26
+
+- eBay earnings and listing performance now recognize items imported or linked directly in Anteroom. See original selling fees alongside net proceeds, quantity-adjusted item costs and profit; missing or duplicate links explain what needs review.
+
 ## 0.1.396 — 2026-10-26
 
 - List on Vinted saves a draft in the background, the same way as Depop and Mercari, then publishes it only after you confirm List. No Vinted tab opens. If Chrome loses the reply, Check result reads Vinted and does not create it again. You can paste the draft link.

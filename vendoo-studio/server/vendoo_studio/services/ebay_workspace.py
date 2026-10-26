@@ -12,8 +12,10 @@ import io
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation
+from vendoo_studio.models.marketplace_listing import MarketplaceListing
+from vendoo_studio.services import inventory_import
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, NS, segment
-from vendoo_studio.services.ebay_finances import order_proceeds
+from vendoo_studio.services.ebay_finances import order_financials
 from vendoo_studio.services.inventory_analytics import load_rows
 from vendoo_studio.services.relay_sales import listing_id_from_url
 from vendoo_studio.services.vendoo_import import parse_notes
@@ -78,16 +80,38 @@ def dates(start: date, end: date) -> tuple[str, str]:
     return f"{start.isoformat()}T00:00:00.000Z", last
 
 
+def traffic_bindings(db: Session) -> dict[str, str]:
+    """Every validated eBay reference, with titles only for unique local owners."""
+    conversations = {conv.id: conv for conv in db.query(Conversation).order_by(Conversation.id).all()}
+    owners: dict[str, set[str]] = {}
+
+    def add(conv_id, url):
+        identifier = listing_id_from_url("ebay", url)
+        if identifier:
+            owners.setdefault(identifier, set()).add(conv_id)
+
+    for conv in conversations.values():
+        notes = parse_notes(conv.notes)
+        urls, marks = notes.get("vendooListingUrls"), notes.get("marketplaceMarks")
+        add(conv.id, urls.get("ebay") if isinstance(urls, dict) else None)
+        mark = marks.get("ebay") if isinstance(marks, dict) else None
+        if isinstance(mark, dict) and mark.get("state") == "listed":
+            add(conv.id, mark.get("url"))
+    for binding in db.query(MarketplaceListing).filter(MarketplaceListing.marketplace == "ebay").all():
+        if binding.conversation_id not in conversations:
+            continue
+        add(binding.conversation_id, binding.listing_url)
+        for identifier in (binding.listing_id, binding.ebay_listing_id):
+            if identifier:
+                add(binding.conversation_id, f"https://www.ebay.com/itm/{identifier}")
+    return {identifier: conversations[next(iter(matches))].title if len(matches) == 1 else f"Listing {identifier}"
+            for identifier, matches in sorted(owners.items())}
+
+
 async def traffic(client: EbayClient, db: Session, start: date, end: date, offset: int) -> dict:
     dates(start, end)
-    ids = []
-    titles = {}
-    for conv in db.query(Conversation).order_by(Conversation.id).all():
-        urls = parse_notes(conv.notes).get("vendooListingUrls") or {}
-        listing_id = listing_id_from_url("ebay", urls.get("ebay")) if isinstance(urls, dict) else None
-        if listing_id and listing_id not in ids:
-            ids.append(listing_id)
-            titles[listing_id] = conv.title
+    titles = traffic_bindings(db)
+    ids = list(titles)
     selected = ids[offset:offset + 25]
     if not selected:
         return page({"total": len(ids)}, [], offset)
@@ -116,29 +140,66 @@ async def finances(client: EbayClient, db: Session, start: date, end: date, offs
     })
     local = {item.conversation_id: item for item in load_rows(db)}
     bindings = {}
-    for conv in db.query(Conversation).all():
-        urls = parse_notes(conv.notes).get("vendooListingUrls") or {}
-        identifier = listing_id_from_url("ebay", urls.get("ebay")) if isinstance(urls, dict) else None
-        if identifier and identifier not in bindings:
-            bindings[identifier] = local.get(conv.id)
-        elif identifier:
-            bindings[identifier] = None  # Ambiguous local matches must not invent profit.
     rows = []
     for order in body.get("orders", []):
-        net = await order_proceeds(client, order["orderId"])
+        financials = await order_financials(client, order["orderId"])
+        net = financials.net if financials else None
         costs = []
-        for item in order.get("lineItems", []):
-            match = bindings.get(str(item.get("legacyItemId", "")))
-            value = Decimal(str(match.cost)) if match and match.cost is not None else None
+        issues = set()
+        seen_lines = {}
+        items = order.get("lineItems")
+        if not isinstance(items, list) or not items or any(not isinstance(item, dict) for item in items):
+            items = []
+            issues.add("eBay did not provide readable order lines.")
+        for item in items:
+            line_id = item.get("lineItemId")
+            if not isinstance(line_id, str) or not line_id:
+                costs.append(None)
+                issues.add("eBay did not identify every order line.")
+                continue
+            identity = (item.get("legacyItemId"), type(item.get("quantity")), item.get("quantity"))
+            if line_id in seen_lines:
+                if seen_lines[line_id] != identity:
+                    costs.append(None)
+                    issues.add("eBay returned conflicting order lines.")
+                continue
+            seen_lines[line_id] = identity
+            identifier = listing_id_from_url("ebay", f"https://www.ebay.com/itm/{item.get('legacyItemId', '')}")
+            if not identifier:
+                costs.append(None)
+                issues.add("eBay did not provide a valid listing ID for every item.")
+                continue
+            if identifier not in bindings:
+                problem = None
+                try:
+                    owner = inventory_import.owner(db, "ebay", identifier)
+                except inventory_import.ImportConflict:
+                    owner, problem = None, "Resolve duplicate items linked to this eBay listing."
+                bindings[identifier] = (local.get(owner.id) if owner else None, problem)
+            match, problem = bindings[identifier]
+            if match is None:
+                costs.append(None)
+                issues.add(problem or "Link each order item to its Anteroom inventory item.")
+                continue
+            value = Decimal(str(match.cost)) if match.cost is not None else None
             quantity = item.get("quantity")
-            costs.append(value * quantity if value is not None and value.is_finite() and value >= 0
-                         and isinstance(quantity, int) and not isinstance(quantity, bool) and quantity > 0 else None)
+            if value is None or not value.is_finite() or value < 0:
+                costs.append(None)
+                issues.add("Record the item's cost in Anteroom.")
+            elif type(quantity) is not int or quantity <= 0:
+                costs.append(None)
+                issues.add("eBay did not provide a valid purchased quantity.")
+            else:
+                costs.append(value * quantity)
         cost = sum(costs, Decimal(0)) if costs and all(value is not None for value in costs) else None
         rows.append(row(order["orderId"], f"Order {order['orderId']}", subtitle=order.get("creationDate"),
                         money={"currency": "USD", "value": str(net)} if net is not None else None, fields={
                             "Payment": order.get("orderPaymentStatus"),
+                            "Original selling fees": f"{financials.original_sale_fees:.2f}" if financials and financials.original_sale_fees is not None else None,
+                            "Fee details": None if financials and financials.original_sale_fees is not None else "Original fee detail is unavailable; net proceeds use recorded credits and debits.",
                             "Proceeds": "Recorded order credits minus debits" if net is not None else "Transaction data is incomplete",
                             "Item cost": f"{cost:.2f}" if cost is not None else None,
+                            "Cost details": " ".join(sorted(issues)) or None,
                             "Profit": f"{net - cost:.2f}" if net is not None and cost is not None else None,
                         }))
     return page(body, rows, offset, 10)
