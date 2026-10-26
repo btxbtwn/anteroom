@@ -69,24 +69,27 @@ def pick_ebay_suggestion(body: dict) -> dict[str, str] | None:
 
 
 def _tokens(text: str) -> list[str]:
+    text = re.sub(r"\bt[\s-]?shirts?\b", "tshirt", text, flags=re.I)
     return [word for word in re.findall(r"[a-z0-9]+", text.lower()) if len(word) > 2]
 
 
 def pick_etsy_leaf(leaves: list[dict], query: str) -> dict[str, str] | None:
-    """The Etsy leaf whose path shares the most words with the item. A longer path wins a tie."""
-    tokens = _tokens(query)
+    """Match the product type at the leaf first, then its department and ancestors."""
+    tokens = {word.rstrip("s") for word in _tokens(query)}
     if not tokens:
         return None
-    ranked: list[tuple[int, int, dict]] = []
+    ranked: list[tuple[int, int, int, dict]] = []
     for leaf in leaves:
-        words = {word.rstrip("s") for word in _tokens(str(leaf.get("path") or ""))}
-        score = sum(1 for token in tokens if token.rstrip("s") in words)
+        path = str(leaf.get("path") or "")
+        words = {word.rstrip("s") for word in _tokens(path)}
+        leaf_words = {word.rstrip("s") for word in _tokens(path.split(">")[-1])}
+        score = len(tokens & words)
         if score:
-            ranked.append((score, len(str(leaf.get("path") or "")), leaf))
+            ranked.append((len(tokens & leaf_words), score, len(path), leaf))
     if not ranked:
         return None
-    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    leaf = ranked[0][2]
+    ranked.sort(key=lambda item: item[:3], reverse=True)
+    leaf = ranked[0][3]
     return {"id": str(leaf["id"]), "path": str(leaf.get("path") or leaf["id"])}
 
 
@@ -111,21 +114,21 @@ def merge_live_fields(vendoo_fields: list[dict], live_fields: list[dict], listin
         if str(live.get("id") or "") == "condition" or not live.get("name"):
             continue
         options = [str(value.get("label") or "") for value in live.get("values") or [] if value.get("label")]
+        rules = {
+            "required": bool(live.get("required")), "multi": bool(live.get("multi")),
+            "selection_only": live.get("mode") == "selection", "options": options,
+            "max_values": live.get("max_values"), "max_length": live.get("max_length"),
+            "options_source": "marketplace",
+        }
         hit = by_fold.get(_fold(str(live["name"])))
         if hit:
-            if options:
-                hit["options"] = options
-                hit["selection_only"] = live.get("mode") == "selection"
-            hit["required"] = bool(hit.get("required") or live.get("required"))
+            hit.update(rules)
             continue
         row = {
             "key": str(live["name"]),
             "label": str(live["name"]),
             "value": listing_value_for_field(listing, marketplace, str(live["name"])) or "",
-            "required": bool(live.get("required")),
-            "multi": bool(live.get("multi")),
-            "selection_only": live.get("mode") == "selection",
-            "options": options,
+            **rules,
         }
         vendoo_fields.append(row)
         by_fold[_fold(row["label"])] = row
@@ -230,8 +233,11 @@ async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[st
     query = search_text(listing, evidence)
     if not query:
         return current
+    paths = listing.get("marketplace_categories") if isinstance(listing.get("marketplace_categories"), dict) else {}
+    etsy_query = str(paths.get("etsy") or listing.get("category_path") or query)
+    cache_query = "\n".join((query, etsy_query))
     chosen = dict(current)
-    if chosen.get("query") != query:
+    if chosen.get("query") != cache_query:
         for key in ("ebay", "ebay_path", "etsy", "etsy_path", "poshmark", "depop"):
             chosen.pop(key, None)
     if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
@@ -245,7 +251,7 @@ async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[st
             chosen["ebay_path"] = hit["path"]
     if not direct_category_id({"direct_category_ids": chosen}, "etsy"):
         try:
-            hit = await _etsy_leaf(query)
+            hit = await _etsy_leaf(etsy_query)
         except Exception as exc:  # noqa: BLE001 - generation continues on Vendoo's category
             log.info("No live Etsy category: %s", exc)
             hit = None
@@ -264,6 +270,6 @@ async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[st
             if chrome.get(key) and not str(chosen.get(key) or "").strip():
                 chosen[key] = chrome[key]
     if chosen.get("ebay") or chosen.get("etsy") or chosen.get("poshmark") or chosen.get("depop"):
-        chosen["query"] = query
+        chosen["query"] = cache_query
         listing["direct_category_ids"] = chosen
     return chosen

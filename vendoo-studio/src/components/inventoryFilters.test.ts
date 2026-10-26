@@ -236,6 +236,9 @@ describe("filter options", () => {
     expect(filterListings([jacket], "", withFilters({ status: "active", marketplaces: ["depop"] }))).toEqual([jacket]);
     expect(filterListings([jacket], "", withFilters({ notListed: true }))).toEqual([]);
     expect(marketplaceCounts([jacket])).toMatchObject({ depop: 1, ebay: 1 });
+    const formerlyFailed = { ...jacket, status: "failed" };
+    expect(filterListings([formerlyFailed], "", withFilters({ status: "active" }))).toEqual([formerlyFailed]);
+    expect(filterListings([formerlyFailed], "", withFilters({ status: "failed" }))).toEqual([]);
   });
 
   it("lists every label once, sorted", () => {

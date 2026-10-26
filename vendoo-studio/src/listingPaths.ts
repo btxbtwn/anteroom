@@ -102,6 +102,15 @@ function editorValuePresent(value: unknown): boolean {
   return formFieldText(value).trim() !== "";
 }
 
+/** Preserve arrays and comma-containing option labels; split only older text lists. */
+export function formFieldValues(value: unknown, options: readonly string[] = []): string[] {
+  if (Array.isArray(value)) return [...new Set(value.map(formFieldText).map((v) => v.trim()).filter(Boolean))];
+  const text = formFieldText(value).trim();
+  if (!text) return [];
+  if (options.includes(text)) return [text];
+  return [...new Set(text.split(",").map((v) => v.trim()).filter(Boolean))];
+}
+
 /** Read a Forms-tab field, matching schema labels to camelCase listing keys. */
 export function getListingEditorValue(listing: ListingData | undefined, path: string): unknown {
   const direct = getNestedValue(listing, path);

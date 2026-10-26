@@ -111,14 +111,14 @@ export function optionsForField(
 }
 
 /** Attach static dropdown options to editor fields that do not already have any. */
-export function withDropdownOptions<T extends { key: string; options?: string[] }>(
+export function withDropdownOptions<T extends { key: string; options?: string[]; optionsSource?: string }>(
   fields: T[],
   tab: string,
   forms: DropdownForms | undefined,
 ): T[] {
   if (!forms) return fields;
   return fields.map((field) => {
-    if (field.options?.length) return field;
+    if (field.options?.length || field.optionsSource === "marketplace") return field;
     const leaf = leafKey(field.key);
     let options: string[] | undefined;
     if (tab === "general") {
@@ -128,6 +128,6 @@ export function withDropdownOptions<T extends { key: string; options?: string[] 
     } else {
       options = optionsFor(forms, tab, leaf);
     }
-    return options?.length ? { ...field, options } : field;
+    return options?.length ? { ...field, options, optionsSource: "reference" } : field;
   });
 }

@@ -63,6 +63,25 @@ def test_form_records_only_raw_changes_before_automatic_normalization(workspace)
     assert correction.revision_id == current.id
 
 
+def test_multi_value_form_edits_survive_save_reload_and_clear(workspace):
+    _db, conv, revision, client = workspace
+    url = f"/api/conversations/{conv.id}/listing"
+    submitted = {**revision.listing_json, "ebay_specifics": {
+        "season": ["Spring", "Summer", "Fall"], "material": ["Cotton", "Polyester"],
+    }}
+    assert client.put(url, json={"listing": submitted}).status_code == 200
+    saved = client.get(url).json()["listing"]
+    assert saved["ebay_specifics"]["season"] == ["Spring", "Summer", "Fall"]
+    assert saved["ebay_specifics"]["material"] == ["Cotton", "Polyester"]
+    assert saved["ebay_specifics"]["fabricType"] == "Cotton"
+    saved["ebay_specifics"]["season"].remove("Summer")
+    saved["ebay_specifics"]["material"] = []
+    assert client.put(url, json={"listing": saved}).status_code == 200
+    reloaded = client.get(url).json()["listing"]
+    assert reloaded["ebay_specifics"]["season"] == ["Spring", "Fall"]
+    assert reloaded["ebay_specifics"]["material"] == []
+
+
 def test_automated_and_legacy_revisions_do_not_become_corrections(workspace):
     db, conv, revision, _client = workspace
     for source in ("user_form", "generation", "dropdown_normalize", "vendoo_import"):

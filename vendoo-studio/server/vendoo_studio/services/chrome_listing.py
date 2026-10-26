@@ -143,6 +143,12 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
     elif _mercari_size(snapshot) and "sizes" not in form:
         found.append(gap("mercari_specifics.size",
                          "Anteroom could not read Mercari's sizes, so the size would be left off. Try again."))
+    sizes = form.get("sizes")
+    if isinstance(sizes, list) and sizes and not _mercari_size(snapshot):
+        aspects = form.get("aspects") if isinstance(form.get("aspects"), dict) else {}
+        coded = str(aspects.get(f"{chosen}_Size") or "")
+        if not any(str(size.get("id")) == coded for size in sizes if isinstance(size, dict)):
+            found.append(gap("size", "Mercari needs a size in this category."))
     return found
 
 

@@ -38,6 +38,21 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(pick_etsy_leaf(leaves, "men cotton t-shirt")["id"], "2")
 
+    def test_etsy_tshirts_do_not_match_childrens_button_downs(self):
+        leaves = [
+            {"id": "11173", "path": "Clothing > Gender-Neutral Kids' Clothing > Tops & Tees > Dress Shirts & Button Downs"},
+            {"id": "20", "path": "Clothing > Women's Clothing > Tops & Tees > T-shirts"},
+            {"id": "30", "path": "Clothing > Men's Clothing > Shirts & Tees > T-shirts"},
+        ]
+        self.assertEqual(pick_etsy_leaf(leaves, "Clothing > Men's Clothing > Shirts & Tees > T-shirts")["id"], "30")
+
+    def test_etsy_leaf_name_outweighs_repeated_ancestor_words(self):
+        leaves = [
+            {"id": "1", "path": "Clothing > Shirts > Dress Shirts & Button Downs"},
+            {"id": "2", "path": "Clothing > Tops > T-shirts"},
+        ]
+        self.assertEqual(pick_etsy_leaf(leaves, "Draft listing T-Shirts")["id"], "2")
+
     def test_a_live_ebay_category_does_not_replace_vendoo(self):
         listing = {"marketplace_category_ids": {"ebay": "111"}, "direct_category_ids": {"ebay": "15687"}}
         self.assertEqual(ebay_category_id(listing), "15687")
@@ -62,6 +77,19 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sleeve["required"])
         self.assertFalse(any(row["label"] == "Condition" for row in fields))
         self.assertEqual(next(row for row in fields if row["label"] == "Fit")["key"], "Fit")
+
+    def test_live_constraints_replace_stale_cached_control_types(self):
+        fields = merge_live_fields(
+            [{"key": "season", "label": "Season", "required": True, "multi": False,
+              "selection_only": True, "options": ["Obsolete"]}],
+            [{"name": "Season", "required": False, "multi": True, "mode": "free_text",
+              "max_values": 4, "max_length": 65, "values": []}], {}, "ebay",
+        )
+        self.assertEqual(fields[0], {
+            "key": "season", "label": "Season", "required": False, "multi": True,
+            "selection_only": False, "options": [], "max_values": 4, "max_length": 65,
+            "options_source": "marketplace",
+        })
 
     def test_the_generation_prompt_names_live_fields_and_keeps_vendoo_names(self):
         listing = {"direct_category_ids": {"ebay": "15687", "ebay_path": "Clothing > T-Shirts"}}

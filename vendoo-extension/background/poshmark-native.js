@@ -384,7 +384,7 @@ async function updatePoshmarkPost(msg, recovery = false) {
   let stage = 'prepare';
   const matches = post => post.status === 'published'
     && marketplaceText(post.title) === marketplaceText(String(p.listing?.title || '').trim())
-    && String(post.price_amount?.val) === String(poshmarkPrice(p.listing));
+    && Number(post.price_amount?.val) === poshmarkPrice(p.listing);
   try {
     if (!/^[a-f0-9]{24}$/.test(id) || (p.confirm !== true && !recovery)) {
       return marketplaceFailure(marketplaceError('Confirm updating the live Poshmark listing.'), true);

@@ -248,6 +248,8 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
 @requirement("etsy")
 def requirements(snapshot: dict, context: Context) -> list[dict]:
     """What Etsy would refuse, read from the listing alone. Shop profiles are chosen in Settings."""
+    if not etsy_eligible(snapshot):
+        return [gap("etsy_specifics.when_made", NOT_ELIGIBLE)]
     found = []
     try:
         fields = draft_fields(snapshot, creating=True)

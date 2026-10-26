@@ -273,6 +273,7 @@ def _scraped_only_fields(
             "multi": False,
             "selection_only": False,
             "options": list(options),
+            "options_source": "reference",
         })
     return extra
 
@@ -316,6 +317,7 @@ def _listing_only_fields(
             "multi": isinstance(value, list),
             "selection_only": False,
             "options": [],
+            "options_source": "saved",
         })
     return extra
 
@@ -342,6 +344,7 @@ async def _with_mercari_sizes(listing: dict, marketplace: str, category_id: str,
     specifics = listing.get("mercari_specifics") if isinstance(listing.get("mercari_specifics"), dict) else {}
     row = {"key": "size", "label": "Size", "value": str(specifics.get("size") or listing.get("size") or ""),
            "required": True, "multi": False, "selection_only": True,
+           "options_source": "marketplace",
            "options": list(dict.fromkeys(size["name"] for size in sizes if size["name"]))}
     return [*(field for field in fields if _fold_field_name(field["label"]) != "size"), row]
 
@@ -408,6 +411,7 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
         for spec in specs.values():
             label = spec.display or spec.key
             options = sorted(spec.options.values())
+            options_source = "vendoo" if options else "reference"
             if not options:
                 # Category schema sometimes omits the closed list; fall back to
                 # the skill scrape so the Forms editor still offers choices.
@@ -426,6 +430,7 @@ async def listing_fields(conv_id: str, db: Session = Depends(get_db)):
                 "multi": spec.multi,
                 "selection_only": spec.selection_only,
                 "options": options,
+                "options_source": options_source,
             })
         fields.extend(_scraped_only_fields(listing, marketplace, static, fields))
         fields.extend(_listing_only_fields(listing, marketplace, fields))

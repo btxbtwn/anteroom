@@ -69,6 +69,22 @@ class ChromePreflightTest(unittest.TestCase):
         }, Context())
         self.assertTrue(any(gap["blocking"] and "subcategories" in gap["message"] for gap in mercari))
 
+    def test_mercari_size_is_required_only_when_its_category_has_sizes(self):
+        listing = {"description": "Graphic tee", "marketplace_category_ids": {"mercari": "1934"},
+                   "form": {"sizes": [{"id": 4, "name": "M"}]}}
+        self.assertTrue(any(gap["field"] == "size" and gap["blocking"] for gap in mercari_requirements(listing, Context())))
+        listing["form"]["aspects"] = {"1934_Size": 4}
+        self.assertFalse(any(gap["field"] == "size" for gap in mercari_requirements(listing, Context())))
+        listing["form"] = {"sizes": []}
+        self.assertFalse(any(gap["field"] == "size" for gap in mercari_requirements(listing, Context())))
+
+    def test_modern_resale_is_not_ready_for_etsy(self):
+        listing = {"title": "Graphic tee", "etsy_specifics": {
+            "who_made": "Another company or person", "what_is": "A finished product", "when_made": "2020 - 2026 (Recently)",
+        }}
+        gaps = etsy_requirements(listing, Context())
+        self.assertTrue(any(gap["field"] == "etsy_specifics.when_made" and gap["blocking"] for gap in gaps))
+
     def test_a_cached_required_ebay_aspect_holds_list_off(self):
         rows = [{"name": "Sleeve Length", "required": True, "mode": "selection", "multi": False, "max_length": None,
                  "values": [{"label": "Short"}]}]

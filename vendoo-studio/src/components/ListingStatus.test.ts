@@ -98,10 +98,15 @@ describe("inventoryStatus", () => {
     expect(inventoryStatus({ status: "active", vendoo_marketplaces: ["ebay"] })).toBe("active");
   });
 
-  it("keeps a sale and a failed send", () => {
+  it("keeps a sale and a failed send without direct listings", () => {
     expect(inventoryStatus({ status: "sold", removed_marketplaces: ["ebay"] })).toBe("sold");
     expect(inventoryStatus({ status: "sold", direct_marketplaces: ["depop"] })).toBe("sold");
-    expect(inventoryStatus({ status: "failed", direct_marketplaces: ["ebay"] })).toBe("failed");
+    expect(inventoryStatus({ status: "failed" })).toBe("failed");
+  });
+
+  it("shows a direct listing as active despite an earlier failed Vendoo send", () => {
+    expect(inventoryStatus({ status: "failed", direct_marketplaces: ["ebay"] })).toBe("active");
+    expect(inventoryStatus({ status: "listing", direct_marketplaces: ["ebay"] })).toBe("listing");
   });
 });
 
