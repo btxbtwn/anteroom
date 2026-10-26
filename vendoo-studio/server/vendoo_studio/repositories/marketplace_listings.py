@@ -70,6 +70,22 @@ class MarketplaceListingRepo:
             grouped.setdefault(conversation_id, []).append(marketplace)
         return grouped
 
+    def live_revisions(self, conv_id: str | None = None) -> dict[str, set[str]]:
+        """The revisions each item's live direct listings were last written from.
+
+        An item live on a marketplace has a key even when no revision is known.
+        """
+        query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.revision_id).filter(
+            MarketplaceListing.state.in_(LIVE_STATES))
+        if conv_id:
+            query = query.filter(MarketplaceListing.conversation_id == conv_id)
+        grouped: dict[str, set[str]] = {}
+        for conversation_id, revision_id in query.all():
+            revisions = grouped.setdefault(conversation_id, set())
+            if revision_id:
+                revisions.add(revision_id)
+        return grouped
+
     def listing_urls(self, conv_id: str | None = None) -> dict[str, dict[str, str]]:
         """Each item's direct listing links by marketplace, for every item or one."""
         query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace,

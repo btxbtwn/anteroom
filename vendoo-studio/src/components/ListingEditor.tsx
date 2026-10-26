@@ -242,6 +242,7 @@ export function ListingEditor({
     queryKey: ["conversation", convId],
     queryFn: () => api.conversations.get(convId),
   });
+  const directMarketplaces = conversation?.direct_marketplaces ?? [];
 
   const updateMutation = useMutation({
     mutationFn: (listing: ListingData) => api.listings.update(convId, listing),
@@ -411,11 +412,16 @@ export function ListingEditor({
             <>
               <Badge
                 variant="info"
-                title="This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                title={
+                  directMarketplaces.length
+                    ? `This listing has changed since it was listed on ${directMarketplaces.map(marketplaceName).join(", ")}. Update it there from Marketplaces.`
+                    : "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                }
               >
                 Unsent edits
               </Badge>
-              {listingJob?.vendoo_item_id || importedItemId ? (
+              {/* Discard pulls Vendoo's copy, which a directly listed item no longer follows. */}
+              {!directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
                 <InlineButton
                   tone="muted"
                   className="text-xs"

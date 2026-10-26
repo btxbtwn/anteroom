@@ -695,32 +695,44 @@ _REVISIONS_MATCH_MAX = 20_000
 
 
 def _unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -> set[str]:
-    """Conversations whose listing moved on after Studio and Vendoo were last level.
+    """Conversations whose listing moved on after it was last sent.
 
-    Read from the sync machinery's own marker rather than from revision
-    timestamps: a pull writes a revision too, and dating the comparison would
-    call Vendoo's own copy an unsent edit the moment it arrived. A differing
-    revision only counts when its content differs too, so a revision that
-    just normalized Vendoo's copy is not an edit. An unbound listing has
-    nothing to be ahead of.
+    A listing live on a marketplace through Anteroom is measured against what
+    those listings were written from, and Vendoo's copy no longer counts:
+    Direct List and Update are where its edits go. Any other listing is
+    measured against the sync machinery's marker for Vendoo, not against
+    revision timestamps: a pull writes a revision too, and dating the
+    comparison would call Vendoo's own copy an unsent edit the moment it
+    arrived. A differing revision only counts when its content differs too,
+    so a revision that just normalized Vendoo's copy is not an edit. A listing
+    sent nowhere has nothing to be ahead of.
     """
+    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
     from vendoo_studio.services.vendoo_import import parse_notes
     from vendoo_studio.services.vendoo_watch import SYNCED_REVISION, listings_match
 
-    pairs: dict[str, tuple[str, str]] = {}
+    ids = [conv.id for conv in conversations]
+    direct = MarketplaceListingRepo(db).live_revisions(ids[0] if len(ids) == 1 else None)
+    pairs: dict[str, set[tuple[str, str]]] = {}
     for conv in conversations:
         current = revisions.get(conv.id)
-        synced = str(parse_notes(conv.notes).get(SYNCED_REVISION) or "")
-        if current and synced and current != synced:
-            pairs[conv.id] = (current, synced)
-    unknown = {pair for pair in pairs.values() if pair not in _REVISIONS_MATCH}
+        if conv.id in direct:
+            sent = direct[conv.id]
+        else:
+            sent = {str(parse_notes(conv.notes).get(SYNCED_REVISION) or "")} - {""}
+        differing = {(current, rev) for rev in sent if current and rev != current}
+        if differing:
+            pairs[conv.id] = differing
+    wanted = {pair for group in pairs.values() for pair in group}
+    unknown = wanted - _REVISIONS_MATCH.keys()
+    if len(_REVISIONS_MATCH) + len(unknown) > _REVISIONS_MATCH_MAX:
+        _REVISIONS_MATCH.clear()
+        unknown = wanted
     if unknown:
         bodies = ListingRepo(db).revision_bodies({rev for pair in unknown for rev in pair})
-        if len(_REVISIONS_MATCH) + len(unknown) > _REVISIONS_MATCH_MAX:
-            _REVISIONS_MATCH.clear()
-        for current, synced in unknown:
-            _REVISIONS_MATCH[(current, synced)] = listings_match(bodies.get(current), bodies.get(synced))
-    return {conv_id for conv_id, pair in pairs.items() if not _REVISIONS_MATCH[pair]}
+        for current, sent in unknown:
+            _REVISIONS_MATCH[(current, sent)] = listings_match(bodies.get(current), bodies.get(sent))
+    return {conv_id for conv_id, group in pairs.items() if not all(_REVISIONS_MATCH[pair] for pair in group)}
 
 
 def _relist_pending(notes: dict) -> list[str]:
