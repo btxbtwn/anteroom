@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.413 — 2026-10-26
+## 0.1.414 — 2026-10-26
 
 - eBay listings are now made only from an item in Inventory, with List… under Marketplaces, the same as every other marketplace. The eBay page no longer has its own Create draft and Publish on eBay forms. Importing from eBay, updating inventory price and quantity, and editing a live listing are still there.
+
+## 0.1.413 — 2026-10-26
+
+- Select items in the sidebar and choose List / delist to list, delist or relist them on the marketplaces you name. You review what happens to each item and confirm once; items then run one at a time, each marketplace once. An item already live is never taken down by List, a marketplace where it sold is left alone, and a failed item is shown instead of retried.
 
 ## 0.1.412 — 2026-10-26
 
