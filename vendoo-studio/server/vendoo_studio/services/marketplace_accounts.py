@@ -39,6 +39,7 @@ NAMES = {
     "poshmark": "Poshmark",
     "mercari": "Mercari",
     "sellwild": "Sellwild",
+    "vinted": "Vinted",
 }
 SIGN_IN_TIMEOUT_S = 10 * 60
 POLL_INTERVAL_S = 2
@@ -385,28 +386,28 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
         except DelistError as exc:
             text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
         else:
-            others = [
+            live = [
                 name for name in MARKETPLACES
                 if (entry := known.get(name))
                 and entry.get("state") == "live"
                 and entry.get("listing_id")
                 and not entry.get("sold_here")
             ]
-            if not others:
+            if not live:
                 text = "It isn't listed anywhere else."
             else:
                 try:
                     with session_factory() as db:
-                        result = await delist(db, conv_id, others, confirm=True)
+                        result = await delist(db, conv_id, live, confirm=True)
                 except DelistError as exc:
                     text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
                 else:
                     failed = {
                         name: str((result.get(name) or {}).get("error") or "The marketplace did not confirm the delete.")
-                        for name in others
+                        for name in live
                         if (result.get(name) or {}).get("state") == "failed"
                     }
-                    done = [name for name in others if name not in failed]
+                    done = [name for name in live if name not in failed]
                     text = _delist_sentence(done, failed)
         for sale_id in groups[conv_id]:
             notes[sale_id] = text

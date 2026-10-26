@@ -231,7 +231,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     title: "Marketplaces",
     section: "connections",
     targetId: "marketplaces",
-    searchTerms: ["depop", "poshmark", "mercari", "sellwild", "ebay", "etsy", "detect sales", "sale detection", "cookie", "sign in"],
+    searchTerms: ["depop", "poshmark", "mercari", "sellwild", "vinted", "ebay", "etsy", "detect sales", "sale detection", "cookie", "sign in"],
   },
   {
     id: "direct-ebay",

@@ -16,6 +16,7 @@ function worker(routes) {
   c.chrome.storage = { local: { get: async () => ({}), set: async () => {} } };
   c.chrome.tabs = { create: () => { throw new Error('opened a tab'); } };
   const requests = [];
+  const calls = [];
   const counts = {};
   const PAGE = `<html><script>window.__INITIAL_STATE__={"csrftoken":"page-csrf","userCookies":{"userInfo":{"uid":"${USER}"}}};</script></html>`;
   routes = { 'GET poshmark.com/create-listing': [200, PAGE, { 'content-type': 'text/html' }],
@@ -24,12 +25,13 @@ function worker(routes) {
     const parsed = new URL(url);
     const key = `${options.method || 'GET'} ${parsed.hostname}${parsed.pathname}`;
     requests.push(key);
+    calls.push({ key, credentials: options.credentials, headers: options.headers || {} });
     counts[key] = (counts[key] || 0) + 1;
     const answer = routes[key];
     const [status, body, headers] = typeof answer === 'function' ? answer(counts[key], options) : answer || [404, {}];
     return reply(status, body, headers);
   };
-  return { c, requests };
+  return { c, requests, calls };
 }
 
 const posh = `poshmark.com/vm-rest/posts/${POST}`;
@@ -113,8 +115,60 @@ test('Sellwild delists through its own seller action and explains skips', async 
 test('nothing is deleted without confirmation or a valid ID', async () => {
   const { c, requests } = worker({});
   for (const payload of [{ marketplace: 'poshmark', listing_id: POST }, { marketplace: 'mercari', listing_id: '../x', confirm: true },
-    { marketplace: 'ebay', listing_id: '123456789012', confirm: true }]) {
+    { marketplace: 'ebay', listing_id: '123456789012', confirm: true },
+    { marketplace: 'vinted', listing_id: '42' }, { marketplace: 'vinted', listing_id: '42abc', confirm: true }]) {
     assert.equal((await c.runMarketplaceDelete(payload)).ok, false);
   }
   assert.equal(requests.length, 0);
+});
+
+const VINTED_ITEM = 'www.vinted.com/api/v2/items/42';
+const VINTED_USER = { user: { id: 7, login: 'seller', email: 'secret@example.com', real_name: 'Secret Name' } };
+const VINTED_LIVE = { item: { id: 42, user: { id: 7, login: 'seller' }, is_closed: false, is_hidden: false, is_reserved: false, title: 'private title' } };
+const VINTED_PAGE = '<html><script>"CSRF_TOKEN":"csrf-secret"</script></html>';
+
+function vintedRoutes(item, { after = null, deleteStatus = 200 } = {}) {
+  return {
+    'GET www.vinted.com/api/v2/users/current': [200, VINTED_USER],
+    [`GET ${VINTED_ITEM}`]: n => (after && n > 1 ? after(n) : [200, item]),
+    'GET www.vinted.com/items/new': [200, VINTED_PAGE],
+    'POST www.vinted.com/api/v2/items/42/delete': [deleteStatus, { code: 0 }],
+  };
+}
+
+test('Vinted delete reads the listing, deletes once through the session, and confirms it is gone', async () => {
+  const { c, requests, calls } = worker(vintedRoutes(VINTED_LIVE, { after: () => [404, {}] }));
+  const result = await c.runMarketplaceDelete({ marketplace: 'vinted', listing_id: '42', confirm: true });
+  assert.deepEqual({ ...result }, { ok: true, state: 'deleted' });
+  assert.deepEqual(requests, [
+    'GET www.vinted.com/api/v2/users/current', `GET ${VINTED_ITEM}`, 'GET www.vinted.com/items/new',
+    'POST www.vinted.com/api/v2/items/42/delete', `GET ${VINTED_ITEM}`,
+  ]);
+  assert.ok(calls.filter(call => call.key.startsWith('POST')).every(call => call.credentials === 'include' && call.headers['x-csrf-token'] === 'csrf-secret'));
+  assert.equal(JSON.stringify(result).includes('csrf-secret'), false);
+  assert.equal(JSON.stringify(result).includes('secret@example.com'), false);
+  assert.equal(JSON.stringify(result).includes('private title'), false);
+});
+
+test('Vinted treats a missing listing as already deleted and refuses sold, reserved, or someone else\'s', async () => {
+  const gone = worker({
+    'GET www.vinted.com/api/v2/users/current': [200, VINTED_USER],
+    [`GET ${VINTED_ITEM}`]: [404, {}],
+  });
+  assert.equal((await gone.c.runMarketplaceDelete({ marketplace: 'vinted', listing_id: '42', confirm: true })).already, true);
+  assert.ok(!gone.requests.some(request => request.startsWith('POST')));
+  for (const item of [
+    { ...VINTED_LIVE.item, is_closed: true },
+    { ...VINTED_LIVE.item, is_reserved: true },
+    { ...VINTED_LIVE.item, user: { id: 99, login: 'other' } },
+  ]) {
+    const { c, requests } = worker(vintedRoutes({ item }));
+    assert.equal((await c.runMarketplaceDelete({ marketplace: 'vinted', listing_id: '42', confirm: true })).ok, false);
+    assert.ok(!requests.some(request => request.startsWith('POST')));
+  }
+  const hidden = worker(vintedRoutes({ item: { ...VINTED_LIVE.item, is_closed: true, is_hidden: true } }, { after: () => [404, {}] }));
+  assert.equal((await hidden.c.runMarketplaceDelete({ marketplace: 'vinted', listing_id: '42', confirm: true })).state, 'deleted');
+  const lagging = worker(vintedRoutes(VINTED_LIVE, { after: n => [n < 4 ? 200 : 404, VINTED_LIVE] }));
+  assert.equal((await lagging.c.runMarketplaceDelete({ marketplace: 'vinted', listing_id: '42', confirm: true })).state, 'deleted');
+  assert.equal(lagging.requests.filter(request => request === `GET ${VINTED_ITEM}`).length, 4);
 });

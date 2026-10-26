@@ -83,6 +83,32 @@ test('Depop\'s accelerated photo bucket gets its web referrer, for this extensio
   assert.equal(target.test('https://antengo-listings.s3.amazonaws.com/a'), false);
 });
 
+test('Vinted request context covers the signed-in read and delete, and nothing else', async () => {
+  const c = loadWorker();
+  const updates = [];
+  c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
+  await c.ensureMarketplaceRequestContext();
+  const rule = updates[0].addRules.find(value => value.id === 17024);
+  assert.deepEqual([...rule.condition.initiatorDomains], ['test-extension-id']);
+  assert.deepEqual([...rule.condition.requestMethods], ['get', 'post']);
+  assert.ok(rule.condition.regexFilter.length < 200);
+  const target = new RegExp(rule.condition.regexFilter);
+  for (const url of [
+    'https://www.vinted.com/items/new',
+    'https://www.vinted.com/api/v2/users/current',
+    'https://www.vinted.com/api/v2/items/42',
+    'https://www.vinted.com/api/v2/items/42/delete',
+  ]) assert.ok(target.test(url), url);
+  for (const url of [
+    'https://www.vinted.com/api/v2/items/42/edit',
+    'https://www.vinted.com.evil/api/v2/items/42',
+    'https://vinted.com/api/v2/items/42/delete',
+    'https://www.vinted.com/api/v2/item_upload/items',
+  ]) assert.equal(target.test(url), false, url);
+  assert.deepEqual(JSON.parse(JSON.stringify(rule.action.requestHeaders.map(header => [header.header, header.value]))),
+    [['Origin', 'https://www.vinted.com'], ['Referer', 'https://www.vinted.com/']]);
+});
+
 test('Sellwild request context covers a seller shop search from this extension', async () => {
   const c = loadWorker();
   const updates = [];

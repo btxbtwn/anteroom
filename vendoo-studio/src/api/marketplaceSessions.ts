@@ -1,6 +1,6 @@
 /** Chrome sign-in for marketplaces that have no official seller API. */
 
-export const EXTENSION_SESSION_MARKETS = ["depop", "poshmark", "mercari", "sellwild"] as const;
+export const EXTENSION_SESSION_MARKETS = ["depop", "poshmark", "mercari", "sellwild", "vinted"] as const;
 
 export type ExtensionSessionMarket = (typeof EXTENSION_SESSION_MARKETS)[number];
 
@@ -35,6 +35,7 @@ export const EXTENSION_SESSION_NAMES: Record<ExtensionSessionMarket, string> = {
   poshmark: "Poshmark",
   mercari: "Mercari",
   sellwild: "Sellwild",
+  vinted: "Vinted",
 };
 
 export function sessionIsExpiring(session: ExtensionSession, now = Date.now()): boolean {

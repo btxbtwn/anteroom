@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { classifyVintedControl, vintedConditionCandidates, vintedListControl } = require('../content-scripts/vinted.js');
+const { classifyVintedControl, vintedCategoryPath, vintedConditionCandidates, vintedListControl } = require('../content-scripts/vinted.js');
 
 test('Upload is the list control, and Save draft is not', () => {
   assert.equal(vintedListControl('Upload'), true);
@@ -12,6 +12,16 @@ test('Upload is the list control, and Save draft is not', () => {
   assert.equal(vintedListControl('Save'), false);
   assert.equal(classifyVintedControl('Save draft'), 'save');
   assert.equal(classifyVintedControl(''), 'ignore');
+});
+
+test('the Vinted category is the direct breadcrumb, not the Vendoo category', () => {
+  const data = {
+    vinted_specifics: { category: 'Women > Clothing > Jeans > Straight jeans' },
+    marketplace_categories: { vinted: '11450' },
+  };
+  assert.equal(vintedCategoryPath(data), 'Women > Clothing > Jeans > Straight jeans');
+  assert.equal(vintedCategoryPath({ marketplace_categories: { vinted: '11450' } }), '');
+  assert.equal(vintedCategoryPath({}), '');
 });
 
 test('Vinted condition labels try the live form wording', () => {
