@@ -141,7 +141,8 @@ class LocalSalesReconciliationTest(unittest.TestCase):
         self.link_native(marketplace="mercari", url="https://www.mercari.com/us/item/m12345678/")
         self.link_native(marketplace="depop", url="https://www.depop.com/products/seller-coat/")
         self.link_native(marketplace="etsy", url="https://www.etsy.com/listing/12345/coat")
-        self.sale(marketplace="depop", listing_id="seller-coat", conversation_id=self.item.id, line="depop")
+        sold = self.sale(marketplace="depop", listing_id="seller-coat", conversation_id=self.item.id, line="depop")
+        sold.quantity = 1
         self.item.notes = json.dumps({
             "marketplaceMarks": {"mercari": {"state": "not_listed", "listing_id": "m12345678"}},
             "marketplaceDelists": {"etsy": {"state": "deleted", "listing_id": "12345"}},
@@ -151,3 +152,12 @@ class LocalSalesReconciliationTest(unittest.TestCase):
         ebay_sale = next(sale for sale in sales if sale["marketplace"] == "ebay")
         self.assertEqual(ebay_sale["listedElsewhere"], ["poshmark"])
         self.assertIsNone(ebay_sale["vendooUrl"])
+
+    def test_multiunit_sale_keeps_other_marketplace_stock_available_for_review(self):
+        self.sale(conversation_id=self.item.id)
+        self.link_native(marketplace="depop", url="https://www.depop.com/products/seller-coat/")
+        self.sale(marketplace="depop", listing_id="seller-coat", conversation_id=self.item.id, line="depop")
+        sales = self.client.get("/api/marketplace-sales").json()["sales"]
+        ebay_sale = next(sale for sale in sales if sale["marketplace"] == "ebay")
+        self.assertEqual(ebay_sale["listedElsewhere"], ["depop"])
+        self.assertEqual(ebay_sale["stockStatus"], "unknown")

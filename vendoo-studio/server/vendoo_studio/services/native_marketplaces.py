@@ -767,7 +767,8 @@ async def sync(conv_id: str, db: Session) -> dict:
     for marketplace, entry in live_listings(db, conv_id).items():
         if checked.get(marketplace):
             continue
-        if entry.get("state") != "live" or entry.get("sold_here") or not entry.get("listing_id"):
+        if (entry.get("state") != "live" or not entry.get("listing_id")
+                or (entry.get("sold_here") and marketplace not in API_MARKETPLACES)):
             continue
         if marketplace in API_MARKETPLACES:
             from vendoo_studio.services.marketplace_inventory import InventoryCheckError, observe

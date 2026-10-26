@@ -209,6 +209,22 @@ Etsy listings in USD without variations; other listings show status and an
 explanation. Check results describe the moment you clicked Sync; click again
 after making changes locally or on a marketplace.
 
+### Partial sales and remaining stock
+
+A multi-unit sale keeps the item listed until its remaining stock is verified.
+Open the item and click **Sync**: Anteroom saves the verified marketplace stock
+read, and its sale alert shows either the remaining quantity, exhausted stock,
+or a request to check. A new sale makes an older stock read stale. Replacement
+listing IDs do not reuse the old listing's stock. Ended or inactive listings
+alone do not establish that all units sold.
+
+Local quantities are never reduced by subtracting historical orders: they may
+already reflect those sales or include your edits. Partial or unverified
+multi-unit sales never trigger automatic delisting, even with that option
+enabled. Review stock on every marketplace before approving quantity updates
+or delisting. Existing single-item sale behavior is retained; a fresh direct
+stock check can show remaining stock there too.
+
 ### Editing something that is already listed
 
 Anteroom writes the Vendoo **form**. Vendoo carries a form change onto a live

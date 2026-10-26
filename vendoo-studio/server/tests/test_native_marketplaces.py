@@ -687,7 +687,13 @@ class MigrationFromNotesTest(unittest.TestCase):
             with Operations.context(MigrationContext.configure(connection)):
                 migration.upgrade()
         db.expire_all()
-        records = MarketplaceListingRepo(db).for_conversation(conv.id)
+        # Inspect the historical migration's table, not today's ORM model:
+        # newer releases can add columns in later revisions.
+        from sqlalchemy import MetaData, Table, select
+
+        table = Table("marketplace_listings", MetaData(), autoload_with=engine, resolve_fks=False)
+        records = {row["marketplace"]: dict(row) for row in db.execute(
+            select(table).where(table.c.conversation_id == conv.id)).mappings()}
         self.assertEqual(set(records), {"ebay", "etsy", "sellwild", "mercari"})
         self.assertEqual(records["ebay"]["ebay_images"], [{"photo_id": None, "checksum": None, "url": "https://i.ebayimg.com/a.jpg"}])
         self.assertTrue(records["ebay"]["ebay_inventory_written"])

@@ -39,6 +39,8 @@ export interface MarketplaceSale {
   orderId: string;
   listingId: string | null;
   quantity: number | null;
+  stockStatus: "remaining" | "sold_out" | "unknown";
+  remainingQuantity: number | null;
   state: MarketplaceSaleState;
   soldAt: string | null;
   receivedAt: string | null;
