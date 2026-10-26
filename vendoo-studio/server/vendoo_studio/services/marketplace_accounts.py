@@ -120,6 +120,9 @@ async def _wait_for_sign_in(pending: PendingSignIn) -> None:
 async def start_sign_in(marketplace: str, features: list[str] | None = None) -> dict:
     """Open the marketplace's sign-in page; finish in the background."""
     _check(marketplace)
+    if marketplace == "ebay":
+        # Listing on eBay reads the seller's business policies, which needs this grant.
+        features = sorted({*(features or []), "listings"})
     previous = _pending.pop(marketplace, None)
     if previous and previous.task and not previous.task.done():
         previous.task.cancel()

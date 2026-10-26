@@ -223,7 +223,9 @@ export function DirectConnectionRow({
       {error && !account?.pending ? <SettingsNote tone="error">{error}</SettingsNote> : null}
       {marketplace.id === "etsy" && account?.connected ? <EtsyListingDefaults /> : null}
       {marketplace.id === "ebay" ? <EbayInventoryLocationRow /> : null}
-      {marketplace.id === "ebay" && account?.connected ? <EbayListingDefaults /> : null}
+      {marketplace.id === "ebay" && account?.connected ? (
+        <EbayListingDefaults reconnecting={connect.isPending} onReconnect={() => connect.mutate()} />
+      ) : null}
     </SettingsRow>
   );
 }
@@ -334,7 +336,7 @@ const EBAY_DEFAULTS = [
 ] as const;
 
 /** Shown only when the account has more than one policy or location. One is used automatically. */
-function EbayListingDefaults() {
+function EbayListingDefaults({ reconnecting, onReconnect }: { reconnecting: boolean; onReconnect: () => void }) {
   const queryClient = useQueryClient();
   const profiles = useQuery({ queryKey: ["ebay-listing-profiles"], queryFn: () => api.ebay.listingProfiles(), staleTime: 60_000, retry: false });
   const defaults = useQuery({ queryKey: ["ebay-listing-defaults"], queryFn: () => api.ebay.listingDefaults(), retry: false });
@@ -366,7 +368,15 @@ function EbayListingDefaults() {
         ))}
         {save.isPending ? <Spinner /> : null}
       </div>
-      {profiles.error || save.error ? <SettingsNote tone="error">{(save.error || profiles.error)?.message}</SettingsNote>
+      {profiles.error && !save.error ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <SettingsNote tone="error">{profiles.error.message}</SettingsNote>
+          <Button size="xs" variant="outline" disabled={reconnecting} onClick={onReconnect}>
+            {reconnecting ? <Spinner /> : null}
+            Reconnect eBay
+          </Button>
+        </div>
+      ) : save.error ? <SettingsNote tone="error">{save.error.message}</SettingsNote>
         : several.length > 0 ? <SettingsNote>New eBay listings use the policy and location you choose here.</SettingsNote> : null}
     </div>
   );
