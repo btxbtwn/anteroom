@@ -124,6 +124,121 @@ test('Save Draft refuses a read-back mismatch and never falls through to publish
   assert.ok(!requests.some(r => r.path.endsWith('/status/published') || r.method === 'DELETE'));
 });
 
+test('a private draft uploads its selected video, submits processing and reads its reference back', async () => {
+  const { c, msg, requests, journal } = setup({ status: 'user_draft' });
+  const asset = 'f'.repeat(24);
+  c.nativeVideo = async () => new Blob(['clip'], { type: 'video/mp4' });
+  const fetch = c.fetch;
+  c.fetch = async (url, options = {}) => {
+    if (new URL(url).pathname === `/vm-rest/posts/${POST}/videos`) {
+      requests.push({ method: options.method, path: new URL(url).pathname });
+      return response(200, { data: { id: asset } });
+    }
+    return fetch(url, options);
+  };
+  msg.payload = { ...msg.payload, action: 'save_draft', confirm: false,
+    listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, videoId: 'abc123' } },
+    video: { id: 'abc123', checksum: 'video-checksum', size_bytes: 4, mime_type: 'video/mp4', duration_seconds: 3 } };
+  const result = await c.runNativeMarketplace(msg);
+  assert.equal(result.ok, true);
+  assert.match(result.warning, /processing/);
+  assert.deepEqual(savedPost(requests).videos, [{ id: asset }]);
+  assert.ok(requests.some(row => row.path === `/api/posts/${POST}/videos/${asset}/media` && row.body instanceof FormData));
+  const submit = requests.find(row => row.path === `/vm-rest/posts/${POST}/videos/${asset}`);
+  assert.deepEqual(submit.body, { input: { status: 'submitted' } });
+  assert.equal(journal['native_operation_op-1'].poshmark_video_checksum, 'video-checksum');
+  assert.ok(!requests.some(row => row.path.endsWith('/status/published')));
+  assert.equal(c.poshmarkVideoPending({ videos: [{ id: asset, status: 'ready' }] }, savedPost(requests)), false);
+  assert.throws(() => c.poshmarkVideoPending({ videos: [{ id: asset, media: { processing_status: 'failed' } }] }, savedPost(requests)), /could not process/);
+  assert.ok(c.poshmarkPostDifferences({ ...savedPost(requests), videos: [] }, savedPost(requests), 2).includes('videos'));
+});
+
+test('clearing a video sends an empty video list and invalid video selections stop before writes', async () => {
+  const { c, msg, requests } = setup({ status: 'user_draft' });
+  msg.payload = { ...msg.payload, action: 'save_draft', confirm: false,
+    listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, videoId: '' } } };
+  assert.equal((await c.runNativeMarketplace(msg)).ok, true);
+  assert.deepEqual(savedPost(requests).videos, []);
+  assert.ok(!requests.some(row => /\/videos/.test(row.path)));
+  for (const duration_seconds of [0, 15, 16]) {
+    const invalid = setup({ status: 'user_draft' });
+    invalid.msg.payload = { ...msg.payload,
+      listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, videoId: 'abc123' } },
+      video: { id: 'abc123', duration_seconds, mime_type: 'video/mp4', checksum: 'test', size_bytes: 4 } };
+    assert.equal((await invalid.c.runNativeMarketplace(invalid.msg)).ok, false);
+    assert.ok(invalid.requests.every(row => row.method === 'GET'));
+  }
+});
+
+test('a failed video never reaches publication and recovery rejects a missing video', async () => {
+  const { c, msg, requests, journal } = setup();
+  const asset = 'f'.repeat(24);
+  c.nativeVideo = async () => new Blob(['clip'], { type: 'video/mp4' });
+  const fetch = c.fetch;
+  c.fetch = async (url, options = {}) => {
+    const path = new URL(url).pathname;
+    if (path === `/vm-rest/posts/${POST}/videos`) return response(200, { data: { id: asset } });
+    if (path === `/vm-rest/posts/${POST}` && (!options.method || options.method === 'GET')) {
+      return response(200, { data: { ...savedPost(requests), id: POST, creator_id: USER, status: 'draft',
+        videos: [{ id: asset, status: 'submitted', media: { processing_status: 'failed' } }] } });
+    }
+    return fetch(url, options);
+  };
+  msg.payload = { ...msg.payload, listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, videoId: 'abc123' } },
+    video: { id: 'abc123', checksum: 'video-checksum', size_bytes: 4, mime_type: 'video/mp4', duration_seconds: 3 } };
+  const result = await c.runNativeMarketplace(msg);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /could not process/);
+  assert.ok(!requests.some(row => row.path.endsWith('/status/published')));
+  assert.equal(journal['native_operation_op-1'].poshmark_video_id, asset);
+  msg.payload.action = 'save_draft';
+  c.fetch = async (url, options = {}) => {
+    assert.equal(options.method || 'GET', 'GET');
+    if (new URL(url).pathname === `/vm-rest/posts/${POST}`) return response(200, { data: {
+      ...savedPost(requests), id: POST, creator_id: USER, status: 'user_draft', videos: [],
+    } });
+    return fetch(url, options);
+  };
+  assert.equal((await c.runPoshmarkApi(msg, true)).ok, false);
+});
+
+test('private Poshmark drafts save multiple sizes, custom sizes and per-size SKUs', async () => {
+  const { c, msg, requests } = setup({ status: 'user_draft' });
+  const catalog = structuredClone(CATALOG.data);
+  catalog.catalog.departments[0].categories[0].size_sets[0].id = 'standard';
+  c.poshmarkCatalogData = async () => catalog;
+  msg.payload = { ...msg.payload, action: 'save_draft', confirm: false,
+    listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, inventoryRows: [
+      { sizeSetId: 'standard', sizeId: 'M', quantity: 2, sku: 'MEDIUM-2' },
+      { sizeSetId: 'custom', sizeId: 'Custom XL', quantity: 1, sku: 'CUSTOM-1' },
+    ] } } };
+  const result = await c.runNativeMarketplace(msg);
+  assert.equal(result.ok, true);
+  const post = savedPost(requests);
+  assert.equal(post.inventory.multi_item, true);
+  assert.deepEqual(post.inventory.size_quantities.map(row => [row.size_id, row.quantity_available, row.seller_inventory_private_info.sku]),
+    [['M', 2, 'MEDIUM-2'], ['Custom XL', 1, 'CUSTOM-1']]);
+  assert.deepEqual(post.inventory.size_quantities[1].size_set_tags, []);
+  assert.ok(!requests.some(row => row.path.includes('/status/published')));
+  const changed = structuredClone(post);
+  changed.inventory.size_quantities[1].seller_inventory_private_info.sku = 'WRONG';
+  assert.ok(c.poshmarkPostDifferences(changed, post, 2).includes('sizes'));
+});
+
+test('invalid Poshmark inventory stops before creating or uploading a post', async () => {
+  for (const rows of [null, {}, 'invalid', [], [{ sizeSetId: 'custom', sizeId: ' ', quantity: 1 }],
+    [{ sizeSetId: 'custom', sizeId: 'M', quantity: 0 }],
+    [{ sizeSetId: 'custom', sizeId: 'M', quantity: 1.5 }],
+    [{ sizeSetId: 'missing', sizeId: 'M', quantity: 1 }],
+    [{ sizeSetId: 'custom', sizeId: 'M', quantity: 1 }, { sizeSetId: 'custom', sizeId: 'M', quantity: 2 }]]) {
+    const { c, msg, requests } = setup({ status: 'user_draft' });
+    msg.payload = { ...msg.payload, action: 'save_draft', confirm: false,
+      listing: { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, inventoryRows: rows } } };
+    assert.equal((await c.runNativeMarketplace(msg)).ok, false);
+    assert.ok(requests.every(row => row.method === 'GET'));
+  }
+});
+
 test('an existing Poshmark draft is reused but a live or foreign post is never changed', async () => {
   for (const [status, owner, allowed] of [['user_draft', USER, true], ['published', USER, false], ['user_draft', 'f'.repeat(24), false]]) {
     const { c, msg, requests } = setup({ status: 'user_draft' });
@@ -245,8 +360,8 @@ test('an update writes the live Poshmark post and does not create or publish ano
     if (path.endsWith('/media/scratch')) return reply(200, { data: { id: 'c'.repeat(24) } });
     if (method === 'POST' && path === `/vm-rest/posts/${POST}`) { saved = true; return reply(200, { data: {} }); }
     if (method === 'GET' && path === `/vm-rest/posts/${POST}`) {
-      return reply(200, { data: { id: POST, status: 'published', creator_id: USER, title: saved ? 'Vintage tee' : 'Old title',
-        price_amount: { val: saved ? '18.0' : '10' }, inventory: { size_quantity_revision: 3, size_quantities: [{ quantity_sold: 0 }] } } });
+      return reply(200, { data: { ...(saved ? savedPost(requests) : {}), id: POST, status: 'published', creator_id: USER, title: saved ? 'Vintage tee' : 'Old title',
+        price_amount: { val: saved ? '18.0' : '10' }, ...(!saved ? { inventory: { size_quantity_revision: 3, size_quantities: [{ quantity_sold: 0 }] } } : {}) } });
     }
     return reply(500, {});
   };
@@ -271,6 +386,30 @@ test('Poshmark gets whole dollars, rounded the way Vendoo rounds', async () => {
   assert.equal(savedPost(requests).price_amount.val, '18');
   assert.equal(c.poshmarkPrice({ price: 19.49 }), 19);
   assert.equal(c.poshmarkPrice({ price: 19.99, poshmark_specifics: { poshmarkPrice: '24.5' } }), 25);
+});
+
+test('a live update refuses a read-back that lost inventory even when title and price match', async () => {
+  for (const lost of ['quantity', 'SKU']) {
+    const { c, msg, requests } = setup({ status: 'published' });
+    const fetch = c.fetch;
+    c.fetch = async (url, options = {}) => {
+      const saved = savedPost(requests);
+      if (saved && (options.method || 'GET') === 'GET' && new URL(url).pathname === `/vm-rest/posts/${POST}`) {
+        const changed = structuredClone(saved);
+        if (lost === 'quantity') changed.inventory.size_quantities[0].quantity_available += 1;
+        else changed.inventory.size_quantities[0].seller_inventory_private_info.sku = 'WRONG';
+        return response(200, { data: { ...changed, id: POST, status: 'published', creator_id: USER } });
+      }
+      return fetch(url, options);
+    };
+    msg.payload.action = 'update';
+    msg.payload.listing_id = POST;
+    const result = await c.runPoshmarkApi(msg);
+    assert.equal(result.ok, false);
+    assert.equal(result.safe_to_retry, false);
+    assert.match(result.error, /did not keep this listing revision/);
+    assert.ok(!requests.some(row => row.path.endsWith('/status/published')));
+  }
 });
 
 test('Poshmark conditions use its own codes and never drop a plain New', () => {

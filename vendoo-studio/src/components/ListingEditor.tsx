@@ -1,9 +1,11 @@
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { Job, ListingData, MarketplaceForm } from "../api/types";
+import type { Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
+import { NativeInventoryEditor } from "./NativeInventoryEditor";
+import { ListingVideoPicker } from "./ListingVideoPicker";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import { SendProgress, sendProgressLabel } from "./SendProgress";
@@ -84,7 +86,8 @@ interface EditorField {
   minValue?: number;
   maxValue?: number;
   step?: number;
-  defaultValue?: string | string[] | number | boolean;
+  defaultValue?: string | string[] | number | boolean | NativeInventoryRow[];
+  inventoryGroups?: NativeInventoryGroup[];
   native?: boolean;
   optionValues?: Record<string, string>;
   clears?: string[];
@@ -242,8 +245,8 @@ export function ListingEditor({
 
   const updateMutation = useMutation({
     mutationFn: (listing: ListingData) => api.listings.update(convId, listing),
-    onSuccess: (_result, listing) => {
-      queryClient.invalidateQueries({ queryKey: ["listing", convId] });
+    onSuccess: async (_result, listing) => {
+      await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
       // A SKU edit is copied into Item Details.
       if ((listing.sku || "") !== (data?.listing?.sku || "")) {
         queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
@@ -499,7 +502,7 @@ export function ListingEditor({
       )}
 
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
-        disabled={generating} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
+        disabled={generating || updateMutation.isPending} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         onSelect={(id) => {
           setFieldTarget(null);
@@ -627,6 +630,7 @@ export function StructuredEditor({
   React.useEffect(() => {
     const init: Record<string, string | string[]> = {};
     fields.forEach((f) => {
+      if (f.type === "inventory") return;
       const val = getListingEditorValue(listing, f.key);
       // Schema labels ("Sleeve Length") don't match JSON keys ("sleeveLength");
       // the fields API already resolved the value — use it when the path miss.
@@ -673,7 +677,8 @@ export function StructuredEditor({
     if (key === "poshmark_specifics.nativeSizeId") {
       setListingEditorValue(updated, "poshmark_specifics.sizeSetId", fields.find((row) => row.key === "poshmark_specifics.sizeSetId")?.defaultValue || "");
     }
-    for (const dependent of field?.clears || []) setListingEditorValue(updated, dependent, dependent.endsWith(".attributes") ? {} : "");
+    for (const dependent of field?.clears || []) setListingEditorValue(updated, dependent,
+      dependent.endsWith(".attributes") ? {} : dependent.endsWith(".inventoryRows") ? [] : "");
     onChange(updated);
   };
 
@@ -681,6 +686,15 @@ export function StructuredEditor({
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
     const text = formFieldText(local[f.key]);
+    if (f.type === "video") return <ListingVideoPicker convId={convId} selectedId={text} disabled={f.locked}
+      onSelect={id => commitField(f.key, id)} />;
+    if (f.type === "inventory") return <NativeInventoryEditor
+      value={Array.isArray(f.defaultValue) ? f.defaultValue.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : []}
+      groups={f.inventoryGroups || []} disabled={f.locked} onChange={rows => {
+        const updated = cloneListing(listing);
+        setListingEditorValue(updated, f.key, rows);
+        onChange(updated);
+      }} />;
     if (f.native && f.key === "direct_category_ids.ebay") return <EbayCategorySelect id={id} value={text} onChange={(categoryId, path) => {
       const updated = cloneListing(listing);
       setListingEditorValue(updated, f.key, categoryId);
@@ -732,7 +746,7 @@ export function StructuredEditor({
     );
   };
   // Long text and the category path need the full row.
-  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || f.type === "textarea";
+  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || ["textarea", "inventory", "video"].includes(f.type || "");
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
@@ -766,7 +780,9 @@ export function StructuredEditor({
       </div>}
       {nativeTab && nativeQuery.data?.notes?.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
-        const filled = section.fields.filter((f) => formFieldText(local[f.key]).trim() !== "").length;
+        const filled = section.fields.filter((f) => f.type === "inventory"
+          ? Array.isArray(f.defaultValue) && f.defaultValue.length > 0
+          : formFieldText(local[f.key]).trim() !== "").length;
         return (
           <InspectorSection
             key={section.id}
@@ -1037,6 +1053,7 @@ function schemaFieldsForTab(
     key: form.native ? field.path || field.key : `${tab}_specifics.${field.key}`,
     native: form.native,
     type: field.input_type,
+    inventoryGroups: field.inventory_groups,
     minValue: field.min_value,
     maxValue: field.max_value,
     step: field.step,

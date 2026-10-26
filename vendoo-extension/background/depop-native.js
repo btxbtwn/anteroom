@@ -548,16 +548,57 @@ function depopAttributeMap(attributes) {
   return attributes && typeof attributes === 'object' ? attributes : {};
 }
 
-function depopAttributeIds(values) {
-  return (Array.isArray(values) ? values : values == null ? [] : [values])
-    .map(value => String(value && typeof value === 'object' ? value.id : value)).sort();
+// Depop's editor document is not one shape. The presentation draft can wrap
+// the fields, name them in camelCase, or leave size and photos on the product
+// the partner API uses. Reading only the top-level snake_case keys makes a
+// saved draft look empty after a successful write.
+function depopDraftDocument(payload) {
+  if (Array.isArray(payload) || !payload || typeof payload !== 'object') return {};
+  const wrappers = [payload.draft, payload.data, payload.object, payload.listing, payload.product, payload.item];
+  const nested = wrappers.find(value => value && typeof value === 'object' && !Array.isArray(value)
+    && (value.product_type != null || value.productType != null || value.pictures || value.pictureIds
+      || value.picture_ids || value.media || value.description));
+  const bare = payload.product_type == null && payload.productType == null && !payload.pictures && !payload.pictureIds && !payload.picture_ids;
+  const source = nested && bare ? { ...payload, ...nested } : { ...payload };
+  const category = source.category && typeof source.category === 'object' ? source.category : null;
+  if (category) {
+    if (source.product_type == null && source.productType == null) source.productType = category.productType ?? category.product_type;
+    if (source.variant_set_id == null && source.variantSetId == null && source.variant_set == null) {
+      source.variantSetId = category.variantSetId ?? category.variant_set_id ?? category.sizeSetId ?? category.size_set_id;
+    }
+    if (source.variants == null) source.variants = category.variants;
+    if (source.gender == null) source.gender = category.gender;
+    if (source.is_kids == null && source.isKids == null) source.isKids = category.isKids ?? category.is_kids;
+  }
+  const media = source.media && typeof source.media === 'object' ? source.media : null;
+  if (!Array.isArray(source.pictures) && !Array.isArray(source.pictureIds) && !Array.isArray(source.picture_ids)) {
+    const rows = media?.pictures || media?.photos || media?.images || source.images;
+    if (Array.isArray(rows)) source.pictures = rows;
+  }
+  if (source.variants == null && (source.size_id != null || source.sizeId != null)) {
+    source.variants = { [String(source.size_id ?? source.sizeId)]: source.quantity ?? 1 };
+  }
+  if (source.variant_set_id == null && source.variantSetId == null && source.variant_set == null
+      && (source.size_set_id != null || source.sizeSetId != null)) {
+    source.variantSetId = source.size_set_id ?? source.sizeSetId;
+  }
+  if (source.brand == null) source.brand = source.brand_id ?? source.brandId ?? source.brand_name ?? source.brandName;
+  if (source.price_amount == null && source.priceAmount == null && source.price && typeof source.price === 'object') {
+    source.priceAmount = source.price.priceAmount ?? source.price.price_amount ?? source.price.amount ?? null;
+  }
+  if (source.shipping_methods == null && Array.isArray(source.shippingMethods)) source.shipping_methods = source.shippingMethods;
+  if (source.national_shipping_cost == null && source.nationalShippingCost != null) source.national_shipping_cost = source.nationalShippingCost;
+  if (!Object.hasOwn(source, 'international_shipping_cost') && Object.hasOwn(source, 'internationalShippingCost')) {
+    source.international_shipping_cost = source.internationalShippingCost;
+  }
+  return source;
 }
 
 // Picture ids in upload order. New drafts stay within Depop's eight. A live
 // listing passes no cap so photos already on it are kept. Strings, numbers, and { id } all count.
 function depopPictureRows(draftOrRows) {
   if (Array.isArray(draftOrRows)) return draftOrRows;
-  const draft = draftOrRows || {};
+  const draft = depopDraftDocument(draftOrRows);
   for (const key of ['pictures', 'picture_ids', 'pictureIds', 'photos']) {
     if (Array.isArray(draft[key])) return draft[key];
   }
@@ -577,47 +618,432 @@ function depopPictureIds(draftOrRows, limit = 8) {
   return ids;
 }
 
+// A picture row Depop returned with only a URL still counts. Numeric ids are
+// what a write sends; a read-back often wraps those ids in formats.
+function depopPictureCount(draftOrRows) {
+  const ids = depopPictureIds(draftOrRows, null);
+  return ids.length || depopPictureRows(draftOrRows).length;
+}
+
+function depopPhotosKept(saved, sentIds) {
+  const wanted = depopPictureIds(sentIds);
+  const kept = depopPictureIds(saved, null);
+  if (kept.length) return kept.length === wanted.length && [...kept].sort((a, b) => a - b).join() === [...wanted].sort((a, b) => a - b).join();
+  return depopPictureRows(saved).length === wanted.length;
+}
+
+function depopFieldId(value) {
+  if (value == null || value === '') return '';
+  if (typeof value === 'object') {
+    const id = value.id ?? value.brand_id ?? value.brandId ?? value.picture_id ?? value.pictureId
+      ?? value.variant_set_id ?? value.variantSetId ?? value.value_id ?? value.valueId;
+    return id == null || typeof id === 'object' ? '' : String(id);
+  }
+  return String(value);
+}
+
+function depopAttributeIds(values) {
+  return (Array.isArray(values) ? values : values == null || values === '' ? [] : [values])
+    .map(value => {
+      if (value && typeof value === 'object') {
+        const id = value.id ?? value.value_id ?? value.valueId;
+        if (id != null && id !== '') return String(id);
+        const name = value.name ?? value.label ?? value.value;
+        return name == null ? '' : String(name);
+      }
+      return String(value);
+    })
+    .filter(value => value !== '')
+    .sort();
+}
+
+function depopSameList(left, right) {
+  const key = values => depopAttributeIds(values).map(marketplaceNameKey).sort().join();
+  return key(left) === key(right);
+}
+
+// Depop's draft read uses the names the form shows (objects, camelCase, value
+// lists). Comparison uses the ids a write sent.
+function depopDraftView(draft) {
+  const source = depopDraftDocument(draft);
+  const product = source.product_type ?? source.productType ?? source.category?.product_type ?? source.category?.productType ?? '';
+  const set = source.variant_set_id ?? source.variantSetId ?? source.variant_set ?? source.variantSet;
+  const conditionRaw = source.condition ?? source.condition_id ?? source.conditionId;
+  const conditionId = depopFieldId(conditionRaw);
+  const conditionName = conditionRaw && typeof conditionRaw === 'object' ? (conditionRaw.name || conditionRaw.label || '') : conditionRaw;
+  const brand = source.brand ?? source.brand_id ?? source.brandId;
+  return {
+    product_type: product && typeof product === 'object' ? depopFieldId(product) : String(product || ''),
+    variant_set: set == null || set === '' ? '' : (typeof set === 'object' ? depopFieldId(set) : String(set)),
+    variants: source.variants ?? source.sizes,
+    attributes: source.attributes,
+    age: source.age, source: source.source, style: source.style,
+    colour: source.colour ?? source.color ?? source.colours ?? source.colors,
+    condition: depopCondition(conditionId) || depopCondition(conditionName) || conditionId,
+    brand,
+    sku: source.sku ?? '',
+    quantity: source.quantity,
+    international_shipping_cost: source.international_shipping_cost ?? source.internationalShippingCost,
+    description: source.description,
+    price: source.price_amount ?? source.priceAmount ?? source.price,
+    shipping_methods: source.shipping_methods,
+    measurements: source.measurements,
+  };
+}
+
+function depopBrandToken(value) {
+  if (value && typeof value === 'object') {
+    const id = depopFieldId(value);
+    if (id) return marketplaceNameKey(id);
+    return marketplaceNameKey(value.name ?? value.title ?? value.label ?? '');
+  }
+  return marketplaceNameKey(value);
+}
+
+function depopRequestAttributes(attributes) {
+  const map = depopAttributeMap(attributes);
+  const out = {};
+  for (const [id, values] of Object.entries(map)) {
+    const ids = depopAttributeIds(values).filter(value => value !== 'undefined');
+    if (id) out[id] = ids;
+  }
+  return out;
+}
+
+function depopRequestVariants(variants) {
+  if (Array.isArray(variants)) {
+    const out = {};
+    for (const entry of variants) {
+      const id = depopFieldId(entry);
+      const quantity = depopVariantQuantity(entry?.quantity ?? entry?.value ?? entry);
+      if (id && Number.isFinite(quantity)) out[id] = quantity;
+    }
+    return out;
+  }
+  if (!variants || typeof variants !== 'object') return variants;
+  const out = {};
+  for (const [id, quantity] of Object.entries(variants)) {
+    const number = depopVariantQuantity(quantity);
+    if (Number.isFinite(number)) out[id] = number;
+  }
+  return out;
+}
+
+function depopCleanShipping(methods) {
+  if (!Array.isArray(methods)) return methods;
+  return methods.map(method => {
+    if (!method || typeof method !== 'object') return method;
+    const next = {
+      payer: method.payer,
+      parcel_size: method.parcel_size != null ? String(method.parcel_size)
+        : method.parcelSize != null ? String(method.parcelSize)
+        : (method.parcel_size_id != null ? String(method.parcel_size_id) : undefined),
+      shipping_provider_id: method.shipping_provider_id ?? method.shippingProviderId,
+      ship_from_address_id: method.ship_from_address_id ?? method.shipFromAddressId,
+    };
+    return Object.fromEntries(Object.entries(next).filter(([, value]) => value != null));
+  });
+}
+
+// The body create and update both send. Response objects from a previous
+// draft (brand records, videos, repop metadata) are not copied in: Depop
+// accepts the write and then ignores the fields.
+function depopDraftWriteBody(listing, fields, pictures, existing) {
+  const source = { ...depopFormFields(listing), ...depopMeasurementBody(listing), ...(fields || {}) };
+  const body = {
+    description: depopDescription(listing),
+    price_amount: String(depopPrice(listing) ?? ''),
+    price_currency: 'USD',
+    pictures: depopPictureIds(pictures),
+  };
+  for (const key of ['address', 'age', 'attributes', 'brand', 'colour', 'condition', 'country', 'country_code',
+    'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids', 'measurements',
+    'national_shipping_cost', 'product_type', 'quantity', 'shipping_methods', 'source', 'style', 'variants']) {
+    if (Object.hasOwn(source, key) && source[key] != null) body[key] = source[key];
+  }
+  if (Object.hasOwn(source, 'sku')) body.sku = source.sku == null ? '' : source.sku;
+  if (body.brand && typeof body.brand === 'object') body.brand = depopFieldId(body.brand);
+  if (body.condition && typeof body.condition === 'object') {
+    body.condition = depopCondition(depopFieldId(body.condition)) || depopCondition(body.condition.name) || depopFieldId(body.condition);
+  }
+  if (body.attributes) body.attributes = depopRequestAttributes(body.attributes);
+  if (body.variants) body.variants = depopRequestVariants(body.variants);
+  if (Array.isArray(body.shipping_methods)) body.shipping_methods = depopCleanShipping(body.shipping_methods);
+  for (const key of ['age', 'source', 'style', 'colour']) {
+    if (Array.isArray(body[key])) body[key] = body[key].map(value => (value && typeof value === 'object' ? depopFieldId(value) : value)).filter(Boolean);
+  }
+  if (body.international_shipping_cost == null) delete body.international_shipping_cost;
+  const prior = depopDraftDocument(existing);
+  if (!Array.isArray(body.measurements) && Array.isArray(prior.measurements) && prior.measurements.length) {
+    body.measurements = prior.measurements.map(row => ({
+      id: String(row?.id || ''), label: String(row?.label || ''), value: String(row?.value ?? '').trim(),
+      unit: String(row?.unit || 'in'),
+    })).filter(row => row.value);
+  }
+  if (!Array.isArray(body.shipping_methods) && Array.isArray(prior.shipping_methods) && prior.shipping_methods.length) {
+    body.shipping_methods = depopCleanShipping(prior.shipping_methods);
+  }
+  if (body.national_shipping_cost == null && prior.national_shipping_cost != null && typeof prior.national_shipping_cost !== 'object') {
+    body.national_shipping_cost = String(prior.national_shipping_cost);
+  }
+  if (Object.hasOwn(source, 'variant_set') && source.variant_set != null) {
+    body.variant_set = typeof source.variant_set === 'object' ? depopFieldId(source.variant_set) : source.variant_set;
+    delete body.quantity;
+  } else if (Object.hasOwn(source, 'variant_set')) {
+    body.variants = {};
+    if (source.quantity != null) body.quantity = source.quantity;
+  }
+  return depopCamelAliases(body);
+}
+
 // The draft fields that differ from this revision: description and price, and
 // when the resolved fields are known, the category, size and attributes sent.
 function depopDraftMismatch(draft, listing, fields) {
+  const view = depopDraftView(draft);
   const wrong = [];
-  if (marketplaceText(draft.description) !== marketplaceText(depopDescription(listing))) wrong.push('description');
-  if (depopPrice(listing) != null && Number(draft.price_amount ?? draft.price) !== Number(depopPrice(listing))) wrong.push('price');
+  if (marketplaceText(view.description) !== marketplaceText(depopDescription(listing))) wrong.push('description');
+  if (depopPrice(listing) != null && Number(view.price) !== Number(depopPrice(listing))) wrong.push('price');
   if (!fields) return wrong;
-  if (fields.product_type != null && String(draft.product_type ?? '') !== String(fields.product_type)) wrong.push('category');
+  if (fields.product_type != null && String(view.product_type) !== String(fields.product_type)) wrong.push('category');
   if (fields.variant_set != null) {
-    const set = draft.variant_set_id ?? draft.variant_set;
-    if (String(set && typeof set === 'object' ? set.id : set ?? '') !== String(fields.variant_set)
-      || depopVariantIds(draft.variants).join() !== depopVariantIds(fields.variants).join()) wrong.push('size');
-  } else if (Object.hasOwn(fields, 'variant_set') && ((draft.variant_set_id ?? draft.variant_set) != null || depopVariantIds(draft.variants).length)) {
+    if (String(view.variant_set) !== String(fields.variant_set)
+      || depopVariantIds(view.variants).join() !== depopVariantIds(fields.variants).join()) wrong.push('size');
+  } else if (Object.hasOwn(fields, 'variant_set') && (view.variant_set !== '' || depopVariantIds(view.variants).length)) {
     wrong.push('size');
   }
   if (Object.hasOwn(fields, 'attributes')) {
     const sent = depopAttributeMap(fields.attributes);
-    const kept = depopAttributeMap(draft.attributes);
+    const kept = depopAttributeMap(view.attributes);
     for (const id of new Set([...Object.keys(sent), ...Object.keys(kept)])) {
-      if (depopAttributeIds(kept[id]).join() !== depopAttributeIds(sent[id]).join()) wrong.push(id.replace(/-/g, ' '));
+      if (!depopSameList(kept[id], sent[id])) wrong.push(id.replace(/-/g, ' '));
     }
   }
   for (const key of ['age', 'source', 'style', 'colour']) {
-    if (Object.hasOwn(fields, key) && depopAttributeIds(draft[key]).join() !== depopAttributeIds(fields[key]).join()) wrong.push(key);
+    if (Object.hasOwn(fields, key) && !depopSameList(view[key], fields[key])) wrong.push(key);
   }
-  if (fields.condition != null && String(draft.condition ?? '') !== String(fields.condition)) wrong.push('condition');
-  if (fields.brand != null && String(draft.brand?.id ?? draft.brand ?? '') !== String(fields.brand)) wrong.push('brand');
-  if (Object.hasOwn(fields, 'sku') && String(draft.sku || '') !== fields.sku) wrong.push('SKU');
+  if (fields.condition != null && depopCondition(fields.condition) !== view.condition
+    && marketplaceNameKey(fields.condition) !== marketplaceNameKey(view.condition)) wrong.push('condition');
+  if (fields.brand != null && depopBrandToken(view.brand) !== depopBrandToken(fields.brand)) wrong.push('brand');
+  if (Object.hasOwn(fields, 'sku') && String(view.sku || '') !== String(fields.sku ?? '')) wrong.push('SKU');
   if (Object.hasOwn(fields, 'international_shipping_cost')) {
-    const actual = draft.international_shipping_cost;
+    const actual = view.international_shipping_cost;
     if (fields.international_shipping_cost == null ? actual != null && actual !== ''
       : actual == null || actual === '' || Number(actual) !== Number(fields.international_shipping_cost)) wrong.push('worldwide shipping');
   }
-  if (fields.variants && depopVariantIds(fields.variants).some(id => Object.hasOwn(draft.variants || {}, id)
-    && depopVariantQuantity(draft.variants[id]) !== depopVariantQuantity(fields.variants[id]))) wrong.push('quantity');
-  if (fields.quantity != null && Number(draft.quantity) !== fields.quantity) wrong.push('quantity');
+  if (fields.variants && depopVariantIds(fields.variants).some(id => view.variants && typeof view.variants === 'object' && !Array.isArray(view.variants)
+    && Object.hasOwn(view.variants, id) && depopVariantQuantity(view.variants[id]) !== depopVariantQuantity(fields.variants[id]))) wrong.push('quantity');
+  if (fields.quantity != null && Number(view.quantity) !== fields.quantity) wrong.push('quantity');
+  if (Array.isArray(fields.shipping_methods) && Array.isArray(view.shipping_methods)) {
+    const parcel = methods => depopCleanShipping(methods).map(method => String(method?.parcel_size || '')).sort().join();
+    if (parcel(fields.shipping_methods) !== parcel(view.shipping_methods)) wrong.push('shipping');
+  }
+  if (Array.isArray(fields.measurements) && Array.isArray(view.measurements)) {
+    const norm = rows => rows.map(row => `${row?.id}:${String(row?.value ?? '').trim()}`).sort().join();
+    if (norm(fields.measurements) !== norm(view.measurements)) wrong.push('measurements');
+  }
   return wrong;
+}
+
+// The editor persists camelCase names. A snake_case-only body is accepted and
+// then ignored, so a reused draft still shows only the description and price
+// it already had. Both names go out; a read understands either.
+function depopCamelAliases(body) {
+  const pairs = [['price_amount', 'priceAmount'], ['price_currency', 'priceCurrency'], ['product_type', 'productType'],
+    ['variant_set', 'variantSetId'], ['is_kids', 'isKids'], ['national_shipping_cost', 'nationalShippingCost'],
+    ['international_shipping_cost', 'internationalShippingCost'], ['country_code', 'countryCode'],
+    ['geo_lat', 'geoLat'], ['geo_lng', 'geoLng'], ['pictures', 'pictureIds']];
+  for (const [snake, camel] of pairs) {
+    if (!Object.hasOwn(body, snake)) continue;
+    // Picture objects stay under pictures. pictureIds is the id list.
+    if (snake === 'pictures' && Array.isArray(body.pictures) && body.pictures.some(item => item && typeof item === 'object')) continue;
+    body[camel] = body[snake];
+  }
+  if (Array.isArray(body.shipping_methods)) {
+    body.shippingMethods = body.shipping_methods.map(method => {
+      if (!method || typeof method !== 'object') return method;
+      return { ...method,
+        ...(method.parcel_size != null ? { parcelSize: method.parcel_size } : {}),
+        ...(method.shipping_provider_id != null ? { shippingProviderId: method.shipping_provider_id } : {}),
+        ...(method.ship_from_address_id != null ? { shipFromAddressId: method.ship_from_address_id } : {}) };
+    });
+  }
+  return body;
+}
+
+function depopSanitizedBody(value) {
+  let json = '';
+  try {
+    json = JSON.stringify(value, (key, item) => {
+      if (typeof item === 'string' && item.includes('?')) {
+        try {
+          const url = new URL(item);
+          if (url.search) return `${url.origin}${url.pathname}`;
+        } catch { /* A field that is not a URL. */ }
+      }
+      return item;
+    });
+  } catch { json = ''; }
+  return marketplaceScrub(json || '');
 }
 
 function depopDraftMatches(draft, listing, fields) {
   return depopDraftMismatch(draft, listing, fields).length === 0;
+}
+
+// Pictures Depop will accept on a write. A bare id list is rejected on a live
+// listing (the product stores picture objects). Query strings are signatures.
+function depopPictureWrite(source) {
+  const written = [];
+  for (const row of depopPictureRows(source)) {
+    if (row && typeof row === 'object') {
+      const url = row.url || row.formats?.P0?.url || row.formats?.P0?.src;
+      if (typeof url === 'string' && url.startsWith('https://')) {
+        try { written.push({ url: new URL(url).origin + new URL(url).pathname }); continue; } catch { /* Keep the id. */ }
+      }
+      const id = Number(row.id ?? row.picture_id ?? row.pictureId);
+      if (Number.isInteger(id) && id > 0) written.push({ id });
+    } else {
+      const id = Number(row);
+      if (Number.isInteger(id) && id > 0) written.push({ id });
+    }
+  }
+  return written;
+}
+
+// Fields a live product write is allowed to send. Everything else on a GET
+// (seller, likes, status, pricing) is read-only and a PUT that includes it
+// is refused. CamelCase copies are added once, at the end.
+const DEPOP_LIVE_FIELDS = [
+  ['address', 'address'],
+  ['description', 'description'],
+  ['price_currency', 'priceCurrency'],
+  ['price_amount', 'priceAmount'],
+  ['quantity', 'quantity'],
+  ['department', 'department'],
+  ['product_type', 'productType'],
+  ['condition', 'condition'],
+  ['colour', 'colour', 'color', 'colours', 'colors'],
+  ['style', 'style'],
+  ['age', 'age'],
+  ['source', 'source'],
+  ['brand', 'brand'],
+  ['brand_name', 'brandName', 'brand_name'],
+  ['attributes', 'attributes'],
+  ['national_shipping_cost', 'nationalShippingCost'],
+  ['international_shipping_cost', 'internationalShippingCost'],
+  ['shipping_methods', 'shippingMethods'],
+  ['depop_shipping', 'depopShipping'],
+  ['measurements', 'measurements'],
+  ['gender', 'gender'],
+  ['is_kids', 'isKids'],
+  ['variant_set', 'variantSetId', 'variant_set'],
+  ['variants', 'variants'],
+  ['size_set_id', 'sizeSetId', 'size_set_id'],
+  ['size_id', 'sizeId', 'size_id'],
+  ['sku', 'sku'],
+  ['country', 'country'],
+  ['country_code', 'countryCode'],
+  ['geo_lat', 'geoLat'],
+  ['geo_lng', 'geoLng'],
+];
+
+function depopTaken(source, keys) {
+  for (const key of keys) {
+    if (source[key] != null && source[key] !== '') return source[key];
+  }
+  return undefined;
+}
+
+// Which fields the read-back actually contained. This stays at the front of
+// the job error so a long body still names what came back.
+function depopReadDigest(body) {
+  const source = depopDraftDocument(body);
+  const names = ['product_type', 'productType', 'variantSetId', 'variant_set', 'size_id', 'pictures', 'pictureIds',
+    'colour', 'condition', 'brand', 'age', 'source', 'style', 'attributes', 'measurements', 'shipping_methods',
+    'description', 'price_amount', 'priceAmount'];
+  const present = names.filter(name => {
+    const value = source[name];
+    if (value == null || value === '') return false;
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  });
+  return `read-back keys: ${present.join(', ') || '(none)'}`;
+}
+
+// A live edit has to send the product Depop already stored. A partial body
+// (bare picture ids, no address, no department, no quantity) is HTTP 400, and
+// the presentation layer reports that as "Request failed with status code 400".
+function depopLiveWriteBody(product, listing, fields) {
+  const source = depopDraftDocument(product);
+  const body = {};
+  for (const [snake, ...aliases] of DEPOP_LIVE_FIELDS) {
+    const value = depopTaken(source, [snake, ...aliases]);
+    if (value !== undefined) body[snake] = value;
+  }
+  if (body.brand && typeof body.brand === 'object') {
+    const name = body.brand.name || body.brand.title || body.brand.label;
+    if (name && body.brand_name == null) body.brand_name = String(name);
+    const id = depopFieldId(body.brand);
+    body.brand = id || (name ? String(name) : undefined);
+    if (body.brand == null) delete body.brand;
+  }
+  if (Array.isArray(body.shipping_methods)) body.shipping_methods = depopCleanShipping(body.shipping_methods);
+  if (body.national_shipping_cost != null && typeof body.national_shipping_cost !== 'object') {
+    body.national_shipping_cost = String(body.national_shipping_cost);
+  }
+  if (body.international_shipping_cost != null && typeof body.international_shipping_cost === 'object') {
+    delete body.international_shipping_cost;
+  }
+  body.description = depopDescription(listing);
+  const price = depopPrice(listing);
+  if (price != null) body.price_amount = String(price);
+  if (!body.price_currency) body.price_currency = 'USD';
+  const pictures = depopPictureWrite(source);
+  if (pictures.length) {
+    body.pictures = pictures;
+    const ids = depopPictureIds(source, null);
+    if (ids.length) body.pictureIds = ids;
+  }
+  const measurements = depopMeasurementBody(listing);
+  if (measurements.measurements?.length) body.measurements = measurements.measurements;
+  if (!fields) return depopCamelAliases(body);
+  const put = (snake, camel, value) => {
+    if (value == null) return;
+    body[snake] = value;
+    if (camel) body[camel] = value;
+  };
+  put('product_type', 'productType', fields.product_type);
+  put('gender', null, fields.gender);
+  put('is_kids', 'isKids', fields.is_kids);
+  if (fields.attributes) body.attributes = depopRequestAttributes(fields.attributes);
+  for (const key of ['colour', 'condition', 'age', 'source', 'style']) {
+    if (Object.hasOwn(fields, key) && fields[key] != null) body[key] = fields[key];
+  }
+  if (fields.brand != null) {
+    body.brand = typeof fields.brand === 'object' ? depopFieldId(fields.brand) : fields.brand;
+    if (typeof body.brand === 'string' && body.brand && !body.brand_name && !body.brandName) body.brand_name = body.brand;
+  }
+  if (fields.variant_set != null) {
+    put('variant_set', 'variantSetId', fields.variant_set);
+    put('size_set_id', 'sizeSetId', Number(fields.variant_set));
+    const variants = depopRequestVariants(fields.variants);
+    body.variants = variants;
+    const ids = depopVariantIds(variants);
+    if (ids.length === 1) {
+      const sizeId = Number(ids[0]);
+      put('size_id', 'sizeId', sizeId);
+      const qty = depopVariantQuantity(variants[ids[0]]);
+      if (Number.isFinite(qty)) body.quantity = qty;
+    }
+  } else if (body.quantity == null) {
+    const qty = Number(listing?.quantity ?? 1);
+    if (Number.isFinite(qty) && qty > 0) body.quantity = qty;
+  }
+  const department = fields.is_kids === true ? 'kidswear'
+    : fields.gender === 'male' ? 'menswear' : fields.gender === 'female' ? 'womenswear' : null;
+  if (department) body.department = department;
+  return depopCamelAliases(body);
 }
 
 // One Depop step. Returns its result, or { error, safe_to_retry, ... } where
@@ -628,6 +1054,7 @@ async function depopApiAction(action, payload) {
     const request = async (method, path, body, extraHeaders) => {
       const allowedRead = method === 'GET' && (/^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)
         || path === '/presentation/api/v1/drafts/?limit=24&sort_by=createdAt'
+        || /^\/api\/v2\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)
         || /^\/api\/v3\/drafts\/products\/[A-Za-z0-9_-]+\/status\/$/.test(path)
         || path === '/presentation/api/v1/attributes/'
         || path === '/presentation/api/v1/users/me/'
@@ -661,17 +1088,50 @@ async function depopApiAction(action, payload) {
         return data;
       } catch (error) {
         if (method !== 'GET' && !retry && error.rejected !== true) wrote = true;
+        if (error?.response_body) {
+          const detail = String(error.response_body);
+          if (detail && !String(error.marketplace_message || '').includes(detail)) {
+            error.marketplace_message = [error.marketplace_message, detail].filter(Boolean).join(' ');
+          }
+          marketplaceLog('depop', action, { method, status: error.status || null, error_code: error.code || null, body: detail });
+        }
         throw error;
       }
+    };
+    const keptError = (parts, body) => {
+      const error = new Error(`Depop did not keep this listing's ${parts.join(', ')}.`);
+      const detail = [depopReadDigest(body), depopSanitizedBody(body)].filter(Boolean).join(' ');
+      if (detail) error.marketplace_message = detail;
+      marketplaceLog('depop', 'read-back', { body: detail || null });
+      return error;
+    };
+    const readDraft = async () => {
+      const primary = await request('GET', path);
+      if (!payload.depop_fields) return primary;
+      const score = draft => depopDraftMismatch(draft, payload.listing, payload.depop_fields).length
+        + (payload.expected_photo_count != null && depopPictureCount(draft) !== payload.expected_photo_count ? 1 : 0);
+      if (!score(primary)) return primary;
+      // The presentation document can be a summary. The editor document is on v2.
+      try {
+        const fuller = await request('GET', `/api/v2/drafts/${id}/`);
+        if (score(fuller) < score(primary)) return fuller;
+      } catch { /* Keep the presentation document and show it on the error. */ }
+      return primary;
     };
     const id = String(payload.draft_url || '').match(/\/sellinghub\/drafts\/edit\/([A-Za-z0-9_-]{1,80})\/?$/)?.[1];
     const path = `/presentation/api/v1/drafts/${id}/`;
     const description = depopDescription(payload.listing);
-    const summary = draft => ({ id: String(draft.id), description: draft.description, price: draft.price_amount,
-      product_type: draft.product_type, variant_set_id: draft.variant_set_id ?? draft.variant_set, variants: draft.variants,
-      brand: draft.brand, condition: draft.condition, colour: draft.colour, age: draft.age, source: draft.source, style: draft.style,
-      attributes: draft.attributes, sku: draft.sku, quantity: draft.quantity, international_shipping_cost: draft.international_shipping_cost,
-      photo_count: depopPictureIds(draft).length, missing_fields: draft.missing_fields || [] });
+    const summary = draft => {
+      const view = depopDraftView(draft);
+      const pictureIds = depopPictureIds(draft, null);
+      return { id: String(draft.id), description: draft.description, price: view.price,
+        product_type: view.product_type, variant_set_id: view.variant_set, variants: view.variants,
+        brand: view.brand, condition: view.condition, colour: view.colour, age: view.age, source: view.source, style: view.style,
+        attributes: view.attributes, sku: view.sku, quantity: view.quantity,
+        international_shipping_cost: view.international_shipping_cost,
+        picture_ids: pictureIds, photo_count: pictureIds.length || depopPictureRows(draft).length,
+        missing_fields: draft.missing_fields || draft.missingFields || [] };
+    };
     if (action === 'session') {
       await request('GET', '/presentation/api/v1/drafts/?limit=24&sort_by=createdAt');
       return { authenticated: true };
@@ -694,14 +1154,19 @@ async function depopApiAction(action, payload) {
       return draftLink(found[0]);
     }
     if (action === 'create') {
-      const draft = await request('POST', '/presentation/api/v1/drafts/', {
-        description, price_amount: String(depopPrice(payload.listing) ?? ''), price_currency: 'USD', pictures: [], quantity: 1,
-      });
+      const draft = await request('POST', '/presentation/api/v1/drafts/', payload.depop_fields
+        ? depopDraftWriteBody(payload.listing, payload.depop_fields, [])
+        : { description, price_amount: String(depopPrice(payload.listing) ?? ''), price_currency: 'USD', pictures: [], quantity: 1 });
       if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(draft.id))) throw marketplaceError('Depop did not confirm its new draft ID. Check drafts before trying again.', { code: 'schema_drift', rejected: false });
       return { draft_url: `https://www.depop.com/sellinghub/drafts/edit/${draft.id}/` };
     }
     if (!id && action !== 'publish_status' && action !== 'update') throw marketplaceError('A saved Depop draft link is required.');
-    if (action === 'read') return summary(await request('GET', path));
+    if (action === 'read') {
+      const draft = await readDraft();
+      const detail = [depopReadDigest(draft), depopSanitizedBody(draft)].filter(Boolean).join(' ');
+      marketplaceLog('depop', 'read-back', { body: detail || null });
+      return { ...summary(draft), read_back: detail };
+    }
     if (action === 'photo') {
       const signed = await request('POST', '/presentation/api/v1/pictures/', {
         type: 'product', extension: 'jpg', dimensions: { width: 1280, height: 1280 },
@@ -729,56 +1194,33 @@ async function depopApiAction(action, payload) {
     }
     if (action === 'save') {
       const existing = await request('GET', path);
-      const draft = {};
-      for (const key of ['address', 'age', 'attributes', 'brand', 'colour', 'condition', 'country', 'country_code',
-        'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids', 'measurements', 'national_shipping_cost',
-        'price_currency', 'product_type', 'quantity', 'repop_metadata', 'shipping_methods', 'sku', 'source', 'style', 'variants', 'videos']) {
-        if (existing[key] != null) draft[key] = existing[key];
-      }
-      if (existing.variant_set_id != null) draft.variant_set = existing.variant_set_id;
-      draft.description = description;
-      draft.price_amount = String(depopPrice(payload.listing) ?? existing.price_amount ?? '');
-      draft.price_currency ||= 'USD';
-      draft.pictures = depopPictureIds(payload.uploaded_photo_ids?.length ? payload.uploaded_photo_ids : existing);
-      Object.assign(draft, depopFormFields(payload.listing), depopMeasurementBody(payload.listing), payload.depop_fields || {});
+      let fields = payload.depop_fields;
       // A direct save has no precomputed fields. Fill category, brand, location, and shipping here.
-      if (!payload.depop_fields) Object.assign(draft, await depopListingFields(request, payload.listing, payload.deadline));
-      else if (DEPOP_LOCATION_KEYS.some(key => draft[key] == null)) {
-        // The ship-from address names the city; Depop's country fills the rest.
+      if (!fields) fields = await depopListingFields(request, payload.listing, payload.deadline);
+      else if (DEPOP_LOCATION_KEYS.some(key => fields[key] == null)) {
         const located = await depopListingFields(request, payload.listing, payload.deadline);
+        fields = { ...fields };
         for (const key of DEPOP_LOCATION_KEYS) {
-          if (draft[key] == null && located[key] != null) draft[key] = located[key];
+          if (fields[key] == null && located[key] != null) fields[key] = located[key];
         }
       }
-      // Depop takes a quantity or a size set, never both.
-      if (draft.international_shipping_cost == null) delete draft.international_shipping_cost;
-      if (draft.variant_set != null) delete draft.quantity;
-      if (Array.isArray(draft.shipping_methods)) {
-        draft.shipping_methods = draft.shipping_methods.map(method => {
-          if (!method || typeof method !== 'object') return method;
-          const next = { ...method };
-          if (next.parcel_size == null && next.parcel_size_id != null) next.parcel_size = String(next.parcel_size_id);
-          delete next.parcel_size_id;
-          return next;
-        });
-      }
-      for (const key of Object.keys(draft)) {
-        if (!['address', 'age', 'attributes', 'brand', 'colour', 'condition', 'country', 'country_code',
-          'description', 'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids', 'measurements',
-          'national_shipping_cost', 'pictures', 'price_amount', 'price_currency', 'product_type', 'quantity',
-          'repop_metadata', 'shipping_methods', 'sku', 'source', 'style', 'variant_set', 'variants', 'videos'].includes(key)) delete draft[key];
+      const pictures = payload.uploaded_photo_ids?.length ? payload.uploaded_photo_ids : existing;
+      const draft = depopDraftWriteBody(payload.listing, fields, pictures, existing);
+      if (draft.national_shipping_cost == null && existing?.national_shipping_cost != null
+        && typeof existing.national_shipping_cost !== 'object') {
+        draft.national_shipping_cost = String(existing.national_shipping_cost);
       }
       await request('PUT', path, draft);
-      let saved = await request('GET', path);
-      for (let attempt = 0; attempt < 2 && depopPictureIds(saved).length < draft.pictures.length; attempt += 1) {
+      let saved = await readDraft();
+      for (let attempt = 0; attempt < 2 && !depopPhotosKept(saved, draft.pictures); attempt += 1) {
         await marketplaceSleep(300);
-        saved = await request('GET', path);
+        saved = await readDraft();
       }
       const wrong = depopDraftMismatch(saved, payload.listing, payload.depop_fields);
-      const photosKept = depopPictureIds(saved).length === draft.pictures.length;
+      const photosKept = depopPhotosKept(saved, draft.pictures);
       if (wrong.length || !photosKept) {
         const parts = [...wrong, ...(!photosKept ? ['photos'] : [])];
-        throw new Error(`Depop did not keep this listing's ${parts.join(', ')}.`);
+        throw keptError(parts, saved);
       }
       return summary(saved);
     }
@@ -809,27 +1251,15 @@ async function depopApiAction(action, payload) {
       const fields = payload.depop_fields !== undefined
         ? payload.depop_fields
         : await depopLiveEditFields(payload.listing || {}, payload.deadline);
-      const pictures = depopPictureIds(product, null);
-      const measurements = depopMeasurementBody(payload.listing);
-      const body = {
-        description,
-        price_amount: String(depopPrice(payload.listing) ?? product.price_amount ?? product.price ?? ''),
-        price_currency: product.price_currency || 'USD',
-        ...(measurements.measurements?.length ? measurements : {}),
-        ...(pictures.length ? { pictures } : {}),
-      };
-      // Category, colour, brand, and gender are what Depop turns into the public title.
-      for (const key of ['product_type', 'is_kids', 'gender', 'attributes', 'variant_set', 'variants', 'colour',
-        'condition', 'brand', 'age', 'source', 'style']) {
-        if (fields && Object.hasOwn(fields, key) && fields[key] != null) body[key] = fields[key];
-      }
+      const body = depopLiveWriteBody(product, payload.listing, fields);
       const updated = await request('PUT', `/presentation/api/v1/products/by-slug/${slug}/`, body);
       const echoed = updated && typeof updated === 'object' ? updated : {};
-      const saved = echoed.price_amount != null || echoed.price != null || echoed.slug ? echoed
+      const saved = echoed.price_amount != null || echoed.priceAmount != null || echoed.price != null || echoed.slug ? echoed
         : await request('GET', `/presentation/api/v1/products/by-slug/${slug}/`);
-      const price = saved?.price_amount ?? saved?.price;
-      if (depopPrice(payload.listing) != null && Number(price) !== Number(depopPrice(payload.listing))) {
-        throw marketplaceError('Depop did not keep the updated price. Check the live listing.', { code: 'schema_drift', rejected: false });
+      const price = depopProductPrice(saved);
+      if (price != null && depopPrice(payload.listing) != null && price !== Number(depopPrice(payload.listing))) {
+        throw marketplaceError('Depop did not keep the updated price. Check the live listing.', { code: 'schema_drift', rejected: false,
+          marketplace_message: depopSanitizedBody(saved) });
       }
       const returned = String(saved?.slug || saved?.product_slug || '').trim().toLowerCase();
       const next = /^[a-z0-9][a-z0-9-]{0,200}$/.test(returned) ? returned : slug;
@@ -997,7 +1427,9 @@ async function runDepopNative(msg, recovery = false) {
     const photos = payload.expected_photo_count != null && draft.photo_count !== payload.expected_photo_count;
     if (wrong.length || photos) {
       const parts = [...wrong, ...(photos ? ['photos'] : [])];
-      throw new Error(`Depop did not keep this listing's ${parts.join(', ')}. List again.`);
+      const error = new Error(`Depop did not keep this listing's ${parts.join(', ')}. List again.`);
+      if (draft.read_back) error.marketplace_message = draft.read_back;
+      throw error;
     }
     return { ok: true, state: 'draft', draft_url: payload.draft_url, ...(replacedDraft ? { draft_replaced: true } : {}) };
   };
@@ -1060,7 +1492,9 @@ async function runDepopNative(msg, recovery = false) {
         await openDraft();
         existing = await depopAction('read', payload);
       }
-      if (existing.photo_count === 0) {
+      // A reused draft with no picture ids still needs this listing's photos.
+      // URL-only rows are not ids Depop will keep on the next write.
+      if (!(existing.picture_ids || []).length) {
         photosChosen();
         payload.expected_photo_count = payload.photos.length;
         await storeReceipt({ expected_photo_count: payload.expected_photo_count });

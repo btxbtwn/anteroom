@@ -94,6 +94,12 @@ class ConversationActivityRouteTest(unittest.TestCase):
         self.add_job("dispatched")
         self.assertTrue(self.activity()["busy"])
 
+    def test_direct_actions_name_the_marketplace_and_action(self):
+        job = self.add_job("dispatched")
+        job.current_step = "native_poshmark_save_draft"
+        self.db.commit()
+        self.assertEqual(self.activity()["items"], ["Poshmark: Saving the listing…"])
+
     def test_finished_jobs_do_not(self):
         self.add_job("completed")
         self.assertFalse(self.activity()["busy"])

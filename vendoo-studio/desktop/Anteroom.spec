@@ -60,6 +60,7 @@ datas = [
 ]
 binaries: list = []
 hiddenimports = [
+    *collect_submodules("hachoir"),
     *collect_submodules("vendoo_studio"),
     *collect_submodules("webview"),
     # Modules only: the SDK's 240 MB bundled CLI stays out. Studio runs the

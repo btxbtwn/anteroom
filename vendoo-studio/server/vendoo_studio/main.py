@@ -19,6 +19,7 @@ from vendoo_studio.routes import ebay
 from vendoo_studio.routes import ai_keys, sales_ledger, bulk_edit, listing_copies, listing_templates
 from vendoo_studio.routes import automations as automations_route
 from vendoo_studio.routes import errors as errors_route
+from vendoo_studio.routes import listing_videos
 
 
 @asynccontextmanager
@@ -176,6 +177,7 @@ app.include_router(marketplace_listings.router)
 app.include_router(conversations.router)
 app.include_router(listing_commands.router)
 app.include_router(photos.router)
+app.include_router(listing_videos.router)
 app.include_router(measurements.router)
 app.include_router(listings.router)
 app.include_router(jobs.router)

@@ -109,7 +109,8 @@ def apply_price_drop(
 
     refresh_statuses = set(ACTIVE_JOB_STATUSES) | {"failed"}
     for job in JobRepo(db).list_by_conversation(conv_id):
-        if job.status not in refresh_statuses or is_schema_probe_job(job):
+        if (job.status not in refresh_statuses or is_schema_probe_job(job)
+                or str(job.current_step or "").startswith("native_")):
             continue
         platforms = (job.listing_snapshot or {}).get("platforms") if isinstance(job.listing_snapshot, dict) else None
         snapshot = dict(updated)

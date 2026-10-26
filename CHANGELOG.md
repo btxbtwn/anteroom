@@ -6,6 +6,34 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.411 — 2026-10-26
+
+- Upload, preview, select and clear a Poshmark listing video shorter than 15 seconds. Save Draft checks that Poshmark kept it, and List waits for video processing before publishing.
+- Marketplace actions wait for your latest field edit to finish saving, so Save Draft uses the revision you just edited.
+
+## 0.1.410 — 2026-10-26
+
+- Listing again on Depop keeps the category, size, colour, brand, photos, measurements, and shipping on the draft you already saved.
+- Moving a live Depop listing to another category sends the listing Depop already has, including its photos and shipping.
+- When Depop refuses a listing, the message includes what Depop said.
+
+## 0.1.409 — 2026-10-26
+
+- Listing again on Depop fills the draft you already saved, including category, size, colour, brand, and photos.
+- Choosing no brand on Mercari clears a brand that was already on the draft.
+- Leaving SKU empty keeps it empty in Anteroom. eBay still needs its own inventory key, and that key is not saved as your SKU.
+
+## 0.1.408 — 2026-10-26
+
+- Add Poshmark sizes to an inventory list, including custom sizes, with a separate quantity and SKU for each. The rows fit the editor panel, and saved drafts check every size and SKU.
+- Mercari accepts its own No Brand response instead of reporting a mismatch after you clear a brand.
+- Check compares Mercari and Depop against the full revision sent, including shipping and size, and keeps the number of photos sent with the action.
+- Direct listing progress names the marketplace and action instead of calling it a Vendoo draft. Poshmark updates check all saved fields, including inventory.
+
+## 0.1.407 — 2026-10-26
+
+- Scheduled listing, delisting and relisting now wait for your review of each item and named marketplace. Changed drafts, photos or links need a new review, and failed marketplace actions stay visible without automatic retries. List never takes down a live listing; choose Relist explicitly.
+
 ## 0.1.406 — 2026-10-26
 
 - Save a private Poshmark draft, reuse it, and review shipping discounts, availability, cost, quantity, and private notes before listing. Later edits keep the revision already sent so Check verifies the right copy.

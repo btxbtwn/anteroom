@@ -326,6 +326,13 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
     snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
+    if marketplace == "poshmark":
+        from vendoo_studio.services.listing_videos import selected_video
+
+        try:
+            snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace)
+        except ValueError as exc:
+            raise NativeMarketplaceError(400, str(exc)) from exc
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace == "etsy":
@@ -400,8 +407,9 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         if record.get("state") in UNSETTLED_STATES:
             raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
         extra: dict = {}
-        if marketplace == "poshmark":
-            extra["photo_ids"] = [photo.id for photo in photos]
+        if marketplace in {"poshmark", "mercari", "depop"}:
+            sent = _depop_photos(snapshot, photos)[0] if marketplace == "depop" else photos
+            extra["photo_ids"] = [photo.id for photo in sent]
         if kind == "update":
             from vendoo_studio.services.marketplace_delist import listings as live_listings
 
@@ -567,6 +575,7 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
         "listing": snapshot, "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
+        **({"video": snapshot.get("_native_video")} if marketplace == "poshmark" else {}),
         "photos": [{"id": p.id, "mime_type": p.mime_type} for p in sent],
         **extra,
     }
@@ -577,9 +586,9 @@ def _result_context(db: Session, conv_id: str, marketplace: str, record: dict, s
     return {"marketplace": marketplace, "action": record.get("action"), "operation_id": record.get("operation_id"),
             "draft_url": candidate, "listing_id": record.get("listing_id"), "local_draft_id": record.get("local_draft_id"),
             "revision_id": record.get("revision_id"), "photo_ids": record.get("photo_ids"),
-            "expected_photo_count": (len(record["photo_ids"]) if marketplace == "poshmark" and record.get("photo_ids") is not None
+            "expected_photo_count": (len(record["photo_ids"]) if record.get("photo_ids") is not None
                                      else len(ConversationRepo(db).get_photos(conv_id)) if first_save or marketplace == "poshmark" else None),
-            "listing": snapshot if marketplace == "poshmark" else {key: snapshot.get(key) for key in ("title", "description", "price")}}
+            "listing": snapshot}
 
 
 async def _send_cancel(operation_id: str) -> None:

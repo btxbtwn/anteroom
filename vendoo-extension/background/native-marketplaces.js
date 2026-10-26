@@ -26,7 +26,22 @@ async function nativeWait(tabId, test, deadline) {
   throw new Error('Chrome did not confirm the marketplace navigation.');
 }
 
-// A listing photo from Studio, bounded by the operation's deadline.
+// Binary video delivery is scoped to the job's selected immutable revision.
+async function nativeVideo(jobId, video, deadline) {
+  if (!/^[a-f0-9-]+$/i.test(String(video.id))) throw marketplaceError('Invalid video ID.');
+  let response;
+  try {
+    response = await fetch(`${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/videos/${encodeURIComponent(video.id)}`,
+      { signal: AbortSignal.timeout(Math.max(1000, Math.min(60000, deadline - Date.now()))) });
+  } catch {
+    throw marketplaceError('Anteroom could not load the selected video in time.', { code: 'network' });
+  }
+  if (!response.ok) throw marketplaceError('Could not load the video selected for this revision.', { code: 'network' });
+  const blob = await response.blob();
+  if (blob.size !== video.size_bytes || !blob.type.startsWith('video/')) throw marketplaceError('The listing video changed. Choose it again before listing.');
+  return blob;
+}
+
 async function nativePhoto(jobId, photo, deadline = Date.now() + 30000) {
   if (!/^[a-f0-9-]+$/i.test(String(photo.id))) throw marketplaceError('Invalid photo ID.');
   let response;

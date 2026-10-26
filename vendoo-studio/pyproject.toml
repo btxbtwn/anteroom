@@ -1,6 +1,6 @@
 [project]
 name = "vendoo-studio"
-version = "0.1.406"
+version = "0.1.411"
 description = "Local web app for generating and automating Vendoo marketplace listings"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pillow>=10.0.0",
     "pillow-heif>=0.18",
+    "hachoir>=3.4,<4",
     "numpy>=2.0",
     "keyring>=25.0.0",
     "pyobjc-framework-Security>=10.0; sys_platform == 'darwin'",

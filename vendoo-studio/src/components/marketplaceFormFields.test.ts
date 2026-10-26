@@ -12,6 +12,17 @@ const listing = {
 };
 
 describe("marketplace form fields", () => {
+  it("keeps native inventory rows and their category size groups", () => {
+    const rows = [{ sizeSetId: "standard", sizeId: "M", quantity: 2, sku: "M-2" }];
+    const groups = [{ id: "standard", label: "Standard", sizes: [{ id: "M", label: "Medium" }] }];
+    const form: MarketplaceForm = { marketplace: "poshmark", native: true, known: true, category_id: "men/shirts", fields: [
+      { key: "poshmark_specifics.inventoryRows", label: "Size and inventory", value: rows, required: true,
+        multi: false, selection_only: false, options: [], input_type: "inventory", inventory_groups: groups },
+    ] };
+    expect(fieldsForMarketplaceForm(listing, "poshmark", [form])[0]).toMatchObject({
+      type: "inventory", defaultValue: rows, inventoryGroups: groups,
+    });
+  });
   it("preserves native numeric limits and precision", () => {
     const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "menswear_tshirts", fields: [
       { key: "depop_specifics.worldwideShipping.price", path: "depop_specifics.worldwideShipping.price", label: "Worldwide Shipping", value: 0,

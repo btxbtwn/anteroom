@@ -469,12 +469,26 @@ export interface FillLogReport {
 
 
 /** One field a marketplace form renders, as Vendoo's category schema defines it. */
+export interface NativeInventoryRow {
+  sizeSetId: string;
+  sizeId: string;
+  quantity: number | string;
+  sku?: string;
+}
+
+export interface NativeInventoryGroup {
+  id: string;
+  label: string;
+  sizes: { id: string; label: string }[];
+}
+
 export interface MarketplaceFormField {
   key: string;
   label: string;
-  value: string | string[] | number | boolean;
+  value: string | string[] | number | boolean | NativeInventoryRow[];
   path?: string;
-  input_type?: "number" | "boolean" | "textarea";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "video";
+  inventory_groups?: NativeInventoryGroup[];
   min_value?: number;
   max_value?: number;
   step?: number;

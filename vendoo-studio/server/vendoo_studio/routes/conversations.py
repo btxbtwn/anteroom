@@ -371,6 +371,11 @@ def _job_activity_label(job) -> str:
 
     if is_schema_probe_job(job):
         return "Discovering fields in Chrome…"
+    if str(job.current_step or "").startswith("native_"):
+        from vendoo_studio.services.native_marketplaces import NAMES, STEP_LABEL
+
+        _, marketplace, step = str(job.current_step).split("_", 2)
+        return f"{NAMES.get(marketplace, marketplace)}: {STEP_LABEL.get(step, 'Working')}…"
     if job.status in ("queued", "awaiting_extension"):
         return "Vendoo draft waiting for Chrome…"
     return "Working on the Vendoo draft…"

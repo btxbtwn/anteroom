@@ -39,7 +39,8 @@ def source(tmp_path, monkeypatch):
     db.commit()
     data = {"title": "Wool coat M", "description": "Good coat", "price": 40, "cost": 9, "quantity": 0, "sku": "OLD-SKU", "labels": ["Winter"],
             "ebay_specifics": {"Size": "M", "listing_id": "old-ebay", "bestOffer": {"minimumOfferPrice": "30"}, "customAspect": "Keep"},
-            "vinted_specifics": {"brand": "Brand", "listingId": "old-vinted"}, "direct_category_ids": {"ebay": "123"},
+            "vinted_specifics": {"brand": "Brand", "listingId": "old-vinted"},
+            "poshmark_specifics": {"videoId": "source-video", "originalPrice": 60}, "direct_category_ids": {"ebay": "123"},
             "marketplace_categories": {"ebay": "Clothing > Coats"}, "listing_id": "old", "form": {"status": "SOLD"},
             "job_id": "old-job", "photos": ["old-photo"], "access_token": "do-not-copy"}
     ListingRepo(db).save_revision("source", data, "user_form")
@@ -88,6 +89,7 @@ def test_copy_is_a_clean_draft_with_new_identity_and_only_reusable_fields(source
     assert listing["sku"] == "NEW-SKU" and listing["quantity"] == 2 and "cost" not in listing
     assert listing["ebay_specifics"]["customAspect"] == "Keep" and "listing_id" not in listing["ebay_specifics"]
     assert "listingId" not in listing["vinted_specifics"]
+    assert listing["poshmark_specifics"] == {"originalPrice": 60}
     assert listing["direct_category_ids"] == {"ebay": "123"}
     assert not {"listing_id", "job_id", "form", "photos", "access_token"} & listing.keys()
     assert source.db.query(Job).filter_by(conversation_id=new["id"]).count() == 0

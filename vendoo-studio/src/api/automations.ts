@@ -40,7 +40,6 @@ export interface Automation {
   actions: AutomationAction[];
   marketplaces: string[];
   price_repeat?: "once" | "step" | null;
-  require_approval: boolean;
   summary: string;
   confirmed_at: string | null;
   next_run_at: string | null;
@@ -61,7 +60,6 @@ export interface AutomationDraft {
   actions: AutomationAction[];
   marketplaces: string[];
   price_repeat?: "once" | "step" | null;
-  require_approval?: boolean;
   issues: string[];
   ready: boolean;
   summary?: string;
@@ -130,7 +128,6 @@ export interface AutomationBody {
   actions?: AutomationAction[];
   marketplaces?: string[];
   price_repeat?: "once" | "step";
-  require_approval?: boolean;
   activate?: boolean;
 }
 
@@ -141,17 +138,20 @@ export interface AssistantAutomation {
   automation_id?: string;
 }
 
-/** A regenerated listing waiting for the seller to publish it. */
+/** One immutable item/action/marketplace proposal waiting for seller approval. */
 export interface AutomationApproval {
   id: string;
   automation_id: string;
   conversation_id: string;
   title: string | null;
-  revision_id: string;
+  revision_id: string | null;
+  action: "publish" | "delist" | "relist";
+  targets: Record<string, { listing_id: string | null; url: string | null; state: string | null; sold_here: boolean | null }>;
+  review_token: string;
   marketplaces: string[];
   status: string;
   state: string;
-  publish?: { ok?: boolean; state?: string | null; error?: string | null; down?: string[] };
+  result?: { ok?: boolean; state?: string | null; error?: string | null; down?: string[] };
 }
 
 /** A marketplace a relist left offline. */

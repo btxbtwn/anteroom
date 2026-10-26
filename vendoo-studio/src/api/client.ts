@@ -1,5 +1,6 @@
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
+import type { ListingVideo, ListingVideoLibrary } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
@@ -212,6 +213,18 @@ async function followAssistant(
 }
 
 export const api = {
+  listingVideos: {
+    list: (convId: string) => request<ListingVideoLibrary>(`/conversations/${convId}/videos`),
+    delete: (convId: string, videoId: string) => request<OkResponse>(`/conversations/${convId}/videos/${videoId}`, { method: "DELETE" }),
+    upload: async (convId: string, file: File): Promise<ListingVideo> => {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(`${BASE}/conversations/${convId}/videos`, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The video could not be uploaded.");
+      return data;
+    },
+  },
   backups: {
     list: () => request<BackupsStatus>("/backups"),
     create: () => request<{ ok: boolean; snapshot: BackupSnapshot }>("/backups", { method: "POST" }),
@@ -369,8 +382,8 @@ export const api = {
       request<AutomationRun>(`/automations/${id}/run`, { method: "POST", body: JSON.stringify({ dry_run: dryRun }) }),
     history: (id: string) => request<AutomationHistory>(`/automations/${id}/history`),
     approvals: () => request<AutomationApproval[]>("/automations/approvals"),
-    approve: (id: string) =>
-      request<AutomationApproval>(`/automations/approvals/${id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+    approve: (row: AutomationApproval) =>
+      request<AutomationApproval>(`/automations/approvals/${row.id}/approve`, { method: "POST", body: JSON.stringify({ confirm: true, action: row.action, marketplaces: row.marketplaces, revision_id: row.revision_id, review_token: row.review_token }) }),
   },
   errors: {
     list: () => request<RelistGap[]>("/errors"),

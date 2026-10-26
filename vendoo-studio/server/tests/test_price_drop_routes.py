@@ -67,6 +67,16 @@ class PriceDropRouteTest(unittest.TestCase):
         listing = self.client.get(f"/api/conversations/{self.conv.id}/listing")
         self.assertEqual(listing.json()["listing"]["price"], 41)
 
+    def test_price_changes_keep_a_direct_actions_sent_revision_and_video(self):
+        revision = ListingRepo(self.db).get_revisions(self.conv.id)[0]
+        snapshot = {**revision.listing_json, "_native_video": {"id": "clip", "checksum": "original"}}
+        job = JobRepo(self.db).create(self.conv.id, revision.id, snapshot, status="failed", current_step="native_poshmark_save_draft")
+        response = self.client.post(f"/api/conversations/{self.conv.id}/price-drop", json={"price": 41, "mode": "percent", "percent": 15})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.refresh(job)
+        self.assertEqual(job.listing_snapshot, snapshot)
+        self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json["price"], 41)
+
     def test_comps_stream_reports_sources_then_the_preview(self):
         comps = (
             "Sold comps:\n"

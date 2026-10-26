@@ -305,7 +305,7 @@ test('Depop refusals are classified, carry Depop\'s own words, and never export 
     };
     const result = await c.depopApiAction('create', payload);
     assert.equal(result.error_code, code);
-    assert.equal(result.marketplace_message, own);
+    assert.match(result.marketplace_message, new RegExp(own));
     // A 403 is a refusal: nothing was written.
     assert.equal(result.safe_to_retry, true);
     assert.equal(requests.length, 1);
@@ -760,7 +760,9 @@ test('a live Depop update sends the price and measurements by slug', async () =>
   assert.match(put.url, /\/presentation\/api\/v1\/products\/by-slug\/studio-works-fleece\/$/);
   const body = JSON.parse(put.body);
   assert.equal(body.price_amount, '29.99');
-  assert.deepEqual(body.pictures, [7]);
+  assert.deepEqual(body.pictures, [{ id: 7 }]);
+  assert.equal(body.id, undefined);
+  assert.equal(body.slug, undefined);
   assert.deepEqual(body.measurements, [{ id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' }]);
   assert.equal(requests.some((item) => /\/products\/99\/$/.test(item.url)), false);
 });
@@ -787,7 +789,7 @@ test('a live Depop update keeps every existing photo and leaves measurements uns
   const bodies = requests.filter(item => item.method === 'PUT').map(item => JSON.parse(item.body));
   assert.equal(bodies.length, 2);
   for (const body of bodies) {
-    assert.deepEqual(body.pictures, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert.deepEqual(body.pictures, [1, 2, 3, 4, 5, 6, 7, 8, 9].map(id => ({ id })));
     assert.equal(Object.hasOwn(body, 'measurements'), false);
   }
 });
@@ -818,7 +820,7 @@ test('a live Depop category change sends the new type and keeps the rewritten sl
   assert.equal(body.gender, 'female');
   assert.deepEqual(body.attributes, { 'sweater-type': ['pullover'] });
   assert.deepEqual(body.colour, ['tan']);
-  assert.deepEqual(body.pictures, [3, 4]);
+  assert.deepEqual(body.pictures, [{ id: 3 }, { id: 4 }]);
   assert.equal(body.product_type === 'vests', false);
 });
 
@@ -875,4 +877,249 @@ test('Depop reuses one matching draft and does not pick the newest when several 
   drafts.objects = [{ id: 'only-draft', description: 'Private draft', price_amount: '12', createdAt: '2026-10-26T01:00:00Z' }];
   const only = await c.depopApiAction('reuse', { action: 'save_draft', listing, deadline: Date.now() + 30000 });
   assert.equal(only.draft_url, 'https://www.depop.com/sellinghub/drafts/edit/only-draft/');
+});
+
+test('reusing a Depop draft writes the full body and accepts Depop\'s read-back shape', async () => {
+  const { c, requests, msg } = newDraft();
+  const item = { ...FULL, tags: [], depop_specifics: { ...FULL.depop_specifics, age: ['modern'], source: ['preloved'], sku: '' } };
+  msg.payload.listing = item;
+  msg.payload.draft_url = DRAFT;
+  let wrote = false;
+  const stale = {
+    id: '123456', description: 'Private draft', price_amount: '12', price_currency: 'USD', pictures: [],
+    brand: { id: 'old-brand', name: 'Old Brand' }, videos: [{ id: 1, url: 'https://video.example/stale' }],
+    repop_metadata: { source: 'stale' }, product_type: 'jeans',
+    attributes: [{ id: 'material', values: ['polyester'] }],
+    condition: { id: 'brand_new', name: 'Brand new' }, colour: ['black'],
+    shipping_methods: [{ payer: 'buyer', parcel_size_id: 'stale', shipping_provider_id: 'USPS', ship_from_address_id: 9 }],
+  };
+  const kept = {
+    id: '123456', description: 'Private draft', priceAmount: '12.00', productType: 'tshirts', variantSetId: 12,
+    variants: { 7: { quantity: 1 } },
+    attributes: [
+      { id: 'material', values: [{ id: 'cotton', name: 'Cotton' }] },
+      { id: 'occasion', values: [{ id: 'casual', name: 'Casual' }] },
+    ],
+    age: [{ id: 'modern', name: 'Modern' }], source: [{ id: 'preloved', name: 'Preloved' }],
+    style: [{ id: 'casual', name: 'Casual' }], colour: [{ id: 'multi', name: 'Multi' }],
+    condition: { id: 'used_good', name: 'Used - Good' }, brand: { id: 'nike', name: 'Nike' },
+    pictures: [{ id: 9, formats: { P0: { url: 'https://media-photos.depop.com/b0.jpg', height: 1280, width: 1280 } } }],
+    sku: '',
+  };
+  c.fetch = async (url, options = {}) => {
+    const { hostname, pathname } = new URL(url);
+    requests.push({ method: options.method, hostname, pathname, body: options.body });
+    if (hostname.endsWith('amazonaws.com')) return reply(200, '');
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/pictures/') {
+      return reply(200, { id: 9, url: 'https://media-photos-depop.s3-accelerate.amazonaws.com/p/9.jpg?X-Amz-Signature=private' });
+    }
+    if (options.method === 'PUT' && /\/drafts\/[^/]+\/$/.test(pathname)) {
+      wrote = true;
+      return reply(200, {});
+    }
+    if (pathname === '/presentation/api/v1/drafts/123456/') return reply(200, wrote ? kept : stale);
+    return reply(200, {});
+  };
+  withCatalog(c);
+  const result = await c.runDepopNative(msg);
+  assert.equal(result.ok, true, result.error);
+  const put = requests.find(request => request.method === 'PUT' && request.pathname.includes('/drafts/'));
+  const body = JSON.parse(put.body);
+  assert.equal(body.videos, undefined);
+  assert.equal(body.repop_metadata, undefined);
+  assert.equal(typeof body.brand, 'string');
+  assert.equal(body.brand, 'nike');
+  assert.equal(body.product_type, 'tshirts');
+  assert.deepEqual(body.pictures, [9]);
+  assert.equal(body.condition, 'used_good');
+  assert.equal(body.shipping_methods[0].parcel_size_id, undefined);
+  const fields = await c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 });
+  const written = JSON.parse(JSON.stringify(c.depopDraftWriteBody(item, fields, [9])));
+  assert.deepEqual(body, written);
+  const created = JSON.parse(JSON.stringify(c.depopDraftWriteBody(item, fields, [])));
+  assert.deepEqual(created.pictures, []);
+  assert.equal(created.product_type, body.product_type);
+  assert.deepEqual(created.attributes, body.attributes);
+  assert.equal(created.brand, body.brand);
+  assert.deepEqual(JSON.parse(JSON.stringify(call(c, 'depopDraftMismatch', kept, item, fields))), []);
+  assert.equal(call(c, 'depopPictureCount', kept), 1);
+});
+
+test('Depop read-back understands a wrapped editor document and partner size ids', () => {
+  const c = loadWorker();
+  const fields = { product_type: 'tshirts', variant_set: 52, variants: { 10: 1 }, attributes: { material: ['cotton'] },
+    brand: 'nike', colour: ['black'] };
+  const wrapped = { description: 'Private draft', price: { priceAmount: '12.00' }, draft: {
+    productType: 'tshirts', variantSetId: 52, variants: { 10: 1 }, brandId: 'nike', colour: ['black'],
+    attributes: { material: ['cotton'] },
+    media: { pictures: [{ id: 4, formats: { P0: { url: 'https://media-photos.depop.com/p.jpg?sig=abcdefghijklmnopqrstuvwxyz012345' } } }] },
+  } };
+  assert.deepEqual(call(c, 'depopDraftMismatch', wrapped, listing, fields), []);
+  assert.deepEqual(call(c, 'depopPictureIds', wrapped), [4]);
+  const partner = { description: 'Private draft', price_amount: '12', product_type: 'tshirts', size_set_id: 52, size_id: 10,
+    quantity: 1, brand_name: 'nike', colour: ['black'], attributes: { material: ['cotton'] },
+    pictures: [{ url: 'https://media-photos.depop.com/p.jpg' }] };
+  assert.deepEqual(call(c, 'depopDraftMismatch', partner, listing, fields), []);
+  assert.equal(call(c, 'depopPictureCount', partner), 1);
+});
+
+test('a reused Depop draft keeps measurements and shipping and writes the editor field names', () => {
+  const c = loadWorker();
+  const existing = {
+    measurements: [{ id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' }],
+    shippingMethods: [{ payer: 'buyer', parcelSize: 'small', shippingProviderId: 'USPS', shipFromAddressId: 3 }],
+    nationalShippingCost: '4.50',
+  };
+  const body = call(c, 'depopDraftWriteBody', { ...listing, depop_specifics: {} }, { product_type: 'tshirts', variant_set: 12, variants: { 7: 1 } }, [9], existing);
+  assert.equal(body.productType, 'tshirts');
+  assert.equal(body.variantSetId, 12);
+  assert.deepEqual(body.pictureIds, [9]);
+  assert.equal(body.measurements[0].value, '22');
+  assert.equal(body.shipping_methods[0].parcel_size, 'small');
+  assert.equal(body.shippingMethods[0].parcelSize, 'small');
+  assert.equal(body.nationalShippingCost, '4.50');
+  assert.equal(body.shipping_methods[0].parcel_size_id, undefined);
+});
+
+test('Depop applies a reused draft when the write uses the editor names', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  const fields = { product_type: 'tshirts', variant_set: 12, variants: { 7: 1 }, attributes: { material: ['cotton'], occasion: ['casual'] },
+    age: ['modern'], source: ['preloved'], style: ['casual'], colour: ['multi'], condition: 'used_good', brand: 'nike' };
+  let saved = { id: '123456', description: 'Private draft', price_amount: '12', pictures: [] };
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    if (options.method === 'PUT' && pathname === '/presentation/api/v1/drafts/123456/') {
+      const body = JSON.parse(options.body);
+      if (body.productType && Array.isArray(body.pictureIds) && body.pictureIds.length) {
+        saved = { id: '123456', description: body.description, priceAmount: body.priceAmount, productType: body.productType,
+          variantSetId: body.variantSetId, variants: body.variants, attributes: body.attributes, age: body.age,
+          source: body.source, style: body.style, colour: body.colour, condition: body.condition, brand: body.brand,
+          pictures: body.pictureIds.map(id => ({ id })) };
+      }
+      return reply(200, {});
+    }
+    if (pathname === '/api/v2/drafts/123456/') return reply(404, { message: 'Could not find draft' });
+    if (pathname === '/presentation/api/v1/drafts/123456/') return reply(200, saved);
+    return reply(200, {});
+  };
+  const result = await c.depopApiAction('save', {
+    action: 'save_draft', draft_url: DRAFT, listing, deadline: Date.now() + 30000,
+    depop_fields: fields, uploaded_photo_ids: [9],
+  });
+  assert.equal(result.error, undefined, `${result.error} ${result.marketplace_message || ''}`);
+  assert.equal(result.product_type, 'tshirts');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.picture_ids)), [9]);
+});
+
+test('Depop read-back uses the editor draft when the presentation document is only a summary', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  const fields = { product_type: 'tshirts', variant_set: 12, variants: { 7: 1 }, colour: ['black'], condition: 'used_good', brand: 'nike' };
+  const editor = { id: '123456', description: 'Private draft', priceAmount: '12.00', productType: 'tshirts', variantSetId: 12,
+    variants: { 7: 1 }, colour: ['black'], condition: 'used_good', brand: 'nike', pictures: [{ id: 9 }] };
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    if (options.method === 'PUT') return reply(200, {});
+    if (pathname === '/api/v2/drafts/123456/') return reply(200, editor);
+    if (pathname === '/presentation/api/v1/drafts/123456/') {
+      return reply(200, { id: '123456', description: 'Private draft', price_amount: '12', pictures: [] });
+    }
+    return reply(200, {});
+  };
+  const result = await c.depopApiAction('save', {
+    action: 'save_draft', draft_url: DRAFT, listing, deadline: Date.now() + 30000,
+    depop_fields: fields, uploaded_photo_ids: [9], expected_photo_count: 1,
+  });
+  assert.equal(result.error, undefined, `${result.error} ${result.marketplace_message || ''}`);
+  assert.equal(result.product_type, 'tshirts');
+  assert.equal(result.photo_count, 1);
+});
+
+test('a live Depop update sends the stored product back, including picture urls without signatures', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  const requests = [];
+  c.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), method: options.method, body: options.body });
+    if (options.method === 'PUT') {
+      return reply(400, { message: 'Request failed with status code 400',
+        errors: [{ field: 'pictures', message: 'must be objects' }],
+        authorization: 'Bearer abcdefghijklmnopqrstuvwxyz0123456789' });
+    }
+    return reply(200, { id: 99, slug: 'studio-works-fleece', status: 'STATUS_ONSALE', user_id: 5,
+      description: 'Old', price_amount: '23.00', price_currency: 'USD',
+      address: { country_code: 'US', state: 'LA' }, department: 'menswear', product_type: 'jackets',
+      quantity: 1, national_shipping_cost: '4.50',
+      pictures: [{ id: 7, url: 'https://media-photos.depop.com/b0/7.jpg?X-Amz-Signature=abcdefghijklmnopqrstuvwxyz0123456789' }] });
+  };
+  const result = await c.depopApiAction('update', {
+    action: 'update', confirm: true, listing_id: 'studio-works-fleece', deadline: Date.now() + 30000,
+    depop_fields: { product_type: 'sweaters', gender: 'female', is_kids: false, colour: ['tan'], condition: 'used_good' },
+    listing: { description: 'Fleece', price: 29.99 },
+  });
+  assert.match(result.error, /HTTP 400/);
+  assert.match(result.marketplace_message, /pictures/);
+  assert.match(result.marketplace_message, /must be objects/);
+  assert.equal(result.marketplace_message.includes('abcdefghijklmnopqrstuvwxyz0123456789'), false);
+  const body = JSON.parse(requests.find(item => item.method === 'PUT').body);
+  assert.deepEqual(body.pictures, [{ url: 'https://media-photos.depop.com/b0/7.jpg' }]);
+  assert.equal(JSON.stringify(body).includes('X-Amz-Signature'), false);
+  assert.deepEqual(body.address, { country_code: 'US', state: 'LA' });
+  assert.equal(body.department, 'womenswear');
+  assert.equal(body.product_type, 'sweaters');
+  assert.equal(body.national_shipping_cost, '4.50');
+  assert.equal(body.quantity, 1);
+  assert.equal(body.id, undefined);
+  assert.equal(body.user_id, undefined);
+  assert.equal(body.status, undefined);
+  assert.equal(body.seller, undefined);
+  assert.equal(body.is_liked, undefined);
+  assert.equal(body.like_count, undefined);
+});
+
+test('a Depop draft that did not stick reports the sanitized read-back', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  const fields = { product_type: 'tshirts', variant_set: 12, variants: { 7: 1 }, colour: ['black'], condition: 'used_good', brand: 'nike' };
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    if (options.method === 'PUT') return reply(200, {});
+    if (pathname === '/api/v2/drafts/123456/') return reply(404, { message: 'Could not find draft', token: 'private-response-token' });
+    if (pathname === '/presentation/api/v1/drafts/123456/') {
+      return reply(200, { id: '123456', description: 'Private draft', price_amount: '12', pictures: [],
+        session: 'private-response-token' });
+    }
+    return reply(200, {});
+  };
+  const result = await c.depopApiAction('save', {
+    action: 'save_draft', draft_url: DRAFT, listing, deadline: Date.now() + 30000,
+    depop_fields: fields, uploaded_photo_ids: [9], expected_photo_count: 1,
+  });
+  assert.match(result.error, /did not keep this listing's category/);
+  assert.match(result.error, /photos/);
+  assert.match(result.marketplace_message, /read-back keys: description, price_amount/);
+  assert.match(result.marketplace_message, /Private draft/);
+  assert.equal(result.marketplace_message.includes('private-response-token'), false);
+  assert.ok(result.marketplace_message.length > 80);
+});
+
+test('a live Depop update leaves read-only product fields off the request', () => {
+  const c = loadWorker();
+  const body = call(c, 'depopLiveWriteBody', {
+    id: 99, slug: 'studio-works-fleece', status: 'STATUS_ONSALE', user_id: 5, seller: { username: 'shop' },
+    is_liked: false, like_count: 3, pricing: { current_price: '23.00' },
+    description: 'Old', price_amount: '23.00', price_currency: 'USD', quantity: 1,
+    address: { country_code: 'US', state: 'LA' }, department: 'menswear', productType: 'jackets',
+    nationalShippingCost: '4.50', pictures: [{ id: 7 }],
+  }, { description: 'Fleece', price: 29.99 }, null);
+  assert.equal(body.product_type, 'jackets');
+  assert.equal(body.national_shipping_cost, '4.50');
+  assert.equal(body.price_amount, '29.99');
+  assert.deepEqual(body.pictures, [{ id: 7 }]);
+  assert.equal(body.seller, undefined);
+  assert.equal(body.status, undefined);
+  assert.equal(body.like_count, undefined);
+  assert.equal(body.pricing, undefined);
+  assert.equal(body.id, undefined);
 });

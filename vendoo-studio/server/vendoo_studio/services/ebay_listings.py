@@ -111,17 +111,31 @@ async def _check_condition(client: EbayClient, category_id: str, condition: str)
 
 
 def item_key(conversation_id: str) -> str:
-    """The SKU Anteroom gives an item that has none of its own: unique to the item, stable across retries."""
+    """Inventory item key for an item with no seller SKU. Stable across retries, and not the seller's SKU."""
     return "ar-" + re.sub(r"[^A-Za-z0-9]", "", conversation_id)[:40]
 
 
+def generated_inventory_key(value: str) -> bool:
+    """True for a key Anteroom minted. eBay's Inventory API requires one; it is not a seller SKU."""
+    return bool(re.fullmatch(r"ar-[A-Za-z0-9]{1,40}", str(value or "")))
+
+
+def seller_sku(listing: dict) -> str:
+    """The SKU the seller typed. A generated inventory key stored on the listing is ignored."""
+    raw = re.sub(r"[^A-Za-z0-9_-]", "", str((listing or {}).get("sku") or ""))[:40]
+    return "" if generated_inventory_key(raw) else raw
+
+
 def ebay_sku(listing: dict, binding: dict, conversation_id: str) -> str:
-    """The seller's SKU when they gave one, else the item's own key. Once written, it never changes."""
+    """The inventory item key. The seller's SKU when they set one, otherwise the internal key.
+
+    The Inventory API has no separate hidden key: this value is also the offer SKU, so eBay
+    shows it as the custom label. Anteroom keeps it on the marketplace binding only.
+    """
     saved = str(binding.get("ebay_sku") or "")
     if re.fullmatch(r"[A-Za-z0-9_-]{1,50}", saved):
         return saved
-    raw = re.sub(r"[^A-Za-z0-9_-]", "", str(listing.get("sku") or ""))[:40]
-    return raw or item_key(conversation_id)
+    return seller_sku(listing) or item_key(conversation_id)
 
 
 def _aspect_name(key: str) -> str:
