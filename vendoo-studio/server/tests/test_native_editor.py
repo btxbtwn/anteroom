@@ -172,6 +172,41 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ebay_listings.ebay_condition({"ebay_specifics": {"condition": "1000"}}), "NEW")
         self.assertEqual(fields["sku"]["value"], "")
 
+    async def test_ebay_format_choices_come_from_ebays_category_rules(self):
+        from vendoo_studio.services.ebay_client import EbayClient
+
+        rows = [{"id": "condition", "name": "Condition", "required": True, "multi": False, "mode": "selection", "values": []}]
+        auction = {"FIXED_PRICE": ["GTC"], "AUCTION": ["DAYS_3", "DAYS_7"]}
+        listing = {"direct_category_ids": {"ebay": "15687"}, "condition": "Good",
+                   "ebay_specifics": {"listingFormat": "AUCTION", "auctionStartPrice": "9.99"}}
+        with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)), \
+                patch.object(EbayClient, "connect", new=AsyncMock()), \
+                patch.object(marketplace_schemas, "ebay_listing_types", new=AsyncMock(return_value=auction)):
+            form = await native_editor.ebay_form(listing)
+            fixed = await native_editor.ebay_form({**listing, "ebay_specifics": {}})
+        fields = {row["path"]: row for row in form["fields"]}
+        self.assertEqual(fields["ebay_specifics.listingFormat"]["option_values"], {"Fixed price": "FIXED_PRICE", "Auction": "AUCTION"})
+        self.assertEqual(fields["ebay_specifics.listingFormat"]["value"], "AUCTION")
+        self.assertIn("ebay_specifics.auctionStartPrice", fields["ebay_specifics.listingFormat"]["clears"])
+        self.assertEqual(fields["ebay_specifics.listingDuration"]["option_values"], {"3 days": "DAYS_3", "7 days": "DAYS_7"})
+        self.assertEqual(fields["ebay_specifics.listingDuration"]["value"], "DAYS_7")
+        self.assertEqual(fields["ebay_specifics.auctionStartPrice"]["value"], "9.99")
+        self.assertIn("ebay_specifics.auctionBuyItNow", fields)
+        self.assertNotIn("ebay_specifics.bestOffer.enabled", fields)
+        fixed_fields = {row["path"]: row for row in fixed["fields"]}
+        self.assertEqual(fixed_fields["ebay_specifics.listingFormat"]["value"], "FIXED_PRICE")
+        self.assertTrue(fixed_fields["ebay_specifics.listingDuration"]["locked"])
+        self.assertNotIn("ebay_specifics.auctionStartPrice", fixed_fields)
+        self.assertIn("ebay_specifics.bestOffer.enabled", fixed_fields)
+        # No auction in the category: Auction is not offered.
+        with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)), \
+                patch.object(EbayClient, "connect", new=AsyncMock()), \
+                patch.object(marketplace_schemas, "ebay_listing_types", new=AsyncMock(return_value={"FIXED_PRICE": ["GTC"]})):
+            plain = await native_editor.ebay_form({**listing, "ebay_specifics": {}})
+        choice = next(row for row in plain["fields"] if row["path"] == "ebay_specifics.listingFormat")
+        self.assertEqual(choice["options"], ["Fixed price"])
+        self.assertIn("does not offer auctions", choice["help"])
+
     async def test_a_generated_ebay_inventory_key_is_not_shown_as_the_sku(self):
         rows = [{"id": "condition", "name": "Condition", "required": True, "multi": False, "mode": "selection", "values": []}]
         with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)):

@@ -135,7 +135,7 @@ class NativeMarketplacesTest(unittest.TestCase):
     def test_draft_route_refuses_publish_parameters_unsupported_markets_and_live_items(self):
         response = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(response.status_code, 422)
-        for market in ["ebay", "sellwild", "vinted"]:
+        for market in ["sellwild", "vinted"]:
             response = self.client.post(f"{self.base}/{market}/draft", json={"revision_id": self.rev.id})
             self.assertEqual(response.status_code, 400, response.text)
         MarketplaceListingRepo(self.db).save(self.conv.id, "mercari", {"state": "published", "listing_id": "m123456789",
@@ -719,6 +719,28 @@ class NativeMarketplacesTest(unittest.TestCase):
             self.assertEqual(record["marketplace_message"], "25002: Color is missing.")
             # List again is allowed and starts from the same offer.
             self.assertEqual(self.client.post(f"{self.base}/ebay/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 200)
+
+    def test_an_ebay_draft_is_an_unpublished_offer_checked_without_a_link(self):
+        from vendoo_studio.services import ebay_listings
+
+        async def execute(action, snapshot, photos, binding, record, active, **kwargs):
+            self.assertEqual((action, kwargs["confirm"]), ("save_draft", False))
+            record({"ebay_sku": "ar-x", "ebay_offer_id": "9", "ebay_inventory_written": True})
+            return {"ok": True, "state": "draft"}
+
+        checked = AsyncMock(return_value={"ok": True, "state": "draft"})
+        with patch("vendoo_studio.services.ebay_client.EbayClient.connect", AsyncMock()), \
+             patch.object(ebay_listings, "execute", execute), patch.object(ebay_listings, "check", checked):
+            response = self.client.post(f"{self.base}/ebay/draft", json={"revision_id": self.rev.id})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.run_jobs()
+            record = self.status()["ebay"]
+            self.assertEqual((record["state"], record.get("draft_url"), record.get("error")), ("draft", None, None))
+            self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
+            self.assertEqual(self.client.post(f"{self.base}/ebay/check", json={}).status_code, 200)
+            self.run_jobs()
+        # Check compares the revision the draft was saved from.
+        self.assertIn(self.rev.listing_json["title"], checked.await_args.args[1]["title"])
 
     # --- records outlive the editor ---------------------------------------------------
 
