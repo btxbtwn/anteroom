@@ -79,6 +79,15 @@ describe("marketplaces section", () => {
     expect(row(html, "Mercari")).toContain('role="status"');
     expect(html).toContain("Check result");
     expect(html).not.toContain("Publish…");
+    const vinted = render({ vinted: { state: "unknown", revision_id: "current", error: "Check before trying again." } }, {}, { selected: "vinted" });
+    expect(row(vinted, "Vinted")).toContain("Unconfirmed");
+    expect(vinted).toContain("Check result");
+    expect(vinted).toContain("Paste the link if one was created");
+    expect(vinted).toContain("Check link");
+    expect(vinted).not.toContain("does not save a draft");
+    expect(vinted).not.toContain("Save draft");
+    expect(vinted).not.toContain("Publish…");
+    expect(enabledButton(render({}, {}, { selected: "vinted" }), "List…")).toBe(true);
   });
 
   it("uses Sellwild's matched category and condition, with Change to override", () => {

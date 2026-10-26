@@ -44,11 +44,11 @@ describe("Connections settings", () => {
       expect(at).toBeGreaterThanOrEqual(cursor);
       cursor = at + name.length;
     }
-    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild"]) {
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
       expect(section).toContain(`Sale detection for ${name}`);
     }
-    expect(section).not.toContain("Sale detection for Vinted");
-    expect(section).toContain("Sales on Vinted are not detected");
+    expect(section).toContain("Poshmark, Sellwild, and Vinted closets");
+    expect(section).not.toContain("Sales on Vinted are not detected");
     expect(section).toContain("Detect sales");
     expect(section).toContain("Where the sign-in lives");
     expect(html).toContain("Marketplaces → eBay → Offers");

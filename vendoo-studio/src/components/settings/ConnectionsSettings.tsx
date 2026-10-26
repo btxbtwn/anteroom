@@ -387,7 +387,7 @@ const CHROME_SESSION_DETAILS: Record<ExtensionSessionMarket, string> = {
   poshmark: "Lists on Poshmark with the account signed in to Chrome.",
   mercari: "Saves the Mercari sign-in on this Mac so listing keeps working after Chrome restarts.",
   sellwild: "Lists on Sellwild with the account signed in to Chrome.",
-  vinted: "Lists on Vinted with the account signed in to Chrome. Upload runs only after you confirm List on Vinted. Sales on Vinted are not detected.",
+  vinted: "Lists on Vinted with the account signed in to Chrome. List saves a draft, then publishes it only after you confirm.",
 };
 
 function ChromeSessionRow({
@@ -516,8 +516,8 @@ function MarketplaceSection() {
           key={marketplace}
           marketplace={marketplace}
           chromeReady={chromeReady}
-          salesSwitch={marketplace === "vinted" ? undefined : salesSwitch(marketplace, EXTENSION_SESSION_NAMES[marketplace])}
-          checkError={marketplace === "vinted" ? null : detection.data?.checks?.[marketplace]}
+          salesSwitch={salesSwitch(marketplace, EXTENSION_SESSION_NAMES[marketplace])}
+          checkError={detection.data?.checks?.[marketplace]}
         />
       ))}
       <SettingsRow
@@ -527,7 +527,7 @@ function MarketplaceSection() {
       <SettingsRow
         id="sale-detection"
         title="Sale detection"
-        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark and Sellwild closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
+        description="Turn Detect sales on for a marketplace to hear when something sells there. Nothing is taken down unless Delist the other marketplaces is on. eBay and Etsy send the sale themselves. Chrome reads your Depop and Mercari sales, and compares your Poshmark, Sellwild, and Vinted closets with everything Anteroom still has listed there. The shops take turns, a few times an hour, with an uneven gap between checks. A sale counts only for an item Anteroom still shows as listed, so items you already sold, delisted, or marked not listed are skipped. Anteroom keeps only the listing and order IDs."
         status={
           listening.length || (relay && !relay.connected && Object.values(accounts ?? {}).some((account) => account.connected)) ? (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

@@ -259,8 +259,7 @@ export function MarketplacesLayout({
   }
   async function listNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
-    const extra = marketplace === "vinted" ? " This uploads it on Vinted. It does not save a draft."
-      : marketplace === "sellwild" ? " Sellwild may hold it for review."
+    const extra = marketplace === "sellwild" ? " Sellwild may hold it for review."
       : marketplace === "ebay" ? " This uses your eBay shipping, payment, and return policies, set in Settings → Connections → eBay when you have more than one."
       : marketplace === "etsy" && !etsyEligible ? " Etsy may still reject it if the item is not vintage, handmade, or a supply."
       : "";
@@ -565,7 +564,7 @@ export function MarketplacesLayout({
             {(() => {
               const draft = NATIVE.has(selectedMarketplace) ? drafts[selectedMarketplace as NativeMarketplace] : undefined;
               const name = railLabel(selectedMarketplace);
-              if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "sellwild" || selectedMarketplace === "ebay" || selectedMarketplace === "vinted") return null;
+              if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "sellwild" || selectedMarketplace === "ebay") return null;
               return (
                 <div className="flex items-center gap-2">
                   <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"

@@ -467,6 +467,93 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertIn("Connect Chrome", body["marketplaces"]["poshmark"]["error"])
         self.assertEqual(self.actions(), writes)
 
+    def test_vinted_list_saves_a_draft_then_publishes_it(self):
+        listing = {**LISTING, "vinted_specifics": {
+            "category": "Women > Clothing > Jeans > Straight jeans", "condition": "Good",
+        }}
+        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        draft = "https://www.vinted.com/items/42/edit"
+        live = "https://www.vinted.com/items/42"
+        self.assertEqual(native.draft_url("vinted", draft + "/"), draft)
+        self.assertEqual(native.draft_url("vinted", draft), draft)
+        with self.assertRaises(native.NativeMarketplaceError):
+            native.draft_url("vinted", draft + "?draft_id=1")
+        with self.assertRaises(native.NativeMarketplaceError):
+            native.draft_url("vinted", live)
+        self.assertEqual(native._plan("vinted", "list", {}, revision.id), ["save_draft", "publish"])
+        self.assertEqual(native._plan("vinted", "list", {"state": "draft", "revision_id": revision.id, "draft_url": draft}, revision.id), ["publish"])
+        self.assertEqual(native._plan("sellwild", "list", {}, revision.id), ["publish"])
+        replaced = native._outcome("vinted", "save_draft", {"state": "draft", "draft_url": draft, "revision_id": revision.id}, {
+            "ok": True, "state": "draft", "draft_url": "https://www.vinted.com/items/43/edit", "draft_replaced": True,
+        })
+        self.assertEqual(replaced["draft_url"], "https://www.vinted.com/items/43/edit")
+        gone = native._outcome("vinted", "publish", {"state": "draft", "draft_url": draft}, {
+            "ok": False, "safe_to_retry": True, "error": "Could not find draft on Vinted. List again.",
+            "marketplace_message": "Could not find draft", "error_code": "rejected",
+        })
+        self.assertIsNone(gone["draft_url"])
+        self.assertEqual(gone["state"], "not_saved")
+
+        async def bridge(job, kind, payload, timeout=None):
+            return ({"ok": True, "state": "draft", "draft_url": draft} if payload["action"] == "save_draft"
+                    else {"ok": True, "state": "published", "draft_url": draft, "listing_url": live})
+
+        self.bridge.side_effect = bridge
+        response = self.client.post(f"{self.base}/vinted/list", json={"revision_id": revision.id, "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.run_jobs()
+        record = self.status()["vinted"]
+        self.assertEqual(record["state"], "published", record)
+        self.assertEqual(record["draft_url"], draft)
+        self.assertEqual(record["listing_url"], live)
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
+        calls = self.bridge.call_args_list
+        self.assertFalse(calls[0].args[2]["confirm"])
+        self.assertTrue(calls[1].args[2]["confirm"])
+        self.assertEqual(calls[1].args[2]["draft_url"], draft)
+        self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
+
+    def test_a_deleted_vinted_draft_is_saved_again_in_the_same_list(self):
+        listing = {**LISTING, "vinted_specifics": {"category": "Women > Clothing", "condition": "Good"}}
+        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        old = "https://www.vinted.com/items/42/edit"
+        new = "https://www.vinted.com/items/43/edit"
+        MarketplaceListingRepo(self.db).save(self.conv.id, "vinted", {
+            "state": "draft", "draft_url": old, "revision_id": revision.id,
+        })
+        self.bridge.side_effect = [
+            {"ok": False, "safe_to_retry": True, "error": "Could not find draft on Vinted. List again.",
+             "marketplace_message": "Could not find draft", "error_code": "rejected"},
+            {"ok": True, "state": "draft", "draft_url": new},
+            {"ok": True, "state": "published", "draft_url": new, "listing_url": "https://www.vinted.com/items/43"},
+        ]
+        response = self.client.post(f"{self.base}/vinted/list", json={"revision_id": revision.id, "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.run_jobs()
+        record = self.status()["vinted"]
+        self.assertEqual(record["state"], "published", record)
+        self.assertEqual(record["draft_url"], new)
+        self.assertEqual(self.actions(), ["publish", "save_draft", "publish"])
+        self.assertIsNone(self.bridge.call_args_list[1].args[2]["draft_url"])
+
+    def test_a_pasted_vinted_draft_link_is_checked_without_writing(self):
+        listing = {**LISTING, "vinted_specifics": {"category": "Women > Clothing", "condition": "Good"}}
+        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
+        draft = "https://www.vinted.com/items/42/edit"
+        self.bridge.side_effect = BrowserBridgeError("lost")
+        with patch.object(native, "SETTLE_DEADLINE_S", 0):
+            response = self.client.post(f"{self.base}/vinted/list", json={"revision_id": revision.id, "confirm": True})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.run_jobs()
+        self.assertEqual(self.status()["vinted"]["state"], "unknown")
+        self.bridge.side_effect = None
+        self.bridge.return_value = {"finished": True, "result": {"ok": True, "state": "draft", "draft_url": draft}}
+        result = self.client.post(f"{self.base}/vinted/check", json={"draft_url": draft}).json()
+        self.assertEqual(result["state"], "draft", result)
+        self.assertEqual(result["draft_url"], draft)
+        self.assertEqual(self.bridge.call_args.args[1], "marketplace.result")
+        self.assertEqual(self.bridge.call_args.args[2]["context"]["draft_url"], draft)
+
     def test_a_pasted_draft_link_is_checked_without_repeating_the_write(self):
         self.bridge.side_effect = BrowserBridgeError("lost")
         with patch.object(native, "SETTLE_DEADLINE_S", 0):

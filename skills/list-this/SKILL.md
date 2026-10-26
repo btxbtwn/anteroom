@@ -429,7 +429,7 @@ Before outputting ANY listing, verify:
 **Vinted (direct listing):**
 - Put Vinted's own catalog breadcrumb in `vinted_specifics.category`, such as `Women > Clothing > Jeans > Straight jeans`. Do not copy that breadcrumb into `marketplace_categories.vinted`. That field is Vendoo's category, and Send fills it on Vendoo's form.
 - Condition, brand, size, color, package size, and material go in `vinted_specifics` when the photos or seller notes support them
-- Listing on Vinted uploads only after the seller confirms it. Do not publish or delist
+- Listing on Vinted saves a draft, then publishes only after the seller confirms List. Do not publish or delist
 
 ## Examples
 
