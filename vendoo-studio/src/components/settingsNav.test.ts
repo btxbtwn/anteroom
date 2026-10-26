@@ -34,6 +34,10 @@ describe("searchSettings", () => {
     expect(isSettingsSectionId("billing")).toBe(false);
   });
 
+  it("finds saved seller templates in Listings", () => {
+    expect(searchSettings("saved templates")).toContainEqual(expect.objectContaining({id:"listing-templates",section:"listings",targetId:"listing-templates"}));
+  });
+
   it("gives every search result its own id", () => {
     const ids = SETTINGS_SEARCH_ITEMS.map((item) => item.id);
     expect(new Set(ids).size).toBe(ids.length);

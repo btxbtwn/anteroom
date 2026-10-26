@@ -17,6 +17,7 @@ from vendoo_studio.services.api_job_lock import start_gate
 from vendoo_studio.services.bulk_edit import basis, digest
 from vendoo_studio.services.listing_copy import CopyError, add_draft, completed_copy, read_source, reusable_listing
 from vendoo_studio.services.listing_editor import prepared_listing, save_listing_edit
+from vendoo_studio.repositories.queries import RevisionConflict
 
 
 class TemplateSource(BaseModel):
@@ -203,5 +204,13 @@ def apply(db: Session, template_id: str, body: TemplateApproval) -> dict:
             raise CopyError("The item or proposed changes changed. Review them again.")
         if raw == revision.listing_json:
             return {"ok": True, "changed": False}
-        result = save_listing_edit(conv.id, raw, db, source="template", expected_revision_id=revision.id)
+        try:
+            result = save_listing_edit(conv.id, raw, db, source="template", expected_revision_id=revision.id)
+        except RevisionConflict as exc:
+            raise CopyError(str(exc)) from exc
+        from vendoo_studio.models.listing_evidence import ListingCorrection
+
+        # A reusable preset is not a fresh observation of this item's facts.
+        db.query(ListingCorrection).filter_by(revision_id=result["revision_id"]).update({"source": "template"})
+        db.commit()
         return {"ok": True, "changed": True, "revision_id": result["revision_id"], "validation": result["validation"]}

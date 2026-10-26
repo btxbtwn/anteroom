@@ -1,3 +1,4 @@
+import { ListingTemplatesSettings } from "./ListingTemplatesSettings";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
@@ -440,6 +441,7 @@ function ListingFormulasSection() {
 export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   return (
     <>
+      <ListingTemplatesSettings onOpenListing={onOpenListing} />
       <VendooSection />
       <MarketplacesSection />
       <PackageDimensionsSection />

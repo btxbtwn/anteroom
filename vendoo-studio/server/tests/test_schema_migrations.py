@@ -426,3 +426,19 @@ def test_copy_receipts_upgrade_keeps_existing_drafts_and_financial_records(engin
         assert row == ("order", "dismissed", '{"currency":"USD","fees":"2.25"}', 3)
         assert connection.execute("SELECT count(*) FROM listing_copy_receipts").fetchone() == (0,)
     assert inspect_database(engine.url.database).clean
+
+
+def test_template_upgrade_preserves_existing_copy_receipts_and_marks_listing_sources(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "2af6da7c6db1")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status) VALUES ('old-copy', 'Existing copy', 'draft')")
+        connection.execute("INSERT INTO listing_copy_receipts (request_id, fingerprint, source_id, conversation_id, created_at) VALUES (?, ?, 'old-source', 'old-copy', '2026-10-26')", ("a" * 32, "b" * 64))
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT source_kind, source_id, conversation_id, fingerprint FROM listing_copy_receipts").fetchone() == ("listing", "old-source", "old-copy", "b" * 64)
+        assert connection.execute("SELECT title FROM conversations WHERE id='old-copy'").fetchone() == ("Existing copy",)
+        assert connection.execute("SELECT count(*) FROM listing_templates").fetchone() == (0,)
+    assert inspect_database(engine.url.database).clean

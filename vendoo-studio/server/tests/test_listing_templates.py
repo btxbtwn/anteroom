@@ -129,3 +129,12 @@ def test_changed_item_template_or_mode_rejects_an_old_application(source, monkey
     assert source.client.put(path,json={"name":"Renamed","expected_revision":1}).status_code == 200
     assert source.client.post(path+"/apply",json=approval).status_code == 409
     assert ListingRepo(source.db).get_revisions("target")[0].listing_json["price"] == 20
+
+
+
+def test_category_selections_keep_catalog_ids_but_strip_operational_identity(source):
+    listing = ListingRepo(source.db).get_revisions("source")[0].listing_json
+    ListingRepo(source.db).save_revision("source", {**listing, "marketplace_category_objects": {"ebay": {"id":"123", "path":["Clothing", "Coats"], "listing_id":"old-listing", "access_token":"do-not-copy"}}}, "user_form")
+    response = capture(source, ["marketplace_category_objects"])
+    assert response.status_code == 200, response.text
+    assert response.json()["fields"]["marketplace_category_objects"]["ebay"] == {"id":"123", "path":["Clothing", "Coats"]}

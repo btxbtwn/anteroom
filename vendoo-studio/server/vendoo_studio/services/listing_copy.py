@@ -65,7 +65,7 @@ def _clean_answers(value):
 def reusable_listing(raw: dict) -> dict:
     """Known contract fields plus saved category selections; no job snapshot metadata."""
     fields = {*ListingSchema.model_fields, *CATEGORY_KEYS, "vinted_specifics", "sellwild_specifics", "material"}
-    return {key: _clean_answers(value) if key.endswith("_specifics") else copy.deepcopy(value)
+    return {key: _clean_answers(value) if key.endswith("_specifics") or key in CATEGORY_KEYS else copy.deepcopy(value)
             for key, value in raw.items() if key in fields}
 
 

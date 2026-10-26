@@ -44,6 +44,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  {id:"listing-templates",title:"Saved templates",section:"listings",targetId:"listing-templates",searchTerms:["template","preset","reusable fields","saved defaults"]},
   {
     id: "business-note",
     title: "About your business",

@@ -1,3 +1,4 @@
+import { ListingTemplatesDialog } from "../ListingTemplatesDialog";
 import { CopyListingDialog } from "../CopyListingDialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -5,7 +6,7 @@ import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { marketplacesNeedingRelist, relistStage } from "../relistStatus";
 import { marketplaceName } from "../marketplaceNames";
-import { CopyIcon, EllipsisIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
+import { LayoutTemplateIcon, CopyIcon, EllipsisIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
@@ -68,6 +69,7 @@ export function ListingRow({
   const hoverTimer = useRef<number | null>(null);
   const [hoverOpen, setHoverOpen] = useState(false);
   const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title);
@@ -370,6 +372,7 @@ export function ListingRow({
           >
             <PencilIcon className="size-3" />
           </button>
+          <button type="button" className={actionClass} title="Listing templates" aria-label={`Templates for ${title}`} onClick={event=>{event.stopPropagation();setTemplatesOpen(true);}}><LayoutTemplateIcon className="size-3"/></button>
           <button type="button" className={actionClass} title="Copy listing" aria-label={`Copy ${title}`} onClick={(event) => { event.stopPropagation(); setCopyOpen(true); }}><CopyIcon className="size-3" /></button>
           <button
             type="button"
@@ -400,6 +403,7 @@ export function ListingRow({
               <PencilIcon />
               Rename
             </MenuItem>
+            <MenuItem onClick={()=>setTemplatesOpen(true)}><LayoutTemplateIcon/>Templates</MenuItem>
             <MenuItem onClick={() => setCopyOpen(true)}><CopyIcon />Copy listing</MenuItem>
             <MenuItem
               variant="destructive"
@@ -414,6 +418,7 @@ export function ListingRow({
           </MenuPopup>
         </Menu>
       )}
+      {templatesOpen?<ListingTemplatesDialog conversationId={listing.id} onClose={()=>setTemplatesOpen(false)}/>:null}
       {copyOpen ? <CopyListingDialog conversationId={listing.id} onClose={() => setCopyOpen(false)} onCopied={(id) => { setCopyOpen(false); onSelect(id); }} /> : null}
       {hoverOpen && jobId && popupPos ? (
         <div
