@@ -441,6 +441,11 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         offer = next(call for call in client.calls if call[0] == "PUT" and call[1].endswith("/offer/offer-1"))
         self.assertEqual(offer[2]["body"]["pricingSummary"]["price"]["value"], "30.00")
         self.assertEqual(offer[2]["body"]["sku"], inventory[1].rsplit("/", 1)[-1])
+        self.assertEqual(offer[2]["body"]["listingPolicies"]["bestOfferTerms"], {
+            "bestOfferEnabled": True,
+            "autoAcceptPrice": {"value": "28.00", "currency": "USD"},
+            "autoDeclinePrice": {"value": "26.00", "currency": "USD"},
+        })
 
     async def test_update_without_an_offer_revises_the_same_item(self):
         self.binding["listing_id"] = "123456789012"
@@ -664,6 +669,21 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         terms = ebay_listings.best_offer_terms(vendoo_form(listing, "ebay"), "17.00")
         self.assertEqual(terms, {"bestOfferEnabled": True, "autoAcceptPrice": {"value": "15.00", "currency": "USD"},
                                  "autoDeclinePrice": {"value": "12.00", "currency": "USD"}})
+        off = {**listing, "ebay_specifics": {"bestOffer": {"enabled": "No", "autoAcceptPrice": 15, "minimumOfferPrice": 12}}}
+        self.assertEqual(ebay_listings.best_offer_terms(vendoo_form(off, "ebay"), "17.00", off), {"bestOfferEnabled": False})
+        from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
+
+        backwards = {**listing, "ebay_specifics": {"bestOffer": {"autoAcceptPrice": 12, "minimumOfferPrice": 15}}}
+        self.assertIn("minimum offer", best_offer_error(backwards) or "")
+        # The formula minimum (list - $4) can sit above an auto-accept the seller is still typing.
+        alone = {**LISTING, "price": "40", "ebay_specifics": {"bestOffer": {"autoAcceptPrice": 15}}}
+        self.assertIsNone(best_offer_error(alone))
+        held = {"specifics": {"pricingFormatDetails": {"fixedPrice": {
+            "allowBestOffer": True, "acceptOffersOfAtLeast": "38.00", "declineOffersLowerThan": "36.00",
+        }}}}
+        one_side = ebay_listings.best_offer_terms(held, "40.00", alone)
+        self.assertEqual(one_side["autoAcceptPrice"]["value"], "15.00")
+        self.assertNotIn("autoDeclinePrice", one_side)
 
     async def test_a_401_refreshes_the_token_once_and_a_second_401_is_signed_out(self):
         import httpx

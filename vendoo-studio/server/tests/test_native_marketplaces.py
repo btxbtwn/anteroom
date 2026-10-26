@@ -113,6 +113,38 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     # --- listing -----------------------------------------------------------------
 
+    def test_save_draft_runs_one_private_step_and_never_publishes_on_check(self):
+        for platform in URLS:
+            with self.subTest(platform=platform):
+                self.bridge.reset_mock()
+                self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": URLS[platform]}
+                response = self.client.post(f"{self.base}/{platform}/draft", json={"revision_id": self.rev.id})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertTrue(response.json()["running"])
+                self.run_jobs()
+                self.assertEqual(self.actions(), ["save_draft"])
+                self.assertIs(self.bridge.call_args.args[2]["confirm"], False)
+                self.assertEqual(self.record(platform)["state"], "draft")
+                # Re-saving updates the same draft, with no publish step.
+                response = self.client.post(f"{self.base}/{platform}/draft", json={"revision_id": self.rev.id})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.run_jobs()
+                self.assertEqual(self.actions(), ["save_draft", "save_draft"])
+                self.assertEqual(self.bridge.call_args.args[2]["draft_url"], URLS[platform])
+
+    def test_draft_route_refuses_publish_parameters_unsupported_markets_and_live_items(self):
+        response = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(response.status_code, 422)
+        for market in ["ebay", "poshmark", "sellwild", "vinted"]:
+            response = self.client.post(f"{self.base}/{market}/draft", json={"revision_id": self.rev.id})
+            self.assertEqual(response.status_code, 400, response.text)
+        MarketplaceListingRepo(self.db).save(self.conv.id, "mercari", {"state": "published", "listing_id": "m123456789",
+                                                                     "listing_url": LIVE["mercari"]})
+        response = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.actions(), [])
+        self.assertEqual(self.launched, [])
+
     def test_list_saves_then_publishes_in_one_job_that_holds_the_slot(self):
         for platform in URLS:
             seen = []
@@ -169,9 +201,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.bridge.assert_not_called()
         self.assertFalse(self.launched)
 
-    def test_save_and_publish_are_not_separate_endpoints(self):
-        for path in ("draft", "publish"):
-            self.assertIn(self.client.post(f"{self.base}/mercari/{path}", json={"revision_id": self.rev.id, "confirm": True}).status_code, {404, 405})
+    def test_publish_still_requires_the_explicit_list_endpoint(self):
+        self.assertIn(self.client.post(f"{self.base}/mercari/publish", json={"revision_id": self.rev.id, "confirm": True}).status_code, {404, 405})
 
     def test_list_refuses_an_existing_imported_listing_before_preparing_or_writing(self):
         self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {"mercari": LIVE["mercari"]}})

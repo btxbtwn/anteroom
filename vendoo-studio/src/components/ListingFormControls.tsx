@@ -186,6 +186,8 @@ export function SearchableSelect({
           </ComboboxList>
         </ComboboxPopup>
       </Combobox>
+      {value && !disabled && <button type="button" className="mt-1 text-xs text-muted-foreground underline" aria-label="Clear value"
+        onMouseDown={(event) => { event.preventDefault(); onChange(""); }}>Clear</button>}
       {unavailable && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">
         {choicesVerified
           ? `Saved value “${value}” is unavailable in these choices. Choose another value or clear it.`
@@ -270,6 +272,8 @@ export function SearchableMultiSelect({
           </ComboboxItem>}</ComboboxList>
         </ComboboxPopup>
       </Combobox>
+      {value.length > 0 && !disabled && <button type="button" className="mt-1 text-xs text-muted-foreground underline" aria-label="Clear values"
+        onMouseDown={(event) => { event.preventDefault(); onChange([]); }}>Clear</button>}
       {(unavailable.length > 0 || overLimit) && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">
         {unavailable.length > 0 && (choicesVerified
           ? `Unavailable saved values: ${unavailable.join(", ")}. Remove or replace them. `

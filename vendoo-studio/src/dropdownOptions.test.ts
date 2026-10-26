@@ -26,6 +26,15 @@ describe("withDropdownOptions", () => {
     const fields = withDropdownOptions([{ key: "size", options: [], optionsSource: "marketplace" }], "general", FORMS);
     expect(fields[0].options).toEqual([]);
   });
+  it("fills an empty Depop style list from the reference choices", () => {
+    const fields = withDropdownOptions(
+      [{ key: "depop_specifics.style", options: [], optionsSource: "marketplace" }],
+      "depop",
+      FORMS,
+    );
+    expect(fields[0].options).toEqual(["Streetwear", "Sportswear"]);
+    expect(fields[0].optionsSource).toBe("reference");
+  });
   it("does not offer a category-specific static eBay department list", () => {
     expect(optionsForField(FORMS, "ebay", "department")).toBeUndefined();
     const fields = withDropdownOptions([{ key: "ebay_specifics.department", label: "Department" }] as Field[], "ebay", FORMS);

@@ -96,6 +96,13 @@ class FamilyKindTest(unittest.TestCase):
         self.assertEqual(family_kind("jeans", "Levi's 501 Jeans"), "")
         self.assertEqual(family_kind("jacket", "Black Jacket"), "")
 
+    def test_a_jacket_filed_under_coats_jackets_and_vests_is_not_a_vest(self):
+        haystack = "Full Zip Fleece Jacket Coats, Jackets & Vests"
+        self.assertEqual(family_kind("jacket", haystack), "")
+        self.assertNotEqual(family_kind("jacket", haystack), "vest")
+        self.assertEqual(family_kind("jacket", "Black Vest"), "vest")
+        self.assertEqual(family_kind("jacket", "Wool Pea Coat"), "coat_pea")
+
 
 class GarmentLeafLookupTest(unittest.TestCase):
     def test_a_cut_falls_back_to_the_family_leaf(self):

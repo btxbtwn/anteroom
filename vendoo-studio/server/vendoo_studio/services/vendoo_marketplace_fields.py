@@ -89,6 +89,66 @@ def offer_floors(price: Any) -> tuple[str, str] | None:
     return str(whole - AUTO_ACCEPT_BELOW_LIST), str(whole - MINIMUM_BELOW_LIST)
 
 
+def best_offer_enabled(chosen: dict[str, Any] | None) -> bool:
+    """Best Offer stays on unless the seller turned it off."""
+    if not isinstance(chosen, dict) or "enabled" not in chosen:
+        return True
+    flag = chosen.get("enabled")
+    if isinstance(flag, str):
+        return flag.strip().casefold() not in {"no", "false", "off", "0"}
+    return bool(flag)
+
+
+def _offer_amount(chosen: dict[str, Any], *keys: str):
+    """The seller's number, None when they left it blank, or '' when it is not a number."""
+    from decimal import Decimal, InvalidOperation
+
+    for key in keys:
+        if key not in chosen:
+            continue
+        raw = chosen.get(key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            return Decimal(str(raw).replace("$", "").replace(",", "").strip())
+        except (InvalidOperation, ValueError):
+            return ""
+    return None
+
+
+def best_offer_error(listing: dict[str, Any] | None) -> str | None:
+    """The seller's Best Offer must be minimum < auto-accept < price. Blank uses the formula."""
+    if not isinstance(listing, dict):
+        return None
+    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
+    if not chosen or not best_offer_enabled(chosen):
+        return None
+    accept = _offer_amount(chosen, "autoAcceptPrice")
+    minimum = _offer_amount(chosen, "minimumOfferPrice", "autoDeclinePrice")
+    if accept == "" or minimum == "":
+        return "Enter Best Offer prices as numbers."
+    if accept is None and minimum is None:
+        return None
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        price = Decimal(str(listing.get("price") or "").replace("$", "").replace(",", "").strip())
+    except (InvalidOperation, ValueError):
+        price = Decimal(0)
+    if price <= 0:
+        return "Set the item price before Best Offer prices."
+    if accept is not None and not (0 < accept < price):
+        return "The auto-accept price must be below the item price."
+    if minimum is not None and not (0 < minimum < price):
+        return "The minimum offer must be below the item price."
+    if accept is not None and minimum is not None and not minimum < accept:
+        return "Best Offer needs the minimum offer below the auto-accept price, and the auto-accept price below the item price."
+    # A blank side stays on the formula. It is checked when the offer is built, so the
+    # seller can save the auto-accept price before typing the minimum.
+    return None
+
+
 def _listing_price(listing: dict[str, Any], general: dict[str, Any]) -> str:
     return _num_str(listing.get("price") or general.get("price"))
 
@@ -112,13 +172,35 @@ def _apply_ebay_pricing(
     if price:
         fixed["buyItNowPrice"] = price
     fixed["duration"] = _clean(fixed.get("duration")) or "GTC"
+    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
+    if not best_offer_enabled(chosen):
+        fixed["allowBestOffer"] = False
+        fixed.pop("acceptOffersOfAtLeast", None)
+        fixed.pop("declineOffersLowerThan", None)
+        return
     fixed["allowBestOffer"] = True
     accept, minimum = offer_floors(price or fixed.get("buyItNowPrice")) or ("", "")
     # The seller's own floors (eBay → Best Offer in the editor) win over the formula.
-    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
-    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
-    fixed["acceptOffersOfAtLeast"] = _num_str(chosen.get("autoAcceptPrice")) or accept
-    fixed["declineOffersLowerThan"] = _num_str(chosen.get("minimumOfferPrice") or chosen.get("autoDeclinePrice")) or minimum
+    seller_accept = _num_str(chosen.get("autoAcceptPrice"))
+    seller_minimum = _num_str(chosen.get("minimumOfferPrice") or chosen.get("autoDeclinePrice"))
+    accept = seller_accept or accept
+    minimum = seller_minimum or minimum
+    if accept and minimum:
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            ordered = Decimal(minimum) < Decimal(accept)
+        except (InvalidOperation, ValueError):
+            ordered = False
+        if not ordered:
+            # A formula floor that sits on the wrong side of the seller's price is left off.
+            if not seller_minimum:
+                minimum = ""
+            if not seller_accept:
+                accept = ""
+    fixed["acceptOffersOfAtLeast"] = accept
+    fixed["declineOffersLowerThan"] = minimum
 
 
 def _etsy_who_code(raw: Any) -> str:

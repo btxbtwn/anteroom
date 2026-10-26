@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Job, ListingData, MarketplaceForm } from "../api/types";
-import { cloneListing, formFieldText, formFieldValues, getListingEditorValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
@@ -22,7 +22,9 @@ import {
   relistStage,
 } from "./relistStatus";
 import { ETSY_CATEGORY_OPTIONALS } from "../marketplaceFields";
+import { depopSizeGroupingApplies } from "../marketplaceFields";
 import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
+import { applyBottomsFields, isBottomsListing } from "../bottomsSizes";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
 import { MarketplacesLayout } from "./MarketplacesSection";
@@ -243,6 +245,9 @@ export function ListingEditor({
       if ((listing.sku || "") !== (data?.listing?.sku || "")) {
         queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
       }
+    },
+    onError: (err: Error) => {
+      toastManager.add({ type: "error", title: "Could not save", description: err.message || "Try that field again." });
     },
   });
 
@@ -584,14 +589,17 @@ export function StructuredEditor({
     queryFn: api.settings.ebayInventoryLocation,
     staleTime: 30_000,
   });
+  // Show all is per tab and starts collapsed, so a marketplace opens on its category form.
+  const [showAllTab, setShowAllTab] = React.useState<string | null>(null);
+  const showAll = showAllTab === tab;
+  const categoryForm = nativeTab ? nativeQuery.data : forms?.forms.find((form) => form.marketplace === tab);
   const fields = React.useMemo(
     () => {
-      if (nativeTab) return nativeEditorDependencies(fieldsForMarketplaceForm(listing, tab, nativeQuery.data ? [nativeQuery.data] : []), listing);
-      const rows = withDropdownOptions(
-        fieldsForMarketplaceForm(listing, tab, forms?.forms),
-        tab,
-        dropdownOptions?.forms,
-      );
+      const source = nativeTab ? (nativeQuery.data ? [nativeQuery.data] : []) : forms?.forms;
+      const built = fieldsForMarketplaceForm(listing, tab, source, showAll);
+      const rows = nativeTab
+        ? nativeEditorDependencies(built, listing)
+        : withDropdownOptions(built, tab, dropdownOptions?.forms);
       const fallback = inventoryLocation?.location || "";
       if (!fallback) return rows;
       return rows.map((field) => (
@@ -600,9 +608,10 @@ export function StructuredEditor({
           : field
       ));
     },
-    [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
+    [nativeTab, nativeQuery.data, forms, listing, tab, showAll, dropdownOptions?.forms, inventoryLocation?.location],
   );
   const [local, setLocal] = React.useState<Record<string, string | string[]>>({});
+  const dirty = React.useRef<Record<string, string | string[]>>({});
   React.useEffect(() => {
     if (!target) return;
     const key = matchingEditorField(fields, target.field);
@@ -620,9 +629,18 @@ export function StructuredEditor({
       // the fields API already resolved the value — use it when the path miss.
       const value = (f.native || f.locked) && f.defaultValue !== undefined ? f.defaultValue : (val ?? f.defaultValue);
       const label = (v: string) => Object.entries(f.optionValues || {}).find(([, id]) => id === v)?.[0] ?? v;
-      init[f.key] = f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
+      const followed = f.label.endsWith(" price") && f.key.includes("_specifics.")
+        && !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(f.key));
+      const shown = followed && listing?.price != null
+        ? formFieldText(listing.price)
+        : f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
+      init[f.key] = f.key === "ebay_specifics.bestOffer.enabled"
+        ? (/^(no|false|0|off)$/i.test(formFieldText(shown)) ? "No" : "Yes")
+        : shown;
     });
-    setLocal(init);
+    const next = nextFieldDraft(init, dirty.current);
+    dirty.current = next.dirty;
+    setLocal(next.local);
   }, [listing, revisionId, tab, fields]);
 
   const handleBlur = (key: string) => {
@@ -640,7 +658,9 @@ export function StructuredEditor({
 
   const commitField = (key: string, value: string | string[] | boolean) => {
     if (typeof value === "string" && value.trim() === "[object Object]") return;
-    const nextLocal = { ...local, [key]: typeof value === "boolean" ? String(value) : value };
+    const shown = typeof value === "boolean" ? String(value) : value;
+    const nextLocal = { ...local, [key]: shown };
+    dirty.current = { ...dirty.current, [key]: shown };
     setLocal(nextLocal);
     const updated = cloneListing(listing);
     const field = fields.find((entry) => entry.key === key);
@@ -670,7 +690,7 @@ export function StructuredEditor({
       return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} maxLength={f.maxLength ?? undefined} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />;
     }
     if (f.multi) return <SearchableMultiSelect id={id} fieldKey={f.key}
-      value={formFieldValues(local[f.key], f.options)} options={f.options ?? []}
+      value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
       selectionOnly={f.selectionOnly ?? Boolean(f.options?.length)} disabled={f.locked}
       choicesVerified={f.optionsSource === "marketplace"}
       maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined}
@@ -712,19 +732,31 @@ export function StructuredEditor({
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
     <div ref={formRef} key={tab} className="flex flex-col">
       {tab !== "general" && <div className="flex items-start justify-between gap-3 border-b py-3 text-xs text-muted-foreground">
-        <p role="status">{nativeTab ? (nativeQuery.isFetching ? "Loading the marketplace’s category fields and choices…"
-          : nativeQuery.isError ? (nativeQuery.error instanceof Error ? nativeQuery.error.message : "The marketplace form could not be loaded. Refresh choices.")
-            : "Fields and choices come from the catalog direct List uses.") : formsQuery.isFetching
-          ? "Refreshing category fields and choices…"
-          : formsQuery.isError || dropdownQuery.isError
-            ? "Some choices could not be refreshed. Check the source below each field before listing."
-            : forms?.forms.find((form) => form.marketplace === tab)?.known === false
-              ? "The full category form is unavailable. Reference choices are shown where available."
-              : "Choices depend on this category. Reference choices may differ from the marketplace."}</p>
-        <Button type="button" variant="ghost" size="sm" onClick={() => {
-          if (nativeTab) { void nativeQuery.refetch(); return; }
-          void formsQuery.refetch(); void dropdownQuery.refetch();
-        }}>Refresh choices</Button>
+        <p role="status">{nativeTab && nativeQuery.isFetching
+          ? "Loading the marketplace’s category fields and choices…"
+          : nativeTab && nativeQuery.isError
+            ? (nativeQuery.error instanceof Error ? nativeQuery.error.message : "The marketplace form could not be loaded. Refresh choices.")
+            : !nativeTab && formsQuery.isFetching
+              ? "Refreshing category fields and choices…"
+              : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
+                ? "Some choices could not be refreshed. Check the source below each field before listing."
+                : categoryForm?.known === false
+                  ? "The full category form is unavailable. Reference choices are shown where available."
+                  : categoryForm?.known && showAll
+                    ? "Every saved field is showing. Values you do not see on the category form stay saved."
+                    : categoryForm?.known
+                      ? "This category's fields are showing."
+                      : nativeTab
+                        ? "Fields and choices come from the catalog direct List uses."
+                        : "Choices depend on this category. Reference choices may differ from the marketplace."}</p>
+        <div className="flex shrink-0 gap-1">
+          {categoryForm?.known && <Button type="button" variant="ghost" size="sm" aria-pressed={showAll}
+            onClick={() => setShowAllTab(showAll ? null : tab)}>{showAll ? "Show category fields" : "Show all fields"}</Button>}
+          <Button type="button" variant="ghost" size="sm" onClick={() => {
+            if (nativeTab) { void nativeQuery.refetch(); return; }
+            void formsQuery.refetch(); void dropdownQuery.refetch();
+          }}>Refresh choices</Button>
+        </div>
       </div>}
       {nativeTab && nativeQuery.data?.notes?.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
@@ -818,17 +850,145 @@ function sameField(a: EditorField, b: EditorField): boolean {
   return fieldIdentities(b).some((id) => ids.has(id));
 }
 
+const MERCARI_DERIVED_LABELS = new Set(["quantity", "shipping label", "delivery method", "who will pay for delivery?", "payer", "who pays"]);
+
+const MARKETPLACE_PRICE_KEYS: Record<string, string> = {
+  ebay: "ebay_specifics.price",
+  poshmark: "poshmark_specifics.poshmarkPrice",
+  mercari: "mercari_specifics.price",
+  depop: "depop_specifics.price",
+  etsy: "etsy_specifics.price",
+  vinted: "vinted_specifics.price",
+  sellwild: "sellwild_specifics.price",
+};
+
+function marketplacePriceField(tab: string): EditorField | null {
+  const key = MARKETPLACE_PRICE_KEYS[tab];
+  if (!key) return null;
+  return { key, label: `${marketplaceName(tab)} price`, type: "number" };
+}
+
+function withMarketplacePrice(rows: EditorField[], tab: string): EditorField[] {
+  const priceRow = marketplacePriceField(tab);
+  if (!priceRow || rows.some((field) => field.key === priceRow.key)) return rows;
+  return [...rows, priceRow];
+}
+
+const BEST_OFFER_ROWS: EditorField[] = [
+  { key: "ebay_specifics.bestOffer.enabled", label: "Best Offer enabled", options: ["Yes", "No"], selectionOnly: true, optionsSource: "marketplace", defaultValue: "Yes" },
+  { key: "ebay_specifics.bestOffer.autoAcceptPrice", label: "Auto Accept Price", type: "number" },
+  { key: "ebay_specifics.bestOffer.minimumOfferPrice", label: "Minimum Offer Price", type: "number" },
+];
+
+function finishMarketplaceRows(rows: EditorField[], listing: ListingData | undefined, tab: string): EditorField[] {
+  let visible = tab === "mercari"
+    ? rows.filter((field) => field.native || !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()))
+    : rows;
+  if (tab === "depop") {
+    for (const row of depopMeasurementFields(listing)) {
+      if (!visible.some((field) => field.key === row.key)) visible = [...visible, row];
+    }
+    if (!depopSizeGroupingApplies(listing) && !isBottomsListing(listing)) {
+      visible = visible.filter((field) => field.key !== "depop_specifics.sizeGrouping");
+    }
+  }
+  if (tab === "ebay") {
+    for (const row of BEST_OFFER_ROWS) {
+      if (!visible.some((field) => field.key === row.key)) visible = [...visible, row];
+    }
+  }
+  const respectMarketplaceSize = visible.some((field) => {
+    const leaf = (field.key.split(".").pop() || "").toLowerCase().replace(/[^a-z]/g, "");
+    return leaf === "size" && field.key.startsWith(`${tab}_specifics`) && field.optionsSource === "marketplace";
+  });
+  return applyBottomsFields(visible, listing, tab, { respectMarketplaceSize });
+}
+
+function depopMeasurementFields(listing: ListingData | undefined): EditorField[] {
+  const depop = listing?.depop_specifics;
+  const block = depop && typeof depop === "object" ? (depop as Record<string, unknown>).measurements : null;
+  const values = block && typeof block === "object" ? (block as { values?: unknown }).values : null;
+  if (!Array.isArray(values)) return [];
+  return values.map((row, index) => {
+    const item = row && typeof row === "object" ? row as Record<string, unknown> : {};
+    return {
+      key: `depop_specifics.measurements.values.${index}.value`,
+      label: String(item.label || item.id || "Measurement"),
+      type: "number" as const,
+    };
+  });
+}
+
+/** Labels of the controls a marketplace's listing form always has, apart from category attributes. */
+const CATEGORY_FORM_LABELS: Record<string, string[]> = {
+  ebay: ["Title", "Description", "Price", "eBay price", "Quantity", "Condition", "Condition Description",
+    "eBay category", "Primary Store Category", "Secondary Store Category", "Inventory location",
+    "Best Offer enabled", "Auto Accept Price", "Minimum Offer Price"],
+  poshmark: ["Title", "Description", "Price", "Poshmark price", "Brand", "Condition", "Primary Color",
+    "Secondary Color", "Original Price", "Sub-category", "Quantity"],
+  mercari: ["Title", "Description", "Price", "Mercari price", "Brand", "Condition"],
+  depop: ["Title", "Description", "Price", "Depop price", "Brand", "Condition", "Category", "Source",
+    "Age", "Style", "Parcel Size"],
+  etsy: ["Title", "Description", "Price", "Etsy price", "Quantity", "Who Made It?", "What Is It?",
+    "When Was It Made?", "Etsy category"],
+  sellwild: ["Title", "Description", "Price", "Sellwild price", "Category", "Condition"],
+  vinted: ["Title", "Description", "Price", "Vinted price", "Category", "Condition", "Brand", "Size",
+    "Color", "Package size"],
+};
+
+function foldFieldName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * A known category shows its own attributes plus the marketplace's real controls.
+ * Saved values the form does not show stay on the listing; Show all reveals their rows.
+ */
+function limitToCategoryForm(
+  rows: EditorField[],
+  forms: MarketplaceForm[] | undefined,
+  tab: string,
+  showAll: boolean,
+): EditorField[] {
+  if (showAll || tab === "general") return rows;
+  const form = forms?.find((entry) => entry.marketplace === tab);
+  if (!form?.known) return rows;
+  const allowed = new Set(
+    form.fields
+      .filter((field) => field.on_form !== false)
+      .flatMap((field) => [foldFieldName(field.label), foldFieldName(field.key)]),
+  );
+  const core = new Set((CATEGORY_FORM_LABELS[tab] ?? []).map(foldFieldName));
+  return rows.filter((field) => {
+    if (field.key.includes(".measurements.")) return true;
+    const label = foldFieldName(field.label.replace(/\s*\*$/, ""));
+    const leaf = foldFieldName(field.key.split(".").pop() || "");
+    return core.has(label) || allowed.has(label) || allowed.has(leaf);
+  });
+}
+
 /** Every field that marketplace submits, shared listing values first, then its own. */
 export function fieldsForMarketplaceForm(
   listing: ListingData | undefined,
   tab: string,
   forms: MarketplaceForm[] | undefined,
+  showAll = false,
 ): EditorField[] {
-  if (DIRECT_FORM_MARKETS.has(tab)) return forms?.some((form) => form.marketplace === tab && form.native) ? schemaFieldsForTab(forms, tab) || [] : [];
+  const catalog = forms?.find((form) => form.marketplace === tab);
+  // A direct marketplace with its native catalog, or with no category schema yet,
+  // does not fall back to a hand-kept form. A known category schema still merges.
+  if (DIRECT_FORM_MARKETS.has(tab) && (catalog?.native || !catalog?.fields.length)) {
+    const rows = catalog?.native ? schemaFieldsForTab(forms, tab) || [] : [];
+    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(rows, tab), listing, tab), forms, tab, showAll);
+  }
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
   if (tab === "general") return withoutObjects(own);
-  const schema = schemaFieldsForTab(forms, tab) ?? [];
+  // Sellwild's category and condition are the direct picks beside List. Its other
+  // category attributes still come from the same schema the other marketplaces use.
+  const schema = (schemaFieldsForTab(forms, tab) ?? []).filter((field) => (
+    tab !== "sellwild" || !["category", "condition"].includes(field.label.replace(/\s*\*$/, "").toLowerCase())
+  ));
   let shared = PACKAGE_MARKETPLACES.has(tab)
     ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
     : SHARED_FORM_FIELDS;
@@ -847,7 +1007,12 @@ export function fieldsForMarketplaceForm(
           optionsSource: field.optionsSource === "marketplace" ? field.optionsSource : match.optionsSource }
       : field;
   });
-  return withoutObjects(named);
+  return limitToCategoryForm(
+    finishMarketplaceRows(withoutObjects(withMarketplacePrice(named, tab)), listing, tab),
+    forms,
+    tab,
+    showAll,
+  );
 }
 
 /** Fields for this tab from Vendoo's own schema, or null when it has none. */
@@ -874,7 +1039,8 @@ function schemaFieldsForTab(
     label: field.required ? `${field.label} *` : field.label,
     required: field.required,
     multi: field.multi,
-    selectionOnly: field.options_source === "reference" ? true : field.selection_only,
+    selectionOnly: field.selection_only || field.options_source === "reference"
+      || (field.options.length > 0 && (field.options_source === "marketplace" || field.options_source === "vendoo")),
     maxValues: field.max_values,
     maxLength: field.max_length,
     optionsSource: field.options_source,

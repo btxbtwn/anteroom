@@ -58,7 +58,7 @@ class SchemaProbeHelpersTest(unittest.TestCase):
         seeded = seed_probe_general_fields({"category_path": MEN_PATH}, '{"condition":"Good"}')
         self.assertEqual(seeded["condition"], "Good")
         self.assertEqual(seeded["title"], "Draft listing")
-        self.assertEqual(seeded["zipCode"], "70125")
+        self.assertNotIn("zipCode", seeded)
         self.assertEqual(seeded["quantity"], 1)
 
         kept = seed_probe_general_fields({

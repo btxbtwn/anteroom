@@ -316,6 +316,29 @@ async def stream_job_preview(job_id: str, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{job_id}/logs")
+def get_job_logs(job_id: str, db: Session = Depends(get_db)):
+    """Events and the fill log for one job, in one place."""
+    repo = JobRepo(db)
+    job = repo.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    from vendoo_studio.services.fill_log import FillLogService
+
+    events = [
+        {
+            "id": event.id,
+            "sequence": event.sequence,
+            "event_type": event.event_type,
+            "step": event.step,
+            "payload": event.payload,
+            "created_at": event.created_at.isoformat() if event.created_at else "",
+        }
+        for event in repo.get_events(job_id)
+    ]
+    return {"job_id": job_id, "events": events, "fill_log": FillLogService(db).report_for_job(job)}
+
+
 @router.get("/{job_id}/fill-log")
 def get_job_fill_log(job_id: str, db: Session = Depends(get_db)):
     repo = JobRepo(db)

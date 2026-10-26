@@ -126,15 +126,25 @@ def normalize_ebay_inventory_location(value: object) -> str:
 
 
 def get_ebay_inventory_location() -> str:
+    """Ship-from ZIP or place. Empty until this install saves one."""
     raw = read_settings().get(EBAY_INVENTORY_LOCATION_KEY)
+    if raw is None or not str(raw).strip():
+        return ""
     try:
         return normalize_ebay_inventory_location(raw)
     except ValueError:
-        return DEFAULT_EBAY_INVENTORY_LOCATION
+        return ""
 
 
 def set_ebay_inventory_location(value: object) -> str:
-    location = normalize_ebay_inventory_location(value)
+    text = " ".join(str(value or "").split())
+    if not text:
+        def clear(payload: dict) -> None:
+            payload[EBAY_INVENTORY_LOCATION_KEY] = ""
+
+        update_settings(clear)
+        return ""
+    location = normalize_ebay_inventory_location(text)
 
     def mutator(payload: dict) -> None:
         payload[EBAY_INVENTORY_LOCATION_KEY] = location

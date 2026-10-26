@@ -63,9 +63,9 @@ function poshmarkEditorForm(listing, catalog, styleTags = []) {
       specifics.smartSell?.minimumPrice ?? specifics.smartSellMinimumPrice ?? specifics.minimumPrice ?? listing.form?.specifics?.smartSell?.minPrice ?? '',
       { input_type: 'number', required: specifics.smartSell?.enabled === true }),
     nativeEditorField('cost', 'Cost', listing.cost, { input_type: 'number', locked: true, help: 'Change cost in Item Details.' }),
-    nativeEditorField('sku', 'SKU', listing.sku, { max_length: 50 }),
-    nativeEditorField('quantity', 'Quantity', 1, { locked: true, help: 'Direct Poshmark listings currently send one item.' }),
-    nativeEditorField('poshmark_specifics.originalPrice', 'Original Price', 0, { locked: true }),
+    nativeEditorField('poshmark_specifics.poshmarkSku', 'SKU', specifics.poshmarkSku ?? listing.sku ?? '', { max_length: 50 }),
+    nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number' }),
+    nativeEditorField('poshmark_specifics.originalPrice', 'Original Price', poshmarkOriginalPrice(listing), { input_type: 'number' }),
   ];
   return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields,
     notes: ['Only fields supported by direct List are shown. Shipping uses your Poshmark account settings.'] };
@@ -127,39 +127,61 @@ function depopEditorForm(listing, attributes, parcels = []) {
   fields.push(nativeEditorChoice('depop_specifics.parcelSize', 'Parcel Size', specifics.parcelSize || '',
     parcels.map(row => String(row.title)), { required: true }),
   nativeEditorField('tags', 'Hashtags', listing.tags || [], { multi: true, max_values: DEPOP_MAX_HASHTAGS }),
-  nativeEditorField('quantity', 'Quantity', 1, { locked: true, help: 'Direct Depop listings currently send one item.' }));
+  nativeEditorField('depop_specifics.sku', 'SKU', specifics.sku ?? listing.sku ?? ''),
+  nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number' }));
   return { marketplace: 'depop', native: true, known: true, category_id: depopDirectId(category), fields,
     notes: ['Buyer pays for Depop shipping. Location comes from the ship-from address selected in Settings.',
       ...(!parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [])] };
 }
 
-function mercariEditorForm(listing, categories = []) {
+function mercariEditorForm(listing, master) {
+  const allCategories = mercariCatalogCategories(master);
+  const categories = allCategories.filter(row => !row.parent);
+  if (master.itemCategories.some(row => Number(row.id) === mercariCategoryId(listing))) {
+    listing = mercariCatalogListing(listing, master);
+  } else listing = { ...listing, form: { ...listing.form, sizes: [] } };
   const category = mercariCategoryId(listing);
   const size = mercariSize(listing, category);
   const specifics = listing.mercari_specifics || {};
+  const sizes = listing.form?.sizes || [];
+  const sizeChoices = sizes.map(row => ({ value: row.id, label: sizes.filter(other => other.name === row.name).length > 1
+    ? `${row.name} · ${row.group_name || row.id}` : row.name || row.title }));
   const fields = [
     ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1000 }),
     nativeEditorChoice('direct_category_ids.mercari', 'Category', category || '', categories,
-      { required: true, options_source: 'reference', clears: ['mercari_specifics.nativeSizeId'], help: 'Recorded category catalog. List checks that the selected category is a leaf.' }),
-    nativeEditorField('brand', 'Brand', listing.form?.overrides?.brand || listing.brand,
-      { help: 'List requires an exact Mercari brand match. The current brand lookup requires Vendoo sign-in.' }),
+      { required: true, clears: ['mercari_specifics.nativeSizeId'], help: 'Categories from Mercari. Choose a category with no subcategories.' }),
+    nativeEditorChoice('brand', 'Brand', master.itemBrands.find(row => marketplaceNameKey(row.name) === marketplaceNameKey(listing.brand))?.name || listing.brand,
+      master.itemBrands.map(row => row.name),
+      { help: 'An exact match from Mercari’s own brand list is required, or select No brand below.' }),
+    nativeEditorField('mercari_specifics.noBrand', 'No brand / Not sure', specifics.noBrand === true, { input_type: 'boolean' }),
     nativeEditorChoice('mercari_specifics.condition', 'Condition', mercariConditionId(specifics.condition || listing.condition),
       ['New', 'Like New', 'Good', 'Fair', 'Poor'].map((label, index) => ({ label, value: index + 1 })), { required: true }),
   ];
+  const heldCategory = listing.form?.overrides?.categoryV2 || listing.marketplace_category_objects?.mercari;
+  if (!categories.some(row => String(row.value) === String(category)) && String(heldCategory?.id) === String(category)) {
+    const label = (heldCategory.displayPath || []).join(' > ');
+    if (label) fields.find(row => row.path === 'direct_category_ids.mercari').option_values[label] = String(category);
+  }
   if (listing.form?.sizes?.length || size.none === 'unknown') fields.push(nativeEditorChoice('mercari_specifics.nativeSizeId', 'Size',
     size.id ?? specifics.nativeSizeId ?? specifics.size ?? listing.size ?? '',
-    (listing.form?.sizes || []).map(row => ({ label: row.name || row.title, value: row.id })),
-    { required: true, options_source: 'reference', help: 'Mercari size catalog mirrored by Vendoo; List verifies the draft’s saved size.' }));
+    sizeChoices,
+    { required: true, help: 'Sizes from Mercari for this category. The saved draft is checked before listing.' }));
   fields.push(nativeEditorField('weight_oz', 'Packed weight (oz)', mercariWeightOz(listing), { locked: true, help: 'Change the package in Item Details.' }),
     nativeEditorField('package_dimensions_in', 'Package dimensions (in)', listing.package_dimensions_in, { locked: true }),
-    nativeEditorField('mercari_specifics.shippingSummary', 'Shipping', 'Buyer pays · Mercari prepaid label', { locked: true }),
-    nativeEditorField('mercari_specifics.offersSummary', 'Offers', 'Off', { locked: true }));
+    nativeEditorChoice('mercari_specifics.shippingPayerId', 'Who pays shipping', specifics.shippingPayerId ?? 1,
+      [{ label: 'Buyer', value: 1 }, { label: 'Seller', value: 2 }]),
+    nativeEditorChoice('mercari_specifics.shippingClassId', 'Shipping label', listing.form?.specifics?.shipping?.carrierId || '',
+      (listing.form?.shipping_classes || []).map(row => ({ label: `${row.carrierDisplayName} · ${row.name} · $${(row.fee / 100).toFixed(2)}`, value: row.id })),
+      { required: true, help: 'Live Mercari labels for this package. Change packed weight and dimensions in Item Details.' }),
+    nativeEditorField('mercari_specifics.smartPricing.enabled', 'Smart pricing', specifics.smartPricing?.enabled === true, { input_type: 'boolean' }),
+    nativeEditorField('mercari_specifics.smartPricing.minimumPrice', 'Floor price', specifics.smartPricing?.minimumPrice ?? '',
+      { input_type: 'number', required: specifics.smartPricing?.enabled === true, help: 'The lowest whole-dollar price Smart Pricing may use.' }));
   return { marketplace: 'mercari', native: true, known: true, category_id: String(category || ''), fields,
-    notes: ['These are the fields direct List supports. Shipping class is calculated from the packed weight. Mercari tags and offers are not supported by direct List.'] };
+    notes: ['Mercari prepaid labels only. Review offer settings on Mercari before publishing.'] };
 }
 
 async function handleNativeMarketplaceForm(msg) {
-  const { marketplace, listing = {}, categories = [] } = msg.payload || {};
+  const { marketplace, listing = {} } = msg.payload || {};
   const deadline = Date.now() + 30000;
   try {
     if (marketplace === 'poshmark') {
@@ -173,7 +195,11 @@ async function handleNativeMarketplaceForm(msg) {
         parcels = (Array.isArray(providers) ? providers : providers?.objects || []).flatMap(row => row.parcelSizes || row.parcel_sizes || []);
       } catch { /* Catalog fields remain usable without an account shipping read. */ }
       sendBrowserResult(msg, { ok: true, form: depopEditorForm(listing, attributes, parcels) });
-    } else if (marketplace === 'mercari') sendBrowserResult(msg, { ok: true, form: mercariEditorForm(listing, categories) });
+    } else if (marketplace === 'mercari') {
+      const master = await mercariCatalogData(deadline);
+      const prepared = mercariShippingListing(listing, await mercariShippingClasses(listing, deadline));
+      sendBrowserResult(msg, { ok: true, form: mercariEditorForm(prepared, master) });
+    }
     else sendBrowserResult(msg, { ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {
     sendBrowserResult(msg, { ok: false, error: error.message || 'The marketplace catalog could not be read.' });

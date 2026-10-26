@@ -1110,6 +1110,19 @@ def delete_error_logs():
     return {"ok": True}
 
 
+@router.get("/app-logs")
+def get_app_logs(
+    level: str = "info",
+    since: str = "",
+    grep: str = "",
+    limit: int = 200,
+):
+    """Server and extension log lines kept on this Mac. Secrets are redacted."""
+    from vendoo_studio.services.error_log import query_entries
+
+    return {"entries": query_entries(level=level, since=since or None, grep=grep or None, limit=limit)}
+
+
 class SaleDetectionConfig(BaseModel):
     marketplace: str | None = None
     enabled: bool | None = None

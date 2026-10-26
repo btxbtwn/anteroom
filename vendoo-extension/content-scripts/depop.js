@@ -244,6 +244,40 @@ if (typeof module !== 'undefined' && module.exports) {
     });
   }
 
+  function fillDepopMeasurements(data) {
+    const rows = data?.depop_specifics?.measurements?.values
+      || data?.measurements?.values
+      || [];
+    if (!Array.isArray(rows) || !rows.length) return;
+    const sections = [...document.querySelectorAll('section, fieldset, div')].filter((node) =>
+      /add measurements/i.test(node.textContent || '') && node.querySelector('input'));
+    sections.sort((a, b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length);
+    const root = sections[0] || document;
+    const inputs = [...root.querySelectorAll('input')].filter((input) => {
+      const type = (input.getAttribute('type') || 'text').toLowerCase();
+      return type === 'text' || type === 'number' || type === '';
+    });
+    rows.forEach((row) => {
+      const labels = [row.label, row.id].filter(Boolean).map((label) => String(label).toLowerCase());
+      const input = inputs.find((candidate) => {
+        const blob = [
+          candidate.getAttribute('aria-label'),
+          candidate.getAttribute('name'),
+          candidate.getAttribute('placeholder'),
+          candidate.id,
+          candidate.closest('label')?.textContent,
+        ].join(' ').toLowerCase();
+        return labels.some((label) => label && blob.includes(label.replace(/_/g, ' ')));
+      });
+      if (!input) return;
+      input.focus();
+      input.value = String(row.value ?? '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      console.log(`[${PLATFORM}] Measurement ${row.label || row.id}: ${row.value}`);
+    });
+  }
+
   async function fillForm(data) {
     console.log(`[${PLATFORM}] Starting form fill...`, data);
 
@@ -285,6 +319,10 @@ if (typeof module !== 'undefined' && module.exports) {
           }
         }, 700);
       }
+
+      // Depop's add-measurements section. Labels are matched loosely because the
+      // live field names are not in this extension's fixtures.
+      fillDepopMeasurements(data);
 
       // Style tags (up to 3) - from data.style or data.styleTags
       if (data.style || data.styleTags) {

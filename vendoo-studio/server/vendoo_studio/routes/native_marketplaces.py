@@ -20,6 +20,11 @@ class ResetRequest(BaseModel):
     confirm: bool = False
 
 
+class SaveDraftRequest(BaseModel):
+    model_config = {"extra": "forbid"}
+    revision_id: str
+
+
 async def _reply(call: Awaitable[dict]) -> dict:
     try:
         return await call
@@ -65,6 +70,11 @@ async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, db
 @router.post("/{marketplace}/update")
 async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest, db: Session = Depends(get_db)):
     return await _reply(native.update_live(conv_id, marketplace, body, db))
+
+
+@router.post("/{marketplace}/draft")
+async def save_draft(conv_id: str, marketplace: Marketplace, body: SaveDraftRequest, db: Session = Depends(get_db)):
+    return await _reply(native.save_draft(conv_id, marketplace, body.revision_id, db))
 
 
 @router.post("/{marketplace}/cancel")

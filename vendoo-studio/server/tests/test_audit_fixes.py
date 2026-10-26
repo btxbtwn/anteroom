@@ -1146,7 +1146,10 @@ class ListingIntegrityRouteTest(unittest.TestCase):
         response = self.client.put(url, json={"listing": {**listing, "sku": "BIN4-001"}})
         self.assertEqual(response.status_code, 200)
         self.db.refresh(self.conv)
-        self.assertEqual(json.loads(self.conv.notes), {"sellerNotes": "keep", "sku": "BIN4-001"})
+        self.assertEqual(
+            json.loads(self.conv.notes),
+            {"sellerNotes": "keep", "sku": "BIN4-001", "askingPrice": "14.00"},
+        )
 
     def test_restore_rejects_cross_conversation_revision(self):
         listing_repo = ListingRepo(self.db)
@@ -1211,7 +1214,8 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.db.refresh(job)
         self.assertEqual(job.listing_snapshot.get("size"), "10")
-        self.assertEqual(job.listing_snapshot.get("ebay_specifics", {}).get("size"), "10")
+        # The save set eBay's size itself, so that value stays.
+        self.assertEqual(job.listing_snapshot.get("ebay_specifics", {}).get("size"), "M")
         self.assertEqual(job.listing_snapshot.get("platforms"), ["ebay"])
         latest = ListingRepo(self.db).get_revisions(self.conv.id)[0]
         self.assertEqual(latest.source, "user_form")

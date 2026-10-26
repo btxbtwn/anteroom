@@ -161,7 +161,7 @@ if (typeof document !== 'undefined') {
       const description = findField(['description']);
       const price = findField(['price']);
       if (!title && !description) {
-        return { ok: false, error: 'Vinted\'s listing form was not on the page. Nothing was published.' };
+        return { ok: false, error: 'Vinted\'s listing form was not on the page. Sign in to Vinted in this Chrome profile, then list again. Nothing was published.' };
       }
       if (title && data.title) setNativeValue(title, String(data.title).slice(0, 100));
       if (description && data.description) setNativeValue(description, String(data.description));

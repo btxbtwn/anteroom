@@ -489,18 +489,76 @@ async def listing_choices(client: EbayClient) -> dict[str, str]:
     return chosen
 
 
-def best_offer_terms(form: dict, price: str) -> dict:
-    """Best Offer with the Vendoo path's floors: accept at list - $2, decline under list - $4."""
+def best_offer_terms(form: dict, price: str, listing: dict | None = None) -> dict:
+    """Best Offer for create and update. The seller's prices win; otherwise accept at list - $2 and decline under list - $4."""
+    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_enabled, offer_floors
+
+    ebay = (listing or {}).get("ebay_specifics") if isinstance((listing or {}).get("ebay_specifics"), dict) else {}
+    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
     fixed = ((form.get("specifics") or {}).get("pricingFormatDetails") or {}).get("fixedPrice") or {}
-    terms: dict = {"bestOfferEnabled": True}
-    for key, name in (("acceptOffersOfAtLeast", "autoAcceptPrice"), ("declineOffersLowerThan", "autoDeclinePrice")):
+    if not best_offer_enabled(chosen) or fixed.get("allowBestOffer") is False and not chosen:
+        return {"bestOfferEnabled": False}
+    if chosen and not best_offer_enabled(chosen):
+        return {"bestOfferEnabled": False}
+    floors = offer_floors(price) or ("", "")
+
+    def _amount(raw) -> Decimal | None:
         try:
-            amount = Decimal(str(fixed.get(key) or ""))
+            amount = Decimal(str(raw or "").replace("$", "").replace(",", "").strip())
         except ArithmeticError:
-            continue
-        if 0 < amount < Decimal(price):
-            terms[name] = {"value": format(amount.quantize(Decimal("0.01")), "f"), "currency": "USD"}
+            return None
+        return amount if amount > 0 else None
+
+    def _seller_amount(*keys: str) -> Decimal | None:
+        for key in keys:
+            if key not in chosen:
+                continue
+            if str(chosen.get(key) or "").strip() == "":
+                return None
+            return _amount(chosen.get(key))
+        return None
+
+    seller_accept = _seller_amount("autoAcceptPrice")
+    seller_minimum = _seller_amount("minimumOfferPrice", "autoDeclinePrice")
+    accept = seller_accept if seller_accept is not None else _amount(fixed.get("acceptOffersOfAtLeast")) or _amount(floors[0])
+    minimum = seller_minimum if seller_minimum is not None else _amount(fixed.get("declineOffersLowerThan")) or _amount(floors[1])
+    # A formula floor on the wrong side of a price the seller set is left off.
+    if seller_accept is not None and seller_minimum is None and minimum is not None and not minimum < seller_accept:
+        minimum = None
+    if seller_minimum is not None and seller_accept is None and accept is not None and not seller_minimum < accept:
+        accept = None
+    if accept is not None and minimum is not None and not minimum < accept:
+        accept = minimum = None
+    price_amount = _amount(price)
+    parsed: dict[str, Decimal] = {}
+    if accept is not None and price_amount is not None and accept < price_amount:
+        parsed["autoAcceptPrice"] = accept
+    if minimum is not None and price_amount is not None and minimum < price_amount:
+        parsed["autoDeclinePrice"] = minimum
+    terms: dict = {"bestOfferEnabled": True}
+    for name, amount in parsed.items():
+        terms[name] = {"value": format(amount.quantize(Decimal("0.01")), "f"), "currency": "USD"}
     return terms
+
+
+def _best_offer_xml(item, terms: dict) -> None:
+    """Trading API Best Offer on a listing that has no inventory offer."""
+    from xml.etree import ElementTree as ET
+
+    details = ET.SubElement(item, "BestOfferDetails")
+    ET.SubElement(details, "BestOfferEnabled").text = "true" if terms.get("bestOfferEnabled") else "false"
+    if not terms.get("bestOfferEnabled"):
+        return
+    listing = None
+    for name, tag in (("autoAcceptPrice", "BestOfferAutoAcceptPrice"), ("autoDeclinePrice", "MinimumBestOfferPrice")):
+        value = (terms.get(name) or {}).get("value")
+        if not value:
+            continue
+        if listing is None:
+            listing = ET.SubElement(item, "ListingDetails")
+        node = ET.SubElement(listing, tag)
+        node.set("currencyID", "USD")
+        node.text = value
 
 
 async def _complete_aspects(client: EbayClient, category_id: str, aspects: dict[str, list[str]]) -> dict[str, list[str]]:
@@ -681,8 +739,10 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
         quantity = 0
     if not 1 <= quantity <= 10000:
         raise missing("Enter an eBay quantity from 1 to 10000.", "quantity")
+    from vendoo_studio.services.seller_overrides import price_for
+
     try:
-        price = dollars(money_cents(str(snapshot.get("price"))))
+        price = dollars(money_cents(str(price_for(snapshot, "ebay"))))
     except (ValueError, ArithmeticError) as exc:
         raise missing("Set a positive eBay price before listing.", "price") from exc
     category_id = ebay_category_id(snapshot)
@@ -736,7 +796,7 @@ def _cached_aspect_gaps(snapshot: dict, form: dict) -> list[dict]:
     return []
 
 
-async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict) -> dict:
+async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict, terms: dict | None = None) -> dict:
     """A pasted eBay link has an item ID and no inventory offer. Revise that listing in place."""
     from xml.etree import ElementTree as ET
 
@@ -753,6 +813,8 @@ async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict) 
     for name, value in {"ItemID": listing_id, "Title": fields["title"], "Description": description_html(fields["description"]),
                         "StartPrice": fields["price"], "Quantity": str(fields["quantity"])}.items():
         ET.SubElement(item, name).text = value
+    if terms:
+        _best_offer_xml(item, terms)
     await client.request("POST", "/ws/api.dll", xml=trading_xml(root), call="ReviseFixedPriceItem")
     after = await owned_listing(client, listing_id)
     if after["title"] != fields["title"] or str(after.get("price")) != fields["price"]:
@@ -818,12 +880,17 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         client = await EbayClient.connect()
         form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
+        from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
+
+        problem = best_offer_error(snapshot)
+        if problem:
+            raise ValueError(problem)
         listing_id = str(binding.get("listing_id") or binding.get("ebay_listing_id") or "")
         offer_id = str(binding.get("ebay_offer_id") or "")
         if not re.fullmatch(r"\d{6,20}", listing_id):
             raise ValueError("eBay has not confirmed which live listing to update.")
         if not offer_id:
-            return await _revise_by_item_id(client, listing_id, fields)
+            return await _revise_by_item_id(client, listing_id, fields, best_offer_terms(form, fields["price"], snapshot))
         offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
         current_id = str((offer.get("listing") or {}).get("listingId") or "")
         if offer.get("status") != "PUBLISHED" or current_id != listing_id:
@@ -838,6 +905,7 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
                              body=_inventory_body(fields, aspects, image_urls, snapshot, form))
         policies = offer.get("listingPolicies") if isinstance(offer.get("listingPolicies"), dict) else {}
+        policies = {**policies, "bestOfferTerms": best_offer_terms(form, fields["price"], snapshot)}
         body = _offer_body(sku, fields, offer.get("merchantLocationKey"), policies)
         body.pop("includeCatalogProductDetails")
         await client.request("PUT", f"/sell/inventory/v1/offer/{segment(offer_id)}", body=body)
@@ -868,6 +936,11 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         client = await EbayClient.connect()
         form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
         fields = _listing_fields(snapshot, form)
+        from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
+
+        problem = best_offer_error(snapshot)
+        if problem:
+            raise ValueError(problem)
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
         await _check_condition(client, fields["category_id"], fields["condition"])
         choices = await listing_choices(client)
@@ -889,7 +962,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                              body=_inventory_body(fields, aspects, image_urls, snapshot, form))
         body = _offer_body(sku, fields, choices["merchantLocationKey"], {
             "fulfillmentPolicyId": choices["fulfillmentPolicyId"], "paymentPolicyId": choices["paymentPolicyId"],
-            "returnPolicyId": choices["returnPolicyId"], "bestOfferTerms": best_offer_terms(form, fields["price"]),
+            "returnPolicyId": choices["returnPolicyId"], "bestOfferTerms": best_offer_terms(form, fields["price"], snapshot),
         })
         offer_id = str(binding.get("ebay_offer_id") or "")
         if offer_id:
