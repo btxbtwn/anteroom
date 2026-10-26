@@ -1,3 +1,4 @@
+import { OrderRecovery } from "../OrderRecovery";
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, RefreshCwIcon, Settings2Icon } from "lucide-react";
@@ -70,7 +71,7 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
             {!period.valid ? <PageNote>Choose valid dates through today, up to one year at a time.</PageNote> : null}
           </> : null}
           {tab === "Dashboard" ? <><EtsyDashboard shop={shop.data} shopError={shop.error} scope={scope} period={period} onOpenOrders={() => setTab("Orders")} /><EtsySaleAlerts onOpenListing={onOpenListing} /></>
-            : tab === "Orders" ? <EtsyOrders scope={scope} period={period} />
+            : tab === "Orders" ? <><OrderRecovery key={scope} marketplace="etsy" connectedAt={account?.connectedAt ?? null} /><EtsyOrders scope={scope} period={period} /></>
               : <EtsyListings scope={scope} onOpenListing={onOpenListing} />}
         </>}
       </div>

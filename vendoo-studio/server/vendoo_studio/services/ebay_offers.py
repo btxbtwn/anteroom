@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.models.conversation import Conversation, new_id
 from vendoo_studio.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
-from vendoo_studio.models.marketplace_sale import MarketplaceSale
+from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
 from vendoo_studio.services import ebay_api
 from vendoo_studio.services.keychain import get_marketplace_accounts
 from vendoo_studio.services.marketplace_accounts import SignInRequired
@@ -60,7 +60,7 @@ def _local_check(db: Session, rule: EbayOfferRule) -> None:
     conv = db.get(Conversation, rule.conversation_id)
     if not conv or conv.status == "sold" or _listing_id(conv) != rule.listing_id:
         raise OfferConflict("This item sold or its eBay listing changed. Sync from Vendoo before making offers.")
-    if db.query(MarketplaceSale.id).filter(MarketplaceSale.conversation_id == conv.id).first():
+    if db.query(MarketplaceSale.id).filter(MarketplaceSale.conversation_id == conv.id, MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending"))).first():
         raise OfferConflict("A marketplace reported this item sold. Offers are blocked.")
     if db.query(EbayOfferAttempt.id).filter(
         EbayOfferAttempt.rule_id == rule.id,
@@ -90,7 +90,7 @@ def status(db: Session) -> dict:
     rules = {r.listing_id: r for r in db.query(EbayOfferRule).filter_by(account_id=seller).all()}
     listings = []
     seen = set()
-    sold = {row[0] for row in db.query(MarketplaceSale.conversation_id).all()}
+    sold = {row[0] for row in db.query(MarketplaceSale.conversation_id).filter(MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending"))).all()}
     for conv in db.query(Conversation).filter(Conversation.status != "sold").order_by(Conversation.title).all():
         listing_id = _listing_id(conv)
         if not listing_id or listing_id in seen or conv.id in sold:

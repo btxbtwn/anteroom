@@ -24,7 +24,8 @@ function listJoin(names: string[]): string {
 export function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; openInVendoo?: ReactNode }) {
   const queryClient = useQueryClient();
   const soldOn = marketplaceName(sale.marketplace);
-  const exhausted = sale.stockStatus === "sold_out";
+  const reversed = sale.orderStatus === "cancelled" || sale.orderStatus === "refunded" || sale.orderStatus === "cancellation_pending";
+  const exhausted = !reversed && sale.stockStatus === "sold_out";
   const elsewhere = listJoin(sale.listedElsewhere.map(marketplaceName));
   const done = useMutation({
     mutationFn: () => api.marketplaceSales.dismiss(sale.id),
@@ -32,16 +33,18 @@ export function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; open
   });
 
   return (
-    <Alert variant="success" role="status" controlAlignment="first-line" className="mx-3 mt-2.5 shrink-0">
+    <Alert variant={reversed ? "warning" : "success"} role="status" controlAlignment="first-line" className="mx-3 mt-2.5 shrink-0">
       <BadgeDollarSignIcon />
       <AlertTitle>
-        Sold on {soldOn}
+        {sale.orderStatus === "cancelled" ? "Cancelled" : sale.orderStatus === "refunded" ? "Refunded" : sale.orderStatus === "cancellation_pending" ? "Cancellation pending" : "Sold"} on {soldOn}
         {sale.quantity && sale.quantity > 1 ? ` (${sale.quantity})` : ""}
       </AlertTitle>
       <AlertDescription className="gap-2">
         <p>
           {soldWhen(sale) ? `${soldOn} reported this sale ${soldWhen(sale)}. ` : null}
-          {sale.stockStatus === "remaining"
+          {reversed
+            ? "The marketplace updated this order. No inventory was restocked or relisted. Review the order and check stock before making changes."
+            : sale.stockStatus === "remaining"
             ? `${sale.remainingQuantity} units remain on ${soldOn}. Review quantities on other marketplaces before making changes.`
             : sale.stockStatus === "unknown"
               ? "Remaining stock is not verified. Click Sync to check linked marketplace inventory before deciding what to delist."

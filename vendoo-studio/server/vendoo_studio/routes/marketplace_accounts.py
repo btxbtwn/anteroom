@@ -5,7 +5,7 @@ publish or delist; seller-confirmed marketplace actions are handled separately.
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -71,10 +71,7 @@ def _other_marketplaces(listings: dict, sold_on: str) -> list[str]:
                   and entry.get("state") not in {"deleted", "deleting"})
 
 
-def _sale_out(db: Session, sale: MarketplaceSale, conv: Conversation | None, listings: dict) -> dict:
-    from vendoo_studio.services.sale_inventory import stock_after_sale
-
-    stock = stock_after_sale(db, conv.id, sale.marketplace, sale.listing_id) if conv else {"status": "unknown", "remaining": None}
+def _sale_out(sale: MarketplaceSale, conv: Conversation | None, listings: dict, stock: dict) -> dict:
     return {
         "stockStatus": stock["status"], "remainingQuantity": stock["remaining"],
         "id": sale.id,
@@ -82,6 +79,7 @@ def _sale_out(db: Session, sale: MarketplaceSale, conv: Conversation | None, lis
         "orderId": sale.order_id,
         "listingId": sale.listing_id,
         "quantity": sale.quantity,
+        "orderStatus": sale.order_status,
         "state": sale.state,
         "soldAt": sale.sold_at.isoformat() if sale.sold_at else None,
         "receivedAt": sale.received_at.isoformat() if sale.received_at else None,
@@ -105,7 +103,43 @@ def list_sales(state: str | None = "new", conversation_id: str | None = None, db
     # An order can have several lines for one item. Read its current listings
     # once, rather than re-querying inventory for every line in the response.
     listings = {conv_id: marketplace_delist.listings(db, conv_id) for conv_id in convs}
-    return {"sales": [_sale_out(db, s, convs.get(s.conversation_id), listings.get(s.conversation_id, {})) for s in sales]}
+    from vendoo_studio.services.sale_inventory import stock_after_sale
+
+    stocks = {}
+    for sale in sales:
+        key = (sale.conversation_id, sale.marketplace, sale.listing_id)
+        if sale.conversation_id in convs and key not in stocks:
+            stocks[key] = stock_after_sale(db, *key)
+    return {"sales": [_sale_out(s, convs.get(s.conversation_id), listings.get(s.conversation_id, {}),
+                               stocks.get((s.conversation_id, s.marketplace, s.listing_id), {"status": "unknown", "remaining": None}))
+                      for s in sales]}
+
+
+class RecoverRequest(BaseModel):
+    marketplace: Literal["ebay", "etsy"]
+    start: date
+    end: date
+    page: int = Field(default=1, ge=1, le=4000)
+    connected_at: str = Field(min_length=1, max_length=40)
+    connection: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    through: datetime | None = None
+
+
+@router.post("/api/marketplace-sales/recover")
+async def recover_orders(body: RecoverRequest, db: Session = Depends(get_db)):
+    """Read one page of changed orders into the local ledger. Never notify or delist."""
+    from vendoo_studio.services import order_recovery
+    from vendoo_studio.services.ebay_client import EbayFailure
+    from vendoo_studio.services.etsy_workspace import EtsyFailure
+
+    try:
+        return await order_recovery.recover(db, body.marketplace, body.start, body.end, body.page, body.connected_at, body.connection, body.through)
+    except (order_recovery.RecoveryError, EbayFailure, EtsyFailure) as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except marketplace_accounts.SignInRequired as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - provider payloads must never leak in a response
+        raise HTTPException(502, "Could not recover orders. Check the marketplace connection and retry this page.") from exc
 
 
 class ReconcileResponse(BaseModel):

@@ -37,6 +37,7 @@ export interface MarketplaceSale {
   id: string;
   marketplace: string;
   orderId: string;
+  orderStatus: "paid" | "partially_refunded" | "cancelled" | "refunded" | "cancellation_pending";
   listingId: string | null;
   quantity: number | null;
   stockStatus: "remaining" | "sold_out" | "unknown";

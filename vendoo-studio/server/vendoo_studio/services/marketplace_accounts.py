@@ -359,6 +359,9 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
     with session_factory() as db:
         sales = db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).all()
         for sale in sales:
+            if sale.order_status not in {"paid", "partially_refunded"}:
+                notes[sale.id] = "The order is cancelled, refunded, or awaiting cancellation review. Nothing was delisted."
+                continue
             if not sale.conversation_id:
                 notes[sale.id] = "Anteroom doesn't have this listing, so nothing else was delisted."
                 continue

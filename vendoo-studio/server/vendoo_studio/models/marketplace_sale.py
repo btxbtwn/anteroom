@@ -1,9 +1,4 @@
-"""Sales a marketplace reported directly, through Anteroom's relay.
-
-Vendoo stays the record of what is listed where. These rows are the faster
-signal: "this sold on eBay a moment ago", shown on the listing until the
-seller has delisted it elsewhere in Vendoo and marks it done.
-"""
+"""Direct order-line ledger and seller-reviewed sale alerts. No buyer details."""
 from __future__ import annotations
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
@@ -12,6 +7,8 @@ from vendoo_studio.database import Base
 from vendoo_studio.models.conversation import new_id, utcnow
 
 SALE_STATES = ("new", "dismissed")
+ORDER_STATUSES = ("paid", "partially_refunded", "cancelled", "refunded", "cancellation_pending")
+PAID_STATUSES = ("paid", "partially_refunded")
 
 
 class MarketplaceSale(Base):
@@ -30,7 +27,10 @@ class MarketplaceSale(Base):
     # The marketplace's own listing ID (eBay item ID, Etsy listing_id).
     listing_id = Column(String, nullable=True)
     quantity = Column(Integer, nullable=True)
-    # The Studio listing it matched, by the listing URL Vendoo reported.
+    order_status = Column(String, nullable=False, default="paid", server_default="paid")
+    order_updated_at = Column(DateTime, nullable=True)
+    order_observed_at = Column(DateTime, nullable=True)
+    # The local item matched by its validated marketplace listing identity.
     conversation_id = Column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
     state = Column(String, nullable=False, default="new")
     sold_at = Column(DateTime, nullable=True)
