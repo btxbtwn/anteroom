@@ -21,4 +21,3 @@ export interface MarketplaceImportResult {
   photo_count: number;
   warnings: string[];
 }
-
