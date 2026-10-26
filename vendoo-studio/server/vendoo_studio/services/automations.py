@@ -1,7 +1,7 @@
 """Create, preview, and run scheduled automations.
 
-A task the seller confirmed is approval for the actions it names, on the
-marketplaces it names, and for nothing else. Sold items are left alone.
+A confirmed schedule prepares local changes and item-specific marketplace
+proposals. Each marketplace write still needs a fresh seller confirmation.
 
 Listing age is the earliest real listed date: the first successful publish,
 the date on the Vendoo job, then the item's own listed timestamp.
@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import copy
 import logging
+import hashlib
+import json
 import re
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import String, cast, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -37,7 +40,7 @@ from vendoo_studio.models.conversation import Conversation, new_id, utcnow
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
-from vendoo_studio.repositories.queries import JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import JobRepo, ListingRepo, ConversationRepo
 from vendoo_studio.services.automation_age import listed_markets, load_listed_index, resolve_listed_at
 from vendoo_studio.services.automation_pricing import PriceError, drop_price
 from vendoo_studio.services.vendoo_import import parse_notes
@@ -106,7 +109,6 @@ def update_automation(db: Session, automation_id: str, body: dict, *, now: datet
         "actions": body.get("actions", row.actions),
         "marketplaces": body.get("marketplaces", row.marketplaces),
         "price_repeat": body.get("price_repeat", row.price_repeat),
-        "require_approval": body["require_approval"] if body.get("require_approval") is not None else row.require_approval,
         "activate": body.get("activate", False),
     }
     # A prompt on an update replaces the structured task, then explicit fields win.
@@ -116,7 +118,6 @@ def update_automation(db: Session, automation_id: str, body: dict, *, now: datet
             "timezone": merged["timezone"],
             "name": merged["name"],
             "price_repeat": merged["price_repeat"],
-            "require_approval": merged["require_approval"],
         }, now=now)
     else:
         spec = compile_spec(merged, now=now)
@@ -131,7 +132,6 @@ def update_automation(db: Session, automation_id: str, body: dict, *, now: datet
     row.actions = spec["actions"]
     row.marketplaces = spec["marketplaces"]
     row.price_repeat = spec.get("price_repeat")
-    row.require_approval = bool(spec.get("require_approval", True))
     moment = now or utcnow()
     if body.get("activate"):
         row.status = "active"
@@ -251,11 +251,10 @@ def confirm_proposal(db: Session, proposal: dict, *, now: datetime | None = None
     op = proposal.get("op") or "create"
     if op == "pause":
         return pause_automation(db, str(proposal.get("id") or ""))
+    body = {key: proposal.get(key) for key in ("name", "prompt", "timezone", "schedule", "filters", "actions", "marketplaces", "price_repeat")}
     if op == "update":
-        body = {key: proposal.get(key) for key in ("name", "prompt", "timezone", "schedule", "filters", "actions", "marketplaces", "price_repeat", "require_approval")}
         body["activate"] = True
         return update_automation(db, str(proposal["id"]), body, now=now)
-    body = {key: proposal.get(key) for key in ("name", "prompt", "timezone", "schedule", "filters", "actions", "marketplaces", "price_repeat", "require_approval")}
     body["activate"] = True
     return create_automation(db, body, now=now)
 
@@ -326,7 +325,6 @@ def compile_spec(body: dict, *, now: datetime | None = None, allow_incomplete: b
         else:
             raise
     actions = _stamp_price_repeat(actions, price_repeat)
-    require_approval = True if body.get("require_approval") is None else bool(body.get("require_approval"))
     if not base["name"]:
         base["name"] = _fallback_name(actions, filters)
     issues.extend(_readiness(actions, marketplaces, schedule, filters))
@@ -342,7 +340,6 @@ def compile_spec(body: dict, *, now: datetime | None = None, allow_incomplete: b
         "actions": actions,
         "marketplaces": marketplaces,
         "price_repeat": price_repeat,
-        "require_approval": require_approval,
         "issues": issues,
         "ready": not issues and schedule is not None and bool(actions),
         "summary": describe(schedule, base["timezone"]) if schedule else "",
@@ -565,31 +562,69 @@ def list_open_gaps(db: Session) -> list[dict]:
     return [_gap_view(row) for row in rows]
 
 
-def enqueue_approval(db: Session, automation: Automation, run_id: str | None, item: dict, revision_id: str, marketplaces: list[str]) -> AutomationApproval:
-    row = (
-        db.query(AutomationApproval)
-        .filter(
-            AutomationApproval.automation_id == automation.id,
-            AutomationApproval.conversation_id == item["conversation_id"],
-            AutomationApproval.status == "pending",
-        )
-        .one_or_none()
-    )
-    if row is None:
-        row = AutomationApproval(
-            automation_id=automation.id,
-            conversation_id=item["conversation_id"],
-            status="pending",
-            created_at=_naive(utcnow()),
-        )
-        db.add(row)
-    row.run_id = run_id
-    row.title = item.get("title")
-    row.revision_id = revision_id
-    row.marketplaces = list(marketplaces)
+def approval_snapshot(db: Session, conv_id: str, marketplaces: list[str]) -> tuple[str, dict]:
+    from vendoo_studio.models.conversation import Photo
+    from vendoo_studio.services.marketplace_delist import listings
+
+    conv = ConversationRepo(db).get(conv_id)
+    if conv is None:
+        raise AutomationError("This item is no longer in Anteroom.", 404)
+    from vendoo_studio.services.marketplace_identity import listing_reference
+
+    known = listings(db, conv_id)
+    targets = {}
+    for name in marketplaces:
+        entry = known.get(name) or {}
+        reference = listing_reference(name, entry.get("url"))
+        targets[name] = {key: entry.get(key) for key in ("listing_id", "state", "sold_here")}
+        targets[name]["url"] = reference[1] if reference else None
+    images = db.query(Photo).filter(Photo.conversation_id == conv_id).order_by(Photo.display_order, Photo.id).all()
+    snapshot = [_current_revision(db, conv_id), conv.title, conv.notes, conv.status, conv.settled_at,
+                [(image.id, image.checksum, image.stored_filename, image.display_order) for image in images], targets]
+    return hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest(), targets
+
+
+def _current_revision(db: Session, conv_id: str) -> str | None:
+    row = ListingRepo(db).get_current(conv_id)
+    return row.current_revision_id if row else None
+
+
+def enqueue_approval(db: Session, automation: Automation, run_id: str | None, item: dict, revision_id: str | None,
+                     marketplaces: list[str], action: str = "publish") -> AutomationApproval:
+    token, targets = approval_snapshot(db, item["conversation_id"], marketplaces)
+    pending = db.query(AutomationApproval).filter(AutomationApproval.automation_id == automation.id,
+        AutomationApproval.conversation_id == item["conversation_id"], AutomationApproval.status == "pending").all()
+    for previous in pending:
+        if (previous.revision_id == revision_id and previous.action == action and previous.marketplaces == marketplaces
+                and previous.review_basis == token):
+            return previous
+        previous.status = "superseded"
+        previous.decided_at = _naive(utcnow())
+    row = AutomationApproval(automation_id=automation.id, run_id=run_id, conversation_id=item["conversation_id"],
+        title=item.get("title"), revision_id=revision_id, marketplaces=list(marketplaces), action=action, targets=targets,
+        review_basis=token, status="pending", created_at=_naive(utcnow()))
+    db.add(row)
     db.commit()
     db.refresh(row)
     return row
+
+
+def approval_token(row: AutomationApproval) -> str:
+    return hashlib.sha256(json.dumps([row.id, row.action, row.revision_id, row.marketplaces, row.targets, row.review_basis], sort_keys=True).encode()).hexdigest()
+
+
+def claim_approval(db: Session, row: AutomationApproval, *, review_token: str, action: str, marketplaces: list[str], revision_id: str | None) -> None:
+    if action != row.action or marketplaces != row.marketplaces or revision_id != row.revision_id or review_token != approval_token(row):
+        raise AutomationError("This request differs from the reviewed action. Reload approvals.", 409)
+    current, _targets = approval_snapshot(db, row.conversation_id, row.marketplaces)
+    if current != row.review_basis:
+        raise AutomationError("The item, its photos or marketplace links changed. Review a new proposal.", 409)
+    result = db.execute(update(AutomationApproval).where(AutomationApproval.id == row.id, AutomationApproval.status == "pending")
+                        .values(status="executing", decided_at=_naive(utcnow())))
+    if result.rowcount != 1:
+        db.rollback()
+        raise AutomationError("This action was already decided.", 409)
+    db.commit()
 
 
 def list_pending_approvals(db: Session) -> list[dict]:
@@ -619,6 +654,30 @@ def mark_approval(db: Session, row: AutomationApproval, status: str) -> dict:
     return _approval_view(row)
 
 
+def record_approval_result(db: Session, row: AutomationApproval, result: dict) -> None:
+    runs = db.query(AutomationRun).filter(AutomationRun.automation_id == row.automation_id, cast(AutomationRun.summary, String).contains(row.id)).all()
+    for run in runs:
+        summary = copy.deepcopy(run.summary)
+        for item in summary.get("items") or []:
+            approved = any(remote.get("approval_id") == row.id for remote in item.get("remote") or [])
+            if item.get("conversation_id") != row.conversation_id or not approved:
+                continue
+            item.update(ok=bool(result.get("ok")), state=result.get("state") or row.status,
+                        down=list(result.get("down") or []), error=result.get("error"))
+            item.setdefault("remote", []).append({"type": row.action, "approval_id": row.id, **result})
+            if item.get("job_id"):
+                job = db.get(Job, item["job_id"])
+                if job:
+                    job.status = "completed" if result.get("ok") else "failed"
+                    job.last_error = result.get("error")
+                    JobRepo(db).add_event(job.id, "automation_approval", "automation", {"approval_id": row.id, "action": row.action, "ok": bool(result.get("ok")), "state": item["state"]})
+        run.summary = summary
+    automation = db.get(Automation, row.automation_id)
+    if result.get("ok") and automation and (automation.filters or {}).get("min_age_days"):
+        record_application(db, row.automation_id, row.conversation_id, None, utcnow())
+    db.commit()
+
+
 def _gap_view(row: AutomationRelistGap) -> dict:
     return {
         "id": row.id,
@@ -641,6 +700,9 @@ def _approval_view(row: AutomationApproval) -> dict:
         "conversation_id": row.conversation_id,
         "title": row.title,
         "revision_id": row.revision_id,
+        "action": row.action,
+        "targets": row.targets,
+        "review_token": approval_token(row),
         "marketplaces": row.marketplaces or [],
         "status": row.status,
         "state": WAITING_APPROVAL if row.status == "pending" else row.status,
@@ -662,7 +724,6 @@ def view(row: Automation) -> dict:
         "actions": row.actions or [],
         "marketplaces": row.marketplaces or [],
         "price_repeat": row.price_repeat or _repeat_on_actions(row.actions or []),
-        "require_approval": bool(row.require_approval),
         "summary": describe(schedule, row.timezone) if schedule.get("kind") else "",
         "confirmed_at": _iso(row.confirmed_at),
         "next_run_at": _iso(row.next_run_at),
@@ -781,9 +842,9 @@ def _insert(db: Session, spec: dict, *, activate: bool, now: datetime) -> Automa
         name=spec["name"], prompt=spec["prompt"] or None, status="active" if activate else "draft",
         timezone=spec["timezone"], schedule=spec["schedule"] or {}, filters=spec["filters"],
         actions=spec["actions"], marketplaces=spec["marketplaces"],
-        price_repeat=spec.get("price_repeat"), require_approval=bool(spec.get("require_approval", True)),
         confirmed_at=_naive(moment) if activate else None,
         next_run_at=_naive(first_due(spec["schedule"], spec["timezone"], moment)) if activate else None,
+        price_repeat=spec.get("price_repeat"),
         created_at=_naive(moment), updated_at=_naive(moment),
     )
     db.add(row)
@@ -804,7 +865,7 @@ def _readiness(actions: list[dict], marketplaces: list[str], schedule: dict | No
         issues.append("Choose when it runs.")
     if not actions:
         issues.append("Choose at least one action.")
-    if any(action["type"] in {"delist", "relist", "regenerate"} for action in actions) and not marketplaces:
+    if any(action["type"] in {"delist", "relist"} for action in actions) and not marketplaces:
         issues.append("Name the marketplaces. An automation does not run on every marketplace by default.")
     if filters.get("status") == "sold":
         issues.append("Sold items are never changed.")

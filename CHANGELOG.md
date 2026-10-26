@@ -6,12 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.407 — 2026-10-26
+## 0.1.408 — 2026-10-26
 
 - Add Poshmark sizes to an inventory list, including custom sizes, with a separate quantity and SKU for each. The rows fit the editor panel, and saved drafts check every size and SKU.
 - Mercari accepts its own No Brand response instead of reporting a mismatch after you clear a brand.
 - Check compares Mercari and Depop against the full revision sent, including shipping and size, and keeps the number of photos sent with the action.
 - Direct listing progress names the marketplace and action instead of calling it a Vendoo draft. Poshmark updates check all saved fields, including inventory.
+
+## 0.1.407 — 2026-10-26
+
+- Scheduled listing, delisting and relisting now wait for your review of each item and named marketplace. Changed drafts, photos or links need a new review, and failed marketplace actions stay visible without automatic retries. List never takes down a live listing; choose Relist explicitly.
 
 ## 0.1.406 — 2026-10-26
 

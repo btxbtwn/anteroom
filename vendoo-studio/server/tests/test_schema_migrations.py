@@ -426,3 +426,19 @@ def test_copy_receipts_upgrade_keeps_existing_drafts_and_financial_records(engin
         assert row == ("order", "dismissed", '{"currency":"USD","fees":"2.25"}', 3)
         assert connection.execute("SELECT count(*) FROM listing_copy_receipts").fetchone() == (0,)
     assert inspect_database(engine.url.database).clean
+
+
+def test_marketplace_review_upgrade_preserves_tasks_but_expires_unpinned_pending_cards(engine, snapshots):
+    from alembic import command
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "c4d8e2b71a05")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id,title,status) VALUES ('approval-item','Existing coat','active')")
+        connection.execute("INSERT INTO automations (id,name,status,timezone,schedule,filters,actions,marketplaces,require_approval,created_at,updated_at) VALUES ('task','Existing task','active','UTC','{}','{}','[]','[\"ebay\"]',0,'2026-10-26','2026-10-26')")
+        connection.execute("INSERT INTO automation_approvals (id,automation_id,conversation_id,title,revision_id,marketplaces,status,created_at) VALUES ('card','task','approval-item','Existing coat','old-rev','[\"ebay\"]','pending','2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT name,status FROM automations WHERE id='task'").fetchone() == ("Existing task","active")
+        assert connection.execute("SELECT title,revision_id,status,action,targets,review_basis FROM automation_approvals WHERE id='card'").fetchone() == ("Existing coat","old-rev","superseded","publish","{}","")
+        assert "require_approval" not in {row[1] for row in connection.execute("PRAGMA table_info(automations)")}
+    assert inspect_database(engine.url.database).clean
