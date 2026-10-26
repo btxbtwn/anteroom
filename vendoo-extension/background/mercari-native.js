@@ -189,11 +189,102 @@ function mercariNumberedSizes(wanted, sizes) {
   });
 }
 
+const MERCARI_NO_BRAND = 'No Brand/Not sure';
+const MERCARI_NO_BRAND_KEYS = new Set(['', 'unbranded', 'no brand', 'not sure', 'no brand not sure', 'no brand/not sure',
+  'none', 'n a', 'na', 'unknown']);
+
+function mercariBrandKey(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function mercariBrandIsBlank(value) {
+  return MERCARI_NO_BRAND_KEYS.has(mercariBrandKey(value));
+}
+
+// Mercari's own brand, or an explicit decision to list with none. A cleared
+// Mercari brand stays cleared (the main brand is a different marketplace).
+// A name Mercari does not list is omitted later; this only decides what to look up.
+function mercariBrandRequest(listing) {
+  const specifics = listing?.mercari_specifics || {};
+  if (specifics.noBrand === true) return { omit: true, explicit: true };
+  const locked = Array.isArray(listing?.seller_fields) && listing.seller_fields.includes('mercari_specifics.brand');
+  const hasOwn = Object.hasOwn(specifics, 'brand');
+  if (hasOwn || locked) {
+    if (mercariBrandIsBlank(specifics.brand)) return { omit: true, explicit: true };
+    return { name: String(specifics.brand).trim() };
+  }
+  const general = String(listing?.brand || '').trim();
+  if (mercariBrandIsBlank(general)) return { omit: true, explicit: false };
+  return { name: general };
+}
+
+function mercariGroupText(size) {
+  return String(size?.group_name || '').trim().toLowerCase();
+}
+
+function mercariRegularRank(size) {
+  const label = mercariGroupText(size);
+  if (!label || /petite|plus|maternity|junior|\bbig\b|\btall\b/.test(label)) return 0;
+  if (/\b(regular|standard|normal)\b/.test(label)) return 2;
+  if (/^(women'?s?|men'?s?|adult|unisex)$/.test(label)) return 1;
+  return 0;
+}
+
+function mercariFitToken(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text || /^(regular|standard|normal)$/.test(text)) return 'regular';
+  if (/petite/.test(text)) return 'petite';
+  if (/plus/.test(text)) return 'plus';
+  if (/maternity/.test(text)) return 'maternity';
+  if (/junior/.test(text)) return 'juniors';
+  if (/big/.test(text)) return 'big';
+  if (/tall/.test(text)) return 'tall';
+  return text;
+}
+
+function mercariGroupMatches(size, fit) {
+  const label = mercariGroupText(size);
+  const id = String(size?.group ?? '').trim().toLowerCase();
+  if (fit === 'regular') return mercariRegularRank(size) > 0;
+  if (fit === 'petite') return /petite/.test(label);
+  if (fit === 'plus') return /plus/.test(label);
+  if (fit === 'maternity') return /maternity/.test(label);
+  if (fit === 'juniors') return /junior/.test(label);
+  if (fit === 'big') return /\bbig\b/.test(label);
+  if (fit === 'tall') return /\btall\b/.test(label);
+  return label === fit || id === fit || Boolean(label && label.includes(fit));
+}
+
+// Mercari's own size type or group, when the seller set one. When that is
+// blank, the item's size type (Petite, Plus, Tall, and the rest) chooses the
+// group. A blank size type everywhere still means regular or standard.
+function mercariWantedFit(listing) {
+  const specifics = listing?.mercari_specifics || {};
+  const named = [specifics.sizeType, specifics.sizeGroup, specifics.size_group, listing?.sizeType]
+    .map(value => String(value || '').trim()).find(Boolean);
+  return named ? mercariFitToken(named) : '';
+}
+
+function mercariSizeChoice(size) {
+  const name = String(size?.name || size?.title || 'size');
+  const group = String(size?.group_name || '').trim();
+  if (group) return `${name} (${group})`;
+  if (size?.group != null && size.group !== '') return `${name} (group ${size.group})`;
+  return name;
+}
+
+function mercariPickGroup(found, fit) {
+  if (fit && fit !== 'regular') return found.filter(entry => mercariGroupMatches(entry.size, fit));
+  const ranked = found.map(entry => ({ entry, rank: mercariRegularRank(entry.size) })).filter(row => row.rank > 0);
+  const best = ranked.reduce((rank, row) => Math.max(rank, row.rank), 0);
+  return best ? ranked.filter(row => row.rank === best).map(row => row.entry) : [];
+}
+
 // Mercari's size id: the seller's label among the category's own sizes first
 // (Studio sends them as form.sizes, in
-// Mercari's order), its numbers before its letters. A size that only matches
-// inside a fit the listing does not name, or several fits when it names one,
-// is not chosen. ``none: 'unknown'`` means Studio could not read the sizes.
+// Mercari's order), its numbers before its letters. The same label in several
+// groups resolves from Mercari's size type or group, then the item's size type,
+// otherwise the regular or standard group. ``none: 'unknown'`` means Studio could not read the sizes.
 function mercariSize(listing, categoryId) {
   const sizes = listing.form?.sizes;
   if (!Array.isArray(sizes) || !sizes.length) return { none: !Array.isArray(sizes) ? 'unknown' : 'none' };
@@ -210,9 +301,14 @@ function mercariSize(listing, categoryId) {
   const numbered = mercariNumberedSizes(wanted, sizes);
   const found = numbered.length ? entries.filter(entry => numbered.includes(entry.size)) : matchSize(wanted, entries);
   if (!found.length) return { problem: 'a size Mercari offers in this category' };
-  const groups = new Set(found.map(entry => entry.size.group));
-  if (groups.size > 1 && listingSizeFit(listing)) return { problem: `which of Mercari's ${found.map(entry => entry.size.name).join(' or ')} sizes this is` };
-  return { id: Number(found[0].size.id) };
+  const groups = new Set(found.map(entry => String(entry.size.group)));
+  if (groups.size <= 1) return { id: Number(found[0].size.id) };
+  const fit = mercariWantedFit(listing) || 'regular';
+  const narrowed = mercariPickGroup(found, fit);
+  const poolGroups = new Set(narrowed.map(entry => String(entry.size.group)));
+  if (narrowed.length && poolGroups.size === 1) return { id: Number(narrowed[0].size.id) };
+  const named = (narrowed.length ? narrowed : found).map(entry => mercariSizeChoice(entry.size));
+  return { problem: `which of Mercari's ${named.join(' or ')} sizes this is` };
 }
 
 function mercariWantedSize(listing) {
@@ -301,20 +397,29 @@ function mercariMissing(listing, common) {
 
 // Only an exact name from Mercari's own catalog is accepted. Encoded brand
 // ids from other services are not a substitute for checking the name.
-async function mercariBrandId(listing, deadline) {
-  if (listing.mercari_specifics?.noBrand === true) return null;
-  const name = String(listing.brand || '').trim();
-  if (!name) return null;
+async function mercariBrandSelection(listing, deadline) {
+  const wanted = mercariBrandRequest(listing);
+  if (wanted.omit) return { id: null, explicit: wanted.explicit };
   let id;
   try {
-    id = await mercariBrandLookup(name, deadline);
+    id = await mercariBrandLookup(wanted.name, deadline);
   } catch (error) {
     marketplaceLog('mercari', 'brand', { error_code: 'unresolved' });
-    throw marketplaceMissing('mercari', [{ field: 'brandId', needs: `its brand id for ${name}, which Anteroom could not read (try again)` }],
+    throw marketplaceMissing('mercari', [{ field: 'brandId', needs: `its brand id for ${wanted.name}, which Anteroom could not read (try again)` }],
       String(error?.message || error));
   }
-  if (!id) throw marketplaceMissing('mercari', [{ field: 'brandId', needs: `a brand from its list (${name} is not one)` }]);
-  return id;
+  // Mercari accepts a listing with no brand. An unmatched name is left off,
+  // including on a draft that already has some other brand.
+  if (!id) return { id: null, explicit: true };
+  return { id, explicit: false };
+}
+
+async function mercariBrandId(listing, deadline) {
+  return (await mercariBrandSelection(listing, deadline)).id;
+}
+
+function applyMercariBrand(common, brand) {
+  if (brand.explicit || brand.id) common.brandId = brand.id;
 }
 
 function mercariBrandLookup(name, deadline) {
@@ -505,8 +610,7 @@ function mercariDraftMatches(draft, common, expectedPhotos) {
 // The draft Mercari should hold for this listing, brand included.
 async function mercariExpected(listing, deadline) {
   const common = mercariCommon(await mercariPreparedListing(listing, deadline));
-  const brandId = await mercariBrandId(listing, deadline);
-  if (brandId) common.brandId = brandId;
+  applyMercariBrand(common, await mercariBrandSelection(listing, deadline));
   return common;
 }
 
@@ -547,8 +651,7 @@ async function runMercariNative(msg, recovery = false) {
     const common = mercariCommon(listing);
     const missing = mercariMissing(listing, common);
     if (missing.length) throw marketplaceMissing('mercari', missing);
-    const brandId = await mercariBrandId(payload.listing, payload.deadline);
-    if (brandId) common.brandId = brandId;
+    applyMercariBrand(common, await mercariBrandSelection(payload.listing, payload.deadline));
     const photos = payload.photos || [];
     if (!photos.length || photos.length > MERCARI_MAX_PHOTOS) {
       throw marketplaceMissing('mercari', [{ field: 'photos', needs: `between one and ${MERCARI_MAX_PHOTOS} photos` }]);
@@ -605,8 +708,7 @@ async function publishMercariDraft(payload, storeReceipt, recovery) {
     const common = mercariCommon(listing);
     const missing = mercariMissing(listing, common);
     if (missing.length) throw marketplaceMissing('mercari', missing);
-    const brandId = await mercariBrandId(payload.listing, payload.deadline);
-    if (brandId) common.brandId = brandId;
+    applyMercariBrand(common, await mercariBrandSelection(payload.listing, payload.deadline));
     const draft = await readMercariDraft(id, payload.deadline);
     const mismatch = mercariDraftMismatch(draft, common, null, 'Mercari\'s draft does not match this revision');
     if (mismatch) throw Object.assign(mismatch, { code: 'rejected' });

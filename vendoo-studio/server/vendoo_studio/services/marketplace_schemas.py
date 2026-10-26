@@ -41,28 +41,93 @@ def _category(category_id: str) -> str:
     return text
 
 
+def _constraint_rule(rule: dict) -> tuple[str, list[str]] | None:
+    """One parent rule, from eBay's names or the names the form already uses.
+
+    Taxonomy returns ``applicableForLocalizedAspectName`` and
+    ``applicableForLocalizedAspectValues``. Cached rows and the editor also
+    carry ``parentName`` / ``parentValues``. A value such as Size M is valid
+    for more than one Size Type, so callers merge those lists.
+    """
+    if not isinstance(rule, dict):
+        return None
+    name = str(rule.get("parentName") or rule.get("applicableForLocalizedAspectName") or "").strip()
+    raw = rule.get("parentValues")
+    if raw is None:
+        raw = rule.get("applicableForLocalizedAspectValues") or []
+    if not name:
+        return None
+    values: list[str] = []
+    for item in raw or []:
+        text = str(item).strip()
+        if text and text.casefold() not in {known.casefold() for known in values}:
+            values.append(text)
+    return name, values
+
+
+def normalize_value_constraints(rules) -> list[dict]:
+    """Parent rules keyed by parent name. Values for the same parent are combined."""
+    merged: dict[str, dict] = {}
+    order: list[str] = []
+    for rule in rules or []:
+        parsed = _constraint_rule(rule)
+        if not parsed:
+            continue
+        name, values = parsed
+        key = name.casefold()
+        if key not in merged:
+            merged[key] = {"parentName": name, "parentValues": []}
+            order.append(key)
+        entry = merged[key]
+        for value in values:
+            if value.casefold() not in {item.casefold() for item in entry["parentValues"]}:
+                entry["parentValues"].append(value)
+    return [merged[key] for key in order]
+
+
+def constraints_by_label(values) -> dict[str, list[dict]]:
+    """One constraint list per label. Duplicate labels (two M sizes) share their parents."""
+    grouped: dict[str, list] = {}
+    for value in values or []:
+        rules = value.get("constraints") or []
+        label = value.get("label")
+        if rules and label:
+            grouped.setdefault(label, []).extend(rules)
+    return {label: normalize_value_constraints(rules) for label, rules in grouped.items()
+            if normalize_value_constraints(rules)}
+
+
 def _ebay_field(aspect: dict) -> dict:
     constraint = aspect.get("aspectConstraint") or {}
+    values = []
+    for value in aspect.get("aspectValues") or []:
+        if not value.get("localizedValue"):
+            continue
+        rules = normalize_value_constraints(value.get("valueConstraints") or [])
+        values.append({"id": value["localizedValue"], "label": value["localizedValue"],
+                       **({"constraints": rules} if rules else {})})
     return {
         "id": aspect["localizedAspectName"], "name": aspect["localizedAspectName"],
         "required": bool(constraint.get("aspectRequired")), "usage": constraint.get("aspectUsage"),
         "mode": "selection" if constraint.get("aspectMode") == "SELECTION_ONLY" else "free_text",
         "multi": constraint.get("itemToAspectCardinality") == "MULTI", "max_values": None,
         "max_length": constraint.get("aspectMaxLength"),
-        "values": [{"id": value["localizedValue"], "label": value["localizedValue"],
-                    **({"constraints": value["valueConstraints"]} if value.get("valueConstraints") else {})}
-                   for value in aspect.get("aspectValues") or [] if value.get("localizedValue")],
+        "values": values,
     }
 
 
 def aspect_options(field: dict, answers: dict[str, list[str]]) -> list[dict]:
     """eBay value constraints require a matching parent aspect selection."""
     keyed = {name.casefold(): {str(value).casefold() for value in values} for name, values in answers.items()}
-    return [value for value in field.get("values") or [] if all(
-        keyed.get(str(rule.get("parentName") or "").casefold(), set())
-        & {str(item).casefold() for item in rule.get("parentValues") or []}
-        for rule in value.get("constraints") or []
-    )]
+    selected = []
+    for value in field.get("values") or []:
+        raw = value.get("constraints") or []
+        rules = [parsed for parsed in (_constraint_rule(rule) for rule in raw) if parsed]
+        if raw and not rules:
+            continue
+        if all(keyed.get(name.casefold(), set()) & {item.casefold() for item in parents} for name, parents in rules):
+            selected.append(value)
+    return selected
 
 
 async def ebay_aspects(client, category_id: str) -> list[dict]:

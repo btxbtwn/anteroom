@@ -160,7 +160,11 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             '{"fields":[{"path":"depop_specifics.style","value":[]}]}\n'
             "Paths look like sku, price, mercari_specifics.brand, poshmark_specifics.size, "
             "ebay_specifics.inseam, ebay_specifics.bestOffer.minimumOfferPrice, depop_specifics.measurements, "
-            "or marketplace_category_ids.mercari. An empty value clears the field and it stays cleared.\n"
+            "or marketplace_category_ids.mercari. An empty value clears the field and it stays cleared. "
+            "An empty mercari_specifics.brand, or the value \"No Brand/Not sure\", lists that item on Mercari "
+            "with no brand and leaves the main brand unchanged. When Mercari has the same size in more than one "
+            "group, set mercari_specifics.sizeType or mercari_specifics.sizeGroup (Regular, Petite, Plus, Tall). "
+            "When that is empty, Anteroom uses the item's size type, then the regular or standard group.\n"
             "Bottoms use the size that marketplace accepts: women's 0-24, Petite/Plus/Tall, "
             "eBay waist plus inseam, Poshmark \"Waist 32\". "
             "eBay Best Offer is enabled (Yes or No), autoAcceptPrice, and minimumOfferPrice, "

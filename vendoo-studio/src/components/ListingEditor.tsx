@@ -86,7 +86,7 @@ interface EditorField {
   optionValues?: Record<string, string>;
   clears?: string[];
   help?: string;
-  valueConstraints?: Record<string, { parentName: string; parentValues: string[] }[]>;
+  valueConstraints?: Record<string, AspectConstraintRule[]>;
   required?: boolean;
   options?: string[];
   locked?: boolean;
@@ -1049,14 +1049,42 @@ function schemaFieldsForTab(
   }));
 }
 
+type AspectConstraintRule = {
+  parentName?: string;
+  parentValues?: string[];
+  applicableForLocalizedAspectName?: string;
+  applicableForLocalizedAspectValues?: string[];
+};
+
+function aspectConstraintRules(rules: AspectConstraintRule[] | undefined): { parentName: string; parentValues: string[] }[] {
+  const merged = new Map<string, { parentName: string; parentValues: string[] }>();
+  for (const rule of rules || []) {
+    const parentName = rule.parentName || rule.applicableForLocalizedAspectName || "";
+    const parentValues = rule.parentValues || rule.applicableForLocalizedAspectValues || [];
+    if (!parentName) continue;
+    const key = parentName.toLowerCase();
+    const entry = merged.get(key) || { parentName, parentValues: [] };
+    for (const item of parentValues) {
+      const text = String(item);
+      if (!entry.parentValues.some((known) => known.toLowerCase() === text.toLowerCase())) entry.parentValues.push(text);
+    }
+    merged.set(key, entry);
+  }
+  return [...merged.values()];
+}
+
 export function nativeEditorDependencies(fields: EditorField[], listing: ListingData): EditorField[] {
   return fields.map((field) => !field.valueConstraints ? field : { ...field,
-    options: field.options?.filter((value) => (field.valueConstraints?.[value] || []).every((rule) => {
-      const parent = fields.find((row) => row.label.replace(/\s*\*$/, "").toLowerCase() === rule.parentName.toLowerCase());
-      const selected = parent && (getListingEditorValue(listing, parent.key) ?? parent.defaultValue);
-      const values = formFieldValues(selected).map((item) => item.toLowerCase());
-      return rule.parentValues.some((item) => values.includes(item.toLowerCase()));
-    })),
+    options: field.options?.filter((value) => {
+      const rules = aspectConstraintRules(field.valueConstraints?.[value]);
+      if (!rules.length) return true;
+      return rules.every((rule) => {
+        const parent = fields.find((row) => row.label.replace(/\s*\*$/, "").toLowerCase() === rule.parentName.toLowerCase());
+        const selected = parent && (getListingEditorValue(listing, parent.key) ?? parent.defaultValue);
+        const values = formFieldValues(selected).map((item) => item.toLowerCase());
+        return rule.parentValues.some((item) => values.includes(item.toLowerCase()));
+      });
+    }),
   });
 }
 

@@ -53,6 +53,19 @@ describe("marketplace form fields", () => {
     expect(updated.defaultValue).toBe("Air Max");
     expect(nativeEditorDependencies(fields, { ebay_specifics: { brand: "" } })[1].options).toEqual([]);
   });
+
+  it("keeps an eBay size when its size type matches either taxonomy parent", () => {
+    const fields = [
+      { key: "ebay_specifics.Size Type", label: "Size Type", defaultValue: "Regular" },
+      { key: "ebay_specifics.Size", label: "Size", defaultValue: "M", options: ["M", "S"],
+        valueConstraints: {
+          M: [{ applicableForLocalizedAspectName: "Size Type", applicableForLocalizedAspectValues: ["Regular", "Petites"] }],
+          S: [{ parentName: "Size Type", parentValues: ["Regular"] }],
+        } },
+    ];
+    expect(nativeEditorDependencies(fields, { ebay_specifics: { sizeType: "Regular" } })[1].options).toEqual(["M", "S"]);
+    expect(nativeEditorDependencies(fields, { ebay_specifics: { sizeType: "Petites" } })[1].options).toEqual(["M"]);
+  });
   it("never substitutes a Vendoo or reference form for a direct marketplace", () => {
     const priceKey: Record<string, string> = {
       ebay: "ebay_specifics.price",
