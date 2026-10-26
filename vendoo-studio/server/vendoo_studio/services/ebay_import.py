@@ -64,7 +64,7 @@ async def active_listings(client: EbayClient, db: Session, page_number: int) -> 
             "has_more": page_number < pages if pages is not None else len(rows) == PAGE_SIZE}
 
 
-def _snapshot(info: dict) -> dict:
+def listing_snapshot(info: dict) -> dict:
     total, sold = _number(info.get("quantity")), _number(info.get("soldQuantity"))
     if total is None or sold is None or sold > total:
         raise EbayFailure("eBay did not return a reliable available quantity for this listing.", 409)
@@ -95,7 +95,7 @@ async def import_listing(client: EbayClient, db: Session, listing_id: str) -> di
     info = await ebay_actions.owned_listing(client, listing_id)
     if info.get("id") != listing_id:
         raise EbayFailure("eBay returned a different listing. Nothing was imported.", 409)
-    snapshot = _snapshot(info)
+    snapshot = listing_snapshot(info)
     try:
         return await inventory_import.save_owned_listing(
             db, "ebay", listing_id, snapshot, info.get("images", []), lambda: assert_identity(client.seller),

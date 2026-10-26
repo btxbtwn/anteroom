@@ -40,7 +40,7 @@ def status(conv_id: str, db: Session = Depends(get_db)):
 
 @router.post("/sync")
 async def sync(conv_id: str, db: Session = Depends(get_db)):
-    """Settle unconfirmed results and look for sales of this item's direct listings."""
+    """Check linked marketplace inventory, settle results, and look for sales."""
     return await _reply(native.sync(conv_id, db))
 
 
