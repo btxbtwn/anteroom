@@ -1181,3 +1181,11 @@ Direct actions and sales matching use the same validated reference. Seller
 linking rejects references already attached to another item, and an ambiguous
 sale remains unmatched rather than being assigned to the first duplicate found.
 Linking and reconciliation are local operations and do not publish or delist.
+
+Bulk List, Delist and Relist start from a seller selection. The seller names
+the action and each marketplace, reviews what every item would do, and confirms
+once. Anteroom then sends one request per item, in order; each carries the
+reviewed marketplaces, revision and a review token that must still match the
+item, its photos and its marketplace links. Nothing is stored to run later, a
+failed item is not retried, List skips a marketplace where the item is already
+live, and a marketplace where it sold is never touched.
