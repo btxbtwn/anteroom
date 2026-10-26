@@ -472,6 +472,9 @@ export const api = {
       }),
   },
   marketplaceSales: {
+    reconcile: (marketplace?: string) => request<{ matched: number; unmatched: number }>(
+      `/marketplace-sales/reconcile${marketplace ? `?${new URLSearchParams({ marketplace })}` : ""}`, { method: "POST" },
+    ),
     list: (options: { state?: MarketplaceSaleState; conversationId?: string } = {}) => {
       const params = new URLSearchParams({ state: options.state ?? "new" });
       if (options.conversationId) params.set("conversation_id", options.conversationId);

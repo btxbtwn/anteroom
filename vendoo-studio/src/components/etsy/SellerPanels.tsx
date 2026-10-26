@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
 import type { EtsyListingState, EtsyMoney, EtsyOrder, EtsyOrderStatus, EtsyShop } from "../../api/etsy";
@@ -92,11 +92,20 @@ export function EtsyOrders({ scope, period }: { scope: string; period: OrderPeri
 }
 
 export function EtsySaleAlerts({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+  const queryClient = useQueryClient();
   const sales = useQuery({ queryKey: ["marketplace-sales", "new"], queryFn: () => api.marketplaceSales.list(),
     refetchInterval: 15000 });
+  const refresh = useMutation({
+    mutationFn: () => api.marketplaceSales.reconcile("etsy"),
+    retry: false,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] }),
+  });
   const rows = (sales.data?.sales ?? []).filter((sale) => sale.marketplace === "etsy");
   return <PageSection title="New Etsy sales" description="Open a matched item to review its other marketplace listings. You choose any delisting separately."
-    actions={<Button variant="outline" size="xs" disabled={sales.isFetching} onClick={() => void sales.refetch()}>Refresh alerts</Button>}>
+    actions={<Button variant="outline" size="xs" disabled={sales.isFetching || refresh.isPending} onClick={() => refresh.mutate()}>
+      {refresh.isPending ? "Refreshing…" : "Refresh alerts"}</Button>}>
+    {refresh.error ? <PageError message={refresh.error.message} /> : null}
+    {refresh.data?.matched ? <PageNote>{refresh.data.matched} previously unmatched {refresh.data.matched === 1 ? "sale is" : "sales are"} now linked to inventory.</PageNote> : null}
     {sales.error ? <PageError message={sales.error.message} /> : sales.isPending ? <Loading label="Loading Etsy sale alerts…" />
       : rows.length ? <Panel><ul>{rows.map((sale) => <ListRow key={sale.id} title={sale.title || "Etsy sale"}
         meta={sale.listedElsewhere.length ? "Review other marketplaces" : "Sale received"}

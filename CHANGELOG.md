@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.384 — 2026-10-26
+
+- Match previously received sale alerts when you link an item, sync its marketplaces, or refresh Etsy alerts. Other-marketplace warnings now include Anteroom's direct listings and exclude listings already sold or removed, without relying on Vendoo.
+
 ## 0.1.383 — 2026-10-26
 
 - Settings → Agents shows whether the anteroom command is installed, the address an agent should use, and copy-ready setup for Cursor, Claude Desktop, and Claude Code. Test connection checks that the command can reach this app.

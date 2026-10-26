@@ -44,8 +44,8 @@ export interface MarketplaceSale {
   receivedAt: string | null;
   conversationId: string | null;
   title: string | null;
-  /** Marketplaces Vendoo says the item is still listed on. */
+  /** Other marketplace listings still present, from direct records and saved links. */
   listedElsewhere: string[];
-  /** The item in Vendoo, where the seller delists it. */
+  /** Optional link back to an item originally imported from Vendoo. */
   vendooUrl: string | null;
 }

@@ -153,8 +153,8 @@ class SalesRoutesTest(unittest.TestCase):
         self.db = self.Session()
         self.conv = _listing(self.db, "tee", {
             "ebay": "https://www.ebay.com/itm/1234567890",
-            "poshmark": "https://poshmark.com/listing/abc",
-            "mercari": "https://www.mercari.com/us/item/m1",
+            "poshmark": "https://poshmark.com/listing/Coat-abcdef012345678901234567",
+            "mercari": "https://www.mercari.com/us/item/m12345678",
         })
         sale = MarketplaceSale(marketplace="ebay", order_id="12-345", line_id="li-1", listing_id="1234567890",
                                conversation_id=self.conv.id)

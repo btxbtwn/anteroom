@@ -760,6 +760,9 @@ async def sync(conv_id: str, db: Session) -> dict:
             continue
         ok = await chrome_sales.check_now(marketplace)
         checked[marketplace] = None if ok else f"Chrome could not check {NAMES[marketplace]}. Connect Chrome and sync again."
+    from vendoo_studio.services.relay_sales import reconcile_unmatched
+
+    reconcile_unmatched(db, conversation_id=conv_id)
     return {"checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "marketplaces": {name: {"ok": error is None, "error": error} for name, error in checked.items()}}
 

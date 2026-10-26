@@ -1,12 +1,12 @@
-"""Direct marketplace connections and the sales they report.
+"""Direct marketplace connections, sale alerts, and local sales reconciliation.
 
-A reported sale only tells the seller where the item is still listed. There is
-no delist here: Vendoo's server-side delist does not reach Poshmark, Mercari or
-Depop (see ``vendoo_api.delist_item``), so the seller delists in Vendoo.
+Matching a sale only updates its local item association. These routes do not
+publish or delist; seller-confirmed marketplace actions are handled separately.
 """
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -15,9 +15,9 @@ from sqlalchemy.orm import Session
 from vendoo_studio.database import get_db
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
-from vendoo_studio.services import marketplace_accounts
+from vendoo_studio.services import marketplace_accounts, marketplace_delist
 from vendoo_studio.services.relay_client import RelayError
-from vendoo_studio.services.vendoo_import import parse_notes, vendoo_binding
+from vendoo_studio.services.vendoo_import import vendoo_binding
 
 router = APIRouter(tags=["marketplace-accounts"])
 
@@ -64,17 +64,14 @@ async def disconnect(marketplace: str):
     return {"ok": True}
 
 
-def _other_marketplaces(conv: Conversation | None, sold_on: str) -> list[str]:
-    """Where else Vendoo says this item is listed: the delist candidates."""
-    if not conv:
-        return []
-    urls = parse_notes(conv.notes).get("vendooListingUrls") or {}
-    if not isinstance(urls, dict):
-        return []
-    return sorted(mp for mp, url in urls.items() if url and mp.lower() != sold_on)
+def _other_marketplaces(listings: dict, sold_on: str) -> list[str]:
+    """Other listings still present, including direct records and seller links."""
+    return sorted(name for name, entry in listings.items()
+                  if name != sold_on and entry.get("listing_id") and not entry.get("sold_here")
+                  and entry.get("state") not in {"deleted", "deleting"})
 
 
-def _sale_out(sale: MarketplaceSale, conv: Conversation | None) -> dict:
+def _sale_out(sale: MarketplaceSale, conv: Conversation | None, listings: dict) -> dict:
     return {
         "id": sale.id,
         "marketplace": sale.marketplace,
@@ -86,7 +83,7 @@ def _sale_out(sale: MarketplaceSale, conv: Conversation | None) -> dict:
         "receivedAt": sale.received_at.isoformat() if sale.received_at else None,
         "conversationId": sale.conversation_id,
         "title": conv.title if conv else None,
-        "listedElsewhere": _other_marketplaces(conv, sale.marketplace),
+        "listedElsewhere": _other_marketplaces(listings, sale.marketplace),
         "vendooUrl": vendoo_binding(conv.notes).get("vendooUrl") if conv else None,
     }
 
@@ -101,7 +98,30 @@ def list_sales(state: str | None = "new", conversation_id: str | None = None, db
     sales = query.order_by(MarketplaceSale.received_at.desc()).limit(200).all()
     ids = {s.conversation_id for s in sales if s.conversation_id}
     convs = {c.id: c for c in db.query(Conversation).filter(Conversation.id.in_(ids)).all()} if ids else {}
-    return {"sales": [_sale_out(s, convs.get(s.conversation_id)) for s in sales]}
+    # An order can have several lines for one item. Read its current listings
+    # once, rather than re-querying inventory for every line in the response.
+    listings = {conv_id: marketplace_delist.listings(db, conv_id) for conv_id in convs}
+    return {"sales": [_sale_out(s, convs.get(s.conversation_id), listings.get(s.conversation_id, {})) for s in sales]}
+
+
+class ReconcileResponse(BaseModel):
+    matched: int
+    unmatched: int
+
+
+@router.post("/api/marketplace-sales/reconcile", response_model=ReconcileResponse)
+def reconcile_sales(
+    marketplace: Literal["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"] | None = None,
+    db: Session = Depends(get_db),
+):
+    """Match new sale alerts against saved listing links. No marketplace calls."""
+    from vendoo_studio.services.relay_sales import reconcile_unmatched
+
+    matched = reconcile_unmatched(db, marketplace=marketplace)
+    pending = db.query(MarketplaceSale).filter(MarketplaceSale.state == "new", MarketplaceSale.conversation_id.is_(None))
+    if marketplace:
+        pending = pending.filter(MarketplaceSale.marketplace == marketplace)
+    return ReconcileResponse(matched=matched, unmatched=pending.count())
 
 
 def _get_sale(db: Session, sale_id: str) -> MarketplaceSale:
