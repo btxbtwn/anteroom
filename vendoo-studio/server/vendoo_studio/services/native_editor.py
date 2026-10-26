@@ -61,7 +61,8 @@ def package(snapshot: dict) -> list[dict]:
 
 async def ebay_form(snapshot: dict) -> dict:
     from vendoo_studio.services import marketplace_schemas
-    from vendoo_studio.services.ebay_listings import CONDITION_IDS, ebay_aspects, ebay_category_id, ebay_condition
+    from vendoo_studio.services.ebay_listings import CONDITION_IDS, best_offer_terms, condition_description, ebay_aspects, ebay_category_id, ebay_condition
+    from vendoo_studio.services.seller_overrides import price_for
 
     from vendoo_studio.services.listing_result import ListingProblem
 
@@ -96,15 +97,15 @@ async def ebay_form(snapshot: dict) -> dict:
                             max_values=row.get("max_values"), max_length=row.get("max_length"),
                             **({"value_constraints": constraints} if constraints else {})))
     details = snapshot.get("ebay_specifics") or {}
-    floors = ((snapshot.get("form") or {}).get("specifics", {}).get("pricingFormatDetails") or {}).get("fixedPrice") or {}
+    terms = best_offer_terms(snapshot.get("form") or {}, str(price_for(snapshot, "ebay") or 0), snapshot)
     fields.extend([field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number"),
                    field("sku", "SKU", snapshot.get("sku"), locked=True, help="SKU comes from Item Details."),
-                   field("ebay_specifics.conditionDescription", "Condition description", details.get("conditionDescription"), locked=True,
-                         help="Anteroom uses the standard condition note. Describe this item’s flaws in Description."),
-                   field("ebay_specifics.bestOffer.autoAcceptPrice", "Automatically accept offers at", floors.get("acceptOffersOfAtLeast"), input_type="number",
-                         help="When blank, Anteroom uses the listing price minus $2."),
-                   field("ebay_specifics.bestOffer.minimumOfferPrice", "Decline offers below", floors.get("declineOffersLowerThan"), input_type="number",
-                         help="When blank, Anteroom uses the listing price minus $4."),
+                   field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}), input_type="textarea", max_length=1000),
+                   field("ebay_specifics.bestOffer.enabled", "Allow offers", terms.get("bestOfferEnabled", True), input_type="boolean"),
+                   field("ebay_specifics.bestOffer.autoAcceptPrice", "Automatically accept offers at", (terms.get("autoAcceptPrice") or {}).get("value", ""), input_type="number",
+                         help="Clear this amount to turn off automatic acceptance."),
+                   field("ebay_specifics.bestOffer.minimumOfferPrice", "Decline offers below", (terms.get("autoDeclinePrice") or {}).get("value", ""), input_type="number",
+                         help="Clear this amount to turn off automatic declines."),
                    *[field(f"ebay_specifics.{key}", key.upper(), details.get(key)) for key in ("upc", "ean", "isbn")],
                    *[field(f"ebay_specifics.{key}", label, details.get(key)) for key, label in
                      (("primaryStoreCategory", "Primary store category"), ("secondaryStoreCategory", "Secondary store category"))],
@@ -115,21 +116,30 @@ async def ebay_form(snapshot: dict) -> dict:
 
 def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
-    from vendoo_studio.services.sellwild_listing import VEHICLE_CATEGORIES, chosen, sellwild_catalog
+    from vendoo_studio.services.sellwild_listing import VEHICLE_CATEGORIES, chosen, package_sides, sellwild_catalog
 
     catalog = sellwild_catalog()
     picks = chosen(snapshot, MarketplaceListingRepo(db).get(conv_id, "sellwild"))
     fields = base(snapshot, 255)
+    next(row for row in fields if row["path"] == "description")["required"] = False
     for key in ("category", "condition"):
         options = catalog["categories" if key == "category" else "conditions"]
-        value = next((row["label"] for row in options if row["id"] == picks[f"{key}_id"]), "Choose one beside List")
-        fields.append(field(f"sellwild_specifics.native{key.title()}Id", key.title(), value, locked=True,
-                            help="Saved selection in Anteroom. Choose new values beside List."))
+        fields.append(field(f"sellwild_specifics.native{key.title()}Id", key.title(), picks[f"{key}_id"], required=True,
+                            selection_only=True, options=[row["label"] for row in options],
+                            option_values={row["label"]: str(row["id"]) for row in options}, options_source="marketplace"))
     if picks["category_id"] in VEHICLE_CATEGORIES:
         details = snapshot.get("sellwild_specifics") or {}
         fields.extend(field(f"sellwild_specifics.{key}", label, details.get(key), required=True)
                       for key, label in (("vin", "VIN"), ("mileage", "Mileage")))
     else:
+        template = str((snapshot.get("sellwild_specifics") or {}).get("parcelTemplate") or "")
+        options = [{"id": "", "label": "Custom package dimensions"}, *catalog["parcel_templates"]]
+        fields.append(field("sellwild_specifics.parcelTemplate", "Packaging", template, selection_only=True,
+                            options=[row["label"] for row in options], option_values={row["label"]: row["id"] for row in options},
+                            options_source="marketplace"))
         fields.extend(package(snapshot))
+        if template and package_sides(snapshot):
+            row = next(row for row in fields if row["path"] == "package_dimensions_in")
+            row.update(value=" × ".join(str(side) for side in package_sides(snapshot)), help="Dimensions for the selected Sellwild packaging.")
     return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
-            "fields": fields, "notes": ["Sellwild has no category-specific attributes. Category and condition are selected beside List."]}
+            "fields": fields, "notes": ["Category and condition use Sellwild’s own catalog. Description is optional."]}

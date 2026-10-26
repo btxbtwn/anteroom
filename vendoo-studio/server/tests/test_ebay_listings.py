@@ -6,10 +6,11 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from vendoo_studio.services import ebay_listings
-from vendoo_studio.services.ebay_client import EbayFailure
+from vendoo_studio.services.ebay_client import EbayFailure, NS
+from vendoo_studio.services.listing_result import ListingProblem
 
 LISTING = {
     "title": "Abercrombie tee",
@@ -459,13 +460,19 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
             '<CurrentPrice currencyID="USD">24.00</CurrentPrice></SellingStatus>'
             "<PrimaryCategory><CategoryID>15687</CategoryID></PrimaryCategory></Item></GetItemResponse>"
         )
-        revised = item.replace("Abercrombie tee", "Updated tee").replace(">24.00<", ">30.00<")
+        revised = item.replace("Abercrombie tee", "Updated tee").replace(">24.00<", ">30.00<").replace(
+            "</Item>", "<ConditionDescription>Small mark on hem.</ConditionDescription></Item>")
         seen = {"revise": False}
 
         async def request(method, path, **kwargs):
             client.calls.append((method, path, kwargs))
             if kwargs.get("call") == "ReviseFixedPriceItem":
                 seen["revise"] = True
+                sent = ET.fromstring(kwargs["xml"])
+                self.assertEqual(sent.findtext("e:Item/e:ConditionDescription", namespaces=NS), "Small mark on hem.")
+                self.assertEqual({node.text for node in sent.findall("e:DeletedField", NS)}, {
+                    "Item.ListingDetails.BestOfferAutoAcceptPrice", "Item.ListingDetails.MinimumBestOfferPrice",
+                })
                 return {"xml": ET.Element("ok")}
             if kwargs.get("call") == "GetItem":
                 xml = revised if seen["revise"] else item
@@ -476,11 +483,27 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         client.trading = types.MethodType(ebay_listings.EbayClient.trading, client)
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client), \
              patch("vendoo_studio.services.keychain.get_marketplace_accounts", return_value={"ebay": {"label": "ada"}}):
-            result = await ebay_listings.execute("update", {**LISTING, "title": "Updated tee", "price": "30"}, [self.photo],
+            result = await ebay_listings.execute("update", {**LISTING, "title": "Updated tee", "price": "30",
+                                                 "ebay_specifics": {"conditionDescription": "Small mark on hem.",
+                                                                    "bestOffer": {"enabled": True, "autoAcceptPrice": "", "minimumOfferPrice": ""}}}, [self.photo],
                                                  self.binding, self.record, self.active, confirm=True)
         self.assertEqual(result["listing_url"], "https://www.ebay.com/itm/123456789012")
         self.assertTrue(seen["revise"])
         self.assertTrue(all(call[1] != "/sell/inventory/v1/offer" for call in client.calls))
+
+    async def test_trading_revision_clears_condition_notes_and_checks_the_readback(self):
+        fields = ebay_listings._listing_fields({**LISTING, "ebay_specifics": {"conditionDescription": ""}}, LISTING["form"])
+        client = Client()
+        client.request = AsyncMock(return_value={})
+        live = {"type": "FixedPriceItem", "title": fields["title"], "price": fields["price"], "conditionDescription": ""}
+        with patch("vendoo_studio.services.ebay_actions.owned_listing", new=AsyncMock(return_value=live)):
+            await ebay_listings._revise_by_item_id(client, "123456789012", fields)
+        sent = ET.fromstring(client.request.call_args.kwargs["xml"])
+        self.assertEqual(sent.findtext("e:DeletedField", namespaces=NS), "Item.ConditionDescription")
+        self.assertIsNone(sent.find("e:Item/e:ConditionDescription", NS))
+        with patch("vendoo_studio.services.ebay_actions.owned_listing", new=AsyncMock(return_value={**live, "conditionDescription": "Old note"})):
+            with self.assertRaisesRegex(ValueError, "not confirmed the update"):
+                await ebay_listings._revise_by_item_id(client, "123456789012", fields)
 
     async def test_a_lost_publish_is_confirmed_by_reading_the_offer(self):
         self.binding.update(ebay_offer_id="offer-1", ebay_sku="ar-abc")
@@ -684,6 +707,18 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         one_side = ebay_listings.best_offer_terms(held, "40.00", alone)
         self.assertEqual(one_side["autoAcceptPrice"]["value"], "15.00")
         self.assertNotIn("autoDeclinePrice", one_side)
+
+    def test_clearing_offer_thresholds_does_not_restore_formula_defaults(self):
+        listing = {**LISTING, "ebay_specifics": {"bestOffer": {"enabled": True, "autoAcceptPrice": "", "minimumOfferPrice": ""}}}
+        form = {"specifics": {"pricingFormatDetails": {"fixedPrice": {"acceptOffersOfAtLeast": "22", "declineOffersLowerThan": "20"}}}}
+        self.assertEqual(ebay_listings.best_offer_terms(form, "24.00", listing), {"bestOfferEnabled": True})
+
+    def test_seller_condition_description_is_editable_and_can_be_cleared(self):
+        for value in ("Small mark on the sleeve.", ""):
+            listing = {**LISTING, "ebay_specifics": {"conditionDescription": value}}
+            self.assertEqual(ebay_listings._listing_fields(listing, {"specifics": {"conditionDescription": "Old note"}})["condition_description"], value)
+        with self.assertRaises(ListingProblem):
+            ebay_listings._listing_fields({**LISTING, "ebay_specifics": {"conditionDescription": "x" * 1001}}, {})
 
     async def test_a_401_refreshes_the_token_once_and_a_second_401_is_signed_out(self):
         import httpx

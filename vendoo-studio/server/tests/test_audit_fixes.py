@@ -1221,6 +1221,22 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.assertEqual(latest.source, "user_form")
         self.assertEqual(latest.listing_json.get("size"), "10")
 
+    def test_edits_preserve_the_revision_sent_by_direct_marketplace_jobs(self):
+        jobs = [Job(conversation_id=self.conv.id, approved_revision_id="sent-revision",
+                    listing_snapshot={**VALID_LISTING, "title": "Already sent"},
+                    status=status, current_step="native_poshmark_save_draft")
+                for status in ("dispatched", "failed")]
+        self.db.add_all(jobs)
+        self.db.commit()
+        response = self.client.put(f"/api/conversations/{self.conv.id}/listing",
+                                   json={"listing": {**VALID_LISTING, "title": "New local edit"}})
+        self.assertEqual(response.status_code, 200, response.text)
+        for job in jobs:
+            self.db.refresh(job)
+            self.assertEqual(job.listing_snapshot["title"], "Already sent")
+            self.assertEqual(job.approved_revision_id, "sent-revision")
+        self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json["title"], "New local edit")
+
     def test_terminal_status_is_not_overwritten(self):
         job = Job(
             conversation_id=self.conv.id,

@@ -41,6 +41,7 @@ _PRICE_FOLDS = frozenset({
     "buyitnowprice",
 })
 _SKIP_PRICE = ("original", "cost", "minimum", "floor", "smart", "offer", "accept", "decline")
+_SKIP_PRICE_CONTAINERS = (*_SKIP_PRICE, "shipping", "postage", "delivery", "tax", "variation")
 _TOP_LEVEL = (
     "sku", "title", "size", "sizeType", "category_path", "package_dimensions_in",
     "zipCode", "zip_code", "department", "price", "description", "brand", "condition",
@@ -57,6 +58,13 @@ def is_price_key(key: str) -> bool:
     if not folded or any(part in folded for part in _SKIP_PRICE):
         return False
     return folded in _PRICE_FOLDS
+
+
+def is_price_path(path: str) -> bool:
+    parts = path.split(".")
+    return is_price_key(parts[-1]) and not any(
+        word in fold_key(part) for part in parts[1:-1] for word in _SKIP_PRICE_CONTAINERS
+    )
 
 
 def money(value: Any) -> Decimal | None:
@@ -151,7 +159,7 @@ def _price_paths(listing: dict) -> list[str]:
             return
         for key, value in node.items():
             path = f"{prefix}.{key}"
-            if is_price_key(key) and not isinstance(value, (dict, list)):
+            if is_price_path(path) and not isinstance(value, (dict, list)):
                 found.append(path)
             elif isinstance(value, dict):
                 walk(value, path, depth + 1)
@@ -169,7 +177,7 @@ def _market_locked(paths: set[str], marketplace: str) -> str | None:
     if canonical in paths:
         return canonical
     for path in sorted(paths):
-        if marketplace_of(path) == marketplace and path.split(".")[-1] and is_price_key(path.split(".")[-1]):
+        if marketplace_of(path) == marketplace and is_price_path(path):
             return path
     return None
 
@@ -362,8 +370,7 @@ def lock_seller_edits(previous: dict, submitted: dict) -> None:
         return
     locks = locked_paths(previous) | locked_paths(submitted)
     for path in _changed_paths(previous if isinstance(previous, dict) else {}, submitted):
-        leaf = path.split(".")[-1]
-        if path == "price" or is_price_key(leaf):
+        if is_price_path(path):
             continue
         locks.add(path)
     _write_locks(submitted, locks)
@@ -426,7 +433,7 @@ def apply_field_updates(listing: dict, fields: list[dict]) -> list[str]:
         locks.add(path)
         applied.append(path)
     _write_locks(listing, locks)
-    if any(path == "price" or is_price_key(path.split(".")[-1]) for path in applied):
+    if any(is_price_path(path) for path in applied):
         sync_unlocked_prices(listing)
     return applied
 

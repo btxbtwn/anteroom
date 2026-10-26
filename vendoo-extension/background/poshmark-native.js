@@ -1,7 +1,5 @@
-// Poshmark one-step listing from the extension worker. Only Connect opens a tab.
-// The steps are the listing editor's own (read 2026-10-24): create a post,
-// upload photos, save every field, publish. The post is never saved as a
-// visible draft. Seller-confirmed only, sent once, never retried.
+// Poshmark's own editor flow. Saving a user_draft never calls published.
+// Publishing is seller-confirmed only, sent once, never retried.
 const POSHMARK = 'https://poshmark.com';
 const POSHMARK_QUERY = 'app_version=2.55&pm_version=2026.43.00';
 const POSHMARK_CONDITIONS = new Set(['nwt', 'uln', 'ug', 'uf']);
@@ -35,11 +33,22 @@ async function poshmarkStyleTags(deadline) {
   }
 }
 
+async function poshmarkShippingDiscounts(deadline) {
+  const account = await poshmarkAccount();
+  const rows = await poshmarkClient(deadline, '').call('GET', `/vm-rest/users/${account.user_id}/seller_shipping_discounts/post`, undefined,
+    { step: 'shipping-discounts', what: 'shipping discounts' });
+  if (!Array.isArray(rows) || rows.some(row => !/^[a-f0-9]{24}$/.test(String(row.id)) || typeof row.label !== 'string')) {
+    throw marketplaceError('Poshmark’s shipping discounts changed. Refresh choices.', { code: 'schema_drift' });
+  }
+  return rows.filter(row => row.enabled !== false);
+}
+
 // Poshmark's own spelling of the brand (brand search, read 2026-10-25). Brand
 // is a free string on a post, so a brand Poshmark does not know, or a failed
 // search, keeps the seller's spelling.
 async function poshmarkBrand(listing, deadline) {
-  const wanted = String(listing.form?.overrides?.brand || listing.poshmark_specifics?.poshmarkBrand || listing.brand || '').trim();
+  const wanted = String(Object.hasOwn(listing, 'brand') ? listing.brand ?? ''
+    : listing.poshmark_specifics?.poshmarkBrand ?? listing.form?.overrides?.brand ?? '').trim();
   if (!wanted || /^(?:unbranded|no brand|none|other|n\/a)$/i.test(wanted)) return '';
   try {
     const brands = await marketplaceCatalog(`poshmark:brand:${marketplaceNameKey(wanted)}`, async () => {
@@ -151,6 +160,7 @@ function poshmarkClient(deadline, csrf) {
 function poshmarkCondition(listing) {
   const own = String(listing.poshmark_specifics?.condition || '').toLowerCase();
   if (POSHMARK_CONDITIONS.has(own)) return own;
+  if (Object.hasOwn(listing.poshmark_specifics || {}, 'condition')) return poshmarkConditionFromText(own);
   const chosen = poshmarkConditionFromText(listing.poshmark_specifics?.poshmarkCondition);
   if (chosen) return chosen;
   const form = String(listing.form?.overrides?.condition || '').toLowerCase();
@@ -170,7 +180,7 @@ function poshmarkConditionFromText(value) {
 
 // Poshmark takes whole dollars only. Vendoo rounds to the nearest one.
 function poshmarkPrice(listing) {
-  return Math.round(Number(listing?.poshmark_specifics?.poshmarkPrice || listing?.price));
+  return Math.round(Number(listing?.poshmark_specifics?.poshmarkPrice ?? listing?.price));
 }
 
 function poshmarkOriginalPrice(listing) {
@@ -304,6 +314,7 @@ function poshmarkSize(category, listing, { kids = false, leaf = category.id } = 
 // listing's form decides when it has the setting, off included; otherwise the
 // Poshmark specifics' minimum. A minimum at or above the price is off.
 function poshmarkSmartMinimum(listing, price) {
+  if (listing.poshmark_specifics?.availability === 'not_for_sale') return 0;
   const direct = listing.poshmark_specifics?.smartSell;
   if (direct && typeof direct.enabled === 'boolean') {
     const value = direct.enabled ? Math.round(Number(direct.minimumPrice)) : 0;
@@ -340,7 +351,8 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   if (!condition) missing.push({ field: 'condition', needs: 'a condition' });
   const price = poshmarkPrice(listing);
   if (!(price >= 3)) missing.push({ field: 'price', needs: 'a price of $3 or more' });
-  if (listing.poshmark_specifics?.smartSell?.enabled === true && !poshmarkSmartMinimum(listing, price)) {
+  if (listing.poshmark_specifics?.availability !== 'not_for_sale'
+      && listing.poshmark_specifics?.smartSell?.enabled === true && !poshmarkSmartMinimum(listing, price)) {
     missing.push({ field: 'poshmark_specifics.smartSell.minimumPrice', needs: 'a Smart Pricing minimum above $0 and below the listing price' });
   }
   const title = String(listing.title || '').trim();
@@ -353,31 +365,42 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: 'quantity', needs: 'a positive whole-number quantity' });
   const originalPrice = poshmarkOriginalPrice(listing);
   if (!Number.isSafeInteger(originalPrice) || originalPrice < 0) missing.push({ field: 'originalPrice', needs: 'an original price in whole dollars, or 0 if unknown' });
+  const sku = String(listing.poshmark_specifics?.poshmarkSku ?? listing.sku ?? '').trim();
+  if (sku.length > 50) missing.push({ field: 'poshmark_specifics.poshmarkSku', needs: 'a SKU of 50 characters or fewer' });
+  const cost = Number(listing.cost);
+  const hasCost = Object.hasOwn(listing, 'cost');
+  const blankCost = listing.cost == null || listing.cost === '';
+  if (hasCost && !blankCost && (!Number.isFinite(cost) || cost < 0)) missing.push({ field: 'cost', needs: 'a cost of $0 or more, or a blank cost' });
   if (missing.length) throw marketplaceMissing('poshmark', missing);
   const colorNames = new Set((catalog.colors || []).map(color => color.name));
-  const colors = [listing.poshmark_specifics?.poshmarkColor || listing.primaryColor,
-    listing.poshmark_specifics?.poshmarkSecondaryColor || listing.secondaryColor]
+  const colors = [listing.poshmark_specifics?.poshmarkColor ?? listing.primaryColor,
+    listing.poshmark_specifics?.poshmarkSecondaryColor ?? listing.secondaryColor]
     .map(value => ({ Grey: 'Gray', Beige: 'Tan' })[value] || value).filter(value => colorNames.has(value));
   const minimum = poshmarkSmartMinimum(listing, price);
-  const sku = String(listing.poshmark_specifics?.poshmarkSku ?? listing.sku ?? '').trim().slice(0, 50);
   // The item's cost (Anteroom's share of the box price), in dollars and cents as Poshmark's editor keeps it.
-  const cost = Number(listing.cost);
+  const privateFields = {
+    ...(sku || Object.hasOwn(listing.poshmark_specifics || {}, 'poshmarkSku') ? { sku } : {}),
+    ...(hasCost ? { cost_price_amount: blankCost ? null : { val: cost.toFixed(2), currency_code: 'USD', currency_symbol: '$' } } : {}),
+    ...(Object.hasOwn(listing.poshmark_specifics || {}, 'sellerNotes')
+      ? { other_info: String(listing.poshmark_specifics.sellerNotes ?? '') } : {}),
+  };
+  const availability = listing.poshmark_specifics?.availability || 'available';
+  if (!['available', 'not_for_sale'].includes(availability)) throw marketplaceMissing('poshmark', [{ field: 'poshmark_specifics.availability', needs: 'For Sale or Not For Sale' }]);
   return {
     title, description,
     catalog: category.catalog,
-    inventory: { status: 'available', multi_item: quantity > 1, size_quantity_revision: 0, size_quantities: [{
+    inventory: { status: availability, multi_item: quantity > 1, size_quantity_revision: 0, size_quantities: [{
       size_id: size.size.id, size_obj: size.size, size_system: 'us', quantity_available: quantity, quantity_sold: 0,
       size_set_tags: size.set.tags || [], seller_inventory_private_info: {} }] },
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
     original_price_amount: { val: String(originalPrice), currency_code: 'USD', currency_symbol: '$' },
     condition,
-    ...(brand ? { brand } : {}),
+    brand,
     colors: [...new Set(colors)].slice(0, 2),
     style_tags: styleTags,
     offer_auto_actions_v2_enabled: minimum > 0,
     offer_auto_actions_min_price_amount: minimum > 0 ? { val: String(minimum), currency_code: 'USD' } : null,
-    ...(sku || cost > 0 ? { seller_private_info: { ...(sku ? { sku } : {}),
-      ...(cost > 0 ? { cost_price_amount: { val: cost.toFixed(2), currency_code: 'USD', currency_symbol: '$' } } : {}) } } : {}),
+    ...(Object.keys(privateFields).length ? { seller_private_info: privateFields } : {}),
   };
 }
 
@@ -386,11 +409,58 @@ async function poshmarkPreparedPost(listing, deadline) {
   const catalog = await poshmarkCatalogData(deadline);
   const brand = await poshmarkBrand(listing, deadline);
   const styleTags = poshmarkPostStyleTags(listing, await poshmarkStyleTags(deadline));
-  return poshmarkPostFields(catalog, listing, { brand, styleTags });
+  const post = poshmarkPostFields(catalog, listing, { brand, styleTags });
+  const discountId = listing.poshmark_specifics?.shippingDiscountId;
+  if (Object.hasOwn(listing.poshmark_specifics || {}, 'shippingDiscountId')) {
+    const discounts = await poshmarkShippingDiscounts(deadline);
+    const selected = discountId ? discounts.find(row => row.id === discountId)
+      : discounts.find(row => Number(row.discount_amount?.val) === 0);
+    if (!selected) throw marketplaceMissing('poshmark', [{ field: 'poshmark_specifics.shippingDiscountId', needs: 'a current shipping discount from Poshmark' }]);
+    post.seller_shipping_discount = { id: selected.id };
+  }
+  return post;
 }
 
 function poshmarkListingUrl(id) {
   return `https://poshmark.com/listing/${id}`;
+}
+
+function poshmarkDraftUrl(id) {
+  return `https://poshmark.com/edit-listing/${id}`;
+}
+
+function poshmarkPostDifferences(actual, expected, photoCount) {
+  const text = value => marketplaceText(String(value ?? ''));
+  const strings = values => (values || []).map(value => String(value?.name ?? value)).sort();
+  const sizes = inventory => (inventory?.size_quantities || []).map(row => ({
+    id: String(row.size_id ?? row.size_obj?.id ?? ''), quantity: Number(row.quantity_available),
+    tags: strings(row.size_set_tags),
+  })).sort((a, b) => a.id.localeCompare(b.id));
+  const fields = {
+    title: [text(actual.title), text(expected.title)],
+    description: [text(actual.description), text(expected.description)],
+    brand: [text(actual.brand).toLowerCase(), text(expected.brand).toLowerCase()],
+    condition: [actual.condition, expected.condition],
+    category: [['department', 'category'].map(k => actual.catalog?.[k]), ['department', 'category'].map(k => expected.catalog?.[k])],
+    subcategory: [strings(actual.catalog?.category_features), strings(expected.catalog?.category_features)],
+    sizes: [sizes(actual.inventory), sizes(expected.inventory)],
+    availability: [actual.inventory?.status, expected.inventory?.status],
+    colors: [strings(actual.colors), strings(expected.colors)],
+    'style tags': [strings(actual.style_tags), strings(expected.style_tags)],
+    price: [Number(actual.price_amount?.val), Number(expected.price_amount?.val)],
+    'original price': [Number(actual.original_price_amount?.val), Number(expected.original_price_amount?.val)],
+    photos: [(actual.cover_shot?.id ? 1 : 0) + (actual.pictures?.length || 0), photoCount],
+  };
+  if (expected.seller_shipping_discount) fields['shipping discount'] = [actual.seller_shipping_discount?.id, expected.seller_shipping_discount.id];
+  for (const key of ['sku', 'cost_price_amount', 'other_info']) {
+    if (expected.seller_private_info?.[key] !== undefined) {
+      const amount = value => value?.val == null || value.val === '' ? null : Number(value.val);
+      fields[key] = key === 'cost_price_amount'
+        ? [amount(actual.seller_private_info?.[key]), amount(expected.seller_private_info[key])]
+        : [String(actual.seller_private_info?.[key] ?? ''), String(expected.seller_private_info[key])];
+    }
+  }
+  return Object.entries(fields).filter(([, pair]) => JSON.stringify(pair[0]) !== JSON.stringify(pair[1])).map(([field]) => field);
 }
 
 function poshmarkPhotoCount(photos) {
@@ -452,35 +522,78 @@ async function runPoshmarkApi(msg, recovery = false) {
   const deadline = Date.now() + 150000;
   const key = `native_operation_${p.operation_id}`;
   let created = null;
+  let existingDraft = false;
+  const draftOnly = p.action === 'save_draft';
   // prepare -> creating -> created -> publishing -> published
   let stage = 'prepare';
   let client = poshmarkClient(deadline, '');
   try {
-    if (p.action !== 'list') return marketplaceFailure(marketplaceError('Poshmark listings are created in one step.'), true);
+    if (!['list', 'save_draft'].includes(p.action)) return marketplaceFailure(marketplaceError('Unsupported Poshmark action.'), true);
     if (recovery) {
       const journal = (await chrome.storage.local.get(key))[key] || {};
       if (!journal.poshmark_post_id) return marketplaceFailure(new Error('Poshmark did not confirm a listing. Check your Poshmark closet before trying again.'), false);
       const post = await client.call('GET', `/vm-rest/posts/${journal.poshmark_post_id}`, undefined, { step: 'recover' });
+      if (draftOnly) {
+        const account = await poshmarkAccount();
+        const expected = await poshmarkPreparedPost(p.listing || {}, deadline);
+        if (String(post.creator_id) !== account.user_id || post.status !== 'user_draft'
+            || poshmarkPostDifferences(post, expected, p.photos?.length ?? p.expected_photo_count).length) {
+          return marketplaceFailure(marketplaceError('Poshmark has not confirmed this draft revision. Check your Poshmark drafts before trying again.'), false);
+        }
+        return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(journal.poshmark_post_id) };
+      }
       if (post.status === 'published') return { ok: true, state: 'published', listing_url: poshmarkListingUrl(journal.poshmark_post_id) };
       return marketplaceFailure(new Error(`Poshmark has post ${journal.poshmark_post_id} but it is not listed. Check your Poshmark closet before trying again.`), false);
     }
-    if (p.confirm !== true) return marketplaceFailure(marketplaceError('Confirm listing on Poshmark.'), true);
+    if (!draftOnly && p.confirm !== true) return marketplaceFailure(marketplaceError('Confirm listing on Poshmark.'), true);
     poshmarkPhotoCount(p.photos);
     const account = await poshmarkAccount();
     const post = await poshmarkPreparedPost(p.listing || {}, deadline);
     client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
 
-    stage = 'creating';
-    const fresh = await client.call('POST', `/vm-rest/users/${account.user_id}/posts`, {}, { step: 'create', what: 'a new listing' });
-    if (!/^[a-f0-9]{24}$/.test(String(fresh.id))) throw marketplaceError('Poshmark did not confirm a new listing.', { code: 'schema_drift', rejected: false });
-    created = String(fresh.id);
+    if (p.draft_url) {
+      const match = /^https:\/\/poshmark\.com\/edit-listing\/([a-f0-9]{24})$/.exec(p.draft_url);
+      if (!match) throw marketplaceError('Invalid native draft link.');
+      const held = await client.call('GET', `/vm-rest/posts/${match[1]}`, undefined, { step: 'read-draft' });
+      if (String(held.creator_id) !== account.user_id || held.status !== 'user_draft'
+          || (held.inventory?.size_quantities || []).some(row => Number(row.quantity_sold) > 0)) {
+        throw marketplaceError('This Poshmark post is not your private draft. It was not changed.');
+      }
+      created = match[1];
+      existingDraft = true;
+      post.inventory.size_quantity_revision = Number(held.inventory?.size_quantity_revision) || 0;
+    } else {
+      stage = 'creating';
+      const fresh = await client.call('POST', `/vm-rest/users/${account.user_id}/posts`, {}, { step: 'create', what: 'a new listing' });
+      if (!/^[a-f0-9]{24}$/.test(String(fresh.id))) throw marketplaceError('Poshmark did not confirm a new listing.', { code: 'schema_drift', rejected: false });
+      created = String(fresh.id);
+    }
     stage = 'created';
     const journal = (await chrome.storage.local.get(key))[key] || {};
     await chrome.storage.local.set({ [key]: { ...journal, poshmark_post_id: created } });
     const ids = [];
     for (const photo of p.photos) ids.push(await client.photo(created, await nativePhoto(msg.job_id, photo, deadline)));
-    await client.call('POST', `/vm-rest/posts/${created}`, { post: { ...post, cover_shot: { id: ids[0] }, pictures: ids.slice(1).map(id => ({ id })) } },
+    const savedFields = { ...post, cover_shot: { id: ids[0] }, pictures: ids.slice(1).map(id => ({ id })) };
+    await client.call('POST', `/vm-rest/posts/${created}`, { post: savedFields },
       { step: 'save', what: 'the listing details' });
+    if (draftOnly) {
+      stage = 'saving-draft';
+      // Current native editor: publishAsDraft uses PUT with postRequestParams.
+      await client.call('PUT', `/vm-rest/posts/${created}/status/user_draft`, { post: savedFields },
+        { step: 'save-draft', what: 'to save the private draft' });
+      const saved = await client.call('GET', `/vm-rest/posts/${created}`, undefined, { step: 'read-back' });
+      const differences = poshmarkPostDifferences(saved, post, p.photos.length);
+      if (saved.id !== created || String(saved.creator_id) !== account.user_id || saved.status !== 'user_draft' || differences.length) {
+        throw marketplaceError(`Poshmark did not keep this draft revision${differences.length ? ` (${differences.join(', ')})` : ''}. Check your Poshmark drafts.`, { code: 'uncertain', rejected: false });
+      }
+      return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(created) };
+    }
+    const checked = await client.call('GET', `/vm-rest/posts/${created}`, undefined, { step: 'verify-before-publish' });
+    const differences = poshmarkPostDifferences(checked, post, p.photos.length);
+    if (checked.id !== created || String(checked.creator_id) !== account.user_id
+        || !['draft', 'user_draft'].includes(checked.status) || differences.length) {
+      throw marketplaceError(`Poshmark’s draft does not match this revision${differences.length ? ` (${differences.join(', ')})` : ''}. It was not published.`);
+    }
     stage = 'publishing';
     // Poshmark's own editor certifies the listing when it publishes.
     await client.call('PUT', `/vm-rest/posts/${created}/status/published?user_certified=true`, {}, { step: 'publish', what: 'to list it' });
@@ -494,7 +607,8 @@ async function runPoshmarkApi(msg, recovery = false) {
     // Until the publish request, nothing is public; a clear refusal of it is safe too.
     let safe = stage === 'prepare' || (stage === 'creating' && error.rejected === true)
       || stage === 'created' || (stage === 'publishing' && error.rejected === true);
-    if (created && safe) {
+    if (existingDraft && stage !== 'prepare') safe = false;
+    if (created && safe && !existingDraft) {
       // Remove the unlisted post so a retry starts clean. Runs after a cancel or
       // the deadline too, with its own short limit; only a confirmed removal is safe.
       try {

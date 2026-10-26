@@ -8,6 +8,23 @@ const listing = { title: 'Test jacket', description: 'Private draft', price: 24.
 // What Mercari's draftItemQuery answers for a draft that kept the label and payer.
 const KEPT = { itemCondition: { id: 3 }, itemCategory: { id: 303 }, shippingPayer: { id: 1 }, shippingClasses: [{ id: 2509 }] };
 const SHIPPING = { payerId: 1, classIds: [2509], suggestedClassIds: [2509], zipCode: '70125', dimensions: {}, weight: { weight: 10 } };
+
+test('ship on your own uses Mercari’s zero class sentinel and seller payer without a label lookup', async () => {
+  const c = loadWorker();
+  const ownListing = { ...listing, mercari_specifics: { shippingMethod: 'SOYO', shippingPayerId: 1 }, weight_oz: 0 };
+  c.mercariRequest = async () => assert.fail('SOYO does not need prepaid label rates');
+  assert.equal((await c.mercariShippingClasses(ownListing, Date.now() + 30000)).length, 0);
+  const common = c.mercariCommon(ownListing);
+  assert.equal(common.shipping.payerId, 2);
+  assert.deepEqual(Array.from(common.shipping.classIds), [0]);
+  assert.deepEqual(Array.from(common.shipping.suggestedClassIds), []);
+  assert.equal(common.shipping.dimensions.unit, undefined);
+  assert.ok(!c.mercariMissing(ownListing, common).some(row => /weight|shippingClassIds/.test(row.field)));
+  const draft = { ...common, photo_count: 1, payerId: 2, classIds: [], isAutoPriceDrop: false };
+  assert.ok(!c.mercariDraftDifferences(draft, common, 1).includes('shipping'));
+  draft.classIds = [2509];
+  assert.ok(c.mercariDraftDifferences(draft, common, 1).includes('shipping'));
+});
 const SESSION = { csrf: 'private-csrf', accessToken: 'private-session', user: { userId: 7, name: 'seller', email: 'seller@example.com' } };
 const INITIALIZE = 'https://www.mercari.com/v1/initialize';
 

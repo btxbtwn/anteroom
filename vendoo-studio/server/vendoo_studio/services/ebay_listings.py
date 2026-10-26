@@ -520,8 +520,9 @@ def best_offer_terms(form: dict, price: str, listing: dict | None = None) -> dic
 
     seller_accept = _seller_amount("autoAcceptPrice")
     seller_minimum = _seller_amount("minimumOfferPrice", "autoDeclinePrice")
-    accept = seller_accept if seller_accept is not None else _amount(fixed.get("acceptOffersOfAtLeast")) or _amount(floors[0])
-    minimum = seller_minimum if seller_minimum is not None else _amount(fixed.get("declineOffersLowerThan")) or _amount(floors[1])
+    accept = seller_accept if "autoAcceptPrice" in chosen else _amount(fixed.get("acceptOffersOfAtLeast")) or _amount(floors[0])
+    minimum = seller_minimum if any(key in chosen for key in ("minimumOfferPrice", "autoDeclinePrice")) \
+        else _amount(fixed.get("declineOffersLowerThan")) or _amount(floors[1])
     # A formula floor on the wrong side of a price the seller set is left off.
     if seller_accept is not None and seller_minimum is None and minimum is not None and not minimum < seller_accept:
         minimum = None
@@ -726,6 +727,13 @@ def _listing_url(listing_id: str) -> str:
     return f"https://www.ebay.com/itm/{listing_id}"
 
 
+def condition_description(snapshot: dict, form: dict) -> str:
+    details = snapshot.get("ebay_specifics") or {}
+    if "conditionDescription" in details:
+        return str(details["conditionDescription"] or "")
+    return str((form.get("specifics") or {}).get("conditionDescription") or EBAY_CONDITION_DESCRIPTION)
+
+
 def _listing_fields(snapshot: dict, form: dict) -> dict:
     title = ebay_title(snapshot)
     description = str(snapshot.get("description") or "").strip()
@@ -747,9 +755,12 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
         raise missing("Set a positive eBay price before listing.", "price") from exc
     category_id = ebay_category_id(snapshot)
     condition, descriptors = card_condition(snapshot, category_id) or (ebay_condition(snapshot), [])
+    condition_note = condition_description(snapshot, form)
+    if len(condition_note) > 1000:
+        raise missing("eBay condition descriptions are at most 1,000 characters.", "ebay_specifics.conditionDescription")
     return {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
             "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
-            "condition_description": str((form.get("specifics") or {}).get("conditionDescription") or EBAY_CONDITION_DESCRIPTION)}
+            "condition_description": condition_note}
 
 
 @requirement("ebay")
@@ -809,15 +820,25 @@ async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict, 
     if fields["quantity"] < int(before.get("soldQuantity") or 0):
         raise ValueError("Quantity cannot be lower than the quantity already sold.")
     root = ET.Element("ReviseFixedPriceItemRequest", xmlns=NS["e"])
+    if terms and terms.get("bestOfferEnabled"):
+        for key, tag in (("autoAcceptPrice", "BestOfferAutoAcceptPrice"), ("autoDeclinePrice", "MinimumBestOfferPrice")):
+            if not terms.get(key):
+                ET.SubElement(root, "DeletedField").text = f"Item.ListingDetails.{tag}"
+    condition_note_applies = fields["condition"] != "NEW" and not fields["condition_descriptors"]
+    if condition_note_applies and not fields["condition_description"]:
+        ET.SubElement(root, "DeletedField").text = "Item.ConditionDescription"
     item = ET.SubElement(root, "Item")
     for name, value in {"ItemID": listing_id, "Title": fields["title"], "Description": description_html(fields["description"]),
                         "StartPrice": fields["price"], "Quantity": str(fields["quantity"])}.items():
         ET.SubElement(item, name).text = value
+    if condition_note_applies and fields["condition_description"]:
+        ET.SubElement(item, "ConditionDescription").text = fields["condition_description"]
     if terms:
         _best_offer_xml(item, terms)
     await client.request("POST", "/ws/api.dll", xml=trading_xml(root), call="ReviseFixedPriceItem")
     after = await owned_listing(client, listing_id)
-    if after["title"] != fields["title"] or str(after.get("price")) != fields["price"]:
+    if (after["title"] != fields["title"] or str(after.get("price")) != fields["price"]
+            or (condition_note_applies and after.get("conditionDescription", "") != fields["condition_description"])):
         raise ValueError("eBay has not confirmed the update. Check the live listing before trying again.")
     return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}
 

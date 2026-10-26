@@ -135,7 +135,7 @@ class NativeMarketplacesTest(unittest.TestCase):
     def test_draft_route_refuses_publish_parameters_unsupported_markets_and_live_items(self):
         response = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(response.status_code, 422)
-        for market in ["ebay", "poshmark", "sellwild", "vinted"]:
+        for market in ["ebay", "sellwild", "vinted"]:
             response = self.client.post(f"{self.base}/{market}/draft", json={"revision_id": self.rev.id})
             self.assertEqual(response.status_code, 400, response.text)
         MarketplaceListingRepo(self.db).save(self.conv.id, "mercari", {"state": "published", "listing_id": "m123456789",
@@ -144,6 +144,33 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(self.actions(), [])
         self.assertEqual(self.launched, [])
+
+    def test_poshmark_saves_and_reuses_a_private_draft_without_publication(self):
+        draft = "https://poshmark.com/edit-listing/6adc371572e62463d992ffef"
+        self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": draft}
+        for _ in range(2):
+            response = self.client.post(f"{self.base}/poshmark/draft", json={"revision_id": self.rev.id})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.run_jobs()
+            self.assertEqual(self.record("poshmark")["state"], "draft")
+            payload = self.bridge.call_args.args[2]
+            self.assertEqual((payload["action"], payload["confirm"]), ("save_draft", False))
+        self.assertEqual(self.actions(), ["save_draft", "save_draft"])
+        self.assertEqual(payload["draft_url"], draft)
+        context = native._result_context(self.db, self.conv.id, "poshmark", self.record("poshmark"), LISTING, draft)
+        self.assertEqual(context["listing"], LISTING)
+        self.assertEqual(context["expected_photo_count"], 1)
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        self.assertEqual(self.list("poshmark")["state"], "published")
+        self.assertEqual(self.actions(), ["save_draft", "save_draft", "list"])
+        self.assertEqual(self.bridge.call_args.args[2]["draft_url"], draft)
+
+    def test_poshmark_draft_links_reject_other_hosts_queries_and_invalid_ids(self):
+        draft = "https://poshmark.com/edit-listing/6adc371572e62463d992ffef"
+        self.assertEqual(native.draft_url("poshmark", draft), draft)
+        for bad in [draft + "?publish=true", draft + "#publish", draft.replace("poshmark.com", "evil.example"), draft[:-1]]:
+            with self.subTest(url=bad), self.assertRaises(native.NativeMarketplaceError):
+                native.draft_url("poshmark", bad)
 
     def test_list_saves_then_publishes_in_one_job_that_holds_the_slot(self):
         for platform in URLS:
@@ -273,7 +300,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(record["state"], "pending_review")
         payload = self.bridge.call_args.args[2]
         self.assertEqual((payload["action"], payload["confirm"]), ("publish", True))
-        self.assertEqual(payload["sellwild"], {"category_id": 272, "condition_id": 2})
+        self.assertEqual(payload["sellwild"], {"category_id": 272, "condition_id": 2, "parcel_template": "", "fixed_package": False,
+                                               "package_dimensions": {"depth": 12.0, "width": 9.0, "height": 2.0}})
         self.assertTrue(payload["local_draft_id"])
         self.assertEqual(self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **SELLWILD}).status_code, 409)
         self.assertEqual(self.bridge.call_count, 1)
@@ -286,12 +314,12 @@ class NativeMarketplacesTest(unittest.TestCase):
         record = self.record("sellwild")
         self.assertIsNone(record.get("sellwild_category_id"))
         self.assertEqual(record["sellwild_condition_id"], 2)
-        self.assertEqual(native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, mens, [], "job")["sellwild"],
-                         {"category_id": 272, "condition_id": 2})
+        payload = native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, mens, [], "job")["sellwild"]
+        self.assertEqual((payload["category_id"], payload["condition_id"]), (272, 2))
         boys = {**mens, "category_path": "", "department": "Boys", "title": "Columbia windbreaker jacket",
                 "marketplace_category_objects": {"sellwild": {"displayPath": ["Fashion", "Mens Clothing"]}}}
-        self.assertEqual(native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, boys, [], "job")["sellwild"],
-                         {"category_id": 246, "condition_id": 2})
+        payload = native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, boys, [], "job")["sellwild"]
+        self.assertEqual((payload["category_id"], payload["condition_id"]), (246, 2))
 
     def test_sellwild_needs_a_category_and_condition(self):
         for extra in ({"sellwild_category_id": 183, "sellwild_condition_id": 2}, {"sellwild_category_id": 272, "sellwild_condition_id": 9}):
@@ -315,6 +343,33 @@ class NativeMarketplacesTest(unittest.TestCase):
                          {"item_weight": 20.0, "item_length": 13.0, "item_width": 10.0, "item_height": 3.0,
                           "item_weight_unit": "oz", "item_dimensions_unit": "in"})
         self.assertIsNone(native.listing_package({"weight_oz": 0, "package_dimensions_in": "13x10x3"}))
+
+    def test_sellwild_form_choices_override_old_picks_and_clears_do_not_restore_them(self):
+        from vendoo_studio.services import sellwild_listing
+        from vendoo_studio.services.direct_preflight import Context
+
+        listing = {**LISTING, "description": "", "sellwild_specifics": {"nativeCategoryId": "246", "nativeConditionId": "3"}}
+        old = {"sellwild_category_id": 272, "sellwild_condition_id": 2}
+        self.assertEqual(sellwild_listing.chosen(listing, old), {"category_id": 246, "condition_id": 3})
+        self.assertNotIn("description", [row["field"] for row in sellwild_listing.requirements(listing, Context(choices=old))])
+        listing["sellwild_specifics"]["nativeCategoryId"] = ""
+        self.assertIsNone(sellwild_listing.chosen(listing, old)["category_id"])
+        self.assertIn("sellwild_specifics.nativeCategoryId", [row["field"] for row in sellwild_listing.requirements(listing, Context(choices=old))])
+
+    def test_sellwild_native_packaging_uses_the_template_sides_in_the_create_payload(self):
+        from vendoo_studio.services import sellwild_listing
+        from vendoo_studio.services.direct_preflight import Context
+
+        listing = {**LISTING, "weight_oz": 0, "package_dimensions_in": "", "sellwild_specifics": {
+            "nativeCategoryId": 246, "nativeConditionId": 3, "parcelTemplate": "USPS_FlatRatePaddedEnvelope"}}
+        self.assertEqual(sellwild_listing.package_sides(listing), [13, 10, 1])
+        self.assertEqual(sellwild_listing.requirements(listing, Context()), [])
+        payload = native._execute_payload("sellwild", "publish", {"operation_id": "test"}, listing, [], "job")["sellwild"]
+        self.assertEqual(payload["parcel_template"], "USPS_FlatRatePaddedEnvelope")
+        self.assertTrue(payload["fixed_package"])
+        self.assertEqual(payload["package_dimensions"], {"depth": 13, "width": 10, "height": 1})
+        listing["sellwild_specifics"]["parcelTemplate"] = "invented"
+        self.assertIn("sellwild_specifics.parcelTemplate", [row["field"] for row in sellwild_listing.requirements(listing, Context())])
 
     def test_sellwild_options_suggest_from_the_listing(self):
         listing = {**LISTING, "title": "Vintage Patagonia fleece jacket", "condition": "Pre-Owned - Good",
