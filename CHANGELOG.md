@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.410 — 2026-10-26
+
+- Upload, preview, select and clear a Poshmark listing video shorter than 15 seconds. Save Draft checks that Poshmark kept it, and List waits for video processing before publishing.
+- Marketplace actions wait for your latest field edit to finish saving, so Save Draft uses the revision you just edited.
+
 ## 0.1.409 — 2026-10-26
 
 - Listing again on Depop fills the draft you already saved, including category, size, colour, brand, and photos.

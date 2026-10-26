@@ -326,6 +326,13 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
     snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
+    if marketplace == "poshmark":
+        from vendoo_studio.services.listing_videos import selected_video
+
+        try:
+            snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace)
+        except ValueError as exc:
+            raise NativeMarketplaceError(400, str(exc)) from exc
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace == "etsy":
@@ -568,6 +575,7 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
         "listing": snapshot, "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
+        **({"video": snapshot.get("_native_video")} if marketplace == "poshmark" else {}),
         "photos": [{"id": p.id, "mime_type": p.mime_type} for p in sent],
         **extra,
     }

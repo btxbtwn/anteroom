@@ -151,7 +151,70 @@ function poshmarkClient(deadline, csrf) {
       }
     }
   };
+  client.video = async (postId, video, jobId, created) => {
+    const blob = await nativeVideo(jobId, video, deadline);
+    const asset = await client.call('POST', `/vm-rest/posts/${postId}/videos`, {}, { step: 'video', what: 'a new video' });
+    if (!/^[a-f0-9]{24}$/.test(String(asset.id))) throw marketplaceError('Poshmark did not confirm the video asset.', { code: 'schema_drift' });
+    await created(asset.id);
+    const form = new FormData();
+    const extension = { 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm' }[video.mime_type] || 'video';
+    form.append('file', blob, `${video.id}.${extension}`);
+    await client.call('POST', `/api/posts/${postId}/videos/${asset.id}/media`, form, { step: 'video-upload', what: 'the video upload', timeoutMs: 60000 });
+    await client.call('POST', `/vm-rest/posts/${postId}/videos/${asset.id}`, { input: { status: 'submitted' } },
+      { step: 'video-submit', what: 'the video for processing' });
+    return String(asset.id);
+  };
   return client;
+}
+
+function poshmarkVideoData(payload) {
+  const specifics = payload.listing?.poshmark_specifics || {};
+  if (!Object.hasOwn(specifics, 'videoId')) return undefined;
+  if (!specifics.videoId) return null;
+  const video = payload.video || payload.listing?._native_video;
+  if (!video || video.id !== specifics.videoId || !(video.duration_seconds > 0 && video.duration_seconds < 15)
+      || !(video.size_bytes > 0) || !video.checksum || !String(video.mime_type).startsWith('video/')) {
+    throw marketplaceMissing('poshmark', [{ field: 'poshmark_specifics.videoId', needs: 'the selected video, shorter than 15 seconds' }]);
+  }
+  return video;
+}
+
+function poshmarkExpectedVideo(post, payload, journal) {
+  const video = poshmarkVideoData(payload);
+  if (video === undefined) return;
+  if (video === null) { post.videos = []; return; }
+  if (!journal?.poshmark_video_id || journal.poshmark_video_checksum !== video.checksum) {
+    throw marketplaceError('Poshmark has not confirmed the video for this revision. Check its draft before trying again.');
+  }
+  post.videos = [{ id: journal.poshmark_video_id }];
+}
+
+async function poshmarkSendVideo(client, postId, payload, jobId, post, key) {
+  const video = poshmarkVideoData(payload);
+  if (video === undefined) return;
+  if (video === null) { post.videos = []; return; }
+  await client.video(postId, video, jobId, async id => {
+    const journal = (await chrome.storage.local.get(key))[key] || {};
+    await chrome.storage.local.set({ [key]: { ...journal, poshmark_video_id: id, poshmark_video_checksum: video.checksum } });
+  });
+  poshmarkExpectedVideo(post, payload, (await chrome.storage.local.get(key))[key]);
+}
+
+function poshmarkVideoPending(post, expected) {
+  if (!expected.videos?.length) return false;
+  const video = post.videos?.find(row => row.id === expected.videos[0].id);
+  if (['failed', 'upload_failed'].includes(video?.media?.processing_status)) throw marketplaceError('Poshmark could not process this video. Replace it before listing.');
+  return video?.status !== 'ready';
+}
+
+async function poshmarkWaitForVideo(client, postId, expected, deadline) {
+  if (!expected.videos?.length) return;
+  while (Date.now() < deadline - 10000) {
+    const saved = await client.call('GET', `/vm-rest/posts/${postId}`, undefined, { step: 'video-processing' });
+    if (!poshmarkVideoPending(saved, expected)) return;
+    await marketplaceSleep(1000);
+  }
+  throw marketplaceError('Poshmark is still processing this video. Check its draft before listing.');
 }
 
 // Anteroom/Vendoo condition labels to Poshmark's own codes. The condition the
@@ -484,6 +547,7 @@ function poshmarkPostDifferences(actual, expected, photoCount) {
     photos: [(actual.cover_shot?.id ? 1 : 0) + (actual.pictures?.length || 0), photoCount],
   };
   if (expected.seller_shipping_discount) fields['shipping discount'] = [actual.seller_shipping_discount?.id, expected.seller_shipping_discount.id];
+  if (Object.hasOwn(expected, 'videos')) fields.videos = [(actual.videos || []).map(video => video.id).sort(), expected.videos.map(video => video.id).sort()];
   for (const key of ['sku', 'cost_price_amount', 'other_info']) {
     if (expected.seller_private_info?.[key] !== undefined) {
       const amount = value => value?.val == null || value.val === '' ? null : Number(value.val);
@@ -520,15 +584,19 @@ async function updatePoshmarkPost(msg, recovery = false) {
     const sold = (existing.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
     if (sold || existing.status !== 'published') throw marketplaceError('This Poshmark listing is not live. It was not changed.');
     const post = await poshmarkPreparedPost(p.listing || {}, deadline);
+    poshmarkVideoData(p);
+    if (recovery) poshmarkExpectedVideo(post, p, (await chrome.storage.local.get(key))[key]);
     const matches = saved => saved.status === 'published'
       && !poshmarkPostDifferences(saved, post, p.photos?.length ?? p.expected_photo_count).length;
     if (recovery) {
       if (!matches(existing)) return marketplaceFailure(new Error('Poshmark has not confirmed the update. Check the live listing before trying again.'), false);
-      return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id) };
+      const warning = [poshmarkSmartWarning(post, existing), poshmarkVideoPending(existing, post) ? 'Poshmark is still processing the video.' : ''].filter(Boolean).join(' ');
+      return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id), ...(warning ? { warning } : {}) };
     }
     poshmarkPhotoCount(p.photos);
     post.inventory.size_quantity_revision = Number(existing.inventory?.size_quantity_revision) || 0;
     client.csrf = await poshmarkCsrf(deadline);
+    await poshmarkSendVideo(client, id, p, msg.job_id, post, key);
     const ids = [];
     for (const photo of p.photos) ids.push(await client.photo(id, await nativePhoto(msg.job_id, photo, deadline)));
     const journal = (await chrome.storage.local.get(key))[key] || {};
@@ -539,7 +607,7 @@ async function updatePoshmarkPost(msg, recovery = false) {
     stage = 'saved';
     const saved = await client.call('GET', `/vm-rest/posts/${id}`, undefined, { step: 'read-back' });
     if (!matches(saved)) throw new Error('Poshmark did not keep this listing revision. Check the live listing before trying again.');
-    const warning = poshmarkSmartWarning(post, saved);
+    const warning = [poshmarkSmartWarning(post, saved), poshmarkVideoPending(saved, post) ? 'Poshmark is still processing the video.' : ''].filter(Boolean).join(' ');
     return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id), ...(warning ? { warning } : {}) };
   } catch (error) {
     const safe = stage === 'prepare' || (stage === 'saving' && error.rejected === true);
@@ -567,11 +635,14 @@ async function runPoshmarkApi(msg, recovery = false) {
       if (draftOnly) {
         const account = await poshmarkAccount();
         const expected = await poshmarkPreparedPost(p.listing || {}, deadline);
+        poshmarkExpectedVideo(expected, p, journal);
         if (String(post.creator_id) !== account.user_id || post.status !== 'user_draft'
             || poshmarkPostDifferences(post, expected, p.photos?.length ?? p.expected_photo_count).length) {
           return marketplaceFailure(marketplaceError('Poshmark has not confirmed this draft revision. Check your Poshmark drafts before trying again.'), false);
         }
-        return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(journal.poshmark_post_id) };
+        const pendingVideo = poshmarkVideoPending(post, expected);
+        return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(journal.poshmark_post_id),
+          ...(pendingVideo ? { warning: 'Poshmark is still processing the video. List will wait for it to finish.' } : {}) };
       }
       if (post.status === 'published') return { ok: true, state: 'published', listing_url: poshmarkListingUrl(journal.poshmark_post_id) };
       return marketplaceFailure(new Error(`Poshmark has post ${journal.poshmark_post_id} but it is not listed. Check your Poshmark closet before trying again.`), false);
@@ -580,6 +651,7 @@ async function runPoshmarkApi(msg, recovery = false) {
     poshmarkPhotoCount(p.photos);
     const account = await poshmarkAccount();
     const post = await poshmarkPreparedPost(p.listing || {}, deadline);
+    poshmarkVideoData(p);
     client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
 
     if (p.draft_url) {
@@ -602,6 +674,7 @@ async function runPoshmarkApi(msg, recovery = false) {
     stage = 'created';
     const journal = (await chrome.storage.local.get(key))[key] || {};
     await chrome.storage.local.set({ [key]: { ...journal, poshmark_post_id: created } });
+    await poshmarkSendVideo(client, created, p, msg.job_id, post, key);
     const ids = [];
     for (const photo of p.photos) ids.push(await client.photo(created, await nativePhoto(msg.job_id, photo, deadline)));
     const savedFields = { ...post, cover_shot: { id: ids[0] }, pictures: ids.slice(1).map(id => ({ id })) };
@@ -617,7 +690,9 @@ async function runPoshmarkApi(msg, recovery = false) {
       if (saved.id !== created || String(saved.creator_id) !== account.user_id || saved.status !== 'user_draft' || differences.length) {
         throw marketplaceError(`Poshmark did not keep this draft revision${differences.length ? ` (${differences.join(', ')})` : ''}. Check your Poshmark drafts.`, { code: 'uncertain', rejected: false });
       }
-      return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(created) };
+      const pendingVideo = poshmarkVideoPending(saved, post);
+      return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(created),
+        ...(pendingVideo ? { warning: 'Poshmark is still processing the video. List will wait for it to finish.' } : {}) };
     }
     const checked = await client.call('GET', `/vm-rest/posts/${created}`, undefined, { step: 'verify-before-publish' });
     const differences = poshmarkPostDifferences(checked, post, p.photos.length);
@@ -625,12 +700,16 @@ async function runPoshmarkApi(msg, recovery = false) {
         || !['draft', 'user_draft'].includes(checked.status) || differences.length) {
       throw marketplaceError(`Poshmark’s draft does not match this revision${differences.length ? ` (${differences.join(', ')})` : ''}. It was not published.`);
     }
+    await poshmarkWaitForVideo(client, created, post, deadline);
     stage = 'publishing';
     // Poshmark's own editor certifies the listing when it publishes.
     await client.call('PUT', `/vm-rest/posts/${created}/status/published?user_certified=true`, {}, { step: 'publish', what: 'to list it' });
     stage = 'published';
     const published = await client.call('GET', `/vm-rest/posts/${created}`, undefined, { step: 'read-back' });
     if (published.status !== 'published') throw new Error('Poshmark has not confirmed the listing.');
+    if (Object.hasOwn(post, 'videos') && poshmarkPostDifferences(published, post, p.photos.length).includes('videos')) {
+      throw new Error('Poshmark did not keep the selected video. Check the live listing before trying again.');
+    }
     const warning = poshmarkSmartWarning(post, published);
     return { ok: true, state: 'published', listing_url: poshmarkListingUrl(created), ...(warning ? { warning } : {}) };
   } catch (error) {

@@ -28,7 +28,7 @@ CATEGORY_KEYS = ("marketplace_categories", "marketplace_category_ids", "marketpl
 # dropping operational identity that is not a reusable field answer.
 OPERATIONAL_KEYS = frozenset(("listingid", "itemid", "draftid", "orderid", "lineid", "conversationid", "jobid", "offerid",
                               "listingurl", "drafturl", "vendooitemid", "vendoourl", "sku", "images", "photos", "media", "imageurls",
-                              "status", "state", "accesstoken", "refreshtoken", "token", "cookie", "authorization"))
+                              "status", "state", "videoid", "accesstoken", "refreshtoken", "token", "cookie", "authorization"))
 
 
 class CopyError(ValueError):

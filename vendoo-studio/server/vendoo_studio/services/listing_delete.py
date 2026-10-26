@@ -44,6 +44,13 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
     repo = ConversationRepo(db)
     photos = [] if keep_photos else repo.get_photos(conv_id)
     deleted_photos = len(photos)
+    if not keep_photos:
+        from vendoo_studio.models.listing_video import ListingVideo
+        from vendoo_studio.services.listing_videos import video_path
+
+        for video in db.query(ListingVideo).filter_by(conversation_id=conv_id).all():
+            video_path(video).unlink(missing_ok=True)
+            db.delete(video)
     for photo in photos:
         filepath = Path(PHOTOS_DIR) / photo.stored_filename
         if filepath.exists():
