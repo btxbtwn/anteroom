@@ -30,16 +30,9 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
 
     if not extension_manager.connected:
         raise NativeMarketplaceError(409, "Connect Chrome to load this marketplace’s current form.")
-    categories = []
-    if marketplace == "mercari":
-        from vendoo_studio.models.catalog import CategoryTreeNode
-
-        categories = [{"label": row.path, "value": row.category_id} for row in db.query(CategoryTreeNode).filter(
-            CategoryTreeNode.marketplace == "mercari", CategoryTreeNode.is_leaf.is_(True), CategoryTreeNode.has_children.is_(False),
-        ).order_by(CategoryTreeNode.path)]
     try:
         answer = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form",
-                                              {"marketplace": marketplace, "listing": snapshot, "categories": categories}, timeout=35)
+                                              {"marketplace": marketplace, "listing": snapshot}, timeout=35)
     except browser_bridge.BrowserBridgeError as exc:
         raise NativeMarketplaceError(502, "Chrome could not read the marketplace form. Refresh choices.") from exc
     form = answer.get("form") if isinstance(answer, dict) and answer.get("ok") else None

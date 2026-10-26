@@ -52,6 +52,7 @@ class NativeMarketplaceError(RuntimeError):
 Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]
 InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
 API_MARKETPLACES = frozenset({"ebay", "etsy"})
+DRAFT_MARKETPLACES = frozenset({"mercari", "depop", "etsy"})
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
 UNKNOWN = "Anteroom could not confirm what happened. Check the result before trying again."
 # How long Chrome has to answer one step, and how long a job then keeps the
@@ -291,6 +292,8 @@ def _progress(db: Session, job_id: str, marketplace: str, step: str, index: int 
 
 
 def _plan(marketplace: str, kind: str, record: dict, revision_id: str) -> list[str]:
+    if kind == "save_draft":
+        return ["save_draft"]
     if kind == "update":
         return ["update"]
     if marketplace in {"ebay", "poshmark"}:
@@ -343,11 +346,13 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
 
 async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, db: Session) -> dict:
     name = NAMES[marketplace]
-    if body.confirm is not True:
+    if kind == "save_draft" and marketplace not in DRAFT_MARKETPLACES:
+        raise NativeMarketplaceError(400, f"Saving a private {name} draft is not supported.")
+    if kind != "save_draft" and body.confirm is not True:
         raise NativeMarketplaceError(400, f"Confirm updating the live {name} listing." if kind == "update" else f"Confirm listing on {name}.")
     if kind == "update" and marketplace not in {"ebay", "etsy", "poshmark", "depop"}:
         raise NativeMarketplaceError(409, f"A live {name} listing cannot be updated from Anteroom yet.")
-    if kind == "list":
+    if kind in {"list", "save_draft"}:
         from vendoo_studio.services.marketplace_delist import listings as live_listings
 
         conv = _conversation(db, conv_id)
@@ -499,6 +504,11 @@ async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest,
     return await _start(conv_id, marketplace, body, "update", db)
 
 
+async def save_draft(conv_id: str, marketplace: Marketplace, revision_id: str, db: Session) -> dict:
+    """Save only. No confirmation, publish step, or automatic publish retry."""
+    return await _start(conv_id, marketplace, ListRequest(revision_id=revision_id), "save_draft", db)
+
+
 def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
     from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
 
@@ -599,10 +609,10 @@ async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: 
         if marketplace == "ebay":
             from vendoo_studio.services import ebay_listings
 
-            result = await ebay_listings.execute(step, snapshot, photos, binding, record, active, confirm=True,
+            result = await ebay_listings.execute(step, snapshot, photos, binding, record, active, confirm=step in {"list", "publish", "update"},
                                                  conversation_id=conv_id)
         else:
-            result = await etsy_listings.execute(step, snapshot, photos, binding, record, active, confirm=True, **options)
+            result = await etsy_listings.execute(step, snapshot, photos, binding, record, active, confirm=step in {"list", "publish", "update"}, **options)
         stored = _apply_result(db, conv_id, marketplace, job.id, step, result)
         if stored["state"] == "unknown":
             # A reply was lost. Read what the marketplace has now, while still holding the slot.

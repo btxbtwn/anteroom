@@ -42,7 +42,7 @@ class ChromePreflightTest(unittest.TestCase):
         }, Context())
         by_message = {gap["message"]: gap["blocking"] for gap in gaps}
         self.assertIs(by_message["Poshmark lists this at $18."], False)
-        self.assertIs(by_message["Poshmark lists a quantity of 1."], False)
+        self.assertNotIn("Poshmark lists a quantity of 1.", by_message)
         dropped = next(message for message in by_message if "left off" in message)
         self.assertIn("Lilac", dropped)
         self.assertNotIn("Grey", dropped)
@@ -69,10 +69,10 @@ class ChromePreflightTest(unittest.TestCase):
         }, Context())
         self.assertTrue(any(gap["blocking"] and "subcategories" in gap["message"] for gap in mercari))
 
-    def test_mercari_size_is_required_only_when_its_category_has_sizes(self):
+    def test_mercari_ignores_a_mirrored_size_table_and_checks_native_sizes_in_chrome(self):
         listing = {"description": "Graphic tee", "marketplace_category_ids": {"mercari": "1934"},
                    "form": {"sizes": [{"id": 4, "name": "M"}]}}
-        self.assertTrue(any(gap["field"] == "size" and gap["blocking"] for gap in mercari_requirements(listing, Context())))
+        self.assertFalse(any(gap["field"] == "size" for gap in mercari_requirements(listing, Context())))
         listing["form"]["aspects"] = {"1934_Size": 4}
         self.assertFalse(any(gap["field"] == "size" for gap in mercari_requirements(listing, Context())))
         listing["form"] = {"sizes": []}
@@ -208,9 +208,9 @@ class MercariParentCategoryTest(unittest.TestCase):
             self.assertTrue(any(gap["blocking"] and "Boys 0-24 mos, Boys 2T-5T, Boys (4+)" in gap["message"]
                                 for gap in gaps), listing)
 
-    def test_a_sized_leaf_needs_mercaris_size_list(self):
+    def test_a_sized_leaf_no_longer_needs_vendoos_size_list(self):
         leaf = {"size": "XL (18/20)", "direct_category_ids": {"mercari": "1931"}}
         unread = self._gaps(**leaf, form={"overrides": {}})
-        self.assertTrue(any(gap["blocking"] and gap["field"] == "mercari_specifics.size" for gap in unread))
+        self.assertFalse(any(gap["blocking"] and gap["field"] == "mercari_specifics.size" for gap in unread))
         self.assertEqual(self._gaps(**leaf, form={"overrides": {}, "sizes": [{"id": 168}]}), [])
         self.assertEqual(self._gaps(direct_category_ids={"mercari": "1931"}, form={"overrides": {}}), [])

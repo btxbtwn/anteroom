@@ -423,11 +423,14 @@ function depopLocation(listing, row) {
 async function depopResolvedFields(payload) {
   const listing = payload.listing || {};
   const missing = [];
+  const quantity = Number(listing.quantity ?? 1);
+  const price = depopPrice(listing);
+  if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: 'quantity', needs: 'a positive whole-number quantity' });
   const base = depopBaseDescription(listing);
   if (!base) missing.push({ field: 'description', needs: 'a description' });
   if (base.length > DEPOP_MAX_DESCRIPTION) missing.push({ field: 'description', needs: `a description of ${DEPOP_MAX_DESCRIPTION} characters or fewer` });
   if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(base)) missing.push({ field: 'description', needs: 'a description without an email address' });
-  if (!(Number(listing.price) >= 1)) missing.push({ field: 'price_amount', needs: 'a price of $1 or more' });
+  if (!(Number(price) >= 1)) missing.push({ field: 'price_amount', needs: 'a price of $1 or more' });
   if (!depopCondition(listing.depop_specifics?.condition || listing.form?.overrides?.condition || listing.condition)) missing.push({ field: 'condition', needs: 'a condition' });
   const attributes = await depopAttributes(payload.deadline);
   const category = depopCategory(listing, attributes);
@@ -443,18 +446,19 @@ async function depopResolvedFields(payload) {
       ...(gender ? { gender } : {}) });
     const size = depopSize(listing, category, attributes);
     if (size.problem) missing.push({ field: 'size', needs: size.problem });
-    else if (!size.none) Object.assign(fields, { variant_set: size.set, variants: { [size.id]: 1 } });
-    else Object.assign(fields, { variant_set: null, variants: {}, quantity: 1 });
+    else if (!size.none) Object.assign(fields, { variant_set: size.set, variants: { [size.id]: quantity } });
+    else Object.assign(fields, { variant_set: null, variants: {}, quantity });
     const extra = depopAttributeValues(listing, category, attributes);
     fields.attributes = extra.values;
     missing.push(...extra.missing);
   }
   fields.brand = depopBrand(listing, attributes);
+  fields.sku = String(listing.depop_specifics?.sku ?? listing.sku ?? '');
   const parcelLabel = String(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size || '').trim();
   if (!parcelLabel) missing.push({ field: 'parcel_size', needs: 'a parcel size' });
   if (missing.length) throw marketplaceMissing('depop', missing);
   const from = depopAddress(listing, await depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', payload.deadline));
-  const providers = await depopAccountRead(`/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD&itemCost=${encodeURIComponent(String(listing.price))}`,
+  const providers = await depopAccountRead(`/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD&itemCost=${encodeURIComponent(String(price))}`,
     'parcel sizes', payload.deadline);
   const parcels = (Array.isArray(providers) ? providers : providers?.objects || []).flatMap(provider => provider?.parcelSizes || provider?.parcel_sizes || []);
   const parcel = parcels.find(entry => marketplaceNameKey(entry?.title) === marketplaceNameKey(parcelLabel));
@@ -510,6 +514,10 @@ function depopDraftMismatch(draft, listing, fields) {
   }
   if (fields.condition != null && String(draft.condition ?? '') !== String(fields.condition)) wrong.push('condition');
   if (fields.brand != null && String(draft.brand?.id ?? draft.brand ?? '') !== String(fields.brand)) wrong.push('brand');
+  if (Object.hasOwn(fields, 'sku') && String(draft.sku || '') !== fields.sku) wrong.push('SKU');
+  if (fields.variants && depopVariantIds(fields.variants).some(id => Object.hasOwn(draft.variants || {}, id)
+    && Number(draft.variants[id]) !== Number(fields.variants[id]))) wrong.push('quantity');
+  if (fields.quantity != null && Number(draft.quantity) !== fields.quantity) wrong.push('quantity');
   return wrong;
 }
 
@@ -566,7 +574,8 @@ async function depopApiAction(action, payload) {
     const summary = draft => ({ id: String(draft.id), description: draft.description, price: draft.price_amount,
       product_type: draft.product_type, variant_set_id: draft.variant_set_id ?? draft.variant_set, variants: draft.variants,
       brand: draft.brand, condition: draft.condition, colour: draft.colour, age: draft.age, source: draft.source, style: draft.style,
-      attributes: draft.attributes, photo_count: draft.pictures?.length || 0, missing_fields: draft.missing_fields || [] });
+      attributes: draft.attributes, sku: draft.sku, quantity: draft.quantity,
+      photo_count: draft.pictures?.length || 0, missing_fields: draft.missing_fields || [] });
     if (action === 'session') {
       await request('GET', '/presentation/api/v1/drafts/?limit=24&sort_by=createdAt');
       return { authenticated: true };

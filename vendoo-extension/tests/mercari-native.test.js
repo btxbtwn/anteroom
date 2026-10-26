@@ -11,7 +11,7 @@ const SHIPPING = { payerId: 1, classIds: [2509], suggestedClassIds: [2509], zipC
 const SESSION = { csrf: 'private-csrf', accessToken: 'private-session', user: { userId: 7, name: 'seller', email: 'seller@example.com' } };
 const INITIALIZE = 'https://www.mercari.com/v1/initialize';
 
-function worker({ session = SESSION, respond, http } = {}) {
+function worker({ session = SESSION, respond, http, prepareCatalog = false } = {}) {
   const c = loadWorker();
   const journal = {};
   c.chrome.storage = {
@@ -21,6 +21,8 @@ function worker({ session = SESSION, respond, http } = {}) {
   c.chrome.tabs = { create: () => { throw new Error('opened a tab'); }, query: () => { throw new Error('read tabs'); } };
   c.nativePhoto = async () => ({ base64: 'AA==', mime_type: 'image/jpeg' });
   c.mercariPhotoBlob = async () => new Blob(['jpeg'], { type: 'image/jpeg' });
+  // These mutation tests isolate the already-tested catalog preparation.
+  if (!prepareCatalog) c.mercariPreparedListing = async value => value;
   const requests = [];
   const initializes = [];
   let images = 0;
@@ -128,7 +130,7 @@ test('Mercari read-back ignores line endings and spacing Mercari rewrites', () =
   const c = loadWorker();
   const common = c.mercariCommon({ ...listing, title: 'Test jacket', description: 'Line one\nLine two' });
   assert.equal(c.mercariDraftMatches({ name: 'Test  jacket ', description: 'Line one\r\nLine two ', price: 2500, photo_count: 1,
-    categoryId: 303, payerId: 1, classIds: [2509] }, common, 1), true);
+    categoryId: 303, conditionId: 3, payerId: 1, classIds: [2509] }, common, 1), true);
 });
 
 test('an existing Mercari draft sends its photos when edited so Mercari does not clear them', async () => {
@@ -297,12 +299,11 @@ const clothing = extra => ({ title: 'Boys graphic tee', description: 'Soft cotto
     aspects: {}, sizes: BOYS_SIZES, ships_from_zip: '70115', ...extra?.form } });
 
 function withVendooBrand(c, journal, answer) {
-  journal.vendoo_session = { uid: 'u1', refresh_token: 'private-refresh', access_token: 'private-vendoo', expiration_time: Date.now() + 3600000 };
-  const original = c.fetch;
   const asked = [];
-  c.fetch = async (url, options = {}) => {
-    if (String(url).startsWith('https://api.web.vendoo.co/')) { asked.push(String(url)); return reply(...answer); }
-    return original(url, options);
+  c.mercariCatalogData = async () => {
+    asked.push('masterQuery');
+    if (answer[0] !== 200) throw new Error('Mercari catalog unavailable');
+    return { itemBrands: answer[1].map(row => ({ id: row.value, name: row.label })) };
   };
   return asked;
 }
@@ -327,7 +328,7 @@ test('a full Mercari clothing listing sends its category, size, brand, label ins
       dimensions: { unit: 'INCH', length: 13, width: 10, height: 3 }, weight: { weight: 7 } }, brandId: 5813,
     imageIds: ['i1', 'i2'] });
   assert.ok(!('shippingClassIds' in common));
-  assert.match(asked[0], /\/api\/rest\/v1\/brand\/mercari\?search=Nike&matchValue=true$/);
+  assert.equal(asked[0], 'masterQuery');
 });
 
 test('a Mercari draft that lost its label, payer, size or brand is refused, and never published', async () => {
@@ -466,4 +467,63 @@ test('a Mercari draft input it no longer accepts is reported as a form change, s
   assert.equal(result.error_code, 'schema_drift');
   assert.equal(result.safe_to_retry, true);
   assert.match(result.marketplace_message, /sizeId/);
+});
+
+const NATIVE_MASTER = {
+  itemCategories: [{ id: 3, name: 'Kids', parentId: 0, itemSizeGroupId: 0 },
+    { id: 1877, name: 'Girls tops & t-shirts', parentId: 3, itemSizeGroupId: 0 },
+    { id: 1911, name: 'Girls (4+)', parentId: 1877, itemSizeGroupId: 8 }],
+  itemSizeGroups: [{ id: 8, sizeIds: [105, 168], subGroupIds: [83] }],
+  itemSizeSubGroups: [{ id: 83, title: '4Y+', sizeIds: [105, 168] }],
+  itemSizes: [{ id: 105, title: 'XL', subtitle: '(14-16)', itemSizeSubGroupId: 83 },
+    { id: 168, title: '2XL', subtitle: '(18)', itemSizeSubGroupId: 83 }],
+  itemBrands: [{ id: 30138, name: 'GB Girls' }],
+};
+
+test('Mercari Smart Pricing sends its floor and refuses mismatched read-back or an invalid floor', () => {
+  const c = loadWorker();
+  const item = { ...listing, mercari_specifics: { smartPricing: { enabled: true, minimumPrice: 18 } } };
+  const common = c.mercariCommon(item);
+  assert.equal(common.isAutoPriceDrop, true);
+  assert.equal(common.minPriceForAutoPriceDrop, 1800);
+  const draft = { name: common.name, description: common.description, price: common.price, categoryId: common.categoryId,
+    conditionId: common.conditionId, payerId: 1, classIds: [2509], isAutoPriceDrop: true, minPriceForAutoPriceDrop: 1800 };
+  assert.deepEqual(Array.from(c.mercariDraftDifferences(draft, common)), []);
+  assert.ok(c.mercariDraftDifferences({ ...draft, isAutoPriceDrop: false }, common).includes('Smart Pricing'));
+  assert.ok(c.mercariDraftDifferences({ ...draft, conditionId: 1 }, common).includes('condition'));
+  assert.ok(c.mercariMissing(item, { ...common, minPriceForAutoPriceDrop: common.price }).some(field => field.field === 'minPriceForAutoPriceDrop'));
+});
+
+test('Mercari reads its own catalog over GraphQL without Vendoo or session export', async () => {
+  const { c, requests, journal } = worker({ respond: op => op === 'masterQuery' ? { master: NATIVE_MASTER } : undefined });
+  c.loadCachedVendooSession = () => assert.fail('Direct listing must not read Vendoo sign-in');
+  const master = await c.mercariCatalogData(Date.now() + 30000);
+  assert.equal(master.itemBrands[0].name, 'GB Girls');
+  assert.match(requests[0].body.query, /itemSizeGroups/);
+  assert.equal(await c.mercariBrandId({ brand: 'GB girls', form: { overrides: { brand: '999' } } }, Date.now() + 30000), 30138);
+  assert.ok(!JSON.stringify(journal).includes('private-session'));
+  const prepared = c.mercariCatalogListing({ size: 'XL (18/20)', direct_category_ids: { mercari: '1911' },
+    form: { sizes: [{ id: 999, name: 'XL (18/20)' }] } }, master);
+  assert.equal(c.mercariSize(prepared, 1911).id, 168);
+  assert.equal(prepared.form.sizes[0].name, 'XL (14-16)');
+  assert.throws(() => c.mercariCatalogListing({ direct_category_ids: { mercari: '999999' } }, master), /current list/);
+  const parent = c.mercariCatalogListing({ direct_category_ids: { mercari: '1877' } }, master);
+  assert.ok(c.mercariMissing(parent, c.mercariCommon(parent)).some(row => row.field === 'categoryId' && /Girls \(4\+\)/.test(row.needs)));
+});
+
+test('native Mercari preparation replaces stale sizes and labels before uploading and verifies its result', async () => {
+  const { c, requests, setDraft } = worker({ prepareCatalog: true });
+  c.mercariCatalogData = async () => NATIVE_MASTER;
+  c.mercariShippingClasses = async () => [{ id: 2550, carrierDisplayName: 'USPS Ground Advantage', fee: 599, name: '0.5 lb' }];
+  setDraft({ ...CLOTHING_DRAFT, name: 'Girls tee', itemCategory: { id: 1911 }, brand: { id: 30138 },
+    shippingClasses: [{ id: 2550 }], shippingPayer: { id: 2 } });
+  const result = await c.runMercariNative(message({ listing: { ...clothing(), title: 'Girls tee', brand: 'GB Girls',
+    direct_category_ids: { mercari: '1911' }, mercari_specifics: { shippingPayerId: 2 } } }));
+  assert.equal(result.state, 'draft');
+  const common = requests.find(row => row.body.operationName === 'addDraftItemMutation').body.variables.input.common;
+  assert.equal(common.sizeId, 168);
+  assert.equal(common.brandId, 30138);
+  assert.deepEqual(Array.from(common.shipping.classIds), [2550]);
+  assert.equal(common.shipping.payerId, 2);
+  assert.equal(c.mercariShippingListing({ mercari_specifics: { shippingClassId: '2508' } }, [{ id: 2550 }]).form.specifics.shipping.carrierId, null);
 });

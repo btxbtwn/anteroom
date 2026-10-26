@@ -102,6 +102,40 @@ class NativeEditorTest(unittest.TestCase):
         self.assertTrue(fields["sellwild_specifics.nativeCategoryId"]["locked"])
         self.bridge.assert_not_called()
 
+    def test_direct_depop_attribute_edits_survive_generated_style_padding(self):
+        self.bridge.return_value = {"ok": True, "form": {"marketplace": "depop", "native": True, "fields": []}}
+        submitted = {**self.listing, "depop_specifics": {
+            "style": ["cute"], "age": [], "source": [],
+        }}
+        answer = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
+        self.assertEqual(answer.status_code, 200, answer.text)
+        response = self.client.get(f"{self.url}/depop/form")
+        self.assertEqual(response.status_code, 200, response.text)
+        snapshot = self.bridge.call_args.args[2]["listing"]
+        self.assertEqual(snapshot["depop_specifics"]["style"], ["cute"])
+        self.assertEqual(snapshot["depop_specifics"]["age"], [])
+        self.assertEqual(snapshot["depop_specifics"]["source"], [])
+
+    def test_seller_original_price_survives_snapshot_defaults(self):
+        submitted = {**self.listing, "poshmark_specifics": {"originalPrice": 55}}
+        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.client.get(f"{self.url}/poshmark/form")
+        self.assertEqual(self.bridge.call_args.args[2]["listing"]["poshmark_specifics"]["originalPrice"], 55)
+
+    def test_clearing_existing_depop_age_and_source_persists(self):
+        previous = {**self.listing, "depop_specifics": {"style": ["Casual", "Retro", "Minimalist"], "age": "Modern", "source": "Preloved"}}
+        ListingRepo(self.db).save_revision(self.conv.id, previous, "test")
+        submitted = {**previous, "quantity": 3, "depop_specifics": {"style": ["casual", "retro"], "age": [], "source": []}}
+        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
+        self.assertEqual(response.status_code, 200, response.text)
+        revision = ListingRepo(self.db).get_revision(ListingRepo(self.db).get_current(self.conv.id).current_revision_id)
+        self.assertEqual(revision.listing_json["depop_specifics"]["age"], [])
+        saved = self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]
+        self.assertEqual(saved["depop_specifics"]["age"], [])
+        self.assertEqual(saved["depop_specifics"]["source"], [])
+        self.assertEqual(saved["quantity"], 3)
+
 
 class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
     async def test_category_search_keeps_the_breadcrumb_in_root_to_leaf_order(self):

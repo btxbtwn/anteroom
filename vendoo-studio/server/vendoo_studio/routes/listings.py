@@ -114,8 +114,12 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
         revision_id = revision.id
         revisions = listing_repo.get_revisions(conv_id)
 
+    from vendoo_studio.services.seller_overrides import capture_locked, restore_locked
+
     photo_count = len(conv_repo.get_photos(conv_id))
+    locked = capture_locked(listing_data)
     validation = validate_listing(listing_data, photo_count, require_photos=True)
+    restore_locked(listing_data, locked)
 
     return ListingResponse(
         conversation_id=conv_id,

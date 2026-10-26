@@ -12,6 +12,16 @@ const listing = {
 };
 
 describe("marketplace form fields", () => {
+  it("keeps Mercari's native shipping label selector instead of hiding it as a legacy derived field", () => {
+    const form: MarketplaceForm = { marketplace: "mercari", native: true, known: true, category_id: "1911", fields: [
+      { key: "mercari_specifics.shippingClassId", path: "mercari_specifics.shippingClassId", label: "Shipping label", value: 2550,
+        required: true, multi: false, selection_only: true, options: ["USPS Ground Advantage · $5.99"],
+        option_values: { "USPS Ground Advantage · $5.99": "2550" } },
+    ] };
+    expect(fieldsForMarketplaceForm(listing, "mercari", [form]).find((field) => field.key === "mercari_specifics.shippingClassId"))
+      .toMatchObject({ native: true, defaultValue: 2550, optionValues: { "USPS Ground Advantage · $5.99": "2550" } });
+  });
+
   it("uses only the native form's supported fields and keeps arrays, IDs and booleans", () => {
     const form: MarketplaceForm = { marketplace: "poshmark", native: true, known: true, category_id: "men/shirts", fields: [
       { key: "size", path: "poshmark_specifics.nativeSizeId", label: "Size", value: "123", required: true, multi: false,

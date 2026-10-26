@@ -3,6 +3,12 @@ const assert = require('node:assert/strict');
 const { loadWorker, call } = require('./worker-context');
 
 const clean = value => JSON.parse(JSON.stringify(value));
+const MERCARI = { itemCategories: [{ id: 1, name: 'Tees', parentId: 0, itemSizeGroupId: 1 },
+  { id: 3, name: 'Kids', parentId: 0, itemSizeGroupId: 0 },
+  { id: 1877, name: 'Girls tops & t-shirts', parentId: 3, itemSizeGroupId: 0 },
+  { id: 1911, name: 'Girls (4+)', parentId: 1877, itemSizeGroupId: 1 }],
+  itemSizeGroups: [{ id: 1, sizeIds: [1, 2], subGroupIds: [] }], itemSizeSubGroups: [],
+  itemSizes: [{ id: 1, title: 'XL' }, { id: 2, title: '2XL' }], itemBrands: [{ id: 30138, name: 'GB Girls' }] };
 const sizeSet = (id, tags, sizes) => ({ id, name: tags.join(' / '), tags,
   size_systems: { us: { sizes: sizes.map(id => ({ id, display: id })) } } });
 const POSH = { colors: [{ name: 'Black' }], catalog: { departments: [{ id: 'men', display: 'Men', categories: [
@@ -105,6 +111,33 @@ test('Depop maps generated labels and explicit editor arrays through the same na
   assert.deepEqual(clean(call(c, 'depopFormFields', listing, DEPOP)), { age: [], source: [], style: [] });
 });
 
+test('explicit Depop choices stay on their canonical fields and category changes preserve them', () => {
+  const c = loadWorker();
+  const listing = { direct_category_ids: { depop: 'menswear_jeans' }, depop_specifics: {
+    age: [], source: [], style: [], attributes: { 'bottom-fit': ['straight'] },
+  } };
+  assert.deepEqual(clean(call(c, 'depopFormFields', listing, DEPOP)), { age: [], source: [], style: [] });
+  const form = clean(call(c, 'depopEditorForm', listing, DEPOP));
+  const category = form.fields.find(row => row.label === 'Category');
+  assert.ok(category.clears.includes('depop_specifics.attributes'));
+  for (const key of ['age', 'source', 'style']) {
+    assert.ok(!category.clears.includes(`depop_specifics.${key}`));
+    assert.deepEqual(form.fields.find(row => row.path === `depop_specifics.${key}`).value, []);
+  }
+});
+
+test('Mercari shows the seller’s brand and an unavailable parent label without offering the parent', () => {
+  const c = loadWorker();
+  const listing = { brand: 'GB girls', form: { overrides: { brand: '30138', categoryV2: {
+    id: '1877', displayPath: ['Kids', 'Girls tops & t-shirts'], hasChildren: true,
+  } } } };
+  const form = clean(call(c, 'mercariEditorForm', listing, MERCARI));
+  assert.equal(form.fields.find(row => row.label === 'Brand').value, 'GB Girls');
+  const category = form.fields.find(row => row.label === 'Category');
+  assert.equal(category.option_values['Kids > Girls tops & t-shirts'], '1877');
+  assert.ok(!category.options.includes('Kids > Girls tops & t-shirts'));
+});
+
 test('Depop read-back catches cleared attributes, old sizes and general choices the draft failed to keep', () => {
   const c = loadWorker();
   const listing = { description: 'Details', price: 16 };
@@ -120,10 +153,10 @@ test('Mercari form and request share category-specific native size and condition
   const c = loadWorker();
   const listing = { title: 'Tee', size: 'XL', condition: 'Good', direct_category_ids: { mercari: '1' },
     mercari_specifics: { nativeSizeId: '2' }, form: { sizes: [{ id: 1, name: 'XL' }, { id: 2, name: '2XL' }] } };
-  const form = clean(call(c, 'mercariEditorForm', listing, [{ label: 'Men > Tees', value: '1' }]));
+  const form = clean(call(c, 'mercariEditorForm', listing, MERCARI));
   assert.equal(form.fields.find(row => row.label === 'Size').value, 2);
   assert.equal(call(c, 'mercariSize', listing, 1).id, 2);
-  assert.equal(form.fields.find(row => row.label === 'Size').options_source, 'reference');
+  assert.equal(form.fields.find(row => row.label === 'Size').options_source, 'marketplace');
   assert.ok(!form.fields.some(row => row.path === 'quantity' || row.path === 'primaryColor'));
   listing.mercari_specifics.nativeSizeId = '';
   assert.ok(call(c, 'mercariSize', listing, 1).problem);
@@ -138,6 +171,8 @@ test('form reader makes no marketplace writes and reports catalog failures', asy
   await c.handleNativeMarketplaceForm({ payload: { marketplace: 'poshmark' } });
   assert.equal(sent[0].ok, false);
   assert.equal(sent[0].error, 'Catalog unavailable');
+  c.mercariCatalogData = async () => MERCARI;
+  c.mercariShippingClasses = async () => [];
   await c.handleNativeMarketplaceForm({ payload: { marketplace: 'mercari', listing: {} } });
   assert.equal(sent[1].form.marketplace, 'mercari');
 });
