@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.410 — 2026-10-26
+
+- Listing again on Depop keeps the category, size, colour, brand, photos, measurements, and shipping on the draft you already saved.
+- Moving a live Depop listing to another category sends the listing Depop already has, including its photos and shipping.
+- When Depop refuses a listing, the message includes what Depop said.
+
 ## 0.1.409 — 2026-10-26
 
 - Listing again on Depop fills the draft you already saved, including category, size, colour, brand, and photos.
