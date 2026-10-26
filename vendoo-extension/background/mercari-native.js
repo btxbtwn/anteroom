@@ -255,11 +255,12 @@ function mercariGroupMatches(size, fit) {
   return label === fit || id === fit || Boolean(label && label.includes(fit));
 }
 
-// The Mercari size type or group, when the seller set one. The main size type
-// belongs to the other marketplaces and does not choose among Mercari's groups.
+// Mercari's own size type or group, when the seller set one. When that is
+// blank, the item's size type (Petite, Plus, Tall, and the rest) chooses the
+// group. A blank size type everywhere still means regular or standard.
 function mercariWantedFit(listing) {
   const specifics = listing?.mercari_specifics || {};
-  const named = [specifics.sizeType, specifics.sizeGroup, specifics.size_group]
+  const named = [specifics.sizeType, specifics.sizeGroup, specifics.size_group, listing?.sizeType]
     .map(value => String(value || '').trim()).find(Boolean);
   return named ? mercariFitToken(named) : '';
 }
@@ -282,8 +283,8 @@ function mercariPickGroup(found, fit) {
 // Mercari's size id: the seller's label among the category's own sizes first
 // (Studio sends them as form.sizes, in
 // Mercari's order), its numbers before its letters. The same label in several
-// groups resolves from Mercari's size type or group, otherwise the regular or
-// standard group. ``none: 'unknown'`` means Studio could not read the sizes.
+// groups resolves from Mercari's size type or group, then the item's size type,
+// otherwise the regular or standard group. ``none: 'unknown'`` means Studio could not read the sizes.
 function mercariSize(listing, categoryId) {
   const sizes = listing.form?.sizes;
   if (!Array.isArray(sizes) || !sizes.length) return { none: !Array.isArray(sizes) ? 'unknown' : 'none' };

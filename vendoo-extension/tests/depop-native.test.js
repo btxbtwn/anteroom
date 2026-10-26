@@ -696,6 +696,7 @@ test('a locked Depop price wins and nine photos stay within eight', () => {
   const chosen = call(c, 'depopChosenPhotos', photos, {});
   assert.equal(chosen.photos.length, 8);
   assert.equal(chosen.omitted, 1);
+  assert.deepEqual(call(c, 'depopPictureIds', Array.from({ length: 9 }, (_, index) => index + 1)), [1, 2, 3, 4, 5, 6, 7, 8]);
   assert.deepEqual(call(c, 'depopMeasurementBody', {
     depop_specifics: { measurements: { unit: 'in', values: [
       { id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' },
@@ -742,6 +743,33 @@ test('a live Depop update sends the price and measurements by slug', async () =>
   assert.deepEqual(body.pictures, [7]);
   assert.deepEqual(body.measurements, [{ id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' }]);
   assert.equal(requests.some((item) => /\/products\/99\/$/.test(item.url)), false);
+});
+
+test('a live Depop update keeps every existing photo and leaves measurements unset when Anteroom has none', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  const pictures = Array.from({ length: 9 }, (_, index) => ({ id: index + 1 }));
+  const requests = [];
+  c.fetch = async (url, options = {}) => {
+    requests.push({ url, method: options.method, body: options.body });
+    if (options.method === 'PUT') return reply(200, { slug: 'studio-works-fleece', price_amount: '29.99' });
+    return reply(200, { id: 99, slug: 'studio-works-fleece', price_amount: '23.00', price_currency: 'USD', pictures });
+  };
+  const update = listing => c.depopApiAction('update', {
+    action: 'update', confirm: true, listing_id: 'studio-works-fleece', listing, deadline: Date.now() + 30000,
+  });
+  assert.equal((await update({ description: 'Fleece', price: 29.99 })).ok, true);
+  const blank = await update({
+    description: 'Fleece', price: 29.99,
+    depop_specifics: { measurements: { unit: 'in', values: [{ id: 'pit_to_pit', label: 'Pit to pit', value: '  ', unit: 'in' }] } },
+  });
+  assert.equal(blank.ok, true);
+  const bodies = requests.filter(item => item.method === 'PUT').map(item => JSON.parse(item.body));
+  assert.equal(bodies.length, 2);
+  for (const body of bodies) {
+    assert.deepEqual(body.pictures, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    assert.equal(Object.hasOwn(body, 'measurements'), false);
+  }
 });
 
 test('a live Depop category change sends the new type and keeps the rewritten slug', async () => {
@@ -805,14 +833,26 @@ test('moving a Depop listing to crop tops replaces the vest type and drops its a
   assert.equal(kept.brand, undefined);
 });
 
-test('Depop reuses the newest matching draft instead of starting another', async () => {
+test('Depop reuses one matching draft and does not pick the newest when several match', async () => {
   const c = loadWorker();
   c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
-  c.fetch = async () => reply(200, { objects: [
-    { id: 'older-draft', description: 'Private draft', price_amount: '12', createdAt: '2026-10-26T01:00:00Z' },
-    { id: 'newer-draft', description: 'Private draft', price_amount: '12', createdAt: '2026-10-26T18:00:00Z' },
+  const logs = [];
+  c.console.log = (...args) => logs.push(args.join(' '));
+  const drafts = { objects: [
+    { id: 'draft-b', description: 'Private draft', price_amount: '12', createdAt: '2026-10-26T18:00:00Z' },
+    { id: 'draft-a', description: 'Private draft', price_amount: '12', createdAt: '2026-10-26T01:00:00Z' },
     { id: 'other', description: 'Something else', price_amount: '12', createdAt: '2026-10-26T19:00:00Z' },
-  ] });
+  ] };
+  c.fetch = async () => reply(200, drafts);
   const reused = await c.depopApiAction('reuse', { action: 'save_draft', listing, deadline: Date.now() + 30000 });
-  assert.equal(reused.draft_url, 'https://www.depop.com/sellinghub/drafts/edit/newer-draft/');
+  assert.equal(reused.draft_url, 'https://www.depop.com/sellinghub/drafts/edit/draft-a/');
+  assert.match(logs.join('\n'), /\[DEPOP\].*step=reuse.*matches=2.*draft=draft-a/);
+  const stored = await c.depopApiAction('reuse', {
+    action: 'save_draft', listing, deadline: Date.now() + 30000,
+    draft_url: 'https://www.depop.com/sellinghub/drafts/edit/draft-b/',
+  });
+  assert.equal(stored.draft_url, 'https://www.depop.com/sellinghub/drafts/edit/draft-b/');
+  drafts.objects = [{ id: 'only-draft', description: 'Private draft', price_amount: '12', createdAt: '2026-10-26T01:00:00Z' }];
+  const only = await c.depopApiAction('reuse', { action: 'save_draft', listing, deadline: Date.now() + 30000 });
+  assert.equal(only.draft_url, 'https://www.depop.com/sellinghub/drafts/edit/only-draft/');
 });

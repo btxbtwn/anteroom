@@ -173,7 +173,7 @@ function mercariEditorForm(listing, master) {
     { required: true, help: 'Sizes from Mercari for this category. The same name in two groups is labeled with its group.' }));
   fields.push(nativeEditorChoice('mercari_specifics.sizeType', 'Size type', specifics.sizeType || specifics.sizeGroup || '',
     ['Regular', 'Petite', 'Plus', 'Tall', 'Juniors', 'Maternity', 'Big & Tall'].map(label => ({ label, value: label })),
-    { help: 'Used when Mercari lists that size in more than one group. Blank uses the regular or standard group.' }));
+    { help: 'Used when Mercari lists that size in more than one group. Blank uses the size type on General, then the regular or standard group.' }));
   fields.push(nativeEditorField('weight_oz', 'Packed weight (oz)', mercariWeightOz(listing), { locked: true, help: 'Change the package in Item Details.' }),
     nativeEditorField('package_dimensions_in', 'Package dimensions (in)', listing.package_dimensions_in, { locked: true }),
     nativeEditorChoice('mercari_specifics.shippingPayerId', 'Who pays shipping', specifics.shippingPayerId ?? 1,

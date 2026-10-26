@@ -398,9 +398,11 @@ test('Mercari sizes come from the category and never cross a fit the listing nam
     { id: 295, name: 'M (8-10)', group: 14, group_name: 'Regular' },
     { id: 353, name: 'M (7-9)', group: 15, group_name: 'Juniors' },
   ];
-  assert.deepEqual(size({ size: 'M (8-10)', sizeType: 'Petites', mercari_specifics: { size: 'M (8-10)' } }, women), { id: 295 });
+  assert.deepEqual(size({ size: 'M (8-10)', sizeType: 'Petites', mercari_specifics: { size: 'M (8-10)' } }, women), { id: 293 });
   assert.deepEqual(size({ size: 'M (8-10)', sizeType: 'Petites', mercari_specifics: { size: 'M (8-10)' } },
-    women.filter(row => row.group_name !== 'Regular')), { id: 4 });
+    women.filter(row => row.group_name !== 'Regular')), { id: 293 });
+  assert.deepEqual(size({ size: 'M (8-10)', mercari_specifics: { size: 'M (8-10)' } }, women), { id: 295 });
+  assert.deepEqual(size({ size: 'M (8-10)', sizeType: 'Petites', mercari_specifics: { size: 'M (8-10)', sizeType: 'Regular' } }, women), { id: 295 });
   assert.deepEqual(size({ mercari_specifics: { size: 'M (8-10)', sizeType: 'Petite' } }, women), { id: 293 });
   assert.match(size({ mercari_specifics: { size: 'M (8-10)', sizeGroup: 'Not a group' } }, women).problem, /Women's/);
   assert.match(size({ mercari_specifics: { size: 'M (8-10)', sizeGroup: 'Not a group' } }, women).problem, /Petite/);

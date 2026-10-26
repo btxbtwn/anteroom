@@ -544,7 +544,8 @@ function depopAttributeIds(values) {
     .map(value => String(value && typeof value === 'object' ? value.id : value)).sort();
 }
 
-// Picture ids in upload order, capped at Depop's eight. Strings, numbers, and { id } all count.
+// Picture ids in upload order. New drafts stay within Depop's eight. A live
+// listing passes no cap so photos already on it are kept. Strings, numbers, and { id } all count.
 function depopPictureRows(draftOrRows) {
   if (Array.isArray(draftOrRows)) return draftOrRows;
   const draft = draftOrRows || {};
@@ -554,13 +555,15 @@ function depopPictureRows(draftOrRows) {
   return [];
 }
 
-function depopPictureIds(draftOrRows) {
+function depopPictureIds(draftOrRows, limit = 8) {
   const ids = [];
+  const cap = Number(limit);
+  const limited = Number.isFinite(cap) && cap > 0;
   for (const row of depopPictureRows(draftOrRows)) {
     const raw = row && typeof row === 'object' ? (row.id ?? row.picture_id ?? row.pictureId) : row;
     const id = Number(raw);
     if (Number.isInteger(id) && id > 0 && !ids.includes(id)) ids.push(id);
-    if (ids.length === 8) break;
+    if (limited && ids.length === cap) break;
   }
   return ids;
 }
@@ -663,14 +666,18 @@ async function depopApiAction(action, payload) {
       const drafts = await request('GET', '/presentation/api/v1/drafts/?limit=24&sort_by=createdAt');
       const rows = Array.isArray(drafts?.objects) ? drafts.objects : [];
       const found = rows.filter(draft => depopDraftMatches(draft, payload.listing) && /^[A-Za-z0-9_-]{1,80}$/.test(String(draft.id)));
-      found.sort((a, b) => String(b.created_at || b.createdAt || b.updated_at || b.updatedAt || '')
-        .localeCompare(String(a.created_at || a.createdAt || a.updated_at || a.updatedAt || '')));
+      const draftLink = draft => ({ ...summary(draft), draft_url: `https://www.depop.com/sellinghub/drafts/edit/${draft.id}/` });
       if (action === 'reuse') {
-        const chosen = found[0];
-        return chosen ? { ...summary(chosen), draft_url: `https://www.depop.com/sellinghub/drafts/edit/${chosen.id}/` } : { draft_url: '' };
+        if (found.length <= 1) return found[0] ? draftLink(found[0]) : { draft_url: '' };
+        // Several drafts share this description and price. The stored draft wins.
+        // Otherwise the same id is chosen on every retry, never whichever was edited last.
+        const stored = found.find(draft => String(draft.id) === id);
+        const chosen = stored || [...found].sort((a, b) => String(a.id).localeCompare(String(b.id)))[0];
+        if (!stored) marketplaceLog('depop', 'reuse', { matches: found.length, draft: chosen.id });
+        return draftLink(chosen);
       }
       if (found.length !== 1) throw new Error('Depop could not identify this draft uniquely. Review drafts in Chrome.');
-      return { ...summary(found[0]), draft_url: `https://www.depop.com/sellinghub/drafts/edit/${found[0].id}/` };
+      return draftLink(found[0]);
     }
     if (action === 'create') {
       const draft = await request('POST', '/presentation/api/v1/drafts/', {
@@ -787,12 +794,13 @@ async function depopApiAction(action, payload) {
       const fields = payload.depop_fields !== undefined
         ? payload.depop_fields
         : await depopLiveEditFields(payload.listing || {}, payload.deadline);
-      const pictures = depopPictureIds(product);
+      const pictures = depopPictureIds(product, null);
+      const measurements = depopMeasurementBody(payload.listing);
       const body = {
         description,
         price_amount: String(depopPrice(payload.listing) ?? product.price_amount ?? product.price ?? ''),
         price_currency: product.price_currency || 'USD',
-        ...depopMeasurementBody(payload.listing),
+        ...(measurements.measurements?.length ? measurements : {}),
         ...(pictures.length ? { pictures } : {}),
       };
       // Category, colour, brand, and gender are what Depop turns into the public title.
