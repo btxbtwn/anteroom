@@ -1,6 +1,6 @@
 # Anteroom in the cloud: Mac, web and iPhone in sync
 
-Status: proposal, 2026-10-26. Nothing here is built yet.
+Status: approved 2026-10-26, with Supabase and Fly.io. Building step 1.
 
 ## Goal
 
@@ -49,7 +49,7 @@ extension polls `queue/pull` every five minutes). Anteroom adopts the same shape
 - **iPhone app** is a native SwiftUI app on the same API and Supabase: photos,
   generation, editing, and queuing jobs for the Mac.
 
-## Invariants that change (need approval in AGENTS.md)
+## Invariants that change (approved, now in AGENTS.md)
 
 - "No cloud hosting" and "Studio binds only to 127.0.0.1": the API is hosted;
   the Mac worker still binds nothing and connects outbound.
@@ -79,12 +79,12 @@ Each step ships on its own and leaves a working product.
    from Keychain to Vault, so web-started generation works.
 5. **iPhone app.** SwiftUI on the same API, then App Store submission.
 
-## Decisions for the owner
+## Decisions
 
-- **Hosting for the API:** a container host (Fly.io, Render or Google Cloud Run).
-  The API needs long requests and background jobs, which rules out serverless
-  functions. This means a Dockerfile, which AGENTS.md currently forbids.
-- **Accounts to create:** Supabase (free tier for development), the host, and
-  the Apple Developer Program.
+- **Hosting for the API:** Fly.io (decided). The API needs long requests and
+  background jobs, which rules out serverless functions, so it ships as a
+  Docker image.
+- **Accounts to create:** Supabase (free tier for development), Fly.io, and the
+  Apple Developer Program. Not needed until step 2.
 - **Price:** hosted generation, storage and bandwidth cost money per seller. A
   subscription on iPhone has to use Apple's in-app purchase.
