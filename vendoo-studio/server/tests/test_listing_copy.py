@@ -192,6 +192,7 @@ def test_repeating_an_approved_request_returns_the_same_copy_after_source_change
     assert source.db.query(Photo).count() == 4
     checked = source.client.get(f"/api/conversations/source/copy-result/{request_id}")
     assert checked.status_code == 200 and checked.json()["id"] == first.json()["id"]
+    assert checked.headers["cache-control"] == "no-store"
     changed = duplicate(source, request_id=request_id, expected_basis=basis, quantity=99)
     assert changed.status_code == 409
     assert source.db.query(Conversation).count() == 2
@@ -247,3 +248,38 @@ def test_copy_result_does_not_expose_a_different_sources_request(source):
     request_id = uuid4().hex
     assert duplicate(source, request_id=request_id).status_code == 200
     assert source.client.get(f"/api/conversations/another-source/copy-result/{request_id}").status_code == 404
+
+
+def test_concurrent_retries_create_one_draft_and_one_set_of_photos(source, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from vendoo_studio.models.listing_copy import ListingCopyReceipt
+
+    # Separate request sessions on a file database model real simultaneous API calls.
+    engine = create_engine(f"sqlite:///{tmp_path / 'concurrent-copy.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as db:
+        db.add(Conversation(id="original", title="Coat", status="draft"))
+        db.commit()
+        original_photo = ConversationRepo(source.db).get_photos("source")[0]
+        db.add(Photo(conversation_id="original", original_filename=original_photo.original_filename,
+                     stored_filename=original_photo.stored_filename, mime_type=original_photo.mime_type,
+                     size_bytes=original_photo.size_bytes, checksum=original_photo.checksum, display_order=0))
+        db.commit()
+        snapshot = listing_copy.preview(db, "original")
+    body = listing_copy.CopyRequest(request_id=uuid4().hex, expected_basis=snapshot["expected_basis"], title="Copy")
+
+    def submit(_index):
+        with factory() as db:
+            return listing_copy.create_copy(db, "original", body)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(submit, range(2)))
+        assert results[0] == results[1]
+        with factory() as db:
+            assert db.query(Conversation).count() == 2
+            assert db.query(ListingCopyReceipt).count() == 1
+            assert db.query(Photo).count() == 2
+    finally:
+        engine.dispose()

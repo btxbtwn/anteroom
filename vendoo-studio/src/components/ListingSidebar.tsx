@@ -439,7 +439,7 @@ export function ListingSidebar({
         onOpenSettings={onOpenSettings}
         onOpenUsage={onOpenUsage}
       />
-      <BulkSelectionDialogs selection={selection} />
+      <BulkSelectionDialogs selection={selection} onOpenListing={onSelect} />
     </aside>
   );
 }

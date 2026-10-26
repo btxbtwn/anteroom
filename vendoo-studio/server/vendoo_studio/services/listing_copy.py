@@ -102,7 +102,9 @@ def batch_preview(db: Session, body: BatchPreviewRequest) -> dict:
         try:
             rows.append({**preview(db, conv_id), "skip_reason": None})
         except CopyError as exc:
-            rows.append({"source_id": conv_id, "source_title": "Unavailable item", "skip_reason": str(exc)})
+            conv = db.get(Conversation, conv_id)
+            title = (conv.title or "Untitled") if conv else f"Missing item ({conv_id})"
+            rows.append({"source_id": conv_id, "source_title": title, "skip_reason": str(exc)})
     return {"rows": rows}
 
 

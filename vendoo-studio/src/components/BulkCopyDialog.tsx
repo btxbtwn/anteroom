@@ -9,7 +9,7 @@ import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 
-export function BulkCopyDialog({ conversationIds, onClose }: { conversationIds: string[]; onClose: () => void }) {
+export function BulkCopyDialog({ conversationIds, onClose, onOpenListing }: { conversationIds: string[]; onClose: () => void; onOpenListing: (id: string) => void }) {
   const client = useQueryClient();
   const [review, setReview] = useState<BatchCopyPreviewRow[] | null>(null);
   const [edits, setEdits] = useState<ReadonlyMap<string, CopyDraft>>(new Map());
@@ -34,13 +34,13 @@ export function BulkCopyDialog({ conversationIds, onClose }: { conversationIds: 
     description="Each selected item becomes a separate local draft with a new SKU and quantity. Review each item’s description, condition and measurements before listing. Copying sends nothing to a marketplace."
     footer={tasks ? <>
       {run.isPending ? <Button variant="outline" disabled={stopRequested} onClick={() => { stop.current = true; setStopRequested(true); }}>{stopRequested ? "Stopping after this item…" : "Stop after current item"}</Button> : <>
-        {remaining.length ? <><Button variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Review remaining</Button><Button variant="outline" disabled={busy} onClick={() => start(tasks)}>Retry remaining</Button></> : null}
+        {remaining.length ? <><Button variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Review remaining</Button><Button variant="outline" disabled={busy} onClick={() => start(tasks)}>{tasks.some((task) => task.state === "failed") ? "Retry remaining" : "Continue remaining"}</Button></> : null}
         <Button disabled={busy} onClick={onClose}>Done</Button>
       </>}
-    </> : <><Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>{preview.error ? <Button onClick={() => void preview.refetch()}>Reload sources</Button> : null}<Button disabled={busy || !rows || !valid || !count} onClick={() => start(approvedCopies(rows!, edits))}>Create {count} local drafts</Button></>}>
+    </> : <><Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>{preview.error ? <Button onClick={() => void preview.refetch()}>Reload sources</Button> : null}<Button disabled={busy || !rows || !valid || !count} onClick={() => start(approvedCopies(rows!, edits))}>Create {count} local {count === 1 ? "draft" : "drafts"}</Button></>}>
     {preview.error || reload.error || run.error ? <PageError message={run.error?.message || reload.error?.message || preview.error?.message || "Could not load copies"} /> : null}
     {tasks ? <div className="space-y-3" aria-live="polite"><PageNote>{tasks.filter((task) => task.state === "saved").length} created · {tasks.filter((task) => task.state === "failed").length} need attention · {tasks.filter((task) => task.state === "pending").length} remaining</PageNote>
-      {tasks.map((task) => <div key={task.sourceId} className="min-w-0 break-words rounded-lg border p-3"><p className="font-medium">{task.title}</p><p>{activeId === task.sourceId ? "Copying…" : task.state === "saved" ? "Local draft created" : task.state === "failed" ? task.error : "Waiting"}</p></div>)}
+      {tasks.map((task) => <div key={task.sourceId} className="min-w-0 break-words rounded-lg border p-3"><p className="font-medium">{task.title}</p><p>{activeId === task.sourceId ? "Copying…" : task.state === "saved" ? "Local draft created" : task.state === "failed" ? task.error : "Waiting"}</p>{task.targetId && !busy ? <Button size="xs" variant="ghost" onClick={() => onOpenListing(task.targetId!)}>Open draft</Button> : null}</div>)}
       {remaining.length && !run.isPending ? <PageNote>Retry keeps the approved values and checks for a completed copy first, so a lost reply does not create another draft. Review remaining reloads only the items that were not confirmed.</PageNote> : null}
     </div> : rows ? <div className="space-y-4"><PageNote>Set a separate inventory name, SKU and quantity for each new item. Photos are independent copies; cost is optional. Marketplace links, jobs, sales history and sourcing-box assignments stay with the originals.</PageNote>
       {rows.map((row) => {
@@ -51,8 +51,8 @@ export function BulkCopyDialog({ conversationIds, onClose }: { conversationIds: 
           {row.skip_reason ? <PageNote>{row.skip_reason}</PageNote> : <fieldset disabled={draft.skip || busy} className="space-y-3 disabled:opacity-50">
             <label className="block space-y-1 text-xs">Inventory name<Input aria-label={`Inventory name for ${row.source_title}`} value={draft.title} maxLength={200} onChange={(event) => update({ title: event.target.value })} /></label>
             <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1 text-xs">New SKU (optional)<Input aria-label={`New SKU for ${row.source_title}`} value={draft.sku} maxLength={120} onChange={(event) => update({ sku: event.target.value })} /></label><label className="space-y-1 text-xs">Quantity<Input aria-label={`Quantity for ${row.source_title}`} inputMode="numeric" value={draft.quantity} onChange={(event) => update({ quantity: event.target.value })} /></label></div>
-            <label className="flex items-center gap-2 text-xs"><Checkbox checked={draft.includePhotos} disabled={!row.photo_count} onCheckedChange={(checked) => update({ includePhotos: checked === true })} />Copy {row.photo_count || 0} saved photos for {row.source_title}</label>
-            <label className="flex items-center gap-2 text-xs"><Checkbox checked={draft.includeCost} onCheckedChange={(checked) => update({ includeCost: checked === true })} />Copy recorded cost for {row.source_title}</label>
+            <label className="flex items-center gap-2 text-xs"><Checkbox checked={draft.includePhotos} disabled={draft.skip || busy || !row.photo_count} onCheckedChange={(checked) => update({ includePhotos: checked === true })} />Copy {row.photo_count || 0} saved photos for {row.source_title}</label>
+            <label className="flex items-center gap-2 text-xs"><Checkbox checked={draft.includeCost} disabled={draft.skip || busy} onCheckedChange={(checked) => update({ includeCost: checked === true })} />Copy recorded cost for {row.source_title}</label>
             {error ? <PageError message={error} /> : null}
           </fieldset>}
         </div>;

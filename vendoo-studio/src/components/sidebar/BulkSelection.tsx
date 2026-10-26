@@ -79,7 +79,7 @@ export function BulkActionBar({
 }
 
 /** The price, Mark down and review dialogs a bulk action opens. */
-export function BulkSelectionDialogs({ selection }: { selection: ListingSelection }) {
+export function BulkSelectionDialogs({ selection, onOpenListing }: { selection: ListingSelection; onOpenListing: (id: string) => void }) {
   const {
     editIds,
     setEditIds,
@@ -96,7 +96,7 @@ export function BulkSelectionDialogs({ selection }: { selection: ListingSelectio
   } = selection;
   return (
     <>
-      {copyIds ? <BulkCopyDialog conversationIds={copyIds} onClose={() => { setCopyIds(null); exitSelecting(); }} /> : null}
+      {copyIds ? <BulkCopyDialog conversationIds={copyIds} onOpenListing={(id) => { setCopyIds(null); exitSelecting(); onOpenListing(id); }} onClose={() => { setCopyIds(null); exitSelecting(); }} /> : null}
       {editIds ? <BulkEditDialog conversationIds={editIds} onClose={() => { setEditIds(null); exitSelecting(); }} /> : null}
       {pricePrompt ? (
         <BulkRegeneratePriceDialog
