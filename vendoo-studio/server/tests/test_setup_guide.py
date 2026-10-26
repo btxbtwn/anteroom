@@ -48,7 +48,7 @@ class SetupGuideSettingsTest(unittest.TestCase):
             {"primary": "chatgpt", "fallback": "none"},
         )
         with self.assertRaises(ValueError):
-            user_settings.set_listing_provider_order("gemini")
+            user_settings.set_listing_provider_order("bogus-ai")
         with self.assertRaises(ValueError):
             user_settings.set_listing_provider_order("chatgpt", "chatgpt")
 
@@ -167,7 +167,7 @@ class SetupGuideRouteTest(unittest.TestCase):
         self.assertEqual(saved.status_code, 200)
         self.assertEqual(saved.json(), {"ok": True, "primary": "mimo", "fallback": "none"})
         self.assertEqual(user_settings.get_listing_provider_order(), ("mimo", "none"))
-        bad = self.client.put("/api/settings/provider/preferred", json={"primary": "gemini"})
+        bad = self.client.put("/api/settings/provider/preferred", json={"primary": "bogus-ai"})
         self.assertEqual(bad.status_code, 422)
 
     def test_data_folder_and_ui_endpoints(self):

@@ -24,6 +24,9 @@ RELAY_DEVICE_ACCOUNT = "relay-device"
 # Direct marketplace sign-ins, by marketplace: {"ebay": {accountId, label,
 # accessToken, refreshToken, expiresAt, refreshExpiresAt}, "etsy": {...}}.
 MARKETPLACE_ACCOUNTS_ACCOUNT = "marketplace-accounts"
+# The seller's own AI API keys, by provider id from ai_key_catalog:
+# {"openai": "sk-...", "anthropic": "sk-ant-...", ...}.
+AI_KEYS_ACCOUNT = "ai-api-keys"
 LEGACY_ACCOUNTS = (KEYRING_ACCOUNT, BRAVE_ACCOUNT, CHATGPT_ACCOUNT, CHATGPT_MODELS_ACCOUNT)
 # Set once the legacy sweep has run. Without it a consolidated item written
 # while the Keychain was unreadable — carrying only what was set at that
@@ -341,6 +344,33 @@ def delete_marketplace_account(marketplace: str):
             _set(MARKETPLACE_ACCOUNTS_ACCOUNT, json.dumps(accounts))
         else:
             _delete(MARKETPLACE_ACCOUNTS_ACCOUNT)
+
+
+def get_ai_keys() -> dict[str, str]:
+    keys = _get_json(AI_KEYS_ACCOUNT) or {}
+    return {name: value for name, value in keys.items() if isinstance(value, str) and value}
+
+
+def get_ai_key(provider_id: str) -> str | None:
+    return get_ai_keys().get(provider_id)
+
+
+def set_ai_key(provider_id: str, key: str):
+    with _lock:
+        keys = get_ai_keys()
+        keys[provider_id] = key
+        _set(AI_KEYS_ACCOUNT, json.dumps(keys))
+
+
+def delete_ai_key(provider_id: str):
+    with _lock:
+        keys = get_ai_keys()
+        if keys.pop(provider_id, None) is None:
+            return
+        if keys:
+            _set(AI_KEYS_ACCOUNT, json.dumps(keys))
+        else:
+            _delete(AI_KEYS_ACCOUNT)
 
 
 REASONING_LADDER = ("none", "low", "medium", "high", "xhigh", "max")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
+
 import asyncio
 import json
 import time
@@ -393,6 +395,9 @@ class ChatGPTCodexProvider:
     async def _headers(self) -> dict[str, str]:
         return await _codex_headers()
 
+    def _http_error(self, resp: httpx.Response) -> str:
+        return _http_error(resp)
+
     async def test_connection(self) -> bool:
         await fetch_codex_models(force=True)
         return True
@@ -404,29 +409,7 @@ class ChatGPTCodexProvider:
         listing_rules: str = "",
         max_side: int | None = VISION_MAX_SIDE,
     ) -> dict:
-        system = (
-            "You are a product listing analyst. Examine these product photos and extract "
-            "structured evidence about the item. Separate visible facts from inference.\n\n"
-            "Return ONLY valid JSON with these fields:\n"
-            '- brand: {value, confidence, evidence}\n'
-            "- size: {value, source: 'tag'|'measurement-derived'|'unreadable', confidence}\n"
-            "- color: {value, confidence}\n"
-            "- material: {value, confidence}\n"
-            "- style: {value, confidence}\n"
-            "- graphic: {value, confidence} — the named character, franchise, band, "
-            "team, show or logo printed on the item (e.g. 'Snoopy and Woodstock'), "
-            "empty when there is none. Generic prints belong in style, not here.\n"
-            "- condition: {value, visibleFlaws: []}\n"
-            "- measurements: [{label, value, source}]\n"
-            "- category: {value, confidence}\n"
-                    "- department: {value, confidence} — who the item is cut for: "
-                    "Women, Men, Girls, Boys, Baby, or Unisex. Category trees split on this "
-                    "first, so infer it from cut, styling and sizing when no label says it.\n"
-            "- uncertainties: [{field, issue}]\n"
-            "- tag_text: {brand_label, size_tag, care_tag, rn_number} copied verbatim from any "
-            "visible labels, empty strings when not visible\n\n"
-            "Be conservative. Flag uncertainty. Do not invent details."
-        )
+        system = PHOTO_ANALYSIS_SYSTEM
         if notes:
             system += f"\n\nUser notes: {notes}"
         if listing_rules:
@@ -528,7 +511,7 @@ class ChatGPTCodexProvider:
             ) as resp:
                 if resp.status_code >= 400:
                     await resp.aread()
-                    raise RuntimeError(_http_error(resp))
+                    raise RuntimeError(self._http_error(resp))
                 async for line in resp.aiter_lines():
                     if not line:
                         continue
@@ -641,7 +624,7 @@ class ChatGPTCodexProvider:
             ) as resp:
                 if resp.status_code >= 400:
                     await resp.aread()
-                    raise RuntimeError(_http_error(resp))
+                    raise RuntimeError(self._http_error(resp))
                 async for line in resp.aiter_lines():
                     if not line:
                         continue

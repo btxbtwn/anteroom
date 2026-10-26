@@ -307,20 +307,25 @@ class EveryVisionProviderAsksForDepartmentTest(unittest.TestCase):
 
     The department was added to two providers and missed on the third, and
     the third was the one the app had switched to — so the analysis came back
-    without it and the category query lost its department again.
+    without it and the category query lost its department again. Every
+    provider now sends the one prompt in ``photo_analysis.py``.
     """
 
-    def test_all_three_providers_request_it(self):
+    def test_every_provider_sends_the_shared_prompt(self):
         from pathlib import Path
 
         providers = Path(__file__).resolve().parents[1] / "vendoo_studio" / "providers"
+        self.assertIn("- department:", (providers / "photo_analysis.py").read_text(encoding="utf-8"))
         missing = [
             path.name
             for path in (
                 providers / "xiaomi_mimo.py",
                 providers / "chatgpt_codex.py",
                 providers / "cursor_agent.py",
+                providers / "claude_agent.py",
+                providers / "chat_completions.py",
+                providers / "anthropic_api.py",
             )
-            if "- department:" not in path.read_text(encoding="utf-8")
+            if "PHOTO_ANALYSIS_SYSTEM" not in path.read_text(encoding="utf-8")
         ]
-        self.assertEqual(missing, [], f"vision prompts missing department: {missing}")
+        self.assertEqual(missing, [], f"vision prompts not using the shared prompt: {missing}")
