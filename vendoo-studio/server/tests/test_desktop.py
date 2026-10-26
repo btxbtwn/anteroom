@@ -157,11 +157,12 @@ class StudioWindowChromeTest(unittest.TestCase):
             resized=Event(),
         )
         window = SimpleNamespace(events=events)
-        webview = SimpleNamespace(create_window=MagicMock(return_value=window))
+        webview = SimpleNamespace(settings={}, create_window=MagicMock(return_value=window))
 
         created = desktop.create_studio_window(webview)
 
         self.assertIs(created, window)
+        self.assertTrue(webview.settings["ALLOW_DOWNLOADS"])
         webview.create_window.assert_called_once()
         _, kwargs = webview.create_window.call_args
         self.assertTrue(kwargs["frameless"])

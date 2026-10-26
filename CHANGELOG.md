@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.398 — 2026-10-26
+
+- Record sales amounts, refunds, fees and costs directly in Analytics, with separate currency totals and a review reminder when an order changes. Download inventory and sales CSV files without Vendoo; blank amounts remain unknown.
+
 ## 0.1.397 — 2026-10-26
 
 - eBay earnings and listing performance now recognize items imported or linked directly in Anteroom. See original selling fees alongside net proceeds, quantity-adjusted item costs and profit; missing or duplicate links explain what needs review.

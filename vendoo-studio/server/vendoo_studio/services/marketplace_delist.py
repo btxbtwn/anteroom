@@ -67,7 +67,7 @@ def _sold_on(db: Session, conv_id: str, notes: dict) -> dict[str, datetime | Non
     stocks = {}
     for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)):
         mark = _notes_dict(notes, "marketplaceMarks").get(row.marketplace) or {}
-        url, _source = _current_listing(row.marketplace, (native.get(row.marketplace) or {}).get("listing_url"),
+        url, _source = current_listing(row.marketplace, (native.get(row.marketplace) or {}).get("listing_url"),
                                        _notes_dict(notes, "vendooListingUrls").get(row.marketplace), mark)
         current_id = listing_id(row.marketplace, url)
         if current_id and row.listing_id and current_id != row.listing_id:
@@ -93,7 +93,7 @@ def _notes_dict(notes: dict, key: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _current_listing(marketplace: str, anteroom_url, vendoo_url, mark: dict) -> tuple[str | None, str | None]:
+def current_listing(marketplace: str, anteroom_url, vendoo_url, mark: dict) -> tuple[str | None, str | None]:
     """The listing link that names this marketplace's listing now, and who reported it."""
     candidates = [(anteroom_url, "anteroom"), (vendoo_url, "vendoo")]
     if mark.get("state") == "listed":
@@ -114,7 +114,7 @@ def removed_marketplaces(notes: dict, anteroom_urls: dict[str, str]) -> list[str
     for marketplace in MARKETPLACES:
         mark = marks.get(marketplace) if isinstance(marks.get(marketplace), dict) else {}
         record = delists.get(marketplace) if isinstance(delists.get(marketplace), dict) else {}
-        url, _source = _current_listing(marketplace, anteroom_urls.get(marketplace), urls.get(marketplace), mark)
+        url, _source = current_listing(marketplace, anteroom_urls.get(marketplace), urls.get(marketplace), mark)
         item_id = listing_id(marketplace, url)
         if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):
             removed.append(marketplace)
@@ -138,7 +138,7 @@ def listings(db: Session, conv_id: str) -> dict:
     for marketplace in MARKETPLACES:
         binding = native.get(marketplace) if isinstance(native.get(marketplace), dict) else {}
         mark = marks.get(marketplace) if isinstance(marks.get(marketplace), dict) else {}
-        url, source = _current_listing(marketplace, binding.get("listing_url"), urls.get(marketplace), mark)
+        url, source = current_listing(marketplace, binding.get("listing_url"), urls.get(marketplace), mark)
         item_id = listing_id(marketplace, url)
         if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):
             continue

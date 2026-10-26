@@ -1,3 +1,6 @@
+import { SalesLedger } from "./SalesLedger";
+import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
+import "./ebay/ebay.css";
 import { useState, type ReactNode } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon } from "lucide-react";
@@ -37,6 +40,13 @@ interface Props {
 }
 
 export function AnalyticsPage({ onOpenListing }: Props) {
+  const [view, setView] = useState("Sales records");
+  return <WorkspacePage width="expanded"><WorkspaceTabs label="Analytics views" items={["Sales records", "Inventory analytics"]} value={view} onChange={setView}>
+    {view === "Sales records" ? <SalesLedger onOpenListing={onOpenListing} /> : <InventoryAnalyticsView onOpenListing={onOpenListing} />}
+  </WorkspaceTabs></WorkspacePage>;
+}
+
+export function InventoryAnalyticsView({ onOpenListing }: Props) {
   const [range, setRange] = useState<AnalyticsRange>("12m");
   const [customStart, setCustomStart] = useState(() => isoDay(addDays(new Date(), -29)));
   const [customEnd, setCustomEnd] = useState(() => isoDay(new Date()));
@@ -54,7 +64,7 @@ export function AnalyticsPage({ onOpenListing }: Props) {
     : ANALYTICS_RANGES.find((item) => item.id === (data?.range ?? range))?.heading ?? "Sales";
 
   return (
-    <WorkspacePage width="expanded">
+    <>
       <PageHeader
         title="Analytics"
         description="Sales and inventory from the listings imported from Vendoo."
@@ -285,7 +295,7 @@ export function AnalyticsPage({ onOpenListing }: Props) {
           </PageSection>
         </>
       ) : null}
-    </WorkspacePage>
+    </>
   );
 }
 

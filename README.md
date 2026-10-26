@@ -26,7 +26,13 @@ The local build supports direct drafts and seller-confirmed publishing to **Depo
 
 Edits to an existing listing have two separate steps: **Update Vendoo** writes the Vendoo form, and a delist/relist in Vendoo updates the live marketplace copy. Anteroom tracks unsent edits and listings that still need a relist. See the [existing-listing workflow](vendoo-studio/README.md#editing-something-that-is-already-listed).
 
-Open **Marketplaces** for each marketplace’s tools, sales planning, and ad history. eBay’s API marketing controls live under eBay; Etsy has a shop dashboard, orders, listings, and a Marketing tab for its sale calendar and ad CSV imports. Inventory-wide discount suggestions are in **Analytics**.
+Open **Marketplaces** for each marketplace’s tools, sales planning, and ad history. eBay’s API marketing controls live under eBay; Etsy has a shop dashboard, orders, listings, and a Marketing tab for its sale calendar and ad CSV imports. Inventory-wide discount suggestions are in **Analytics → Inventory analytics**.
+
+### Local sales records and exports
+
+**Analytics → Sales records** opens local marketplace order lines, including dismissed sale alerts and cancellation/refund updates. Recover missing eBay or Etsy orders from that marketplace’s Orders tab. **Record amounts** saves seller-entered line totals: item revenue after discounts, shipping collected, revenue refunded, net fees, shipping cost and item cost, excluding buyer taxes. Choose the currency explicitly. Blank means unknown; enter zero when confirmed. Net fees can be negative for fee credits. Profit is shown only when all six amounts are known, and currencies are reported separately without conversion. An order or inventory-link change requires you to review the figures again; an older editor cannot overwrite a newer record.
+
+**Export sales CSV** downloads every matching order line in the selected UTC dates and marketplace, across all pages. It includes recorded amounts, currency, IDs, order status and review flags. **Export inventory CSV** downloads current local listing details, quantity, recorded cost and validated saved marketplace URLs. Recorded inventory cost uses the same cost as Inventory analytics, including imported sale costs or a sourcing-box allocation when applicable. Inventory prices and costs have no inferred currency. Neither export includes private notes, photos or provider payloads. Spreadsheet formulas in text are escaped. Recording figures and exporting files make no marketplace changes and do not change inventory quantities.
 
 ### Native marketplace drafts
 
