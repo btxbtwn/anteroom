@@ -4,7 +4,7 @@
  * its input chrome for native selects, its muted field labels.
  */
 import { ChevronDownIcon } from "lucide-react";
-import type * as React from "react";
+import * as React from "react";
 import { cn } from "../lib/utils";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "./ui/combobox";
 import { toggleVariants } from "./ui/toggle";
@@ -126,7 +126,7 @@ export function NativeSelect({
   );
 }
 
-/** A dropdown you can type into. A value the list does not contain stays visible. */
+/** Keep an unavailable saved value visible without offering it as a valid choice. */
 export function SearchableSelect({
   id,
   fieldKey,
@@ -134,6 +134,9 @@ export function SearchableSelect({
   options,
   onChange,
   disabled,
+  selectionOnly = true,
+  maxLength,
+  choicesVerified = true,
 }: {
   id: string;
   fieldKey: string;
@@ -141,28 +144,108 @@ export function SearchableSelect({
   options: string[];
   onChange: (value: string) => void;
   disabled?: boolean;
+  selectionOnly?: boolean;
+  maxLength?: number;
+  choicesVerified?: boolean;
 }) {
-  const items = value && !options.includes(value) ? [value, ...options] : options;
+  const [query, setQuery] = React.useState("");
+  const custom = !selectionOnly && query.trim() && !options.includes(query.trim()) ? query.trim() : "";
+  const items = custom ? [custom, ...options] : options;
+  const unavailable = Boolean(selectionOnly && options.length && value && !options.includes(value));
   return (
-    <Combobox<string>
-      items={items}
-      value={value || null}
-      disabled={disabled}
-      onValueChange={(next) => onChange(next ?? "")}
-    >
-      <ComboboxInput
-        id={id}
-        data-listing-field={fieldKey}
-        placeholder="Search"
-        showClear={Boolean(value) && !disabled}
+    <div className="min-w-0">
+      <Combobox<string>
+        items={items}
+        value={value || null}
         disabled={disabled}
-      />
-      <ComboboxPopup>
-        <ComboboxEmpty>No matches.</ComboboxEmpty>
-        <ComboboxList>
-          {(item: string) => <ComboboxItem key={item} value={item}>{item}</ComboboxItem>}
-        </ComboboxList>
-      </ComboboxPopup>
-    </Combobox>
+        onValueChange={(next) => onChange(next ?? "")}
+        onInputValueChange={setQuery}
+      >
+        <ComboboxInput
+          id={id}
+          data-listing-field={fieldKey}
+          placeholder="Search"
+          showClear={Boolean(value) && !disabled}
+          disabled={disabled}
+          maxLength={maxLength}
+          aria-invalid={(unavailable && choicesVerified) || undefined}
+          aria-describedby={unavailable ? `${id}-unavailable` : undefined}
+        />
+        <ComboboxPopup>
+          <ComboboxEmpty>No matches.</ComboboxEmpty>
+          <ComboboxList>
+            {(item: string) => <ComboboxItem key={item} value={item}>{item === custom ? `Use “${item}”` : item}</ComboboxItem>}
+          </ComboboxList>
+        </ComboboxPopup>
+      </Combobox>
+      {unavailable && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">
+        {choicesVerified
+          ? `Saved value “${value}” is unavailable in these choices. Choose another value or clear it.`
+          : `Saved value “${value}” is outside these reference choices. Verify it on the marketplace before changing it.`}
+      </p>}
+    </div>
+  );
+}
+
+/** A category's multiple values stay an array, including values awaiting correction. */
+export function SearchableMultiSelect({
+  id, fieldKey, value, options, onChange, disabled, selectionOnly = true, maxValues, maxLength, choicesVerified = true,
+}: {
+  id: string;
+  fieldKey: string;
+  value: string[];
+  options: string[];
+  onChange: (value: string[]) => void;
+  disabled?: boolean;
+  selectionOnly?: boolean;
+  maxValues?: number;
+  maxLength?: number;
+  choicesVerified?: boolean;
+}) {
+  const anchor = React.useRef<HTMLDivElement>(null);
+  const [query, setQuery] = React.useState("");
+  const custom = !selectionOnly && query.trim() && !options.includes(query.trim()) ? query.trim() : "";
+  const items = custom ? [custom, ...options] : options;
+  const unavailable = selectionOnly && options.length ? value.filter((item) => !options.includes(item)) : [];
+  const overLimit = maxValues != null && value.length > maxValues;
+  const invalid = (choicesVerified && unavailable.length > 0) || overLimit;
+  return (
+    <div ref={anchor} className="min-w-0">
+      <Combobox<string, true>
+        multiple items={items} value={value} disabled={disabled}
+        onInputValueChange={setQuery}
+        onValueChange={(next) => {
+          if (maxValues != null && next.length > maxValues && next.length > value.length) return;
+          onChange(next);
+        }}
+      >
+        {value.length > 0 && <ul aria-label="Selected values" className="mb-2 flex flex-wrap gap-1.5">
+          {value.map((item) => <li key={item} className="flex max-w-full items-center gap-1 rounded-md border border-border bg-secondary px-2 py-1 text-xs">
+            <span className="break-words">{item}</span>
+            <button type="button" disabled={disabled} aria-label={`Remove ${item}`}
+              className="shrink-0 rounded px-1 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() => onChange(value.filter((entry) => entry !== item))}>×</button>
+          </li>)}
+        </ul>}
+        <ComboboxInput id={id} data-listing-field={fieldKey} placeholder={selectionOnly ? "Search choices" : "Search or add values"}
+          disabled={disabled} maxLength={maxLength} aria-invalid={invalid || undefined}
+          aria-describedby={unavailable.length > 0 || overLimit ? `${id}-unavailable` : undefined} />
+        <ComboboxPopup anchor={anchor}>
+          <ComboboxEmpty>No matches.</ComboboxEmpty>
+          <ComboboxList>{(item: string) => <ComboboxItem key={item} value={item}
+            disabled={maxValues != null && value.length >= maxValues && !value.includes(item)}>
+            <span aria-hidden="true">{value.includes(item) ? "✓" : "○"}</span>
+            {item === custom ? `Add “${item}”` : item}
+          </ComboboxItem>}</ComboboxList>
+        </ComboboxPopup>
+      </Combobox>
+      {(unavailable.length > 0 || overLimit) && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">
+        {unavailable.length > 0 && (choicesVerified
+          ? `Unavailable saved values: ${unavailable.join(", ")}. Remove or replace them. `
+          : `Saved values outside these reference choices: ${unavailable.join(", ")}. Verify them on the marketplace. `)}
+        {overLimit && `Choose at most ${maxValues} values.`}
+      </p>}
+      {maxValues != null && <p className="mt-1 text-xs text-muted-foreground">{value.length} of {maxValues} selected</p>}
+    </div>
   );
 }

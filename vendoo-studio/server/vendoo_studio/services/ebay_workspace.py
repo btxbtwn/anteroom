@@ -42,7 +42,10 @@ class _Text(HTMLParser):
 
 def plain(value: object) -> str:
     parser = _Text()
-    parser.feed(str(value or ""))
+    # Some live eBay descriptions contain literal CDATA markers, including
+    # an unmatched opening marker. HTMLParser otherwise hides their contents.
+    source = str(value or "").replace("<![CDATA[", "").replace("]]>", "")
+    parser.feed(source)
     return unescape("".join(parser.parts)).strip()
 
 

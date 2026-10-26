@@ -28,6 +28,7 @@ LIVE = {"mercari": "https://www.mercari.com/us/item/m123456789/", "depop": None}
 POSH_URL = "https://poshmark.com/listing/6adc371572e62463d992ffef"
 SELLWILD_URL = "https://sellwild.com/product/123/test"
 LISTING = {"title": "ANTEROOM DRAFT CHECK - DO NOT PUBLISH", "description": "Private test draft.", "price": 12,
+           "size": "M",
            "weight_oz": 8, "package_dimensions_in": "12x9x2",
            "marketplace_category_ids": {"ebay": "11450", "poshmark": "5c3c3d4a6a2b3c4d5e6f7081", "mercari": "1934", "depop": "menswear_tshirts"},
            "depop_specifics": {"parcelSize": "Medium"}}
@@ -172,6 +173,38 @@ class NativeMarketplacesTest(unittest.TestCase):
         for path in ("draft", "publish"):
             self.assertIn(self.client.post(f"{self.base}/mercari/{path}", json={"revision_id": self.rev.id, "confirm": True}).status_code, {404, 405})
 
+    def test_list_refuses_an_existing_imported_listing_before_preparing_or_writing(self):
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {"mercari": LIVE["mercari"]}})
+        self.db.commit()
+        with patch.object(native, "_preflight", new_callable=AsyncMock) as prepare:
+            response = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("already listed", response.text)
+        prepare.assert_not_called()
+        self.bridge.assert_not_called()
+        self.assertFalse(self.launched)
+        self.assertFalse(JobRepo(self.db).list_by_conversation(self.conv.id))
+
+    def test_list_refuses_an_item_sold_on_another_marketplace(self):
+        self.conv.notes = merge_notes(self.conv.notes, {"marketplaceMarks": {"depop": {"state": "sold"}}})
+        self.db.commit()
+        with patch.object(native, "_preflight", new_callable=AsyncMock) as prepare:
+            response = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("sold", response.text)
+        prepare.assert_not_called()
+        self.bridge.assert_not_called()
+        self.assertFalse(self.launched)
+
+    def test_an_imported_listing_marked_not_listed_can_be_listed_again(self):
+        self.conv.notes = merge_notes(self.conv.notes, {
+            "vendooListingUrls": {"mercari": LIVE["mercari"]},
+            "marketplaceMarks": {"mercari": {"state": "not_listed", "listing_id": "m123456789"}},
+        })
+        self.db.commit()
+        self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]}, self.published("mercari")]
+        self.assertEqual(self.list("mercari")["state"], "published")
+
     def test_poshmark_lists_in_one_step_and_updates_the_same_listing(self):
         self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
         record = self.list("poshmark")
@@ -274,10 +307,12 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(result["category"], ["Kids", "Jackets & Coats"])
         self.assertEqual(result["subcategories"], ["Puffers", "Raincoats", "None"])
         self.assertEqual(result["colors"], ["Blue", "Gray"])
+        self.assertTrue(result["catalog_available"])
         with patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=AsyncMock(return_value={})):
             offline = self.client.get(f"{self.base}/poshmark/options").json()
         self.assertEqual((offline["category"], offline["subcategories"]), ([], []))
         self.assertIn("Tan", offline["colors"])
+        self.assertFalse(offline["catalog_available"])
 
     def test_a_listed_poshmark_post_keeps_the_extensions_warning(self):
         outcome = native._outcome("poshmark", "list", {}, {

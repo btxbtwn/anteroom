@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Job, ListingData, MarketplaceForm } from "../api/types";
 import type { NativeDraft, PoshmarkOptions, SellwildOptions } from "../api/nativeMarketplaces";
-import { cloneListing, formFieldText, getListingEditorValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { cloneListing, formFieldText, formFieldValues, getListingEditorValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
@@ -64,7 +64,7 @@ import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
-import { FieldLabel, InspectorSection, SearchableSelect } from "./ListingFormControls";
+import { FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect } from "./ListingFormControls";
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -93,6 +93,11 @@ interface EditorField {
   required?: boolean;
   options?: string[];
   locked?: boolean;
+  multi?: boolean;
+  selectionOnly?: boolean;
+  maxValues?: number | null;
+  maxLength?: number | null;
+  optionsSource?: "marketplace" | "vendoo" | "reference" | "saved";
 }
 
 export function ListingEditor({
@@ -538,7 +543,7 @@ export function ListingEditor({
   );
 }
 
-function StructuredEditor({
+export function StructuredEditor({
   convId,
   listing,
   revisionId,
@@ -557,36 +562,40 @@ function StructuredEditor({
   // What Vendoo says this listing's category actually renders, rather than a
   // list kept by hand here. Falls back to the static one while it loads, or
   // for a category no schema has been fetched for.
-  const { data: forms } = useQuery({
+  const formsQuery = useQuery({
     queryKey: ["listing-fields", convId],
     queryFn: () => api.vendooApi.listingFields(convId),
     staleTime: 60_000,
   });
-  const { data: dropdownOptions } = useQuery({
+  const { data: forms } = formsQuery;
+  const dropdownQuery = useQuery({
     queryKey: ["catalog-dropdown-options"],
     queryFn: api.catalog.dropdownOptions,
     staleTime: Infinity,
   });
+  const { data: dropdownOptions } = dropdownQuery;
   const { data: inventoryLocation } = useQuery({
     queryKey: ["settings-ebay-inventory-location"],
     queryFn: api.settings.ebayInventoryLocation,
     staleTime: 30_000,
   });
-  const { data: poshmarkOptions } = useQuery({
+  const poshmarkQuery = useQuery({
     queryKey: ["poshmark-options", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.poshmarkOptions(convId),
     enabled: tab === "poshmark",
     staleTime: 60_000,
     retry: false,
   });
+  const { data: poshmarkOptions } = poshmarkQuery;
   // The same reads the Sellwild row beside List uses.
-  const { data: sellwildOptions } = useQuery({
+  const sellwildQuery = useQuery({
     queryKey: ["sellwild-options", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.sellwildOptions(convId),
     enabled: tab === "sellwild",
     staleTime: 60_000,
     retry: false,
   });
+  const { data: sellwildOptions } = sellwildQuery;
   const { data: nativeDrafts } = useQuery({
     queryKey: ["native-marketplaces", convId],
     queryFn: () => api.nativeMarketplaces.status(convId),
@@ -612,7 +621,7 @@ function StructuredEditor({
     },
     [forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location, poshmarkOptions, sellwildOptions, nativeDrafts?.sellwild],
   );
-  const [local, setLocal] = React.useState<Record<string, string>>({});
+  const [local, setLocal] = React.useState<Record<string, string | string[]>>({});
   React.useEffect(() => {
     if (!target) return;
     const key = matchingEditorField(fields, target.field);
@@ -623,13 +632,13 @@ function StructuredEditor({
   }, [target, fields]);
 
   React.useEffect(() => {
-    const init: Record<string, string> = {};
+    const init: Record<string, string | string[]> = {};
     fields.forEach((f) => {
       const val = getListingEditorValue(listing, f.key);
       // Schema labels ("Sleeve Length") don't match JSON keys ("sleeveLength");
       // the fields API already resolved the value — use it when the path miss.
-      const text = f.locked ? formFieldText(f.defaultValue) : (formFieldText(val) || formFieldText(f.defaultValue));
-      init[f.key] = text;
+      const value = f.locked && f.defaultValue !== undefined ? f.defaultValue : (val ?? f.defaultValue);
+      init[f.key] = f.multi ? formFieldValues(value, f.options) : formFieldText(value);
     });
     setLocal(init);
   }, [listing, revisionId, tab, fields]);
@@ -639,36 +648,48 @@ function StructuredEditor({
     const field = fields.find((entry) => entry.key === key);
     if (field?.locked) return;
     const before = getListingEditorValue(listing, key);
-    if (local[key].trim() === "[object Object]") return;
-    if (local[key] === formFieldText(before) || local[key] === formFieldText(field?.defaultValue)) return;
+    const text = formFieldText(local[key]);
+    if (text.trim() === "[object Object]") return;
+    if (text === formFieldText(before) || text === formFieldText(field?.defaultValue)) return;
     const updated = cloneListing(listing);
-    setListingEditorValue(updated, key, coerce(local[key]));
+    setListingEditorValue(updated, key, field?.type === "number" ? coerce(text) : text);
     onChange(updated);
   };
 
-  const commitField = (key: string, value: string) => {
-    if (value.trim() === "[object Object]") return;
+  const commitField = (key: string, value: string | string[]) => {
+    if (typeof value === "string" && value.trim() === "[object Object]") return;
     const nextLocal = { ...local, [key]: value };
     setLocal(nextLocal);
     const updated = cloneListing(listing);
-    setListingEditorValue(updated, key, coerce(value));
+    const field = fields.find((entry) => entry.key === key);
+    setListingEditorValue(updated, key, typeof value === "string" && field?.type === "number" ? coerce(value) : value);
     onChange(updated);
   };
 
   const sections = groupFieldsIntoSections(fields);
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
+    const text = formFieldText(local[f.key]);
     if (f.key === "description") {
-      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={local[f.key] || ""} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />;
+      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} maxLength={f.maxLength ?? undefined} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />;
     }
+    if (f.multi) return <SearchableMultiSelect id={id} fieldKey={f.key}
+      value={formFieldValues(local[f.key], f.options)} options={f.options ?? []}
+      selectionOnly={f.selectionOnly ?? Boolean(f.options?.length)} disabled={f.locked}
+      choicesVerified={f.optionsSource === "marketplace"}
+      maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined}
+      onChange={(value) => commitField(f.key, value)} />;
     if (f.options?.length) {
       return (
         <SearchableSelect
           id={id}
           fieldKey={f.key}
-          value={local[f.key] || ""}
+          value={text}
           options={f.options}
           disabled={f.locked}
+          selectionOnly={f.selectionOnly}
+          choicesVerified={f.optionsSource === "marketplace"}
+          maxLength={f.maxLength ?? undefined}
           onChange={(value) => commitField(f.key, value)}
         />
       );
@@ -680,7 +701,9 @@ function StructuredEditor({
         data-listing-field={f.key}
         type={f.type || "text"}
         readOnly={f.locked}
-        value={local[f.key] || ""}
+        disabled={f.selectionOnly && !f.options?.length}
+        maxLength={f.maxLength ?? undefined}
+        value={text}
         onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }}
         onBlur={() => handleBlur(f.key)}
       />
@@ -692,8 +715,22 @@ function StructuredEditor({
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
     <div ref={formRef} key={tab} className="flex flex-col">
+      {tab !== "general" && <div className="flex items-start justify-between gap-3 border-b py-3 text-xs text-muted-foreground">
+        <p role="status">{formsQuery.isFetching || (tab === "poshmark" && poshmarkQuery.isFetching) || (tab === "sellwild" && sellwildQuery.isFetching)
+          ? "Refreshing category fields and choices…"
+          : formsQuery.isError || dropdownQuery.isError || (tab === "poshmark" && poshmarkQuery.isError) || (tab === "sellwild" && sellwildQuery.isError)
+            ? "Some choices could not be refreshed. Check the source below each field before listing."
+            : forms?.forms.find((form) => form.marketplace === tab)?.known === false
+              ? "The full category form is unavailable. Reference choices are shown where available."
+              : "Choices depend on this category. Reference choices may differ from the marketplace."}</p>
+        <Button type="button" variant="ghost" size="sm" onClick={() => {
+          void formsQuery.refetch(); void dropdownQuery.refetch();
+          if (tab === "poshmark") void poshmarkQuery.refetch();
+          if (tab === "sellwild") void sellwildQuery.refetch();
+        }}>Refresh choices</Button>
+      </div>}
       {sections.map((section) => {
-        const filled = section.fields.filter((f) => (local[f.key] || "").trim() !== "").length;
+        const filled = section.fields.filter((f) => formFieldText(local[f.key]).trim() !== "").length;
         return (
           <InspectorSection
             key={section.id}
@@ -706,6 +743,12 @@ function StructuredEditor({
                 <div key={f.key} className={cn("min-w-0", fullWidth(f) && "col-span-full")}>
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
                   {control(f)}
+                  {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
+                    <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
+                  {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Refresh choices to load this field.</p>}
+                  {f.optionsSource && f.optionsSource !== "saved" && <p className="mt-1 text-xs text-muted-foreground">
+                    {f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"}
+                  </p>}
                 </div>
               ))}
             </div>
@@ -737,7 +780,7 @@ const PACKAGE_FORM_FIELDS: EditorField[] = [
 
 const PACKAGE_MARKETPLACES = new Set(["ebay", "etsy", "poshmark", "mercari", "sellwild"]);
 const MERCARI_ABSENT_FIELDS = new Set(["quantity", "primaryColor", "secondaryColor"]);
-const MERCARI_DERIVED_LABELS = new Set(["quantity", "shipping label", "delivery method", "who will pay for delivery?"]);
+const MERCARI_DERIVED_LABELS = new Set(["quantity", "shipping label", "delivery method", "who will pay for delivery?", "payer", "who pays"]);
 
 /**
  * Two rows are the same field when they share a label or edit the same value.
@@ -790,10 +833,7 @@ export function fieldsForMarketplaceForm(
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
   if (tab === "general") return withoutObjects(own);
   // Vendoo's Sellwild ids are retired; its Sellwild form is not what direct List sends.
-  const schema = (tab === "sellwild" ? [] : schemaFieldsForTab(forms, tab) ?? [])
-    // Vendoo's Mercari quantity and shipping rows are rewritten on every build (the
-    // weight's prepaid label, buyer pays), so an edit there would never be sent.
-    .filter((field) => tab !== "mercari" || !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()));
+  const schema = tab === "sellwild" ? [] : schemaFieldsForTab(forms, tab) ?? [];
   let shared = PACKAGE_MARKETPLACES.has(tab)
     ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
     : SHARED_FORM_FIELDS;
@@ -810,12 +850,18 @@ export function fieldsForMarketplaceForm(
     // Vendoo's label is the name the marketplace uses, so it wins over a listing key.
     const match = schema.find((row) => sameField(row, field));
     return match && match !== field
-      ? { ...field, label: match.label, required: field.required || match.required }
+      ? { ...field, label: match.label, required: match.required,
+          multi: match.multi, selectionOnly: field.optionsSource === "marketplace" ? field.selectionOnly : match.selectionOnly,
+          maxValues: match.maxValues, maxLength: match.maxLength,
+          optionsSource: field.optionsSource === "marketplace" ? field.optionsSource : match.optionsSource }
       : field;
   });
   // A group of values (eBay's Best Offer, Depop's national shipping) is edited
   // through its own rows, never as one text box.
-  const rows = withoutObjects(named);
+  // These values come from the package's prepaid label, buyer pays. Hide both
+  // schema rows and older imported aliases: edits to them would never be sent.
+  const rows = withoutObjects(named)
+    .filter((field) => tab !== "mercari" || !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()));
   // Regular sizing has no Depop size grouping.
   return tab === "depop" && !depopSizeGroupingApplies(listing)
     ? rows.filter((field) => field.key !== "depop_specifics.sizeGrouping")
@@ -838,6 +884,11 @@ function schemaFieldsForTab(
     key: `${tab}_specifics.${tab === "depop" ? depopSchemaKey(field.key) : field.key}`,
     label: field.required ? `${field.label} *` : field.label,
     required: field.required,
+    multi: field.multi,
+    selectionOnly: field.options_source === "reference" ? true : field.selection_only,
+    maxValues: field.max_values,
+    maxLength: field.max_length,
+    optionsSource: field.options_source,
     options: field.options,
     defaultValue: formFieldText(field.value),
   }));
@@ -860,10 +911,12 @@ export function withDirectChoices(fields: EditorField[], choices: {
   const { poshmark, sellwild } = choices;
   return fields.map((field) => {
     if (poshmark && (field.key === "poshmark_specifics.poshmarkColor" || field.key === "poshmark_specifics.poshmarkSecondaryColor")) {
-      return { ...field, options: poshmark.colors };
+      return { ...field, options: poshmark.colors, selectionOnly: true,
+        optionsSource: poshmark.catalog_available ? "marketplace" : "reference" };
     }
     if (poshmark?.subcategories.length && field.key === "poshmark_specifics.subcategory") {
-      return { ...field, options: poshmark.subcategories };
+      return { ...field, options: poshmark.subcategories, selectionOnly: true,
+        optionsSource: poshmark.catalog_available ? "marketplace" : "reference" };
     }
     if (sellwild && field.key === "sellwild.category") return { ...field, defaultValue: sellwild.category };
     if (sellwild && field.key === "sellwild.condition") return { ...field, defaultValue: sellwild.condition };
@@ -924,11 +977,14 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string, schemaKn
         { key: "price", label: "Price", type: "number" },
         { key: "poshmark_specifics.originalPrice", label: "Original Price", type: "number", defaultValue: "0", locked: true },
         { key: "poshmark_specifics.poshmarkCondition", label: "Condition", options: POSHMARK_CONDITIONS,
+          selectionOnly: true, optionsSource: "marketplace",
           defaultValue: poshmarkConditionLabel(listing?.condition) },
         { key: "brand", label: "Brand" },
         { key: "poshmark_specifics.poshmarkColor", label: "Primary Color", options: POSHMARK_COLORS,
+          selectionOnly: true, optionsSource: "reference",
           defaultValue: poshmarkColorName(listing?.primaryColor) },
         { key: "poshmark_specifics.poshmarkSecondaryColor", label: "Secondary Color", options: POSHMARK_COLORS,
+          selectionOnly: true, optionsSource: "reference",
           defaultValue: poshmarkColorName(listing?.secondaryColor) },
         { key: "poshmark_specifics.subcategory", label: "Sub-category" },
         { key: "quantity", label: "Quantity", type: "number" },
@@ -942,6 +998,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string, schemaKn
       return [
         { key: "price", label: "Price", type: "number" },
         { key: "mercari_specifics.condition", label: "Condition", options: MERCARI_CONDITIONS,
+          selectionOnly: true, optionsSource: "marketplace",
           defaultValue: mercariConditionLabel(listing?.condition) },
         { key: "brand", label: "Brand" },
         ...specificsFields(listing?.mercari_specifics, "mercari_specifics", ["shippingLabel", "condition", "delistingAttemptMessages"]),
@@ -1032,7 +1089,9 @@ function specificsFields(specs: unknown, prefix: string, skip: string[] = []): E
       return;
     }
     if (Array.isArray(value) && value.some((item) => isPlainObject(item))) return;
-    fields.push({ key: `${prefix}.${path}`, label, ...(typeof value === "number" ? { type: "number" as const } : {}) });
+    fields.push({ key: `${prefix}.${path}`, label,
+      ...(Array.isArray(value) && label !== "Category" ? { multi: true } : {}),
+      ...(typeof value === "number" ? { type: "number" as const } : {}) });
   };
   for (const [key, value] of Object.entries(specs as Record<string, unknown>)) {
     if (skip.includes(key) || NON_FORM_SPECIFIC_KEYS.has(squashFieldKey(key))) continue;

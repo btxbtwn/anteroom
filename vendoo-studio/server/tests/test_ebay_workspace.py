@@ -24,6 +24,14 @@ from vendoo_studio.services import ebay_actions, ebay_client, ebay_workspace, ke
 from vendoo_studio.services.vendoo_import import merge_notes
 
 
+@pytest.mark.parametrize("description", [
+    '<![CDATA[<div>Cat tee.<br /><br />Length: 22.5&quot;</div>',
+    '<![CDATA[<div>Cat tee.<br /><br />Length: 22.5&quot;</div>]]>',
+])
+def test_plain_keeps_description_inside_literal_cdata(description):
+    assert ebay_workspace.plain(description) == 'Cat tee.\n\nLength: 22.5"'
+
+
 def example_image():
     stream = io.BytesIO()
     Image.new("RGB", (4, 4), "blue").save(stream, format="JPEG")

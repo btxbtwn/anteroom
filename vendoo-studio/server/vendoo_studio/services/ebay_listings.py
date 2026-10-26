@@ -44,6 +44,8 @@ _SKIP = {
     # Offer and listing settings, sent (or not) on their own.
     "bestoffer", "primarystorecategory", "secondarystorecategory", "shippingpolicy",
     "delistingattemptmessages", "personalizationinstructions",
+    "autoaccept", "autoacceptprice", "autodeclineprice", "minimumoffer", "minimumofferprice",
+    "storecategoryname", "storecategory2name",
 }
 # Identifiers eBay asks branded items to answer, Does Not Apply included.
 _IDENTIFIER_ASPECTS = {"mpn"}

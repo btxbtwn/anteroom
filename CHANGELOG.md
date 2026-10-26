@@ -6,9 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.386 — 2026-10-26
+## 0.1.387 — 2026-10-26
 
 - Import existing eBay listings and photos straight into Anteroom from eBay → Listings → Import from eBay. Select items from your active listings or enter a listing ID; existing items keep their edits and photos, and partial photo failures are shown. The import leaves live eBay listings unchanged.
+
+## 0.1.386 — 2026-10-26
+
+- Marketplace forms keep multiple selections, flag unavailable saved choices, show where dropdown choices came from, and let you refresh them. Clearing Material stays cleared after saving.
+- Mercari draft edits keep their photos and use the current size and shipping location. Poshmark no longer reports a failed update when the price is unchanged, and older eBay descriptions can be revised without losing their text.
+- Direct listings show Active even after an older Vendoo send failed. Listing checks catch duplicate or sold items, missing sizes, and Etsy eligibility before starting a send.
 
 ## 0.1.385 — 2026-10-26
 

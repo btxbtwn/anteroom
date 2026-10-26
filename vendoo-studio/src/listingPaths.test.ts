@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cloneListing,
   formFieldText,
+  formFieldValues,
   getListingEditorValue,
   getNestedValue,
   labelToJsonKey,
@@ -17,6 +18,23 @@ describe("formFieldText", () => {
     expect(formFieldText(["Sportswear", { method: "buyer" }])).toBe("Sportswear");
     expect(formFieldText(15)).toBe("15");
     expect(formFieldText(["Kids", "Coats and jackets", "Jackets"])).toBe("Kids, Coats and jackets, Jackets");
+  });
+});
+
+describe("multi-value form fields", () => {
+  it("preserves separate selected values through an edit and save", () => {
+    const listing = { ebay_specifics: { season: ["Spring", "Summer", "Fall"] } };
+    const values = formFieldValues(getListingEditorValue(listing, "ebay_specifics.Season"));
+    setListingEditorValue(listing, "ebay_specifics.Season", values.filter((value) => value !== "Summer"));
+    expect(listing.ebay_specifics.season).toEqual(["Spring", "Fall"]);
+    setListingEditorValue(listing, "ebay_specifics.Season", []);
+    expect(getListingEditorValue(listing, "ebay_specifics.Season")).toEqual([]);
+  });
+
+  it("does not split a native option containing a comma", () => {
+    expect(formFieldValues("Blue, Green", ["Blue, Green", "Red"])).toEqual(["Blue, Green"]);
+    expect(formFieldValues(["Blue, Green", "Red"])).toEqual(["Blue, Green", "Red"]);
+    expect(formFieldValues("Spring, Summer")).toEqual(["Spring", "Summer"]);
   });
 });
 

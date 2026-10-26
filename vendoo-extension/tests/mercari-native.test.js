@@ -131,12 +131,21 @@ test('Mercari read-back ignores line endings and spacing Mercari rewrites', () =
     categoryId: 303, payerId: 1, classIds: [2509] }, common, 1), true);
 });
 
-test('an existing Mercari draft is edited in place without re-uploading photos', async () => {
+test('an existing Mercari draft sends its photos when edited so Mercari does not clear them', async () => {
   const { c, requests, opsOf } = worker();
   const result = await c.runMercariNative(message({ draft_url: 'https://www.mercari.com/sell/draft/m9AbC123/' }));
   assert.equal(result.ok, true);
-  assert.deepEqual(opsOf(), ['editDraftItemMutation', 'draftItemQuery']);
-  assert.deepEqual(requests[0].body.variables, { input: { id: 'm9AbC123', common: { name: 'Test jacket', isAutoPriceDrop: false, description: 'Private draft', price: 2500, categoryId: 303, conditionId: 3, shipping: SHIPPING } } });
+  assert.deepEqual(opsOf(), ['uploadDraftItemImageMutation', 'uploadDraftItemImageMutation', 'editDraftItemMutation', 'draftItemQuery']);
+  assert.deepEqual(requests[2].body.variables, { input: { id: 'm9AbC123', common: { name: 'Test jacket', isAutoPriceDrop: false, description: 'Private draft', price: 2500, categoryId: 303, conditionId: 3, shipping: SHIPPING, imageIds: ['i1', 'i2'] } } });
+});
+
+test('an existing Mercari draft that loses photos is not reported as saved', async () => {
+  const { c, setDraft } = worker();
+  setDraft({ ...KEPT, name: 'Test jacket', description: 'Private draft', price: 2500, photos: [] });
+  const result = await c.runMercariNative(message({ draft_url: 'https://www.mercari.com/sell/draft/m9AbC123/' }));
+  assert.equal(result.ok, false);
+  assert.match(result.error, /photos/);
+  assert.equal(result.safe_to_retry, false);
 });
 
 test('Mercari asks for a reconnect when initialize has no signed-in user, before any request', async () => {
@@ -374,11 +383,34 @@ test('Mercari sizes come from the category and never cross a fit the listing nam
   assert.deepEqual(size({ size: 'L (42-44)' }, MEN_TOP_SIZES), { id: 11 });
   assert.deepEqual(size({ size: '2XL' }), { id: 168 });
   assert.deepEqual(size({ size: 'XL' }, MEN_TOP_SIZES), { id: 12 });
+  assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'XL', sizeType: 'Regular',
+    form: { aspects: { '303_Size': '342' }, sizes: MEN_TOP_SIZES } }, 303))), { id: 12 });
+  assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({
+    form: { aspects: { '303_Size': '342' }, sizes: MEN_TOP_SIZES } }, 303))), { id: 342 });
+  assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'XL (18/20)',
+    form: { aspects: { '1934_Size': '105' }, sizes: BOYS_SIZES } }, 1934))), { id: 168 });
   assert.match(size({ size: 'XL', sizeType: 'Big & Tall' }, MEN_TOP_SIZES).problem, /XL \(46-48\) or XL/);
   assert.deepEqual(size({ size: 'L/XL' }), { problem: 'a size Mercari offers in this category' });
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: { '1934_Size': '103' }, sizes: BOYS_SIZES } }, 1934))), { id: 103 });
   assert.deepEqual(size({ size: 'M' }, []), { none: 'none' });
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: {} } }, 1934))), { none: 'unknown' });
+});
+
+test('Mercari ships from current Settings instead of a cached Vendoo ZIP', () => {
+  const { c } = worker();
+  const listing = clothing();
+  listing.form.ships_from_zip = '70125';
+  assert.equal(c.mercariCommon(listing).shipping.zipCode, '70125');
+});
+
+test('Mercari schema errors retain the reason after a long input echo', () => {
+  const c = loadWorker();
+  const reason = 'Field "shippingClassIds" is not defined by type "DraftItemCommonInput".';
+  const failure = c.mercariFailure('addDraftItemMutation', [{
+    message: `Variable "$input" got invalid value { description: "${'shirt '.repeat(200)}" }; ${reason}`,
+  }], true);
+  assert.equal(failure.code, 'schema_drift');
+  assert.equal(failure.marketplace_message, reason);
 });
 
 test('a sized Mercari listing whose size list could not be read stops before any upload', async () => {
