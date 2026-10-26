@@ -17,7 +17,7 @@ import { Spinner } from "./ui/spinner";
 type Marketplace = DelistMarketplace;
 const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
 const NATIVE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]);
-const REMOTE_DRAFT = new Set<Marketplace>(["mercari", "depop", "etsy", "poshmark"]);
+const REMOTE_DRAFT = new Set<Marketplace>(["ebay", "mercari", "depop", "etsy", "poshmark"]);
 // What Delist does on each marketplace: eBay has no delete; Sellwild offers only its own delist.
 // Vinted is deleted through the signed-in Chrome session, the same as Depop, Poshmark and Mercari.
 const REMOVED: Record<Marketplace, string> = {
@@ -101,6 +101,9 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
   if (draft?.state === "draft" && draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
   if (draft?.state === "draft" && draft.draft_url) return { tone: "neutral", label: "Draft", href: draft.draft_url, hrefLabel: "View draft",
     detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to this draft." : null };
+  // eBay keeps a saved draft as an unpublished offer, which has no page to open.
+  if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
+    detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
   if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "Not eligible", detail: ETSY_NOT_ELIGIBLE };
   return { tone: "idle", label: "Not listed" };
 }

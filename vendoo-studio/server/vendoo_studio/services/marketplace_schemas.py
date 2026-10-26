@@ -27,6 +27,7 @@ from vendoo_studio.services.category_fields import load_rows, save_rows
 
 EBAY_ASPECTS = "ebay_aspects_v2"
 EBAY_CONDITIONS = "ebay_conditions"
+EBAY_LISTING_TYPES = "ebay_listing_types"
 ETSY_PROPERTIES = "etsy_properties"
 _TAXONOMY_MAX_AGE_S = 24 * 3600
 _etsy_taxonomy: dict[str, object] = {"at": 0.0, "leaves": ()}
@@ -156,6 +157,53 @@ async def ebay_conditions(client, category_id: str) -> dict:
               "conditions": [{"id": str(item["conditionId"]), "label": str(item.get("conditionDescription") or "")}
                              for item in policy.get("itemConditions") or [] if item.get("conditionId")]}
     save_rows(EBAY_CONDITIONS, category_id, [answer])
+    return answer
+
+
+def _ebay_listing_type(value: object) -> str | None:
+    """eBay's listing type in the Inventory API's spelling."""
+    text = re.sub(r"[^A-Z]", "", str(value or "").upper())
+    if text in {"AUCTION", "CHINESE"}:
+        return "AUCTION"
+    if text in {"FIXEDPRICE", "FIXEDPRICEITEM"}:
+        return "FIXED_PRICE"
+    return None
+
+
+def ebay_duration(value: object) -> str | None:
+    """A listing duration in the Inventory API's spelling: ``GTC`` or ``DAYS_<n>``."""
+    text = str(value or "").strip().upper()
+    if text == "GTC":
+        return "GTC"
+    match = re.fullmatch(r"DAYS?_?(\d{1,3})", text)
+    return f"DAYS_{int(match.group(1))}" if match and int(match.group(1)) > 0 else None
+
+
+async def ebay_listing_types(client, category_id: str) -> dict[str, list[str]]:
+    """``{"FIXED_PRICE": ["GTC"], "AUCTION": ["DAYS_1", ...]}`` for the leaf.
+
+    A listing type eBay leaves out is one the category does not accept. An
+    empty answer means eBay did not say.
+    """
+    category_id = _category(category_id)
+    cached = load_rows(EBAY_LISTING_TYPES, category_id)
+    if cached:
+        return cached[0]
+    body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_type_policies",
+                                params={"filter": f"categoryIds:{{{category_id}}}"})
+    policy = next((row for row in body.get("listingTypePolicies") or [] if str(row.get("categoryId")) == category_id), {})
+    answer: dict[str, list[str]] = {}
+    for row in policy.get("listingDurations") or []:
+        kind = _ebay_listing_type(row.get("listingType"))
+        if not kind:
+            continue
+        for value in row.get("durationValues") or []:
+            duration = ebay_duration(value)
+            if duration and duration not in answer.setdefault(kind, []):
+                answer[kind].append(duration)
+    answer = {kind: values for kind, values in answer.items() if values}
+    if answer:
+        save_rows(EBAY_LISTING_TYPES, category_id, [answer])
     return answer
 
 

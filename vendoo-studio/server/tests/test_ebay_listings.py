@@ -814,3 +814,173 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(body["product"]["imageUrls"], urls)
         self.assertIsInstance(body["packageWeightAndSize"]["weight"]["value"], int)
+
+
+AUCTION_LISTING = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"], "listingFormat": "AUCTION", "listingDuration": "DAYS_5",
+                                                 "auctionStartPrice": "9.99", "auctionReservePrice": "15", "auctionBuyItNow": "30"}}
+
+
+class FormatClient(Client):
+    """eBay with its listing-type policy, and one offer per SKU and format."""
+
+    def __init__(self, durations=None, **kwargs):
+        super().__init__(**kwargs)
+        self.durations = durations if durations is not None else [
+            {"listingType": "FIXED_PRICE", "durationValues": ["GTC"]},
+            {"listingType": "AUCTION", "durationValues": ["Days_1", "Days_3", "Days_5", "Days_7", "Days_10"]}]
+
+    async def request(self, method, path, **kwargs):
+        if path.endswith("get_listing_type_policies"):
+            self.calls.append((method, path, kwargs))
+            category = kwargs["params"]["filter"].removeprefix("categoryIds:{").removesuffix("}")
+            return {"listingTypePolicies": [{"categoryId": category, "listingDurations": self.durations}]}
+        if path == "/sell/inventory/v1/offer" and method == "GET":
+            self.calls.append((method, path, kwargs))
+            found = [offer for offer in self.offers.values()
+                     if offer["sku"] == kwargs["params"]["sku"] and offer.get("format") == kwargs["params"]["format"]]
+            if not found:
+                raise EbayFailure("eBay returned HTTP 404.", 404)
+            return {"offers": found}
+        if path == "/sell/inventory/v1/offer" and method == "POST":
+            self.calls.append((method, path, kwargs))
+            offer_id = f"offer-{len(self.offers) + 1}"
+            self.offers[offer_id] = {**kwargs["body"], "offerId": offer_id, "status": "UNPUBLISHED"}
+            return {"offerId": offer_id}
+        match = path.removeprefix("/sell/inventory/v1/offer/")
+        if path.startswith("/sell/inventory/v1/offer/") and "/" not in match and match in self.offers:
+            self.calls.append((method, path, kwargs))
+            if method == "PUT":
+                self.offers[match].update(kwargs["body"])
+                return {}
+            return self.offers[match]
+        return await super().request(method, path, **kwargs)
+
+
+class EbayAuctionTest(unittest.IsolatedAsyncioTestCase):
+    setUp = EbayListingsTest.setUp
+    record = EbayListingsTest.record
+    active = EbayListingsTest.active
+
+    async def run_action(self, action, listing, client, **kwargs):
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            return await ebay_listings.execute(action, listing, [self.photo], self.binding, self.record, self.active,
+                                               confirm=action == "list", conversation_id="abc123", **kwargs)
+
+    async def test_an_auction_offer_carries_ebays_auction_fields_and_no_offers_or_quantity(self):
+        client = FormatClient()
+        result = await self.run_action("list", AUCTION_LISTING, client)
+        self.assertTrue(result["ok"], result)
+        body = next(call for call in client.calls if call[:2] == ("POST", "/sell/inventory/v1/offer"))[2]["body"]
+        self.assertEqual(body["format"], "AUCTION")
+        self.assertEqual(body["listingDuration"], "DAYS_5")
+        self.assertEqual(body["pricingSummary"], {"auctionStartPrice": {"value": "9.99", "currency": "USD"},
+                                                  "auctionReservePrice": {"value": "15.00", "currency": "USD"},
+                                                  "price": {"value": "30.00", "currency": "USD"}})
+        self.assertNotIn("availableQuantity", body)
+        self.assertNotIn("bestOfferTerms", body["listingPolicies"])
+        self.assertEqual(client.items["ar-abc123"]["availability"]["shipToLocationAvailability"]["quantity"], 1)
+        self.assertEqual(self.binding["ebay_format"], "AUCTION")
+
+    async def test_an_auction_without_buy_it_now_or_reserve_sends_only_the_starting_bid(self):
+        specifics = {**AUCTION_LISTING["ebay_specifics"], "auctionReservePrice": "", "auctionBuyItNow": ""}
+        client = FormatClient()
+        result = await self.run_action("list", {**AUCTION_LISTING, "ebay_specifics": specifics}, client)
+        self.assertTrue(result["ok"], result)
+        body = next(call for call in client.calls if call[:2] == ("POST", "/sell/inventory/v1/offer"))[2]["body"]
+        self.assertEqual(body["pricingSummary"], {"auctionStartPrice": {"value": "9.99", "currency": "USD"}})
+
+    async def test_a_category_without_auctions_or_that_length_writes_nothing(self):
+        for durations, field in (([{"listingType": "FIXED_PRICE", "durationValues": ["GTC"]}], "ebay_specifics.listingFormat"),
+                                 ([{"listingType": "AUCTION", "durationValues": ["Days_7"]}], "ebay_specifics.listingDuration")):
+            client = FormatClient(durations=durations)
+            self.binding.clear()
+            result = await self.run_action("list", AUCTION_LISTING, client)
+            self.assertFalse(result["ok"])
+            self.assertEqual([item["field"] for item in result["fields"]], [field])
+            self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls))
+
+    def test_auction_choices_are_checked_before_anything_is_sent(self):
+        def problem(**specifics):
+            listing = {**AUCTION_LISTING, "ebay_specifics": {**AUCTION_LISTING["ebay_specifics"], **specifics}}
+            with self.assertRaises(ListingProblem) as caught:
+                ebay_listings._listing_fields(listing, {})
+            return caught.exception.fields[0]["field"]
+
+        self.assertEqual(problem(auctionStartPrice=""), "ebay_specifics.auctionStartPrice")
+        self.assertEqual(problem(auctionReservePrice="9.99"), "ebay_specifics.auctionReservePrice")
+        self.assertEqual(problem(auctionBuyItNow="5"), "ebay_specifics.auctionBuyItNow")
+        self.assertEqual(problem(listingDuration="GTC"), "ebay_specifics.listingDuration")
+        self.assertEqual(problem(listingFormat="Classified"), "ebay_specifics.listingFormat")
+        self.assertEqual(problem(bestOffer={"enabled": True}), "ebay_specifics.bestOffer.enabled")
+        with self.assertRaises(ListingProblem) as caught:
+            ebay_listings._listing_fields({**AUCTION_LISTING, "quantity": 2}, {})
+        self.assertEqual(caught.exception.fields[0]["field"], "quantity")
+        fixed = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"], "listingDuration": "DAYS_7"}}
+        with self.assertRaises(ListingProblem):
+            ebay_listings._listing_fields(fixed, {})
+        # No choice stays the fixed-price, Good 'Til Cancelled listing it always was.
+        self.assertEqual(ebay_listings._listing_fields(LISTING, {})["format"], {"format": "FIXED_PRICE", "duration": "GTC"})
+
+    async def test_save_draft_writes_an_unpublished_offer_reads_it_back_and_never_publishes(self):
+        client = FormatClient()
+        result = await self.run_action("save_draft", AUCTION_LISTING, client)
+        self.assertEqual(result, {"ok": True, "state": "draft"})
+        self.assertFalse(any(path.endswith("/publish") for _, path, _ in client.calls))
+        self.assertEqual(client.offers["offer-1"]["status"], "UNPUBLISHED")
+        self.assertEqual(client.calls[-1][:2], ("GET", "/sell/inventory/v1/offer/offer-1"))
+        # Check reads the same offer and confirms the draft without writing.
+        self.binding["action"] = "save_draft"
+        writes = len([call for call in client.calls if call[0] in ("PUT", "POST")])
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            checked = await ebay_listings.check(self.binding, AUCTION_LISTING, self.record)
+        self.assertEqual(checked, {"ok": True, "state": "draft"})
+        self.assertEqual(len([call for call in client.calls if call[0] in ("PUT", "POST")]), writes)
+        # List then publishes the saved offer rather than making another.
+        result = await self.run_action("list", AUCTION_LISTING, client)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(list(client.offers), ["offer-1"])
+
+    async def test_a_saved_draft_ebay_stored_differently_is_reported(self):
+        client = FormatClient()
+        original = client.request
+
+        async def drifted(method, path, **kwargs):
+            answer = await original(method, path, **kwargs)
+            if method == "GET" and path == "/sell/inventory/v1/offer/offer-1":
+                return {**answer, "listingDuration": "DAYS_7", "pricingSummary": {}}
+            return answer
+
+        client.request = drifted
+        result = await self.run_action("save_draft", AUCTION_LISTING, client)
+        self.assertFalse(result["ok"])
+        self.assertIn("duration", result["error"])
+        self.assertIn("starting bid", result["error"])
+
+    async def test_switching_an_unpublished_offer_to_auction_uses_ebays_auction_offer(self):
+        client = FormatClient()
+        await self.run_action("save_draft", LISTING, client)
+        self.assertEqual(client.offers["offer-1"]["format"], "FIXED_PRICE")
+        result = await self.run_action("save_draft", AUCTION_LISTING, client)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(client.offers["offer-1"]["format"], "FIXED_PRICE")
+        self.assertEqual(client.offers["offer-2"]["format"], "AUCTION")
+        self.assertEqual(self.binding["ebay_offer_id"], "offer-2")
+
+    async def test_updating_a_live_listing_cannot_change_its_format(self):
+        client = FormatClient()
+        client.offers["offer-1"] = {"offerId": "offer-1", "sku": "sku", "status": "PUBLISHED", "format": "FIXED_PRICE",
+                                    "listing": {"listingId": "123456789012"}}
+        binding = {"listing_id": "123456789012", "ebay_offer_id": "offer-1"}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("update", AUCTION_LISTING, [self.photo], binding, self.record, self.active, confirm=True)
+        self.assertFalse(result["ok"])
+        self.assertIn("between fixed price and auction", result["error"])
+        self.assertFalse(any(call[0] in ("PUT", "POST") for call in client.calls))
+
+    async def test_listing_types_take_ebays_spellings(self):
+        from vendoo_studio.services import marketplace_schemas
+
+        client = FormatClient(durations=[{"listingType": "CHINESE", "durationValues": ["Days_3", "DAYS_7", "bogus"]},
+                                         {"listingType": "FIXED_PRICE_ITEM", "durationValues": ["GTC"]}])
+        self.assertEqual(await marketplace_schemas.ebay_listing_types(client, "15687"),
+                         {"AUCTION": ["DAYS_3", "DAYS_7"], "FIXED_PRICE": ["GTC"]})

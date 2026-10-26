@@ -98,20 +98,75 @@ async def ebay_form(snapshot: dict) -> dict:
                             **({"value_constraints": constraints} if constraints else {})))
     details = snapshot.get("ebay_specifics") or {}
     terms = best_offer_terms(snapshot.get("form") or {}, str(price_for(snapshot, "ebay") or 0), snapshot)
-    fields.extend([field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number"),
+    selling = await _ebay_format_fields(snapshot, category, details)
+    auction = any(row["key"] == "ebay_specifics.auctionStartPrice" for row in selling)
+    offers = [] if auction else [
+        field("ebay_specifics.bestOffer.enabled", "Allow offers", terms.get("bestOfferEnabled", True), input_type="boolean"),
+        field("ebay_specifics.bestOffer.autoAcceptPrice", "Automatically accept offers at", (terms.get("autoAcceptPrice") or {}).get("value", ""), input_type="number",
+              help="Clear this amount to turn off automatic acceptance."),
+        field("ebay_specifics.bestOffer.minimumOfferPrice", "Decline offers below", (terms.get("autoDeclinePrice") or {}).get("value", ""), input_type="number",
+              help="Clear this amount to turn off automatic declines."),
+    ]
+    fields.extend([*selling,
+                   field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number",
+                         **({"help": "An eBay auction sells one item."} if auction else {})),
                    field("sku", "SKU", seller_sku(snapshot), locked=True, help="SKU comes from Item Details."),
                    field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}), input_type="textarea", max_length=1000),
-                   field("ebay_specifics.bestOffer.enabled", "Allow offers", terms.get("bestOfferEnabled", True), input_type="boolean"),
-                   field("ebay_specifics.bestOffer.autoAcceptPrice", "Automatically accept offers at", (terms.get("autoAcceptPrice") or {}).get("value", ""), input_type="number",
-                         help="Clear this amount to turn off automatic acceptance."),
-                   field("ebay_specifics.bestOffer.minimumOfferPrice", "Decline offers below", (terms.get("autoDeclinePrice") or {}).get("value", ""), input_type="number",
-                         help="Clear this amount to turn off automatic declines."),
+                   *offers,
                    *[field(f"ebay_specifics.{key}", key.upper(), details.get(key)) for key in ("upc", "ean", "isbn")],
                    *[field(f"ebay_specifics.{key}", label, details.get(key)) for key, label in
                      (("primaryStoreCategory", "Primary store category"), ("secondaryStoreCategory", "Secondary store category"))],
                    *package(snapshot)])
     return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields,
-            "notes": ["Category aspects and condition choices come from eBay. Shipping, payment and return policies come from Settings."]}
+            "notes": ["Category aspects and condition choices come from eBay. Shipping, payment and return policies come from Settings.",
+                      *(["An auction uses Starting bid and Buy It Now, not Price."] if auction else [])]}
+
+
+_FORMAT_CLEARS = ["ebay_specifics.listingDuration", "ebay_specifics.auctionStartPrice",
+                  "ebay_specifics.auctionReservePrice", "ebay_specifics.auctionBuyItNow"]
+
+
+async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> list[dict]:
+    """Format, duration and auction prices. Auction and its lengths come from eBay's rules for the category."""
+    from vendoo_studio.services import marketplace_schemas
+    from vendoo_studio.services.ebay_client import EbayClient
+    from vendoo_studio.services.ebay_listings import (AUCTION, DEFAULT_AUCTION_DURATION, FIXED_PRICE, FORMAT_LABELS,
+                                                      duration_label)
+
+    kind = marketplace_schemas._ebay_listing_type(details.get("listingFormat")) or FIXED_PRICE
+    allowed: dict[str, list[str]] = {}
+    note = ""
+    if category:
+        try:
+            allowed = await marketplace_schemas.ebay_listing_types(await EbayClient.connect(), category)
+        except Exception:  # noqa: BLE001 - fixed price needs no lookup; List checks auctions again
+            note = "eBay's auction rules for this category could not be loaded. Refresh choices."
+    kinds = [FIXED_PRICE] + ([AUCTION] if allowed.get(AUCTION) or kind == AUCTION else [])
+    if not allowed.get(AUCTION) and not note and category:
+        note = "eBay does not offer auctions in this category."
+    rows = [field("ebay_specifics.listingFormat", "Format", kind, selection_only=True, required=True,
+                  options=[FORMAT_LABELS[value] for value in kinds],
+                  option_values={FORMAT_LABELS[value]: value for value in kinds}, options_source="marketplace",
+                  clears=_FORMAT_CLEARS, **({"help": note} if note else {}))]
+    if kind != AUCTION:
+        rows.append(field("ebay_specifics.listingDuration", "Duration", "GTC", locked=True,
+                          options=[duration_label("GTC")], option_values={duration_label("GTC"): "GTC"},
+                          help="eBay fixed-price listings run Good 'Til Cancelled."))
+        return rows
+    lengths = allowed.get(AUCTION) or []
+    chosen = marketplace_schemas.ebay_duration(details.get("listingDuration")) or (
+        DEFAULT_AUCTION_DURATION if DEFAULT_AUCTION_DURATION in lengths or not lengths else lengths[0])
+    rows += [
+        field("ebay_specifics.listingDuration", "Duration", chosen, selection_only=True, required=True,
+              options=[duration_label(value) for value in lengths],
+              option_values={duration_label(value): value for value in lengths}, options_source="marketplace"),
+        field("ebay_specifics.auctionStartPrice", "Starting bid", details.get("auctionStartPrice"), input_type="number", required=True),
+        field("ebay_specifics.auctionReservePrice", "Reserve (optional)", details.get("auctionReservePrice"), input_type="number",
+              help="eBay charges a fee for a reserve, whether or not the item sells."),
+        field("ebay_specifics.auctionBuyItNow", "Buy It Now (optional)", details.get("auctionBuyItNow"), input_type="number",
+              help="In most categories eBay needs Buy It Now at least 30% above the starting bid."),
+    ]
+    return rows
 
 
 def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
