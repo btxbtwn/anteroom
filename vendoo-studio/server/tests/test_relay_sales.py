@@ -219,6 +219,7 @@ class SignInTest(unittest.TestCase):
         async def fake_request(method, path, **kwargs):
             calls.append((method, path))
             if path.endswith("/start"):
+                self.assertEqual(kwargs.get("params"), {"features": "listings"})
                 return FakeResponse(200, {"state": "s1", "authorizeUrl": "https://auth.ebay.com/x"})
             return next(replies)
 

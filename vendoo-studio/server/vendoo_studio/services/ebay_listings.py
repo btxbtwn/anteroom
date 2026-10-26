@@ -442,8 +442,15 @@ async def _create_ship_from_location(client: EbayClient) -> dict:
 async def listing_profiles(client: EbayClient | None = None) -> dict[str, list[dict]]:
     """The account's business policies and enabled locations, names and IDs only."""
     client = client or await EbayClient.connect()
-    return {"fulfillment": await _policies(client, "fulfillment"), "payment": await _policies(client, "payment"),
-            "return": await _policies(client, "return"), "locations": await _locations(client)}
+    try:
+        return {"fulfillment": await _policies(client, "fulfillment"), "payment": await _policies(client, "payment"),
+                "return": await _policies(client, "return"), "locations": await _locations(client)}
+    except EbayFailure as exc:
+        if exc.status != 403:
+            raise
+        raise EbayFailure("eBay has not given Anteroom access to your shipping, payment, and return policies. "
+                          "Reconnect eBay to grant it.", 403, code="needs_permission",
+                          marketplace_message=exc.marketplace_message) from exc
 
 
 def _pick(options: list[dict], chosen: str | None, kind: str, setting: str) -> str:

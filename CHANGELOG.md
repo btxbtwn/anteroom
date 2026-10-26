@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.392 — 2026-10-26
+
+- Connecting eBay from Settings now grants access to your shipping, payment, and return policies, so the eBay card no longer shows "eBay denied access" right after you sign in. If eBay still refuses, the card says why and offers a Reconnect eBay button.
+
 ## 0.1.391 — 2026-10-26
 
 - Recover missing eBay and Etsy sales from Orders, including cancellations and refunds on older orders changed during your selected dates. Check pages sequentially, stop and resume, and keep existing links, dismissed alerts and local quantities intact.
