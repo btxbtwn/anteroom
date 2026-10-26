@@ -216,6 +216,10 @@ def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | No
     # Marking listed or not listed starts the record over; a sale keeps how the listing ended.
     if state != "sold":
         _store(db, conv_id, "marketplaceDelists", marketplace, None)
+    if state == "listed":
+        from vendoo_studio.services.relay_sales import reconcile_unmatched
+
+        reconcile_unmatched(db, conversation_id=conv_id)
     return listings(db, conv_id)
 
 

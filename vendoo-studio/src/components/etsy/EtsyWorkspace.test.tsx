@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EtsyOrders as EtsyOrderPage, EtsyShop } from "../../api/etsy";
 import { EtsyWorkspace } from "./EtsyWorkspace";
 import { EtsyDashboard, EtsyListings, EtsyOrders, EtsySaleAlerts, etsyMoney } from "./SellerPanels";
+import { api } from "../../api/client";
 
 const { useQuery, useMutation, account } = vi.hoisted(() => ({
   useQuery: vi.fn(), useMutation: vi.fn(),
@@ -111,6 +112,25 @@ describe("Etsy seller pages", () => {
     expect(html).not.toContain("eBay-only sale");
     expect(html).toContain("You choose any delisting separately.");
     expect(html).toContain("Open item");
+  });
+
+  it("refreshes Etsy alerts by reconciling Etsy sales against saved inventory", async () => {
+    const reconcile = vi.spyOn(api.marketplaceSales, "reconcile").mockResolvedValue({ matched: 2, unmatched: 1 });
+    try {
+      useMutation.mockClear();
+      renderToStaticMarkup(<EtsySaleAlerts onOpenListing={vi.fn()} />);
+      await useMutation.mock.calls[0][0].mutationFn();
+      expect(reconcile).toHaveBeenCalledWith("etsy");
+    } finally {
+      reconcile.mockRestore();
+    }
+  });
+
+  it("reports newly matched sales and keeps reconciliation errors visible", () => {
+    useMutation.mockReturnValueOnce({ mutate: vi.fn(), isPending: false, data: { matched: 2, unmatched: 1 } });
+    expect(renderToStaticMarkup(<EtsySaleAlerts onOpenListing={vi.fn()} />)).toContain("2 previously unmatched sales are");
+    useMutation.mockReturnValueOnce({ mutate: vi.fn(), isPending: false, error: new Error("Could not refresh sale alerts.") });
+    expect(renderToStaticMarkup(<EtsySaleAlerts onOpenListing={vi.fn()} />)).toContain("Could not refresh sale alerts.");
   });
 
   it("lists orders with fulfillment status, local pagination, and an Etsy orders link", () => {

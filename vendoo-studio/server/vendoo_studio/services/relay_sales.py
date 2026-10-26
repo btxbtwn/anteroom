@@ -60,6 +60,36 @@ def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conve
     return matches[0] if len(matches) == 1 else None
 
 
+def reconcile_unmatched(db: Session, *, conversation_id: str | None = None, marketplace: str | None = None) -> int:
+    """Match previously received sales to exact listing links, without remote actions.
+
+    Dismissed sales and existing assignments are left alone. Duplicate local
+    owners remain unresolved. Nothing here notifies, publishes, or delists.
+    """
+    pending = db.query(MarketplaceSale.id, MarketplaceSale.marketplace, MarketplaceSale.listing_id).filter(
+        MarketplaceSale.state == "new", MarketplaceSale.conversation_id.is_(None), MarketplaceSale.listing_id.isnot(None),
+    )
+    if marketplace:
+        pending = pending.filter(MarketplaceSale.marketplace == marketplace)
+    owners: dict[tuple[str, str], str | None] = {}
+    matched = 0
+    for sale_id, marketplace, item_id in pending.yield_per(100):
+        key = (marketplace, item_id)
+        if key not in owners:
+            owner = find_listing(db, marketplace, item_id)
+            owners[key] = owner.id if owner else None
+        owner_id = owners[key]
+        if not owner_id or (conversation_id and owner_id != conversation_id):
+            continue
+        # Re-check assignment and state when writing, so an overlapping refresh
+        # cannot take a sale another request just assigned or dismissed.
+        matched += db.query(MarketplaceSale).filter(
+            MarketplaceSale.id == sale_id, MarketplaceSale.conversation_id.is_(None), MarketplaceSale.state == "new",
+        ).update({"conversation_id": owner_id}, synchronize_session=False)
+    db.commit()
+    return matched
+
+
 def _parse_time(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value, UTC).replace(tzinfo=None)
