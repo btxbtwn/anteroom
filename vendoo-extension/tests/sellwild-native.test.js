@@ -63,6 +63,21 @@ test('Sellwild moderation is reported as pending review', async () => {
   assert.equal((await c.runSellwildNative(message())).state, 'pending_review');
 });
 
+test('Sellwild packaging is sent with native dimensions and description remains optional', async () => {
+  const { c, requests } = worker();
+  const result = await c.runSellwildNative(message({
+    listing: { ...listing, description: '', weight_lb: 0, weight_oz: 0, package_dimensions_in: '' },
+    sellwild: { category_id: 246, condition_id: 3, parcel_template: 'USPS_FlatRatePaddedEnvelope', fixed_package: true,
+      package_dimensions: { depth: 13, width: 10, height: 1 } },
+  }));
+  assert.equal(result.ok, true);
+  const body = requests.find(row => row.route === 'POST /api/listings/create').body;
+  assert.equal(body.text, '');
+  assert.equal(body.parcelTemplate, 'USPS_FlatRatePaddedEnvelope');
+  assert.deepEqual([body.depth, body.width, body.height], [13, 10, 1]);
+  assert.equal(body.weight, undefined);
+});
+
 test('Sellwild publishing needs confirmation and complete fields before any request', async () => {
   for (const extra of [{ confirm: false }, { action: 'review' }, { sellwild: { category_id: 272 } },
     { listing: { ...listing, price: 4 } }, { listing: { ...listing, weight_lb: 0, weight_oz: 0 } },

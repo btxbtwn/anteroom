@@ -24,7 +24,7 @@ const LISTING = { title: 'Vintage tee', description: 'Soft cotton tee', price: 1
 const BRANDS = { data: [{ type: 'brand', brand_id: 'd'.repeat(24), brand_name: 'Hanes' }, { type: 'brand', brand_id: 'e'.repeat(24), brand_name: 'Hanes Her Way' }] };
 const STYLE_TAGS = { data: ['Casual', 'Retro', 'Streetwear', 'Vintage'] };
 const CATALOG_READS = ['GET /vm-rest/meta/catalog_v2', 'GET /vm-rest/searches/brands/suggested', 'GET /vm-rest/meta/style_tags/top'];
-const savedPost = requests => requests.find(r => r.method === 'POST' && r.path === `/vm-rest/posts/${POST}`).body.post;
+const savedPost = requests => requests.find(r => r.method === 'POST' && r.path === `/vm-rest/posts/${POST}`)?.body.post;
 const PAGE = `<html><script>window.__INITIAL_STATE__={"csrftoken":"page-csrf","userCookies":{"userInfo":{"uid":"${USER}"}}};</script></html>`;
 const page = () => response(200, PAGE, { 'content-type': 'text/html' });
 
@@ -53,7 +53,11 @@ function setup({ publishAnswer = [200, {}], status = 'published' } = {}) {
     if (method === 'POST' && path === `/vm-rest/users/${USER}/posts`) return reply(200, { data: { id: POST, status: 'draft' } });
     if (path.endsWith('/media/scratch')) return reply(200, { data: { id: `${'c'.repeat(23)}${photo++}` } });
     if (method === 'PUT' && path.endsWith('/status/published')) return reply(...publishAnswer);
-    if (method === 'GET' && path === `/vm-rest/posts/${POST}`) return reply(200, { data: { id: POST, status } });
+    if (method === 'GET' && path === `/vm-rest/posts/${POST}`) {
+      const saved = savedPost(requests);
+      const readStatus = saved && !requests.some(r => r.path.includes('/status/')) ? 'draft' : status;
+      return reply(200, { data: { ...saved, id: POST, creator_id: USER, status: readStatus } });
+    }
     return reply(200, { data: {} });
   };
   const msg = { job_id: 'job-1', payload: { marketplace: 'poshmark', action: 'list', confirm: true, operation_id: 'op-1',
@@ -67,7 +71,7 @@ test('Poshmark lists in one step with every field, no draft save, no tab', async
   assert.deepEqual(result, { ok: true, state: 'published', listing_url: `https://poshmark.com/listing/${POST}` });
   assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), [...CATALOG_READS, 'GET /create-listing', `POST /vm-rest/users/${USER}/posts`,
     `POST /api/posts/${POST}/media/scratch`, `POST /api/posts/${POST}/media/scratch`, `POST /vm-rest/posts/${POST}`,
-    `PUT /vm-rest/posts/${POST}/status/published`, `GET /vm-rest/posts/${POST}`]);
+    `GET /vm-rest/posts/${POST}`, `PUT /vm-rest/posts/${POST}/status/published`, `GET /vm-rest/posts/${POST}`]);
   assert.ok(!requests.some(r => r.path.endsWith('/status/user_draft')));
   assert.ok(requests.filter(r => r.method !== 'GET').every(r => r.headers['X-XSRF-TOKEN'] === 'page-csrf'));
   assert.ok(requests.filter(r => r.method === 'GET').every(r => !('X-XSRF-TOKEN' in r.headers)));
@@ -87,6 +91,106 @@ test('Poshmark lists in one step with every field, no draft save, no tab', async
   assert.equal(journal['native_operation_op-1'].poshmark_post_id, POST);
 });
 
+test('Save Draft uses the native user_draft transition and never publishes, including recovery', async () => {
+  const { c, msg, requests } = setup({ status: 'user_draft' });
+  msg.payload.action = 'save_draft';
+  msg.payload.confirm = false;
+  const result = JSON.parse(JSON.stringify(await c.runNativeMarketplace(msg)));
+  assert.deepEqual(result, { ok: true, state: 'draft', draft_url: `https://poshmark.com/edit-listing/${POST}` });
+  const transition = requests.find(r => r.path.endsWith('/status/user_draft'));
+  assert.equal(transition.method, 'PUT');
+  assert.equal(transition.body.post.title, LISTING.title);
+  assert.ok(!requests.some(r => r.path.endsWith('/status/published') || r.method === 'DELETE'));
+  requests.length = 0;
+  // Preserve the saved post while observing that recovery performs GETs only.
+  c.fetch = async (url, options = {}) => {
+    assert.equal(options.method || 'GET', 'GET');
+    if (new URL(url).pathname === `/vm-rest/posts/${POST}`) return response(200, { data: {
+      ...transition.body.post, id: POST, creator_id: USER, status: 'user_draft',
+    } });
+    throw new Error('Unexpected recovery request');
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(await c.runPoshmarkApi(msg, true))), result);
+});
+
+test('Save Draft refuses a read-back mismatch and never falls through to publish', async () => {
+  const { c, msg, requests } = setup({ status: 'published' });
+  msg.payload.action = 'save_draft';
+  msg.payload.confirm = false;
+  const result = await c.runPoshmarkApi(msg);
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.match(result.error, /did not keep this draft revision/);
+  assert.ok(!requests.some(r => r.path.endsWith('/status/published') || r.method === 'DELETE'));
+});
+
+test('an existing Poshmark draft is reused but a live or foreign post is never changed', async () => {
+  for (const [status, owner, allowed] of [['user_draft', USER, true], ['published', USER, false], ['user_draft', 'f'.repeat(24), false]]) {
+    const { c, msg, requests } = setup({ status: 'user_draft' });
+    msg.payload.action = 'save_draft';
+    msg.payload.confirm = false;
+    msg.payload.draft_url = `https://poshmark.com/edit-listing/${POST}`;
+    const fetch = c.fetch;
+    let read = false;
+    c.fetch = async (url, options = {}) => {
+      if (!read && new URL(url).pathname === `/vm-rest/posts/${POST}` && (options.method || 'GET') === 'GET') {
+        read = true;
+        requests.push({ method: 'GET', path: new URL(url).pathname });
+        return response(200, { data: { status, creator_id: owner, inventory: { size_quantity_revision: 4 } } });
+      }
+      return fetch(url, options);
+    };
+    const result = await c.runNativeMarketplace(msg);
+    assert.equal(result.ok, allowed);
+    assert.ok(!requests.some(r => r.path.includes('/users/') || r.path.endsWith('/status/published') || r.method === 'DELETE'));
+    if (!allowed) assert.ok(requests.every(r => r.method === 'GET'));
+    else assert.equal(savedPost(requests).inventory.size_quantity_revision, 4);
+  }
+});
+
+test('Poshmark draft verification catches changed size, quantity, colors, price and photo count', () => {
+  const { c } = setup();
+  const expected = c.poshmarkPostFields(CATALOG.data, LISTING, { brand: 'Hanes', styleTags: [] });
+  const actual = JSON.parse(JSON.stringify(expected));
+  actual.cover_shot = { id: 'photo' };
+  actual.pictures = [];
+  assert.equal(c.poshmarkPostDifferences(actual, expected, 1).length, 0);
+  actual.inventory.size_quantities[0].size_id = 'XL';
+  actual.inventory.size_quantities[0].quantity_available = 2;
+  actual.colors = ['Blue'];
+  actual.price_amount.val = '99';
+  assert.deepEqual(Array.from(c.poshmarkPostDifferences(actual, expected, 2)), ['sizes', 'colors', 'price', 'photos']);
+});
+
+test('clearing native Poshmark values does not restore general or old form defaults', async () => {
+  const { c } = setup();
+  const listing = { ...LISTING, brand: '', form: { overrides: { brand: 'Old brand', condition: 'ug' } },
+    poshmark_specifics: { ...LISTING.poshmark_specifics, poshmarkColor: '', poshmarkSecondaryColor: '', poshmarkPrice: 0, condition: '' } };
+  assert.equal(await c.poshmarkBrand(listing, Date.now() + 30000), '');
+  assert.equal(c.poshmarkPrice(listing), 0);
+  assert.equal(c.poshmarkCondition(listing), null);
+  listing.poshmark_specifics.poshmarkPrice = 18;
+  listing.poshmark_specifics.condition = 'ug';
+  const post = c.poshmarkPostFields(CATALOG.data, listing, { brand: '' });
+  assert.equal(post.brand, '');
+  assert.deepEqual(Array.from(post.colors), []);
+});
+
+test('a changed draft field prevents the confirmed publication request', async () => {
+  const { c, msg, requests } = setup();
+  const fetch = c.fetch;
+  c.fetch = async (url, options = {}) => {
+    if (new URL(url).pathname === `/vm-rest/posts/${POST}` && (options.method || 'GET') === 'GET') {
+      return response(200, { data: { ...savedPost(requests), id: POST, creator_id: USER, status: 'draft', brand: 'Different brand' } });
+    }
+    return fetch(url, options);
+  };
+  const result = await c.runPoshmarkApi(msg);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /brand.*not published/);
+  assert.ok(!requests.some(r => r.path.endsWith('/status/published')));
+});
+
 test('Poshmark sends the selected quantity, original price and explicit SKU instead of generated defaults', () => {
   const c = loadWorker();
   const listing = { ...LISTING, quantity: 3, sku: 'item-details-sku', seller_fields: ['poshmark_specifics.originalPrice'], poshmark_specifics: {
@@ -96,8 +200,33 @@ test('Poshmark sends the selected quantity, original price and explicit SKU inst
   assert.equal(post.inventory.multi_item, true);
   assert.equal(post.inventory.size_quantities[0].quantity_available, 3);
   assert.equal(post.original_price_amount.val, '55');
-  assert.equal(post.seller_private_info, undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(post.seller_private_info)), { sku: '' });
   assert.throws(() => c.poshmarkPostFields(CATALOG.data, { ...listing, quantity: 1.5 }, {}), /whole-number quantity/);
+});
+
+test('Poshmark private notes and cost support clearing, and shipping discounts require a live option', async () => {
+  const { c } = setup();
+  const listing = { ...LISTING, cost: 0, poshmark_specifics: { ...LISTING.poshmark_specifics,
+    poshmarkSku: '', sellerNotes: '', availability: 'not_for_sale', shippingDiscountId: 'd'.repeat(24),
+  } };
+  c.poshmarkShippingDiscounts = async () => [{ id: 'd'.repeat(24), label: 'Buyer Shipping: Free' }];
+  const post = await c.poshmarkPreparedPost(listing, Date.now() + 30000);
+  assert.equal(post.inventory.status, 'not_for_sale');
+  assert.equal(post.offer_auto_actions_v2_enabled, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(post.seller_private_info)), {
+    sku: '', other_info: '', cost_price_amount: { val: '0.00', currency_code: 'USD', currency_symbol: '$' },
+  });
+  assert.equal(post.seller_shipping_discount.id, 'd'.repeat(24));
+  listing.cost = '';
+  listing.poshmark_specifics.shippingDiscountId = '';
+  c.poshmarkShippingDiscounts = async () => [{ id: 'e'.repeat(24), discount_amount: { val: '0.00' } }];
+  const cleared = await c.poshmarkPreparedPost(listing, Date.now() + 30000);
+  assert.equal(cleared.seller_private_info.cost_price_amount, null);
+  assert.equal(cleared.seller_shipping_discount.id, 'e'.repeat(24));
+  assert.deepEqual(Array.from(c.poshmarkPostDifferences(cleared, cleared, 0)), []);
+  assert.throws(() => c.poshmarkPostFields(CATALOG.data, { ...listing, cost: -1 }, {}), /cost of \$0/);
+  c.poshmarkShippingDiscounts = async () => [];
+  await assert.rejects(c.poshmarkPreparedPost(listing, Date.now() + 30000), /current shipping discount/);
 });
 
 test('an update writes the live Poshmark post and does not create or publish another', async () => {
@@ -423,12 +552,14 @@ test('Smart Pricing follows the listing form, off included, and cost keeps its c
 });
 
 test('a published post that did not keep Smart Pricing is listed with a warning', async () => {
-  const { c, msg } = setup();
+  const { c, msg, requests } = setup();
   const fetch = c.fetch;
   c.fetch = async (url, options = {}) => {
     const path = new URL(url).pathname;
     if ((options.method || 'GET') === 'GET' && path === `/vm-rest/posts/${POST}`) {
-      return response(200, { data: { id: POST, status: 'published', offer_auto_actions_v2_enabled: true, offer_auto_actions_min_price_amount: { val: '9' } } });
+      return response(200, { data: { ...savedPost(requests), id: POST, creator_id: USER,
+        status: requests.some(r => r.path.endsWith('/status/published')) ? 'published' : 'draft',
+        offer_auto_actions_v2_enabled: true, offer_auto_actions_min_price_amount: { val: '9' } } });
     }
     return fetch(url, options);
   };
@@ -436,6 +567,7 @@ test('a published post that did not keep Smart Pricing is listed with a warning'
   const result = await c.runPoshmarkApi(msg);
   assert.equal(result.ok, true);
   assert.match(result.warning, /left Smart Pricing on/);
+  requests.length = 0;
   msg.payload.listing = LISTING;
   msg.payload.operation_id = 'op-2';
   const kept = await c.runPoshmarkApi(msg);

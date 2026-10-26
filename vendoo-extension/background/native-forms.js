@@ -11,15 +11,15 @@ function nativeEditorChoice(path, label, value, choices, extra = {}) {
     options: rows.map(row => row.label), option_values: Object.fromEntries(rows.map(row => [row.label, String(row.value)])), ...extra });
 }
 
-function nativeEditorBase(listing, { title = true, maxTitle, maxDescription } = {}) {
+function nativeEditorBase(listing, { title = true, maxTitle, maxDescription, minPrice, maxPrice, priceStep = 0.01 } = {}) {
   return [
     ...(title ? [nativeEditorField('title', 'Title', listing.title, { required: true, max_length: maxTitle })] : []),
     nativeEditorField('description', 'Description', listing.description, { required: true, max_length: maxDescription }),
-    nativeEditorField('price', 'Price', listing.price, { required: true, input_type: 'number' }),
+    nativeEditorField('price', 'Price', listing.price, { required: true, input_type: 'number', min_value: minPrice, max_value: maxPrice, step: priceStep }),
   ];
 }
 
-function poshmarkEditorForm(listing, catalog, styleTags = []) {
+function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts = []) {
   const resolved = poshmarkCategory(catalog, listing);
   const categoryChoices = [];
   for (const department of catalog.catalog?.departments || []) {
@@ -33,14 +33,14 @@ function poshmarkEditorForm(listing, catalog, styleTags = []) {
   const pickedSet = sets.find(set => set.id === listing.poshmark_specifics?.sizeSetId) || nativeSize?.set;
   const specifics = listing.poshmark_specifics || {};
   const fields = [
-    ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1500 }),
+    ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1500, minPrice: 3, priceStep: 1 }),
     nativeEditorChoice('direct_category_ids.poshmark', 'Category', resolved ? `${resolved.department.id}/${category.id}` : '', categoryChoices,
       { required: true, clears: ['poshmark_specifics.subcategory', 'poshmark_specifics.sizeSetId', 'poshmark_specifics.nativeSizeId'],
         help: 'Changing category clears its sub-category and size selections.' }),
     nativeEditorChoice('poshmark_specifics.subcategory', 'Sub-category',
       specifics.subcategory || (category?.category_features || []).find(row => row.id === resolved?.leaf)?.display || 'None',
       ['None', ...(category?.category_features || []).map(row => row.display)]),
-    nativeEditorField('brand', 'Brand', listing.form?.overrides?.brand || listing.brand),
+    nativeEditorField('brand', 'Brand', listing.brand ?? listing.form?.overrides?.brand),
     nativeEditorChoice('poshmark_specifics.condition', 'Condition', poshmarkCondition(listing), [
       { label: 'New With Tags (NWT)', value: 'nwt' }, { label: 'Like New', value: 'uln' },
       { label: 'Good', value: 'ug' }, { label: 'Fair', value: 'uf' },
@@ -50,9 +50,9 @@ function poshmarkEditorForm(listing, catalog, styleTags = []) {
       { required: sets.length > 1, clears: ['poshmark_specifics.nativeSizeId'], help: 'Size choices follow this group.' }),
     nativeEditorChoice('poshmark_specifics.nativeSizeId', 'Size', nativeSize?.size?.id || specifics.nativeSizeId || specifics.size || '',
       (pickedSet?.size_systems?.us?.sizes || []).map(size => ({ label: size.display || size.id, value: size.id })), { required: true }),
-    nativeEditorChoice('poshmark_specifics.poshmarkColor', 'Primary Color', specifics.poshmarkColor || ({ Grey: 'Gray', Beige: 'Tan' })[listing.primaryColor] || listing.primaryColor,
+    nativeEditorChoice('poshmark_specifics.poshmarkColor', 'Primary Color', specifics.poshmarkColor ?? (({ Grey: 'Gray', Beige: 'Tan' })[listing.primaryColor] || listing.primaryColor),
       (catalog.colors || []).map(color => color.name)),
-    nativeEditorChoice('poshmark_specifics.poshmarkSecondaryColor', 'Secondary Color', specifics.poshmarkSecondaryColor || ({ Grey: 'Gray', Beige: 'Tan' })[listing.secondaryColor] || listing.secondaryColor,
+    nativeEditorChoice('poshmark_specifics.poshmarkSecondaryColor', 'Secondary Color', specifics.poshmarkSecondaryColor ?? (({ Grey: 'Gray', Beige: 'Tan' })[listing.secondaryColor] || listing.secondaryColor),
       (catalog.colors || []).map(color => color.name)),
     nativeEditorField('poshmark_specifics.styleTags', 'Style Tags', poshmarkPostStyleTags(listing, styleTags),
       { multi: true, max_values: 3, max_length: 25, options: styleTags, options_source: 'marketplace' }),
@@ -63,12 +63,19 @@ function poshmarkEditorForm(listing, catalog, styleTags = []) {
       specifics.smartSell?.minimumPrice ?? specifics.smartSellMinimumPrice ?? specifics.minimumPrice ?? listing.form?.specifics?.smartSell?.minPrice ?? '',
       { input_type: 'number', required: specifics.smartSell?.enabled === true }),
     nativeEditorField('cost', 'Cost', listing.cost, { input_type: 'number', locked: true, help: 'Change cost in Item Details.' }),
+    nativeEditorChoice('poshmark_specifics.shippingDiscountId', 'Shipping Discount', specifics.shippingDiscountId || shippingDiscounts.find(row => Number(row.discount_amount?.val) === 0)?.id || '',
+      shippingDiscounts.map(row => ({ label: row.label, value: row.id })),
+      { help: 'Poshmark’s current buyer shipping prices. Any discount is paid by the seller.' }),
+    nativeEditorChoice('poshmark_specifics.availability', 'Availability', specifics.availability || 'available',
+      [{ label: 'For Sale', value: 'available' }, { label: 'Not For Sale', value: 'not_for_sale' }]),
+    nativeEditorField('poshmark_specifics.sellerNotes', 'Additional Details', specifics.sellerNotes || '',
+      { input_type: 'textarea', help: 'Private seller notes; buyers cannot see them.' }),
     nativeEditorField('poshmark_specifics.poshmarkSku', 'SKU', specifics.poshmarkSku ?? listing.sku ?? '', { max_length: 50 }),
-    nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number' }),
-    nativeEditorField('poshmark_specifics.originalPrice', 'Original Price', poshmarkOriginalPrice(listing), { input_type: 'number' }),
+    nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
+    nativeEditorField('poshmark_specifics.originalPrice', 'Original Price', poshmarkOriginalPrice(listing), { input_type: 'number', min_value: 0, step: 1 }),
   ];
   return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields,
-    notes: ['Only fields supported by direct List are shown. Shipping uses your Poshmark account settings.'] };
+    notes: ['Category, size and shipping-discount choices come from Poshmark. Additional Details are private seller notes.'] };
 }
 
 function depopEditorForm(listing, attributes, parcels = []) {
@@ -90,7 +97,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
   const extraValues = category ? depopAttributeValues(listing, category, attributes).values : {};
   const brands = attributes.brand || attributes.brands || [];
   const fields = [
-    ...nativeEditorBase(listing, { title: false, maxDescription: DEPOP_MAX_DESCRIPTION }),
+    ...nativeEditorBase(listing, { title: false, maxDescription: DEPOP_MAX_DESCRIPTION, minPrice: 1, maxPrice: 9999999999.99 }),
     nativeEditorChoice('direct_category_ids.depop', 'Category', depopDirectId(category), choices,
       { required: true, clears: ['depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'],
         help: 'Changing category clears its size and category attributes.' }),
@@ -127,8 +134,12 @@ function depopEditorForm(listing, attributes, parcels = []) {
   fields.push(nativeEditorChoice('depop_specifics.parcelSize', 'Parcel Size', specifics.parcelSize || '',
     parcels.map(row => String(row.title)), { required: true }),
   nativeEditorField('tags', 'Hashtags', listing.tags || [], { multi: true, max_values: DEPOP_MAX_HASHTAGS }),
-  nativeEditorField('depop_specifics.sku', 'SKU', specifics.sku ?? listing.sku ?? ''),
-  nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number' }));
+  nativeEditorField('depop_specifics.sku', 'SKU', specifics.sku ?? listing.sku ?? '', { max_length: 50 }),
+  nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
+  nativeEditorField('depop_specifics.worldwideShipping.enabled', 'Offer worldwide shipping', specifics.worldwideShipping?.enabled === true,
+    { input_type: 'boolean' }));
+  if (specifics.worldwideShipping?.enabled === true) fields.push(nativeEditorField('depop_specifics.worldwideShipping.price', 'Worldwide Shipping',
+    specifics.worldwideShipping.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01 }));
   return { marketplace: 'depop', native: true, known: true, category_id: depopDirectId(category), fields,
     notes: ['Buyer pays for Depop shipping. Location comes from the ship-from address selected in Settings.',
       ...(!parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [])] };
@@ -143,11 +154,12 @@ function mercariEditorForm(listing, master) {
   const category = mercariCategoryId(listing);
   const size = mercariSize(listing, category);
   const specifics = listing.mercari_specifics || {};
+  const ownShipping = specifics.shippingMethod === 'SOYO';
   const sizes = listing.form?.sizes || [];
   const sizeChoices = sizes.map(row => ({ value: row.id, label: sizes.filter(other => other.name === row.name).length > 1
     ? `${row.name} · ${row.group_name || row.id}` : row.name || row.title }));
   const fields = [
-    ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1000 }),
+    ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1000, minPrice: 1, maxPrice: 2000, priceStep: 1 }),
     nativeEditorChoice('direct_category_ids.mercari', 'Category', category || '', categories,
       { required: true, clears: ['mercari_specifics.nativeSizeId'], help: 'Categories from Mercari. Choose a category with no subcategories.' }),
     nativeEditorChoice('mercari_specifics.brand', 'Brand', mercariBrandRequest(listing).omit
@@ -174,18 +186,22 @@ function mercariEditorForm(listing, master) {
   fields.push(nativeEditorChoice('mercari_specifics.sizeType', 'Size type', specifics.sizeType || specifics.sizeGroup || '',
     ['Regular', 'Petite', 'Plus', 'Tall', 'Juniors', 'Maternity', 'Big & Tall'].map(label => ({ label, value: label })),
     { help: 'Used when Mercari lists that size in more than one group. Blank uses the size type on General, then the regular or standard group.' }));
-  fields.push(nativeEditorField('weight_oz', 'Packed weight (oz)', mercariWeightOz(listing), { locked: true, help: 'Change the package in Item Details.' }),
+  fields.push(nativeEditorChoice('mercari_specifics.shippingMethod', 'Shipping method', specifics.shippingMethod ?? 'MERCARI',
+    [{ label: 'Mercari shipping', value: 'MERCARI' }, { label: 'Ship on your own', value: 'SOYO' }], { required: true }),
+    nativeEditorField('weight_oz', 'Packed weight (oz)', mercariWeightOz(listing), { locked: true, help: 'Change the package in Item Details.' }),
     nativeEditorField('package_dimensions_in', 'Package dimensions (in)', listing.package_dimensions_in, { locked: true }),
-    nativeEditorChoice('mercari_specifics.shippingPayerId', 'Who pays shipping', specifics.shippingPayerId ?? 1,
-      [{ label: 'Buyer', value: 1 }, { label: 'Seller', value: 2 }]),
+    nativeEditorChoice('mercari_specifics.shippingPayerId', 'Who pays shipping', ownShipping ? 2 : specifics.shippingPayerId ?? 1,
+      ownShipping ? [{ label: 'Seller', value: 2 }] : [{ label: 'Buyer', value: 1 }, { label: 'Seller', value: 2 }],
+      { locked: ownShipping, ...(ownShipping ? { help: 'Ship on your own is paid by the seller.' } : {}) }),
     nativeEditorChoice('mercari_specifics.shippingClassId', 'Shipping label', listing.form?.specifics?.shipping?.carrierId || '',
       (listing.form?.shipping_classes || []).map(row => ({ label: `${row.carrierDisplayName} · ${row.name} · $${(row.fee / 100).toFixed(2)}`, value: row.id })),
       { required: true, help: 'Live Mercari labels for this package. Change packed weight and dimensions in Item Details.' }),
     nativeEditorField('mercari_specifics.smartPricing.enabled', 'Smart pricing', specifics.smartPricing?.enabled === true, { input_type: 'boolean' }),
     nativeEditorField('mercari_specifics.smartPricing.minimumPrice', 'Floor price', specifics.smartPricing?.minimumPrice ?? '',
       { input_type: 'number', required: specifics.smartPricing?.enabled === true, help: 'The lowest whole-dollar price Smart Pricing may use.' }));
-  return { marketplace: 'mercari', native: true, known: true, category_id: String(category || ''), fields,
-    notes: ['Mercari prepaid labels only. Review offer settings on Mercari before publishing.'] };
+  return { marketplace: 'mercari', native: true, known: true, category_id: String(category || ''),
+    fields: ownShipping ? fields.filter(row => !['mercari_specifics.shippingClassId', 'weight_oz', 'package_dimensions_in'].includes(row.path)) : fields,
+    notes: [ownShipping ? 'Buy and provide your own shipping label; the seller pays.' : 'Prepaid label choices and rates come from Mercari for this package.'] };
 }
 
 async function handleNativeMarketplaceForm(msg) {
@@ -193,8 +209,8 @@ async function handleNativeMarketplaceForm(msg) {
   const deadline = Date.now() + 30000;
   try {
     if (marketplace === 'poshmark') {
-      const [catalog, tags] = await Promise.all([poshmarkCatalogData(deadline), poshmarkStyleTags(deadline)]);
-      sendBrowserResult(msg, { ok: true, form: poshmarkEditorForm(listing, catalog, tags) });
+      const [catalog, tags, discounts] = await Promise.all([poshmarkCatalogData(deadline), poshmarkStyleTags(deadline), poshmarkShippingDiscounts(deadline)]);
+      sendBrowserResult(msg, { ok: true, form: poshmarkEditorForm(listing, catalog, tags, discounts) });
     } else if (marketplace === 'depop') {
       const attributes = await depopAttributes(deadline);
       let parcels = [];

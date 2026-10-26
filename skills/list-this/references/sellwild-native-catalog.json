@@ -1,5 +1,91 @@
 {
-  "source": "Sellwild public web catalog, 2026-10-24",
+  "source": "Sellwild public web catalog, 2026-10-26",
+  "parcel_templates": [
+    {
+      "id": "USPS_FlatRateEnvelope",
+      "label": "Flat Rate Envelope",
+      "length": 12.5,
+      "width": 9.5,
+      "height": 0.75
+    },
+    {
+      "id": "USPS_FlatRateLegalEnvelope",
+      "label": "Flat Rate Legal Envelope",
+      "length": 15,
+      "width": 9.5,
+      "height": 0.75
+    },
+    {
+      "id": "USPS_FlatRatePaddedEnvelope",
+      "label": "Flat Rate Padded Envelope",
+      "length": 12.5,
+      "width": 9.5,
+      "height": 1
+    },
+    {
+      "id": "USPS_FlatRateCardboardEnvelope",
+      "label": "Flat Rate Cardboard Envelope",
+      "length": 12.5,
+      "width": 9.5,
+      "height": 0.75
+    },
+    {
+      "id": "USPS_FlatRateWindowEnvelope",
+      "label": "Flat Rate Window Envelope",
+      "length": 10,
+      "width": 5,
+      "height": 0.75
+    },
+    {
+      "id": "USPS_SmallFlatRateEnvelope",
+      "label": "Small Flat Rate Envelope",
+      "length": 10,
+      "width": 6,
+      "height": 0.8
+    },
+    {
+      "id": "USPS_SmallFlatRateBox",
+      "label": "Small Flat Rate Box",
+      "length": 8.6875,
+      "width": 5.4375,
+      "height": 1.75
+    },
+    {
+      "id": "USPS_MediumFlatRateBox1",
+      "label": "Medium Flat Rate Box 1",
+      "length": 11.25,
+      "width": 8.75,
+      "height": 6
+    },
+    {
+      "id": "USPS_MediumFlatRateBox2",
+      "label": "Medium Flat Rate Box 2",
+      "length": 14,
+      "width": 12,
+      "height": 3.5
+    },
+    {
+      "id": "USPS_LargeFlatRateBox",
+      "label": "Large Flat Rate Box",
+      "length": 12.25,
+      "width": 12.25,
+      "height": 6
+    },
+    {
+      "id": "USPS_SoftPack",
+      "label": "Soft Pack (poly mailer)",
+      "length": 0,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "id": "USPS_IrregularParcel",
+      "label": "Irregular Parcel",
+      "length": 4,
+      "width": 4,
+      "height": 4
+    }
+  ],
   "conditions": [
     {
       "id": 5,

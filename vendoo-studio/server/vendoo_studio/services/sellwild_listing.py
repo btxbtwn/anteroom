@@ -9,6 +9,7 @@ before confirming rather than from Chrome afterwards.
 from __future__ import annotations
 
 import re
+from math import ceil
 from functools import cache
 
 from vendoo_studio.services.direct_preflight import Context, gap, requirement
@@ -117,8 +118,15 @@ _CONTACT = (
 def chosen(listing: dict, choices: dict) -> dict:
     """The category and condition List will send: the seller's pick, else Anteroom's match."""
     automatic = suggest_sellwild(listing)
-    return {"category_id": choices.get("sellwild_category_id") or automatic["category_id"],
-            "condition_id": choices.get("sellwild_condition_id") or automatic["condition_id"]}
+    specifics = listing.get("sellwild_specifics") or {}
+
+    def pick(key: str, field: str):
+        if field in specifics:
+            value = str(specifics[field] or "")
+            return int(value) if re.fullmatch(r"[1-9]\d*", value) else None
+        return choices.get(f"sellwild_{key}_id") or automatic[f"{key}_id"]
+
+    return {"category_id": pick("category", "nativeCategoryId"), "condition_id": pick("condition", "nativeConditionId")}
 
 
 def package_pounds(listing: dict) -> float | None:
@@ -130,6 +138,11 @@ def package_pounds(listing: dict) -> float | None:
 
 
 def package_sides(listing: dict) -> list[float] | None:
+    selected = str((listing.get("sellwild_specifics") or {}).get("parcelTemplate") or "")
+    preset = next((row for row in sellwild_catalog()["parcel_templates"] if row["id"] == selected), None)
+    if preset and all(preset[side] > 0 for side in ("length", "width", "height")):
+        # The native sell page rounds each template side up to a whole inch.
+        return [ceil(preset[side]) for side in ("length", "width", "height")]
     sides = [float(side) for side in re.findall(r"\d+(?:\.\d+)?", str(listing.get("package_dimensions_in") or ""))]
     return sides if len(sides) == 3 and min(sides) > 0 else None
 
@@ -145,8 +158,6 @@ def requirements(listing: dict, context: Context) -> list[dict]:
     title = str(listing.get("title") or "").strip()
     if not 3 <= len(title) <= 255:
         found.append(gap("title", "Sellwild titles need 3 to 255 characters."))
-    if not str(listing.get("description") or "").strip():
-        found.append(gap("description", "Sellwild needs a description."))
     try:
         price = float(listing.get("price") or 0)
     except (TypeError, ValueError):
@@ -156,17 +167,22 @@ def requirements(listing: dict, context: Context) -> list[dict]:
     choice = chosen(listing, context.choices)
     catalog = sellwild_catalog()
     if choice["category_id"] not in {option["id"] for option in catalog["categories"]}:
-        found.append(gap("sellwild.category", "Choose a Sellwild category."))
+        found.append(gap("sellwild_specifics.nativeCategoryId", "Choose a Sellwild category."))
     if choice["condition_id"] not in {option["id"] for option in catalog["conditions"]}:
-        found.append(gap("sellwild.condition", "Choose a Sellwild condition."))
+        found.append(gap("sellwild_specifics.nativeConditionId", "Choose a Sellwild condition."))
     specifics = listing.get("sellwild_specifics") if isinstance(listing.get("sellwild_specifics"), dict) else {}
+    template = str(specifics.get("parcelTemplate") or "")
+    preset = next((row for row in catalog["parcel_templates"] if row["id"] == template), None)
+    fixed_package = preset and all(preset[side] > 0 for side in ("length", "width", "height"))
+    if choice["category_id"] not in VEHICLE_CATEGORIES and template and not preset:
+        found.append(gap("sellwild_specifics.parcelTemplate", "Choose packaging from Sellwild’s current catalog."))
     if choice["category_id"] in VEHICLE_CATEGORIES:
         if not str(specifics.get("vin") or "").strip():
             found.append(gap("sellwild_specifics.vin", "Sellwild needs the vehicle's VIN."))
         if not str(specifics.get("mileage") or "").strip():
             found.append(gap("sellwild_specifics.mileage", "Sellwild needs the vehicle's mileage."))
     else:
-        if package_pounds(listing) is None:
+        if not fixed_package and package_pounds(listing) is None:
             found.append(gap("weight_oz", "Sellwild needs the packed weight."))
         sides = package_sides(listing)
         if sides is None:

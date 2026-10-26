@@ -118,10 +118,12 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         current.validation_status = "valid" if validation.valid else "error"
         current.validation_errors = validation.errors + validation.warnings
 
-    # Keep in-flight / paused automation on the edited Studio form payload.
+    # Keep unreviewed Vendoo preparation on the edited form. A direct action
+    # owns the revision already sent, including after a lost reply or failure.
     refresh_statuses = set(ACTIVE_JOB_STATUSES) | {"failed"}
     for job in JobRepo(db).list_by_conversation(conv_id):
-        if job.status not in refresh_statuses or is_schema_probe_job(job):
+        if (job.status not in refresh_statuses or is_schema_probe_job(job)
+                or str(job.current_step or "").startswith("native_")):
             continue
         if JobRepo(db).latest_event(job.id, "vendoo_review"):
             continue  # A reviewed Send owns its approved snapshot, even after edits.
