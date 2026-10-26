@@ -472,7 +472,14 @@ export interface FillLogReport {
 export interface MarketplaceFormField {
   key: string;
   label: string;
-  value: string;
+  value: string | string[] | number | boolean;
+  path?: string;
+  input_type?: "number" | "boolean";
+  locked?: boolean;
+  option_values?: Record<string, string>;
+  clears?: string[];
+  help?: string;
+  value_constraints?: Record<string, { parentName: string; parentValues: string[] }[]>;
   required: boolean;
   multi: boolean;
   selection_only: boolean;
@@ -485,6 +492,8 @@ export interface MarketplaceFormField {
 /** A marketplace's form for one listing. ``known`` is false when no schema is cached. */
 export interface MarketplaceForm {
   marketplace: string;
+  native?: boolean;
+  notes?: string[];
   category_id: string;
   known: boolean;
   fields: MarketplaceFormField[];

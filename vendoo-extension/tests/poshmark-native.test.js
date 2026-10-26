@@ -363,7 +363,7 @@ test('a kids listing with no gender stops before anything is written and names t
 test('Poshmark brand, style tags, certification and limits follow Poshmark\'s own catalog', async () => {
   const { c, msg, requests } = setup();
   msg.payload.listing = { ...LISTING, brand: 'hanes', tags: ['vintage', 'casual', 'not#ok', 'graphic'],
-    poshmark_specifics: { ...LISTING.poshmark_specifics, styleTags: [] } };
+    poshmark_specifics: { ...LISTING.poshmark_specifics, styleTags: undefined } };
   assert.equal((await c.runPoshmarkApi(msg)).ok, true);
   const post = savedPost(requests);
   assert.equal(post.brand, 'Hanes');

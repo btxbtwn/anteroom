@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.392 — 2026-10-26
+
+- Direct listing forms now use the catalogs the marketplaces actually list with. Size groups update their size choices, Depop shows each category’s attributes, and Smart Pricing keeps your choice. Fields controlled by Item Details or Settings explain where to change them.
+
 ## 0.1.391 — 2026-10-26
 
 - Recover missing eBay and Etsy sales from Orders, including cancellations and refunds on older orders changed during your selected dates. Check pages sequentially, stop and resume, and keep existing links, dismissed alerts and local quantities intact.

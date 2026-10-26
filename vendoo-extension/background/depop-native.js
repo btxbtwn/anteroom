@@ -26,16 +26,23 @@ function depopColour(value) {
 
 // Age, style, and source use the same codes Vendoo writes. Colour and condition
 // are Depop's own slugs. Brand stays on the draft until Depop's brand id is known.
-function depopFormFields(listing) {
+function depopFormFields(listing, attributes) {
   const specifics = listing?.form?.specifics || {};
   const fields = {};
   const colour = [listing?.primaryColor, listing?.secondaryColor].map(depopColour).filter(Boolean);
   if (colour.length) fields.colour = [...new Set(colour)].slice(0, 2);
-  const condition = depopCondition(listing?.form?.overrides?.condition || listing?.condition);
+  const condition = depopCondition(listing?.depop_specifics?.condition || listing?.form?.overrides?.condition || listing?.condition);
   if (condition) fields.condition = condition;
   for (const key of ['age', 'source', 'style']) {
-    const values = Array.isArray(specifics[key]) ? specifics[key].map(String).filter(Boolean) : [];
-    if (values.length) fields[key] = values.slice(0, 3);
+    const own = listing?.depop_specifics?.[key];
+    const definition = attributes?.[key];
+    const raw = definition?.attributes ? own ?? specifics[key] : Array.isArray(own) ? own : specifics[key];
+    let values = (Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : []).map(String).filter(Boolean);
+    if (definition?.attributes) {
+      values = values.map(value => definition.attributes.find(row => row.status !== 'inactive'
+        && (marketplaceNameKey(row.id) === marketplaceNameKey(value) || marketplaceNameKey(depopName(row)) === marketplaceNameKey(value)))?.id).filter(Boolean);
+    }
+    if (values.length || Array.isArray(own)) fields[key] = [...new Set(values)].slice(0, Number(definition?.max_selection) || 3);
   }
   return fields;
 }
@@ -183,7 +190,7 @@ function depopDescription(listing) {
   return text;
 }
 
-const depopName = entry => String(entry?.name_i18n?.['en-US'] ?? entry?.name ?? entry?.title ?? entry?.id ?? '');
+const depopName = entry => String(entry?.name_i18n?.['en-US'] ?? entry?.name_i18n?.en ?? entry?.name ?? entry?.title ?? entry?.id ?? '');
 
 // Depop's taxonomy. The partner host api.depop.com/api/v3/attributes/ answers
 // 403 "not authorized" without a partner token, so a direct list never starts.
@@ -291,6 +298,11 @@ function depopSize(listing, category, attributes) {
   const set = attributes.size_sets.find(entry => String(entry.id) === String(setId));
   if (!set) return { problem: 'a size Depop offers for this category' };
   const sizes = set.sizes || [];
+  if (Object.hasOwn(listing.depop_specifics || {}, 'nativeSizeId')) {
+    const id = String(listing.depop_specifics.nativeSizeId);
+    return sizes.some(size => String(size.id) === id) ? { set: Number(set.id), id: Number(id) }
+      : { problem: 'a size Depop offers for this category' };
+  }
   const coded = String(listing.form?.aspects?.[`${category.leaf}_size`] ?? '').trim();
   if (coded && sizes.some(size => String(size.id) === coded)) return { set: Number(set.id), id: Number(coded) };
   // Anteroom writes Depop's own label (a kids' age such as "16 years") on the
@@ -329,7 +341,8 @@ function depopAttributeValues(listing, category, attributes) {
     const attribute = attributes.generic_attributes.find(entry => entry.id === id);
     if (!attribute) continue;
     const options = (attribute.attributes || []).filter(option => option.status !== 'inactive');
-    const labels = wanted[id] || (/-type$/.test(id) ? asList(specifics.type) : []);
+    const labels = Object.hasOwn(specifics.attributes || {}, id) ? asList(specifics.attributes[id])
+      : wanted[id] || (/-type$/.test(id) ? asList(specifics.type) : []);
     const ids = [...new Set(labels.map(label => options.find(option => marketplaceNameKey(depopName(option)) === marketplaceNameKey(label)
       || marketplaceNameKey(option.id) === marketplaceNameKey(label))?.id).filter(Boolean))];
     const chosen = ids.slice(0, Math.max(1, Number(attribute.max_selection) || 1));
@@ -381,10 +394,10 @@ async function depopResolvedFields(payload) {
   if (base.length > DEPOP_MAX_DESCRIPTION) missing.push({ field: 'description', needs: `a description of ${DEPOP_MAX_DESCRIPTION} characters or fewer` });
   if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(base)) missing.push({ field: 'description', needs: 'a description without an email address' });
   if (!(Number(listing.price) >= 1)) missing.push({ field: 'price_amount', needs: 'a price of $1 or more' });
-  if (!depopCondition(listing.form?.overrides?.condition || listing.condition)) missing.push({ field: 'condition', needs: 'a condition' });
+  if (!depopCondition(listing.depop_specifics?.condition || listing.form?.overrides?.condition || listing.condition)) missing.push({ field: 'condition', needs: 'a condition' });
   const attributes = await depopAttributes(payload.deadline);
   const category = depopCategory(listing, attributes);
-  const fields = {};
+  const fields = depopFormFields(listing, attributes);
     if (!category) missing.push({ field: 'product_type', needs: 'a Depop category' });
   else {
     // The listing site stores product type, kids, and gender. Department and
@@ -397,8 +410,9 @@ async function depopResolvedFields(payload) {
     const size = depopSize(listing, category, attributes);
     if (size.problem) missing.push({ field: 'size', needs: size.problem });
     else if (!size.none) Object.assign(fields, { variant_set: size.set, variants: { [size.id]: 1 } });
+    else Object.assign(fields, { variant_set: null, variants: {}, quantity: 1 });
     const extra = depopAttributeValues(listing, category, attributes);
-    if (Object.keys(extra.values).length) fields.attributes = extra.values;
+    fields.attributes = extra.values;
     missing.push(...extra.missing);
   }
   fields.brand = depopBrand(listing, attributes);
@@ -451,10 +465,17 @@ function depopDraftMismatch(draft, listing, fields) {
     const set = draft.variant_set_id ?? draft.variant_set;
     if (String(set && typeof set === 'object' ? set.id : set ?? '') !== String(fields.variant_set)
       || depopVariantIds(draft.variants).join() !== depopVariantIds(fields.variants).join()) wrong.push('size');
+  } else if (Object.hasOwn(fields, 'variant_set') && ((draft.variant_set_id ?? draft.variant_set) != null || depopVariantIds(draft.variants).length)) {
+    wrong.push('size');
   }
-  for (const [id, values] of Object.entries(fields.attributes || {})) {
-    if (depopAttributeIds(draft.attributes?.[id]).join() !== depopAttributeIds(values).join()) wrong.push(id.replace(/-/g, ' '));
+  if (Object.hasOwn(fields, 'attributes')) for (const id of new Set([...Object.keys(fields.attributes || {}), ...Object.keys(draft.attributes || {})])) {
+    if (depopAttributeIds(draft.attributes?.[id]).join() !== depopAttributeIds(fields.attributes?.[id]).join()) wrong.push(id.replace(/-/g, ' '));
   }
+  for (const key of ['age', 'source', 'style', 'colour']) {
+    if (Object.hasOwn(fields, key) && depopAttributeIds(draft[key]).join() !== depopAttributeIds(fields[key]).join()) wrong.push(key);
+  }
+  if (fields.condition != null && String(draft.condition ?? '') !== String(fields.condition)) wrong.push('condition');
+  if (fields.brand != null && String(draft.brand?.id ?? draft.brand ?? '') !== String(fields.brand)) wrong.push('brand');
   return wrong;
 }
 
@@ -506,6 +527,7 @@ async function depopApiAction(action, payload) {
     const description = depopDescription(payload.listing);
     const summary = draft => ({ id: String(draft.id), description: draft.description, price: draft.price_amount,
       product_type: draft.product_type, variant_set_id: draft.variant_set_id ?? draft.variant_set, variants: draft.variants,
+      brand: draft.brand, condition: draft.condition, colour: draft.colour, age: draft.age, source: draft.source, style: draft.style,
       attributes: draft.attributes, photo_count: draft.pictures?.length || 0, missing_fields: draft.missing_fields || [] });
     if (action === 'session') {
       await request('GET', '/presentation/api/v1/drafts/?limit=24&sort_by=createdAt');
@@ -599,8 +621,6 @@ async function depopApiAction(action, payload) {
     if (action === 'prepare_publish' || action === 'publish') {
       if (payload.action !== 'publish' || payload.confirm !== true) throw marketplaceError('Confirm listing on Depop.');
       const draft = await request('GET', path);
-      const wrong = depopDraftMismatch(draft, payload.listing, payload.depop_fields);
-      if (wrong.length) throw marketplaceError(`Depop's draft has a different ${wrong.join(', ')} than this revision. List again.`);
       const missing = [...(Array.isArray(draft.missing_fields) ? draft.missing_fields : []).map(String),
         ...(!draft.pictures?.length ? ['photos'] : []), ...(!(Number(draft.price_amount) > 0) ? ['price'] : [])];
       if (missing.length || !Array.isArray(draft.missing_fields)) {
@@ -608,6 +628,8 @@ async function depopApiAction(action, payload) {
         throw marketplaceMissing('depop', [...new Set(missing.length ? missing : ['details'])]
           .map(field => ({ field, needs: depopFieldNeeds(field) })), named ? `missing_fields: ${named}` : '');
       }
+      const wrong = depopDraftMismatch(draft, payload.listing, payload.depop_fields);
+      if (wrong.length) throw marketplaceError(`Depop's draft has a different ${wrong.join(', ')} than this revision. List again.`);
       if (action === 'prepare_publish') return { ok: true };
       const job = await request('POST', '/presentation/api/v1/drafts/products/', { draft_ids: [id] });
       if (!/^[A-Za-z0-9_-]+$/.test(String(job.id))) throw marketplaceError('Depop did not confirm the publish result. Check its result before trying again.', { code: 'schema_drift', rejected: false });

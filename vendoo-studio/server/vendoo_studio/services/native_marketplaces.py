@@ -915,42 +915,6 @@ def sellwild_options(conv_id: str, db: Session) -> dict:
 POSHMARK_CONDITIONS = ["New With Tags (NWT)", "Like New", "Good", "Fair"]
 
 
-async def poshmark_options(conv_id: str, db: Session) -> dict:
-    """The Poshmark tab's choices from Poshmark's own catalog: colors, and the sub-categories of the listing's category.
-
-    The catalog is Poshmark's public one, read the same way the category check reads it.
-    When it cannot be read the colors are the ones Poshmark listed when last checked and
-    no sub-categories are offered.
-    """
-    from vendoo_studio.services.chrome_catalog import ensure_catalogs, poshmark_category_id
-    from vendoo_studio.services.chrome_listing import POSHMARK_COLORS
-
-    _conversation(db, conv_id)
-    listing = ListingRepo(db).get_current(conv_id)
-    revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
-    snapshot = revision.listing_json if revision and isinstance(revision.listing_json, dict) else {}
-    try:
-        catalog = (await ensure_catalogs()).get("poshmark") or {}
-    except Exception:  # noqa: BLE001 - the tab still edits as text
-        catalog = {}
-    body = catalog.get("data") if isinstance(catalog.get("data"), dict) else catalog
-    colors = [str(color["name"]) for color in body.get("colors") or [] if isinstance(color, dict) and color.get("name")]
-    department_id, _, rest = poshmark_category_id(catalog, snapshot).partition("/")
-    category_id = rest.partition("/")[0]
-    department = next((entry for entry in (body.get("catalog") or {}).get("departments") or []
-                       if department_id and entry.get("id") == department_id), None)
-    category = next((entry for entry in (department or {}).get("categories") or []
-                     if category_id and entry.get("id") == category_id), None)
-    features = [str(entry["display"]) for entry in (category or {}).get("category_features") or [] if entry.get("display")]
-    return {
-        "category": [str(department["display"]), str(category["display"])] if category else [],
-        "subcategories": [*features, "None"] if features else [],
-        "colors": colors or list(POSHMARK_COLORS),
-        "conditions": POSHMARK_CONDITIONS,
-        "catalog_available": bool(colors and category),
-    }
-
-
 def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> dict:
     """Record the seller's Sellwild category and condition in Anteroom; Sellwild has no draft of its own.
 

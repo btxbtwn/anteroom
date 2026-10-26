@@ -35,7 +35,7 @@ const RULES: SectionRule[] = [
   {
     id: "pricing",
     title: "Pricing",
-    patterns: [/^price$/, /^originalprice$/, /^cost$/, /^pricingformat$/, /offer/],
+    patterns: [/^price$/, /^originalprice$/, /^cost$/, /^pricingformat$/, /^smartpricing$/, /^minimumprice$/, /offer/],
   },
   {
     id: "condition",
@@ -45,7 +45,7 @@ const RULES: SectionRule[] = [
   {
     id: "size",
     title: "Size & fit",
-    patterns: [/^size$/, /^sizetype$/, /size/, /fit$/, /^inseam$/, /^rise$/, /length$/, /^silhouette$/, /^legstyle$/, /measurement/],
+    patterns: [/^sizegroup$/, /^size$/, /^sizetype$/, /size/, /fit$/, /^inseam$/, /^rise$/, /length$/, /^silhouette$/, /^legstyle$/, /measurement/],
   },
   {
     id: "appearance",
@@ -62,6 +62,7 @@ const RULES: SectionRule[] = [
     title: "Item",
     patterns: [
       /^category(path)?$/,
+      /^subcategory$/,
       /^(brand|designer)$/,
       /^model$/,
       /^productline$/,
@@ -103,6 +104,7 @@ function names(field: SectionField): string[] {
 
 function classify(field: SectionField): { id: string; rank: number } {
   const candidates = names(field);
+  if (candidates.includes("parcelsize")) return { id: "shipping", rank: 0 };
   for (const rule of RULES) {
     const rank = rule.patterns.findIndex((pattern) => candidates.some((name) => pattern.test(name)));
     if (rank >= 0) return { id: rule.id, rank };

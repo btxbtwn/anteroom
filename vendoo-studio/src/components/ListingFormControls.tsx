@@ -5,6 +5,8 @@
  */
 import { ChevronDownIcon } from "lucide-react";
 import * as React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api/client";
 import { cn } from "../lib/utils";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "./ui/combobox";
 import { toggleVariants } from "./ui/toggle";
@@ -137,6 +139,7 @@ export function SearchableSelect({
   selectionOnly = true,
   maxLength,
   choicesVerified = true,
+  onSearch,
 }: {
   id: string;
   fieldKey: string;
@@ -147,19 +150,24 @@ export function SearchableSelect({
   selectionOnly?: boolean;
   maxLength?: number;
   choicesVerified?: boolean;
+  onSearch?: (query: string) => void;
 }) {
-  const [query, setQuery] = React.useState("");
+  const [query, setQuery] = React.useState(value);
+  React.useEffect(() => setQuery(value), [value]);
   const custom = !selectionOnly && query.trim() && !options.includes(query.trim()) ? query.trim() : "";
-  const items = custom ? [custom, ...options] : options;
+  const matches = options.length > 200 ? options.filter((item) => item.toLowerCase().includes(query.toLowerCase())).slice(0, 100) : options;
+  const items = custom ? [custom, ...matches] : matches;
   const unavailable = Boolean(selectionOnly && options.length && value && !options.includes(value));
   return (
     <div className="min-w-0">
       <Combobox<string>
         items={items}
+        filter={onSearch ? null : undefined}
         value={value || null}
+        inputValue={query}
         disabled={disabled}
         onValueChange={(next) => onChange(next ?? "")}
-        onInputValueChange={setQuery}
+        onInputValueChange={(next) => { setQuery(next); onSearch?.(next); }}
       >
         <ComboboxInput
           id={id}
@@ -185,6 +193,29 @@ export function SearchableSelect({
       </p>}
     </div>
   );
+}
+
+/** Category names from eBay's own taxonomy search; selecting one stores its ID. */
+export function EbayCategorySelect({ id, value, onChange }: {
+  id: string; value: string; onChange: (id: string, path: string) => void;
+}) {
+  const [query, setQuery] = React.useState("");
+  const [search, setSearch] = React.useState("");
+  React.useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const result = useQuery({ queryKey: ["ebay-category-search", search],
+    queryFn: () => api.ebay.read("categories", { q: search }), enabled: search.length >= 3 && search !== value, retry: false });
+  const choices = (result.data?.rows || []).map((row) => ({ id: row.id, path: [row.subtitle, row.title].filter(Boolean).join(" › ") }));
+  return <div>
+    <SearchableSelect id={id} fieldKey="direct_category_ids.ebay" value={value}
+      options={[...new Set([value, ...choices.map((row) => row.path)].filter(Boolean))]} onSearch={setQuery}
+      onChange={(label) => { const choice = choices.find((row) => row.path === label); if (choice) onChange(choice.id, choice.path); }} />
+    <p role="status" className="mt-1 text-xs text-muted-foreground">{result.isError ? "eBay category search failed. Check its connection and try again."
+      : result.isFetching ? "Searching eBay categories…" : search.length >= 3 && search !== value
+        ? `${choices.length} eBay categories found.` : "Type at least 3 characters to search eBay categories."}</p>
+  </div>;
 }
 
 /** A category's multiple values stay an array, including values awaiting correction. */
