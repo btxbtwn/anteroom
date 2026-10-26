@@ -142,6 +142,46 @@ class UnsentEditsTest(unittest.TestCase):
         rows = self.client.get("/api/conversations").json()
         self.assertTrue(next(item for item in rows if item["id"] == conv_id)["unsent_edits"])
 
+    def list_directly(self, revision_id: str | None, marketplace: str = "ebay", state: str = "published") -> None:
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        MarketplaceListingRepo(self.db).save(self.conv.id, marketplace, {"state": state, "revision_id": revision_id})
+
+    def row_flag(self) -> bool:
+        rows = self.client.get("/api/conversations").json()
+        return next(item for item in rows if item["id"] == self.conv.id)["unsent_edits"]
+
+    def test_a_regenerated_listing_live_directly_is_not_unsent_against_vendoo(self):
+        """Once it is listed directly, Vendoo's older copy no longer counts."""
+        self.mark_synced_on(self.revision.id)
+        regenerated = ListingRepo(self.db).save_revision(
+            self.conv.id, {**LISTING, "title": "Levi's 501 Regenerated"}, source="model",
+        )
+        self.assertTrue(self.flag())
+        self.list_directly(regenerated.id)
+        self.assertFalse(self.flag())
+        self.assertFalse(self.row_flag())
+
+    def test_an_edit_after_a_direct_listing_is_unsent(self):
+        self.list_directly(self.revision.id)
+        ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        self.assertTrue(self.flag())
+        self.assertTrue(self.row_flag())
+
+    def test_every_live_marketplace_must_have_the_edit(self):
+        self.list_directly(self.revision.id, "ebay")
+        updated = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        self.list_directly(updated.id, "etsy")
+        self.assertTrue(self.flag())
+        self.list_directly(updated.id, "ebay")
+        self.assertFalse(self.flag())
+
+    def test_a_direct_draft_leaves_vendoo_as_the_baseline(self):
+        self.mark_synced_on(self.revision.id)
+        edited = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "price": 42}, source="user_form")
+        self.list_directly(edited.id, state="draft")
+        self.assertTrue(self.flag())
+
     def test_polling_the_inventory_compares_each_revision_pair_once(self):
         """The sidebar polls the whole inventory; re-normalizing every bound
         listing on each poll held the GIL long enough to stall Studio."""

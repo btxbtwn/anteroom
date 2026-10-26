@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.416 — 2026-10-26
+
+- Items you listed directly on a marketplace no longer show **Unsent edits** just because Vendoo still has an older copy. The chip now means the live marketplace listings are behind: press **Update** under Marketplaces to clear it. Discard is hidden on those items, so it can no longer roll a regenerated listing back to Vendoo's version.
+
 ## 0.1.415 — 2026-10-26
 
 - eBay listings are now made only from an item in Inventory, with List… under Marketplaces, the same as every other marketplace. The eBay page no longer has its own Create draft and Publish on eBay forms. Importing from eBay, updating inventory price and quantity, and editing a live listing are still there.

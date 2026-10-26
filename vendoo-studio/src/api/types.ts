@@ -44,7 +44,8 @@ export interface ConversationSummary {
   vendoo_form_updated_at?: string | null;
   /** Marketplaces owed a relist since then, kept across the delist itself. */
   vendoo_relist_pending?: string[];
-  /** Edited here since Studio and Vendoo were last level: Update Vendoo is owed. */
+  /** Edited here since the listing was last sent: to its live direct
+   * listings when it has any (Update them), otherwise to Vendoo. */
   unsent_edits?: boolean;
   /** False for modern resale: Etsy removes it, so Send leaves Etsy empty. */
   etsy_eligible?: boolean;
