@@ -71,21 +71,21 @@ export function fileBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1]); reader.onerror = () => reject(new Error("Could not read the image.")); reader.readAsDataURL(file); });
 }
 
-export function ImageUploader({ disputeId, onResult }: { disputeId?: string; onResult?: (result: EbayResult) => void }) {
+export function EvidenceUploader({ disputeId, onResult }: { disputeId: string; onResult?: (result: EbayResult) => void }) {
   const [image, setImage] = useState<{ data: string; mime: string } | null>(null);
   const [error, setError] = useState("");
   return <div className="space-y-4">
-    <div className="ebay-upload"><label><span className="flex items-center gap-2 font-medium"><UploadCloudIcon className="size-4" aria-hidden="true" />{disputeId ? "Upload evidence" : "Add a listing photo"}</span>
-      <span className="text-xs text-muted-foreground">JPEG or PNG · up to {disputeId ? "1.5" : "8"} MB. Choose a file, then review the upload.</span>
-      <input type="file" aria-label={disputeId ? "Evidence image" : "Listing image"} accept="image/jpeg,image/png" onChange={async (event) => {
+    <div className="ebay-upload"><label><span className="flex items-center gap-2 font-medium"><UploadCloudIcon className="size-4" aria-hidden="true" />Upload evidence</span>
+      <span className="text-xs text-muted-foreground">JPEG or PNG · up to 1.5 MB. Choose a file, then review the upload.</span>
+      <input type="file" aria-label="Evidence image" accept="image/jpeg,image/png" onChange={async (event) => {
         const file = event.target.files?.[0]; setImage(null); setError("");
         if (!file) return;
-        if (file.size > (disputeId ? 1500000 : 8000000)) { setError("The image is too large."); return; }
+        if (file.size > 1500000) { setError("The image is too large."); return; }
         try { setImage({ data: await fileBase64(file), mime: file.type }); } catch { setError("Could not read the image."); }
       }} />
     </label></div>
     {error ? <PageError message={error} /> : null}
-    {image ? <ActionForm key={image.data.slice(-32)} title={disputeId ? "Upload evidence image" : "Upload listing image"}
-      kind={disputeId ? "upload_evidence" : "upload_image"} context={{ ...image, dispute_id: disputeId || "" }} onResult={onResult} /> : null}
+    {image ? <ActionForm key={image.data.slice(-32)} title="Upload evidence image"
+      kind="upload_evidence" context={{ ...image, dispute_id: disputeId }} onResult={onResult} /> : null}
   </div>;
 }
