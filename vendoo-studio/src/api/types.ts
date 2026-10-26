@@ -474,7 +474,10 @@ export interface MarketplaceFormField {
   label: string;
   value: string | string[] | number | boolean;
   path?: string;
-  input_type?: "number" | "boolean";
+  input_type?: "number" | "boolean" | "textarea";
+  min_value?: number;
+  max_value?: number;
+  step?: number;
   locked?: boolean;
   option_values?: Record<string, string>;
   clears?: string[];

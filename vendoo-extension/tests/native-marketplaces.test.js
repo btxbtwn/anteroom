@@ -41,7 +41,7 @@ test('native links accept only the correct marketplace and durable draft route',
   for (const url of ['https://poshmark.com/edit-listing/6adc371572e62463d992ffef', 'https://www.mercari.com.evil/sell/draft/testDraft/']) {
     assert.equal(call(c, 'nativeDraftUrl', 'mercari', url), '');
   }
-  assert.equal(call(c, 'nativeDraftUrl', 'poshmark', 'https://poshmark.com/edit-listing/6adc371572e62463d992ffef'), '');
+  assert.equal(call(c, 'nativeDraftUrl', 'poshmark', 'https://poshmark.com/edit-listing/6adc371572e62463d992ffef'), 'https://poshmark.com/edit-listing/6adc371572e62463d992ffef');
   assert.equal(call(c, 'nativeDraftUrl', 'vinted', 'https://www.vinted.com/items/42/edit'), 'https://www.vinted.com/items/42/edit');
   assert.equal(call(c, 'nativeDraftUrl', 'vinted', 'https://www.vinted.com/items/42/edit/'), 'https://www.vinted.com/items/42/edit/');
   assert.equal(call(c, 'nativeDraftUrl', 'vinted', 'https://www.vinted.com/items/42'), '');
@@ -104,12 +104,14 @@ test('Etsy listing writes are unavailable in the browser worker', async () => {
   assert.equal(call(s.context, 'nativeDraftUrl', 'etsy', 'https://www.etsy.com/your/shops/me/listing-editor/edit/123456'), '');
 });
 
-test('Poshmark only lists in one confirmed step', async () => {
+test('Poshmark keeps publication confirmed and accepts its private draft action', async () => {
   const s = setup();
-  for (const action of ['save_draft', 'publish']) {
-    const result = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action, confirm: true } });
-    assert.match(result.error, /Unsupported/);
-  }
+  const unsupported = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action: 'publish' } });
+  assert.match(unsupported.error, /Unsupported/);
+  s.context.runPoshmarkApi = async msg => ({ ok: true, state: 'draft', action: msg.payload.action });
+  const draft = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action: 'save_draft', confirm: false,
+    draft_url: 'https://poshmark.com/edit-listing/6adc371572e62463d992ffef' } });
+  assert.equal(draft.action, 'save_draft');
   const unconfirmed = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action: 'list', confirm: false } });
   assert.match(unconfirmed.error, /Confirm/);
   const missing = await s.context.runNativeMarketplace({ payload: { ...s.msg.payload, marketplace: 'poshmark', action: 'update', confirm: true } });

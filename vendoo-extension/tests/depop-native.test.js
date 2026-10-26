@@ -44,6 +44,26 @@ test('Depop sends and verifies exact SKU and quantity, including clearing an Ite
   await assert.rejects(c.depopResolvedFields({ listing: { ...item, quantity: 0 }, deadline: Date.now() + 30000 }), /whole-number quantity/);
 });
 
+test('Depop worldwide shipping accepts free or paid shipping and verifies clearing', async () => {
+  const { c } = newDraft();
+  withCatalog(c);
+  for (const price of [0, 15.25]) {
+    const item = { ...FULL, depop_specifics: { ...FULL.depop_specifics, worldwideShipping: { enabled: true, price } } };
+    const fields = await c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 });
+    assert.equal(fields.international_shipping_cost, price.toFixed(2));
+    const draft = { ...fields, description: c.depopDescription(item), price_amount: String(item.price) };
+    assert.ok(!c.depopDraftMismatch(draft, item, fields).includes('worldwide shipping'));
+    assert.ok(c.depopDraftMismatch({ ...draft, international_shipping_cost: null }, item, fields).includes('worldwide shipping'));
+  }
+  const off = await c.depopResolvedFields({ listing: FULL, deadline: Date.now() + 30000 });
+  assert.equal(off.international_shipping_cost, null);
+  assert.ok(c.depopDraftMismatch({ international_shipping_cost: '10.00' }, FULL, off).includes('worldwide shipping'));
+  for (const price of ['', -1, 100, 'bad', 1.111]) {
+    const item = { ...FULL, depop_specifics: { ...FULL.depop_specifics, worldwideShipping: { enabled: true, price } } };
+    await assert.rejects(c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 }), /worldwide shipping price/);
+  }
+});
+
 // Answers Depop's catalog and the seller's shipping reads; other requests go on.
 function withCatalog(c, { attributes = [200, ATTRIBUTES], addresses = [200, [{ id: 41, postal_code: '70115' }, { id: 42, postal_code: '10001' }]],
   providers = [200, [{ id: 'USPS', parcelSizes: [{ id: 'small', title: 'Extra small' }, { id: 'medium', title: 'Medium' }] }]] } = {}) {

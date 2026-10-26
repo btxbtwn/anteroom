@@ -89,6 +89,7 @@ function mercariCatalogListing(listing, master) {
 }
 
 async function mercariShippingClasses(listing, deadline) {
+  if (listing.mercari_specifics?.shippingMethod === 'SOYO') return [];
   const weight = mercariWeightOz(listing), dimensions = mercariDimensions(listing);
   if (!weight || !mercariCategoryId(listing)) return [];
   const { length = 0, width = 0, height = 0 } = dimensions;
@@ -342,7 +343,7 @@ function mercariCommon(listing) {
   if (common.isAutoPriceDrop) common.minPriceForAutoPriceDrop = mercariPriceCents(smart.minimumPrice);
   if (listing.mercari_specifics?.noBrand === true || Object.hasOwn(listing, 'brand') && !String(listing.brand || '').trim()) common.brandId = null;
   if (listing.description) common.description = String(listing.description).trim();
-  const price = mercariPriceCents(listing.mercari_specifics?.price || listing.price);
+  const price = mercariPriceCents(listing.mercari_specifics?.price ?? listing.price);
   if (price != null) common.price = price;
   const categoryId = mercariCategoryId(listing);
   if (categoryId != null) common.categoryId = categoryId;
@@ -355,13 +356,18 @@ function mercariCommon(listing) {
   const zip = [listing.form?.ships_from_zip, listing.zipCode, specifics.shipping?.location].map(value => String(value ?? '').trim())
     .find(value => /^\d{5}$/.test(value));
   const weight = mercariWeightOz(listing);
+  const ownShipping = listing.mercari_specifics?.shippingMethod === 'SOYO';
   const chosenPayer = listing.mercari_specifics?.shippingPayerId ?? specifics.shipping?.payerId;
-  const payerId = [MERCARI_SHIPPING_PAYER.BUYER, MERCARI_SHIPPING_PAYER.SELLER].includes(Number(chosenPayer))
+  const payerId = ownShipping ? MERCARI_SHIPPING_PAYER.SELLER : [MERCARI_SHIPPING_PAYER.BUYER, MERCARI_SHIPPING_PAYER.SELLER].includes(Number(chosenPayer))
     ? Number(chosenPayer) : MERCARI_SHIPPING_PAYER.BUYER;
   const carrierId = Number(specifics.shipping?.carrierId);
-  const classIds = Number.isInteger(carrierId) && carrierId > 0 ? [carrierId] : null;
+  const classIds = ownShipping ? [0] : Number.isInteger(carrierId) && carrierId > 0 ? [carrierId] : null;
   common.shipping = { payerId, ...(classIds ? { classIds, suggestedClassIds: classIds } : {}), ...(zip ? { zipCode: zip } : {}),
     dimensions: mercariDimensions(listing), ...(weight ? { weight: { weight } } : {}) };
+  if (ownShipping) {
+    common.shipping.suggestedClassIds = [];
+    delete common.shipping.dimensions.unit;
+  }
   return common;
 }
 
@@ -388,10 +394,14 @@ function mercariMissing(listing, common) {
     if (size.problem) missing.push({ field: 'sizeId', needs: size.problem });
     else if (size.none === 'unknown' && mercariWantedSize(listing)) missing.push({ field: 'sizeId', needs: 'its size list, which Anteroom could not read (try again)' });
   }
+  const method = listing.mercari_specifics?.shippingMethod ?? 'MERCARI';
+  if (!['MERCARI', 'SOYO'].includes(method)) missing.push({ field: 'mercari_specifics.shippingMethod', needs: 'a shipping method from Mercari' });
   if (!common.shipping.classIds) missing.push({ field: 'shippingClassIds', needs: 'a prepaid shipping label' });
   const weight = common.shipping.weight?.weight;
-  if (!weight) missing.push({ field: 'weight', needs: 'a package weight' });
-  else if (weight > MERCARI_MAX_LABEL_OZ) missing.push({ field: 'weight', needs: 'a package of 50 lb or less for a Mercari label' });
+  if (method !== 'SOYO') {
+    if (!weight) missing.push({ field: 'weight', needs: 'a package weight' });
+    else if (weight > MERCARI_MAX_LABEL_OZ) missing.push({ field: 'weight', needs: 'a package of 50 lb or less for a Mercari label' });
+  }
   return missing;
 }
 
@@ -597,7 +607,8 @@ function mercariDraftDifferences(draft, common, expectedPhotos) {
   if (common.sizeId != null && Number(draft.sizeId) !== common.sizeId) differ.push('size');
   if (Boolean(draft.isAutoPriceDrop) !== Boolean(common.isAutoPriceDrop)
     || common.isAutoPriceDrop && Number(draft.minPriceForAutoPriceDrop) !== common.minPriceForAutoPriceDrop) differ.push('Smart Pricing');
-  const sent = common.shipping.classIds || [];
+  // The native client sends [0] for SOYO; the draft reader omits that sentinel.
+  const sent = (common.shipping.classIds || []).filter(classId => classId > 0);
   if (Number(draft.payerId) !== common.shipping.payerId || sent.length !== draft.classIds.length
       || sent.some(classId => !draft.classIds.includes(classId))) differ.push('shipping');
   return differ;
@@ -617,7 +628,7 @@ async function mercariExpected(listing, deadline) {
 function mercariDraftMismatch(draft, common, expectedPhotos, lead) {
   const differ = mercariDraftDifferences(draft, common, expectedPhotos);
   if (!differ.length) return null;
-  const soyo = differ.includes('shipping') && common.shipping.classIds && !draft.classIds.length;
+  const soyo = differ.includes('shipping') && common.shipping.classIds?.some(id => id > 0) && !draft.classIds.length;
   const detail = soyo
     ? ' Mercari has it as ship-on-your-own with the seller paying, not the prepaid label Anteroom sent.'
     : '';

@@ -12,6 +12,21 @@ const listing = {
 };
 
 describe("marketplace form fields", () => {
+  it("preserves native numeric limits and precision", () => {
+    const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "menswear_tshirts", fields: [
+      { key: "depop_specifics.worldwideShipping.price", path: "depop_specifics.worldwideShipping.price", label: "Worldwide Shipping", value: 0,
+        required: true, multi: false, selection_only: false, options: [], input_type: "number", min_value: 0, max_value: 99.99, step: 0.01 },
+    ] };
+    expect(fieldsForMarketplaceForm(listing, "depop", [form])[0]).toMatchObject({ minValue: 0, maxValue: 99.99, step: 0.01 });
+  });
+  it("keeps native free-text style tags editable outside the suggested tags", () => {
+    const form: MarketplaceForm = { marketplace: "poshmark", native: true, known: true, category_id: "men/shirts", fields: [
+      { key: "poshmark_specifics.styleTags", path: "poshmark_specifics.styleTags", label: "Style Tags", value: ["Boho"],
+        required: false, multi: true, selection_only: false, options_source: "marketplace", options: ["Casual"] },
+    ] };
+    const fields = fieldsForMarketplaceForm(listing, "poshmark", [form]);
+    expect(fields.find((row) => row.key === "poshmark_specifics.styleTags")?.selectionOnly).toBe(false);
+  });
   it("keeps Mercari's native shipping label selector instead of hiding it as a legacy derived field", () => {
     const form: MarketplaceForm = { marketplace: "mercari", native: true, known: true, category_id: "1911", fields: [
       { key: "mercari_specifics.shippingClassId", path: "mercari_specifics.shippingClassId", label: "Shipping label", value: 2550,

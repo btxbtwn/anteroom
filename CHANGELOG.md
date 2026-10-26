@@ -6,9 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.406 — 2026-10-26
+## 0.1.407 — 2026-10-26
 
 - Scheduled listing, delisting and relisting now wait for your review of each item and named marketplace. Changed drafts, photos or links need a new review, and failed marketplace actions stay visible without automatic retries. List never takes down a live listing; choose Relist explicitly.
+
+## 0.1.406 — 2026-10-26
+
+- Save a private Poshmark draft, reuse it, and review shipping discounts, availability, cost, quantity, and private notes before listing. Later edits keep the revision already sent so Check verifies the right copy.
+- Choose Mercari prepaid labels or ship on your own, with the correct shipping payer checked on the saved draft.
+- Set Depop worldwide shipping separately from the item price, including free shipping or turning it off.
+- Edit Sellwild category, condition, and USPS packaging in its form; its description is optional.
+- Clear eBay automatic offer amounts without bringing them back, edit condition notes, and use native numeric limits and free-text choices.
 
 ## 0.1.405 — 2026-10-26
 

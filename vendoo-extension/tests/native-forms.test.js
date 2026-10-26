@@ -31,9 +31,12 @@ const DEPOP = { department: [{ id: 'menswear', name: 'Men' }], group: [{ id: 'bo
 
 test('Poshmark form uses native category, group and size IDs and only supported fields', () => {
   const c = loadWorker();
-  const form = clean(call(c, 'poshmarkEditorForm', POSH_LISTING, POSH, ['Casual']));
+  const form = clean(call(c, 'poshmarkEditorForm', POSH_LISTING, POSH, ['Casual'], [{ id: 'discount-1', label: 'Buyer Shipping: Free' }]));
   const fields = Object.fromEntries(form.fields.map(row => [row.path, row]));
   assert.equal(form.native, true);
+  assert.deepEqual(fields['poshmark_specifics.shippingDiscountId'].option_values, { 'Buyer Shipping: Free': 'discount-1' });
+  assert.deepEqual(fields['poshmark_specifics.availability'].option_values, { 'For Sale': 'available', 'Not For Sale': 'not_for_sale' });
+  assert.equal(fields['poshmark_specifics.sellerNotes'].value, '');
   assert.equal(fields['direct_category_ids.poshmark'].value, 'men/shirts');
   assert.deepEqual(fields['poshmark_specifics.sizeSetId'].option_values, { standard: 'standard', 'big_&_tall': 'tall' });
   assert.equal(fields['poshmark_specifics.nativeSizeId'].value, 'M');
@@ -69,6 +72,28 @@ test('explicit Smart Pricing off and empty style tags survive older form default
   assert.deepEqual(clean(call(c, 'poshmarkPostStyleTags', listing, ['Casual'])), []);
   listing.poshmark_specifics.smartSell.enabled = true;
   assert.equal(call(c, 'poshmarkSmartMinimum', listing, 16), 8);
+});
+
+test('Mercari ship on your own shows seller-paid shipping and hides prepaid package controls', () => {
+  const c = loadWorker();
+  const form = call(c, 'mercariEditorForm', { title: 'A tee', direct_category_ids: { mercari: 1 },
+    mercari_specifics: { shippingMethod: 'SOYO', shippingPayerId: 1 } }, MERCARI);
+  const fields = Object.fromEntries(form.fields.map(row => [row.path, row]));
+  assert.equal(fields['mercari_specifics.shippingMethod'].value, 'SOYO');
+  assert.equal(fields['mercari_specifics.shippingPayerId'].value, 2);
+  assert.equal(fields['mercari_specifics.shippingPayerId'].locked, true);
+  assert.equal(fields['mercari_specifics.shippingClassId'], undefined);
+  assert.equal(fields.weight_oz, undefined);
+});
+
+test('Depop worldwide shipping exposes its fee only when enabled with native monetary limits', () => {
+  const c = loadWorker();
+  const listing = { direct_category_ids: { depop: 'menswear_jeans' }, depop_specifics: { worldwideShipping: { enabled: true, price: 0 } } };
+  const form = call(c, 'depopEditorForm', listing, DEPOP);
+  const fee = form.fields.find(row => row.path === 'depop_specifics.worldwideShipping.price');
+  assert.deepEqual([fee.value, fee.min_value, fee.max_value, fee.step], [0, 0, 99.99, 0.01]);
+  listing.depop_specifics.worldwideShipping.enabled = false;
+  assert.ok(!call(c, 'depopEditorForm', listing, DEPOP).fields.some(row => row.path === fee.path));
 });
 
 test('Depop form reads native general attribute objects, maximums and category attributes', () => {
@@ -171,6 +196,7 @@ test('form reader makes no marketplace writes and reports catalog failures', asy
   const sent = [];
   c.sendBrowserResult = (_msg, result) => sent.push(clean(result));
   c.poshmarkCatalogData = async () => { throw new Error('Catalog unavailable'); };
+  c.poshmarkShippingDiscounts = async () => [];
   c.fetch = async () => assert.fail('No marketplace write or unexpected read');
   await c.handleNativeMarketplaceForm({ payload: { marketplace: 'poshmark' } });
   assert.equal(sent[0].ok, false);

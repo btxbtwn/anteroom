@@ -27,7 +27,7 @@ function depopColour(value) {
 // Age, style, and source use the same codes Vendoo writes. Colour and condition
 // are Depop's own slugs. Brand stays on the draft until Depop's brand id is known.
 function depopPrice(listing) {
-  const locked = Array.isArray(listing?.seller_fields) && listing.seller_fields.some(path => String(path) === 'depop_specifics.price' || String(path).startsWith('depop_specifics.') && /price$/i.test(String(path).split('.').pop()));
+  const locked = Array.isArray(listing?.seller_fields) && listing.seller_fields.includes('depop_specifics.price');
   const override = listing?.depop_specifics?.price;
   if (locked && override != null && override !== '') return override;
   return listing?.price;
@@ -425,6 +425,13 @@ async function depopResolvedFields(payload) {
   const missing = [];
   const quantity = Number(listing.quantity ?? 1);
   const price = depopPrice(listing);
+  const worldwide = listing.depop_specifics?.worldwideShipping;
+  const internationalPrice = Number(worldwide?.price);
+  if (worldwide?.enabled === true && (worldwide.price == null || worldwide.price === ''
+    || !Number.isFinite(internationalPrice) || internationalPrice < 0 || internationalPrice >= 100
+    || Math.abs(internationalPrice * 100 - Math.round(internationalPrice * 100)) > 0.000001)) {
+    missing.push({ field: 'depop_specifics.worldwideShipping.price', needs: 'a worldwide shipping price from $0 to $99.99, in dollars and cents' });
+  }
   if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: 'quantity', needs: 'a positive whole-number quantity' });
   const base = depopBaseDescription(listing);
   if (!base) missing.push({ field: 'description', needs: 'a description' });
@@ -454,6 +461,8 @@ async function depopResolvedFields(payload) {
   }
   fields.brand = depopBrand(listing, attributes);
   fields.sku = String(listing.depop_specifics?.sku ?? listing.sku ?? '');
+  if (fields.sku.length > 50) missing.push({ field: 'depop_specifics.sku', needs: 'a SKU of 50 characters or fewer' });
+  fields.international_shipping_cost = worldwide?.enabled === true ? internationalPrice.toFixed(2) : null;
   const parcelLabel = String(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size || '').trim();
   if (!parcelLabel) missing.push({ field: 'parcel_size', needs: 'a parcel size' });
   if (missing.length) throw marketplaceMissing('depop', missing);
@@ -596,6 +605,11 @@ function depopDraftMismatch(draft, listing, fields) {
   if (fields.condition != null && String(draft.condition ?? '') !== String(fields.condition)) wrong.push('condition');
   if (fields.brand != null && String(draft.brand?.id ?? draft.brand ?? '') !== String(fields.brand)) wrong.push('brand');
   if (Object.hasOwn(fields, 'sku') && String(draft.sku || '') !== fields.sku) wrong.push('SKU');
+  if (Object.hasOwn(fields, 'international_shipping_cost')) {
+    const actual = draft.international_shipping_cost;
+    if (fields.international_shipping_cost == null ? actual != null && actual !== ''
+      : actual == null || actual === '' || Number(actual) !== Number(fields.international_shipping_cost)) wrong.push('worldwide shipping');
+  }
   if (fields.variants && depopVariantIds(fields.variants).some(id => Object.hasOwn(draft.variants || {}, id)
     && depopVariantQuantity(draft.variants[id]) !== depopVariantQuantity(fields.variants[id]))) wrong.push('quantity');
   if (fields.quantity != null && Number(draft.quantity) !== fields.quantity) wrong.push('quantity');
@@ -656,7 +670,7 @@ async function depopApiAction(action, payload) {
     const summary = draft => ({ id: String(draft.id), description: draft.description, price: draft.price_amount,
       product_type: draft.product_type, variant_set_id: draft.variant_set_id ?? draft.variant_set, variants: draft.variants,
       brand: draft.brand, condition: draft.condition, colour: draft.colour, age: draft.age, source: draft.source, style: draft.style,
-      attributes: draft.attributes, sku: draft.sku, quantity: draft.quantity,
+      attributes: draft.attributes, sku: draft.sku, quantity: draft.quantity, international_shipping_cost: draft.international_shipping_cost,
       photo_count: depopPictureIds(draft).length, missing_fields: draft.missing_fields || [] });
     if (action === 'session') {
       await request('GET', '/presentation/api/v1/drafts/?limit=24&sort_by=createdAt');
@@ -737,6 +751,7 @@ async function depopApiAction(action, payload) {
         }
       }
       // Depop takes a quantity or a size set, never both.
+      if (draft.international_shipping_cost == null) delete draft.international_shipping_cost;
       if (draft.variant_set != null) delete draft.quantity;
       if (Array.isArray(draft.shipping_methods)) {
         draft.shipping_methods = draft.shipping_methods.map(method => {

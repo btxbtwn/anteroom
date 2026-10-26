@@ -81,6 +81,9 @@ interface EditorField {
   key: string;
   label: string;
   type?: string;
+  minValue?: number;
+  maxValue?: number;
+  step?: number;
   defaultValue?: string | string[] | number | boolean;
   native?: boolean;
   optionValues?: Record<string, string>;
@@ -634,7 +637,7 @@ export function StructuredEditor({
       const shown = followed && listing?.price != null
         ? formFieldText(listing.price)
         : f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
-      init[f.key] = f.key === "ebay_specifics.bestOffer.enabled"
+      init[f.key] = f.type !== "boolean" && f.key === "ebay_specifics.bestOffer.enabled"
         ? (/^(no|false|0|off)$/i.test(formFieldText(shown)) ? "No" : "Yes")
         : shown;
     });
@@ -686,8 +689,8 @@ export function StructuredEditor({
     }} />;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
-    if (f.key === "description") {
-      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} maxLength={f.maxLength ?? undefined} onChange={(e) => setLocal({ ...local, [f.key]: e.target.value })} onBlur={() => handleBlur(f.key)} />;
+    if (f.key === "description" || f.type === "textarea") {
+      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (f.multi) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
@@ -716,6 +719,9 @@ export function StructuredEditor({
         id={id}
         data-listing-field={f.key}
         type={f.type || "text"}
+        min={f.minValue}
+        max={f.maxValue}
+        step={f.type === "number" ? f.step ?? "any" : undefined}
         readOnly={f.locked}
         disabled={f.selectionOnly && !f.options?.length}
         maxLength={f.maxLength ?? undefined}
@@ -726,7 +732,7 @@ export function StructuredEditor({
     );
   };
   // Long text and the category path need the full row.
-  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category";
+  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || f.type === "textarea";
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
@@ -1031,6 +1037,9 @@ function schemaFieldsForTab(
     key: form.native ? field.path || field.key : `${tab}_specifics.${field.key}`,
     native: form.native,
     type: field.input_type,
+    minValue: field.min_value,
+    maxValue: field.max_value,
+    step: field.step,
     locked: field.locked,
     optionValues: field.option_values,
     clears: field.clears,
@@ -1039,7 +1048,7 @@ function schemaFieldsForTab(
     label: field.required ? `${field.label} *` : field.label,
     required: field.required,
     multi: field.multi,
-    selectionOnly: field.selection_only || field.options_source === "reference"
+    selectionOnly: form.native ? field.selection_only : field.selection_only || field.options_source === "reference"
       || (field.options.length > 0 && (field.options_source === "marketplace" || field.options_source === "vendoo")),
     maxValues: field.max_values,
     maxLength: field.max_length,
