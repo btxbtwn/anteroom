@@ -262,7 +262,7 @@ export function ListingRow({
           <SelectCheckbox
             checked={checked}
             label={`${checked ? "Deselect" : "Select"} ${title}`}
-            title={canSelect ? "Include in regenerate" : "Add photos before regenerating"}
+            title={canSelect ? "Include in bulk actions" : "Unavailable for bulk actions"}
             disabled={!canSelect || selectLocked}
             onToggle={(shift) => onToggleSelect?.(listing.id, shift)}
           />

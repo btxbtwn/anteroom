@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation, Message, Photo, new_id, utcnow
@@ -484,6 +484,10 @@ def _recheck_error_flag(db: Session, conv_id: str) -> None:
     listing.validation_errors = validation.errors + validation.warnings
 
 
+class RevisionConflict(ValueError):
+    pass
+
+
 class ListingRepo:
     def __init__(self, db: Session):
         self.db = db
@@ -491,7 +495,7 @@ class ListingRepo:
     def get_current(self, conv_id: str) -> Listing | None:
         return self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
 
-    def save_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None) -> ListingRevision:
+    def save_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None) -> ListingRevision:
         revision = ListingRevision(
             conversation_id=conv_id,
             listing_json=listing_json,
@@ -502,7 +506,14 @@ class ListingRepo:
         self.db.flush()
 
         listing = self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
-        if listing:
+        if expected_revision_id is not None:
+            result = self.db.execute(update(Listing).where(
+                Listing.conversation_id == conv_id, Listing.current_revision_id == expected_revision_id,
+            ).values(current_revision_id=revision.id))
+            if result.rowcount != 1:
+                self.db.rollback()
+                raise RevisionConflict("This listing changed since you reviewed it")
+        elif listing:
             listing.current_revision_id = revision.id
         else:
             listing = Listing(conversation_id=conv_id, current_revision_id=revision.id)

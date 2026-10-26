@@ -1,3 +1,4 @@
+import { BulkEditDialog } from "../BulkEditDialog";
 import { BulkRegeneratePriceDialog } from "../BulkRegeneratePriceDialog";
 import { BulkPriceDropDialog } from "../BulkPriceDropDialog";
 import { RegenerateReviewDialog } from "../RegenerateReviewDialog";
@@ -15,13 +16,13 @@ export function BulkActionBar({
   selection: ListingSelection;
   eligibleIds: string[];
 }) {
-  const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, exitSelecting } = selection;
+  const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, setEditIds, exitSelecting } = selection;
   return (
     <div
       className="flex shrink-0 flex-col gap-1.5 border-t border-sidebar-border px-(--sidebar-content-inset) py-2 max-[900px]:sticky max-[900px]:bottom-0 max-[900px]:z-10 max-[900px]:bg-sidebar max-[900px]:pb-[max(8px,env(safe-area-inset-bottom,0px))]"
       data-bulk-bar
       role="region"
-      aria-label="Regenerate listings"
+      aria-label="Bulk listing actions"
     >
       <p className="min-w-0 px-1 text-xs font-medium leading-snug text-sidebar-foreground">
         {bulkStatusLabel(bulk.run, selectedIds.size, eligibleIds.length)}
@@ -36,11 +37,13 @@ export function BulkActionBar({
         >
           {eligibleIds.length > 0 && eligibleIds.every((id) => selectedIds.has(id)) ? "None" : "All"}
         </Button>
+        <Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 300}
+          title="Review local field and label changes for up to 300 listings" onClick={() => setEditIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Edit fields</Button>
         <Button
           type="button"
           variant="destructive"
           size="xs"
-          disabled={bulk.running || selectedIds.size === 0}
+          disabled={bulk.running || selection.regenerateIds.length === 0}
           onClick={() => { void regenerateSelected(); }}
         >
           Regenerate
@@ -75,6 +78,8 @@ export function BulkActionBar({
 /** The price, Mark down and review dialogs a bulk action opens. */
 export function BulkSelectionDialogs({ selection }: { selection: ListingSelection }) {
   const {
+    editIds,
+    setEditIds,
     pricePrompt,
     setPricePrompt,
     reviewPrompt,
@@ -86,6 +91,7 @@ export function BulkSelectionDialogs({ selection }: { selection: ListingSelectio
   } = selection;
   return (
     <>
+      {editIds ? <BulkEditDialog conversationIds={editIds} onClose={() => { setEditIds(null); exitSelecting(); }} /> : null}
       {pricePrompt ? (
         <BulkRegeneratePriceDialog
           listings={pricePrompt}
@@ -138,6 +144,6 @@ function bulkStatusLabel(
     if (run.phase === "finishing") return `Finishing fields on ${title} (${place})`;
     return `Rewriting ${title} (${place})`;
   }
-  if (eligibleCount === 0) return "No listings with photos to rewrite";
+  if (eligibleCount === 0) return "No listings to select";
   return `${selectedCount} selected`;
 }

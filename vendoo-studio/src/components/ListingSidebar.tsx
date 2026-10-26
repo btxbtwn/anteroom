@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { listingCanRegenerate, mergeRegenerateIds } from "../bulkRegenerate";
+import { mergeRegenerateIds } from "../bulkRegenerate";
 import { jobsPollMs } from "../api/polling";
 import type { SettingsSearchItem, SettingsSectionId } from "./settingsNav";
 import { ListingFilters } from "./ListingFilters";
@@ -132,9 +132,21 @@ export function ListingSidebar({
     };
   }, [conversations, filters, needle]);
 
+  // Finished listings stay out of the working list. Search and the Sold tab still find them.
+  const shownListings = useMemo(() => {
+    const includeFinished = Boolean(needle) || filters.status === "sold";
+    const rows = includeFinished ? [...activeListings, ...settledListings] : [...activeListings];
+    if (activeView === "listings" && selectedConvId && !rows.some((listing) => listing.id === selectedConvId)) {
+      const open = settledListings.find((listing) => listing.id === selectedConvId);
+      if (open) rows.unshift(open);
+    }
+    return rows;
+  }, [activeListings, activeView, filters.status, needle, selectedConvId, settledListings]);
+
+
   const listingEligibleIds = useMemo(
-    () => activeListings.filter((listing) => listingCanRegenerate(listing)).map((listing) => listing.id),
-    [activeListings],
+    () => shownListings.map((listing) => listing.id),
+    [shownListings],
   );
   const { data: suggestionData } = useQuery({
     queryKey: ["suggestions"],
@@ -148,7 +160,7 @@ export function ListingSidebar({
   const suggestionEligibleIds = useMemo(
     () => suggestions.filter((suggestion) => {
       const listing = listingsById.get(suggestion.conversation_id);
-      if (listing) return listingCanRegenerate(listing);
+      if (listing) return true;
       return Boolean(suggestion.cover_photo_url);
     }).map((suggestion) => suggestion.conversation_id),
     [listingsById, suggestions],
@@ -160,16 +172,6 @@ export function ListingSidebar({
   const selection = useListingSelection({ eligibleIds, listingsById, suggestions, bulk });
   const { selecting, setSelecting, selectedIds, exitSelecting, toggleSelect } = selection;
 
-  // Finished listings stay out of the working list. Search and the Sold tab still find them.
-  const shownListings = useMemo(() => {
-    const includeFinished = Boolean(needle) || filters.status === "sold";
-    const rows = includeFinished ? [...activeListings, ...settledListings] : [...activeListings];
-    if (activeView === "listings" && selectedConvId && !rows.some((listing) => listing.id === selectedConvId)) {
-      const open = settledListings.find((listing) => listing.id === selectedConvId);
-      if (open) rows.unshift(open);
-    }
-    return rows;
-  }, [activeListings, activeView, filters.status, needle, selectedConvId, settledListings]);
 
   const { data: marketplaceSettings } = useQuery({
     queryKey: ["settings-marketplaces"],
@@ -404,7 +406,7 @@ export function ListingSidebar({
                 nameBySku={nameBySku}
                 selecting={selecting}
                 checked={selectedIds.has(listing.id)}
-                canSelect={listingCanRegenerate(listing)}
+                canSelect={true}
                 selectLocked={bulk.running}
                 onToggleSelect={(id, shift) => toggleSelect(id, shift, listingEligibleIds)}
                 onSelect={onSelect}

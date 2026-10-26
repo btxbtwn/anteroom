@@ -28,6 +28,12 @@ Edits to an existing listing have two separate steps: **Update Vendoo** writes t
 
 Open **Marketplaces** for each marketplace’s tools, sales planning, and ad history. eBay’s API marketing controls live under eBay; Etsy has a shop dashboard, orders, listings, and a Marketing tab for its sale calendar and ad CSV imports. Inventory-wide discount suggestions are in **Analytics → Inventory analytics**.
 
+### Bulk field and label editing
+
+Choose **Select** in inventory, pick up to 300 items and choose **Edit fields**. Check the fields you want to replace: title, description, brand, size, SKU, price, cost or quantity. Unchecked fields stay as they are. Empty description, brand or SKU clears that field; empty cost means unknown. Prices and quantities are positive whole numbers. Choose whether to add, remove or replace labels; replacing with an empty list clears them.
+
+**Review changes** shows each item’s before/after values, including dependent price and size fields the listing editor updates. Exclude individual rows before saving. An item that changed or started generating/sending after review is skipped with a reason; the other reviewed items still save. Items without photos can be edited, while Regenerate continues to require photos. Each saved edit is a listing revision that can be restored. Saving never calls a marketplace or changes a listing’s published state; direct updates, publishing and delisting are separate seller actions.
+
 ### Local sales records and exports
 
 **Analytics → Sales records** opens local marketplace order lines, including dismissed sale alerts and cancellation/refund updates. Recover missing eBay or Etsy orders from that marketplace’s Orders tab. **Record amounts** saves seller-entered line totals: item revenue after discounts, shipping collected, revenue refunded, net fees, shipping cost and item cost, excluding buyer taxes. Choose the currency explicitly. Blank means unknown; enter zero when confirmed. Net fees can be negative for fee credits. Profit is shown only when all six amounts are known, and currencies are reported separately without conversion. An order or inventory-link change requires you to review the figures again; an older editor cannot overwrite a newer record.

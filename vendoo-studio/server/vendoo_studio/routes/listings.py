@@ -20,30 +20,12 @@ from vendoo_studio.services.price_markdown import PriceDropError, current_listin
 
 router = APIRouter(tags=["listings"])
 
-CORRUPT_SPECIFIC_KEYS = (
-    "ebay_specifics",
-    "depop_specifics",
-    "etsy_specifics",
-    "poshmark_specifics",
-    "mercari_specifics",
-)
-
-
 def _first_error(validation) -> str:
     for err in validation.errors:
         message = err.get("message") or ""
         if message:
             return message
     return "Listing is invalid"
-
-
-def _reject_corrupt_listing(listing: dict) -> None:
-    if not isinstance(listing, dict):
-        raise HTTPException(422, "Listing must be an object")
-    for key in CORRUPT_SPECIFIC_KEYS:
-        value = listing.get(key)
-        if value is not None and not isinstance(value, dict):
-            raise HTTPException(422, f"{key} must be an object")
 
 
 class ListingUpdate(BaseModel):
@@ -129,82 +111,9 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
 
 @router.put("/api/conversations/{conv_id}/listing")
 def update_listing(conv_id: str, body: ListingUpdate, db: Session = Depends(get_db)):
-    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
-    from vendoo_studio.repositories.queries import JobRepo
-    from vendoo_studio.services.listing_generate import (
-        align_size_fields,
-        sanitize_listing_sizes,
-    )
-    from vendoo_studio.services.schema_probe import is_schema_probe_job
+    from vendoo_studio.services.listing_editor import save_listing_edit
 
-    conv_repo = ConversationRepo(db)
-    if not conv_repo.get(conv_id):
-        raise HTTPException(404, "Conversation not found")
-
-    listing_repo = ListingRepo(db)
-    current = listing_repo.get_current(conv_id)
-
-    photo_count = len(conv_repo.get_photos(conv_id))
-    _reject_corrupt_listing(body.listing)
-    from vendoo_studio.services.listing_evidence import explicit_changes, record_correction
-
-    previous = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
-    previous_json = previous.listing_json if previous and isinstance(previous.listing_json, dict) else {}
-    from vendoo_studio.services.chrome_catalog import keep_direct_categories
-
-    keep_direct_categories(previous_json, body.listing)
-    changes = explicit_changes(previous_json, body.listing)
-    sanitize_listing_sizes(body.listing)
-    # The seller's size input is the source of truth; the title follows it.
-    # A Depop size that already differed stays, unless it was a copy of the
-    # previous general size and that general size is what changed.
-    align_size_fields(body.listing, previous_size=None if previous_json.get("size") is None else str(previous_json.get("size")))
-    normalize_listing_dropdowns(body.listing)
-    validation = validate_listing(body.listing, photo_count, require_photos=True)
-
-    # Generation pins the SKU in Item Details over the model's, so a SKU the
-    # seller edits here goes there too, or Regenerate would bring the old one back.
-    revisions = listing_repo.get_revisions(conv_id)
-    previous_sku = str((revisions[0].listing_json if revisions else {}).get("sku") or "").strip()
-    sku = str(body.listing.get("sku") or "").strip()
-    if sku != previous_sku:
-        from vendoo_studio.services.vendoo_import import merge_notes
-
-        conv_repo.write_notes(conv_id, merge_notes(conv_repo.get(conv_id).notes, {"sku": sku}))
-
-    revision = listing_repo.save_revision(
-        conv_id=conv_id,
-        listing_json=body.listing,
-        source="user_form",
-        parent_revision_id=current.current_revision_id if current else None,
-    )
-
-    record_correction(db, conv_id, revision.id, body.listing, changes)
-
-    if current:
-        current.validation_status = "valid" if validation.valid else "error"
-        current.validation_errors = validation.errors + validation.warnings
-
-    # Keep in-flight / paused automation on the edited Studio form payload.
-    refresh_statuses = set(ACTIVE_JOB_STATUSES) | {"failed"}
-    for job in JobRepo(db).list_by_conversation(conv_id):
-        if job.status not in refresh_statuses or is_schema_probe_job(job):
-            continue
-        if JobRepo(db).latest_event(job.id, "vendoo_review"):
-            continue  # A reviewed Send owns its approved snapshot, even after edits.
-        platforms = (job.listing_snapshot or {}).get("platforms") if isinstance(job.listing_snapshot, dict) else None
-        snapshot = dict(body.listing)
-        if isinstance(platforms, list):
-            snapshot["platforms"] = platforms
-        job.listing_snapshot = snapshot
-
-    db.commit()
-
-    return {
-        "ok": True,
-        "revision_id": revision.id,
-        "validation": validation.model_dump(),
-    }
+    return save_listing_edit(conv_id, body.listing, db)
 
 
 @router.post("/api/conversations/{conv_id}/listing/validate")
