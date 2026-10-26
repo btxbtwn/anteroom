@@ -25,7 +25,7 @@ const FEATURES = [
   { id: "messages", name: "Buyer messages", detail: "Read conversations and send reviewed replies." },
   { id: "feedback", name: "Buyer feedback", detail: "Leave positive feedback for completed sales." },
   { id: "marketing", name: "Discounts and advertising", detail: "Promotions, campaigns, reports, and store emails." },
-  { id: "listings", name: "Listing tools", detail: "Business policies and unpublished offers." },
+  { id: "listings", name: "Listing tools", detail: "Imports, inventory, and live listing edits." },
 ];
 
 export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) => void }) {

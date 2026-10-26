@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.415 — 2026-10-26
+## 0.1.416 — 2026-10-26
 
 - Saving an eBay draft no longer stops after eBay saves the offer with “eBay did not confirm the listing”. Check finds an auction draft whose reply was lost, and saving again reuses it.
+
+## 0.1.415 — 2026-10-26
+
+- eBay listings are now made only from an item in Inventory, with List… under Marketplaces, the same as every other marketplace. The eBay page no longer has its own Create draft and Publish on eBay forms. Importing from eBay, updating inventory price and quantity, and editing a live listing are still there.
 
 ## 0.1.414 — 2026-10-26
 

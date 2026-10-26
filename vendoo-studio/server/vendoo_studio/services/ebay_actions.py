@@ -115,35 +115,12 @@ class Email(Input):
     schedule: datetime
 
 
-class Draft(Input):
-    sku: str = Field(pattern=r"^[A-Za-z0-9_-]{1,50}$")
-    title: str = Field(min_length=1, max_length=80)
-    description: str = Field(min_length=1, max_length=4000)
-    category_id: str = Field(pattern=r"^\d{1,15}$")
-    price: str = Field(max_length=20)
-    quantity: int = Field(default=1, strict=True, ge=1, le=10000)
-    condition: Literal["NEW", "NEW_OTHER", "NEW_WITH_DEFECTS", "PRE_OWNED_EXCELLENT", "USED_EXCELLENT",
-                       "PRE_OWNED_FAIR", "USED_VERY_GOOD", "USED_GOOD", "USED_ACCEPTABLE"]
-    image_urls: list[str] = Field(min_length=1, max_length=12)
-    aspects: dict[str, list[str]] = Field(default_factory=dict)
-    fulfillment_policy_id: str = Field(min_length=1, max_length=200)
-    payment_policy_id: str = Field(min_length=1, max_length=200)
-    return_policy_id: str = Field(min_length=1, max_length=200)
-    merchant_location_key: str = Field(min_length=1, max_length=200)
-    weight_oz: str = Field(default="16", pattern=r"^\d+(?:\.\d+)?$", max_length=15)
-
-
 class Revision(Input):
     listing_id: str = Field(pattern=r"^\d{6,20}$")
     title: str = Field(min_length=1, max_length=80)
     description: str = Field(min_length=1, max_length=4000)
     price: str = Field(max_length=20)
     quantity: int = Field(strict=True, ge=1, le=10000)
-
-
-class Offer(Input):
-    offer_id: str = Field(min_length=1, max_length=200)
-    marketplace: Literal["ebay"]
 
 
 class InventoryRevision(Input):
@@ -161,7 +138,10 @@ class Report(Input):
 class ImageUpload(Input):
     data: str = Field(min_length=1, max_length=11000000)
     mime: Literal["image/jpeg", "image/png"]
-    dispute_id: str = Field(default="", max_length=200)
+
+
+class EvidenceUpload(ImageUpload):
+    dispute_id: str = Field(min_length=1, max_length=200)
 
 
 def image_bytes(data: dict, *, maximum: int = 8000000) -> bytes:
@@ -181,8 +161,7 @@ def image_bytes(data: dict, *, maximum: int = 8000000) -> bytes:
 MODELS = {"message": Message, "mark_read": MarkRead, "feedback": Feedback, "shipment": Shipment, "refund": Refund,
           "contest": Contest, "evidence": Evidence, "markdown": Promotion, "quantity_discount": Promotion,
           "campaign": Campaign, "ad": Ad, "campaign_control": Control, "promotion_control": Control,
-          "email": Email, "draft": Draft, "revise": Revision, "publish_offer": Offer,
-          "upload_image": ImageUpload, "upload_evidence": ImageUpload,
+          "email": Email, "revise": Revision, "upload_evidence": EvidenceUpload,
           "inventory_revision": InventoryRevision, "ad_report": Report}
 
 
@@ -302,19 +281,15 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
         plan["context"] = offer
         plan["target"] = data["offer_id"]
         plan["summary"] = [f"Update inventory SKU {offer['sku']}", f"Price ${dollars(cents)} · available quantity {data['quantity']}"]
-    elif kind in ("upload_image", "upload_evidence"):
-        raw = image_bytes(data, maximum=1500000 if kind == "upload_evidence" else 8000000)
-        if kind == "upload_evidence":
-            target = segment(data["dispute_id"])
-            await client.request("GET", f"/sell/fulfillment/v1/payment_dispute/{target}")
-            path = f"/sell/fulfillment/v1/payment_dispute/{target}/upload_evidence_file"
-            field = "file"
-        else:
-            path, field = "/commerce/media/v1_beta/image/create_image_from_file", "image"
-        operation("POST", path, upload={"field": field, "data": data["data"], "mime": data["mime"]})
-        plan["target"] = data["dispute_id"] or "image"
+    elif kind == "upload_evidence":
+        raw = image_bytes(data, maximum=1500000)
+        target = segment(data["dispute_id"])
+        await client.request("GET", f"/sell/fulfillment/v1/payment_dispute/{target}")
+        operation("POST", f"/sell/fulfillment/v1/payment_dispute/{target}/upload_evidence_file",
+                  upload={"field": "file", "data": data["data"], "mime": data["mime"]})
+        plan["target"] = data["dispute_id"]
         plan["summary"] = [f"Upload this {len(raw) // 1000} KB image to eBay.",
-                           "The image will be available for your listing." if kind == "upload_image" else "Attach the returned file ID to the dispute's evidence separately."]
+                           "Attach the returned file ID to the dispute's evidence separately."]
     elif kind in ("message", "mark_read"):
         target = segment(data["conversation_id"])
         conversation = await client.request("GET", f"/commerce/message/v1/conversation/{target}",
@@ -495,52 +470,6 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
         plan["target"] = data["resource_id"]
         plan["summary"] = [f"{data['action'].capitalize()} {current.get('campaignName') or current.get('name') or target}",
                            *[f"{key}: {json.dumps(value, ensure_ascii=False)}" for key, value in details.items() if value is not None]]
-    elif kind == "draft":
-        for url in data["image_urls"]:
-            parsed = urlparse(url)
-            if parsed.scheme != "https" or not parsed.hostname or parsed.username or len(url) > 2000:
-                raise EbayFailure("Provide HTTPS image URLs, or upload an image first.", 422)
-        cents = money_cents(data["price"])
-        weight = Decimal(data["weight_oz"])
-        if not weight.is_finite() or not 0 < weight <= 2400:
-            raise EbayFailure("Enter a packaged weight above zero and no more than 2400 ounces.", 422)
-        for policy in ("fulfillment", "payment", "return"):
-            selected = await client.request("GET", f"/sell/account/v1/{policy}_policy/{segment(data[f'{policy}_policy_id'])}")
-            if selected.get("marketplaceId") != "EBAY_US":
-                raise EbayFailure("Choose US eBay business policies.", 422)
-        location = await client.request("GET", f"/sell/inventory/v1/location/{segment(data['merchant_location_key'])}")
-        if location.get("merchantLocationStatus") != "ENABLED":
-            raise EbayFailure("Choose an enabled eBay inventory location.", 422)
-        try:
-            await client.request("GET", f"/sell/inventory/v1/inventory_item/{segment(data['sku'])}")
-        except EbayFailure as exc:
-            if exc.status != 404:
-                raise
-        else:
-            raise EbayFailure("This SKU already exists on eBay. Choose a new SKU to avoid overwriting it.", 409)
-        from vendoo_studio.services.marketplace_schemas import ebay_aspects
-
-        for aspect in await ebay_aspects(client, data["category_id"]):
-            values = data["aspects"].get(aspect["name"], [])
-            if aspect["required"] and not values:
-                raise EbayFailure(f"Add required item specific: {aspect['name']}.", 422)
-            if aspect["mode"] == "selection" and any(v not in {a["label"] for a in aspect["values"]} for v in values):
-                raise EbayFailure(f"Choose a valid value for {aspect['name']}.", 422)
-        from vendoo_studio.services.user_settings import get_package_dimensions
-        package = get_package_dimensions()
-        operation("PUT", f"/sell/inventory/v1/inventory_item/{segment(data['sku'])}", {
-            "condition": data["condition"], "availability": {"shipToLocationAvailability": {"quantity": data["quantity"]}},
-            "product": {"title": data["title"], "description": data["description"], "imageUrls": data["image_urls"], "aspects": data["aspects"]},
-            "packageWeightAndSize": {"weight": {"value": str(weight), "unit": "OUNCE"}, "dimensions": {**package, "unit": "INCH"}},
-        })
-        operation("POST", "/sell/inventory/v1/offer", {"sku": data["sku"], "marketplaceId": "EBAY_US", "format": "FIXED_PRICE",
-                  "includeCatalogProductDetails": False, "categoryId": data["category_id"], "availableQuantity": data["quantity"],
-                  "pricingSummary": {"price": {"value": dollars(cents), "currency": "USD"}}, "listingDescription": data["description"],
-                  "merchantLocationKey": data["merchant_location_key"],
-                  "listingPolicies": {"fulfillmentPolicyId": data["fulfillment_policy_id"], "paymentPolicyId": data["payment_policy_id"],
-                                      "returnPolicyId": data["return_policy_id"]}})
-        plan["target"] = data["sku"]
-        plan["summary"] = [f"Save unpublished eBay offer: {data['title']}", f"SKU {data['sku']} · ${dollars(cents)} · quantity {data['quantity']}"]
     elif kind == "revise":
         before = await owned_listing(client, data["listing_id"])
         if before["type"] != "FixedPriceItem":
@@ -557,23 +486,6 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
         plan["target"] = data["listing_id"]
         plan["summary"] = [f"Update live listing {before['title']}", f"New title: {data['title']}",
                            f"${data['price']} · total quantity {data['quantity']}", data["description"]]
-    elif kind == "publish_offer":
-        offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(data['offer_id'])}")
-        if offer.get("marketplaceId") != "EBAY_US" or offer.get("status") != "UNPUBLISHED":
-            raise EbayFailure("Choose an unpublished US eBay offer.", 409)
-        plan["context"] = offer
-        inventory = await client.request("GET", f"/sell/inventory/v1/inventory_item/{segment(offer['sku'])}")
-        plan["context"] = {"offer": offer, "inventory": inventory}
-        plan["target"] = data["offer_id"]
-        price = offer.get("pricingSummary", {}).get("price", {})
-        plan["summary"] = [f"Publish {inventory.get('product', {}).get('title', offer['sku'])} on eBay US now.",
-                           f"Price: {price.get('value')} {price.get('currency')} · quantity {offer.get('availableQuantity')}",
-                           f"Category {offer.get('categoryId')} · condition {inventory.get('condition')}",
-                           offer.get("listingDescription") or inventory.get("product", {}).get("description", ""),
-                           f"Shipping policy: {offer.get('listingPolicies', {}).get('fulfillmentPolicyId', 'missing')}",
-                           "This makes the listing public."]
-        plan["images"] = inventory.get("product", {}).get("imageUrls", [])
-        operation("POST", f"/sell/inventory/v1/offer/{segment(data['offer_id'])}/publish", {})
     return plan
 
 
@@ -649,10 +561,7 @@ async def execute(db: Session, action_id: str, kind: str, payload: dict) -> dict
     action.state = "sent"
     action.receipt_id = str(result.get("receiptId") or result.get("offerId") or result.get("listingId") or result.get("emailCampaignId") or result.get("refundId") or result.get("fileId") or "")[:200]
     db.commit()
-    image_url = result.get("imageUrl")
-    if kind == "upload_image" and action.receipt_id and not image_url:
-        image_url = (await client.request("GET", f"/commerce/media/v1_beta/image/{segment(action.receipt_id)}")).get("imageUrl")
-    return {"state": "sent", "id": action.id, "receiptId": action.receipt_id, "imageUrl": image_url,
+    return {"state": "sent", "id": action.id, "receiptId": action.receipt_id,
             "message": "eBay accepted the refund; payment is pending. Check the order for its final status." if kind == "refund" and result.get("refundStatus") == "PENDING" else "eBay confirmed the action."}
 
 
