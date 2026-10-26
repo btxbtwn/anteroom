@@ -479,7 +479,12 @@ export interface MarketplaceFormField {
   option_values?: Record<string, string>;
   clears?: string[];
   help?: string;
-  value_constraints?: Record<string, { parentName: string; parentValues: string[] }[]>;
+  value_constraints?: Record<string, {
+    parentName?: string;
+    parentValues?: string[];
+    applicableForLocalizedAspectName?: string;
+    applicableForLocalizedAspectValues?: string[];
+  }[]>;
   required: boolean;
   multi: boolean;
   selection_only: boolean;

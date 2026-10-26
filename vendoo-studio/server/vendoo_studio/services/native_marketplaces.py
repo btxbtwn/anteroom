@@ -237,8 +237,16 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
         if action == "update":
             from vendoo_studio.services.marketplace_delist import listing_id
 
-            if listing_id(marketplace, values.get("listing_url")) != record.get("listing_id"):
-                raise NativeMarketplaceError(502, "The marketplace answered for a different listing. The live one was not replaced.")
+            answered = listing_id(marketplace, values.get("listing_url"))
+            stored = record.get("listing_id")
+            if answered != stored:
+                # A Depop category change rewrites the public slug. Accept it when
+                # the extension loaded the product we already had and Depop returned the new one.
+                previous = str(result.get("previous_slug") or "").strip().casefold()
+                if marketplace == "depop" and previous and previous == str(stored or "").strip().casefold() and answered:
+                    values["listing_id"] = answered
+                else:
+                    raise NativeMarketplaceError(502, "The marketplace answered for a different listing. The live one was not replaced.")
         return values
     contract = _contract(result)
     if result.get("safe_to_retry") is True:

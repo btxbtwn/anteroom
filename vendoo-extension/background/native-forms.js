@@ -150,10 +150,15 @@ function mercariEditorForm(listing, master) {
     ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1000 }),
     nativeEditorChoice('direct_category_ids.mercari', 'Category', category || '', categories,
       { required: true, clears: ['mercari_specifics.nativeSizeId'], help: 'Categories from Mercari. Choose a category with no subcategories.' }),
-    nativeEditorChoice('brand', 'Brand', master.itemBrands.find(row => marketplaceNameKey(row.name) === marketplaceNameKey(listing.brand))?.name || listing.brand,
-      master.itemBrands.map(row => row.name),
-      { help: 'An exact match from Mercari’s own brand list is required, or select No brand below.' }),
-    nativeEditorField('mercari_specifics.noBrand', 'No brand / Not sure', specifics.noBrand === true, { input_type: 'boolean' }),
+    nativeEditorChoice('mercari_specifics.brand', 'Brand', mercariBrandRequest(listing).omit
+      ? MERCARI_NO_BRAND
+      : (master.itemBrands.find(row => marketplaceNameKey(row.name) === marketplaceNameKey(mercariBrandRequest(listing).name))?.name
+        || mercariBrandRequest(listing).name || ''),
+      [{ label: 'No brand', value: MERCARI_NO_BRAND }, ...master.itemBrands.map(row => ({ label: row.name, value: row.name }))],
+      { clears: ['mercari_specifics.noBrand'],
+        help: 'No brand lists this on Mercari without a brand. The brand on General stays as it is. A name Mercari does not list is left off.' }),
+    nativeEditorField('mercari_specifics.noBrand', 'No brand / Not sure', specifics.noBrand === true, { input_type: 'boolean',
+      help: 'Lists on Mercari with no brand. The brand on General stays as it is.' }),
     nativeEditorChoice('mercari_specifics.condition', 'Condition', mercariConditionId(specifics.condition || listing.condition),
       ['New', 'Like New', 'Good', 'Fair', 'Poor'].map((label, index) => ({ label, value: index + 1 })), { required: true }),
   ];
@@ -165,7 +170,10 @@ function mercariEditorForm(listing, master) {
   if (listing.form?.sizes?.length || size.none === 'unknown') fields.push(nativeEditorChoice('mercari_specifics.nativeSizeId', 'Size',
     size.id ?? specifics.nativeSizeId ?? specifics.size ?? listing.size ?? '',
     sizeChoices,
-    { required: true, help: 'Sizes from Mercari for this category. The saved draft is checked before listing.' }));
+    { required: true, help: 'Sizes from Mercari for this category. The same name in two groups is labeled with its group.' }));
+  fields.push(nativeEditorChoice('mercari_specifics.sizeType', 'Size type', specifics.sizeType || specifics.sizeGroup || '',
+    ['Regular', 'Petite', 'Plus', 'Tall', 'Juniors', 'Maternity', 'Big & Tall'].map(label => ({ label, value: label })),
+    { help: 'Used when Mercari lists that size in more than one group. Blank uses the regular or standard group.' }));
   fields.push(nativeEditorField('weight_oz', 'Packed weight (oz)', mercariWeightOz(listing), { locked: true, help: 'Change the package in Item Details.' }),
     nativeEditorField('package_dimensions_in', 'Package dimensions (in)', listing.package_dimensions_in, { locked: true }),
     nativeEditorChoice('mercari_specifics.shippingPayerId', 'Who pays shipping', specifics.shippingPayerId ?? 1,

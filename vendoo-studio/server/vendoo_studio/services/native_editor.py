@@ -87,12 +87,14 @@ async def ebay_form(snapshot: dict) -> dict:
         values = row.get("values") or []
         inherited = {"size": "Size follows the tag size on General. Change it there.",
                      "department": "Department follows General. Change it there."}
+        constraints = marketplace_schemas.constraints_by_label(values)
         fields.append(field(f"ebay_specifics.{name}", name, value, required=row["required"], multi=row["multi"],
                             locked=name.casefold() in inherited, **({"help": inherited[name.casefold()]} if name.casefold() in inherited else {}),
-                            selection_only=row["mode"] == "selection", options=[v["label"] for v in values],
+                            selection_only=row["mode"] == "selection",
+                            options=list(dict.fromkeys(v["label"] for v in values)),
                             option_values={v["label"]: str(v["id"]) for v in values}, options_source="marketplace",
                             max_values=row.get("max_values"), max_length=row.get("max_length"),
-                            value_constraints={v["label"]: v["constraints"] for v in values if v.get("constraints")}))
+                            **({"value_constraints": constraints} if constraints else {})))
     details = snapshot.get("ebay_specifics") or {}
     floors = ((snapshot.get("form") or {}).get("specifics", {}).get("pricingFormatDetails") or {}).get("fixedPrice") or {}
     fields.extend([field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number"),

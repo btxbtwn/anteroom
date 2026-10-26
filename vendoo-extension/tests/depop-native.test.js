@@ -135,6 +135,31 @@ test('Depop draft sends the slug Studio already chose', async () => {
   assert.equal(JSON.parse(requests.find(request => request.method === 'PUT').body).condition, 'used_like_new');
 });
 
+test('Depop keeps a draft whose read-back uses object quantities and picture ids', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  let saved = { id: 123456, description: 'Private draft', price_amount: '12', price_currency: 'USD', pictures: [] };
+  const requests = [];
+  c.fetch = async (url, options = {}) => {
+    requests.push({ method: options.method, body: options.body });
+    if (options.method === 'PUT') {
+      const sent = JSON.parse(options.body);
+      saved = { ...saved, ...sent, pictures: sent.pictures.map(id => ({ id })),
+        variants: { 4: { quantity: 1 } }, attributes: [{ id: 'material', values: ['cotton'] }] };
+    }
+    return reply(200, saved);
+  };
+  const result = await c.depopApiAction('save', {
+    action: 'save_draft', draft_url: DRAFT, listing, deadline: Date.now() + 30000,
+    depop_fields: { product_type: 'jeans', variant_set: 54, variants: { 4: 1 }, attributes: { material: ['cotton'] } },
+    uploaded_photo_ids: ['11', '12', '13', '14', '15', '16', '17', '18', '19'],
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.photo_count, 8);
+  const body = JSON.parse(requests.find(request => request.method === 'PUT').body);
+  assert.deepEqual(body.pictures, [11, 12, 13, 14, 15, 16, 17, 18]);
+});
+
 test('Depop draft updates preserve photos and never call the publish endpoint', async () => {
   const { c, requests, payload } = page();
   const result = await c.depopApiAction('save', payload);
@@ -679,14 +704,18 @@ test('a locked Depop price wins and nine photos stay within eight', () => {
   }), { measurements: [{ id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' }] });
 });
 
-test('a live Depop update sends the price and measurements', async () => {
+test('a live Depop update sends the price and measurements by slug', async () => {
   const c = loadWorker();
   c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
   const requests = [];
   c.fetch = async (url, options = {}) => {
     requests.push({ url, method: options.method, body: options.body });
-    if (String(url).includes('/by-slug/')) return reply(200, { id: 99, price_amount: '23.00', price_currency: 'USD' });
-    if (options.method === 'PUT') return reply(200, {});
+    if (String(url).includes('/by-slug/') && options.method === 'PUT') {
+      return reply(200, { slug: 'studio-works-fleece', price_amount: '29.99', price_currency: 'USD' });
+    }
+    if (String(url).includes('/by-slug/')) {
+      return reply(200, { id: 99, slug: 'studio-works-fleece', price_amount: '23.00', price_currency: 'USD', pictures: [{ id: 7 }] });
+    }
     return reply(200, { id: 99, price_amount: '29.99', price_currency: 'USD' });
   };
   const result = await c.depopApiAction('update', {
@@ -705,9 +734,85 @@ test('a live Depop update sends the price and measurements', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.state, 'published');
   assert.match(result.listing_url, /\/products\/studio-works-fleece\/$/);
+  assert.equal(result.previous_slug, 'studio-works-fleece');
   const put = requests.find((item) => item.method === 'PUT');
-  assert.match(put.url, /\/presentation\/api\/v1\/products\/99\/$/);
+  assert.match(put.url, /\/presentation\/api\/v1\/products\/by-slug\/studio-works-fleece\/$/);
   const body = JSON.parse(put.body);
   assert.equal(body.price_amount, '29.99');
+  assert.deepEqual(body.pictures, [7]);
   assert.deepEqual(body.measurements, [{ id: 'pit_to_pit', label: 'Pit to pit', value: '22', unit: 'in' }]);
+  assert.equal(requests.some((item) => /\/products\/99\/$/.test(item.url)), false);
+});
+
+test('a live Depop category change sends the new type and keeps the rewritten slug', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  const requests = [];
+  c.fetch = async (url, options = {}) => {
+    requests.push({ url, method: options.method, body: options.body });
+    if (options.method === 'PUT') {
+      return reply(200, { slug: 'vassarette-womens-tan-sweater', price_amount: '18.00', price_currency: 'USD' });
+    }
+    return reply(200, { id: 42, slug: 'vassarette-womens-tan-vest', price_amount: '18.00', price_currency: 'USD',
+      pictures: [{ id: 3 }, { id: '4' }], product_type: 'vests' });
+  };
+  const result = await c.depopApiAction('update', {
+    action: 'update', confirm: true, listing_id: 'vassarette-womens-tan-vest', deadline: Date.now() + 30000,
+    depop_fields: { product_type: 'sweaters', gender: 'female', is_kids: false, attributes: { 'sweater-type': ['pullover'] },
+      colour: ['tan'], brand: 'vassarette', condition: 'used_good' },
+    listing: { description: 'Tube top', price: 18, primaryColor: 'Tan' },
+  });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.listing_url, 'https://www.depop.com/products/vassarette-womens-tan-sweater/');
+  assert.equal(result.previous_slug, 'vassarette-womens-tan-vest');
+  const body = JSON.parse(requests.find((item) => item.method === 'PUT').body);
+  assert.equal(body.product_type, 'sweaters');
+  assert.equal(body.gender, 'female');
+  assert.deepEqual(body.attributes, { 'sweater-type': ['pullover'] });
+  assert.deepEqual(body.colour, ['tan']);
+  assert.deepEqual(body.pictures, [3, 4]);
+  assert.equal(body.product_type === 'vests', false);
+});
+
+test('Depop treats object quantities and attribute lists as the fields it kept', () => {
+  const c = loadWorker();
+  const fields = { product_type: 'jeans', variant_set: 54, variants: { 4: 1 }, attributes: { material: ['cotton'] }, brand: 'anne-klein' };
+  const draft = { description: 'Private draft', price_amount: '12', product_type: 'jeans', variant_set_id: 54,
+    variants: { 4: { quantity: 1 } }, attributes: [{ id: 'material', values: ['cotton'] }], brand: 'anne-klein',
+    pictures: [{ id: 1 }, { id: 2 }] };
+  assert.deepEqual(call(c, 'depopDraftMismatch', draft, listing, fields), []);
+  assert.deepEqual(call(c, 'depopPictureIds', draft), [1, 2]);
+});
+
+test('moving a Depop listing to crop tops replaces the vest type and drops its attributes', async () => {
+  const c = loadWorker();
+  const attributes = { ...ATTRIBUTES, group: ATTRIBUTES.group.map(group => group.id !== 'tops' ? group : {
+    ...group, product_types: [...group.product_types,
+      { id: 'vests', attribute_ids: ['occasion'] },
+      { id: 'crop-tops', attribute_ids: ['material'] }],
+  }) };
+  withCatalog(c, { attributes: [200, attributes] });
+  const fields = await c.depopLiveEditFields({
+    description: 'Tube top', price: 18, brand: 'Vassarette', primaryColor: 'Tan', department: 'Women',
+    direct_category_ids: { depop: 'womenswear_crop-tops' },
+    depop_specifics: { material: ['Cotton'], attributes: { occasion: ['party'] } },
+  }, Date.now() + 30000);
+  const kept = JSON.parse(JSON.stringify(fields));
+  assert.equal(kept.product_type, 'crop-tops');
+  assert.equal(kept.gender, 'female');
+  assert.deepEqual(kept.colour, ['tan']);
+  assert.deepEqual(kept.attributes, { material: ['cotton'] });
+  assert.equal(kept.brand, undefined);
+});
+
+test('Depop reuses the newest matching draft instead of starting another', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  c.fetch = async () => reply(200, { objects: [
+    { id: 'older-draft', description: 'Private draft', price_amount: '12', createdAt: '2026-10-26T01:00:00Z' },
+    { id: 'newer-draft', description: 'Private draft', price_amount: '12', createdAt: '2026-10-26T18:00:00Z' },
+    { id: 'other', description: 'Something else', price_amount: '12', createdAt: '2026-10-26T19:00:00Z' },
+  ] });
+  const reused = await c.depopApiAction('reuse', { action: 'save_draft', listing, deadline: Date.now() + 30000 });
+  assert.equal(reused.draft_url, 'https://www.depop.com/sellinghub/drafts/edit/newer-draft/');
 });
