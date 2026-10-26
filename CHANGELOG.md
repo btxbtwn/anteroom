@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.413 — 2026-10-26
+
+- List on eBay as an auction. Choose the auction length eBay offers for the category, a starting bid, and an optional reserve and Buy It Now. Fixed price stays Good 'Til Cancelled, and auctions sell one item without offers.
+- Save an eBay draft without listing it. eBay keeps it out of sight of buyers, Anteroom checks the format, duration and prices eBay saved, and List publishes that same draft.
+
 ## 0.1.412 — 2026-10-26
 
 - Save selected listing fields as reusable templates. Apply one with a before-and-after review, or create a separate local draft with its own SKU and quantity. Manage templates in Settings → Listings; photos, videos and marketplace links stay with the original item.

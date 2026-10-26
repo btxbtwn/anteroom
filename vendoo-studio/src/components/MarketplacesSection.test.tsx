@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
-import type { NativeDrafts } from "../api/nativeMarketplaces";
+import type { NativeDraft, NativeDrafts } from "../api/nativeMarketplaces";
 import { MarketplacesSection, askChatPrompt, deletable, rowStatus } from "./MarketplacesSection";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
@@ -236,6 +236,13 @@ describe("marketplaces section", () => {
       expect(disabledButton(render({}, {}, { ...options, selected: "mercari" }), "List…")).toBe(true);
       expect(/<button[^>]*disabled=""[^>]*>List(?:ing)?…<\/button>/.test(render({}, {}, { ...options, selected: "poshmark" }))).toBe(true);
     }
+  });
+
+  it("shows an eBay draft as saved on eBay without a link", () => {
+    const draft = { state: "draft", action: "save_draft", revision_id: "current" } as NativeDraft;
+    const saved = rowStatus("ebay", undefined, draft, "current", true);
+    expect([saved.label, saved.href, saved.detail]).toEqual(["Saved on eBay", undefined, "Not listed. Buyers cannot see it until you List."]);
+    expect(rowStatus("ebay", undefined, draft, "newer", true).detail).toBe("Changes in Anteroom have not been saved to eBay.");
   });
 
   it("derives removal wording per marketplace", () => {

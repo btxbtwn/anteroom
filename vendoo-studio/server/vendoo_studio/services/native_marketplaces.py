@@ -52,7 +52,7 @@ class NativeMarketplaceError(RuntimeError):
 Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]
 InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy", "sellwild"]
 API_MARKETPLACES = frozenset({"ebay", "etsy"})
-DRAFT_MARKETPLACES = frozenset({"mercari", "depop", "etsy", "poshmark"})
+DRAFT_MARKETPLACES = frozenset({"ebay", "mercari", "depop", "etsy", "poshmark"})
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild", "vinted": "Vinted"}
 UNKNOWN = "Anteroom could not confirm what happened. Check the result before trying again."
 # How long Chrome has to answer one step, and how long a job then keeps the
@@ -211,7 +211,8 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
     reason = str(result.get("error") or "").strip()
     if result.get("ok") is True:
         url = None
-        if marketplace != "sellwild" and action in {"save_draft", "publish"}:
+        # eBay's saved draft is an unpublished offer, which has no page to link.
+        if marketplace not in {"sellwild", "ebay"} and action in {"save_draft", "publish"}:
             url = draft_url(marketplace, str(result.get("draft_url") or ""))
             replaced = marketplace in {"depop", "vinted"} and result.get("draft_replaced") is True
             if record.get("draft_url") and url != record["draft_url"] and not replaced:
@@ -765,7 +766,7 @@ async def _read_result(db: Session, conv_id: str, marketplace: str, record: dict
         def remember(values: dict) -> None:
             _store(db, conv_id, marketplace, values)
 
-        return await ebay_listings.check(record, snapshot if record.get("action") == "update" else None, remember)
+        return await ebay_listings.check(record, snapshot if record.get("action") in {"update", "save_draft"} else None, remember)
     try:
         reply = await browser_bridge.request(job, "marketplace.result", {
             "operation_id": record.get("operation_id"),

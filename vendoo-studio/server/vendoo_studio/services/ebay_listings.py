@@ -46,6 +46,7 @@ _SKIP = {
     "delistingattemptmessages", "personalizationinstructions",
     "autoaccept", "autoacceptprice", "autodeclineprice", "minimumoffer", "minimumofferprice",
     "storecategoryname", "storecategory2name",
+    "listingformat", "listingduration", "auctionstartprice", "auctionreserveprice", "auctionbuyitnow",
 }
 # Identifiers eBay asks branded items to answer, Does Not Apply included.
 _IDENTIFIER_ASPECTS = {"mpn"}
@@ -247,6 +248,77 @@ def store_category_names(listing: dict) -> list[str]:
     return list(dict.fromkeys(names))
 
 
+FIXED_PRICE = "FIXED_PRICE"
+AUCTION = "AUCTION"
+FORMAT_LABELS = {FIXED_PRICE: "Fixed price", AUCTION: "Auction"}
+DEFAULT_AUCTION_DURATION = "DAYS_7"
+
+
+def duration_label(value: str) -> str:
+    if value == "GTC":
+        return "Good 'Til Cancelled"
+    days = int(value.removeprefix("DAYS_"))
+    return f"{days} day" if days == 1 else f"{days} days"
+
+
+def _format_amount(details: dict, key: str, label: str, *, required: bool = False) -> str | None:
+    text = str(details.get(key) or "").replace("$", "").replace(",", "").strip()
+    if not text:
+        if required:
+            raise missing(f"Enter the eBay {label}.", f"ebay_specifics.{key}")
+        return None
+    try:
+        return dollars(money_cents(text))
+    except ValueError as exc:
+        raise missing(f"Enter the eBay {label} as a positive amount.", f"ebay_specifics.{key}") from exc
+
+
+def listing_format(snapshot: dict) -> dict:
+    """The seller's eBay format, duration and auction prices, as eBay's Inventory API spells them.
+
+    No choice is a fixed-price, Good 'Til Cancelled listing. eBay's own per-category
+    rules are checked live at List (``_check_format``).
+    """
+    from vendoo_studio.services.marketplace_schemas import _ebay_listing_type, ebay_duration
+
+    details = snapshot.get("ebay_specifics") if isinstance(snapshot.get("ebay_specifics"), dict) else {}
+    raw = str(details.get("listingFormat") or "").strip()
+    kind = _ebay_listing_type(raw) if raw else FIXED_PRICE
+    if kind is None:
+        raise missing("Choose Fixed price or Auction for eBay.", "ebay_specifics.listingFormat")
+    chosen = str(details.get("listingDuration") or "").strip()
+    duration = ebay_duration(chosen) if chosen else ("GTC" if kind == FIXED_PRICE else DEFAULT_AUCTION_DURATION)
+    if duration is None:
+        raise missing("Choose an eBay listing duration.", "ebay_specifics.listingDuration")
+    if kind == FIXED_PRICE and duration != "GTC":
+        raise missing("eBay fixed-price listings run Good 'Til Cancelled.", "ebay_specifics.listingDuration")
+    if kind == AUCTION and duration == "GTC":
+        raise missing("Choose how many days the eBay auction runs.", "ebay_specifics.listingDuration")
+    out: dict = {"format": kind, "duration": duration}
+    if kind == AUCTION:
+        start = _format_amount(details, "auctionStartPrice", "starting bid", required=True)
+        reserve = _format_amount(details, "auctionReservePrice", "reserve price")
+        buy_now = _format_amount(details, "auctionBuyItNow", "Buy It Now price")
+        if reserve and Decimal(reserve) <= Decimal(start):
+            raise missing("The eBay reserve price must be higher than the starting bid.", "ebay_specifics.auctionReservePrice")
+        if buy_now and Decimal(buy_now) <= Decimal(start):
+            raise missing("The eBay Buy It Now price must be higher than the starting bid.", "ebay_specifics.auctionBuyItNow")
+        out.update(start=start, reserve=reserve, buy_it_now=buy_now)
+    return out
+
+
+async def _check_format(client: EbayClient, category_id: str, chosen: dict) -> None:
+    """Refuse a format or duration eBay does not offer in this category, before anything is written."""
+    if chosen["format"] != AUCTION:
+        return
+    allowed = (await marketplace_schemas.ebay_listing_types(client, category_id)).get(AUCTION) or []
+    if not allowed:
+        raise missing("eBay does not offer auctions in this category. Choose Fixed price.", "ebay_specifics.listingFormat")
+    if chosen["duration"] not in allowed:
+        lengths = ", ".join(duration_label(value) for value in allowed)
+        raise missing(f"eBay auctions in this category run {lengths}.", "ebay_specifics.listingDuration")
+
+
 def _short_description(text: str) -> str:
     """The product's copy of the description (eBay keeps 4000 characters there; the listing keeps all of it)."""
     if len(text) <= PRODUCT_DESCRIPTION_MAX:
@@ -365,16 +437,22 @@ async def _not_found(call) -> dict | None:
         raise
 
 
-async def _offer_for(client: EbayClient, sku: str, binding: dict) -> dict | None:
-    """This item's one EBAY_US offer: the saved one, or the one eBay has for its SKU."""
+async def _offer_for(client: EbayClient, sku: str, binding: dict, kind: str = FIXED_PRICE) -> dict | None:
+    """This item's EBAY_US offer in the chosen format: the saved one, or the one eBay has for its SKU.
+
+    eBay keeps one offer per SKU and format. A live offer always wins; an
+    unpublished offer in the other format is left as it is.
+    """
     offer_id = str(binding.get("ebay_offer_id") or "")
     if offer_id:
-        return await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+        offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+        if offer.get("status") == "PUBLISHED" or offer.get("format", kind) == kind:
+            return offer
     if not binding.get("ebay_inventory_written"):
         # An offer needs the inventory item, which this item has never written.
         return None
     found = await _not_found(client.request("GET", "/sell/inventory/v1/offer",
-                                            params={"sku": sku, "marketplace_id": "EBAY_US", "format": "FIXED_PRICE"}))
+                                            params={"sku": sku, "marketplace_id": "EBAY_US", "format": kind}))
     offers = [offer for offer in (found or {}).get("offers") or []
               if offer.get("marketplaceId") in (None, "EBAY_US") and offer.get("offerId")]
     if len(offers) > 1:
@@ -762,11 +840,23 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
     if not 1 <= quantity <= 10000:
         raise missing("Enter an eBay quantity from 1 to 10000.", "quantity")
     from vendoo_studio.services.seller_overrides import price_for
+    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_enabled
 
-    try:
-        price = dollars(money_cents(str(price_for(snapshot, "ebay"))))
-    except (ValueError, ArithmeticError) as exc:
-        raise missing("Set a positive eBay price before listing.", "price") from exc
+    chosen = listing_format(snapshot)
+    if chosen["format"] == AUCTION:
+        if quantity != 1:
+            raise missing("An eBay auction sells one item. Set quantity to 1.", "quantity")
+        offer = (snapshot.get("ebay_specifics") or {}).get("bestOffer")
+        if isinstance(offer, dict) and offer and best_offer_enabled(offer):
+            raise missing("Turn off eBay offers for an auction. Anteroom sends offers only on fixed-price listings.",
+                          "ebay_specifics.bestOffer.enabled")
+        # The price on an auction is its optional Buy It Now.
+        price = chosen["buy_it_now"] or ""
+    else:
+        try:
+            price = dollars(money_cents(str(price_for(snapshot, "ebay"))))
+        except (ValueError, ArithmeticError) as exc:
+            raise missing("Set a positive eBay price before listing.", "price") from exc
     category_id = ebay_category_id(snapshot)
     condition, descriptors = card_condition(snapshot, category_id) or (ebay_condition(snapshot), [])
     condition_note = condition_description(snapshot, form)
@@ -774,7 +864,7 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
         raise missing("eBay condition descriptions are at most 1,000 characters.", "ebay_specifics.conditionDescription")
     return {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
             "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
-            "condition_description": condition_note}
+            "condition_description": condition_note, "format": chosen}
 
 
 @requirement("ebay")
@@ -828,6 +918,8 @@ async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict, 
     from vendoo_studio.services.ebay_actions import owned_listing
     from vendoo_studio.services.ebay_client import NS, trading_xml
 
+    if fields["format"]["format"] != FIXED_PRICE:
+        raise ValueError("eBay cannot change a live listing between fixed price and auction. End it on eBay and list it again.")
     before = await owned_listing(client, listing_id)
     if before["type"] != "FixedPriceItem":
         raise ValueError("Only a fixed-price eBay listing can be updated.")
@@ -886,16 +978,34 @@ def _inventory_body(fields: dict, aspects: dict, image_urls: list[str], snapshot
     return body
 
 
+def _usd(value: str) -> dict:
+    return {"value": value, "currency": "USD"}
+
+
+def offer_terms(form: dict, fields: dict, snapshot: dict) -> dict | None:
+    """Best Offer terms for a fixed-price offer. An auction carries none."""
+    return None if fields["format"]["format"] == AUCTION else best_offer_terms(form, fields["price"], snapshot)
+
+
 def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) -> dict:
+    chosen = fields["format"]
+    pricing = {"price": _usd(fields["price"])} if fields["price"] else {}
+    if chosen["format"] == AUCTION:
+        pricing["auctionStartPrice"] = _usd(chosen["start"])
+        if chosen.get("reserve"):
+            pricing["auctionReservePrice"] = _usd(chosen["reserve"])
+    policies = {key: value for key, value in policies.items() if value is not None}
     body = {
-        "sku": sku, "marketplaceId": "EBAY_US", "format": "FIXED_PRICE", "listingDuration": "GTC",
+        "sku": sku, "marketplaceId": "EBAY_US", "format": chosen["format"], "listingDuration": chosen["duration"],
         "includeCatalogProductDetails": False, "categoryId": fields["category_id"],
-        "availableQuantity": fields["quantity"],
-        "pricingSummary": {"price": {"value": fields["price"], "currency": "USD"}},
+        "pricingSummary": pricing,
         "listingDescription": description_html(fields["description"]),
         "merchantLocationKey": location,
         "listingPolicies": policies,
     }
+    if chosen["format"] != AUCTION:
+        # eBay: an auction offer does not carry availableQuantity.
+        body["availableQuantity"] = fields["quantity"]
     if fields.get("store_categories"):
         body["storeCategoryNames"] = fields["store_categories"]
     return body
@@ -930,6 +1040,8 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         current_id = str((offer.get("listing") or {}).get("listingId") or "")
         if offer.get("status") != "PUBLISHED" or current_id != listing_id:
             raise ValueError("This eBay offer is not the live listing. Check eBay before updating it.")
+        if offer.get("format", FIXED_PRICE) != fields["format"]["format"]:
+            raise ValueError("eBay cannot change a live listing between fixed price and auction. End it on eBay and list it again.")
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
         await _check_condition(client, fields["category_id"], fields["condition"])
         sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
@@ -940,7 +1052,7 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
                              body=_inventory_body(fields, aspects, image_urls, snapshot, form))
         policies = offer.get("listingPolicies") if isinstance(offer.get("listingPolicies"), dict) else {}
-        policies = {**policies, "bestOfferTerms": best_offer_terms(form, fields["price"], snapshot)}
+        policies = {**policies, "bestOfferTerms": offer_terms(form, fields, snapshot)}
         body = _offer_body(sku, fields, offer.get("merchantLocationKey"), policies)
         body.pop("includeCatalogProductDetails")
         await client.request("PUT", f"/sell/inventory/v1/offer/{segment(offer_id)}", body=body)
@@ -962,7 +1074,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         return await _update_live(snapshot, photos, binding, record, active)
     pending: str | None = None
     try:
-        if action != "list" or confirm is not True:
+        if action not in {"list", "save_draft"} or (action == "list" and confirm is not True):
             raise ValueError("Confirm listing on eBay.")
         if not active():
             raise ValueError("The eBay listing stopped before it started.")
@@ -978,15 +1090,17 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             raise ValueError(problem)
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
         await _check_condition(client, fields["category_id"], fields["condition"])
+        await _check_format(client, fields["category_id"], fields["format"])
         choices = await listing_choices(client)
         sku = ebay_sku(snapshot, binding, conversation_id)
         if not binding.get("ebay_inventory_written") and sku != item_key(conversation_id):
             # The seller's own SKU may already name another item on eBay. Never overwrite it.
             if await _not_found(client.request("GET", f"/sell/inventory/v1/inventory_item/{segment(sku)}")) is not None:
                 raise missing(f"eBay already has an item with SKU {sku}. Give this item its own SKU, then List again.", "sku")
-        offer = await _offer_for(client, sku, binding)
+        kind = fields["format"]["format"]
+        offer = await _offer_for(client, sku, binding, kind)
         if offer:
-            record({"ebay_sku": sku, "ebay_offer_id": str(offer.get("offerId") or binding["ebay_offer_id"])})
+            record({"ebay_sku": sku, "ebay_offer_id": str(offer.get("offerId") or binding["ebay_offer_id"]), "ebay_format": kind})
             live = _published(offer, record)
             if live:
                 return live
@@ -997,9 +1111,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                              body=_inventory_body(fields, aspects, image_urls, snapshot, form))
         body = _offer_body(sku, fields, choices["merchantLocationKey"], {
             "fulfillmentPolicyId": choices["fulfillmentPolicyId"], "paymentPolicyId": choices["paymentPolicyId"],
-            "returnPolicyId": choices["returnPolicyId"], "bestOfferTerms": best_offer_terms(form, fields["price"], snapshot),
+            "returnPolicyId": choices["returnPolicyId"], "bestOfferTerms": offer_terms(form, fields, snapshot),
         })
-        offer_id = str(binding.get("ebay_offer_id") or "")
+        offer_id = str((offer or {}).get("offerId") or "")
         if offer_id:
             # The offer from an earlier List: bring it up to date, then publish it.
             await client.request("PUT", f"/sell/inventory/v1/offer/{segment(offer_id)}", body=body)
@@ -1009,8 +1123,15 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             offer_id = str(created.get("offerId") or "")
             if not offer_id:
                 raise EbayFailure("eBay did not confirm the offer. Check eBay before listing again.")
-            record({"ebay_offer_id": offer_id})
+            record({"ebay_offer_id": offer_id, "ebay_format": kind})
             pending = None
+        if action == "save_draft":
+            # Saved on eBay, not listed: an unpublished offer buyers cannot see. Read it back.
+            saved = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+            differences = offer_differences(saved, sku, fields)
+            if differences:
+                raise ValueError(f"eBay saved different values for: {', '.join(differences)}. Check the item before listing.")
+            return {"ok": True, "state": "draft"}
         if not active():
             raise ValueError("The eBay listing stopped before it was published. List again to publish it.")
         pending = "publish"
@@ -1034,12 +1155,18 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
         client = await EbayClient.connect()
         if binding.get("action") == "update" and snapshot:
             return await _check_update(client, binding, snapshot)
-        offer = await _offer_for(client, sku, binding)
+        offer = await _offer_for(client, sku, binding, str(binding.get("ebay_format") or FIXED_PRICE))
         if offer:
             record({"ebay_offer_id": str(offer.get("offerId") or binding.get("ebay_offer_id"))})
             live = _published(offer, record)
             if live:
                 return live
+            if binding.get("action") == "save_draft" and snapshot:
+                form = snapshot.get("form") if isinstance(snapshot.get("form"), dict) else vendoo_form(snapshot, "ebay")
+                differences = offer_differences(offer, sku, _listing_fields(snapshot, form))
+                if differences:
+                    raise ValueError(f"eBay saved different values for: {', '.join(differences)}. Save the draft again.")
+                return {"ok": True, "state": "draft"}
             return resumable("eBay has this listing saved but not live. List again to publish it.")
         return resumable("eBay has no listing for this item. List again.")
     except Exception as exc:
@@ -1047,9 +1174,38 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
         return {**result, "safe_to_retry": False, "error_code": "uncertain" if result["error_code"] != "signed_out" else "signed_out"}
 
 
+def _same_amount(saved: object, expected: str | None) -> bool:
+    value = (saved or {}).get("value") if isinstance(saved, dict) else None
+    if not expected:
+        return value in (None, "")
+    try:
+        return Decimal(str(value)) == Decimal(expected)
+    except ArithmeticError:
+        return False
+
+
+def offer_differences(offer: dict, sku: str, fields: dict) -> list[str]:
+    """What eBay's saved offer holds differently from the revision sent. Empty when it matches."""
+    chosen = fields["format"]
+    pricing = offer.get("pricingSummary") if isinstance(offer.get("pricingSummary"), dict) else {}
+    checks = {
+        "SKU": offer.get("sku") == sku,
+        "format": offer.get("format") == chosen["format"],
+        "duration": offer.get("listingDuration") == chosen["duration"],
+        "category": str(offer.get("categoryId") or "") == fields["category_id"],
+        "price" if chosen["format"] == FIXED_PRICE else "Buy It Now price": _same_amount(pricing.get("price"), fields["price"] or None),
+    }
+    if chosen["format"] == AUCTION:
+        checks["starting bid"] = _same_amount(pricing.get("auctionStartPrice"), chosen["start"])
+        checks["reserve price"] = _same_amount(pricing.get("auctionReservePrice"), chosen.get("reserve"))
+    else:
+        checks["quantity"] = str(offer.get("availableQuantity") or "") == str(fields["quantity"])
+    return [name for name, same in checks.items() if not same]
+
+
 async def _check_update(client: EbayClient, binding: dict, snapshot: dict) -> dict:
     title = ebay_title(snapshot)
-    expected = dollars(money_cents(str(snapshot.get("price"))))
+    expected = dollars(money_cents(str(snapshot.get("price")))) if listing_format(snapshot)["format"] == FIXED_PRICE else ""
     offer_id = str(binding.get("ebay_offer_id") or "")
     listing_id = str(binding.get("listing_id") or binding.get("ebay_listing_id") or "")
     if not offer_id:
@@ -1063,8 +1219,12 @@ async def _check_update(client: EbayClient, binding: dict, snapshot: dict) -> di
     sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
     item = await client.request("GET", f"/sell/inventory/v1/inventory_item/{segment(sku)}") if sku else {}
     product = item.get("product") if isinstance(item.get("product"), dict) else {}
-    price = str((offer.get("pricingSummary") or {}).get("price", {}).get("value") or "")
-    if product.get("title") != title or price != expected:
+    chosen = listing_format(snapshot)
+    if chosen["format"] == AUCTION:
+        same_price = _same_amount((offer.get("pricingSummary") or {}).get("auctionStartPrice"), chosen["start"])
+    else:
+        same_price = str((offer.get("pricingSummary") or {}).get("price", {}).get("value") or "") == expected
+    if product.get("title") != title or not same_price:
         raise ValueError("eBay has not confirmed the update. Check the live listing before trying again.")
     listing_id = str((offer.get("listing") or {}).get("listingId") or listing_id)
     if offer.get("status") == "PUBLISHED" and listing_id:
