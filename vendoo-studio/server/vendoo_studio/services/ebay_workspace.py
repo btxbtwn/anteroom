@@ -271,7 +271,9 @@ def research_page(body: dict, offset: int) -> dict:
 async def listing(client: EbayClient, listing_id: str) -> dict:
     if not listing_id.isdigit():
         raise EbayFailure("Enter an eBay listing ID.", 422)
-    result = await client.trading("GetItem", {"ItemID": listing_id, "DetailLevel": "ReturnAll"})
+    # eBay's GetItem reference requires this flag for ItemSpecifics even when
+    # ReturnAll is used: https://developer.ebay.com/devzone/xml/docs/reference/ebay/getitem.html
+    result = await client.trading("GetItem", {"ItemID": listing_id, "DetailLevel": "ReturnAll", "IncludeItemSpecifics": "true"})
     item = result["xml"].find("e:Item", NS)
     if item is None:
         raise EbayFailure("eBay did not return the listing.")

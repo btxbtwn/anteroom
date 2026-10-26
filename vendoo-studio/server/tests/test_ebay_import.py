@@ -66,7 +66,7 @@ class ReadOnlyEbay:
     async def trading(self, call, fields):
         self.calls.append((call, fields))
         assert call == "GetItem", "Import must not write to eBay"
-        assert fields == {"ItemID": ITEM_ID, "DetailLevel": "ReturnAll"}
+        assert fields == {"ItemID": ITEM_ID, "DetailLevel": "ReturnAll", "IncludeItemSpecifics": "true"}
         return {"xml": response("GetItemResponse", self.item)}
 
     async def request(self, method, path, *, xml, call):
