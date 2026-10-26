@@ -119,6 +119,26 @@ def test_health_get_json(catalog_file, config_dir, capsys):
     assert captured.err == ""
 
 
+def test_gender_check_sends_an_empty_body_when_apply_is_left_off(catalog_file, config_dir, capsys):
+    del catalog_file, config_dir
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.content
+        seen["path"] = request.url.path
+        return httpx.Response(200, json={"ok": True, "department": "Men", "applied": False})
+
+    code = main(
+        ["conversations", "department-review", "--conv-id", "c1", "--json"],
+        transport=_transport(handler),
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["data"]["department"] == "Men"
+    assert seen["path"] == "/api/conversations/c1/department/review"
+    assert seen["body"] == b"{}"
+
+
 def test_api_error_exit_code(catalog_file, config_dir, capsys):
     del catalog_file, config_dir
 
