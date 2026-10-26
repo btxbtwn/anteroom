@@ -86,8 +86,16 @@ class AnteroomClient:
         ) as response:
             content_type = response.headers.get("content-type", "")
             if "text/event-stream" not in content_type:
+                # iter_bytes() already removed content-encoding. Building a new
+                # response with the original headers makes httpx decode the
+                # plain body a second time (gzip raises DecodingError).
                 body = b"".join(response.iter_bytes())
-                finished = httpx.Response(response.status_code, headers=response.headers, content=body)
+                headers = [
+                    (key, value)
+                    for key, value in response.headers.multi_items()
+                    if key.lower() not in {"content-encoding", "content-length"}
+                ]
+                finished = httpx.Response(response.status_code, headers=headers, content=body)
                 return _interpret(finished, output)
             events: list[Any] = []
             raw_lines: list[str] = []

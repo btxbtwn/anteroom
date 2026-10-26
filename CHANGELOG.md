@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.382 — 2026-10-26
+## 0.1.383 — 2026-10-26
 
 - Match previously received sale alerts when you link an item, sync its marketplaces, or refresh Etsy alerts. Other-marketplace warnings now include Anteroom's direct listings and exclude listings already sold or removed, without relying on Vendoo.
+
+## 0.1.382 — 2026-10-26
+
+- `anteroom api request` can read the changelog and other ordinary pages again, and a failed command still prints `--json` when you asked for it.
 
 ## 0.1.381 — 2026-10-26
 
