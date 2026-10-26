@@ -117,6 +117,15 @@ class Client:
 
 
 class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
+    def test_offer_controls_and_category_metadata_are_not_product_aspects(self):
+        listing = {"ebay_specifics": {
+            "autoAccept": 14, "minimumOffer": 12, "category_path": ["Men", "T-Shirts"],
+            "primaryStoreCategory": "Other", "secondaryStoreCategory": "Other",
+            "category_specifics": {"Brand": "Tennessee River", "Size": "XL", "storeCategoryName": "Other",
+                                   "condition": "Pre-owned - Good", "upc": "Does Not Apply"},
+        }}
+        self.assertEqual(ebay_listings.ebay_aspects(listing, {}), {"Brand": ["Tennessee River"], "Size": ["XL"]})
+
     def setUp(self):
         self.temp = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(patch.object(ebay_listings, "PHOTOS_DIR", self.temp))

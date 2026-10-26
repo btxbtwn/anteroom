@@ -8,6 +8,7 @@ from typing import Any
 
 from vendoo_studio.models.sizes import letter_size
 from vendoo_studio.models.listing_values import (
+    as_list,
     collapse_option,
     dropdown_field_options,
     infer_known_option,
@@ -594,11 +595,9 @@ def normalize_ebay_fabric_weight(value: Any) -> tuple[Any, bool]:
 
 def _infer_ebay_fabric_type(listing: dict | None, ebay: dict | None) -> str | None:
     ebay = ebay if isinstance(ebay, dict) else {}
-    material = text_value(ebay_optional_raw(ebay, "material") or (listing or {}).get("material"))
-    if material:
-        first = material.split(",")[0].strip()
-        if first:
-            return first
+    materials = as_list(ebay_optional_raw(ebay, "material") or (listing or {}).get("material"))
+    if materials:
+        return materials[0]
     hay = ebay_season_haystack(listing, ebay)
     for pattern, label in (
         (r"\bdenim\b", "Denim"),
@@ -707,7 +706,8 @@ def ensure_ebay_category_optionals(listing: dict) -> bool:
             changed = True
 
     # Material: copy fabricType fiber when material empty and fabric looks like a fiber.
-    if ebay_optional_blank(ebay_optional_raw(ebay, "material")):
+    # A present blank is the seller's clear, not permission to refill it.
+    if not ebay_optional_keys(ebay, "material"):
         fabric_val = text_value(ebay_optional_raw(ebay, "fabricType"))
         if fabric_val and fabric_val.casefold() not in {
             "knit", "jersey", "woven", "canvas", "twill", "microfiber",

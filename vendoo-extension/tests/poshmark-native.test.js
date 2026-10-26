@@ -104,7 +104,7 @@ test('an update writes the live Poshmark post and does not create or publish ano
     if (method === 'POST' && path === `/vm-rest/posts/${POST}`) { saved = true; return reply(200, { data: {} }); }
     if (method === 'GET' && path === `/vm-rest/posts/${POST}`) {
       return reply(200, { data: { id: POST, status: 'published', creator_id: USER, title: saved ? 'Vintage tee' : 'Old title',
-        price_amount: { val: saved ? '18' : '10' }, inventory: { size_quantity_revision: 3, size_quantities: [{ quantity_sold: 0 }] } } });
+        price_amount: { val: saved ? '18.0' : '10' }, inventory: { size_quantity_revision: 3, size_quantities: [{ quantity_sold: 0 }] } } });
     }
     return reply(500, {});
   };

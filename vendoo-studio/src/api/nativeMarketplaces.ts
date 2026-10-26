@@ -39,6 +39,7 @@ export interface NativePreflight {
 export interface SellwildChoice { categoryId?: number; conditionId?: number }
 /** The Poshmark tab's choices from Poshmark's own catalog. */
 export interface PoshmarkOptions {
+  catalog_available?: boolean;
   category: string[];
   subcategories: string[];
   colors: string[];

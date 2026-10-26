@@ -36,6 +36,18 @@ const schema: MarketplaceForm[] = [{
 }];
 
 describe("marketplace form fields", () => {
+  it("retains native multi-select rules when an existing listing row matches the schema", () => {
+    const forms: MarketplaceForm[] = [{ ...schema[0], fields: [{
+      key: "Season", label: "Season", value: "Spring, Summer", required: false,
+      multi: true, selection_only: true, options: ["Spring", "Summer", "Fall", "Winter"],
+      max_values: 4, max_length: 65, options_source: "marketplace",
+    }] }];
+    const fields = fieldsForMarketplaceForm({ ...listing, ebay_specifics: { season: ["Spring", "Summer"] } }, "ebay", forms);
+    expect(fields.find((field) => field.label === "Season")).toMatchObject({
+      multi: true, selectionOnly: true, maxValues: 4, maxLength: 65, optionsSource: "marketplace",
+    });
+  });
+
   it("shows the shared listing fields on a marketplace, then that marketplace's own", () => {
     const labels = fieldsForMarketplaceForm(listing, "mercari", undefined).map((field) => field.label);
     expect(labels.slice(0, 6)).toEqual(["Title", "Description", "Price", "Brand", "Condition", "Size"]);
@@ -47,16 +59,18 @@ describe("marketplace form fields", () => {
     const mercariSchema: MarketplaceForm[] = [{
       marketplace: "mercari", category_id: "1931", known: true,
       fields: [
-        ...["Quantity", "Shipping Label", "Delivery Method", "Who will pay for delivery?"].map((label) => ({
+        ...["Quantity", "Shipping Label", "Delivery Method", "Who will pay for delivery?", "Payer", "Who pays"].map((label) => ({
           key: label, label, value: "", required: false, multi: false, selection_only: false, options: [] as string[],
         })),
         { key: "size", label: "Size", value: "XL (18/20)", required: true, multi: false, selection_only: true,
           options: ["XL (14-16)", "2XL (18)"] },
       ],
     }];
-    const fields = fieldsForMarketplaceForm({ ...listing, primaryColor: "Blue", quantity: 1 }, "mercari", mercariSchema);
+    const fields = fieldsForMarketplaceForm({ ...listing, primaryColor: "Blue", quantity: 1,
+      mercari_specifics: { ...listing.mercari_specifics, payer: "1" },
+    }, "mercari", mercariSchema);
     const labels = fields.map((field) => field.label.replace(/\s*\*$/, ""));
-    for (const absent of ["Quantity", "Primary Color", "Secondary Color", "Shipping Label", "Delivery Method", "Who will pay for delivery?"]) {
+    for (const absent of ["Quantity", "Primary Color", "Secondary Color", "Shipping Label", "Delivery Method", "Who will pay for delivery?", "Payer", "Who pays"]) {
       expect(labels).not.toContain(absent);
     }
     const condition = fields.find((field) => field.label === "Condition");

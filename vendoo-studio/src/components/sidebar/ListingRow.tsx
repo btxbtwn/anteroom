@@ -57,7 +57,7 @@ export function ListingRow({
   const coverUrl = listing.cover_photo_url || listing.vendoo_cover_url || null;
   const status = inventoryStatus(listing);
   const statusTitle = status === "active" && String(listing.status || "draft") !== "active"
-    ? "Listed from Anteroom. Vendoo still has this item as a draft."
+    ? "Listed directly from Anteroom."
     : statusHint(status);
   const settledAt = settled ? compactRelativeTime(listing.settled_at || listing.updated_at) : "";
   const queryClient = useQueryClient();

@@ -477,6 +477,9 @@ export interface MarketplaceFormField {
   multi: boolean;
   selection_only: boolean;
   options: string[];
+  max_values?: number | null;
+  max_length?: number | null;
+  options_source?: "marketplace" | "vendoo" | "reference" | "saved";
 }
 
 /** A marketplace's form for one listing. ``known`` is false when no schema is cached. */

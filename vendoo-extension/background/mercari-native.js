@@ -94,18 +94,19 @@ function mercariNumberedSizes(wanted, sizes) {
   });
 }
 
-// Mercari's size id: Vendoo's coded ``<leaf>_Size`` first, else the seller's
-// size among the category's own sizes (Studio sends them as form.sizes, in
+// Mercari's size id: the seller's label among the category's own sizes first
+// (Studio sends them as form.sizes, in
 // Mercari's order), its numbers before its letters. A size that only matches
 // inside a fit the listing does not name, or several fits when it names one,
 // is not chosen. ``none: 'unknown'`` means Studio could not read the sizes.
 function mercariSize(listing, categoryId) {
   const sizes = listing.form?.sizes;
   if (!Array.isArray(sizes) || !sizes.length) return { none: !Array.isArray(sizes) ? 'unknown' : 'none' };
-  const coded = Number(listing.form?.aspects?.[`${categoryId}_Size`]);
-  if (coded && sizes.some(size => Number(size.id) === coded)) return { id: coded };
   const wanted = mercariWantedSize(listing);
-  if (!wanted) return { problem: 'a size' };
+  if (!wanted) {
+    const coded = Number(listing.form?.aspects?.[`${categoryId}_Size`]);
+    return coded && sizes.some(size => Number(size.id) === coded) ? { id: coded } : { problem: 'a size' };
+  }
   const entries = sizes.map(size => ({ size, keys: sizeEntryKeys([size.name, size.title]) }));
   const numbered = mercariNumberedSizes(wanted, sizes);
   const found = numbered.length ? entries.filter(entry => numbered.includes(entry.size)) : matchSize(wanted, entries);
@@ -153,7 +154,7 @@ function mercariCommon(listing) {
     const size = mercariSize(listing, categoryId);
     if (size.id) common.sizeId = size.id;
   }
-  const zip = [specifics.shipping?.location, listing.form?.ships_from_zip, listing.zipCode].map(value => String(value ?? '').trim())
+  const zip = [listing.form?.ships_from_zip, listing.zipCode, specifics.shipping?.location].map(value => String(value ?? '').trim())
     .find(value => /^\d{5}$/.test(value));
   const weight = mercariWeightOz(listing);
   const payerId = [MERCARI_SHIPPING_PAYER.BUYER, MERCARI_SHIPPING_PAYER.SELLER].includes(Number(specifics.shipping?.payerId))
@@ -269,7 +270,10 @@ function mercariHeaders(session) {
 function mercariFailure(operationName, errors, write) {
   const list = Array.isArray(errors) ? errors : [];
   const text = JSON.stringify(list).slice(0, 4000);
-  const own = list.map(entry => String(entry?.message || '')).filter(Boolean).join(' ');
+  const own = list.map(entry => {
+    const message = String(entry?.message || '');
+    return message.match(/Field "[^"]+" is not defined by type "[^"]+"[^]*$/)?.[0] || message;
+  }).filter(Boolean).join(' ');
   if (/PersistedQueryNotFound|PERSISTED_QUERY|is not defined by type|Unknown field|GRAPHQL_VALIDATION_FAILED/i.test(text)) {
     return marketplaceError('Mercari changed its listing form. Anteroom needs an update before listing there.', { code: 'schema_drift', marketplace_message: own });
   }
@@ -445,27 +449,27 @@ async function runMercariNative(msg, recovery = false) {
     if (missing.length) throw marketplaceMissing('mercari', missing);
     const brandId = await mercariBrandId(payload.listing, payload.deadline);
     if (brandId) common.brandId = brandId;
-    let expectedPhotos = null;
+    const photos = payload.photos || [];
+    if (!photos.length || photos.length > MERCARI_MAX_PHOTOS) {
+      throw marketplaceMissing('mercari', [{ field: 'photos', needs: `between one and ${MERCARI_MAX_PHOTOS} photos` }]);
+    }
+    // Mercari replaces the image list on edit too; leaving it out clears the draft's photos.
+    common.imageIds = await mercariUploadPhotos(msg.job_id, photos, payload.deadline);
+    const expectedPhotos = photos.length;
     if (id) {
       stage = 'writing';
       const data = await mercariRequest(mercariOperation('editDraftItemMutation', { input: { id, common } }), { deadline: payload.deadline });
       stage = 'written';
       if (String(data.editDraftItem?.id || '') !== id) throw new Error('Mercari did not confirm the draft update. Check the draft before trying again.');
     } else {
-      const photos = payload.photos || [];
-      if (!photos.length || photos.length > MERCARI_MAX_PHOTOS) {
-        throw marketplaceMissing('mercari', [{ field: 'photos', needs: `between one and ${MERCARI_MAX_PHOTOS} photos` }]);
-      }
-      const imageIds = await mercariUploadPhotos(msg.job_id, photos, payload.deadline);
       stage = 'writing';
-      const data = await mercariRequest(mercariOperation('addDraftItemMutation', { input: { common: { ...common, imageIds } } }), { deadline: payload.deadline });
+      const data = await mercariRequest(mercariOperation('addDraftItemMutation', { input: { common } }), { deadline: payload.deadline });
       stage = 'written';
       id = String(data.addDraftItem?.item?.id || '');
       if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) throw new Error('Mercari did not confirm a new draft. Check your Mercari drafts before trying again.');
       payload.draft_url = `https://www.mercari.com/sell/draft/${id}/`;
-      expectedPhotos = photos.length;
-      await storeReceipt({ receipt_url: payload.draft_url, expected_photo_count: expectedPhotos });
     }
+    await storeReceipt({ receipt_url: payload.draft_url, expected_photo_count: expectedPhotos });
     const draft = await readMercariDraft(id, payload.deadline);
     const mismatch = mercariDraftMismatch(draft, common, expectedPhotos, 'Mercari did not keep everything this listing sent');
     if (mismatch) throw mismatch;

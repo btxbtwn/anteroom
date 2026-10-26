@@ -11,6 +11,8 @@ const CATALOG = { catalog: { departments: [{ id: DEPT, display: 'Men', categorie
     { id: 'M', short: 'M', display: 'M' }, { id: 'XL', short: 'XL', display: 'XL' },
   ] } } }] }] }] } };
 const ATTRIBUTES = {
+  category_size_mapping: [],
+  size_sets: [],
   department: [{ id: 'menswear' }, { id: 'womenswear' }],
   group: [
     { id: 'tops', department: ['menswear', 'womenswear'], product_types: [{ id: 'tshirts' }] },
@@ -55,4 +57,20 @@ test('one size categories and a live parcel title are not refused', () => {
   }, { catalog, parcels: [{ title: 'Oversize' }] });
   assert.deepEqual(preview.gaps.poshmark, []);
   assert.deepEqual(preview.gaps.depop, []);
+});
+
+test('Depop preflight uses the same category size check as draft creation', () => {
+  const c = loadWorker();
+  const attributes = { ...ATTRIBUTES,
+    category_size_mapping: [{ department: 'menswear', product_type: 'tshirts', size_set_by_region: { US: 12 } }],
+    size_sets: [{ id: 12, sizes: [{ id: 4, name_i18n: { 'en-US': 'M' } }] }],
+  };
+  const listing = { direct_category_ids: { depop: 'menswear_tshirts' } };
+  for (const size of ['', '40R']) {
+    const preview = call(c, 'chromeDirectPreview', { ...listing, size }, { attributes });
+    assert.equal(preview.gaps.depop[0].field, 'size');
+    assert.equal(preview.gaps.depop[0].blocking, true);
+  }
+  assert.deepEqual(call(c, 'chromeDirectPreview', { ...listing, size: 'M' }, { attributes }).gaps.depop, []);
+  assert.deepEqual(call(c, 'chromeDirectPreview', listing, { attributes: ATTRIBUTES }).gaps.depop, []);
 });

@@ -339,6 +339,16 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         raise NativeMarketplaceError(400, f"Confirm updating the live {name} listing." if kind == "update" else f"Confirm listing on {name}.")
     if kind == "update" and marketplace not in {"ebay", "etsy", "poshmark"}:
         raise NativeMarketplaceError(409, f"A live {name} listing cannot be updated from Anteroom yet.")
+    if kind == "list":
+        from vendoo_studio.services.marketplace_delist import listings as live_listings
+
+        conv = _conversation(db, conv_id)
+        listings = live_listings(db, conv_id)
+        if conv.status == "sold" or any(entry.get("sold_here") for entry in listings.values()):
+            raise NativeMarketplaceError(409, "This item has sold. It cannot be listed again.")
+        existing = listings.get(marketplace) or {}
+        if existing.get("listing_id") and existing.get("state") != "deleted":
+            raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
     snapshot, photos = await _preflight(db, conv_id, marketplace, body)
     if not photos:
         raise NativeMarketplaceError(400, "Add photos before updating the live listing." if kind == "update" else "Add photos before listing.")
@@ -914,6 +924,7 @@ async def poshmark_options(conv_id: str, db: Session) -> dict:
         "subcategories": [*features, "None"] if features else [],
         "colors": colors or list(POSHMARK_COLORS),
         "conditions": POSHMARK_CONDITIONS,
+        "catalog_available": bool(colors and category),
     }
 
 

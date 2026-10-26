@@ -75,6 +75,10 @@ function chromeDirectPreview(listing, sources = {}) {
     if (category) {
       const id = depopDirectId(category);
       if (id) categories.depop = id;
+      const size = depopSize(depopListing, category, sources.attributes);
+      if (size.problem) {
+        gaps.depop.push({ field: 'size', message: `Depop needs ${size.problem}.`, blocking: true });
+      }
     } else if (hasDepopCategory(depopListing)) {
       gaps.depop.push({
         field: 'direct_category_ids.depop', message: 'Depop needs a category from its own list.', blocking: true,
