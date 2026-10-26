@@ -1,6 +1,6 @@
 /** T3 Code-style settings categories for Vendoo Studio. */
 
-export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "connections" | "data" | "logs" | "help";
+export type SettingsSectionId = "general" | "listings" | "assistant" | "providers" | "connections" | "agents" | "data" | "logs" | "help";
 
 export type SettingsNavItem = {
   id: SettingsSectionId;
@@ -23,6 +23,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
   { id: "assistant", label: "Assistant" },
   { id: "providers", label: "Providers" },
   { id: "connections", label: "Connections" },
+  { id: "agents", label: "Agents" },
   { id: "data", label: "Data" },
   { id: "logs", label: "Logs" },
   { id: "help", label: "Help" },
@@ -34,6 +35,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
   assistant: "Assistant",
   providers: "Providers",
   connections: "Connections",
+  agents: "Agents",
   data: "Data",
   logs: "Logs",
   help: "Help",
@@ -251,6 +253,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "connections",
     targetId: "direct-etsy",
     searchTerms: ["etsy", "sold", "sale", "detect sales", "delist", "connect", "sign in", "notification"],
+  },
+  {
+    id: "agent-cli",
+    title: "Connect an agent",
+    section: "agents",
+    targetId: "agent-cli",
+    searchTerms: ["anteroom", "cli", "command line", "mcp", "cursor", "claude desktop", "claude code", "agent"],
   },
   {
     id: "tailscale-https",

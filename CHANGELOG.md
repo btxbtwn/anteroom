@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.383 — 2026-10-26
+
+- Settings → Agents shows whether the anteroom command is installed, the address an agent should use, and copy-ready setup for Cursor, Claude Desktop, and Claude Code. Test connection checks that the command can reach this app.
+
 ## 0.1.382 — 2026-10-26
 
 - `anteroom api request` can read the changelog and other ordinary pages again, and a failed command still prints `--json` when you asked for it.

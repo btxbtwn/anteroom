@@ -85,6 +85,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     ],
   },
   {
+    id: "help-connect-agent",
+    title: "Connect an agent",
+    steps: [
+      "Go to Settings → Agents. It shows whether the **anteroom** command is installed and the address an agent on this Mac should use.",
+      "If it says the command is not installed, run the install command shown there from the vendoo-studio folder, then reopen Agents.",
+      "Press **Copy** on the login command and run it in a terminal. On this Mac the command already talks to this app, so this saves that address.",
+      "Pick **Cursor**, **Claude Desktop**, or **Claude Code**, press **Copy**, and paste that setup into the place the row names.",
+      "Press **Test connection**. It only checks that the command can reach this app. An agent still cannot publish or delete unless you confirm it.",
+    ],
+  },
+  {
     id: "help-connect-chrome",
     title: "Connect Chrome and the extension",
     steps: [

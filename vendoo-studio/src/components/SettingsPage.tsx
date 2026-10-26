@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS_SECTION,
   type SettingsSectionId,
 } from "./settingsNav";
+import { AgentSettings } from "./settings/AgentSettings";
 import { AssistantSettings } from "./settings/AssistantSettings";
 import { ConnectionsSettings } from "./settings/ConnectionsSettings";
 import { DataSettings } from "./settings/DataSettings";
@@ -59,6 +60,7 @@ export function SettingsPage({
       {section === "assistant" ? <AssistantSettings /> : null}
       {section === "providers" ? <ProvidersSettings /> : null}
       {section === "connections" ? <ConnectionsSettings /> : null}
+      {section === "agents" ? <AgentSettings /> : null}
       {section === "data" ? <DataSettings /> : null}
       {section === "logs" ? <LogsSettings /> : null}
       {section === "help" ? <HelpSettings /> : null}
