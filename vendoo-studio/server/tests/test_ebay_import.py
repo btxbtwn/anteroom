@@ -275,3 +275,12 @@ def test_two_requests_finishing_the_same_import_reuse_one_item_and_clean_unused_
     result = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID}).json()
     assert result["reused"] and imported.db.query(Conversation).count() == 1
     assert list(imported.directory.iterdir()) == []
+
+
+def test_an_anteroom_inventory_key_is_not_imported_as_the_item_sku():
+    info = {"title": "Tee", "description": "Soft", "price": "12.00", "quantity": 1, "soldQuantity": 0,
+            "type": "FixedPriceItem", "condition": "Pre-owned - Good", "categoryName": "Shirts",
+            "categoryId": "15687", "specifics": {"Brand": ["Nike"]}}
+    assert ebay_import.listing_snapshot({**info, "sku": "ar-abc123"})["sku"] is None
+    assert ebay_import.listing_snapshot({**info, "sku": ""})["sku"] is None
+    assert ebay_import.listing_snapshot({**info, "sku": "COAT-1"})["sku"] == "COAT-1"

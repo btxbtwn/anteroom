@@ -170,6 +170,17 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("locked", fields["ebay_specifics.conditionDescription"])
         self.assertEqual(fields["ebay_specifics.conditionDescription"]["max_length"], 1000)
         self.assertEqual(ebay_listings.ebay_condition({"ebay_specifics": {"condition": "1000"}}), "NEW")
+        self.assertEqual(fields["sku"]["value"], "")
+
+    async def test_a_generated_ebay_inventory_key_is_not_shown_as_the_sku(self):
+        rows = [{"id": "condition", "name": "Condition", "required": True, "multi": False, "mode": "selection", "values": []}]
+        with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)):
+            generated = await native_editor.ebay_form({"direct_category_ids": {"ebay": "15687"}, "sku": "ar-abc123", "condition": "Good"})
+            typed = await native_editor.ebay_form({"direct_category_ids": {"ebay": "15687"}, "sku": "HAT-1", "condition": "Good"})
+        generated_sku = next(row for row in generated["fields"] if row["path"] == "sku")
+        typed_sku = next(row for row in typed["fields"] if row["path"] == "sku")
+        self.assertEqual(generated_sku["value"], "")
+        self.assertEqual(typed_sku["value"], "HAT-1")
 
     def test_ebay_size_follows_size_type_from_taxonomys_parent_constraints(self):
         size = {

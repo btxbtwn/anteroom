@@ -64,6 +64,16 @@ async def active_listings(client: EbayClient, db: Session, page_number: int) -> 
             "has_more": page_number < pages if pages is not None else len(rows) == PAGE_SIZE}
 
 
+def _seller_sku(value) -> str | None:
+    """A SKU the seller typed on eBay. Anteroom's inventory key is not one."""
+    from vendoo_studio.services.ebay_listings import generated_inventory_key
+
+    text = str(value or "").strip()
+    if not text or generated_inventory_key(text):
+        return None
+    return text
+
+
 def listing_snapshot(info: dict) -> dict:
     total, sold = _number(info.get("quantity")), _number(info.get("soldQuantity"))
     if total is None or sold is None or sold > total:
@@ -84,7 +94,7 @@ def listing_snapshot(info: dict) -> dict:
 
     category = str(info.get("categoryName") or "").replace(":", " > ")
     return {"title": info["title"], "description": info["description"], "price": float(price), "quantity": total - sold,
-            "brand": first("brand"), "size": first("size"), "sku": info.get("sku") or None,
+            "brand": first("brand"), "size": first("size"), "sku": _seller_sku(info.get("sku")),
             "condition": ListingSchema.validate_condition(info.get("condition") or None),
             "category_path": category, "marketplace_categories": {"ebay": category},
             "marketplace_category_ids": {"ebay": info.get("categoryId")},

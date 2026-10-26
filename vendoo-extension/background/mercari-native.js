@@ -191,6 +191,9 @@ function mercariNumberedSizes(wanted, sizes) {
 }
 
 const MERCARI_NO_BRAND = 'No Brand/Not sure';
+// Mercari leaves a draft's brand unchanged when brandId is omitted or null.
+// Zero is the empty brand its form sends to clear one.
+const MERCARI_EMPTY_BRAND = 0;
 const MERCARI_NO_BRAND_KEYS = new Set(['', 'unbranded', 'no brand', 'not sure', 'no brand not sure', 'no brand/not sure',
   'none', 'n a', 'na', 'unknown']);
 
@@ -341,7 +344,7 @@ function mercariCommon(listing) {
   const smart = listing.mercari_specifics?.smartPricing;
   const common = { name: String(listing.title || '').trim(), isAutoPriceDrop: smart?.enabled === true };
   if (common.isAutoPriceDrop) common.minPriceForAutoPriceDrop = mercariPriceCents(smart.minimumPrice);
-  if (listing.mercari_specifics?.noBrand === true || Object.hasOwn(listing, 'brand') && !String(listing.brand || '').trim()) common.brandId = null;
+  if (listing.mercari_specifics?.noBrand === true || Object.hasOwn(listing, 'brand') && !String(listing.brand || '').trim()) common.brandId = MERCARI_EMPTY_BRAND;
   if (listing.description) common.description = String(listing.description).trim();
   const price = mercariPriceCents(listing.mercari_specifics?.price ?? listing.price);
   if (price != null) common.price = price;
@@ -429,7 +432,14 @@ async function mercariBrandId(listing, deadline) {
 }
 
 function applyMercariBrand(common, brand) {
-  if (brand.explicit || brand.id) common.brandId = brand.id;
+  if (brand.id) common.brandId = brand.id;
+  else if (brand.explicit) common.brandId = MERCARI_EMPTY_BRAND;
+}
+
+function mercariBrandPresent(id) {
+  if (id == null || id === '') return false;
+  const number = Number(id);
+  return Number.isFinite(number) ? number > 0 : String(id).trim() !== '';
 }
 
 function mercariBrandLookup(name, deadline) {
@@ -602,8 +612,9 @@ function mercariDraftDifferences(draft, common, expectedPhotos) {
   if (expectedPhotos != null && draft.photo_count !== expectedPhotos) differ.push('photos');
   if (common.categoryId != null && Number(draft.categoryId) !== common.categoryId) differ.push('category');
   if (common.conditionId != null && Number(draft.conditionId) !== common.conditionId) differ.push('condition');
-  if (common.brandId != null && Number(draft.brandId) !== common.brandId) differ.push('brand');
-  if (Object.hasOwn(common, 'brandId') && common.brandId == null && draft.brandId != null) differ.push('brand');
+  if (mercariBrandPresent(common.brandId)) {
+    if (Number(draft.brandId) !== Number(common.brandId)) differ.push('brand');
+  } else if (Object.hasOwn(common, 'brandId') && mercariBrandPresent(draft.brandId)) differ.push('brand');
   if (common.sizeId != null && Number(draft.sizeId) !== common.sizeId) differ.push('size');
   if (Boolean(draft.isAutoPriceDrop) !== Boolean(common.isAutoPriceDrop)
     || common.isAutoPriceDrop && Number(draft.minPriceForAutoPriceDrop) !== common.minPriceForAutoPriceDrop) differ.push('Smart Pricing');
