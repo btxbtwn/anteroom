@@ -105,6 +105,7 @@ def merge_live_fields(vendoo_fields: list[dict], live_fields: list[dict], listin
     direct List sends. eBay's condition list is not copied onto Vendoo's condition.
     """
     from vendoo_studio.services.fill_log import listing_value_for_field
+    from vendoo_studio.services.form_schema import field_applies, live_belongs_on_form
 
     by_fold: dict[str, dict] = {}
     for row in vendoo_fields:
@@ -119,6 +120,7 @@ def merge_live_fields(vendoo_fields: list[dict], live_fields: list[dict], listin
             "selection_only": live.get("mode") == "selection", "options": options,
             "max_values": live.get("max_values"), "max_length": live.get("max_length"),
             "options_source": "marketplace",
+            "on_form": live_belongs_on_form(live) and field_applies(str(live["name"]), listing),
         }
         hit = by_fold.get(_fold(str(live["name"])))
         if hit:

@@ -228,6 +228,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
     from vendoo_studio.services.chat_field_context import chat_field_context
 
     system_prompt["content"] += chat_field_context(db, conv_id)
+    system_prompt["content"] += _item_form_prompt(db, conv_id)
     messages = [system_prompt]
     for msg in history[-20:]:
         role = msg.role
@@ -348,6 +349,15 @@ def _empty_discovered_fields_prompt(db: Session, conv_id: str, evidence: str = "
     )
 
 
+def _item_form_prompt(db: Session, conv_id: str) -> str:
+    """The fields each marketplace form shows for this item. Same list as the editor."""
+    from vendoo_studio.services.form_schema import form_schema_prompt
+
+    revisions = ListingRepo(db).get_revisions(conv_id)
+    listing = revisions[0].listing_json if revisions and isinstance(revisions[0].listing_json, dict) else None
+    return form_schema_prompt(listing)
+
+
 def _live_category_fields_prompt(db: Session, conv_id: str) -> str:
     """eBay's and Etsy's own field names, when category choice already cached them."""
     from vendoo_studio.services.direct_categories import live_fields_prompt
@@ -390,6 +400,7 @@ def listing_generation_messages(
         f"{current_listing_prompt(db, conv_id)}"
         f"{_empty_discovered_fields_prompt(db, conv_id, field_evidence)}"
         f"{_live_category_fields_prompt(db, conv_id)}"
+        f"{_item_form_prompt(db, conv_id)}"
     )
     return [
         {"role": "system", "content": system_content},

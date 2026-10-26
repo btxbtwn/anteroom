@@ -487,6 +487,8 @@ export interface MarketplaceFormField {
   max_values?: number | null;
   max_length?: number | null;
   options_source?: "marketplace" | "vendoo" | "reference" | "saved";
+  /** False when this row is saved data the category form does not show. Absent means it is on the form. */
+  on_form?: boolean;
 }
 
 /** A marketplace's form for one listing. ``known`` is false when no schema is cached. */

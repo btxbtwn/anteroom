@@ -132,4 +132,47 @@ describe("marketplace form fields", () => {
     const sellwild = fieldsForMarketplaceForm(jeans, "sellwild", undefined);
     expect(sellwild.find((field) => field.key === "sellwild_specifics.size")?.options).toContain("32x30");
   });
+
+  it("shows each marketplace's category fields and that marketplace's choices", () => {
+    const item = {
+      ...listing,
+      sku: "ABC",
+      weight_oz: 8,
+      ebay_specifics: { theme: "Western", size: "32" },
+      poshmark_specifics: { holiday: "Christmas" },
+      mercari_specifics: { holiday: "Christmas" },
+      depop_specifics: { holiday: "Christmas" },
+      etsy_specifics: { holiday: "Christmas" },
+      sellwild_specifics: { holiday: "Christmas" },
+      vinted_specifics: { holiday: "Christmas" },
+    };
+    for (const tab of ["ebay", "poshmark", "mercari", "depop", "etsy", "sellwild", "vinted"]) {
+      const forms: MarketplaceForm[] = [{
+        marketplace: tab,
+        category_id: "11483",
+        known: true,
+        fields: [
+          { key: "Material", label: "Material", value: "Cotton", required: true, multi: false, selection_only: false,
+            options: ["Cotton", "Denim"], options_source: "marketplace", on_form: true },
+          { key: "Holiday", label: "Holiday", value: "Christmas", required: false, multi: false, selection_only: true,
+            options: ["Christmas"], options_source: "marketplace", on_form: false },
+        ],
+      }];
+      const fields = fieldsForMarketplaceForm(item, tab, forms);
+      const labels = fields.map((field) => field.label.replace(/\s*\*$/, ""));
+      expect(labels, tab).toContain("Title");
+      expect(labels, tab).toContain("Material");
+      expect(labels, tab).not.toContain("Holiday");
+      expect(labels, tab).not.toContain("SKU");
+      if (tab === "ebay" || tab === "etsy" || tab === "poshmark" || tab === "mercari" || tab === "sellwild") {
+        expect(labels, tab).not.toContain("Package Weight (oz)");
+      }
+      const material = fields.find((field) => field.label.startsWith("Material"));
+      expect(material?.options, tab).toEqual(["Cotton", "Denim"]);
+      expect(material?.selectionOnly, tab).toBe(true);
+      const all = fieldsForMarketplaceForm(item, tab, forms, true).map((field) => field.label.replace(/\s*\*$/, ""));
+      expect(all, tab).toContain("Holiday");
+      expect(all, tab).toContain("SKU");
+    }
+  });
 });
