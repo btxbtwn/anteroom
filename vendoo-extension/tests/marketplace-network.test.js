@@ -109,6 +109,43 @@ test('Vinted request context covers the signed-in read and delete, and nothing e
     [['Origin', 'https://www.vinted.com'], ['Referer', 'https://www.vinted.com/']]);
 });
 
+test('Vinted draft, photo, wardrobe and package-size calls each have their own request context', async () => {
+  const c = loadWorker();
+  const updates = [];
+  c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
+  await c.ensureMarketplaceRequestContext();
+  const rules = Object.fromEntries(updates[0].addRules.map(rule => [rule.id, rule]));
+  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].removeRuleIds.filter(id => id >= 17025))), [17025, 17026, 17027, 17028]);
+  const cases = [
+    [17025, [
+      'https://www.vinted.com/api/v2/item_upload/catalogs',
+      'https://www.vinted.com/api/v2/item_upload/attributes',
+      'https://www.vinted.com/api/v2/item_upload/size_groups?catalog_ids[]=1',
+      'https://www.vinted.com/api/v2/item_upload/brands?keyword=Levi',
+      'https://www.vinted.com/api/v2/item_upload/colors',
+      'https://www.vinted.com/api/v2/item_upload/drafts',
+      'https://www.vinted.com/api/v2/item_upload/drafts/42',
+      'https://www.vinted.com/api/v2/item_upload/drafts/42/completion',
+      'https://www.vinted.com/api/v2/item_upload/items/42',
+    ], [
+      'https://www.vinted.com.evil/api/v2/item_upload/drafts',
+      'https://www.vinted.com/api/v2/photos',
+    ]],
+    [17026, ['https://www.vinted.com/api/v2/photos'], ['https://www.vinted.com/api/v2/photos/1']],
+    [17027, ['https://www.vinted.com/api/v2/wardrobe/7/items?page=1'], ['https://www.vinted.com/api/v2/wardrobe/items']],
+    [17028, ['https://api.www.vinted.com/shipping-estimation/external/catalogs/1904/package_sizes'],
+      ['https://api.www.vinted.com/shipping-estimation/external/catalogs/package_sizes']],
+  ];
+  for (const [id, allowed, rejected] of cases) {
+    const rule = rules[id];
+    assert.ok(rule.condition.regexFilter.length < 500, rule.condition.regexFilter);
+    assert.deepEqual([...rule.condition.initiatorDomains], ['test-extension-id']);
+    const target = new RegExp(rule.condition.regexFilter);
+    for (const url of allowed) assert.ok(target.test(url), `${id} ${url}`);
+    for (const url of rejected) assert.equal(target.test(url), false, `${id} ${url}`);
+  }
+});
+
 test('Sellwild request context covers a seller shop search from this extension', async () => {
   const c = loadWorker();
   const updates = [];

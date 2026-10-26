@@ -12,12 +12,15 @@
 //             on its own, sold when data.inventory.status is "sold_out".
 //   Sellwild  the seller's live listings; a known listing missing from them is
 //             read on its own, sold when listing.status is 5 (1 while live).
+//   Vinted    the seller's wardrobe; a known listing missing from the live rows
+//             is read on its own, sold when it is closed and not hidden or reserved.
 
 const SALE_LISTING_ID = {
   poshmark: /^[a-f0-9]{24}$/,
   mercari: /^m\d{6,}$/,
   depop: /^[a-z0-9][a-z0-9-]{0,200}$/,
   sellwild: /^\d{1,15}$/,
+  vinted: /^\d{1,15}$/,
 };
 const SALE_MAX_LISTINGS = 5000;
 const SALE_MAX_PAGES = 40;
@@ -179,7 +182,39 @@ async function sellwildSales(ids) {
   return soldAmongMissing(ids, live, async id => (await sellwildListing(id))?.status === 5);
 }
 
-const SALE_READERS = { depop: depopSales, mercari: mercariSales, poshmark: poshmarkSales, sellwild: sellwildSales };
+async function vintedSales(ids) {
+  await ensureMarketplaceRequestContext();
+  const account = vintedAccountId(await saleJson('https://www.vinted.com/api/v2/users/current', { credentials: 'include' }));
+  if (!account) throw new Error('Seller not found');
+  const pending = new Set(ids);
+  const live = new Set();
+  let page = 1;
+  let total = 1;
+  let finished = false;
+  while (page <= total && page <= SALE_MAX_PAGES && pending.size) {
+    if (page > 1) await salePause(true);
+    const body = await saleJson(`https://www.vinted.com/api/v2/wardrobe/${account}/items?page=${page}&per_page=96&order=newest_first`, { credentials: 'include' });
+    if (!Array.isArray(body?.items)) throw new Error('Vinted wardrobe missing');
+    total = Number(body.pagination?.total_pages) || page;
+    body.items.forEach(item => {
+      const id = String(item?.id ?? '');
+      if (!SALE_LISTING_ID.vinted.test(id)) return;
+      if (item.is_draft !== true && item.is_closed !== true && item.is_hidden !== true) {
+        live.add(id);
+        pending.delete(id);
+      }
+    });
+    if (page >= total || !body.items.length) { finished = true; break; }
+    page += 1;
+  }
+  if (pending.size && !finished) throw new Error('Vinted wardrobe too large to read');
+  return soldAmongMissing(ids, live, async id => {
+    const item = (await saleJson(`https://www.vinted.com/api/v2/items/${id}`, { credentials: 'include' }))?.item;
+    return Boolean(item && item.is_closed === true && item.is_hidden !== true && item.is_reserved !== true && item.is_draft !== true);
+  });
+}
+
+const SALE_READERS = { depop: depopSales, mercari: mercariSales, poshmark: poshmarkSales, sellwild: sellwildSales, vinted: vintedSales };
 
 async function readMarketplaceSales(marketplace, listingIds) {
   if (activeNativeOperation) return { ok: true, sales: [], skipped: true };

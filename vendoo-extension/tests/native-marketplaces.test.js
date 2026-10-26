@@ -42,6 +42,10 @@ test('native links accept only the correct marketplace and durable draft route',
     assert.equal(call(c, 'nativeDraftUrl', 'mercari', url), '');
   }
   assert.equal(call(c, 'nativeDraftUrl', 'poshmark', 'https://poshmark.com/edit-listing/6adc371572e62463d992ffef'), '');
+  assert.equal(call(c, 'nativeDraftUrl', 'vinted', 'https://www.vinted.com/items/42/edit'), 'https://www.vinted.com/items/42/edit');
+  assert.equal(call(c, 'nativeDraftUrl', 'vinted', 'https://www.vinted.com/items/42/edit/'), 'https://www.vinted.com/items/42/edit/');
+  assert.equal(call(c, 'nativeDraftUrl', 'vinted', 'https://www.vinted.com/items/42'), '');
+  assert.equal(call(c, 'nativeDraftUrl', 'vinted', 'https://www.vinted.com/items/42-tee/edit'), '');
 });
 
 test('an interrupted worker is never replayed, and checking a result does no page work', async () => {

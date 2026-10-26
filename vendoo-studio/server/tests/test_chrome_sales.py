@@ -169,6 +169,7 @@ class SaleDetectionRouteTest(unittest.TestCase):
         client = TestClient(app)
         body = client.get("/api/settings/sale-detection").json()
         self.assertTrue(body["enabled"]["sellwild"])
+        self.assertTrue(body["enabled"]["vinted"])
         self.assertTrue(body["enabled"]["ebay"])
         self.assertFalse(body["autodelist"])
         saved = client.put("/api/settings/sale-detection", json={"marketplace": "sellwild", "enabled": False}).json()

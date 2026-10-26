@@ -1,5 +1,5 @@
-// Fills the seller's Vinted upload form and clicks Upload.
-// Save draft is never used. Upload runs only after Studio has confirm: true.
+// Classifies the seller's Vinted upload form. Listing does not use this script:
+// the extension background saves a draft and publishes it after List is confirmed.
 
 function classifyVintedControl(label) {
   const text = String(label || '').replace(/\s+/g, ' ').trim().toLowerCase();

@@ -76,7 +76,11 @@ class VintedListRouteTest(unittest.TestCase):
         ConversationRepo(self.db).add_photo(self.conv.id, "test.jpg", "test.jpg", "image/jpeg", 1)
         self.base = f"/api/conversations/{self.conv.id}/native-marketplaces"
         self.bridge = self.enterContext(patch("vendoo_studio.services.native_marketplaces.browser_bridge.request", new_callable=AsyncMock))
-        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": "https://www.vinted.com/items/42-black-tee"}
+        self.draft_url = "https://www.vinted.com/items/42/edit"
+        self.bridge.side_effect = [
+            {"ok": True, "state": "draft", "draft_url": self.draft_url},
+            {"ok": True, "state": "published", "draft_url": self.draft_url, "listing_url": "https://www.vinted.com/items/42-black-tee"},
+        ]
         self.manager = SimpleNamespace(connected=True, build="test-build", send_message=AsyncMock(return_value=True))
         self.enterContext(patch("vendoo_studio.routes.extension.extension_manager", self.manager))
         self.enterContext(patch("vendoo_studio.services.native_marketplaces.expected_extension_build", return_value="test-build"))
@@ -91,7 +95,7 @@ class VintedListRouteTest(unittest.TestCase):
         app.dependency_overrides.clear()
         self.db.close()
 
-    def test_list_requires_confirm_and_publishes_without_a_draft(self):
+    def test_list_requires_confirm_then_saves_and_publishes(self):
         refused = self.client.post(f"{self.base}/vinted/list", json={"revision_id": self.rev.id, "confirm": False})
         self.assertEqual(refused.status_code, 400)
         self.assertIn("Confirm", refused.json()["detail"])
@@ -99,14 +103,14 @@ class VintedListRouteTest(unittest.TestCase):
 
         started = self.client.post(f"{self.base}/vinted/list", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(started.status_code, 200, started.text)
-        self.assertEqual(started.json()["state"], "publishing")
+        self.assertEqual(started.json()["state"], "saving")
         while self.launched:
             asyncio.run(self.launched.pop(0))
         record = self.client.get(self.base).json()["vinted"]
         self.assertEqual(record["state"], "published")
+        self.assertEqual(record["draft_url"], self.draft_url)
         self.assertEqual(record["listing_url"], "https://www.vinted.com/items/42-black-tee")
-        self.assertIsNone(record.get("draft_url"))
-        payload = self.bridge.call_args.args[2]
-        self.assertEqual(payload["action"], "publish")
-        self.assertTrue(payload["confirm"])
-        self.assertEqual(payload["listing"]["vinted_specifics"]["category"], "Women > Clothing > Tops & t-shirts > T-shirts")
+        save, publish = (call.args[2] for call in self.bridge.call_args_list)
+        self.assertEqual((save["action"], save["confirm"]), ("save_draft", False))
+        self.assertEqual((publish["action"], publish["confirm"], publish["draft_url"]), ("publish", True, self.draft_url))
+        self.assertEqual(save["listing"]["vinted_specifics"]["category"], "Women > Clothing > Tops & t-shirts > T-shirts")

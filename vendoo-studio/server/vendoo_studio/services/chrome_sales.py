@@ -23,7 +23,7 @@ from vendoo_studio.services.user_settings import sale_detection_enabled
 
 log = logging.getLogger("vendoo_studio.chrome_sales")
 
-CHROME_MARKETS = ("poshmark", "mercari", "depop", "sellwild")
+CHROME_MARKETS = ("poshmark", "mercari", "depop", "sellwild", "vinted")
 POLL_INTERVAL_S = 30
 MIN_GAP_S = 4 * 60
 MAX_GAP_S = 12 * 60
@@ -36,8 +36,10 @@ _LISTING_ID = {
     "mercari": re.compile(r"^m\d{6,}$"),
     "depop": re.compile(r"^[a-z0-9][a-z0-9-]{0,200}$"),
     "sellwild": re.compile(r"^\d{1,15}$"),
+    "vinted": re.compile(r"^\d{1,15}$"),
 }
-_HOST = {"poshmark": "poshmark.com", "mercari": "mercari.com", "depop": "depop.com", "sellwild": "sellwild.com"}
+_HOST = {"poshmark": "poshmark.com", "mercari": "mercari.com", "depop": "depop.com", "sellwild": "sellwild.com",
+         "vinted": "vinted.com"}
 
 _task: asyncio.Task | None = None
 _next: dict[str, float] = {}
