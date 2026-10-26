@@ -1,4 +1,5 @@
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
+import type { ListingVideo, ListingVideoLibrary } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
@@ -211,6 +212,18 @@ async function followAssistant(
 }
 
 export const api = {
+  listingVideos: {
+    list: (convId: string) => request<ListingVideoLibrary>(`/conversations/${convId}/videos`),
+    delete: (convId: string, videoId: string) => request<OkResponse>(`/conversations/${convId}/videos/${videoId}`, { method: "DELETE" }),
+    upload: async (convId: string, file: File): Promise<ListingVideo> => {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(`${BASE}/conversations/${convId}/videos`, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The video could not be uploaded.");
+      return data;
+    },
+  },
   backups: {
     list: () => request<BackupsStatus>("/backups"),
     create: () => request<{ ok: boolean; snapshot: BackupSnapshot }>("/backups", { method: "POST" }),

@@ -564,6 +564,7 @@ def list_open_gaps(db: Session) -> list[dict]:
 
 def approval_snapshot(db: Session, conv_id: str, marketplaces: list[str]) -> tuple[str, dict]:
     from vendoo_studio.models.conversation import Photo
+    from vendoo_studio.models.listing_video import ListingVideo
     from vendoo_studio.services.marketplace_delist import listings
 
     conv = ConversationRepo(db).get(conv_id)
@@ -579,8 +580,10 @@ def approval_snapshot(db: Session, conv_id: str, marketplaces: list[str]) -> tup
         targets[name] = {key: entry.get(key) for key in ("listing_id", "state", "sold_here")}
         targets[name]["url"] = reference[1] if reference else None
     images = db.query(Photo).filter(Photo.conversation_id == conv_id).order_by(Photo.display_order, Photo.id).all()
+    videos = db.query(ListingVideo).filter_by(conversation_id=conv_id).order_by(ListingVideo.id).all()
     snapshot = [_current_revision(db, conv_id), conv.title, conv.notes, conv.status, conv.settled_at,
-                [(image.id, image.checksum, image.stored_filename, image.display_order) for image in images], targets]
+                [(image.id, image.checksum, image.stored_filename, image.display_order) for image in images],
+                [(video.id, video.checksum, video.stored_filename) for video in videos], targets]
     return hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest(), targets
 
 

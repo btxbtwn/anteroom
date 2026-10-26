@@ -487,7 +487,7 @@ export interface MarketplaceFormField {
   label: string;
   value: string | string[] | number | boolean | NativeInventoryRow[];
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "video";
   inventory_groups?: NativeInventoryGroup[];
   min_value?: number;
   max_value?: number;

@@ -33,6 +33,7 @@ class Conversation(Base):
 
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     photos = relationship("Photo", back_populates="conversation", cascade="all, delete-orphan")
+    videos = relationship("ListingVideo", back_populates="conversation", cascade="all, delete-orphan")
     listing = relationship("Listing", back_populates="conversation", uselist=False, cascade="all, delete-orphan")
 
 

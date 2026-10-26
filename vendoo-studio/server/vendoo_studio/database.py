@@ -50,6 +50,7 @@ def get_db():
 
 def load_models() -> None:
     """Import every model so ``Base.metadata`` describes the whole schema."""
+    from vendoo_studio.models.listing_video import ListingVideo  # noqa: F401
     from vendoo_studio.models.conversation import Conversation  # noqa: F401
     from vendoo_studio.models.listing_copy import ListingCopyReceipt  # noqa: F401
     from vendoo_studio.models.listing import Listing, ListingRevision  # noqa: F401
