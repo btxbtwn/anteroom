@@ -46,7 +46,11 @@ async def _delist(db: Session, conv_id: str, marketplaces: list[str]) -> dict:
         return {"ok": False, "error": str(exc)}
     if not await _wait_until_idle(db):
         return {"ok": False, "error": "The delist was still running when this automation stopped waiting."}
-    return {"ok": True, "detail": _brief(result)}
+    failed = {name: (result.get(name) or {}).get("error") or "The marketplace did not confirm deletion."
+              for name in marketplaces if (result.get(name) or {}).get("state") != "deleted"}
+    if failed:
+        return {"ok": False, "error": "; ".join(f"{name}: {error}" for name, error in failed.items()), "errors": failed, "detail": result}
+    return {"ok": True, "detail": result}
 
 
 async def _relist(db: Session, conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
@@ -60,6 +64,9 @@ async def _relist(db: Session, conv_id: str, marketplaces: list[str], revision_i
     """
     taken_down = await _delist(db, conv_id, marketplaces)
     if not taken_down.get("ok"):
+        confirmed = [name for name in marketplaces if (taken_down.get("detail", {}).get(name) or {}).get("state") == "deleted"]
+        if confirmed:
+            return {**taken_down, "state": DOWN_STATE, "down": confirmed}
         return taken_down
     return await _list_remaining(db, conv_id, marketplaces, revision_id)
 
@@ -162,6 +169,11 @@ async def _list_one(db: Session, conv_id: str, name: str, revision_id: str) -> d
         return {"ok": False, "marketplace": name, "error": str(exc)}
     if not await _wait_until_idle(db):
         return {"ok": False, "marketplace": name, "error": f"The {name} relist was still running when this automation stopped waiting."}
+    db.expire_all()
+    job = JobRepo(db).get(result["job_id"]) if result.get("job_id") else None
+    if (job is not None and job.status != "completed") or (job is None and result.get("state") not in {"published", "pending_review"}):
+        return {"marketplace": name, "ok": False,
+                "error": (job.last_error if job else result.get("error")) or "The marketplace did not confirm publication."}
     return {"marketplace": name, "ok": True, "detail": _brief(result)}
 
 

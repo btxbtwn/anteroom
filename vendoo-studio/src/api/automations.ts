@@ -138,7 +138,7 @@ export interface AssistantAutomation {
   automation_id?: string;
 }
 
-/** A regenerated listing waiting for the seller to publish it. */
+/** One immutable item/action/marketplace proposal waiting for seller approval. */
 export interface AutomationApproval {
   id: string;
   automation_id: string;
@@ -146,7 +146,7 @@ export interface AutomationApproval {
   title: string | null;
   revision_id: string | null;
   action: "publish" | "delist" | "relist";
-  targets: Record<string,{listing_id:string|null;url:string|null;state:string|null;sold_here:boolean|null}>;
+  targets: Record<string, { listing_id: string | null; url: string | null; state: string | null; sold_here: boolean | null }>;
   review_token: string;
   marketplaces: string[];
   status: string;

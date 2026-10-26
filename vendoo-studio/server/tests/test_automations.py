@@ -480,7 +480,7 @@ def _second_market(db, conv, marketplace):
 
 
 def test_relist_continues_after_one_marketplace_fails_without_retrying(db, monkeypatch):
-    """A failure on the first marketplace still lists the next one, then retries the failure."""
+    """A failure on the first marketplace still lists the next one without a retry."""
     from vendoo_studio.services import automation_actions
     from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
@@ -488,7 +488,7 @@ def test_relist_continues_after_one_marketplace_fails_without_retrying(db, monke
 
     async def fake_delist(_db, _conv_id, marketplaces, confirm):
         calls.append(("delist", tuple(marketplaces), confirm))
-        return {"ok": True}
+        return {name: {"state": "deleted"} for name in marketplaces}
 
     async def fake_list(_conv_id, name, _body, _db):
         calls.append(("list", name))
@@ -522,8 +522,8 @@ def test_a_failed_relist_requires_a_new_seller_request_before_another_attempt(db
 
     attempts = {"ebay": 0}
 
-    async def fake_delist(*_args, **_kwargs):
-        return {"ok": True}
+    async def fake_delist(_db, _conv_id, marketplaces, _confirm):
+        return {name: {"state": "deleted"} for name in marketplaces}
 
     async def fake_list(_conv_id, name, _body, _db):
         if name == "ebay":
@@ -580,8 +580,8 @@ def test_a_mid_run_failure_stays_down_in_history_and_errors_and_the_run_continue
     _second_market(db, second, "poshmark")
     calls = []
 
-    async def fake_delist(*_args, **_kwargs):
-        return {"ok": True}
+    async def fake_delist(_db, _conv_id, marketplaces, _confirm):
+        return {name: {"state": "deleted"} for name in marketplaces}
 
     async def fake_list(conv_id, name, _body, _db):
         calls.append((conv_id, name))
@@ -742,7 +742,7 @@ def test_publishing_a_live_listing_requires_explicit_relist_instead_of_delisting
 
     async def fake_delist(_db, _conv_id, marketplaces, confirm):
         calls.append(("delist", tuple(marketplaces), confirm))
-        return {"ok": True}
+        return {name: {"state": "deleted"} for name in marketplaces}
 
     async def fake_list(_conv_id, name, body, _db):
         calls.append(("list", name, body.confirm))
@@ -771,7 +771,7 @@ def test_scheduled_delist_never_writes_until_the_exact_item_action_is_confirmed(
     calls = []
     async def remove(_db, key, markets, confirm):
         calls.append((key, markets, confirm))
-        return {"ok": True}
+        return {name: {"state": "deleted"} for name in markets}
     monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist", remove)
     conv = _item(db, title="Coat", price=40, department="Men", category="Coats", marketplace="ebay", days=70)
     task = client.post("/api/automations", json={"schedule":{"kind":"daily","time":"09:00"},"filters":{"conversation_ids":[conv.id]},"actions":[{"type":"delist"}],"marketplaces":["ebay"],"activate":True}).json()
@@ -831,3 +831,71 @@ def test_new_proposals_supersede_old_cards_without_rewriting_them(db, client):
     prior=db.get(AutomationApproval,old["id"])
     assert prior.status == "superseded" and prior.revision_id == old["revision_id"]
     assert client.post(f"/api/automations/approvals/{old['id']}/approve",json=_approval_body(old)).status_code == 409
+
+
+def test_local_regeneration_without_marketplaces_stops_at_a_saved_draft(db, client, monkeypatch):
+    calls = []
+    async def regenerate(conv_id):
+        calls.append(conv_id)
+        ListingRepo(db).save_revision(conv_id, {"title": "New draft", "price": 45}, "generated")
+        return {"ok": True}
+    monkeypatch.setattr("vendoo_studio.services.automation_actions._regenerate", regenerate)
+    conv = _item(db, title="Coat", price=40, department="Men", category="Coats", marketplace="ebay", days=70)
+    task = automations.create_automation(db, {"schedule": {"kind": "daily", "time": "09:00"},
+        "filters": {"conversation_ids": [conv.id]}, "actions": [{"type": "regenerate"}], "activate": True})
+    response = client.post(f"/api/automations/{task['id']}/run", json={})
+    assert response.status_code == 200 and response.json()["items"][0]["ok"]
+    assert calls == [conv.id] and automations.list_pending_approvals(db) == []
+    assert ListingRepo(db).get_revision(ListingRepo(db).get_current(conv.id).current_revision_id).listing_json["title"] == "New draft"
+
+
+def test_shared_proposal_updates_every_run_history_once_and_is_not_replayed(db, client, monkeypatch):
+    calls = []
+    async def remove(_db, _conv_id, marketplaces, _confirm):
+        calls.append(marketplaces)
+        return {name: {"state": "deleted"} for name in marketplaces}
+    monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist", remove)
+    conv = _item(db, title="Coat", price=40, department="Men", category="Coats", marketplace="ebay", days=70)
+    task = automations.create_automation(db, {"schedule": {"kind": "daily", "time": "09:00"},
+        "filters": {"conversation_ids": [conv.id]}, "actions": [{"type": "delist"}], "marketplaces": ["ebay"], "activate": True})
+    for _ in range(2):
+        assert client.post(f"/api/automations/{task['id']}/run", json={}).status_code == 200
+    approvals = client.get("/api/automations/approvals").json()
+    assert len(approvals) == 1
+    path = f"/api/automations/approvals/{approvals[0]['id']}/approve"
+    assert client.post(path, json=_approval_body(approvals[0])).status_code == 200
+    assert client.post(path, json=_approval_body(approvals[0])).status_code == 409 and calls == [["ebay"]]
+    runs = client.get(f"/api/automations/{task['id']}/history").json()["runs"]
+    assert len(runs) == 2
+    for run in runs:
+        assert run["items"][0]["state"] == "approved"
+        assert len([step for step in run["items"][0]["remote"] if step["type"] == "delist"]) == 1
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_failed_delete_response_cannot_start_republication(db, monkeypatch, partial):
+    from vendoo_studio.services import automation_actions
+    async def remove(*_args):
+        return {"ebay": {"state": "failed", "error": "Delete refused"}, "poshmark": {"state": "deleted" if partial else "failed"}}
+    async def publish(*_args):
+        pytest.fail("No publish after an unconfirmed delete")
+    monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist", remove)
+    monkeypatch.setattr("vendoo_studio.services.native_marketplaces.list_now", publish)
+    result = asyncio.run(automation_actions._relist(db, "item", ["ebay", "poshmark"], "revision"))
+    assert result["ok"] is False and "Delete refused" in result["error"]
+    assert result.get("down", []) == (["poshmark"] if partial else [])
+
+
+def test_failed_background_publish_is_not_reported_as_a_success(db, monkeypatch):
+    from vendoo_studio.services import automation_actions
+    conv = _item(db, title="Coat", price=40, department="Men", category="Coats", marketplace="ebay", days=70)
+    revision = ListingRepo(db).get_current(conv.id).current_revision_id
+    job = Job(conversation_id=conv.id, approved_revision_id=revision, status="failed", listing_snapshot={}, last_error="Marketplace refused")
+    db.add(job)
+    db.commit()
+    async def publish(*_args):
+        return {"job_id": job.id, "state": "publishing", "running": True}
+    monkeypatch.setattr("vendoo_studio.services.native_marketplaces.list_now", publish)
+    result = asyncio.run(automation_actions._list_remaining(db, conv.id, ["ebay"], revision))
+    assert result["ok"] is False and result["down"] == ["ebay"]
+    assert result["errors"]["ebay"] == "Marketplace refused"

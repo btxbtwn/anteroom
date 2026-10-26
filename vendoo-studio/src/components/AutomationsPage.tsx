@@ -51,7 +51,7 @@ function Check({
   );
 }
 
-export function AutomationsPage({onOpenListing}:{onOpenListing:(id:string)=>void}) {
+export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   const queryClient = useQueryClient();
   const list = useQuery({ queryKey: LIST_KEY, queryFn: () => api.automations.list() });
   const approvals = useQuery({ queryKey: APPROVAL_KEY, queryFn: () => api.automations.approvals() });
@@ -197,6 +197,7 @@ export function AutomationsPage({onOpenListing}:{onOpenListing:(id:string)=>void
                   {row.marketplaces.length ? ` · ${row.marketplaces.join(", ")}` : ""}
                   {` · ${row.action === "publish" ? "list" : row.action} · ${row.state}`}
                 </span>
+                <Button size="sm" variant="ghost" onClick={() => onOpenListing(row.conversation_id)}>Open item</Button>
                 <Button size="sm" onClick={() => void approve(row)}>Review and approve</Button>
                 {Object.entries(row.targets || {}).map(([name,target])=>target.url?<a key={name} href={target.url} target="_blank" rel="noreferrer" className="text-xs underline">{name} listing</a>:null)}
               </li>

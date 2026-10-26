@@ -1,8 +1,7 @@
 """Scheduled automations: list, draft, preview, confirm, and run them.
 
-Creating a task does not run it. ``activate`` is the seller confirming the
-actions and marketplaces by name. A draft that is still ambiguous is refused
-at that point. Run now only works after that confirmation.
+Activating a task permits local draft preparation. Marketplace writes always
+wait for a separate confirmation of each item, action and named marketplace.
 """
 from __future__ import annotations
 
@@ -113,7 +112,7 @@ def preview_automation(body: AutomationBody, db: Session = Depends(get_db)):
 
 @router.get("/approvals")
 def list_approvals(db: Session = Depends(get_db)):
-    """Regenerated listings waiting for approval before they publish."""
+    """Item-specific marketplace actions waiting for seller approval."""
     return automations.list_pending_approvals(db)
 
 

@@ -32,7 +32,6 @@ from vendoo_studio.services.automations import (
     log_item_job,
     mark_retry,
     mark_waiting,
-    note_relist_result,
     record_application,
     select_items,
 )
@@ -294,6 +293,8 @@ async def _one_item(db: Session, run: AutomationRun, automation: Automation, ite
 
 
 async def _run_remote(db, run, automation, item, executor, action, markets, revision_id) -> dict:
+    if action["type"] != "regenerate":
+        raise ValueError("Scheduled marketplace writes must become approval proposals.")
     if JobRepo(db).get_active():
         return {
             **_outcome(item, {"notes": []}, [], error="Waiting for the current marketplace job.", dry_run=bool(run.dry_run)),
@@ -308,8 +309,6 @@ async def _run_remote(db, run, automation, item, executor, action, markets, revi
             "busy": True,
             "acted": False,
         }
-    if action["type"] in {"relist", "delist"} or result.get("down") or result.get("detail"):
-        note_relist_result(db, automation.id, run.id, item, result)
     error = None if result.get("ok") else (result.get("error") or f"{action['type']} failed.")
     return {"remote": {"type": action["type"], **result}, "error": error, "state": result.get("state"), "down": result.get("down")}
 

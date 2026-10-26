@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.405 — 2026-10-26
+
+- Scheduled listing, delisting and relisting now wait for your review of each item and named marketplace. Changed drafts, photos or links need a new review, and failed marketplace actions stay visible without automatic retries. List never takes down a live listing; choose Relist explicitly.
+
 ## 0.1.404 — 2026-10-26
 
 - Save private Mercari, Depop and Etsy drafts from the listing form without publishing. Draft links show which edits still need saving.
