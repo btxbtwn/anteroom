@@ -129,6 +129,23 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.client.post(f"{self.base}/ebay/mark", json={"state": "listed", "url": URLS["ebay"]})
         self.assertEqual(find_listing(self.db, "ebay", "377507697747").id, self.conv.id)
 
+    def test_linking_a_listing_already_attached_to_another_item_is_refused(self):
+        other = ConversationRepo(self.db).create(title="Duplicate import")
+        response = self.client.post(f"/api/conversations/{other.id}/marketplace-listings/ebay/mark",
+                                    json={"state": "listed", "url": "https://ebay.co.uk/itm/377507697747?tracking=private"})
+        self.assertEqual(response.status_code, 409)
+        self.db.refresh(other)
+        self.assertNotIn("marketplaceMarks", parse_notes(other.notes))
+        self.ebay.assert_not_called()
+        self.bridge.assert_not_called()
+
+    def test_seller_link_is_normalized_and_can_be_saved_again_for_the_same_item(self):
+        response = self.client.post(f"{self.base}/ebay/mark",
+                                    json={"state": "listed", "url": "https://ebay.com/itm/377507697747?tracking=private#details"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["ebay"]["url"], URLS["ebay"])
+        self.assertEqual(self.client.post(f"{self.base}/ebay/mark", json={"state": "listed", "url": URLS["ebay"]}).status_code, 200)
+
     def test_a_direct_listing_matches_relay_sales(self):
         from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
         from vendoo_studio.services.relay_sales import find_listing

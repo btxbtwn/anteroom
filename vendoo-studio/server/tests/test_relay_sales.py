@@ -97,6 +97,28 @@ class RecordSalesTest(unittest.TestCase):
         with self.Session() as db:
             self.assertIsNone(db.query(MarketplaceSale).one().conversation_id)
 
+    def test_duplicate_imports_leave_sales_unmatched_instead_of_picking_an_item(self):
+        with self.Session() as db:
+            _listing(db, "duplicate tee", {"ebay": "https://www.ebay.co.uk/itm/1234567890"})
+        self.handle(_ebay_event())
+        with self.Session() as db:
+            self.assertIsNone(db.query(MarketplaceSale).one().conversation_id)
+
+    def test_direct_and_imported_reference_to_the_same_item_are_one_match(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        with self.Session() as db:
+            MarketplaceListingRepo(db).save(self.tee, "ebay", {"state": "published", "listing_url": "https://www.ebay.com/itm/1234567890"})
+            self.assertEqual(relay_sales.find_listing(db, "ebay", "1234567890").id, self.tee)
+
+    def test_direct_and_imported_reference_to_different_items_is_ambiguous(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        with self.Session() as db:
+            other = _listing(db, "other tee", {})
+            MarketplaceListingRepo(db).save(other.id, "ebay", {"state": "published", "listing_url": "https://www.ebay.com/itm/1234567890"})
+            self.assertIsNone(relay_sales.find_listing(db, "ebay", "1234567890"))
+
     def test_multi_line_orders_become_one_sale_per_line(self):
         created = self.handle(_ebay_event(order="77-1", lines=(("li-a", "1234567890"), ("li-b", "5550001111"))))
         self.assertEqual(len(created), 2)

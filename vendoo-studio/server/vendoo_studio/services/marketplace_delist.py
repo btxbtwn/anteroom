@@ -15,7 +15,6 @@ listed" one.
 """
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 
 import httpx
@@ -28,32 +27,16 @@ from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, Listin
 from vendoo_studio.services import browser_bridge, marketplace_accounts
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.listing_result import scrub
+from vendoo_studio.services.marketplace_identity import listing_id, listing_reference
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
 MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
 BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop", "sellwild"}
 
-# The listing ID each marketplace's public link carries.
-LISTING_ID = {
-    "ebay": re.compile(r"^https://(?:www\.)?ebay\.com/itm/(?:[^/?#]+/)?(\d{9,15})(?:[/?#]|$)"),
-    "etsy": re.compile(r"^https://www\.etsy\.com/(?:[a-z-]+/)?listing/([1-9]\d*)(?:[/?#]|$)"),
-    "poshmark": re.compile(r"^https://poshmark\.com/(?:my-)?listing/(?:[^/?#]*-)?([a-f0-9]{24})(?:[/?#]|$)"),
-    "mercari": re.compile(r"^https://www\.mercari\.com/us/item/(m\d{6,})/?(?:[?#]|$)"),
-    "depop": re.compile(r"^https://www\.depop\.com/products/([a-z0-9][a-z0-9-]{0,200})/?(?:[?#]|$)"),
-    "sellwild": re.compile(r"^https://sellwild\.com/product/(\d+)(?:/|$)"),
-    "vinted": re.compile(r"^https://www\.vinted\.com/items/(\d+)(?:-[^/?#]*)?(?:[/?#]|$)"),
-}
-
 class DelistError(RuntimeError):
     def __init__(self, status_code: int, detail: str):
         super().__init__(detail)
         self.status_code = status_code
-
-
-def listing_id(marketplace: str, url: str | None) -> str | None:
-    pattern = LISTING_ID.get(marketplace)
-    match = pattern.match(str(url or "").strip()) if pattern else None
-    return match.group(1) if match else None
 
 
 def _now() -> str:
@@ -182,6 +165,13 @@ MARKS = ("listed", "sold", "not_listed")
 
 
 def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None = None) -> dict:
+    # Serialise duplicate validation and the local write with other seller
+    # marks and direct action starts in this process.
+    with start_gate():
+        return _mark(db, conv_id, marketplace, state, url)
+
+
+def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None) -> dict:
     """Record what the seller says about one marketplace. The marketplace itself is not touched.
 
     A mark also settles an unconfirmed direct listing: the seller has looked.
@@ -194,10 +184,14 @@ def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | Non
     # Full precision: a sale reported later in the same second must still count as newer.
     value: dict = {"state": state, "at": datetime.now(UTC).isoformat()}
     if state == "listed":
-        clean = str(url or "").strip()
-        item_id = listing_id(marketplace, clean)
-        if not item_id:
+        reference = listing_reference(marketplace, url)
+        if not reference:
             raise DelistError(400, f"Paste the {marketplace.title()} listing link, as it appears in the browser's address bar.")
+        item_id, clean = reference
+        from vendoo_studio.services.relay_sales import matching_listings
+
+        if any(conv.id != conv_id for conv in matching_listings(db, marketplace, item_id)):
+            raise DelistError(409, "This marketplace listing is already linked to another item. Resolve the duplicate before linking it here.")
         value.update(url=clean, listing_id=item_id)
     else:
         value.update(url=known.get("url"), listing_id=known.get("listing_id"))

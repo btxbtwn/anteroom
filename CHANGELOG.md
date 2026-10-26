@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.381 — 2026-10-26
+
+- Link existing marketplace listings with consistent URL checks and without tracking parameters. Anteroom catches links already attached to another item and leaves sales unmatched when duplicate inventory makes their owner unclear.
+
 ## 0.1.380 — 2026-10-26
 
 - You can drive Anteroom from the terminal with the `anteroom` command. It can do what the app's API already allows, prints `--json` for an assistant, and will not delete, publish, or delist unless you pass `--confirm`.
