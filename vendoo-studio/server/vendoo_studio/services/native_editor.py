@@ -61,7 +61,7 @@ def package(snapshot: dict) -> list[dict]:
 
 async def ebay_form(snapshot: dict) -> dict:
     from vendoo_studio.services import marketplace_schemas
-    from vendoo_studio.services.ebay_listings import CONDITION_IDS, best_offer_terms, condition_description, ebay_aspects, ebay_category_id, ebay_condition
+    from vendoo_studio.services.ebay_listings import CONDITION_IDS, best_offer_terms, condition_description, ebay_aspects, ebay_category_id, ebay_condition, seller_sku
     from vendoo_studio.services.seller_overrides import price_for
 
     from vendoo_studio.services.listing_result import ListingProblem
@@ -99,7 +99,7 @@ async def ebay_form(snapshot: dict) -> dict:
     details = snapshot.get("ebay_specifics") or {}
     terms = best_offer_terms(snapshot.get("form") or {}, str(price_for(snapshot, "ebay") or 0), snapshot)
     fields.extend([field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number"),
-                   field("sku", "SKU", snapshot.get("sku"), locked=True, help="SKU comes from Item Details."),
+                   field("sku", "SKU", seller_sku(snapshot), locked=True, help="SKU comes from Item Details."),
                    field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}), input_type="textarea", max_length=1000),
                    field("ebay_specifics.bestOffer.enabled", "Allow offers", terms.get("bestOfferEnabled", True), input_type="boolean"),
                    field("ebay_specifics.bestOffer.autoAcceptPrice", "Automatically accept offers at", (terms.get("autoAcceptPrice") or {}).get("value", ""), input_type="number",

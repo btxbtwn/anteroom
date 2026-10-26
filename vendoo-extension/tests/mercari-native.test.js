@@ -504,8 +504,32 @@ test('Mercari lists with no brand when the seller clears it, and omits a name it
   const result = await run.runMercariNative(message({ listing: clothing({ brand: 'BRIGGS', mercari_specifics: { brand: '' }, seller_fields: ['mercari_specifics.brand'] }) }));
   assert.equal(result.ok, true, result.error);
   const common = requests.find(row => row.body.operationName === 'addDraftItemMutation').body.variables.input.common;
-  assert.equal(common.brandId, null);
+  assert.equal(common.brandId, 0);
   assert.equal(common.name, 'Boys graphic tee');
+});
+
+test('editing a Mercari draft clears a stale brand when the listing has no brand', async () => {
+  const state = { draft: { ...CLOTHING_DRAFT, brand: { id: 5813, name: 'BRIGGS' } } };
+  const { c, requests } = worker({
+    respond(op, body) {
+      if (op === 'uploadDraftItemImageMutation') return { uploadDraftItemImage: { images: [{ id: 'i1' }] } };
+      if (op === 'editDraftItemMutation') {
+        // Null or a missing brandId leaves the old brand. Zero is the clear Mercari accepts.
+        if (body.variables.input.common.brandId === 0) state.draft = { ...CLOTHING_DRAFT, brand: null };
+        return { editDraftItem: { id: 'm9AbC123' } };
+      }
+      if (op === 'draftItemQuery') return { draftItem: state.draft };
+      return null;
+    },
+  });
+  const result = await c.runMercariNative(message({
+    draft_url: 'https://www.mercari.com/sell/draft/m9AbC123/',
+    listing: clothing({ brand: 'BRIGGS', mercari_specifics: { noBrand: true } }),
+  }));
+  assert.equal(result.ok, true, result.error);
+  const common = requests.find(row => row.body.operationName === 'editDraftItemMutation').body.variables.input.common;
+  assert.equal(common.brandId, 0);
+  assert.equal(requests.some(row => row.body.operationName === 'listDraftItemMutation'), false);
 });
 
 test('a Mercari draft input it no longer accepts is reported as a form change, safe to retry', async () => {

@@ -876,3 +876,69 @@ test('Depop reuses one matching draft and does not pick the newest when several 
   const only = await c.depopApiAction('reuse', { action: 'save_draft', listing, deadline: Date.now() + 30000 });
   assert.equal(only.draft_url, 'https://www.depop.com/sellinghub/drafts/edit/only-draft/');
 });
+
+test('reusing a Depop draft writes the full body and accepts Depop\'s read-back shape', async () => {
+  const { c, requests, msg } = newDraft();
+  const item = { ...FULL, tags: [], depop_specifics: { ...FULL.depop_specifics, age: ['modern'], source: ['preloved'], sku: '' } };
+  msg.payload.listing = item;
+  msg.payload.draft_url = DRAFT;
+  let wrote = false;
+  const stale = {
+    id: '123456', description: 'Private draft', price_amount: '12', price_currency: 'USD', pictures: [],
+    brand: { id: 'old-brand', name: 'Old Brand' }, videos: [{ id: 1, url: 'https://video.example/stale' }],
+    repop_metadata: { source: 'stale' }, product_type: 'jeans',
+    attributes: [{ id: 'material', values: ['polyester'] }],
+    condition: { id: 'brand_new', name: 'Brand new' }, colour: ['black'],
+    shipping_methods: [{ payer: 'buyer', parcel_size_id: 'stale', shipping_provider_id: 'USPS', ship_from_address_id: 9 }],
+  };
+  const kept = {
+    id: '123456', description: 'Private draft', priceAmount: '12.00', productType: 'tshirts', variantSetId: 12,
+    variants: { 7: { quantity: 1 } },
+    attributes: [
+      { id: 'material', values: [{ id: 'cotton', name: 'Cotton' }] },
+      { id: 'occasion', values: [{ id: 'casual', name: 'Casual' }] },
+    ],
+    age: [{ id: 'modern', name: 'Modern' }], source: [{ id: 'preloved', name: 'Preloved' }],
+    style: [{ id: 'casual', name: 'Casual' }], colour: [{ id: 'multi', name: 'Multi' }],
+    condition: { id: 'used_good', name: 'Used - Good' }, brand: { id: 'nike', name: 'Nike' },
+    pictures: [{ id: 9, formats: { P0: { url: 'https://media-photos.depop.com/b0.jpg', height: 1280, width: 1280 } } }],
+    sku: '',
+  };
+  c.fetch = async (url, options = {}) => {
+    const { hostname, pathname } = new URL(url);
+    requests.push({ method: options.method, hostname, pathname, body: options.body });
+    if (hostname.endsWith('amazonaws.com')) return reply(200, '');
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/pictures/') {
+      return reply(200, { id: 9, url: 'https://media-photos-depop.s3-accelerate.amazonaws.com/p/9.jpg?X-Amz-Signature=private' });
+    }
+    if (options.method === 'PUT' && /\/drafts\/[^/]+\/$/.test(pathname)) {
+      wrote = true;
+      return reply(200, {});
+    }
+    if (pathname === '/presentation/api/v1/drafts/123456/') return reply(200, wrote ? kept : stale);
+    return reply(200, {});
+  };
+  withCatalog(c);
+  const result = await c.runDepopNative(msg);
+  assert.equal(result.ok, true, result.error);
+  const put = requests.find(request => request.method === 'PUT' && request.pathname.includes('/drafts/'));
+  const body = JSON.parse(put.body);
+  assert.equal(body.videos, undefined);
+  assert.equal(body.repop_metadata, undefined);
+  assert.equal(typeof body.brand, 'string');
+  assert.equal(body.brand, 'nike');
+  assert.equal(body.product_type, 'tshirts');
+  assert.deepEqual(body.pictures, [9]);
+  assert.equal(body.condition, 'used_good');
+  assert.equal(body.shipping_methods[0].parcel_size_id, undefined);
+  const fields = await c.depopResolvedFields({ listing: item, deadline: Date.now() + 30000 });
+  const written = JSON.parse(JSON.stringify(c.depopDraftWriteBody(item, fields, [9])));
+  assert.deepEqual(body, written);
+  const created = JSON.parse(JSON.stringify(c.depopDraftWriteBody(item, fields, [])));
+  assert.deepEqual(created.pictures, []);
+  assert.equal(created.product_type, body.product_type);
+  assert.deepEqual(created.attributes, body.attributes);
+  assert.equal(created.brand, body.brand);
+  assert.deepEqual(JSON.parse(JSON.stringify(call(c, 'depopDraftMismatch', kept, item, fields))), []);
+  assert.equal(call(c, 'depopPictureCount', kept), 1);
+});

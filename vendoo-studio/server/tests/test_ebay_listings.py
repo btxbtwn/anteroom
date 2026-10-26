@@ -573,6 +573,27 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
                                                self.active, confirm=True, conversation_id="abc")
         self.assertEqual(mine["state"], "published")
 
+    def test_a_generated_inventory_key_is_not_the_sellers_sku(self):
+        self.assertEqual(ebay_listings.seller_sku({"sku": ""}), "")
+        self.assertEqual(ebay_listings.seller_sku({"sku": "ar-abc123"}), "")
+        self.assertEqual(ebay_listings.seller_sku({"sku": "TEE-001"}), "TEE-001")
+        self.assertEqual(ebay_listings.ebay_sku({"sku": "ar-leaked"}, {}, "abc123"), "ar-abc123")
+        self.assertEqual(ebay_listings.ebay_sku({"sku": "TEE-001"}, {}, "abc123"), "TEE-001")
+
+    async def test_an_empty_sku_stays_off_the_listing_record(self):
+        client = Client()
+        listing = {**LISTING, "sku": ""}
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", listing, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"])
+        self.assertEqual(listing["sku"], "")
+        self.assertEqual(self.binding["ebay_sku"], "ar-abc123")
+        inventory = next(call for call in client.calls if call[0] == "PUT" and "/inventory_item/" in call[1])
+        self.assertNotIn("sku", inventory[2]["body"]["product"])
+        offer = next(call for call in client.calls if call[:2] == ("POST", "/sell/inventory/v1/offer"))
+        self.assertEqual(offer[2]["body"]["sku"], "ar-abc123")
+
     async def test_photos_are_reused_only_when_the_same_file_is_in_the_same_place(self):
         client = Client()
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):

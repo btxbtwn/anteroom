@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.409 — 2026-10-26
+
+- Listing again on Depop fills the draft you already saved, including category, size, colour, brand, and photos.
+- Choosing no brand on Mercari clears a brand that was already on the draft.
+- Leaving SKU empty keeps it empty in Anteroom. eBay still needs its own inventory key, and that key is not saved as your SKU.
+
 ## 0.1.408 — 2026-10-26
 
 - Add Poshmark sizes to an inventory list, including custom sizes, with a separate quantity and SKU for each. The rows fit the editor panel, and saved drafts check every size and SKU.
