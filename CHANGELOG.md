@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.412 — 2026-10-26
+
+- Save selected listing fields as reusable templates. Apply one with a before-and-after review, or create a separate local draft with its own SKU and quantity. Manage templates in Settings → Listings; photos, videos and marketplace links stay with the original item.
+
 ## 0.1.411 — 2026-10-26
 
 - Upload, preview, select and clear a Poshmark listing video shorter than 15 seconds. Save Draft checks that Poshmark kept it, and List waits for video processing before publishing.

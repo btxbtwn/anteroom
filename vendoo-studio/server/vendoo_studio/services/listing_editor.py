@@ -112,7 +112,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         conv_repo.write_notes(conv_id, merge_notes(conv_repo.get(conv_id).notes, note_updates))
 
 
-    record_correction(db, conv_id, revision.id, listing_data, changes)
+    record_correction(db, conv_id, revision.id, listing_data, changes, source="template" if source == "template" else "user_form")
 
     if current:
         current.validation_status = "valid" if validation.valid else "error"

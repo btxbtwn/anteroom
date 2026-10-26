@@ -245,3 +245,18 @@ Changing the draft, photos, item details or marketplace links requires a new
 proposal. Each confirmation makes one attempt per marketplace; failed writes
 are not retried automatically. An existing live listing requires explicit
 Relist approval rather than being deleted as a side effect of List.
+
+
+### Saved listing templates
+
+Choose **Templates** on an inventory item to save selected reusable fields or
+apply a template. Applying fills blanks or replaces the selected fields, shows
+the editor's before-and-after changes, and saves a local revision after review.
+Changed items or templates require a new review. Marketplace forms are selected
+as a group; replace mode replaces that saved answer object.
+
+Manage templates under **Settings → Listings → Saved templates**. Create a local
+draft with its own inventory name, SKU and quantity, then add photos and finish
+its details. Templates do not carry private notes, photos, videos, sales history
+or marketplace links, and never send, publish or delist. After a lost draft
+reply, **Check draft result** finds the completed draft without creating another.

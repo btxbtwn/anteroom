@@ -99,6 +99,9 @@ def test_apply_requires_review_and_saves_the_reviewed_editor_result_with_item_de
     assert response.status_code == 200, response.text
     revision = ListingRepo(source.db).get_revisions("target")[0]
     assert revision.source == "template" and revision.parent_revision_id == approval["expected_revision_id"]
+    from vendoo_studio.models.listing_evidence import ListingCorrection
+    corrections = source.db.query(ListingCorrection).filter_by(revision_id=revision.id).all()
+    assert corrections and all(row.source == "template" for row in corrections)
     assert revision.listing_json["price"] == 40 and revision.listing_json["cost"] == 9 and revision.listing_json["labels"] == ["Winter"]
     assert revision.listing_json["quantity"] == 3 and revision.listing_json["description"] == "Original text"
     notes = json.loads(source.db.get(Conversation,"target").notes)
@@ -138,3 +141,35 @@ def test_category_selections_keep_catalog_ids_but_strip_operational_identity(sou
     response = capture(source, ["marketplace_category_objects"])
     assert response.status_code == 200, response.text
     assert response.json()["fields"]["marketplace_category_objects"]["ebay"] == {"id":"123", "path":["Clothing", "Coats"]}
+
+
+def test_marketplace_forms_cannot_reuse_private_notes_variant_skus_or_video_identity(source):
+    original = ListingRepo(source.db).get_revisions("source")[0].listing_json
+    ListingRepo(source.db).save_revision("source", {**original, "poshmark_specifics": {
+        "poshmarkSku": "SOURCE-SKU", "sellerNotes": "Private source notes", "video_id": "source-video",
+        "originalPrice": 60, "inventoryRows": [{"sizeId": "M", "sizeSetId": "regular", "quantity": 2, "sku": "SOURCE-M"}],
+    }}, "user_form")
+    result = capture(source, ["poshmark_specifics"])
+    assert result.status_code == 200, result.text
+    assert result.json()["fields"]["poshmark_specifics"] == {"originalPrice": 60, "inventoryRows": [{"sizeId": "M", "sizeSetId": "regular", "quantity": 2}]}
+    draft = source.client.post(f"/api/listing-templates/{result.json()['id']}/draft", json={
+        "request_id": uuid4().hex, "expected_revision": 1, "title": "New coat", "sku": "NEW-SKU", "quantity": 1})
+    assert draft.status_code == 200, draft.text
+    current = ListingRepo(source.db).get_revisions(draft.json()["conversation_id"])[0].listing_json
+    assert current["sku"] == "NEW-SKU" and "SOURCE" not in json.dumps(current)
+
+
+def test_review_matches_the_saved_editor_result_including_item_measurements(source):
+    from vendoo_studio.services.bulk_edit import digest
+    template = capture(source, ["price"]).json()
+    target(source)
+    conv = source.db.get(Conversation, "target")
+    conv.notes = json.dumps({"garment": "top", "measurements": {"top": {"length": "25", "pitToPit": "20"}}})
+    source.db.commit()
+    approval, review = application(source, template)
+    measurement_change = next(change for change in review["changes"] if change["field"] == "depop_specifics")
+    assert measurement_change["new"]["measurements"]["values"][0]["value"] == "20"
+    response = source.client.post(f"/api/listing-templates/{template['id']}/apply", json=approval)
+    assert response.status_code == 200, response.text
+    saved = ListingRepo(source.db).get_revision(response.json()["revision_id"]).listing_json
+    assert digest(saved) == approval["expected_result"]

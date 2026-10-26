@@ -18,6 +18,7 @@ from vendoo_studio.services.bulk_edit import basis, digest
 from vendoo_studio.services.listing_copy import CopyError, add_draft, completed_copy, read_source, reusable_listing
 from vendoo_studio.services.listing_editor import prepared_listing, save_listing_edit
 from vendoo_studio.repositories.queries import RevisionConflict
+from vendoo_studio.services.vendoo_import import parse_notes
 
 
 class TemplateSource(BaseModel):
@@ -185,7 +186,7 @@ def _application(db: Session, template_id: str, body: TemplateApply):
     if revision is None or not isinstance(revision.listing_json, dict):
         raise CopyError("Save listing fields before applying a template.", 422)
     raw = apply_fields(revision.listing_json, row.fields, body.mode)
-    prepared = prepared_listing(revision.listing_json, raw) if raw != revision.listing_json else raw
+    prepared = prepared_listing(revision.listing_json, raw, notes=parse_notes(conv.notes)) if raw != revision.listing_json else raw
     return conv, revision, raw, prepared
 
 
@@ -208,9 +209,4 @@ def apply(db: Session, template_id: str, body: TemplateApproval) -> dict:
             result = save_listing_edit(conv.id, raw, db, source="template", expected_revision_id=revision.id)
         except RevisionConflict as exc:
             raise CopyError(str(exc)) from exc
-        from vendoo_studio.models.listing_evidence import ListingCorrection
-
-        # A reusable preset is not a fresh observation of this item's facts.
-        db.query(ListingCorrection).filter_by(revision_id=result["revision_id"]).update({"source": "template"})
-        db.commit()
         return {"ok": True, "changed": True, "revision_id": result["revision_id"], "validation": result["validation"]}

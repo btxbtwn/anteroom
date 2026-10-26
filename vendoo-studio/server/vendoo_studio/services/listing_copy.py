@@ -28,7 +28,8 @@ CATEGORY_KEYS = ("marketplace_categories", "marketplace_category_ids", "marketpl
 # dropping operational identity that is not a reusable field answer.
 OPERATIONAL_KEYS = frozenset(("listingid", "itemid", "draftid", "orderid", "lineid", "conversationid", "jobid", "offerid",
                               "listingurl", "drafturl", "vendooitemid", "vendoourl", "sku", "images", "photos", "media", "imageurls",
-                              "status", "state", "videoid", "accesstoken", "refreshtoken", "token", "cookie", "authorization"))
+                              "status", "state", "video", "videos", "videoid", "videourl", "sellernotes", "privatenotes", "internalnotes",
+                              "sellerprivateinfo", "sellerinventoryprivateinfo", "accesstoken", "refreshtoken", "token", "cookie", "authorization"))
 
 
 class CopyError(ValueError):
@@ -56,7 +57,8 @@ class CopyRequest(BaseModel):
 def _clean_answers(value):
     if isinstance(value, dict):
         return {key: _clean_answers(answer) for key, answer in value.items()
-                if "".join(char for char in key.casefold() if char.isalnum()) not in OPERATIONAL_KEYS}
+                if "".join(char for char in key.casefold() if char.isalnum()) not in OPERATIONAL_KEYS
+                and not key.casefold().endswith("sku")}
     if isinstance(value, list):
         return [_clean_answers(answer) for answer in value]
     return copy.deepcopy(value)
