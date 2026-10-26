@@ -64,6 +64,86 @@ Then:
 3. Click **Connect Chrome**, then load unpacked from the folder shown in Settings → Connections so Chrome stays on Anteroom's copy.
 4. Sign in to Vendoo. The status bar shows **Extension connected**.
 
+## Command line
+
+`anteroom` is a terminal client for the same HTTP API the app uses. Install it with the backend (the `setup.sh` editable install picks up the `anteroom` script):
+
+```bash
+cd vendoo-studio
+source .venv/bin/activate
+pip install -e .
+anteroom version
+```
+
+The app does not check a bearer token. It listens on `127.0.0.1:4318`. A saved token is sent as `Authorization: Bearer` only when a proxy in front of another URL requires one. Tailscale Serve, turned on in Settings → Connections, is what protects a remote URL.
+
+```bash
+# This Mac. Saved as the current environment.
+anteroom auth login --alias local --base-url http://127.0.0.1:4318
+
+# Another Mac on your tailnet. Optional --token if a proxy demands one.
+anteroom auth login --alias studio --base-url https://mac.tailnet.ts.net --token "$ANTEROOM_TOKEN"
+anteroom auth use studio
+anteroom auth list
+anteroom auth whoami
+```
+
+`ANTEROOM_BASE_URL`, `ANTEROOM_TOKEN`, and `ANTEROOM_ENV` override the saved environment for one shell. Config lives in `~/.config/anteroom/config.json` (mode 0600). `auth list` shows whether a token is stored and never prints it.
+
+Commands are generated from the FastAPI routes, so a new endpoint shows up after the next `anteroom` run (the catalog is cached under `~/.cache/anteroom` and rebuilt when the server code changes):
+
+```bash
+anteroom commands                 # one line per route
+anteroom commands --json          # machine-readable catalog
+anteroom health get
+anteroom health status --json
+anteroom conversations list --json
+anteroom conversations get --conv-id CONV
+anteroom boxes create --store Goodwill --title "Monday coats" --price 40
+```
+
+`--json` on any command prints one object on stdout: `ok`, `status`, `data`, and `error` when the call failed. Exit codes are `0` success, `1` the server returned an error, `2` bad usage, `3` could not connect, `4` the command is destructive and `--confirm` was missing.
+
+Delete, publish, delist, price changes, live-listing updates, and anything else the API treats as undoable or seller-confirmed are refused until you pass `--confirm`. Publishing still requires the marketplaces by name. The CLI does not fill them in, and it does not publish on its own:
+
+```bash
+anteroom vendoo-api conversations-list --conv-id CONV --marketplaces ebay --confirm
+anteroom boxes delete --box-id BOX --confirm
+```
+
+A path that does not have a generated command yet:
+
+```bash
+anteroom api request GET /api/changelog --json
+anteroom api schema
+```
+
+WebSocket routes (the extension socket and the Claude sign-in terminal) are listed in `anteroom commands` and are not opened by the CLI. The webhook relay is a separate Cloudflare worker; Anteroom calls it outbound, and this CLI does not.
+
+### Hooking up an agent
+
+Point the agent at the catalog, or at the MCP server. Both expose the same routes.
+
+```bash
+anteroom commands --json
+anteroom mcp serve
+```
+
+Cursor or Claude can connect with a stdio MCP server:
+
+```json
+{
+  "mcpServers": {
+    "anteroom": {
+      "command": "anteroom",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+Each HTTP route is a tool. Destructive tools require `"confirm": true` and still name marketplaces themselves. `anteroom_commands` returns the catalog, and `anteroom_api_request` calls any path.
+
 ## Workflow
 
 1. **Create a listing**.

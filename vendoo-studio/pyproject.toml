@@ -1,6 +1,6 @@
 [project]
 name = "vendoo-studio"
-version = "0.1.379"
+version = "0.1.380"
 description = "Local web app for generating and automating Vendoo marketplace listings"
 requires-python = ">=3.12"
 dependencies = [
@@ -41,6 +41,7 @@ package = [
 [project.scripts]
 vendoo-studio = "vendoo_studio.main:main"
 vendoo-studio-category-trees = "vendoo_studio.category_trees_cli:main"
+anteroom = "vendoo_studio.cli.main:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]

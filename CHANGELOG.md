@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.380 — 2026-10-26
+
+- You can drive Anteroom from the terminal with the `anteroom` command. It can do what the app's API already allows, prints `--json` for an assistant, and will not delete, publish, or delist unless you pass `--confirm`.
+
 ## 0.1.379 — 2026-10-25
 
 - Mercari listings now carry the brand, size and prepaid shipping label (buyer pays), and Anteroom checks Mercari's draft before posting. A category with sub-categories, like Boys coats & jackets, has to be narrowed down first.
