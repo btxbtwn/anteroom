@@ -184,7 +184,8 @@ def test_invalid_listing_ids_are_rejected_before_contacting_ebay(imported, listi
 
 @pytest.mark.parametrize(("path", "value"), [("Seller/UserID", "someone-else"), ("Site", "UK"),
     ("SellingStatus/ListingStatus", "Ended"), ("ListingType", "Chinese"), ("Quantity", "invalid"),
-    ("SellingStatus/QuantitySold", "6"), ("SellingStatus/CurrentPrice", "NaN"), ("ItemID", "987654321098")])
+    ("SellingStatus/QuantitySold", "6"), ("SellingStatus/CurrentPrice", "NaN"),
+    ("SellingStatus/CurrentPrice", "1e9999"), ("ItemID", "987654321098")])
 def test_unsupported_or_unowned_listings_never_create_inventory(imported, path, value):
     imported.remote.item = item_xml(**{path: value})
     response = imported.client.post("/api/ebay/import", json={"listing_id": ITEM_ID})

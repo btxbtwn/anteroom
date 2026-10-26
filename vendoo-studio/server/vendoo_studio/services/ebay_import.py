@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal, InvalidOperation
+import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -88,7 +89,7 @@ def _snapshot(info: dict) -> dict:
         price = Decimal(info["price"])
     except (InvalidOperation, TypeError):
         raise EbayFailure("eBay did not return a valid USD price.", 409) from None
-    if not price.is_finite() or price <= 0:
+    if not price.is_finite() or price <= 0 or not math.isfinite(float(price)):
         raise EbayFailure("eBay did not return a valid USD price.", 409)
     if info.get("type") not in {"FixedPriceItem", "StoresFixedPrice"}:
         raise EbayFailure("This import supports active fixed-price listings without variations.", 409)

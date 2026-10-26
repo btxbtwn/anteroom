@@ -16,7 +16,7 @@ beforeEach(() => {
 
 describe("direct eBay inventory import", () => {
   it("shows existing and unsupported listings without offering to publish or replace them", () => {
-    const html = renderToStaticMarkup(<InventoryImport onOpenListing={vi.fn()} />);
+    const html = renderToStaticMarkup(<InventoryImport accountKey="seller:connection-one" onOpenListing={vi.fn()} />);
     expect(html).toContain("Already saved coat");
     expect(html).toContain("Open item");
     expect(html).toContain("3 available");
@@ -29,7 +29,7 @@ describe("direct eBay inventory import", () => {
 
   it("keeps manual import available when loading the active list fails", () => {
     useQuery.mockReturnValue({ error: new Error("The active list could not be read.") });
-    const html = renderToStaticMarkup(<InventoryImport onOpenListing={vi.fn()} />);
+    const html = renderToStaticMarkup(<InventoryImport accountKey="seller:connection-one" onOpenListing={vi.fn()} />);
     expect(html).toContain("The active list could not be read.");
     expect(html).toContain("eBay listing ID");
     expect(html).toContain("Import listing");
@@ -37,7 +37,7 @@ describe("direct eBay inventory import", () => {
 
   it("offers a stop after the current listing while importing", () => {
     useMutation.mockReturnValue({ mutate: vi.fn(), isPending: true });
-    const html = renderToStaticMarkup(<InventoryImport onOpenListing={vi.fn()} />);
+    const html = renderToStaticMarkup(<InventoryImport accountKey="seller:connection-one" onOpenListing={vi.fn()} />);
     expect(html).toContain("Stop after this listing");
     expect(html).toContain("Importing listings and photos");
   });

@@ -6,7 +6,7 @@ import { PageError, PageNote, PageSection } from "../WorkspacePage";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 
-export function InventoryImport({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+export function InventoryImport({ accountKey, onOpenListing }: { accountKey: string; onOpenListing: (id: string) => void }) {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<string[]>([]);
@@ -15,7 +15,7 @@ export function InventoryImport({ onOpenListing }: { onOpenListing: (id: string)
   const [errors, setErrors] = useState<Record<string, string>>({});
   const stop = useRef(false);
   const [stopping, setStopping] = useState(false);
-  const candidates = useQuery({ queryKey: ["ebay", "import-active", page], queryFn: () => api.ebay.importCandidates(page), retry: false });
+  const candidates = useQuery({ queryKey: ["ebay", "import-active", accountKey, page], queryFn: () => api.ebay.importCandidates(page), retry: false });
   const run = useMutation({
     mutationFn: async (ids: string[]) => {
       stop.current = false;
