@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.399 — 2026-10-26
+
+- Select inventory items and choose Edit fields to review price, cost, quantity, title, description, brand, size or SKU changes together. Add, remove or replace labels in the same review; changed or busy items are skipped, and saved edits stay in Anteroom until you choose a marketplace action.
+
 ## 0.1.398 — 2026-10-26
 
 - Record sales amounts, refunds, fees and costs directly in Analytics, with separate currency totals and a review reminder when an order changes. Download inventory and sales CSV files without Vendoo; blank amounts remain unknown.
