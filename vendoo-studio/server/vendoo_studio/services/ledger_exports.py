@@ -69,7 +69,7 @@ def sales_csv(query):
 
 
 def inventory_csv(db: Session):
-    headers = ["conversation_id", "title", "description", "local_status", "sku", "price", "unit_cost", "local_quantity", "brand", "category",
+    headers = ["conversation_id", "title", "description", "local_status", "sku", "price", "recorded_cost", "local_quantity", "brand", "category",
                *[f"saved_{marketplace}_url" for marketplace in sales_ledger.MARKETPLACES]]
     costs = {row.conversation_id: row.cost for row in load_rows(db)}
     links = MarketplaceListingRepo(db).listing_urls()

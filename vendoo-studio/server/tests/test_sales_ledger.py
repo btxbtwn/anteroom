@@ -182,7 +182,7 @@ def test_inventory_export_uses_current_local_values_and_only_validated_clean_lin
     MarketplaceListingRepo(ledger.db).save("coat", "ebay", {"state": "published", "listing_url": "https://www.ebay.com/itm/123456789012?private=never-export"})
     response = ledger.client.get("/api/sales-ledger/export/inventory.csv")
     row = next(csv.DictReader(StringIO(response.content.decode("utf-8-sig"))))
-    assert row["local_quantity"] == "3" and row["unit_cost"] == "5.0"
+    assert row["local_quantity"] == "3" and row["recorded_cost"] == "5.0"
     assert row["saved_ebay_url"] == "https://www.ebay.com/itm/123456789012"
     assert "never-export" not in response.text and "notes" not in row
     assert set(row) >= {"conversation_id", "title", "description", "local_status", "sku", "price"}

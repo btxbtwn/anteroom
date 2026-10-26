@@ -96,14 +96,14 @@ function FinancialEditor({ row, onClose, onSaved, onReload }: { row: SalesLedger
   const reload = useMutation({ mutationFn: () => api.salesLedger.get(row.id), retry: false, onSuccess: onReload });
   const busy = save.isPending || reload.isPending;
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
-    <DialogPopup className="sm:max-w-xl"><DialogHeader><DialogTitle>Record sale amounts</DialogTitle><DialogDescription>{marketplaceName(row.marketplace)} order {row.order_id} · line {row.line_id} · quantity {row.quantity ?? "unknown"} · {row.order_status.replace(/_/g, " ")}</DialogDescription></DialogHeader>
-      <form onSubmit={(event) => { event.preventDefault(); if (!busy) save.mutate(); }}><DialogPanel className="space-y-4">
+    <DialogPopup className="sm:max-w-xl"><DialogHeader className="shrink-0"><DialogTitle>Record sale amounts</DialogTitle><DialogDescription>{marketplaceName(row.marketplace)} order {row.order_id} · line {row.line_id} · quantity {row.quantity ?? "unknown"} · {row.order_status.replace(/_/g, " ")}</DialogDescription></DialogHeader>
+      <form className="flex min-h-0 flex-col" onSubmit={(event) => { event.preventDefault(); if (!busy) save.mutate(); }}><DialogPanel className="space-y-4">
         <PageNote>Enter totals for this order line, excluding buyer taxes. Blank is unknown; zero is a confirmed zero. Net fees may be negative for fee credits. Saving records your figures locally; quantities and marketplace listings stay unchanged.</PageNote>
         {row.financials_stale ? <PageNote>This order changed. Review every amount before saving again.</PageNote> : null}
         <label className="block space-y-1 text-xs">Currency code<Input required pattern="[A-Z]{3}" maxLength={3} value={currency} placeholder="USD" disabled={busy} onChange={(event) => setCurrency(event.target.value.toUpperCase())} /></label>
         <div className="grid gap-3 sm:grid-cols-2">{FINANCIAL_FIELDS.map((field) => <label key={field} className="space-y-1 text-xs">{LABELS[field]}<Input inputMode="decimal" value={values[field]} placeholder="Unknown" disabled={busy} onChange={(event) => setValues((previous) => ({ ...previous, [field]: event.target.value }))} /></label>)}</div>
         {save.error ? <PageError message={save.error.message} /> : null}{reload.error ? <PageError message={reload.error.message} /> : null}
-      </DialogPanel><DialogFooter><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" disabled={busy || !/^[A-Z]{3}$/.test(currency)}>{save.isPending ? "Saving…" : "Save amounts"}</Button></DialogFooter></form>
+      </DialogPanel><DialogFooter className="shrink-0"><Button type="button" variant="ghost" disabled={busy} onClick={() => reload.mutate()}>Reload record</Button><Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" disabled={busy || !/^[A-Z]{3}$/.test(currency)}>{save.isPending ? "Saving…" : "Save amounts"}</Button></DialogFooter></form>
     </DialogPopup>
   </Dialog>;
 }
