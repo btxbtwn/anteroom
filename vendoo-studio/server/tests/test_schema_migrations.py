@@ -408,3 +408,21 @@ def test_existing_orders_keep_identity_and_state_when_financial_records_are_adde
         row = connection.execute("SELECT order_id, line_id, listing_id, state, quantity, order_status, financials, financial_revision FROM marketplace_sales WHERE id='keep-financial-sale'").fetchone()
     assert row == ("100", "200", "555", "dismissed", 2, "refunded", None, 0)
     assert inspect_database(engine.url.database).clean
+
+
+def test_copy_receipts_upgrade_keeps_existing_drafts_and_financial_records(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "9661374eb3a1")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status) VALUES ('copy-source', 'Existing coat', 'draft')")
+        connection.execute("INSERT INTO marketplace_sales (id, marketplace, order_id, line_id, state, received_at, financials, financial_revision) "
+                           "VALUES ('sale-copy-upgrade', 'etsy', 'order', 'line', 'dismissed', '2026-10-26', '{\"currency\":\"USD\",\"fees\":\"2.25\"}', 3)")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT title, status FROM conversations WHERE id='copy-source'").fetchone() == ("Existing coat", "draft")
+        row = connection.execute("SELECT order_id, state, financials, financial_revision FROM marketplace_sales WHERE id='sale-copy-upgrade'").fetchone()
+        assert row == ("order", "dismissed", '{"currency":"USD","fees":"2.25"}', 3)
+        assert connection.execute("SELECT count(*) FROM listing_copy_receipts").fetchone() == (0,)
+    assert inspect_database(engine.url.database).clean

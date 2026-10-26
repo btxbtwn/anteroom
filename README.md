@@ -34,6 +34,12 @@ Choose the **Copy listing** action on an inventory row (the copy icon on desktop
 
 Saved listing fields, categories, form answers and seller Item Details are the starting point; review the copy’s description, condition, measurements and shipping before listing it. Creating the copy never contacts a marketplace. If the source changes while the dialog is open, reload its review before copying. A missing local photo stops the copy and removes any partial files/rows; restore the source photo or copy without photos. An item without saved listing fields can still become a partial draft from its Item Details and photos.
 
+### Copy selected inventory items
+
+Choose **Select → Copy items** for up to 300 inventory items. Review each new draft’s inventory name, SKU, quantity, photo option and cost option; uncheck any source to leave it out. Busy or missing sources show why they cannot be copied. **Create local drafts** processes one item at a time and reports every outcome. **Stop after current item** lets the active copy finish and leaves the rest waiting. **Continue remaining** or **Retry remaining** uses the same approved requests and leaves completed copies alone; **Review remaining** reloads only unconfirmed sources for a new review. **Open draft** opens a saved result.
+
+A completed copy request is recorded with the new draft in the same database transaction. Repeating that request returns the same copy, including after a lost reply or a source change. Reusing it with different parameters is rejected. Deleting the copy keeps a receipt, so replaying its old request cannot recreate it. Failed copies leave no receipt or partial files. Individual copying also has **Check copy result** after an error. Batch progress is held in the open dialog; the created drafts and receipts persist in the database. All copying stays local and never publishes or delists.
+
 ### Bulk field and label editing
 
 Choose **Select** in inventory, pick up to 300 items and choose **Edit fields**. Check the fields you want to replace: title, description, brand, size, SKU, price, cost or quantity. Unchecked fields stay as they are. Empty description, brand or SKU clears that field; empty cost means unknown. Prices and quantities are positive whole numbers. Choose whether to add, remove or replace labels; replacing with an empty list clears them.

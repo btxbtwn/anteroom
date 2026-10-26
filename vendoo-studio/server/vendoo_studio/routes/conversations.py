@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -175,13 +175,14 @@ def get_conversation(conv_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{conv_id}/copy-preview")
-def preview_copy(conv_id: str, db: Session = Depends(get_db)):
+def preview_copy(conv_id: str, response: Response, db: Session = Depends(get_db)):
     from vendoo_studio.services import listing_copy
 
+    response.headers["Cache-Control"] = "no-store"
     try:
         return listing_copy.preview(db, conv_id)
     except listing_copy.CopyError as exc:
-        raise HTTPException(exc.status, str(exc)) from exc
+        raise HTTPException(exc.status, str(exc), headers={"Cache-Control": "no-store"}) from exc
 
 
 @router.post("/{conv_id}/copy", response_model=ConversationResponse)
@@ -192,6 +193,18 @@ def copy_conversation(conv_id: str, body: CopyRequest, db: Session = Depends(get
         new_id = listing_copy.create_copy(db, conv_id, body)
     except listing_copy.CopyError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
+    return _conv_response(ConversationRepo(db).get(new_id), _extras_for(db, new_id))
+
+
+@router.get("/{conv_id}/copy-result/{request_id}", response_model=ConversationResponse)
+def copy_result(conv_id: str, request_id: str, response: Response, db: Session = Depends(get_db)):
+    from vendoo_studio.services import listing_copy
+
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        new_id = listing_copy.copy_result(db, conv_id, request_id)
+    except listing_copy.CopyError as exc:
+        raise HTTPException(exc.status, str(exc), headers={"Cache-Control": "no-store"}) from exc
     return _conv_response(ConversationRepo(db).get(new_id), _extras_for(db, new_id))
 
 

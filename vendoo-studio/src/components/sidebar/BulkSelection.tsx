@@ -1,3 +1,4 @@
+import { BulkCopyDialog } from "../BulkCopyDialog";
 import { BulkEditDialog } from "../BulkEditDialog";
 import { BulkRegeneratePriceDialog } from "../BulkRegeneratePriceDialog";
 import { BulkPriceDropDialog } from "../BulkPriceDropDialog";
@@ -16,7 +17,7 @@ export function BulkActionBar({
   selection: ListingSelection;
   eligibleIds: string[];
 }) {
-  const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, setEditIds, exitSelecting } = selection;
+  const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, setEditIds, setCopyIds, exitSelecting } = selection;
   return (
     <div
       className="flex shrink-0 flex-col gap-1.5 border-t border-sidebar-border px-(--sidebar-content-inset) py-2 max-[900px]:sticky max-[900px]:bottom-0 max-[900px]:z-10 max-[900px]:bg-sidebar max-[900px]:pb-[max(8px,env(safe-area-inset-bottom,0px))]"
@@ -39,6 +40,8 @@ export function BulkActionBar({
         </Button>
         <Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 300}
           title="Review local field and label changes for up to 300 listings" onClick={() => setEditIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Edit fields</Button>
+        <Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 300}
+          title="Review separate draft copies of up to 300 selected items" onClick={() => setCopyIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Copy items</Button>
         <Button
           type="button"
           variant="destructive"
@@ -76,10 +79,12 @@ export function BulkActionBar({
 }
 
 /** The price, Mark down and review dialogs a bulk action opens. */
-export function BulkSelectionDialogs({ selection }: { selection: ListingSelection }) {
+export function BulkSelectionDialogs({ selection, onOpenListing }: { selection: ListingSelection; onOpenListing: (id: string) => void }) {
   const {
     editIds,
     setEditIds,
+    copyIds,
+    setCopyIds,
     pricePrompt,
     setPricePrompt,
     reviewPrompt,
@@ -91,6 +96,7 @@ export function BulkSelectionDialogs({ selection }: { selection: ListingSelectio
   } = selection;
   return (
     <>
+      {copyIds ? <BulkCopyDialog conversationIds={copyIds} onOpenListing={(id) => { setCopyIds(null); exitSelecting(); onOpenListing(id); }} onClose={() => { setCopyIds(null); exitSelecting(); }} /> : null}
       {editIds ? <BulkEditDialog conversationIds={editIds} onClose={() => { setEditIds(null); exitSelecting(); }} /> : null}
       {pricePrompt ? (
         <BulkRegeneratePriceDialog

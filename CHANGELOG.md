@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.401 — 2026-10-26
+
+- Select inventory items and choose Copy items to review separate names, SKUs, quantities, photos and costs. See each result, stop after the current item, and continue or retry the remaining copies without creating duplicates when a reply is lost.
+
 ## 0.1.400 — 2026-10-26
 
 - Copy an inventory item into a separate local draft, with a new SKU and quantity and optional photos or cost. Photos stay independent, and marketplace links and sales history stay with the original. Review the item’s details before listing the copy.

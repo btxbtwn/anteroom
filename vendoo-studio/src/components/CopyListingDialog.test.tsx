@@ -18,7 +18,7 @@ describe("listing copy review", () => {
     expect(copy).not.toHaveBeenCalled();
     const mutation = useMutation.mock.calls[0][0];
     await expect(mutation.mutationFn()).rejects.toThrow("No network");
-    expect(copy).toHaveBeenCalledWith("original", {expected_basis:preview.expected_basis,title:"Copy of Coat",sku:"",quantity:1,include_photos:true,include_cost:false});
+    expect(copy).toHaveBeenCalledWith("original", {request_id:expect.stringMatching(/^[a-f0-9]{32}$/),expected_basis:preview.expected_basis,title:"Copy of Coat",sku:"",quantity:1,include_photos:true,include_cost:false});
     expect(mutation.retry).toBe(false);
     copy.mockRestore();
   });

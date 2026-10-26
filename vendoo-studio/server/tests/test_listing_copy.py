@@ -1,6 +1,7 @@
 import copy
 from io import BytesIO
 import json
+from uuid import uuid4
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -67,7 +68,7 @@ def preview(source):
 
 
 def duplicate(source, **changes):
-    body = {"expected_basis": preview(source)["expected_basis"], "title": "Copy of coat", "sku": "NEW-SKU", "quantity": 2, **changes}
+    body = {"request_id": uuid4().hex, "expected_basis": preview(source)["expected_basis"], "title": "Copy of coat", "sku": "NEW-SKU", "quantity": 2, **changes}
     return source.client.post("/api/conversations/source/copy", json=body)
 
 
@@ -168,8 +169,117 @@ def test_photo_only_item_becomes_a_partial_draft_with_its_new_sku_and_quantity(s
     source.db.commit()
     response = source.client.get("/api/conversations/empty/copy-preview")
     assert response.status_code == 200 and response.json()["has_listing"] is False
-    copied = source.client.post("/api/conversations/empty/copy", json={"expected_basis": response.json()["expected_basis"], "title": "New partial", "sku": "NEW", "quantity": 3})
+    copied = source.client.post("/api/conversations/empty/copy", json={"request_id": uuid4().hex, "expected_basis": response.json()["expected_basis"], "title": "New partial", "sku": "NEW", "quantity": 3})
     assert copied.status_code == 200, copied.text
     listing = ListingRepo(source.db).get_revisions(copied.json()["id"])[0].listing_json
     assert listing == {"sku": "NEW", "quantity": 3}
     assert copied.json()["status"] == "draft"
+
+
+def test_repeating_an_approved_request_returns_the_same_copy_after_source_changes(source):
+    from vendoo_studio.models.listing_copy import ListingCopyReceipt
+
+    request_id = uuid4().hex
+    basis = preview(source)["expected_basis"]
+    first = duplicate(source, request_id=request_id, expected_basis=basis)
+    assert first.status_code == 200, first.text
+    source.db.get(Conversation, "source").notes = '{"sellerNotes":"Changed after successful copy"}'
+    source.db.commit()
+    second = duplicate(source, request_id=request_id, expected_basis=basis)
+    assert second.status_code == 200 and second.json()["id"] == first.json()["id"]
+    assert source.db.query(Conversation).count() == 2
+    assert source.db.query(ListingCopyReceipt).count() == 1
+    assert source.db.query(Photo).count() == 4
+    checked = source.client.get(f"/api/conversations/source/copy-result/{request_id}")
+    assert checked.status_code == 200 and checked.json()["id"] == first.json()["id"]
+    assert checked.headers["cache-control"] == "no-store"
+    changed = duplicate(source, request_id=request_id, expected_basis=basis, quantity=99)
+    assert changed.status_code == 409
+    assert source.db.query(Conversation).count() == 2
+
+
+def test_removed_copy_is_not_recreated_by_replaying_its_request(source, monkeypatch):
+    from vendoo_studio.services import listing_delete
+
+    monkeypatch.setattr(listing_delete, "PHOTOS_DIR", source.directory)
+    request_id = uuid4().hex
+    basis = preview(source)["expected_basis"]
+    first = duplicate(source, request_id=request_id, expected_basis=basis)
+    delete_listing(source.db, first.json()["id"])
+    source.db.commit()
+    result = duplicate(source, request_id=request_id, expected_basis=basis)
+    assert result.status_code == 410
+    assert source.client.get(f"/api/conversations/source/copy-result/{request_id}").status_code == 410
+    assert source.db.query(Conversation).count() == 1
+
+
+def test_failed_copy_leaves_no_receipt_and_same_approval_can_be_retried(source):
+    from vendoo_studio.models.listing_copy import ListingCopyReceipt
+
+    image = ConversationRepo(source.db).get_photos("source")[1]
+    path = source.directory / image.stored_filename
+    contents = path.read_bytes()
+    path.unlink()
+    request_id = uuid4().hex
+    basis = preview(source)["expected_basis"]
+    assert duplicate(source, request_id=request_id, expected_basis=basis).status_code == 422
+    assert source.db.query(ListingCopyReceipt).count() == 0
+    path.write_bytes(contents)
+    assert duplicate(source, request_id=request_id, expected_basis=basis).status_code == 200
+    assert source.db.query(ListingCopyReceipt).count() == 1
+
+
+def test_bulk_review_deduplicates_and_explains_missing_or_busy_sources(source, monkeypatch):
+    source.db.add(Conversation(id="busy", title="Busy"))
+    source.db.commit()
+    monkeypatch.setattr(listing_copy, "running_marketplace", lambda db, key: "ebay" if key == "busy" else None)
+    response = source.client.post("/api/listings/copies/preview", json={"conversation_ids": ["source", "missing", "busy", "source"]})
+    assert response.status_code == 200, response.text
+    rows = response.json()["rows"]
+    assert [row["source_id"] for row in rows] == ["source", "missing", "busy"]
+    assert rows[0]["photo_count"] == 2 and rows[0]["skip_reason"] is None
+    assert rows[1]["skip_reason"] and rows[2]["skip_reason"]
+    assert source.db.query(Conversation).count() == 2
+    assert source.client.post("/api/listings/copies/preview", json={"conversation_ids": []}).status_code == 422
+    assert source.client.post("/api/listings/copies/preview", json={"conversation_ids": ["source"] * 301}).status_code == 422
+
+
+def test_copy_result_does_not_expose_a_different_sources_request(source):
+    request_id = uuid4().hex
+    assert duplicate(source, request_id=request_id).status_code == 200
+    assert source.client.get(f"/api/conversations/another-source/copy-result/{request_id}").status_code == 404
+
+
+def test_concurrent_retries_create_one_draft_and_one_set_of_photos(source, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from vendoo_studio.models.listing_copy import ListingCopyReceipt
+
+    # Separate request sessions on a file database model real simultaneous API calls.
+    engine = create_engine(f"sqlite:///{tmp_path / 'concurrent-copy.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as db:
+        db.add(Conversation(id="original", title="Coat", status="draft"))
+        db.commit()
+        original_photo = ConversationRepo(source.db).get_photos("source")[0]
+        db.add(Photo(conversation_id="original", original_filename=original_photo.original_filename,
+                     stored_filename=original_photo.stored_filename, mime_type=original_photo.mime_type,
+                     size_bytes=original_photo.size_bytes, checksum=original_photo.checksum, display_order=0))
+        db.commit()
+        snapshot = listing_copy.preview(db, "original")
+    body = listing_copy.CopyRequest(request_id=uuid4().hex, expected_basis=snapshot["expected_basis"], title="Copy")
+
+    def submit(_index):
+        with factory() as db:
+            return listing_copy.create_copy(db, "original", body)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(submit, range(2)))
+        assert results[0] == results[1]
+        with factory() as db:
+            assert db.query(Conversation).count() == 2
+            assert db.query(ListingCopyReceipt).count() == 1
+            assert db.query(Photo).count() == 2
+    finally:
+        engine.dispose()
