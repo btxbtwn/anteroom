@@ -164,7 +164,17 @@ describe("marketplaces section", () => {
     expect(deleted).not.toContain("Fill or fix those fields");
   });
 
-  it("offers Update on a live listing on every direct marketplace", () => {
+  it("shows Update on a live listing only once the listing has changed", () => {
+    const sent = (revision_id: string) => ({ mercari: { state: "published", revision_id, listing_url: live.url } }) as NativeDrafts;
+    const current = render(sent("current"), { mercari: live }, { selected: "mercari" });
+    expect(current).not.toContain(">Update…</button>");
+    expect(current).not.toContain("latest edits");
+    const changed = render(sent("older"), { mercari: live }, { selected: "mercari" });
+    expect(enabledButton(changed, "Update…")).toBe(true);
+    expect(changed).toContain("Your latest edits aren&#x27;t on Mercari yet.");
+  });
+
+  it("offers Update on a changed live listing on every direct marketplace", () => {
     const listing = (url: string, listingId: string) => ({ ...live, url, listing_id: listingId });
     for (const [selected, entry] of [
       ["ebay", listing("https://www.ebay.com/itm/123456789012", "123456789012")],
@@ -174,7 +184,7 @@ describe("marketplaces section", () => {
       ["vinted", listing("https://www.vinted.com/items/4567890123", "4567890123")],
       ["sellwild", listing("https://sellwild.com/product/123/test", "123")],
     ] as const) {
-      const html = render({}, { [selected]: entry }, { selected });
+      const html = render({ [selected]: { state: "published", revision_id: "older" } } as NativeDrafts, { [selected]: entry }, { selected });
       expect(enabledButton(html, "Update…")).toBe(true);
       expect(html).not.toContain("List…");
     }
@@ -212,7 +222,7 @@ describe("marketplaces section", () => {
 
   it("gives every marketplace its own actions menu, and offers Delist everywhere only for more than one listing", () => {
     const html = render({}, { mercari: live, ebay: { ...live, url: "https://www.ebay.com/itm/1", listing_id: "1", sold_here: true } });
-    expect(row(html, "Mercari")).toContain("Live");
+    expect(row(html, "Mercari")).toContain("Listed");
     expect(row(html, "eBay")).toContain("Sold here");
     for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) expect(row(html, name)).toContain(`aria-label="${name} actions"`);
     expect(html).not.toContain("Delist everywhere…");
@@ -259,7 +269,7 @@ describe("marketplaces section", () => {
   it("shows a linked Facebook listing as live, offers a check, and leaves deleting to Facebook", () => {
     const facebook = { ...live, url: "https://www.facebook.com/marketplace/item/1234567890123456", listing_id: "1234567890123456", can_delist: false };
     const html = render({}, { facebook, mercari: live }, { selected: "facebook" });
-    expect(row(html, "Facebook")).toContain("Live");
+    expect(row(html, "Facebook")).toContain("Listed");
     expect(enabledButton(html, "Check on Facebook")).toBe(true);
     expect(html).toContain("Anteroom can&#x27;t delete Facebook listings yet");
     expect(html).not.toContain("List…");
@@ -274,7 +284,7 @@ describe("marketplaces section", () => {
     expect(facebookCheckText({ ok: true, state: "sold", owner: "you", sale_recorded: true, listings: {} }))
       .toBe("Marked sold on Facebook. Anteroom recorded the sale.");
     expect(facebookCheckText({ ok: true, state: "live", owner: "other", sale_recorded: false, listings: {} }))
-      .toBe("Live on Facebook. It is on a different Facebook account than the one signed in to Chrome.");
+      .toBe("Listed on Facebook. It is on a different Facebook account than the one signed in to Chrome.");
     expect(facebookCheckText({ ok: false, error: "Facebook asked to sign in again.", sale_recorded: false, listings: {} }))
       .toBe("Facebook asked to sign in again.");
   });

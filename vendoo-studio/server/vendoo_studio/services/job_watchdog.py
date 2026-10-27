@@ -139,7 +139,8 @@ async def sweep() -> list[str]:
     """One pass: fail what is stuck, tell the extension, start the next queued Send."""
     from vendoo_studio.database import SessionLocal
     from vendoo_studio.models.protocol import ProtocolMessage
-    from vendoo_studio.routes.extension import dispatch_queued_jobs, extension_manager
+    from vendoo_studio.routes.extension import extension_manager
+    from vendoo_studio.services.native_marketplaces import reconcile_then_dispatch
 
     def fail_in_session() -> list[str]:
         with SessionLocal() as db:
@@ -152,7 +153,9 @@ async def sweep() -> list[str]:
             type="job.cancel", job_id=job_id, payload={"job_id": job_id},
         ).model_dump(mode="json"))
     if failed:
-        await dispatch_queued_jobs()
+        # A stalled List or Update left its result unconfirmed: read it now
+        # (read-only), then start the next queued job.
+        await reconcile_then_dispatch()
     return failed
 
 

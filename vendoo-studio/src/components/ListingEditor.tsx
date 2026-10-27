@@ -15,7 +15,7 @@ import { SendProgress, sendProgressLabel } from "./SendProgress";
 import { ListingBlockers } from "./ListingBlockers";
 import { ListingHistory } from "./ListingHistory";
 import { blockerTarget, isEbayInventoryLocationEdit, matchingEditorField } from "./listingChanges";
-import { ListingSyncStatus } from "./ListingSyncStatus";
+import { useListingSync } from "./useListingSync";
 import { OpenListingButton } from "./OpenListingButton";
 import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -32,6 +32,7 @@ import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
 import { applyBottomsFields, isBottomsListing } from "../bottomsSizes";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
+import { RegenerateListingButton } from "./ClearListingButton";
 import { MarketplacesLayout } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
@@ -53,7 +54,7 @@ import {
   withoutHiddenFields,
 } from "./fillLog/formFilters";
 import { sourceFormsForJob } from "./fillLog/sourceForms";
-import { ListingBrowserButton, ListingReviewActions } from "./ListingReviewActions";
+import { ListingActionsMenu, ListingBrowserButton, ListingReviewActions } from "./ListingReviewActions";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
@@ -63,7 +64,6 @@ import { CategoryTreeSelect, EbayCategorySelect, FieldLabel, InspectorSection, S
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
-import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
 import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
@@ -334,6 +334,7 @@ export function ListingEditor({
   const listingTitle = String(listing.title || "Listing");
   const importedItemId = listingJob?.vendoo_item_id || notesVendooItemId(conversation?.notes);
   const importedUrl = listingJob?.vendoo_url || notesVendooUrl(conversation?.notes);
+  const { vendooConflict } = useListingSync(convId, vendooEnabled && Boolean(importedItemId));
 
   // Studio writes the Vendoo *form*. Vendoo carries a form change onto a live
   // marketplace listing only when the seller delists and relists it there, so
@@ -391,12 +392,8 @@ export function ListingEditor({
         >
           {listingTitle}
         </h2>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
-          <Button variant="ghost-muted" size="xs" disabled={!data?.current_revision_id} onClick={() => { setFieldTarget(null); setHistoryOpen(true); }}>
-            <HistoryIcon />
-            History
-          </Button>
-          {vendooEnabled ? (
+        {/* Only Vendoo's controls earn a row of their own; sync and More sit at the rail's foot. */}
+        {vendooEnabled && <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
             <VendooLinkControl
               convId={convId}
               itemId={importedItemId}
@@ -410,12 +407,7 @@ export function ListingEditor({
                 ensureDraftMutation.mutate({ importDraft: true });
               }}
             />
-          ) : null}
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
-          <ListingSyncStatus
-            convId={convId}
-            bound={vendooEnabled && Boolean(listingJob?.vendoo_item_id || importedItemId)}
-          />
           {conversation?.unsent_edits ? (
             <>
               {/* Discard pulls Vendoo's copy, which a directly listed item no longer follows. */}
@@ -424,7 +416,9 @@ export function ListingEditor({
                   tone="muted"
                   className="text-xs"
                   disabled={discardUnsent.isPending || generating}
-                  title="Replace this listing with the copy Vendoo has"
+                  title={vendooConflict
+                    ? "Vendoo's copy and this listing were both edited, so this listing was kept. Discard takes Vendoo's copy instead."
+                    : "Replace this listing with the copy Vendoo has"}
                   onClick={() => void confirmDiscardUnsent()}
                 >
                   {discardUnsent.isPending ? "Pulling…" : "Discard"}
@@ -432,18 +426,14 @@ export function ListingEditor({
               ) : null}
             </>
           ) : null}
-          {data?.can_send && !generating && <Badge variant="success">Ready</Badge>}
-          <ListingReviewActions
-            convId={convId}
-            onCleared={onCleared}
-          >
+          <ListingReviewActions convId={convId}>
             <ListingBrowserButton
               convId={convId}
               browserOpen={browserOpen}
               onOpenBrowser={onOpenBrowser}
             />
           </ListingReviewActions>
-        </div>
+        </div>}
       </div>
 
       <SoldElsewhereNotice
@@ -518,6 +508,10 @@ export function ListingEditor({
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || updateMutation.isPending} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
+        railActions={<RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} />}
+        railStatus={<>
+          <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>
+        </>}
         onSelect={(id) => {
           setFieldTarget(null);
           if (id === "general") onReviewTabChange("input");
@@ -543,6 +537,13 @@ export function ListingEditor({
             target={fieldTarget}
             onChange={(updated) => updateMutation.mutate(updated)}
           />
+          {/* Past versions are a look-back, so they close the form instead of crowding its header. */}
+          <div className="flex border-t pt-2">
+            <Button variant="ghost-muted" size="xs" disabled={!data?.current_revision_id} onClick={() => { setFieldTarget(null); setHistoryOpen(true); }}>
+              <HistoryIcon />
+              History
+            </Button>
+          </div>
         </>
       </MarketplacesLayout>
 

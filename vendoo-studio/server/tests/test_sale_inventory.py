@@ -29,7 +29,7 @@ def test_partial_sale_requires_fresh_stock_instead_of_subtracting_from_local_edi
     assert stock(etsy_imported, conv_id) == {"status": "unknown", "remaining": None}
     result = etsy_imported.client.get(f"/api/conversations/{conv_id}/marketplace-listings").json()
     assert result["etsy"]["sold_here"] is False
-    inventory_tests.sync(etsy_imported, conv_id)
+    inventory_tests.read_listings(etsy_imported, conv_id)
     assert stock(etsy_imported, conv_id) == {"status": "remaining", "remaining": 3}
     alert = etsy_imported.client.get("/api/marketplace-sales").json()["sales"][0]
     assert (alert["stockStatus"], alert["remainingQuantity"]) == ("remaining", 3)
@@ -38,7 +38,7 @@ def test_partial_sale_requires_fresh_stock_instead_of_subtracting_from_local_edi
 
 def test_a_new_sale_invalidates_the_previous_stock_read(etsy_imported):
     conv_id, _ = prepare(etsy_imported)
-    inventory_tests.sync(etsy_imported, conv_id)
+    inventory_tests.read_listings(etsy_imported, conv_id)
     etsy_imported.db.add(MarketplaceSale(marketplace="etsy", listing_id="555", order_id="second", line_id="two", quantity=1, conversation_id=conv_id))
     etsy_imported.db.commit()
     assert stock(etsy_imported, conv_id)["status"] == "unknown"
@@ -49,7 +49,7 @@ def test_verified_exhausted_stock_is_distinguished_from_partial_sales(etsy_impor
     conv_id, _ = prepare(etsy_imported)
     etsy_imported.remote.item["state"] = state
     etsy_imported.remote.offering["quantity"] = quantity
-    inventory_tests.sync(etsy_imported, conv_id)
+    inventory_tests.read_listings(etsy_imported, conv_id)
     assert stock(etsy_imported, conv_id) == {"status": "sold_out", "remaining": 0}
     listings = etsy_imported.client.get(f"/api/conversations/{conv_id}/marketplace-listings").json()
     assert listings["etsy"]["sold_here"] is True
@@ -58,7 +58,7 @@ def test_verified_exhausted_stock_is_distinguished_from_partial_sales(etsy_impor
 def test_ended_listing_is_not_proof_multiunit_stock_is_exhausted(etsy_imported):
     conv_id, _ = prepare(etsy_imported)
     etsy_imported.remote.item["state"] = "inactive"
-    inventory_tests.sync(etsy_imported, conv_id)
+    inventory_tests.read_listings(etsy_imported, conv_id)
     assert stock(etsy_imported, conv_id)["status"] == "unknown"
 
 
@@ -67,7 +67,7 @@ def test_single_item_sale_can_be_checked_again_to_detect_remaining_stock(etsy_im
     conv_id, _ = prepare(etsy_imported)
     etsy_imported.remote.offering["quantity"] = 3
     assert stock(etsy_imported, conv_id)["status"] == "sold_out"
-    result = inventory_tests.sync(etsy_imported, conv_id)
+    result = inventory_tests.read_listings(etsy_imported, conv_id)
     assert result["etsy"]["ok"]
     assert stock(etsy_imported, conv_id) == {"status": "remaining", "remaining": 3}
 
@@ -82,7 +82,7 @@ def test_stock_read_started_before_sale_receipt_is_stale_even_if_it_finished_lat
 
 def test_replacing_listing_id_invalidates_its_old_observation(etsy_imported):
     conv_id, _ = prepare(etsy_imported)
-    inventory_tests.sync(etsy_imported, conv_id)
+    inventory_tests.read_listings(etsy_imported, conv_id)
     MarketplaceListingRepo(etsy_imported.db).save(conv_id, "etsy", {"listing_url": "https://www.etsy.com/listing/556"})
     assert stock(etsy_imported, conv_id)["status"] == "unknown"
 
@@ -103,7 +103,7 @@ def test_partial_stock_is_not_automatically_delisted_even_if_seller_enabled_the_
 
 def test_observation_contains_only_public_inventory_fields(etsy_imported):
     conv_id, _ = prepare(etsy_imported)
-    inventory_tests.sync(etsy_imported, conv_id)
+    inventory_tests.read_listings(etsy_imported, conv_id)
     saved = MarketplaceListingRepo(etsy_imported.db).get(conv_id, "etsy")["inventory_observation"]
     assert set(saved) == {"listing_id", "checked_at", "state", "quantity", "price"}
     assert "fixture-token" not in str(saved)

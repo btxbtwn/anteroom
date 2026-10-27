@@ -1,5 +1,4 @@
 """Sales received before linking an item can be reconciled without Vendoo."""
-import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -14,7 +13,6 @@ from vendoo_studio.main import app
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo
-from vendoo_studio.services import native_marketplaces
 from vendoo_studio.services.relay_sales import reconcile_unmatched
 
 EBAY = "https://www.ebay.com/itm/123456789012"
@@ -58,14 +56,6 @@ class LocalSalesReconciliationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.db.refresh(sale)
         self.assertEqual((sale.conversation_id, sale.quantity, sale.received_at, sale.state), (self.item.id, 2, received_at, "new"))
-
-    def test_direct_sync_matches_existing_sales_even_without_a_vendoo_binding(self):
-        sale = self.sale()
-        self.link_native()
-        asyncio.run(native_marketplaces.sync(self.item.id, self.db))
-        self.db.refresh(sale)
-        self.assertEqual(sale.conversation_id, self.item.id)
-        self.assertIsNone(self.item.notes)
 
     def test_reconcile_endpoint_is_idempotent_and_preserves_existing_assignments_and_dismissals(self):
         assigned_to = ConversationRepo(self.db).create(title="Already assigned")
