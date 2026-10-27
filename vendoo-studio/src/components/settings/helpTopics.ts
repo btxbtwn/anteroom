@@ -11,7 +11,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     id: "help-create-listing",
     title: "Create a listing from photos",
     steps: [
-      "Drop photos anywhere in the window, or press **+** (New listing) at the end of the listing tabs and use **Add Photos** on the **Input** tab.",
+      "Drop photos anywhere in the window, or press **+** (New listing) beside the listings search and use **Add Photos** on the **Input** tab.",
       "Type the measurements and anything else you know into Item details on **Input**.",
       "Press **Generate Listing** in the chat.",
       "Check the result on the **Forms** tab. Ask in the chat for any change you want.",

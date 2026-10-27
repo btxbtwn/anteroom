@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.447 — 2026-10-27
+## 0.1.448 — 2026-10-27
 
 - Changing a field on a marketplace form keeps you where you are. Saving no longer jumps back to a field you opened with an Edit button, and the box above the form no longer shrinks and grows back on each save, so the form stops moving under you.
 - Edit buttons for a missing category now open that marketplace's own form at its category, instead of General.
+
+## 0.1.447 — 2026-10-27
+
+- Clicking a listing no longer opens a tab. Anteroom shows one listing at a time, and the listing's name appears in the title bar. Use the **+** beside the listings search to start a new listing.
 
 ## 0.1.446 — 2026-10-27
 
