@@ -85,22 +85,20 @@ class ListingPromotionsTest(unittest.TestCase):
             self.assertEqual(response.status_code, 422, body)
         self.assertEqual(self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], "marketplace": "mercari",
                                                                            "action": "share"}).status_code, 400)
-        # Mercari and Depop offers wait for a capture of their signed-in request.
-        for marketplace in ("mercari", "depop"):
-            response = self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], "marketplace": marketplace,
-                                                                         "action": "offer", "discount_percent": 10})
-            self.assertEqual(response.status_code, 409, marketplace)
-            self.assertIn("signed-in site", response.json()["detail"])
+        # Depop offers wait for a capture of its signed-in request.
+        response = self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], "marketplace": "depop",
+                                                                     "action": "offer", "discount_percent": 10})
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("signed-in site", response.json()["detail"])
         self.bridge.assert_not_called()
 
-    def test_mercari_offer_once_captured_has_no_shipping_choice(self):
+    def test_mercari_offer_has_no_shipping_choice(self):
         item = "m12345678901"
         conv = ConversationRepo(self.db).create(title="Mercari jacket")
         conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"mercari": f"https://www.mercari.com/us/item/{item}/"}})
         self.db.commit()
-        self.enterContext(patch.dict(listing_promotions.AWAITING_CAPTURE, {"mercari": frozenset()}))
-        self.check = {"ok": True, "price_cents": 5000, "like_count": 4, "minimum_discount_percent": 10,
-                      "maximum_discount_percent": 99, "offer_price_cents": 4000, "shipping_discounts": []}
+        self.check = {"ok": True, "price_cents": 5000, "like_count": 4, "minimum_discount_percent": 20,
+                      "maximum_discount_percent": 48, "offer_price_cents": 4000, "shipping_discounts": []}
         response = self.client.post("/api/promotions/preview", json={"conversation_ids": [conv.id], "marketplace": "mercari",
                                                                      "action": "offer", "discount_percent": 20, "floors": {conv.id: "30"}})
         row = response.json()["rows"][0]
@@ -210,5 +208,5 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual(self.db.get(ListingPromotion, row["id"]).state, "unknown")
         history = self.client.get("/api/promotions").json()
         self.assertEqual(history["supported"], {"poshmark": ["offer", "share"], "mercari": ["offer"], "depop": ["offer"]})
-        self.assertEqual(history["awaiting_capture"], {"mercari": ["offer"], "depop": ["offer"]})
+        self.assertEqual(history["awaiting_capture"], {"depop": ["offer"]})
         self.assertEqual(history["history"][0]["state"], "unknown")
