@@ -129,7 +129,23 @@ def chosen(listing: dict, choices: dict) -> dict:
     return {"category_id": pick("category", "nativeCategoryId"), "condition_id": pick("condition", "nativeConditionId")}
 
 
+def _own_package(listing: dict) -> dict:
+    """Weight and sides typed on the Sellwild tab. They start from Item Details."""
+    package = (listing.get("sellwild_specifics") or {}).get("package")
+    return package if isinstance(package, dict) else {}
+
+
+def _positive(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 def package_pounds(listing: dict) -> float | None:
+    if (own := _positive(_own_package(listing).get("weight"))) is not None:
+        return own
     try:
         pounds = float(listing.get("weight_lb") or 0) + float(listing.get("weight_oz") or 0) / 16
     except (TypeError, ValueError):
@@ -138,11 +154,15 @@ def package_pounds(listing: dict) -> float | None:
 
 
 def package_sides(listing: dict) -> list[float] | None:
+    """Length (Sellwild's depth), width and height in inches."""
     selected = str((listing.get("sellwild_specifics") or {}).get("parcelTemplate") or "")
     preset = next((row for row in sellwild_catalog()["parcel_templates"] if row["id"] == selected), None)
     if preset and all(preset[side] > 0 for side in ("length", "width", "height")):
         # The native sell page rounds each template side up to a whole inch.
         return [ceil(preset[side]) for side in ("length", "width", "height")]
+    own = [_positive(_own_package(listing).get(side)) for side in ("depth", "width", "height")]
+    if all(side is not None for side in own):
+        return own
     sides = [float(side) for side in re.findall(r"\d+(?:\.\d+)?", str(listing.get("package_dimensions_in") or ""))]
     return sides if len(sides) == 3 and min(sides) > 0 else None
 

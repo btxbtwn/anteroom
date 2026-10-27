@@ -20,9 +20,11 @@ function sellwildListingUrl(id, title) {
   return `${SELLWILD}/product/${id}/${slug}`;
 }
 
-// Weight in pounds, as Sellwild's "Weight (lbs)" field takes it.
+// Weight in pounds, as Sellwild's "Weight (lbs)" field takes it: the Sellwild tab's
+// own weight, otherwise the package in Item Details.
 function sellwildWeightLb(listing) {
-  const pounds = Number(listing.weight_lb || 0) + Number(listing.weight_oz || 0) / 16;
+  const own = Number(listing.sellwild_specifics?.package?.weight);
+  const pounds = own > 0 ? own : Number(listing.weight_lb || 0) + Number(listing.weight_oz || 0) / 16;
   return Number.isFinite(pounds) && pounds > 0 ? Math.ceil(pounds * 100) / 100 : null;
 }
 

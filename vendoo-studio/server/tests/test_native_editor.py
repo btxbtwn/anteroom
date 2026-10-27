@@ -130,6 +130,24 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual({fields[label].get("width") for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")},
                          {"half"})
 
+    def test_sellwild_weight_and_sides_are_typed_on_the_sellwild_tab(self):
+        from vendoo_studio.services.sellwild_listing import package_pounds, package_sides
+
+        submitted = {**self.listing, "weight_lb": 1, "weight_oz": 8, "package_dimensions_in": "10x8x4",
+                     "sellwild_specifics": {"nativeCategoryId": "1", "parcelTemplate": ""}}
+        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted}).status_code, 200)
+        fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
+        # They start from Item Details and can be changed here, as on Sellwild's page.
+        self.assertEqual([fields[label]["value"] for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")],
+                         [1.5, 4.0, 8.0, 10.0])
+        self.assertFalse(any(fields[label].get("locked") for label in ("Weight (lbs)", "Depth (in)")))
+        own = {**submitted, "sellwild_specifics": {"parcelTemplate": "", "package": {"weight": 2.25, "depth": 12, "width": 9, "height": 5}}}
+        self.assertEqual(package_pounds(own), 2.25)
+        self.assertEqual(package_sides(own), [12.0, 9.0, 5.0])
+        # An incomplete box on the tab falls back to Item Details.
+        partial = {**submitted, "sellwild_specifics": {"parcelTemplate": "", "package": {"depth": 12}}}
+        self.assertEqual(package_sides(partial), [10.0, 8.0, 4.0])
+
     def test_sellwild_vehicle_form_has_vehicle_information_and_no_package(self):
         submitted = {**self.listing, "sellwild_specifics": {"nativeCategoryId": "43", "vin": "1HGCM82633A004352"}}
         self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted}).status_code, 200)

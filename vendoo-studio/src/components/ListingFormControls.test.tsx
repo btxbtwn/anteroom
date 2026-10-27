@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CategoryTreeSelect, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
+import { CategoryTreeSelect, groupedChoices, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
 
 describe("marketplace choice controls", () => {
   it("identifies an unsupported saved choice without silently clearing it", () => {
@@ -103,5 +103,15 @@ describe("category tree dropdown", () => {
     expect(html).toContain("Choose a category group, then continue until the last one.");
     expect(html).toContain('label="Kids"');
     expect(html).toContain(">Girls tops</option>");
+  });
+});
+
+describe("groupedChoices", () => {
+  it("keeps the marketplace's order and starts a heading wherever it changes", () => {
+    expect(groupedChoices(["XS (0-2)", "S (4-6)", "XS Petite", "30", "One size"], {
+      "XS (0-2)": "Standard", "S (4-6)": "Standard", "XS Petite": "Petite", "30": "Inch",
+    }).map((group) => [group.value, group.items])).toEqual([
+      ["Standard", ["XS (0-2)", "S (4-6)"]], ["Petite", ["XS Petite"]], ["Inch", ["30"]], ["", ["One size"]],
+    ]);
   });
 });

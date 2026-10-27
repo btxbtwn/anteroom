@@ -570,6 +570,8 @@ export interface MarketplaceFormField {
   options_source?: "marketplace" | "vendoo" | "reference" | "saved";
   /** False when this row is saved data the category form does not show. Absent means it is on the form. */
   on_form?: boolean;
+  /** Choice label → the heading the marketplace lists it under (Mercari's size groups). */
+  option_groups?: Record<string, string>;
   /** The heading this field sits under on the marketplace's own form. */
   section?: string;
   /** Half: shares a row, as the marketplace's form lays it out. Absent means a full row. */

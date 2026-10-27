@@ -282,15 +282,14 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
     fields.append(choice("sellwild_specifics.parcelTemplate", "Package", template, packages, "Item Shipping",
                          category_specific=True))
     # Weight shows for every package that is not flat rate; the sides only for custom dimensions.
-    # They come from the package in Item Details.
+    # They start from the package in Item Details and are typed here, as on Sellwild's page.
     pounds = package_pounds(snapshot)
     sides = package_sides(snapshot) or []
     measured = (("weight", "Weight (lbs)", round(pounds, 2) if pounds else ""),
                 *((key, f"{key.title()} (in)", sides[index] if sides else "")
                   for key, index in (("height", 2), ("width", 1), ("depth", 0))))
-    fields.extend(field(f"sellwild_specifics.package.{key}", label, value, input_type="number", locked=True,
-                        help="Change the package in Item Details.", category_specific=True, section="Item Shipping",
-                        width="half")
+    fields.extend(field(f"sellwild_specifics.package.{key}", label, value, input_type="number", min_value=0,
+                        category_specific=True, section="Item Shipping", width="half")
                   for key, label, value in measured)
     return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
             "fields": fields}
