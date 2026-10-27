@@ -102,6 +102,33 @@ export interface Photo {
   height: number | null;
   created_at: string;
   url: string;
+  /** The edits served in place of the kept original; null when unedited. */
+  edits?: PhotoEdits | null;
+}
+
+/** A crop as fractions of the turned and straightened photo. */
+export interface CropBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Non-destructive edits, rendered by the server from the original upload. */
+export interface PhotoEdits {
+  /** Quarter turns, clockwise. */
+  rotate: 0 | 90 | 180 | 270;
+  /** Degrees clockwise, -45 to 45. */
+  straighten: number;
+  crop: CropBox | null;
+  /** Stops, -2 to 2. */
+  exposure: number;
+  /** -100 to 100. */
+  brightness: number;
+  /** -100 to 100. */
+  contrast: number;
+  /** Colour behind the cut-out item, as #rrggbb; null keeps the photo's own background. */
+  background: string | null;
 }
 
 export interface PhotoUploadResult {

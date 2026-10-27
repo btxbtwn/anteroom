@@ -63,6 +63,8 @@ class MarketplaceListing(Base):
     etsy_photo_ids = Column(JSON, nullable=True)
     # {photo_id: listing_image_id}
     etsy_image_ids = Column(JSON, nullable=True)
+    # {photo_id: checksum} of each uploaded file, so an edited photo is uploaded again.
+    etsy_image_checksums = Column(JSON, nullable=True)
     etsy_photos_complete = Column(Boolean, nullable=True)
     etsy_shipping_profile_id = Column(String, nullable=True)
     etsy_readiness_state_id = Column(String, nullable=True)

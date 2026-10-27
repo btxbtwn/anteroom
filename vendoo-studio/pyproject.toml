@@ -19,6 +19,7 @@ dependencies = [
     "numpy>=2.0",
     "keyring>=25.0.0",
     "pyobjc-framework-Security>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-Vision>=10.0; sys_platform == 'darwin'",
     "aiofiles>=24.0.0",
     "semble>=0.5.0",
     "cursor-sdk>=1.0.31",

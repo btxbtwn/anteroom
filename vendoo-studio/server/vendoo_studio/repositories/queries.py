@@ -442,8 +442,10 @@ class ConversationRepo:
         self.db.commit()
         return True
 
-    def replace_photo_file(self, photo: Photo, meta: dict) -> Photo:
-        """Point a photo at a rewritten file, e.g. after a rotation."""
+    def replace_photo_file(self, photo: Photo, meta: dict, *, source_filename: str | None, edits: dict | None) -> Photo:
+        """Point a photo at a rendered edit of its source, or back at the source."""
+        photo.source_filename = source_filename
+        photo.edits = edits
         photo.stored_filename = meta["stored_filename"]
         photo.size_bytes = meta["size_bytes"]
         photo.checksum = meta["checksum"]
