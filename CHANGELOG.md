@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.456 — 2026-10-27
+
+- The Sellwild tab now matches Sellwild’s own sell page: the same sections (Add a Title, Name Your Price, Add Details, Item Shipping), its field names, its category list in the same order, and its packages, with weight and box sides shown only for the packages that ask for them. Vehicles show Vehicle Information instead of packaging. Pets > Adoption, which Sellwild does not offer, is gone, and an Irregular Parcel now asks for the packed weight like it does on Sellwild.
+
 ## 0.1.455 — 2026-10-27
 
 - The Depop tab is laid out like Depop’s sell page: the same headings (Description, Info, Enhance your listing, Item price, Shipping), Size and Quantity side by side, and Depop’s own hint under each field.

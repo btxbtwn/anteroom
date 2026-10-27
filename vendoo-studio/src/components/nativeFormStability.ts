@@ -120,6 +120,9 @@ function shownChoice(
   return field?.optionValues?.[shown] ?? shown;
 }
 
+/** Sellwild's packages that are not flat rate, so its page still asks for a weight. */
+const SELLWILD_WEIGHED_PACKAGES = new Set(["USPS_SoftPack", "USPS_IrregularParcel"]);
+
 const EBAY_AUCTION_PRICE_KEYS = new Set([
   "ebay_specifics.auctionStartPrice",
   "ebay_specifics.auctionReservePrice",
@@ -157,6 +160,13 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
   if (context.categoryStale && field.categorySpecific) return false;
   if (field.key === "depop_specifics.worldwideShipping.price") {
     return shownChoice(context.fields, context.local, context.listing, "depop_specifics.worldwideShipping.enabled") === "true";
+  }
+  if (field.key.startsWith("sellwild_specifics.package.")) {
+    // Sellwild's page: Custom Package Dimensions asks for weight and all three sides,
+    // a package that is not flat rate asks for weight only, a flat-rate one for neither.
+    const template = shownChoice(context.fields, context.local, context.listing, "sellwild_specifics.parcelTemplate");
+    if (!template) return true;
+    return field.key === "sellwild_specifics.package.weight" && SELLWILD_WEIGHED_PACKAGES.has(template);
   }
   if (context.tab === "mercari" && ["mercari_specifics.shippingClassId", "weight_oz", "package_dimensions_in"].includes(field.key)) {
     return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.shippingMethod") !== "SOYO";

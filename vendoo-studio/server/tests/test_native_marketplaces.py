@@ -436,6 +436,11 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(payload["parcel_template"], "USPS_FlatRatePaddedEnvelope")
         self.assertTrue(payload["fixed_package"])
         self.assertEqual(payload["package_dimensions"], {"depth": 13, "width": 10, "height": 1})
+        # Irregular Parcel has sides but is not flat rate, so Sellwild still asks for a weight.
+        listing["sellwild_specifics"]["parcelTemplate"] = "USPS_IrregularParcel"
+        listing["weight_lb"] = 0
+        self.assertFalse(native._execute_payload("sellwild", "publish", {"operation_id": "test"}, listing, [], "job")["sellwild"]["fixed_package"])
+        self.assertIn("weight_oz", [row["field"] for row in sellwild_listing.requirements(listing, Context())])
         listing["sellwild_specifics"]["parcelTemplate"] = "invented"
         self.assertIn("sellwild_specifics.parcelTemplate", [row["field"] for row in sellwild_listing.requirements(listing, Context())])
 

@@ -175,7 +175,8 @@ def requirements(listing: dict, context: Context) -> list[dict]:
     specifics = listing.get("sellwild_specifics") if isinstance(listing.get("sellwild_specifics"), dict) else {}
     template = str(specifics.get("parcelTemplate") or "")
     preset = next((row for row in catalog["parcel_templates"] if row["id"] == template), None)
-    fixed_package = preset and all(preset[side] > 0 for side in ("length", "width", "height"))
+    # Sellwild's page asks for a weight with every package except the flat-rate ones.
+    fixed_package = bool(preset and preset.get("flat_rate"))
     if choice["category_id"] not in VEHICLE_CATEGORIES and template and not preset:
         found.append(gap("sellwild_specifics.parcelTemplate", "Choose packaging from Sellwild’s current catalog."))
     if choice["category_id"] in VEHICLE_CATEGORIES:
