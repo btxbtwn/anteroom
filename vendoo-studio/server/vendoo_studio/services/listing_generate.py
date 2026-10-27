@@ -706,9 +706,13 @@ def normalize_mens_bottoms_size(listing: dict) -> bool:
             listing[key] = waist
             changed = True
 
+    from vendoo_studio.services.seller_overrides import field_locked
+
     for specifics_key in _SIZE_SPECIFIC_KEYS:
         block = listing.get(specifics_key)
         if not isinstance(block, dict) or "size" not in block:
+            continue
+        if field_locked(listing, specifics_key[: -len("_specifics")], "size"):
             continue
         raw = sanitize_size_value(block.get("size"))
         key_waist, key_inseam = _collapse_waist_inseam(raw)
@@ -853,11 +857,15 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
         listing["size"] = size
     changed = False
     from vendoo_studio.models.depop_fields import depop_size_for
+    from vendoo_studio.services.seller_overrides import field_locked
 
     previous = sanitize_size_value(previous_size) if previous_size is not None else None
     for specifics_key in _SIZE_SPECIFIC_KEYS:
         block = listing.get(specifics_key)
         if not isinstance(block, dict):
+            continue
+        # Skip here, not only in preserving_locks: send readiness calls this directly.
+        if field_locked(listing, specifics_key[: -len("_specifics")], "size"):
             continue
         current = str(block.get("size") or "").strip()
         target = size

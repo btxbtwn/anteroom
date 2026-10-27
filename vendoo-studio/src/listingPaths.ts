@@ -142,6 +142,73 @@ export function nextFieldDraft(
   return { local, dirty: kept };
 }
 
+/** True when this marketplace form stores its own copy of a shared field, even if that copy is blank. */
+export function ownedSpecificsValue(
+  listing: ListingData | undefined,
+  path: string,
+): { owned: boolean; value: unknown } {
+  const parts = path.split(".");
+  if (parts.length !== 2 || !parts[0].endsWith("_specifics")) return { owned: false, value: undefined };
+  const bucket = listing?.[parts[0]];
+  if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) return { owned: false, value: undefined };
+  const record = bucket as Record<string, unknown>;
+  const want = squashFieldKey(parts[1]);
+  const key = Object.keys(record).find((name) => squashFieldKey(name) === want);
+  if (!key) return { owned: false, value: undefined };
+  return { owned: true, value: record[key] };
+}
+
+const FOLLOWED_GENERAL_KEYS: Record<string, string> = {
+  title: "title",
+  description: "description",
+  brand: "brand",
+  condition: "condition",
+  primarycolor: "primaryColor",
+  secondarycolor: "secondaryColor",
+  quantity: "quantity",
+  size: "size",
+  department: "department",
+  price: "price",
+  poshmarkprice: "price",
+};
+
+/** The General value a marketplace field shows when that form has not edited it. */
+export function followedGeneralValue(listing: ListingData | undefined, path: string): unknown {
+  const parts = path.split(".");
+  if (!listing || parts.length !== 2 || !parts[0].endsWith("_specifics")) return undefined;
+  const general = FOLLOWED_GENERAL_KEYS[squashFieldKey(parts[1])];
+  return general ? listing[general] : undefined;
+}
+
+// Title, description, brand and department are copies of General. Size and
+// condition keep the marketplace form's own spelling when it supplied one.
+const PLAIN_GENERAL_FILLS = new Set(["title", "description", "brand", "department"]);
+
+/** What a marketplace row shows: its own edit, otherwise the fill it still follows. */
+export function marketplaceDisplayValue(
+  listing: ListingData | undefined,
+  path: string,
+  options: { tab: string; locked?: boolean; native?: boolean; defaultValue?: unknown },
+): unknown {
+  const owned = ownedSpecificsValue(listing, path);
+  if (owned.owned) return owned.value;
+  // A locked row is the server's value (variation quantity, SKU), not a live copy of General.
+  if (options.locked && options.defaultValue !== undefined) return options.defaultValue;
+  const leaf = squashFieldKey(path.split(".").pop() || path);
+  if (options.tab !== "general" && PLAIN_GENERAL_FILLS.has(leaf)) {
+    const general = followedGeneralValue(listing, path);
+    if (general !== undefined) return general;
+  }
+  if ((options.native || options.locked) && options.defaultValue !== undefined) return options.defaultValue;
+  const direct = getListingEditorValue(listing, path);
+  if (formFieldText(direct) !== "" || typeof direct === "boolean" || (Array.isArray(direct) && direct.length > 0)) return direct;
+  if (options.tab !== "general") {
+    const general = followedGeneralValue(listing, path);
+    if (general != null && formFieldText(general) !== "") return general;
+  }
+  return options.defaultValue;
+}
+
 /** Read a Forms-tab field, matching schema labels to camelCase listing keys. */
 export function getListingEditorValue(listing: ListingData | undefined, path: string): unknown {
   const direct = getNestedValue(listing, path);

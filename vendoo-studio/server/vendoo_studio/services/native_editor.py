@@ -47,9 +47,19 @@ def field(path: str, label: str, value, **extra) -> dict:
             "required": False, "multi": False, "selection_only": False, "options": [], **extra}
 
 
-def base(snapshot: dict, title_max: int) -> list[dict]:
-    return [field("title", "Title", snapshot.get("title"), required=True, max_length=title_max),
-            field("description", "Description", snapshot.get("description"), required=True),
+def _shared(snapshot: dict, marketplace: str, name: str):
+    """The form's own title, description, or brand, or General when this form has not set one."""
+    from vendoo_studio.services.seller_overrides import followed_entry
+
+    entry = followed_entry(snapshot, marketplace, name)
+    if entry is not None:
+        return entry[1] if entry[1] is not None else ""
+    return snapshot.get(name)
+
+
+def base(snapshot: dict, title_max: int, marketplace: str) -> list[dict]:
+    return [field(f"{marketplace}_specifics.title", "Title", _shared(snapshot, marketplace, "title"), required=True, max_length=title_max),
+            field(f"{marketplace}_specifics.description", "Description", _shared(snapshot, marketplace, "description"), required=True),
             field("price", "Price", snapshot.get("price"), required=True, input_type="number")]
 
 
@@ -75,7 +85,7 @@ async def ebay_form(snapshot: dict) -> dict:
     except Exception as exc:  # noqa: BLE001 - never substitute a different form
         raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from exc
     aspects = ebay_aspects(snapshot, snapshot.get("form") or {})
-    fields = base(snapshot, 80)
+    fields = base(snapshot, 80, "ebay")
     fields.append(field("direct_category_ids.ebay", "Category", (snapshot.get("direct_category_ids") or {}).get("ebay_path")
                         or (snapshot.get("marketplace_categories") or {}).get("ebay") or category,
                         help="Changing category reloads its condition and item-specific choices."))
@@ -86,11 +96,11 @@ async def ebay_form(snapshot: dict) -> dict:
         if not row["multi"] and isinstance(value, list):
             value = value[0] if value else ""
         values = row.get("values") or []
-        inherited = {"size": "Size follows the tag size on General. Change it there.",
-                     "department": "Department follows General. Change it there."}
+        filled_from_general = {"size": "Filled from General. A change here stays on eBay.",
+                               "department": "Filled from General. A change here stays on eBay."}
         constraints = marketplace_schemas.constraints_by_label(values)
         fields.append(field(f"ebay_specifics.{name}", name, value, required=row["required"], multi=row["multi"],
-                            locked=name.casefold() in inherited, **({"help": inherited[name.casefold()]} if name.casefold() in inherited else {}),
+                            **({"help": filled_from_general[name.casefold()]} if name.casefold() in filled_from_general else {}),
                             selection_only=row["mode"] == "selection",
                             options=list(dict.fromkeys(v["label"] for v in values)),
                             option_values={v["label"]: str(v["id"]) for v in values}, options_source="marketplace",
@@ -216,8 +226,8 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
 
     catalog = sellwild_catalog()
     picks = chosen(snapshot, MarketplaceListingRepo(db).get(conv_id, "sellwild"))
-    fields = base(snapshot, 255)
-    next(row for row in fields if row["path"] == "description")["required"] = False
+    fields = base(snapshot, 255, "sellwild")
+    next(row for row in fields if row["path"] == "sellwild_specifics.description")["required"] = False
     for key in ("category", "condition"):
         options = catalog["categories" if key == "category" else "conditions"]
         fields.append(field(f"sellwild_specifics.native{key.title()}Id", key.title(), picks[f"{key}_id"], required=True,

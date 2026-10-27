@@ -95,7 +95,11 @@ def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
     from vendoo_studio.services.native_form import attach_form
 
-    snapshot = attach_form(prepare_listing_snapshot(db, conv, copy.deepcopy(listing_json)), marketplace)
+    snapshot = prepare_listing_snapshot(db, conv, copy.deepcopy(listing_json))
+    from vendoo_studio.services.seller_overrides import apply_marketplace_overrides
+
+    apply_marketplace_overrides(snapshot, marketplace)
+    snapshot = attach_form(snapshot, marketplace)
     if marketplace == "vinted":
         from vendoo_studio.services.vinted_listing import apply_vinted_listing
 

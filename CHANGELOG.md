@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.438 — 2026-10-27
+
+- General fills every marketplace form. A title, description, brand, size, or department you change on one marketplace stays on that marketplace, and eBay's Size and Department can be edited on the eBay form.
+
 ## 0.1.437 — 2026-10-27
 
 - When Anteroom watches you send an offer or save a draft by hand to learn a marketplace's requests, it now keeps what it saw even if the request that started it is interrupted. Only one of these recordings runs at a time.

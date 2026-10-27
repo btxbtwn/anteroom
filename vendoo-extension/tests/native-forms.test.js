@@ -29,6 +29,24 @@ const DEPOP = { department: [{ id: 'menswear', name: 'Men' }], group: [{ id: 'bo
   source: { max_selection: 2, attributes: [{ id: 'preloved', name: 'Preloved' }] },
   style: { max_selection: 3, attributes: [{ id: 'casual', name: 'Casual' }] } };
 
+test('Poshmark title, description and brand follow General until this form sets them', () => {
+  const c = loadWorker();
+  const form = call(c, 'poshmarkEditorForm', { ...POSH_LISTING, brand: 'Nike' }, POSH);
+  const fields = Object.fromEntries(form.fields.map(row => [row.path, row]));
+  assert.equal(fields['poshmark_specifics.title'].value, 'A tee');
+  assert.equal(fields['poshmark_specifics.description'].value, 'Details');
+  assert.equal(fields['poshmark_specifics.brand'].value, 'Nike');
+  assert.equal(fields.price.path, 'price');
+  const overridden = call(c, 'poshmarkEditorForm', {
+    ...POSH_LISTING, brand: 'Nike',
+    poshmark_specifics: { title: 'Posh title', description: '', brand: 'Posh brand' },
+  }, POSH);
+  const rows = Object.fromEntries(overridden.fields.map(row => [row.path, row]));
+  assert.equal(rows['poshmark_specifics.title'].value, 'Posh title');
+  assert.equal(rows['poshmark_specifics.description'].value, '');
+  assert.equal(rows['poshmark_specifics.brand'].value, 'Posh brand');
+});
+
 test('Poshmark form uses native category, group and size IDs and only supported fields', () => {
   const c = loadWorker();
   const form = clean(call(c, 'poshmarkEditorForm', POSH_LISTING, POSH, ['Casual'], [{ id: 'discount-1', label: 'Buyer Shipping: Free' }]));

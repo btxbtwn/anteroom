@@ -209,8 +209,8 @@ function vintedSame(item, expected) {
 
 async function vintedFields(call, listing, currency) {
   const specifics = listing.vinted_specifics && typeof listing.vinted_specifics === 'object' ? listing.vinted_specifics : {};
-  const title = String(listing.title || '').trim();
-  const description = String(listing.description || '').trim();
+  const title = String(marketplaceCopy(listing, 'vinted', 'title') || '').trim();
+  const description = String(marketplaceCopy(listing, 'vinted', 'description') || '').trim();
   const price = vintedAmount(specifics.price ?? listing.price);
   const missing = [];
   if (!title) missing.push({ field: 'title', needs: 'a title' });
@@ -242,7 +242,7 @@ async function vintedFields(call, listing, currency) {
   if (!size && sizes.length) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.size', needs: 'a size' }]);
   let brandId = null;
   let brand = null;
-  const brandName = String(specifics.brand || '').trim();
+  const brandName = String(marketplaceCopy(listing, 'vinted', 'brand') || '').trim();
   if (brandName) {
     const found = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/brands?keyword=${encodeURIComponent(brandName)}&category_id=${catalogId}`, { step: 'brand' });
     const match = vintedMatch((found?.brands || []).map(row => ({ id: Number(row.id), title: row.title })), brandName);
@@ -336,7 +336,7 @@ async function updateVintedItem(call, session, payload, listing, recovery, writi
   if (recovery) {
     try {
       const view = await vintedRead(call, id);
-      const expected = { title: listing.title, description: listing.description, price: vintedAmount(specifics.price ?? listing.price) };
+      const expected = { title: marketplaceCopy(listing, 'vinted', 'title'), description: marketplaceCopy(listing, 'vinted', 'description'), price: vintedAmount(specifics.price ?? listing.price) };
       const differ = view ? vintedDifferences(view, expected) : ['listing'];
       if (vintedLive(view) && !differ.length) return { ok: true, state: 'published', listing_url: listingUrl };
       return marketplaceFailure(marketplaceError(`Vinted has not confirmed the update${differ.length ? ` (${differ.join(', ')} still differ)` : ''}. Check the live listing.`,
@@ -444,7 +444,7 @@ async function runVintedNative(msg, recovery = false) {
     if (recovery && payload.action === 'save_draft') {
       let view = id ? await vintedRead(call, id) : null;
       if (!view && !id) {
-        const expected = { title: listing.title, price: vintedAmount(listing.vinted_specifics?.price ?? listing.price) };
+        const expected = { title: marketplaceCopy(listing, 'vinted', 'title'), price: vintedAmount(listing.vinted_specifics?.price ?? listing.price) };
         const matches = (await vintedWardrobe(call, session.userId)).filter(item => item?.is_draft === true && vintedSame(item, expected));
         if (matches.length === 1) {
           payload.draft_url = vintedDraftUrl(matches[0].id);
@@ -453,7 +453,7 @@ async function runVintedNative(msg, recovery = false) {
       }
       if (!view) return fail(marketplaceError('Vinted did not confirm a draft. Check your Vinted drafts before trying again.', { code: 'uncertain', rejected: false }));
       const expected = {
-        title: listing.title, description: listing.description, price: vintedAmount(listing.vinted_specifics?.price ?? listing.price),
+        title: marketplaceCopy(listing, 'vinted', 'title'), description: marketplaceCopy(listing, 'vinted', 'description'), price: vintedAmount(listing.vinted_specifics?.price ?? listing.price),
         photo_count: payload.expected_photo_count ?? null,
       };
       const differ = vintedDifferences(view, expected);

@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
-import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
@@ -657,13 +657,9 @@ export function StructuredEditor({
     const init: Record<string, string | string[]> = {};
     fields.forEach((f) => {
       if (f.type === "inventory") return;
-      const val = getListingEditorValue(listing, f.key);
-      // Schema labels ("Sleeve Length") don't match JSON keys ("sleeveLength");
-      // the fields API already resolved the value — use it when the path miss.
-      const value = (f.native || f.locked) && f.defaultValue !== undefined ? f.defaultValue : (val ?? f.defaultValue);
+      const value = sourceValue(listing, f, tab);
       const label = (v: string) => Object.entries(f.optionValues || {}).find(([, id]) => id === v)?.[0] ?? v;
-      const followed = f.label.endsWith(" price") && f.key.includes("_specifics.")
-        && !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(f.key));
+      const followed = marketplacePriceFollowsGeneral(listing, f, tab);
       const shown = followed && listing?.price != null
         ? formFieldText(listing.price)
         : f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
@@ -680,10 +676,11 @@ export function StructuredEditor({
     if (local[key] == null) return;
     const field = fields.find((entry) => entry.key === key);
     if (field?.locked) return;
-    const before = getListingEditorValue(listing, key);
     const text = formFieldText(local[key]);
     if (text.trim() === "[object Object]") return;
-    if (text === formFieldText(before) || text === formFieldText(field?.defaultValue)) return;
+    const followed = field ? marketplacePriceFollowsGeneral(listing, field, tab) : false;
+    const before = followed && listing?.price != null ? listing.price : (field ? sourceValue(listing, field, tab) : getListingEditorValue(listing, key));
+    if (text === formFieldText(before)) return;
     const updated = cloneListing(listing);
     setListingEditorValue(updated, key, field?.type === "number" ? coerce(text) : text);
     onChange(updated);
@@ -735,7 +732,7 @@ export function StructuredEditor({
     }} />;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
-    if (f.key === "description" || f.type === "textarea") {
+    if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
       return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (f.multi) return <SearchableMultiSelect id={id} fieldKey={f.key}
@@ -777,8 +774,13 @@ export function StructuredEditor({
       />
     );
   };
-  // Long text and the category path need the full row.
-  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || ["textarea", "inventory", "variations"].includes(f.type || "");
+  // Long text and the category path need the full row. A marketplace title is
+  // stored under that form, so the leaf is what still makes it full width.
+  const fullWidth = (f: EditorField) => {
+    const leaf = fieldLeaf(f.key);
+    return leaf === "title" || leaf === "description" || f.key === "category_path" || leaf === "categorypath"
+      || f.label === "Category" || ["textarea", "inventory", "variations"].includes(f.type || "");
+  };
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
@@ -842,6 +844,57 @@ export function StructuredEditor({
       })}
     </div>
   );
+}
+
+function fieldLeaf(key: string): string {
+  return (key.split(".").pop() || "").toLowerCase();
+}
+
+const FOLLOWED_GENERAL = new Set([
+  "title", "description", "brand", "size", "department",
+]);
+
+/** General fills these. A marketplace edit is stored on that form alone. */
+function independentFieldKey(tab: string, key: string): string {
+  if (tab === "general" || key.includes(".")) return key;
+  if (key === "price") return MARKETPLACE_PRICE_KEYS[tab] ?? key;
+  if (FOLLOWED_GENERAL.has(key)) return `${tab}_specifics.${key}`;
+  return key;
+}
+
+function independentRows(rows: EditorField[], tab: string): EditorField[] {
+  if (tab === "general") return rows;
+  return mergeEditorFields(rows.flatMap((field) => {
+    // The marketplace price row is added separately and already follows General
+    // until this form sets its own price. The shared Price row would edit every form.
+    if (field.key === "price" && MARKETPLACE_PRICE_KEYS[tab]) return [];
+    const key = independentFieldKey(tab, field.key);
+    const inherited = Boolean(field.locked && /change it there/i.test(field.help || ""));
+    if (key === field.key && !inherited) return [field];
+    return [{
+      ...field,
+      key,
+      ...(fieldLeaf(key) === "description" && !field.type ? { type: "textarea" as const } : {}),
+      ...(inherited ? { locked: false, help: "Filled from General. A change here stays on this marketplace." } : {}),
+    }];
+  }));
+}
+
+function marketplacePriceFollowsGeneral(listing: ListingData | undefined, field: EditorField, tab: string): boolean {
+  const canonical = MARKETPLACE_PRICE_KEYS[tab];
+  const priceRow = field.key === canonical || (field.label.endsWith(" price") && field.key.includes("_specifics."));
+  if (!priceRow) return false;
+  return !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(field.key));
+}
+
+/** This form's own value, otherwise the native or General value it was filled with. */
+function sourceValue(listing: ListingData | undefined, field: EditorField, tab: string): unknown {
+  return marketplaceDisplayValue(listing, field.key, {
+    tab,
+    locked: field.locked,
+    native: field.native,
+    defaultValue: field.defaultValue,
+  });
 }
 
 const SHARED_FORM_FIELDS: EditorField[] = [
@@ -1033,7 +1086,7 @@ export function fieldsForMarketplaceForm(
   // does not fall back to a hand-kept form. A known category schema still merges.
   if (DIRECT_FORM_MARKETS.has(tab) && (catalog?.native || !catalog?.fields.length)) {
     const rows = catalog?.native ? schemaFieldsForTab(forms, tab) || [] : [];
-    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(rows, tab), listing, tab), forms, tab, showAll);
+    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(independentRows(rows, tab), tab), listing, tab), forms, tab, showAll);
   }
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
@@ -1062,7 +1115,7 @@ export function fieldsForMarketplaceForm(
       : field;
   });
   return limitToCategoryForm(
-    finishMarketplaceRows(withoutObjects(withMarketplacePrice(named, tab)), listing, tab),
+    finishMarketplaceRows(withoutObjects(withMarketplacePrice(independentRows(named, tab), tab)), listing, tab),
     forms,
     tab,
     showAll,

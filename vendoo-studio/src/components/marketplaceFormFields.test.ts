@@ -124,13 +124,36 @@ describe("marketplace form fields", () => {
     }
   });
 
+  it("fills a marketplace title from General and keeps an edit on that marketplace", () => {
+    const form: MarketplaceForm = { marketplace: "ebay", native: true, known: true, category_id: "15687", fields: [
+      { key: "title", path: "title", label: "Title", value: "Nike tee", required: true, multi: false, selection_only: false, options: [] },
+      { key: "description", path: "description", label: "Description", value: "About it", required: true, multi: false, selection_only: false, options: [] },
+      { key: "size", path: "ebay_specifics.Size", label: "Size", value: "L", required: true, multi: false, selection_only: true,
+        options: ["L"], locked: true, help: "Size follows the tag size on General. Change it there." },
+    ] };
+    const fields = fieldsForMarketplaceForm(listing, "ebay", [form]);
+    const title = fields.find((field) => field.key === "ebay_specifics.title");
+    expect(title?.label.replace(/\s*\*$/, "")).toBe("Title");
+    expect(title?.locked).toBeFalsy();
+    expect(fields.find((field) => field.key === "ebay_specifics.description")?.type).toBe("textarea");
+    expect(fields.find((field) => field.key === "ebay_specifics.Size")).toMatchObject({
+      locked: false, help: "Filled from General. A change here stays on this marketplace.",
+    });
+    expect(fields.some((field) => field.key === "title")).toBe(false);
+  });
+
   it("keeps General and the remaining marketplace editors available", () => {
     const general = fieldsForMarketplaceForm(listing, "general", undefined);
     expect(general.filter((field) => field.key === "title")).toHaveLength(1);
     expect(general.some((field) => field.key === "category_path")).toBe(true);
     const etsy = fieldsForMarketplaceForm({ ...listing, etsy_specifics: { whoMade: "Another company or person" } }, "etsy", undefined);
     expect(etsy.find((field) => field.key === "etsy_specifics.whoMade")?.label).toBe("Who Made It?");
-    expect(etsy.filter((field) => field.key === "title")).toHaveLength(1);
+    expect(etsy.filter((field) => field.key === "etsy_specifics.title")).toHaveLength(1);
+    expect(etsy.find((field) => field.key === "etsy_specifics.description")).toBeTruthy();
+    expect(etsy.find((field) => field.key === "etsy_specifics.brand")?.label.replace(/\s*\*$/, "")).toBe("Brand");
+    expect(etsy.find((field) => field.key === "title")).toBeUndefined();
+    expect(etsy.find((field) => field.key === "brand")).toBeUndefined();
+    expect(etsy.find((field) => field.key === "condition")?.key).toBe("condition");
   });
 
   it("shows an eBay price row and Depop measurement rows beside the native catalog", () => {

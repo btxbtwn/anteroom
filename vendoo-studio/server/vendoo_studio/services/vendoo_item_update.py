@@ -185,6 +185,10 @@ def apply_update_all(
                 value = sanitize_etsy_tags(value)
                 if not value:
                     continue
+            # A title, description, or quantity already on this form and different
+            # from General was edited there. Update All does not replace it.
+            if key in ("title", "description", "quantity") and key in want_over and str(want_over.get(key) if want_over.get(key) is not None else "").strip() != str(value).strip():
+                continue
             want_over[key] = deepcopy(value)
         # A regenerated listing weighs and measures whatever the new item does;
         # without this the forms keep the previous package and ship on it.

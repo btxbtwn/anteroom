@@ -133,7 +133,7 @@ async function depopListingFields(request, listing, deadline) {
   if (category) Object.assign(fields, category);
   try {
     const attributes = await request('GET', '/presentation/api/v1/attributes/');
-    const brand = depopBrandId(attributes?.brand, listing?.depop_specifics?.brand || listing?.form?.overrides?.brand || listing?.brand);
+    const brand = depopBrandId(attributes?.brand, depopBrandText(listing));
     if (brand) fields.brand = brand;
   } catch { /* The publish check names a missing brand. */ }
   try {
@@ -192,7 +192,7 @@ const DEPOP_PHOTO_HOSTS = ['.s3.amazonaws.com', '.s3-accelerate.amazonaws.com'];
 const DEPOP_WEBAPI = 'https://webapi.depop.com';
 
 function depopBaseDescription(listing) {
-  return String(listing?.description || '').trim();
+  return String(marketplaceCopy(listing, 'depop', 'description') || '').trim();
 }
 
 // The description, then up to five of the listing's tags as hashtags,
@@ -334,11 +334,19 @@ function depopSize(listing, category, attributes) {
   return { problem: 'a size Depop offers for this category' };
 }
 
+// This form's brand, including a cleared one. Otherwise the imported override, then General.
+function depopBrandText(listing) {
+  const specifics = listing?.depop_specifics;
+  if (specifics && typeof specifics === 'object' && !Array.isArray(specifics) && Object.hasOwn(specifics, 'brand')) {
+    return specifics.brand ?? '';
+  }
+  return listing?.form?.overrides?.brand || listing?.brand || '';
+}
+
 // Depop's brand id for this listing. An unknown or blank brand is Other.
 function depopBrand(listing, attributes) {
   const brands = Array.isArray(attributes?.brand) ? attributes.brand : attributes?.brands;
-  const wanted = listing?.depop_specifics?.brand || listing?.form?.overrides?.brand || listing?.brand;
-  return depopBrandId(brands, wanted);
+  return depopBrandId(brands, depopBrandText(listing));
 }
 
 const DEPOP_FIT_ATTRIBUTE = { petite: 'petite', plus: 'plussize', 'big_&_tall': 'tall', tall: 'tall', maternity: 'maternity' };
@@ -1001,7 +1009,7 @@ async function depopLiveFields(request, payload, product) {
   const attributes = await depopAttributes(payload.deadline);
   const other = depopOtherId(Array.isArray(attributes?.brand) ? attributes.brand : attributes?.brands || []);
   const listing = payload.listing || {};
-  const wanted = String(listing.depop_specifics?.brand || listing.form?.overrides?.brand || listing.brand || '').trim().toLowerCase();
+  const wanted = String(depopBrandText(listing) || '').trim().toLowerCase();
   const stored = depopProductBrand(product);
   if (fields.brand === other && wanted && wanted !== 'other' && wanted !== 'unbranded' && stored) fields.brand = stored;
   return fields;

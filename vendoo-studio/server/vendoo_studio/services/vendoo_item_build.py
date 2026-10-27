@@ -387,6 +387,11 @@ def _listing_section(
     it we fall back to what ``observe_listing_encodings`` learned from the
     seller's existing items.
     """
+    from vendoo_studio.services.seller_overrides import (
+        FOLLOWED_NOT_ASPECTS, fold_key, followed_entry, overlay_followed_fields,
+    )
+
+    listing = overlay_followed_fields(listing, marketplace)
     section = default_listing_section(marketplace)
     raw = listing.get(SPECIFICS_SOURCES.get(marketplace, f"{marketplace}_specifics"))
     specifics = dict(raw) if isinstance(raw, dict) else {}
@@ -404,7 +409,18 @@ def _listing_section(
         if key in section["overrides"] and general.get(key):
             section["overrides"][key] = deepcopy(general[key])
     if "quantity" in section["overrides"]:
-        section["overrides"]["quantity"] = general.get("quantity") or "1"
+        owned_quantity = followed_entry(listing, marketplace, "quantity")
+        if owned_quantity is not None and str(owned_quantity[1]).strip() != "":
+            section["overrides"]["quantity"] = str(owned_quantity[1]).strip()
+        else:
+            section["overrides"]["quantity"] = general.get("quantity") or "1"
+    for key in ("title", "description"):
+        owned = followed_entry(listing, marketplace, key)
+        if owned is None:
+            continue
+        text = str(owned[1] if owned[1] is not None else "").strip()
+        # An empty owned value stays empty so General does not fill it back in.
+        section["overrides"][key] = text
 
     path = specifics.pop("categoryPath", None)
     parts = path_parts(path)
@@ -428,7 +444,7 @@ def _listing_section(
     # field with the same label would consume them. Size/brand stay in aspects.
     aspects = {
         key: value for key, value in specifics.items()
-        if key not in known and key != "category_specifics"
+        if key not in known and key != "category_specifics" and fold_key(key) not in FOLLOWED_NOT_ASPECTS
     }
     # Generation stores leaf fields in category_specifics; the gap filler
     # writes corrections at the top level. Encode both, preferring a current
