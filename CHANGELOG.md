@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.447 — 2026-10-27
+
+- Clicking a listing no longer opens a tab. Anteroom shows one listing at a time, and the listing's name appears in the title bar. Use the **+** beside the listings search to start a new listing.
+
 ## 0.1.446 — 2026-10-27
 
 - Marketplace forms are cleaner: the “This category’s fields are showing” line, the notes about where each marketplace’s choices come from, and the Refresh choices and Show all fields buttons are gone. A line only appears while a form loads or when it could not be loaded.

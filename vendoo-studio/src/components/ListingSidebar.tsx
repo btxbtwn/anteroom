@@ -28,10 +28,10 @@ import {
   statusCounts,
   type ListingFilters as Filters,
 } from "./inventoryFilters";
-import { SearchIcon, XIcon } from "lucide-react";
+import { PlusIcon, SearchIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { Kbd } from "./ui/kbd";
-import { SIDEBAR_ROW } from "./sidebar/sidebarStyles";
+import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebar/sidebarStyles";
 import { ListingRow } from "./sidebar/ListingRow";
 import { activeAnchorMs, settledAnchorMs, type Listing } from "./sidebar/listingShelves";
 import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
@@ -59,6 +59,8 @@ interface Props {
   onSearchQueryChange: (query: string) => void;
   onSelect: (id: string) => void;
   onDelete: (id: string, title: string) => void;
+  onCreate: () => void;
+  creating: boolean;
   onOpenSettings: () => void;
   onOpenUsage: () => void;
   onOpenAnalytics: () => void;
@@ -85,6 +87,8 @@ export function ListingSidebar({
   onSearchQueryChange,
   onSelect,
   onDelete,
+  onCreate,
+  creating,
   onOpenSettings,
   onOpenUsage,
   onOpenAnalytics,
@@ -363,6 +367,16 @@ export function ListingSidebar({
               }}
             >
               Select
+            </button>
+            <button
+              type="button"
+              className={SIDEBAR_ICON_BUTTON}
+              title="New listing"
+              aria-label="New listing"
+              disabled={creating}
+              onClick={onCreate}
+            >
+              <PlusIcon />
             </button>
           </div>
 

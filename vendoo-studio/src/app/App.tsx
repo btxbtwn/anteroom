@@ -50,9 +50,8 @@ import { marketplaceName } from "../components/marketplaceNames";
 import { ThemeSync } from "../components/ThemeSync";
 import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSessionNotice";
 
-import { OpenListingTabs } from "../components/OpenListingTabs";
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
-import { initialListingTabs, listingTabsReducer } from "./listingTabs";
+import { initialOpenListing, openListingReducer } from "./openListing";
 
 const ListingEditor = lazy(() =>
   import("../components/ListingEditor").then((module) => ({ default: module.ListingEditor })),
@@ -117,14 +116,14 @@ export function App() {
   const queryClient = useQueryClient();
   const vendooOn = useVendooEnabled();
   const isMobile = useMobileLayout();
-  const [listingTabs, dispatchListingTab] = useReducer(
-    listingTabsReducer,
+  const [openListingState, dispatchOpenListing] = useReducer(
+    openListingReducer,
     new URLSearchParams(window.location.search).get("listing") || null,
-    initialListingTabs,
+    initialOpenListing,
   );
-  const selectedConvId = listingTabs.selectedId;
-  const setSelectedConvId = (id: string) => dispatchListingTab({ type: "open", id });
-  const clearListingWorkspace = (id: string) => dispatchListingTab({ type: "clear", id });
+  const selectedConvId = openListingState?.id ?? null;
+  const setSelectedConvId = (id: string) => dispatchOpenListing({ type: "open", id });
+  const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
   const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
   const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
@@ -646,8 +645,8 @@ export function App() {
   const deleteConv = useMutation({
     mutationFn: (convId: string) => api.conversations.delete(convId),
     onSuccess: (_data, convId) => {
-      dispatchListingTab({ type: "close", id: convId });
-      if (selectedConvId === convId && listingTabs.tabs.length === 1) {
+      dispatchOpenListing({ type: "close", id: convId });
+      if (selectedConvId === convId) {
         setMobilePane("workspace");
         if (isMobile) setMobileSidebarOpen(true);
       }
@@ -680,21 +679,7 @@ export function App() {
                 }
               : null
         }
-      >
-        {activeView === "listings" ? (
-          <OpenListingTabs
-            tabs={listingTabs.tabs.map((tab) => ({
-              id: tab.id,
-              title: conversations?.find((listing) => listing.id === tab.id)?.title || "Untitled listing",
-            }))}
-            selectedId={selectedConvId}
-            onSelect={openListing}
-            onClose={(id) => dispatchListingTab({ type: "close", id })}
-            onCreate={createListing}
-            creating={createConv.isPending}
-          />
-        ) : null}
-      </WorkspaceTopbar>
+      />
       <div
         className={`app-content mobile-pane-${mobilePane}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
       >
@@ -709,6 +694,8 @@ export function App() {
             onSearchQueryChange={handleListingSearch}
             onSelect={openListing}
             onDelete={(id) => deleteConv.mutate(id)}
+            onCreate={createListing}
+            creating={createConv.isPending}
             onOpenSettings={openSettings}
             onOpenUsage={openUsage}
             onOpenAnalytics={openAnalytics}
@@ -798,10 +785,7 @@ export function App() {
               </div>
             ) : null}
           </header>
-          <div className="workspace-body" id="listing-workspace-panel"
-            role={activeView === "listings" && selectedConvId ? "tabpanel" : undefined}
-            aria-labelledby={activeView === "listings" && selectedConvId ? `listing-tab-${selectedConvId}` : undefined}
-          >
+          <div className="workspace-body">
             <main className="panel main-panel" ref={mainPanelRef}>
               {activeView === "settings" ? (
                 <Suspense fallback={pageLoading}>
@@ -899,21 +883,21 @@ export function App() {
                       onGoToChat={isMobile ? () => setMobilePane("workspace") : undefined}
                     />
                   )}
-                  {listingTabs.tabs.map((tab) => (
-                    <div className="listing-workspace-main listing-session" key={`${tab.id}:${tab.nonce}`} hidden={tab.id !== selectedConvId}>
+                  {openListingState && (
+                    <div className="listing-workspace-main listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
                       <div className="chat-column">
-                        <ListingSession active={tab.id === selectedConvId && activeView === "listings"}>
+                        <ListingSession active={activeView === "listings"}>
                           <ChatPanel
-                            convId={tab.id}
-                            queuedMessage={tab.queuedMessage}
-                            onQueuedMessageConsumed={() => dispatchListingTab({ type: "message", id: tab.id, value: null })}
-                            browser={tab.id === selectedConvId && browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
+                            convId={openListingState.id}
+                            queuedMessage={openListingState.queuedMessage}
+                            onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: openListingState.id, value: null })}
+                            browser={browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
                             onBrowserFieldsChange={setBrowserFields}
                           />
                         </ListingSession>
                       </div>
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </main>
@@ -929,41 +913,39 @@ export function App() {
                 {...DETAIL_WIDTH}
               />
             )}
-            {(listingTabs.tabs.length > 0 || (activeView === "listings" && !detailHidden)) && (
+            {(openListingState || (activeView === "listings" && !detailHidden)) && (
               <aside id="listing-inspector" className="panel detail-panel" hidden={activeView !== "listings" || detailHidden}>
-                {selectedConvId ? (
-                  listingTabs.tabs.map((tab) => (
-                    <div className="listing-session" key={`${tab.id}:${tab.nonce}`} hidden={tab.id !== selectedConvId}>
-                      <Suspense fallback={null}>
-                        <ListingSession active={tab.id === selectedConvId && activeView === "listings"}>
-                          <ListingEditor
-                            convId={tab.id}
-                            reviewTab={tab.reviewTab}
-                            onReviewTabChange={(value) => dispatchListingTab({ type: "review", id: tab.id, value })}
-                            onOpenBrowser={(jobId) => openBrowser.mutate(jobId)}
-                            browserOpen={tab.id === selectedConvId && browserOpen}
-                            onAskChat={(text) => {
-                              dispatchListingTab({ type: "message", id: tab.id, value: text });
-                              setMobilePane("workspace");
-                            }}
-                            onCleared={() => {
-                              clearListingWorkspace(tab.id);
-                            }}
-                            onEditInventoryLocation={openEbayInventoryLocation}
-                            onBulkListingsCreated={(listings, generate) => {
-                              if (generate) void generateBatch(listings);
-                              const first = listings[0]?.convId;
-                              if (!first) return;
-                              setSelectedConvId(first);
-                              goListings();
-                              setMobilePane("workspace");
-                              setMobileSidebarOpen(false);
-                            }}
-                          />
-                        </ListingSession>
-                      </Suspense>
-                    </div>
-                  ))
+                {openListingState ? (
+                  <div className="listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
+                    <Suspense fallback={null}>
+                      <ListingSession active={activeView === "listings"}>
+                        <ListingEditor
+                          convId={openListingState.id}
+                          reviewTab={openListingState.reviewTab}
+                          onReviewTabChange={(value) => dispatchOpenListing({ type: "review", id: openListingState.id, value })}
+                          onOpenBrowser={(jobId) => openBrowser.mutate(jobId)}
+                          browserOpen={browserOpen}
+                          onAskChat={(text) => {
+                            dispatchOpenListing({ type: "message", id: openListingState.id, value: text });
+                            setMobilePane("workspace");
+                          }}
+                          onCleared={() => {
+                            clearListingWorkspace(openListingState.id);
+                          }}
+                          onEditInventoryLocation={openEbayInventoryLocation}
+                          onBulkListingsCreated={(listings, generate) => {
+                            if (generate) void generateBatch(listings);
+                            const first = listings[0]?.convId;
+                            if (!first) return;
+                            setSelectedConvId(first);
+                            goListings();
+                            setMobilePane("workspace");
+                            setMobileSidebarOpen(false);
+                          }}
+                        />
+                      </ListingSession>
+                    </Suspense>
+                  </div>
                 ) : (
                   <Empty className="h-full">
                     <EmptyDescription>Select a listing to inspect</EmptyDescription>
