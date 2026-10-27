@@ -33,16 +33,23 @@ def review_inputs(db, conv_id: str) -> tuple[dict, str]:
     from vendoo_studio.services.marketplaces import get_selected_marketplaces
     from vendoo_studio.services.vendoo_import import vendoo_binding
 
+    photos = repo.get_photos(conv_id)
     inputs = {
         "conversation_id": conv_id,
         "revision_id": revisions[0].id,
         "snapshot": snapshot,
-        "photo_ids": [p.id for p in repo.get_photos(conv_id)],
+        "photo_ids": [p.id for p in photos],
+        # An edit keeps the photo's ID, so the approval covers each file's content too.
+        "photo_versions": photo_versions(photos),
         "binding": vendoo_binding(conv.notes),
         "marketplaces": get_selected_marketplaces(),
     }
     fingerprint = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
     return inputs, fingerprint
+
+
+def photo_versions(photos) -> list[list[str | None]]:
+    return [[photo.id, photo.checksum] for photo in photos]
 
 
 def remember_review(inputs: dict, fingerprint: str, preparation: dict) -> str:

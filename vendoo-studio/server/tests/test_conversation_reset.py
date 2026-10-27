@@ -35,10 +35,7 @@ JPEG_BYTES = bytes([
 @contextmanager
 def photos_dir(path: str):
     """Point both the photo routes and the wipe at a throwaway directory."""
-    with (
-        patch("vendoo_studio.routes.conversations.PHOTOS_DIR", path),
-        patch("vendoo_studio.services.listing_delete.PHOTOS_DIR", path),
-    ):
+    with patch("vendoo_studio.services.photos.PHOTOS_DIR", path):
         yield
 
 

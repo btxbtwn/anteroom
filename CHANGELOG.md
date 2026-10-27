@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.421 — 2026-10-26
+## 0.1.422 — 2026-10-26
 
 - Add a listing video on eBay and Etsy, the same way as on Poshmark: upload it on that marketplace's form, then Save Draft or List. eBay takes one MP4 or MOV up to 150 MB and List waits until eBay has processed it; Etsy takes one video of 3 to 15 seconds. Anteroom checks that the marketplace kept the video, never uploads the same file twice, and will not list with a video the marketplace blocked or could not process. Clear video removes it.
 - Depop, Mercari, Vinted and Sellwild don't accept listing videos from their websites, so their forms have no video picker.
+
+## 0.1.421 — 2026-10-26
+
+- Photos can now be edited in the listing editor: open a photo and press **Edit**. Crop to a square or another marketplace shape, rotate and straighten, adjust exposure, brightness and contrast, or remove the background and put white or any colour behind the item. Background removal runs on your Mac; the photo is not uploaded anywhere. Your original photo is always kept, and **Reset to original** brings it back. Marketplaces, Vendoo sends and Etsy drafts get the edited photo, and editing a photo means a pending automation approval or reviewed Vendoo send has to be reviewed again.
 
 ## 0.1.420 — 2026-10-26
 

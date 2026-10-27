@@ -4,7 +4,7 @@
  * (MIT, (c) 2026 T3 Tools Inc.): a media dialog with corner close, side
  * navigation and a caption line under the image.
  */
-import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, RotateCcwIcon, RotateCwIcon, SlidersHorizontalIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -157,6 +157,8 @@ export function PhotoLightbox({
   turns = 0,
   rotating = false,
   onRotate,
+  onEdit,
+  edited = false,
   onStep,
   onMove,
   onRemove,
@@ -168,6 +170,10 @@ export function PhotoLightbox({
   turns?: number;
   rotating?: boolean;
   onRotate: (degrees: 90 | -90) => void;
+  /** Opens the photo editor for the photo shown. */
+  onEdit?: () => void;
+  /** The photo shown is an edit of a kept original. */
+  edited?: boolean;
   onStep: (index: number) => void;
   /** Touch screens cannot drag thumbnails, so the viewer moves the photo instead. */
   onMove?: (delta: -1 | 1) => void;
@@ -243,6 +249,12 @@ export function PhotoLightbox({
             <Button variant="overlay" size="icon-micro" onClick={() => onRotate(90)} disabled={rotating} aria-label="Rotate right" title="Rotate right">
               <RotateCwIcon />
             </Button>
+            {onEdit ? (
+              <Button variant="overlay" size="micro" className="ms-1" onClick={onEdit} disabled={rotating} title="Crop, adjust or remove the background">
+                <SlidersHorizontalIcon />
+                {edited ? "Edited" : "Edit"}
+              </Button>
+            ) : null}
           </div>
           {onMove || onRemove ? (
             // Touch only: the desktop drags thumbnails and uses their delete button.

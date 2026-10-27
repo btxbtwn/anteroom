@@ -478,4 +478,18 @@ def test_ebay_variation_groups_upgrade_keeps_existing_ebay_listing_identity(engi
                                  "FROM marketplace_listings WHERE id='binding'").fetchone()
     assert row == ("draft", "TEE-1", "offer-9", 1, None, None)
     assert recorded_revision(engine) == head_revision()
+
+
+def test_photo_edit_upgrade_keeps_every_photo_unedited(engine, snapshots):
+    from alembic import command
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "a7c3e91f5d20")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id,title,status) VALUES ('item','Denim jacket','draft')")
+        connection.execute("INSERT INTO photos (id,conversation_id,original_filename,stored_filename,mime_type,size_bytes,display_order,checksum) VALUES ('photo','item','front.jpg','saved.jpg','image/jpeg',10,0,'checksum')")
+        connection.execute("INSERT INTO marketplace_listings (id,conversation_id,marketplace,state,etsy_image_ids,created_at,updated_at) VALUES ('etsy','item','etsy','draft','{\"photo\": \"100\"}','2026-10-26','2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT stored_filename,checksum,source_filename,edits FROM photos").fetchone() == ("saved.jpg","checksum",None,None)
+        assert connection.execute("SELECT etsy_image_ids,etsy_image_checksums FROM marketplace_listings").fetchone() == ('{"photo": "100"}',None)
     assert inspect_database(engine.url.database).clean

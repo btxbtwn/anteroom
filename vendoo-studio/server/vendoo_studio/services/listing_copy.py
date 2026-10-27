@@ -128,6 +128,17 @@ def completed_copy(db: Session, source_kind: str, source_id: str, request_id: st
     return copy_result(db, source_id, request_id, source_kind=source_kind)
 
 
+def _copy_file(name: str, mime_type: str, created_files: list[Path]) -> dict:
+    if Path(name).name != name:
+        raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422)
+    try:
+        meta = photos.process_bytes((Path(photos.PHOTOS_DIR) / name).read_bytes(), name, mime_type)
+    except (OSError, ValueError) as exc:
+        raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422) from exc
+    created_files.append(Path(photos.PHOTOS_DIR) / meta["stored_filename"])
+    return meta
+
+
 def add_draft(db: Session, title: str, notes: dict, listing: dict, images: list[dict], source: str) -> str:
     """Stage a clean local draft. The caller commits it with its creation receipt."""
     conv = Conversation(title=title, notes=json.dumps(notes), status="draft")
@@ -173,14 +184,11 @@ def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
         try:
             copied_images = []
             for image in images if body.include_photos else []:
-                if Path(image.stored_filename).name != image.stored_filename:
-                    raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422)
-                path = Path(photos.PHOTOS_DIR) / image.stored_filename
-                try:
-                    meta = photos.process_bytes(path.read_bytes(), image.stored_filename, image.mime_type)
-                except (OSError, ValueError) as exc:
-                    raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422) from exc
-                created_files.append(Path(photos.PHOTOS_DIR) / meta["stored_filename"])
+                meta = _copy_file(image.stored_filename, image.mime_type, created_files)
+                if image.source_filename:
+                    # The copy keeps the original under its edits, so it can be reset too.
+                    meta["source_filename"] = _copy_file(image.source_filename, image.mime_type, created_files)["stored_filename"]
+                    meta["edits"] = copy.deepcopy(image.edits)
                 meta["original_filename"] = image.original_filename
                 copied_images.append(meta)
             new_id = add_draft(db, body.title, notes, data, copied_images, "copy")

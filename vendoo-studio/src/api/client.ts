@@ -35,6 +35,7 @@ import type {
   Message,
   OkResponse,
   Photo,
+  PhotoEdits,
   PhotoUploadResult,
   PriceDropApplyResult,
   PriceDropCompsSource,
@@ -675,6 +676,28 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ degrees }),
       }),
+    /** Replace a photo's edits; the server renders them from the kept original. */
+    editPhoto: (convId: string, photoId: string, edits: PhotoEdits) =>
+      request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, {
+        method: "PUT",
+        body: JSON.stringify(edits),
+      }),
+    resetPhoto: (convId: string, photoId: string) =>
+      request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
+    /** A smaller JPEG of unsaved edits; `crop: false` keeps the whole frame to draw the crop on. */
+    previewPhotoEdits: async (convId: string, photoId: string, edits: PhotoEdits, crop: boolean, signal?: AbortSignal) => {
+      const res = await fetch(`${BASE}/conversations/${convId}/photos/${photoId}/edits/preview?crop=${crop}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(edits),
+        signal,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(errorMessage(body, "Preview failed"));
+      }
+      return res.blob();
+    },
     delete: (id: string) =>
       request<DeleteConversationResult>(`/conversations/${id}`, { method: "DELETE" }),
     reset: (id: string, opts?: { keepInputs?: boolean }) =>

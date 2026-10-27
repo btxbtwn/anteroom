@@ -304,6 +304,25 @@ class EtsyListingsTest(unittest.TestCase):
         self.execute("save_draft", binding, photos=kept)
         self.assertFalse(any(c[3] for c in self.calls))
 
+    def test_an_edited_photo_is_uploaded_again_in_its_place(self):
+        binding = {}
+        self.execute("save_draft", binding)
+        photos = ConversationRepo(self.db).get_photos(self.conv.id)
+        Path(self.temp, "edited.jpg").write_bytes(b"edited image")
+        ConversationRepo(self.db).replace_photo_file(
+            photos[0], {"stored_filename": "edited.jpg", "size_bytes": 12, "checksum": "e" * 64, "width": 1, "height": 1},
+            source_filename=photos[0].stored_filename, edits={"rotate": 90})
+        self.calls.clear()
+        result = self.execute("save_draft", binding, photos=photos)
+        self.assertEqual(result["state"], "draft", result)
+        self.assertEqual([c[:2] for c in self.writes()], [("PATCH", "shops/123/listings/123456"),
+                                                           ("DELETE", "shops/123/listings/123456/images/1001"),
+                                                           ("POST", "shops/123/listings/123456/images")])
+        self.assertEqual(binding["etsy_image_checksums"][photos[0].id], "e" * 64)
+        self.calls.clear()
+        self.execute("save_draft", binding, photos=photos)
+        self.assertFalse(any(c[3] for c in self.calls))
+
     def test_update_changes_the_live_listing_and_does_not_create_another(self):
         self.assertEqual(self.list()["state"], "published")
         self.calls.clear()
