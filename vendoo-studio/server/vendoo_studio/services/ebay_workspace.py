@@ -347,12 +347,23 @@ async def listing(client: EbayClient, listing_id: str) -> dict:
         values = [node.text for node in aspect.findall("e:Value", NS) if node.text]
         if name and values:
             specifics[name] = values
+    variations = []
+    for node in item.findall("e:Variations/e:Variation", NS):
+        start = node.find("e:StartPrice", NS)
+        variations.append({
+            "sku": node.findtext("e:SKU", namespaces=NS) or "",
+            "quantity": node.findtext("e:Quantity", namespaces=NS) or "",
+            "soldQuantity": node.findtext("e:SellingStatus/e:QuantitySold", namespaces=NS) or "0",
+            "price": start.text if start is not None and start.get("currencyID") == "USD" else None,
+            "values": {pair.findtext("e:Name", namespaces=NS) or "": pair.findtext("e:Value", namespaces=NS) or ""
+                       for pair in node.findall("e:VariationSpecifics/e:NameValueList", NS)},
+        })
     return {"id": text("e:ItemID"), "title": text("e:Title"), "description": plain(text("e:Description")),
             "price": price.text if price is not None and price.get("currencyID") == "USD" else None,
             "quantity": text("e:Quantity"), "soldQuantity": text("e:SellingStatus/e:QuantitySold"),
             "status": text("e:SellingStatus/e:ListingStatus"), "type": text("e:ListingType"),
             "seller": text("e:Seller/e:UserID"), "sku": text("e:SKU"), "site": text("e:Site"),
-            "categoryId": text("e:PrimaryCategory/e:CategoryID"), "variations": item.find("e:Variations", NS) is not None,
+            "categoryId": text("e:PrimaryCategory/e:CategoryID"), "variations": item.find("e:Variations", NS) is not None, "variation_rows": variations,
             "categoryName": text("e:PrimaryCategory/e:CategoryName"),
             "condition": text("e:ConditionDisplayName"), "conditionDescription": text("e:ConditionDescription"),
             "specifics": specifics,
