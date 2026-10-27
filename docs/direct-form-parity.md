@@ -21,13 +21,87 @@ serialization and saved result have been checked; displaying it is insufficient.
 | --- | --- | --- |
 | Poshmark | Native categories, size groups, sizes, conditions, colors and style tags. Private Save Draft creates a `user_draft`, reuses it, checks ownership and reads fields back. Quantity, original price, SKU, cost cents, shipping discount, availability, private notes and Smart Pricing off were exercised in a real private draft. Installed 0.1.409 saved standard XL and a custom size with separate quantities and SKUs, then removed the custom row. The candidate video picker uploaded a three-second clip through the file chooser; the private draft returned its video as ready/completed and the native editor played it. Clearing the video saved an empty video list with all six photos retained. Installed 0.1.412 with the normal bridge: a three-second clip selected on the private test item saved through Save Draft; Check passed, Poshmark's post read back `videos` with `status = ready` and `processing_status = completed`, still `user_draft`, six photos and XL quantity 2, and the native editor loaded the 3.0-second clip. Clearing it and saving again read back `videos: []` with six photos. | Updates after some inventory has sold; scheduled availability if offered, and any other controls revealed by the native editor. Video publication and live updates have request-level checks only. Selection and Save Draft in the installed check went through the same local routes the form uses, not clicks in the form. |
 | Mercari | Native categories, size groups, brands, conditions and package-specific prepaid labels. Buyer/seller payer, Smart Pricing and floor read-back. Ship on your own uses the native zero shipping-class sentinel, seller payer and no prepaid-label requirement; the native private draft showed SOYO selected. Installed 0.1.409 recovered the private No Brand draft using the full sent snapshot. | Inspect category-dependent fields outside clothing, including device identifiers. Audit the current form for any offer controls before exposing one. No manual tag control was observed on the clothing draft. |
-| Depop | Native category attributes, category sizes, brands, conditions, colors, age, source, style and parcel choices. Private draft photo count, SKU, quantity, style edits and clears were checked. Worldwide shipping saved $15.25, saved free shipping as $0.00, then omitted the fee when switched off; the item stayed $12. | Video, remaining category-specific behavior, and installed-release verification of worldwide shipping. |
-| eBay | Native category aspects, option IDs, dependent choices and conditions. Offer amounts and explicit offer disablement are carried by the direct API path. The form exposes the offer switch and editable condition description; clearing offer thresholds no longer restores calculated amounts. Trading revise sends DeletedField for cleared offer thresholds and sends or clears condition notes. Format, duration and auctions (0.1.413): Fixed price (Good 'Til Cancelled) or Auction, with auction lengths, starting bid, optional reserve and Buy It Now; the auction choice and lengths come from eBay's listing-type policy for the leaf category. Auctions omit `availableQuantity` and Best Offer and require quantity 1. Save Draft writes the inventory item and an unpublished offer, never publishes, and reads the offer back; List publishes that same offer. Installed 0.1.417 on the private test item: the form read the category's real auction lengths (3, 5, 7 and 10 days), hid offers for an auction, and the pre-flight blocked a missing starting bid. Save Draft saved an unpublished Auction offer (5 days, $8 starting bid, $12 Buy It Now, no reserve, quantity 1), and eBay's offer read back the same; switching to Fixed price saved a separate unpublished Fixed price, Good 'Til Cancelled offer with quantity 2, as eBay keeps one offer per SKU and format. Check confirmed each without writing; neither has a listing ID. (0.1.414 failed after writing by recording a field the listing record does not store; fixed in 0.1.417.) Variations (0.1.420): an item's eBay form lists the aspects eBay enables for variations in its leaf (Size, Color…) and one row per variation with its own quantity, optional SKU and optional price, plus up to 12 photos for each value of one aspect. Save Draft writes one inventory item per variation, the inventory item group and one unpublished fixed-price offer per variation, never publishes, and reads the group and every offer back; List publishes that group once (one listing ID). Update replaces the items, group and offers of the live listing; Delist withdraws the whole group; Sync reads stock per variation. These have request-level tests with an eBay fake. | List of an auction (publication) is unverified, since nothing may be published. Real private Save Draft of a listing with variations; its List, Update and Delist are unverified. Adding a variation to a live listing (refused for now), importing an existing variation listing from eBay (still refused), and the Vendoo send path for variations. Policy and store-category selectors, optional merchandising fields, media and any conditional controls. The Vendoo send path still writes fixed price only. Trading changes have request-level tests; their saved results need a safe real validation path. |
+| Depop | Native category attributes, category sizes, brands, conditions, colors, age, source, style and parcel choices. Private draft photo count, SKU, quantity, style edits and clears were checked. Worldwide shipping saved $15.25, saved free shipping as $0.00, then omitted the fee when switched off; the item stayed $12. | Remaining category-specific behavior, and installed-release verification of worldwide shipping. Video is not offered by Depop's web client (see Listing videos). |
+| eBay | Native category aspects, option IDs, dependent choices and conditions. Offer amounts and explicit offer disablement are carried by the direct API path. The form exposes the offer switch and editable condition description; clearing offer thresholds no longer restores calculated amounts. Trading revise sends DeletedField for cleared offer thresholds and sends or clears condition notes. Format, duration and auctions (0.1.413): Fixed price (Good 'Til Cancelled) or Auction, with auction lengths, starting bid, optional reserve and Buy It Now; the auction choice and lengths come from eBay's listing-type policy for the leaf category. Auctions omit `availableQuantity` and Best Offer and require quantity 1. Save Draft writes the inventory item and an unpublished offer, never publishes, and reads the offer back; List publishes that same offer. Installed 0.1.417 on the private test item: the form read the category's real auction lengths (3, 5, 7 and 10 days), hid offers for an auction, and the pre-flight blocked a missing starting bid. Save Draft saved an unpublished Auction offer (5 days, $8 starting bid, $12 Buy It Now, no reserve, quantity 1), and eBay's offer read back the same; switching to Fixed price saved a separate unpublished Fixed price, Good 'Til Cancelled offer with quantity 2, as eBay keeps one offer per SKU and format. Check confirmed each without writing; neither has a listing ID. (0.1.414 failed after writing by recording a field the listing record does not store; fixed in 0.1.417.) Variations (0.1.420): an item's eBay form lists the aspects eBay enables for variations in its leaf (Size, Color…) and one row per variation with its own quantity, optional SKU and optional price, plus up to 12 photos for each value of one aspect. Save Draft writes one inventory item per variation, the inventory item group and one unpublished fixed-price offer per variation, never publishes, and reads the group and every offer back; List publishes that group once (one listing ID). Update replaces the items, group and offers of the live listing; Delist withdraws the whole group; Sync reads stock per variation. These have request-level tests with an eBay fake. | List of an auction (publication) is unverified, since nothing may be published. Real private Save Draft of a listing with variations; its List, Update and Delist are unverified. Adding a variation to a live listing (refused for now), importing an existing variation listing from eBay (still refused), and the Vendoo send path for variations. Policy and store-category selectors, optional merchandising fields and any conditional controls. The listing video (0.1.422) has request-level tests only; it needs a real private Save Draft. The Vendoo send path still writes fixed price only. Trading changes have request-level tests; their saved results need a safe real validation path. |
+| Etsy | Listing video (0.1.422): upload, clear, re-attach and read-back have request-level tests only. | Real private Save Draft with a video, then clearing it. |
 | Sellwild | Native category/condition IDs, vehicle VIN/mileage branch, package validation and explicit activation boundary. Its form exposes category, condition, optional description and the 12 native USPS packaging presets. Preset dimensions and request serialization have tests. | Remaining visible sell-page controls and installed UI verification. Sellwild has no remote draft operation; local editing must not activate a listing. |
 
 Photo selection/order and the marketplace's media limits also need to be checked
 per marketplace. A shared General field or account setting must be identified
 as such; it must not silently override an explicit marketplace selection.
+
+## Listing videos
+
+Researched 2026-10-26 from each marketplace's API documentation or current web
+client. Anteroom keeps one video per marketplace: the seller selects it on that
+marketplace's form (`<marketplace>_specifics.videoId`), and limits come from
+`VIDEO_RULES` in `services/listing_videos.py`.
+
+| Marketplace | Video | Limits Anteroom applies | How it attaches |
+| --- | --- | --- | --- |
+| Poshmark | Supported (0.1.411) | One video shorter than 15 seconds | Web client endpoints below. |
+| eBay | Supported (0.1.422) | One MP4 or MOV, at most 157,286,400 bytes (150 MB) | Media API `createVideo` → `uploadVideo` → `getVideo` until `LIVE`, then `product.videoIds` on the inventory item. Trading revise sends `VideoDetails.VideoID`, or `DeletedField` to clear. |
+| Etsy | Supported (0.1.422) | One video of 3 to 15 seconds, MP4/MOV/FLV/AVI/3GP/MPEG, at most 95 MB | `uploadListingVideo` (multipart through the relay), `deleteListingVideo`, `getListingVideos` read-back. |
+| Depop | Not offered on the web | — | Videos are added in Depop's app. |
+| Mercari | Not offered on the web | — | — |
+| Vinted | Not offered on the web | — | — |
+| Sellwild | Not offered | — | — |
+
+Recovery never repeats a write. eBay: the journal keeps the video ID per file
+checksum. A retry reuses it and uploads only while eBay still reports
+`PENDING_UPLOAD`; a video eBay no longer has (unused videos expire after 30
+days) is created again. A video whose create reply was lost is attached to
+nothing and expires, so creating it again cannot change a listing. Save Draft,
+List and Update wait for `LIVE` before the inventory item names the video, and
+refuse `BLOCKED` or `PROCESSING_FAILED`. Etsy: the journal marks an upload as
+pending before sending it. Anteroom removes every other active video first, so
+after a lost reply the one active video is adopted instead of uploaded again. A
+removed video is attached again by `video_id`, which Etsy allows because it
+keeps a copy. List refuses to activate a draft unless Etsy shows exactly the
+selected video as `active`; `flagged` is refused.
+
+Sources:
+
+- eBay Media API OpenAPI `v1_beta.5.1`
+  (`https://developer.ebay.com/develop/api/spec/media_api.json`): `createVideo`
+  takes `title`, `size` (max 157,286,400 bytes) and `classification: [ITEM]` and
+  returns the ID in `Location`; `uploadVideo` takes `application/octet-stream`
+  and the size must match exactly; status runs `PENDING_UPLOAD` → `PROCESSING` →
+  `LIVE`, `BLOCKED` or `PROCESSING_FAILED`; videos cannot be deleted, and an
+  unused video expires 30 days after upload. Inventory API OpenAPI 1.18.5:
+  `product.videoIds`, "Only one video per listing is supported."
+  [Managing videos](https://developer.ebay.com/api-docs/sell/static/inventory/managing-video-media.html):
+  EBAY_US, EBAY_GB and EBAY_MOTORS_US; Trading uses `Item.VideoDetails.VideoID`
+  and `DeletedField` to remove; videos currently play only in eBay's apps. The
+  MP4/MOV formats come from eBay's seller help, which also says listings with
+  variations do not take a video.
+- Etsy Open API v3 (`https://www.etsy.com/openapi/generated/oas/3.0.0.json`):
+  `uploadListingVideo` takes `video` and `name`, or `video_id` to attach a video
+  the shop already has, and allows 10 uploads per listing per day;
+  `deleteListingVideo` keeps a copy; `video_state` is `active`, `inactive`,
+  `deleted` or `flagged`. [Etsy Help: How to Add a Listing Video](https://help.etsy.com/hc/en-us/articles/360053206073-How-to-Add-a-Listing-Video)
+  (live page refused automated reads; read from the Wayback copy): 3 to 15
+  seconds, 100 MB, MP4 MOV FLV AAC AVI 3GP MPEG, no sound, one video per listing,
+  500 px minimum. Etsy's developer listings tutorial allows two active videos
+  through the API; Anteroom keeps one, like Etsy's own editor. The 95 MB cap
+  leaves room for the multipart form inside the relay's 100 MB Cloudflare
+  request limit.
+- Depop web client (static.depop.com build `1c495f4/39954785555-1`, 2026-10-26):
+  the API registry lists `/presentation/api/v1/pictures/` and the draft and
+  product endpoints but no video endpoint, and the create request sends only
+  `picture_ids`. The client only reads `videos` on products to show them. The
+  draft write ignores a `videos` field (existing test).
+- Mercari web client (build `r-v3.104.70`, from the 2026-07-17 Wayback copy of
+  `/sell/`; mercari.com refuses unauthenticated reads): the sell-form chunks
+  upload only through `uploadDraftItemImageMutation`. "Video" appears only in
+  Open Graph metadata. Confirm in the signed-in sell form that no video control
+  has appeared since.
+- Vinted web client (www.vinted.com, 2026-10-26): of 384 `item_upload.*`
+  strings, none is a listing video; the only video strings are the video-game
+  rating and Vinted's own item-verification service.
+- Sellwild web client (build `TfctsWXpff2fKS`, 2026-10-26): both sell pages
+  accept `image/*` only and activate through `confirm-photos`; "video" there is
+  the camera used to take photos.
 
 ## Native evidence
 

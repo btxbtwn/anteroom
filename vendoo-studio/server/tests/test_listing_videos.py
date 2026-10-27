@@ -106,8 +106,50 @@ class ListingVideosTest(unittest.TestCase):
         self.assertEqual(self.client.delete(endpoint).status_code, 200)
         self.assertFalse(listing_videos.video_path(row).exists())
 
+    def test_ebay_and_etsy_selection_check_their_own_limits_and_carry_the_file(self):
+        video = self.upload()
+        selected = listing_videos.selected_video(self.db, self.conv.id, {"ebay_specifics": {"videoId": video["id"]}}, "ebay")
+        self.assertEqual(listing_videos.video_bytes(selected), CLIP)
+        with self.assertRaisesRegex(ValueError, "3 to 15 seconds"):
+            listing_videos.selected_video(self.db, self.conv.id, {"etsy_specifics": {"videoId": video["id"]}}, "etsy")
+        self.assertIsNone(listing_videos.selected_video(self.db, self.conv.id, {"etsy_specifics": {"videoId": ""}}, "etsy"))
+        self.assertIn("ebay", self.client.get(self.base).json()["rules"])
+        with self.assertRaisesRegex(ValueError, "changed"):
+            listing_videos.video_bytes({**selected, "checksum": "different"})
+
     def test_new_video_invalidates_an_automation_review(self):
         before, _ = approval_snapshot(self.db, self.conv.id, [])
         self.upload()
         after, _ = approval_snapshot(self.db, self.conv.id, [])
         self.assertNotEqual(before, after)
+
+
+class VideoRulesTest(unittest.TestCase):
+    def row(self, **values):
+        return ListingVideo(**{"duration_seconds": 8, "size_bytes": 1000, "mime_type": "video/mp4", **values})
+
+    def test_each_marketplace_refuses_what_its_own_rules_refuse(self):
+        problem = listing_videos.video_problem
+        self.assertIsNone(problem(self.row(), "poshmark"))
+        self.assertIn("shorter than 15", problem(self.row(duration_seconds=15), "poshmark"))
+        self.assertIsNone(problem(self.row(duration_seconds=59, mime_type="video/quicktime"), "ebay"))
+        self.assertIn("150 MB", problem(self.row(size_bytes=157_286_401), "ebay"))
+        self.assertIn("format", problem(self.row(mime_type="video/webm"), "ebay"))
+        self.assertIsNone(problem(self.row(duration_seconds=3), "etsy"))
+        self.assertIsNone(problem(self.row(duration_seconds=15), "etsy"))
+        self.assertIn("3 to 15 seconds", problem(self.row(duration_seconds=2.9), "etsy"))
+        self.assertIn("3 to 15 seconds", problem(self.row(duration_seconds=15.1), "etsy"))
+        self.assertIn("95 MB", problem(self.row(size_bytes=95_000_001), "etsy"))
+        for marketplace in ("depop", "mercari", "vinted", "sellwild"):
+            self.assertIn("does not take listing videos", problem(self.row(), marketplace))
+
+    def test_video_ids_are_never_category_fields_or_vendoo_fields(self):
+        from vendoo_studio.services import ebay_listings, etsy_listings
+        from vendoo_studio.services.vendoo_item_build import _listing_section
+
+        listing = {"ebay_specifics": {"videoId": "abc", "Brand": "Levi's"}, "etsy_specifics": {"videoId": "abc"}}
+        self.assertEqual(ebay_listings.ebay_aspects(listing, {}), {"Brand": ["Levi's"]})
+        self.assertNotIn("videoid", etsy_listings._answers(listing))
+        for marketplace in ("ebay", "etsy", "poshmark"):
+            section = _listing_section(marketplace, {f"{marketplace}_specifics": {"videoId": "abc"}}, {})
+            self.assertNotIn("videoId", str(section))
