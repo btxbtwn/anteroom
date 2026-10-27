@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.443 — 2026-10-27
+
+- Marketplace forms no longer show filler lines like “This category’s fields are showing” or where each marketplace’s choices come from. A line and Refresh choices appear only while loading, when something failed, or when a field has no choices.
+
 ## 0.1.442 — 2026-10-27
 
 - Nothing changes in the app. A check that Anteroom runs on every change, that a stuck send fails and the next one in line still goes out, no longer fails at random.

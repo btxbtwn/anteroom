@@ -745,11 +745,29 @@ export function StructuredEditor({
   const viewFields = fields.map((field) => presentNativeField(field, viewContext));
   const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
   const formNotes = nativeTab
-    ? (tab === "mercari"
-      ? nativeFormNotes(tab, listing, local, fields)
-      : [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing, local, fields)])
+    ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing, local, fields)]
     : [];
   const sections = groupFieldsIntoSections(renderedFields);
+  // Only loading, errors and gaps get a line; a form that loaded fine needs none.
+  const formStatus = nativeTab && !nativeQuery.data && nativeQuery.isFetching
+    ? "Loading the marketplace’s category fields and choices…"
+    : nativeTab && nativeQuery.isError && !nativeQuery.data
+      ? (nativeQuery.error instanceof Error ? nativeQuery.error.message : "The marketplace form could not be loaded. Refresh choices.")
+      : categoryStale
+        ? "Updating this category’s fields…"
+        : nativeTab && nativeQuery.isFetching
+          ? "Refreshing choices…"
+          : !nativeTab && formsQuery.isFetching
+            ? "Refreshing category fields and choices…"
+            : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
+              ? "Some choices could not be refreshed. Check the source below each field before listing."
+              : categoryForm?.known === false
+                ? "The full category form is unavailable. Reference choices are shown where available."
+                : null;
+  const showAllToggle = !nativeTab && !!categoryForm?.known;
+  const missingChoices = renderedFields.some((f) => f.selectionOnly && !f.options?.length);
+  const refreshing = nativeTab ? nativeQuery.isFetching : formsQuery.isFetching;
+  const canRefresh = !refreshing && (!!formStatus || missingChoices);
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
     // A format or shipping change narrows the choices. Show the choice that fits
@@ -844,35 +862,15 @@ export function StructuredEditor({
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
     <div ref={formRef} key={tab} className="flex flex-col">
-      {tab !== "general" && <div className="flex items-start justify-between gap-3 border-b py-3 text-xs text-muted-foreground">
-        <p role="status">{nativeTab && !nativeQuery.data && nativeQuery.isFetching
-          ? "Loading the marketplace’s category fields and choices…"
-          : nativeTab && nativeQuery.isError && !nativeQuery.data
-            ? (nativeQuery.error instanceof Error ? nativeQuery.error.message : "The marketplace form could not be loaded. Refresh choices.")
-            : categoryStale
-              ? "Updating this category’s fields…"
-              : nativeTab && nativeQuery.isFetching
-                ? "Refreshing choices…"
-                : !nativeTab && formsQuery.isFetching
-              ? "Refreshing category fields and choices…"
-              : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
-                ? "Some choices could not be refreshed. Check the source below each field before listing."
-                : categoryForm?.known === false
-                  ? "The full category form is unavailable. Reference choices are shown where available."
-                  : categoryForm?.known && showAll
-                    ? "Every saved field is showing. Values you do not see on the category form stay saved."
-                    : categoryForm?.known
-                      ? "This category's fields are showing."
-                      : nativeTab
-                        ? "Fields and choices come from the catalog direct List uses."
-                        : "Choices depend on this category. Reference choices may differ from the marketplace."}</p>
+      {tab !== "general" && (formStatus || showAllToggle || missingChoices) && <div className="flex items-start justify-between gap-3 border-b py-3 text-xs text-muted-foreground">
+        <p role="status">{formStatus}</p>
         <div className="flex shrink-0 gap-1">
-          {!nativeTab && categoryForm?.known && <Button type="button" variant="ghost" size="sm" aria-pressed={showAll}
+          {showAllToggle && <Button type="button" variant="ghost" size="sm" aria-pressed={showAll}
             onClick={() => setShowAllTab(showAll ? null : tab)}>{showAll ? "Show category fields" : "Show all fields"}</Button>}
-          <Button type="button" variant="ghost" size="sm" onClick={() => {
+          {canRefresh && <Button type="button" variant="ghost" size="sm" onClick={() => {
             if (nativeTab) { void nativeQuery.refetch(); return; }
             void formsQuery.refetch(); void dropdownQuery.refetch();
-          }}>Refresh choices</Button>
+          }}>Refresh choices</Button>}
         </div>
       </div>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}

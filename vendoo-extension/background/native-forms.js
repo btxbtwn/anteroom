@@ -91,8 +91,7 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
     nativeEditorField('poshmark_specifics.poshmarkSku', 'SKU', specifics.poshmarkSku ?? listing.sku ?? '', { max_length: 50 }),
     nativeEditorField('poshmark_specifics.originalPrice', 'Original Price', poshmarkOriginalPrice(listing), { input_type: 'number', min_value: 0, step: 1 }),
   ];
-  return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields,
-    notes: ['Category, size and shipping-discount choices come from Poshmark. Additional Details are private seller notes.'] };
+  return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields };
 }
 
 function depopEditorForm(listing, attributes, parcels = []) {
@@ -159,8 +158,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
   nativeEditorField('depop_specifics.worldwideShipping.price', 'Worldwide Shipping',
     specifics.worldwideShipping?.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01 }));
   return { marketplace: 'depop', native: true, known: true, category_id: depopDirectId(category), fields,
-    notes: ['Buyer pays for Depop shipping. Location comes from the ship-from address selected in Settings.',
-      ...(!parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [])] };
+    notes: !parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [] };
 }
 
 function mercariEditorForm(listing, master) {
@@ -219,8 +217,7 @@ function mercariEditorForm(listing, master) {
     nativeEditorField('mercari_specifics.smartPricing.minimumPrice', 'Floor price', specifics.smartPricing?.minimumPrice ?? '',
       { input_type: 'number', required: specifics.smartPricing?.enabled === true, help: 'The lowest whole-dollar price Smart Pricing may use.' }));
   return { marketplace: 'mercari', native: true, known: true, category_id: String(category || ''),
-    fields,
-    notes: ['Prepaid label choices and rates come from Mercari for this package. Ship on your own is paid by the seller.'] };
+    fields };
 }
 
 async function handleNativeMarketplaceForm(msg) {

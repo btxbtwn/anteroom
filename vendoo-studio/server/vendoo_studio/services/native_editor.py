@@ -142,8 +142,7 @@ async def ebay_form(snapshot: dict) -> dict:
                    *[field(f"ebay_specifics.{key}", label, details.get(key)) for key, label in
                      (("primaryStoreCategory", "Primary store category"), ("secondaryStoreCategory", "Secondary store category"))],
                    *package(snapshot)])
-    return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields,
-            "notes": ["Category aspects and condition choices come from eBay. Shipping, payment and return policies come from Settings."]}
+    return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields}
 
 
 async def _ebay_variations_field(snapshot: dict, category: str, schema: list[dict]) -> list[dict]:
@@ -262,4 +261,4 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
             row = next(row for row in fields if row["path"] == "package_dimensions_in")
             row.update(value=" × ".join(str(side) for side in package_sides(snapshot)), help="Dimensions for the selected Sellwild packaging.")
     return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
-            "fields": fields, "notes": ["Category and condition use Sellwild’s own catalog. Description is optional."]}
+            "fields": fields}
