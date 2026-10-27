@@ -35,6 +35,8 @@ function ComboboxInput({
   startAddon,
   size,
   unstyled = false,
+  embedded = false,
+  rootClassName,
   ...props
 }: Omit<ComboboxPrimitive.Input.Props, "size"> & {
   showTrigger?: boolean;
@@ -42,12 +44,20 @@ function ComboboxInput({
   startAddon?: React.ReactNode;
   size?: "sm" | "default" | "lg" | number;
   unstyled?: boolean;
+  /** Sit in a parent field that already draws the border, beside chips. */
+  embedded?: boolean;
+  rootClassName?: string;
   ref?: React.Ref<HTMLInputElement>;
 }) {
   const sizeValue = (size ?? "default") as "sm" | "default" | "lg" | number;
+  const bare = unstyled || embedded;
 
   return (
-    <div className="relative not-has-[>*.w-full]:w-fit w-full text-foreground has-disabled:opacity-64">
+    <div className={cn(
+      "relative text-foreground",
+      embedded ? "flex-1" : "not-has-[>*.w-full]:w-fit w-full has-disabled:opacity-64",
+      rootClassName,
+    )}>
       {startAddon && (
         <div
           aria-hidden="true"
@@ -64,6 +74,7 @@ function ComboboxInput({
           sizeValue === "sm"
             ? "has-[+[data-slot=combobox-trigger],+[data-slot=combobox-clear]]:*:data-[slot=combobox-input]:pe-6.5"
             : "has-[+[data-slot=combobox-trigger],+[data-slot=combobox-clear]]:*:data-[slot=combobox-input]:pe-7",
+          embedded && "[&_input]:h-6 [&_input]:bg-transparent [&_input]:px-1 [&_input]:leading-6",
           className,
         )}
         data-slot="combobox-input"
@@ -71,11 +82,12 @@ function ComboboxInput({
           <Input
             className={cn(
               "has-disabled:opacity-100",
-              unstyled && "rounded-none bg-transparent text-sm",
+              bare && "rounded-none bg-transparent text-sm",
+              embedded && "w-full",
             )}
             nativeInput
             size={sizeValue}
-            unstyled={unstyled}
+            unstyled={bare}
           />
         }
         {...props}

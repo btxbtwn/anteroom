@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.428 — 2026-10-27
+
+- Multiple-choice fields, such as Occasion, Theme, Season, and Features, show the selected values inside the field. Extra values wrap onto another line in that same field.
+
 ## 0.1.427 — 2026-10-26
 
 - Share Poshmark listings to your followers, one or many at a time: select items in the sidebar and choose **Share / offers**. You review each item and confirm once; shares go out a few seconds apart and stop at the first limit Poshmark reports.
