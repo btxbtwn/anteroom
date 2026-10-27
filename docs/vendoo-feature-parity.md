@@ -30,11 +30,12 @@ Vendoo's. The losses on cancelling today are:
    Anteroom now links them, shows them, reads their state and can detect a
    sale (opt-in; not yet verified on a real listing), but cannot delete them:
    the seller deletes each one on Facebook.
-3. **Offers to likers on Mercari and Depop.** Poshmark sharing and
+3. **Offers to likers on Depop (Mercari's are unverified).** Poshmark sharing and
    offers to likers run on schedules and rules since 0.1.430 (not yet
-   verified on a real account). Mercari and Depop offer rules are built but
-   stay off until their web requests are read from the signed-in sites;
-   Depop has no free refresh to copy.
+   verified on a real account). Mercari offers to likers run on the same
+   engine since 0.1.439 (not yet verified on a real listing). Depop's are
+   built but stay off until its web requests are read from the signed-in
+   site; Depop has no free refresh to copy.
 4. **Photo editing beyond rotate**: background removal, crop and adjustments.
 
 The full prioritized list is in [Gaps if Vendoo is cancelled today](#gaps-if-vendoo-is-cancelled-today).
@@ -72,7 +73,7 @@ and Vinted only on UK and US Enterprise accounts
 | eBay | List, import, delist, relist, sale detection, offers | **Have** | Official API: `services/ebay_listings.py`, `routes/ebay.py` (`/import`), `services/marketplace_delist.py` (Trading `EndFixedPriceItem`), relay sale push `services/relay_sales.py` |
 | Etsy | List, import, delist, sale detection | **Have** | Official API: `services/etsy_listings.py`, `routes/etsy.py` (`/import`), relay `order.paid` |
 | Poshmark | List, delist, relist, sale detection, sharing, offers | **Partial** | List, draft, update, delist, sale detection: `background/poshmark-native.js`, `services/chrome_sales.py`. Share to followers and offers to likers, seller-started or on a schedule or rule: `services/listing_promotions.py`, `services/promotion_automations.py`, `background/marketplace-promotions.js`. Not yet verified on a real listing (see [Automations](#automations-offers-sharing-refresh)) |
-| Mercari | List, delist, relist, sale detection, offers | **Partial** | Same as Poshmark, `background/mercari-native.js`. No Promote. Offers to likers are built (`checkMercariPromotion`/`offerMercari`, manual and automatic) but refuse to run until the likers read and offer mutation are captured from the signed-in client (`PENDING_OFFER_REQUESTS`, `AWAITING_CAPTURE`) |
+| Mercari | List, delist, relist, sale detection, offers | **Partial** | Same as Poshmark, `background/mercari-native.js`. No Promote. Offers to likers, manual and automatic (`checkMercariPromotion`/`offerMercari`), since 0.1.439 from Mercari's own `offerToLikerable`, `offerToLikerInit` and `createOfferToLikers`; unit-tested against the recorded shapes, not yet verified on a real listing |
 | Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. Offers to likers are built (`checkDepopPromotion`/`offerDepop`, manual and automatic) but refuse to run until the signed-in web requests are captured; Depop's documented offer endpoint is the partner Selling API, not the seller's web session. Depop has no free refresh (paid Boost only); see `docs/direct-form-parity.md` |
 | Vinted | UK/Enterprise only | **Have** | `background/vinted-native.js`, `services/vinted_listing.py`; Anteroom covers more than the seller's Vendoo plan does |
 | Sellwild | Logo only | **Have** | `background/sellwild-native.js`, `services/sellwild_listing.py` |
@@ -164,7 +165,7 @@ off integrated marketplaces
 
 | Vendoo feature | Source | Anteroom | Evidence |
 | --- | --- | --- | --- |
-| Offers to likers/watchers, manual bulk and automatic rules (price bands, exclusions, activity log) | [Send offers](https://help.vendoo.co/en/articles/10043166-send-offers-to-likers-automatically-or-manually-in-bulk) | **Partial** | eBay: `routes/ebay_offers.py` (preview, send, rules, pause, attempts), `services/ebay_offers.py`. Poshmark, manual bulk and automatic rules (listings covered, discount, required floor per listing, exclusions, minimum days listed and likes, new likers only, shipping discount, activity log, pause): `services/listing_promotions.py`, `services/promotion_automations.py`, `routes/promotion_automations.py`, Automations → Sharing and offers to likers (0.1.430). Mercari and Depop: same engine and extension handlers, unit-tested against fakes, off until their requests are captured. Nothing is verified on a real account yet. Grailed and Vestiaire are N/A |
+| Offers to likers/watchers, manual bulk and automatic rules (price bands, exclusions, activity log) | [Send offers](https://help.vendoo.co/en/articles/10043166-send-offers-to-likers-automatically-or-manually-in-bulk) | **Partial** | eBay: `routes/ebay_offers.py` (preview, send, rules, pause, attempts), `services/ebay_offers.py`. Poshmark, manual bulk and automatic rules (listings covered, discount, required floor per listing, exclusions, minimum days listed and likes, new likers only, shipping discount, activity log, pause): `services/listing_promotions.py`, `services/promotion_automations.py`, `routes/promotion_automations.py`, Automations → Sharing and offers to likers (0.1.430). Mercari (0.1.439): same engine, from its recorded offer requests. Depop: same engine and extension handler, unit-tested against fakes, off until its requests are captured. Nothing is verified on a real account yet. Grailed and Vestiaire are N/A |
 | Poshmark sharing (scheduled rounds, order, speed, up to 6,000/day, log) | [Marketplace Sharing](https://help.vendoo.co/en/articles/11003940-marketplace-sharing-tool-for-poshmark-depop-and-grailed) | **Partial** | Share one or selected listings to followers, spaced 4–30 seconds apart, stopping at Poshmark's first limit: `services/listing_promotions.py`, `background/marketplace-promotions.js`. Scheduled rounds (up to 6 times a day, all or chosen listings, exclusions, minimum days listed, newest/oldest/random order, slow/normal/fast, daily cap up to 6,000 counted across all shares, activity log, pause), off by default: `services/promotion_automations.py` (0.1.430). Not yet verified on a real account |
 | Depop refresh | same | **Missing** | Depop itself has no free refresh or bump (Boost is paid); see `docs/direct-form-parity.md` |
 | Grailed bump | same | **N/A** | Not a seller marketplace |
@@ -233,18 +234,26 @@ Most important first.
    scheduled rounds with Vendoo's controls, off by default. Still to do:
    watch one scheduled round on a real account (spacing, daily cap, how
    Poshmark's limit shows).
-4. **Offers to likers on Mercari and Depop are not live yet.** Automatic
-   rules are built for Poshmark, Mercari and Depop on one engine
-   (`services/promotion_automations.py`), with the Mercari and Depop
-   handlers in `background/marketplace-promotions.js`. *Fix:* capture from
-   the signed-in sites Mercari's likers read and offer-to-likers mutation
-   (operation name, persisted-query hash, variables, success shape) and
-   Depop's likers read and send-offer request (method, path, body, success
-   shape, any headers), fill `PENDING_OFFER_REQUESTS`, and remove them from
-   `AWAITING_CAPTURE` in `services/listing_promotions.py`.
-   `POST /api/marketplaces/{mercari|depop}/record?goal=offers` records
-   those shapes, reads included, while the seller sends one offer by hand;
-   `GET` on the same path reads the saved result.
+4. **Offers to likers on Depop are not live yet; Mercari's are on but
+   unverified.** Automatic rules are built for Poshmark, Mercari and Depop
+   on one engine (`services/promotion_automations.py`), with the Mercari
+   and Depop handlers in `background/marketplace-promotions.js`. Mercari's
+   requests were recorded on 2026-10-27 and filled in 0.1.439:
+   `offerToLikerable` (eligibility, price, likes), `offerToLikerInit`
+   (Mercari's allowed range in cents) and `createOfferToLikers`
+   (`offerPrice` in cents, whole dollars, inside that range and at or above
+   the seller's floor; `numOffersCreated` confirms it). Anteroom does not
+   send Mercari's `x-socure-device-token`, a device-risk token its page
+   SDK adds to every call; if Mercari starts refusing offers without it,
+   they fail as refusals and nothing is resent. *Verify:* send one offer
+   from Anteroom on a real listing and check the amount and recipients on
+   Mercari. *Fix (Depop):* capture its likers read and send-offer request
+   (method, path, body, success shape, any headers), fill
+   `PENDING_OFFER_REQUESTS.depop`, and remove it from `AWAITING_CAPTURE` in
+   `services/listing_promotions.py`.
+   `POST /api/marketplaces/depop/record?goal=offers` records those shapes,
+   reads included, while the seller sends one offer by hand; `GET` on the
+   same path reads the saved result.
 5. **No background removal, crop or photo adjustments.** *Fix:* add crop
    and adjustments beside rotate, and background removal to white (a local
    model or a provider API).

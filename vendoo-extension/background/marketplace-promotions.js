@@ -131,30 +131,39 @@ async function offerPoshmark(payload, deadline) {
 }
 
 // Mercari's and Depop's offers to likers. Their rules come from their help
-// pages; the signed-in web client's requests could not be read without a
-// capture (both sites refuse a plain fetch), so every entry below is null and
-// checks and offers refuse before any request is made. Fill each one from a
-// single capture of the seller's own browser (docs/vendoo-feature-parity.md,
-// gap 4):
-// - likers: the read behind the offer screen, giving the like count (and, on
-//   Mercari, the lowest price the item has had).
-// - offer: the request the "Offer to likers" / "Send offer" button sends.
+// pages. A marketplace whose signed-in requests have not been captured (both
+// sites refuse a plain fetch) keeps null entries, and its checks and offers
+// refuse before any request is made (docs/vendoo-feature-parity.md, gap 4).
 // Mercari (help article 347): at least 10% below the item's lowest price so
 // far, whole dollars, at least $1, to up to 50 recent likers, for 24 hours.
+// Its offer screen (recorded 2026-10-27) asks offerToLikerable whether the
+// item can take one, then offerToLikerInit for the allowed range in cents,
+// which already applies the lowest-price rule, and sends createOfferToLikers.
+// offerPrice is in cents like every other Mercari price (item.price, the
+// draft and edit price, minPriceForAutoPriceDrop). Mercari's client also
+// adds x-socure-device-token, a device-risk token from Socure's in-page SDK,
+// to every API call once that SDK loads; the worker has no page, sends none,
+// as its draft, publish and edit calls already do.
 // Depop (Send Offer help): to likers in the seller's country, one active offer
 // per buyer, not on listings with several sizes, shipping not included. Its
 // partner Selling API requires at least 5% off; the web client is assumed to
 // be no looser.
 const PENDING_OFFER_REQUESTS = {
-  // likers: { operationName, sha256Hash, variables: id => ({}), read: data => ({ like_count, lowest_price_cents }) }
-  // offer:  { operationName, sha256Hash, variables: (id, offerCents) => ({}), confirmed: data => boolean }
-  mercari: { likers: null, offer: null },
+  mercari: {
+    likers: { operationName: 'offerToLikerable', sha256Hash: '37bcc049bd1bf9241387cf44f4a2742a653f2e3dca8150c26d00aa27e30cc825',
+      variables: id => ({ itemId: id }),
+      read: data => ({ eligible: data?.offer?.offerToLikerable, price_cents: data?.item?.price, like_count: data?.item?.numLikes }) },
+    bounds: { operationName: 'offerToLikerInit', sha256Hash: 'babbde0d58f82b3803f24247c0e9f007688c75e3c3b9cbef96a7b33f055cc64a',
+      variables: id => ({ itemId: id }),
+      read: data => ({ lowest_cents: data?.offerToLikerBounds?.lowerLimitCents, highest_cents: data?.offerToLikerBounds?.higherLimitCents }) },
+    offer: { operationName: 'createOfferToLikers', sha256Hash: '00c320abe9a24e864ad765b06b0276517b423e12f66203a27ffd9edd95ff36e6',
+      variables: (id, offerCents) => ({ input: { itemId: id, offerPrice: offerCents } }),
+      created: data => data?.createOfferToLikers?.numOffersCreated },
+  },
   // likers: { path: product => string, read: body => ({ like_count }) }
   // offer:  { method, path: product => string, body: (product, offerCents) => ({}), confirmed: body => boolean }
   depop: { likers: null, offer: null },
 };
-const MERCARI_OFFER_MIN_PERCENT = 10;
-const MERCARI_OFFER_MAX_LIKERS = 50;
 const DEPOP_OFFER_MIN_PERCENT = 5;
 
 function pendingOfferRequests(marketplace) {
@@ -175,11 +184,14 @@ function centOffer(priceCents, percent) {
   return Math.floor(priceCents * (100 - percent) / 100);
 }
 
+// ``lowest`` is the marketplace's own lower limit when it gives one; $1 otherwise.
 function offerFacts(state, percent, round) {
+  const lowest = state.lowest || 100;
   const minimum = Math.max(1, Math.ceil(100 - state.highest * 100 / state.price));
+  const maximum = state.lowest ? Math.min(99, Math.floor(100 - lowest * 100 / state.price)) : 99;
   const offer = Number.isInteger(percent) ? round(state.price, percent) : 0;
-  return { ok: true, price_cents: state.price, like_count: state.likes, minimum_discount_percent: minimum, maximum_discount_percent: 99,
-    shipping_discounts: [], offer_price_cents: percent >= minimum && percent <= 99 && offer >= 100 && offer <= state.highest ? offer : null };
+  return { ok: true, price_cents: state.price, like_count: state.likes, minimum_discount_percent: minimum, maximum_discount_percent: maximum,
+    shipping_discounts: [], offer_price_cents: percent >= minimum && percent <= maximum && offer >= lowest && offer <= state.highest ? offer : null };
 }
 
 function checkedOffer(payload, wholeDollars) {
@@ -191,6 +203,11 @@ function checkedOffer(payload, wholeDollars) {
   return offer;
 }
 
+function mercariPersisted(request, variables) {
+  return { operationName: request.operationName, variables, extensions: { persistedQuery: { version: 1, sha256Hash: request.sha256Hash } } };
+}
+
+// The item, its likers and Mercari's own offer range, all read before anything is sent.
 async function mercariOfferState(requests, id, deadline) {
   const session = await mercariCurrentSession(deadline, true);
   const data = await mercariRequest({ operationName: 'sellFetchItemsDetails', variables: { itemId: id }, query: MERCARI_ITEM_DETAILS_QUERY },
@@ -200,12 +217,21 @@ async function mercariOfferState(requests, id, deadline) {
   if (String(item.seller?.id) !== String(session.user.userId)) throw marketplaceError('This Mercari listing belongs to another account.');
   if (item.status !== 'on_sale') throw marketplaceError('This Mercari listing has sold or is not on sale.');
   const price = Number(item.price);
-  const likers = requests.likers.read(await mercariRequest({ operationName: requests.likers.operationName,
-    variables: requests.likers.variables(id), extensions: { persistedQuery: { version: 1, sha256Hash: requests.likers.sha256Hash } } },
-  { deadline, retry: true }));
-  const lowest = Number(likers?.lowest_price_cents) || price;
-  if (!(price > 0) || !(lowest > 0)) throw marketplaceError('Mercari did not return this listing’s price.', { code: 'schema_drift' });
-  return { price, likes: Number(likers?.like_count) || 0, highest: wholeDollarOffer(Math.min(price, lowest), MERCARI_OFFER_MIN_PERCENT) };
+  if (!(price > 0)) throw marketplaceError('Mercari did not return this listing’s price.', { code: 'schema_drift' });
+  const likers = requests.likers.read(await mercariRequest(mercariPersisted(requests.likers, requests.likers.variables(id)),
+    { deadline, retry: true }));
+  if (typeof likers.eligible !== 'boolean' || Number(likers.price_cents) !== price || !Number.isInteger(likers.like_count)) {
+    throw marketplaceError('Mercari’s offer screen changed. Anteroom needs an update before sending offers.', { code: 'schema_drift' });
+  }
+  if (!likers.eligible) throw marketplaceError('Mercari says this listing cannot get an offer to likers right now.');
+  const bounds = requests.bounds.read(await mercariRequest(mercariPersisted(requests.bounds, requests.bounds.variables(id)),
+    { deadline, retry: true }));
+  const lower = Number(bounds.lowest_cents), higher = Number(bounds.highest_cents);
+  // Cents below the price; anything else means the units or the rule changed.
+  if (!Number.isInteger(lower) || !Number.isInteger(higher) || lower < 100 || higher < lower || higher >= price) {
+    throw marketplaceError('Mercari’s offer limits changed. Anteroom needs an update before sending offers.', { code: 'schema_drift' });
+  }
+  return { price, likes: likers.like_count, lowest: Math.ceil(lower / 100) * 100, highest: Math.floor(higher / 100) * 100 };
 }
 
 async function checkMercariPromotion(payload, deadline) {
@@ -220,13 +246,18 @@ async function offerMercari(payload, deadline) {
   const state = await mercariOfferState(requests, payload.listing_id, deadline);
   if (state.price !== Number(payload.price_cents)) throw marketplaceError('The Mercari price changed since your review. Review the offer again.');
   if (!(state.likes > 0)) throw marketplaceError('This Mercari listing has no likers to send an offer to.');
-  if (offer > state.highest) throw marketplaceError('Mercari needs offers to likers at least 10% below the lowest price this item has had. Review the offer again.');
-  const data = await mercariRequest({ operationName: requests.offer.operationName, variables: requests.offer.variables(payload.listing_id, offer),
-    extensions: { persistedQuery: { version: 1, sha256Hash: requests.offer.sha256Hash } } }, { deadline });
-  if (!requests.offer.confirmed(data)) {
+  if (offer < state.lowest || offer > state.highest) {
+    throw marketplaceError(`Mercari takes offers to likers from $${state.lowest / 100} to $${state.highest / 100} on this listing. Review the offer again.`);
+  }
+  // Sent once: a refused session is not read again and resent.
+  const data = await mercariRequest(mercariPersisted(requests.offer, requests.offer.variables(payload.listing_id, offer)),
+    { deadline, resend: false });
+  const created = requests.offer.created(data);
+  if (!Number.isInteger(created) || created < 0) {
     throw marketplaceError('Mercari did not confirm the offer.', { code: 'uncertain', rejected: false });
   }
-  return { ok: true, state: 'done', recipient_count: Math.min(state.likes, MERCARI_OFFER_MAX_LIKERS) };
+  if (created === 0) throw marketplaceError('Mercari sent this offer to no one. Its likers may already have an offer.');
+  return { ok: true, state: 'done', recipient_count: created };
 }
 
 async function depopOfferCall(method, url, deadline, step, body) {

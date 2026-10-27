@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.439 — 2026-10-27
+
+- Offers to likers now work on Mercari, sent by you or by a rule you turn on. Anteroom asks Mercari whether the listing can take an offer and what range it allows, sends whole-dollar offers inside that range and never below your floor, sends each one once, and pauses the rule if Mercari's answer is lost, it limits requests, or you are signed out.
+
 ## 0.1.438 — 2026-10-27
 
 - General fills every marketplace form. A title, description, brand, size, or department you change on one marketplace stays on that marketplace, and eBay's Size and Department can be edited on the eBay form.
