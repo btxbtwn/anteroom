@@ -39,7 +39,6 @@ SUPPORTED: dict[str, frozenset[str]] = {
 # yet (docs/vendoo-feature-parity.md, gap 4). Nothing is sent while listed here.
 AWAITING_CAPTURE: dict[str, frozenset[str]] = {
     "mercari": frozenset({"offer"}),
-    "depop": frozenset({"offer"}),
 }
 # Marketplaces whose offers carry a seller shipping discount the seller picks.
 SHIPPING_DISCOUNTS = frozenset({"poshmark"})
@@ -368,8 +367,10 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
         row.state, row.note = "unknown", UNKNOWN_NOTE
     elif result.get("ok") is True and result.get("state") == "done":
         row.state = "done"
+        reach = result.get("recipient_count")
         row.note = "Shared to your followers." if row.action == "share" else (
-            f"Offer of ${dollars(row.offer_price_cents)} sent to likers.")
+            f"Offer of ${dollars(row.offer_price_cents)} sent to likers."
+            + (f" {NAMES.get(row.marketplace, row.marketplace)} expected it to reach {reach} {'liker' if reach == 1 else 'likers'}." if isinstance(reach, int) and reach > 0 else ""))
     elif result.get("safe_to_retry") is True:
         row.state = "failed"
         row.note = str(result.get("error") or "The marketplace refused this.")[:300]

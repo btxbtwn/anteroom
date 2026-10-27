@@ -115,12 +115,19 @@ class PromotionAutomationsTest(unittest.TestCase):
                      {**SHARE, "scope": "items", "conversation_ids": []}):
             self.assertIn(self.client.post("/api/promotion-automations", json=body).status_code, (400, 422), body)
 
-    def test_mercari_and_depop_rules_save_but_cannot_be_turned_on_until_captured(self):
-        for marketplace in ("mercari", "depop"):
-            saved = self.create({**OFFER, "marketplace": marketplace, "shipping_label": None})
-            self.assertFalse(saved["available"])
-            response = self.client.post(f"/api/promotion-automations/{saved['id']}/enable", json={"confirm": True})
-            self.assertEqual(response.status_code, 409)
+    def test_mercari_rules_save_but_cannot_be_turned_on_until_captured(self):
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None})
+        self.assertFalse(saved["available"])
+        response = self.client.post(f"/api/promotion-automations/{saved['id']}/enable", json={"confirm": True})
+        self.assertEqual(response.status_code, 409)
+
+    def test_depop_rules_save_off_and_turn_on_only_when_asked(self):
+        saved = self.create({**OFFER, "marketplace": "depop", "shipping_label": None})
+        self.assertTrue(saved["available"])
+        self.assertFalse(saved["enabled"])
+        self.assertEqual(self.tick(), 0)
+        self.assertTrue(self.enable(saved["id"])["enabled"])
+        self.bridge.assert_not_called()
 
     def test_a_share_round_follows_order_exclusions_cap_and_speed(self):
         newest, _middle, oldest = self.items[1], self.items[0], self.items[2]

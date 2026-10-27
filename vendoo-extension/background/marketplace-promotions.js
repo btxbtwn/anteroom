@@ -131,11 +131,9 @@ async function offerPoshmark(payload, deadline) {
 }
 
 // Mercari's and Depop's offers to likers. Their rules come from their help
-// pages; the signed-in web client's requests could not be read without a
-// capture (both sites refuse a plain fetch), so every entry below is null and
-// checks and offers refuse before any request is made. Fill each one from a
-// single capture of the seller's own browser (docs/vendoo-feature-parity.md,
-// gap 4):
+// pages; the requests come from one capture of the seller's own signed-in
+// browser (docs/vendoo-feature-parity.md, gap 4). A null entry has not been
+// captured yet, so checks and offers refuse before any request is made:
 // - likers: the read behind the offer screen, giving the like count (and, on
 //   Mercari, the lowest price the item has had).
 // - offer: the request the "Offer to likers" / "Send offer" button sends.
@@ -144,14 +142,30 @@ async function offerPoshmark(payload, deadline) {
 // Depop (Send Offer help): to likers in the seller's country, one active offer
 // per buyer, not on listings with several sizes, shipping not included. Its
 // partner Selling API requires at least 5% off; the web client is assumed to
-// be no looser.
+// be no looser. Depop's Selling Hub (read 2026-10-26):
+// - likers: GET /presentation/api/v1/offers/me/products/ lists the seller's
+//   items that have likers to offer to, with offer_count. Only
+//   page_info.has_more was seen, never the next-page parameter, so an item
+//   past the first page is refused rather than guessed at.
+// - preview: GET /presentation/api/v1/offers/products/{id}/offers/send-all/
+//   names one offer_recipient_id plus offer_additional_recipients_count
+//   others, and sellers_lowest_offer_value, the lowest offer Depop allows.
+// - offer: POST /presentation/api/v1/products/{id}/offers/ with
+//   { offer_recipient_id, offer_currency, offer_value }, answered 200 with no
+//   body. "Send offer to all likers" sent exactly one such POST, with the
+//   preview's recipient. Anteroom sends that same single request, never one
+//   per liker, and records the preview's reach as the expected recipients.
 const PENDING_OFFER_REQUESTS = {
   // likers: { operationName, sha256Hash, variables: id => ({}), read: data => ({ like_count, lowest_price_cents }) }
   // offer:  { operationName, sha256Hash, variables: (id, offerCents) => ({}), confirmed: data => boolean }
   mercari: { likers: null, offer: null },
-  // likers: { path: product => string, read: body => ({ like_count }) }
-  // offer:  { method, path: product => string, body: (product, offerCents) => ({}), confirmed: body => boolean }
-  depop: { likers: null, offer: null },
+  depop: {
+    likers: { path: () => '/presentation/api/v1/offers/me/products/', read: depopOfferLikers },
+    preview: { path: product => `/presentation/api/v1/offers/products/${product.id}/offers/send-all/`, read: depopOfferPreview },
+    offer: { method: 'POST', path: product => `/presentation/api/v1/products/${product.id}/offers/`,
+      body: (preview, offerCents) => ({ offer_recipient_id: preview.recipient_id, offer_currency: 'USD', offer_value: (offerCents / 100).toFixed(2) }),
+      confirmed: ({ status, data }) => status >= 200 && status < 300 && !/<html|<!doctype/i.test(String(data || '')) },
+  },
 };
 const MERCARI_OFFER_MIN_PERCENT = 10;
 const MERCARI_OFFER_MAX_LIKERS = 50;
@@ -175,11 +189,14 @@ function centOffer(priceCents, percent) {
   return Math.floor(priceCents * (100 - percent) / 100);
 }
 
+// `lowest`, when the marketplace names one, is the smallest offer it allows.
 function offerFacts(state, percent, round) {
   const minimum = Math.max(1, Math.ceil(100 - state.highest * 100 / state.price));
+  const maximum = state.lowest ? Math.min(99, Math.floor(100 - state.lowest * 100 / state.price)) : 99;
   const offer = Number.isInteger(percent) ? round(state.price, percent) : 0;
-  return { ok: true, price_cents: state.price, like_count: state.likes, minimum_discount_percent: minimum, maximum_discount_percent: 99,
-    shipping_discounts: [], offer_price_cents: percent >= minimum && percent <= 99 && offer >= 100 && offer <= state.highest ? offer : null };
+  const allowed = percent >= minimum && percent <= maximum && offer >= Math.max(100, state.lowest || 0) && offer <= state.highest;
+  return { ok: true, price_cents: state.price, like_count: state.likes, minimum_discount_percent: minimum, maximum_discount_percent: maximum,
+    shipping_discounts: [], offer_price_cents: allowed ? offer : null };
 }
 
 function checkedOffer(payload, wholeDollars) {
@@ -229,18 +246,57 @@ async function offerMercari(payload, deadline) {
   return { ok: true, state: 'done', recipient_count: Math.min(state.likes, MERCARI_OFFER_MAX_LIKERS) };
 }
 
-async function depopOfferCall(method, url, deadline, step, body) {
-  const { data } = await marketplaceFetch(url.startsWith('https://') ? url : `${DEPOP_WEBAPI}${url}`, { marketplace: 'depop', step, method,
-    credentials: 'omit', deadline, headers: { Accept: 'application/json', Authorization: await depopBearer(),
-      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  return data;
+// The offer POST answers 200 with no body, so it is read as text.
+async function depopOfferCall(method, path, deadline, step, { body, expect } = {}) {
+  return await marketplaceFetch(`${DEPOP_WEBAPI}${path}`, { marketplace: 'depop', step, method, credentials: 'omit', deadline,
+    headers: { Accept: 'application/json', Authorization: await depopBearer(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(expect ? { expect } : {}) });
+}
+
+// Depop's money strings, such as "42.50".
+function depopOfferCents(value) {
+  const text = String(value ?? '').trim();
+  return /^\d{1,7}(\.\d{1,2})?$/.test(text) ? Math.round(Number(text) * 100) : null;
+}
+
+function depopOfferDrift(what) {
+  return marketplaceError(`Depop’s ${what} changed. Anteroom needs an update before sending offers.`, { code: 'schema_drift' });
+}
+
+// The item's row in the Selling Hub offers list. No row means no liker an offer can reach.
+function depopOfferLikers(body, product) {
+  if (!Array.isArray(body?.objects)) throw depopOfferDrift('offers list');
+  const row = body.objects.find(entry => String(entry?.product_id) === String(product.id));
+  if (!row) {
+    if (body.page_info?.has_more === true) {
+      throw marketplaceError('Depop lists this item past the first page of its offers. Send this offer from Depop’s Selling Hub.',
+        { code: 'not_captured' });
+    }
+    return { like_count: 0 };
+  }
+  if (!/^\d{1,6}$/.test(String(row.offer_count ?? ''))) throw depopOfferDrift('offers list');
+  return { like_count: Number(row.offer_count) };
+}
+
+function depopOfferPreview(body, product) {
+  const recipient = Number(body?.offer_recipient_id);
+  const others = String(body?.offer_additional_recipients_count ?? '');
+  const lowest = depopOfferCents(body?.sellers_lowest_offer_value);
+  const current = body?.prices?.current_price?.price_break_down?.item_price;
+  const currentCents = current == null ? null : depopOfferCents(current);
+  if (String(body?.product_id) !== String(product.id) || !Number.isSafeInteger(recipient) || recipient <= 0 || !/^\d{1,6}$/.test(others)
+      || lowest == null || (current != null && currentCents == null)) {
+    throw depopOfferDrift('send-offer preview');
+  }
+  if (String(body.price_currency || '').toUpperCase() !== 'USD') throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.');
+  return { recipient_id: recipient, reach: 1 + Number(others), lowest_cents: lowest, current_cents: currentCents };
 }
 
 async function depopOfferState(requests, slug, deadline) {
-  const me = await depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account');
-  const product = await depopOfferCall('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, deadline, 'read');
+  const { data: me } = await depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account');
+  const { data: product } = await depopOfferCall('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, deadline, 'read');
   if (String(product?.slug ?? '') !== slug) throw marketplaceError('Depop did not return this listing.', { code: 'schema_drift' });
+  if (!/^\d{1,15}$/.test(String(product.id ?? ''))) throw marketplaceError('Depop did not return this listing’s ID.', { code: 'schema_drift' });
   const owner = product.user_id ?? product.seller?.id ?? product.user?.id;
   if (owner == null || String(owner) !== String(me?.id)) throw marketplaceError('This Depop listing belongs to another account.');
   if (product.status !== 'STATUS_ONSALE' || product.sold === true) throw marketplaceError('This Depop listing has sold or is not on sale.');
@@ -248,8 +304,12 @@ async function depopOfferState(requests, slug, deadline) {
   const currency = String(product.price_currency ?? product.pricing?.currency_name ?? product.currency ?? '').toUpperCase();
   const price = Math.round((depopProductPrice(product) || 0) * 100);
   if (currency !== 'USD' || !(price > 0)) throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.', { code: 'schema_drift' });
-  const likers = requests.likers.read(await depopOfferCall('GET', requests.likers.path(product), deadline, 'likers'));
-  return { product, price, likes: Number(likers?.like_count) || 0, highest: centOffer(price, DEPOP_OFFER_MIN_PERCENT) };
+  const { like_count: likes } = requests.likers.read((await depopOfferCall('GET', requests.likers.path(product), deadline, 'likers')).data, product);
+  if (!likes) return { product, price, likes: 0, highest: centOffer(price, DEPOP_OFFER_MIN_PERCENT) };
+  const preview = requests.preview.read((await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview')).data, product);
+  // A marked-down item is offered against its current price, as Depop's preview shows it.
+  const basis = preview.current_cents ? Math.min(price, preview.current_cents) : price;
+  return { product, price, likes, preview, lowest: preview.lowest_cents, highest: centOffer(basis, DEPOP_OFFER_MIN_PERCENT) };
 }
 
 async function checkDepopPromotion(payload, deadline) {
@@ -263,12 +323,16 @@ async function offerDepop(payload, deadline) {
   const requests = pendingOfferRequests('depop');
   const state = await depopOfferState(requests, payload.listing_id, deadline);
   if (state.price !== Number(payload.price_cents)) throw marketplaceError('The Depop price changed since your review. Review the offer again.');
-  if (!(state.likes > 0)) throw marketplaceError('This Depop listing has no likers to send an offer to.');
+  if (!(state.likes > 0) || !state.preview) throw marketplaceError('This Depop listing has no likers to send an offer to.');
   if (offer > state.highest) throw marketplaceError('Depop needs offers at least 5% below the price. Review the offer again.');
-  const body = await depopOfferCall(requests.offer.method, requests.offer.path(state.product), deadline, 'offer',
-    requests.offer.body(state.product, offer));
-  if (!requests.offer.confirmed(body)) throw marketplaceError('Depop did not confirm the offer.', { code: 'uncertain', rejected: false });
-  return { ok: true, state: 'done', recipient_count: state.likes };
+  if (state.lowest && offer < state.lowest) {
+    throw marketplaceError(`Depop allows offers of at least $${(state.lowest / 100).toFixed(2)} on this item. Review the offer again.`);
+  }
+  // One request, as Depop's own "Send offer to all likers" sends it. Never repeated, never one per liker.
+  const response = await depopOfferCall(requests.offer.method, requests.offer.path(state.product), deadline, 'offer',
+    { body: requests.offer.body(state.preview, offer), expect: 'text' });
+  if (!requests.offer.confirmed(response)) throw marketplaceError('Depop did not confirm the offer.', { code: 'uncertain', rejected: false });
+  return { ok: true, state: 'done', recipient_count: state.preview.reach };
 }
 
 const MARKETPLACE_PROMOTIONS = {
