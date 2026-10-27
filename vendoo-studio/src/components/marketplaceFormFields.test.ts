@@ -34,6 +34,19 @@ describe("marketplace form fields", () => {
       type: "variations", defaultValue: value, variationAspects: aspects,
     });
   });
+  it("shows Depop's own Size and Size grouping once on a bottoms listing", () => {
+    const jeans = { ...listing, title: "Jack & Jones jeans", category_path: "Men > Jeans", department: "Men",
+      depop_specifics: { size: "34\"", sizeGrouping: "Does Not Apply" } };
+    const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "menswear_jeans", fields: [
+      { key: "depop_specifics.nativeSizeId", path: "depop_specifics.nativeSizeId", label: "Size", value: "34", required: true,
+        multi: false, selection_only: true, options: ["34"], options_source: "marketplace" },
+      { key: "depop_specifics.attributes.body-fit", path: "depop_specifics.attributes.body-fit", label: "Size grouping", value: [],
+        required: false, multi: true, selection_only: true, options: ["Petite", "Tall"], options_source: "marketplace" },
+    ] };
+    const labels = fieldsForMarketplaceForm(jeans, "depop", [form]).map((field) => field.label.replace(/\s*\*$/, "").toLowerCase());
+    expect(labels.filter((label) => label === "size")).toHaveLength(1);
+    expect(labels.filter((label) => label === "size grouping")).toHaveLength(1);
+  });
   it("keeps the category-specific flag so a category change can replace only those rows", () => {
     const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "womenswear_tops", fields: [
       { key: "price", path: "price", label: "Price", value: 20, required: true, multi: false, selection_only: false, options: [], input_type: "number" },
@@ -82,7 +95,6 @@ describe("marketplace form fields", () => {
     const fields = fieldsForMarketplaceForm(listing, "poshmark", [form]);
     expect(fields.map((row) => row.key)).toEqual([
       "poshmark_specifics.nativeSizeId", "poshmark_specifics.styleTags", "poshmark_specifics.smartSell.enabled",
-      "poshmark_specifics.poshmarkPrice",
     ]);
     expect(fields[0]).toMatchObject({ optionValues: { XL: "123" }, defaultValue: "123", native: true });
     expect(fields[1].defaultValue).toEqual(["Casual", "Retro"]);
@@ -115,24 +127,21 @@ describe("marketplace form fields", () => {
     expect(nativeEditorDependencies(fields, { ebay_specifics: { sizeType: "Petites" } })[1].options).toEqual(["M"]);
   });
   it("never substitutes a Vendoo or reference form for a direct marketplace", () => {
-    const priceKey: Record<string, string> = {
-      ebay: "ebay_specifics.price",
-      poshmark: "poshmark_specifics.poshmarkPrice",
-      mercari: "mercari_specifics.price",
-      depop: "depop_specifics.price",
-      sellwild: "sellwild_specifics.price",
-    };
-    const ebayOffer = [
-      "ebay_specifics.price",
-      "ebay_specifics.bestOffer.enabled",
-      "ebay_specifics.bestOffer.autoAcceptPrice",
-      "ebay_specifics.bestOffer.minimumOfferPrice",
-    ];
     for (const tab of ["ebay", "poshmark", "mercari", "depop", "sellwild"]) {
-      const expected = tab === "ebay" ? ebayOffer : [priceKey[tab]];
-      expect(fieldsForMarketplaceForm(listing, tab, undefined).map((field) => field.key)).toEqual(expected);
-      expect(fieldsForMarketplaceForm(listing, tab, [{ marketplace: tab, known: true, category_id: "1", fields: [] }]).map((field) => field.key)).toEqual(expected);
+      expect(fieldsForMarketplaceForm(listing, tab, undefined)).toEqual([]);
+      expect(fieldsForMarketplaceForm(listing, tab, [{ marketplace: tab, known: true, category_id: "1", fields: [] }])).toEqual([]);
     }
+  });
+
+  it("shows the marketplace form's Price as this marketplace's own price, in its place", () => {
+    const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "menswear_jeans", fields: [
+      { key: "description", path: "depop_specifics.description", label: "Description", value: "", required: true, multi: false, selection_only: false, options: [] },
+      { key: "price", path: "price", label: "Price", value: 20, required: true, multi: false, selection_only: false, options: [], input_type: "number" },
+      { key: "brand", path: "depop_specifics.brand", label: "Brand", value: "", required: false, multi: false, selection_only: false, options: [] },
+    ] };
+    expect(fieldsForMarketplaceForm(listing, "depop", [form]).map((field) => [field.key, field.label.replace(/\s*\*$/, "")])).toEqual([
+      ["depop_specifics.description", "Description"], ["depop_specifics.price", "Price"], ["depop_specifics.brand", "Brand"],
+    ]);
   });
 
   it("fills a marketplace title from General and keeps an edit on that marketplace", () => {
@@ -167,13 +176,7 @@ describe("marketplace form fields", () => {
     expect(etsy.find((field) => field.key === "condition")?.key).toBe("condition");
   });
 
-  it("shows an eBay price row and Depop measurement rows beside the native catalog", () => {
-    const priced = fieldsForMarketplaceForm({
-      ...listing,
-      price: 29.99,
-      ebay_specifics: { price: 23 },
-    }, "ebay", undefined);
-    expect(priced.find((field) => field.label === "eBay price")).toMatchObject({ key: "ebay_specifics.price" });
+  it("shows Depop measurement rows, which Depop's form posts", () => {
     const measured = fieldsForMarketplaceForm({
       ...listing,
       depop_specifics: {
@@ -183,60 +186,27 @@ describe("marketplace form fields", () => {
     expect(measured.find((field) => field.label === "Pit to pit")).toMatchObject({
       key: "depop_specifics.measurements.values.0.value",
     });
-    expect(measured.find((field) => field.label === "Depop price")?.key).toBe("depop_specifics.price");
   });
 
-  it("shows Best Offer on every eBay form, as its own rows", () => {
-    const fields = fieldsForMarketplaceForm(listing, "ebay", undefined);
-    expect(fields.find((field) => field.key === "ebay_specifics.bestOffer.enabled")).toMatchObject({
-      label: "Best Offer enabled", options: ["Yes", "No"], defaultValue: "Yes",
-    });
-    expect(fields.map((field) => field.key)).toEqual(expect.arrayContaining([
-      "ebay_specifics.bestOffer.autoAcceptPrice", "ebay_specifics.bestOffer.minimumOfferPrice",
-    ]));
-    expect(fields.some((field) => field.label === "Best Offer" || field.key === "ebay_specifics.bestOffer")).toBe(false);
-  });
-
-  it("fills bottoms sizes on the size fields that category includes", () => {
+  it("fills bottoms sizes only on forms that are not the marketplace's own", () => {
     const row = (tab: string, key: string, label: string) => ({
       key: `${tab}_specifics.${key}`, path: `${tab}_specifics.${key}`, label, value: "", required: false,
       multi: false, selection_only: false, options: [],
     });
-    const formFor = (tab: string, keys: [string, string][]): MarketplaceForm => ({
-      marketplace: tab, native: true, known: true, category_id: "jeans", fields: keys.map(([key, label]) => row(tab, key, label)),
+    const formFor = (tab: string, keys: [string, string][], native = false): MarketplaceForm => ({
+      marketplace: tab, native, known: true, category_id: "jeans", fields: keys.map(([key, label]) => row(tab, key, label)),
     });
-    const jeans = {
-      ...listing,
-      title: "Levi's 32 Jeans",
-      department: "Men",
-      size: "32",
-      category_path: "Clothing > Men > Jeans",
-      ebay_specifics: { type: "Jeans" },
-    };
-    const ebay = fieldsForMarketplaceForm(jeans, "ebay", [formFor("ebay", [["size", "Size"], ["inseam", "Inseam"], ["sizeType", "Size Type"]])]);
-    expect(ebay.find((field) => field.key === "ebay_specifics.size")?.options).toEqual(expect.arrayContaining(["32", "30"]));
-    expect(ebay.find((field) => field.key === "ebay_specifics.inseam")?.options).toContain("30");
-    expect(ebay.find((field) => field.key === "ebay_specifics.sizeType")?.options).toEqual(expect.arrayContaining(["Regular", "Big & Tall"]));
-    const poshmark = fieldsForMarketplaceForm(jeans, "poshmark", [formFor("poshmark", [["size", "Size"]])]);
-    expect(poshmark.find((field) => field.key === "poshmark_specifics.size")?.options).toContain("Waist 32");
     const pants = { ...listing, title: "Anne Klein 8 Pants", department: "Women", size: "8", category_path: "Clothing > Women > Pants" };
-    for (const tab of ["ebay", "mercari", "depop", "etsy", "sellwild"]) {
-      const options = fieldsForMarketplaceForm(pants, tab, [formFor(tab, [["size", "Size"]])])
-        .find((field) => field.key === `${tab}_specifics.size`)?.options;
-      expect(options).toEqual(expect.arrayContaining(["0", "8", "24"]));
-    }
-    expect(fieldsForMarketplaceForm(pants, "poshmark", [formFor("poshmark", [["size", "Size"]])])
-      .find((field) => field.key === "poshmark_specifics.size")?.options)
-      .toEqual(expect.arrayContaining(["8", "8P", "0", "24"]));
+    expect(fieldsForMarketplaceForm(pants, "etsy", [formFor("etsy", [["size", "Size"]])])
+      .find((field) => field.key === "etsy_specifics.size")?.options).toEqual(expect.arrayContaining(["0", "8", "24"]));
     expect(fieldsForMarketplaceForm(pants, "vinted", [formFor("vinted", [["size", "Size"]])])
       .find((field) => field.key === "vinted_specifics.size")?.options)
       .toEqual(expect.arrayContaining(["S / 8", "XXL / 24", "XXS / 0"]));
-    const depop = fieldsForMarketplaceForm(pants, "depop", [formFor("depop", [["sizeGrouping", "Size Grouping"]])]);
-    expect(depop.find((field) => field.key === "depop_specifics.sizeGrouping")?.options).toEqual(expect.arrayContaining(["Petite", "Plus size", "Tall"]));
-    const sellwild = fieldsForMarketplaceForm(jeans, "sellwild", [formFor("sellwild", [["size", "Size"]])]);
-    expect(sellwild.find((field) => field.key === "sellwild_specifics.size")?.options).toContain("32x30");
-    // A category that does not ask for inseam does not grow that row.
-    expect(fieldsForMarketplaceForm(jeans, "ebay", [formFor("ebay", [["size", "Size"]])]).some((field) => field.key === "ebay_specifics.inseam")).toBe(false);
+    // A direct marketplace's own form is shown as it came: no reference choices, no extra rows.
+    for (const tab of ["ebay", "poshmark", "mercari", "depop", "sellwild"]) {
+      const fields = fieldsForMarketplaceForm(pants, tab, [formFor(tab, [["size", "Size"]], true)]);
+      expect(fields.map((field) => [field.key, field.options])).toEqual([[`${tab}_specifics.size`, []]]);
+    }
   });
 
   it("shows a marketplace's own controls until its category schema arrives", () => {

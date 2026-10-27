@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.451 — 2026-10-27
+
+- eBay, Poshmark, Mercari, Depop and Sellwild tabs now show exactly the fields that marketplace’s own form has, in its order. Anteroom no longer adds its own Size, Size Grouping, price or offer rows to them, so pants and jeans no longer show Size twice on Depop, and Price sits where the marketplace puts it.
+
 ## 0.1.450 — 2026-10-27
 
 - Changing a field on a marketplace form keeps you where you are. Saving no longer jumps back to a field you opened with an Edit button, and the box above the form no longer shrinks and grows back on each save, so the form stops moving under you.
