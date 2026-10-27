@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.425 — 2026-10-26
+
+- Updating a live Depop listing no longer fails with “Depop did not keep the updated price” when Depop's reply simply leaves the price out. After saving, Anteroom reads the listing again the way Depop's edit page does, waits a few seconds if Depop is slow to show the change, and only then reports which of the price, category or size Depop did not keep.
+
 ## 0.1.424 — 2026-10-26
 
 - A sale Anteroom detects now turns the item Sold in Inventory and counts in Analytics, without waiting for Vendoo. An item with more than one unit stays Active and shows how many have sold, such as "1 of 3 sold". A sale Vendoo already recorded is counted once.
