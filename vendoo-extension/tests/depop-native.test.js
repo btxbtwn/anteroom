@@ -29,6 +29,28 @@ const FULL = { ...listing, brand: 'Nike', size: '2XL', condition: 'Pre-Owned - G
   form: { overrides: { condition: 'used_good', brand: 'Nike', categoryV2: { id: 'menswear_tshirts', path: ['menswear', 'menswear_tops', 'menswear_tshirts'] } },
     specifics: { style: ['casual'] }, aspects: {}, ships_from_zip: '70115' } };
 
+test('Depop reads its category list with the seller session', async () => {
+  const { c } = newDraft();
+  const seen = [];
+  const original = c.fetch;
+  c.fetch = async (url, options = {}) => {
+    if (String(url).includes('/presentation/api/v1/attributes')) seen.push(options.headers || {});
+    return original(url, options);
+  };
+  await c.depopAttributes(Date.now() + 30000);
+  assert.ok(seen.length >= 2);
+  assert.ok(seen.every(headers => headers.Authorization === 'Bearer private-session'));
+  assert.ok(seen.every(headers => headers.Accept === 'application/json'));
+});
+
+test('Depop catalog asks for sign-in before reading when the session is missing', async () => {
+  const { c } = newDraft();
+  c.chrome.cookies.get = async () => null;
+  c.fetch = async () => assert.fail('No catalog read without a seller session');
+  await assert.rejects(c.depopAttributes(Date.now() + 30000), error =>
+    error.code === 'signed_out' && /Sign in to Depop/.test(error.message));
+});
+
 test('Depop sends and verifies an exact SKU and quantity, and leaves a blank SKU off the draft', async () => {
   const { c } = newDraft();
   withCatalog(c);
