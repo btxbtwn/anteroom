@@ -39,7 +39,7 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
     if not keep_marketplace_listings:
         records.delete_for_conversation(conv_id)
     repo = ConversationRepo(db)
-    photos = [] if keep_photos else repo.get_photos(conv_id)
+    photos = [] if keep_photos else repo.get_all_photos(conv_id)
     deleted_photos = len(photos)
     if not keep_photos:
         from vendoo_studio.models.listing_video import ListingVideo

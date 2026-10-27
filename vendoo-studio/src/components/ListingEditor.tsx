@@ -6,7 +6,8 @@ import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getL
 import { PhotoTray } from "./PhotoTray";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
 import { EbayVariationsEditor, normalizeVariations, variationTotal } from "./EbayVariationsEditor";
-import { ListingVideoPicker } from "./ListingVideoPicker";
+import { MarketplaceMedia } from "./MarketplaceMedia";
+import { MEDIA_MARKETPLACES } from "../marketplaceMedia";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import { SendProgress, sendProgressLabel } from "./SendProgress";
@@ -525,6 +526,10 @@ export function ListingEditor({
               <ItemDetails convId={convId} />
             </>
           )}
+          {reviewTab === "forms" && MEDIA_MARKETPLACES.has(editTab) && listing && (
+            <MarketplaceMedia key={editTab} convId={convId} marketplace={editTab} listing={listing}
+              disabled={generating || updateMutation.isPending} onChange={(updated) => updateMutation.mutate(updated)} />
+          )}
           <StructuredEditor
             convId={convId}
             listing={listing}
@@ -694,8 +699,6 @@ export function StructuredEditor({
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
     const text = formFieldText(local[f.key]);
-    if (f.type === "video") return <ListingVideoPicker convId={convId} marketplace={f.key.split("_specifics.")[0]} selectedId={text} disabled={f.locked}
-      onSelect={id => commitField(f.key, id)} />;
     if (f.type === "inventory") return <NativeInventoryEditor
       value={Array.isArray(f.defaultValue) ? f.defaultValue.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : []}
       groups={f.inventoryGroups || []} disabled={f.locked} onChange={rows => {
@@ -703,7 +706,7 @@ export function StructuredEditor({
         setListingEditorValue(updated, f.key, rows);
         onChange(updated);
       }} />;
-    if (f.type === "variations") return <EbayVariationsEditor convId={convId}
+    if (f.type === "variations") return <EbayVariationsEditor convId={convId} listing={listing}
       value={normalizeVariations(f.defaultValue)} aspects={f.variationAspects || []} disabled={f.locked} onChange={value => {
         const updated = cloneListing(listing);
         setListingEditorValue(updated, f.key, value);
@@ -762,7 +765,7 @@ export function StructuredEditor({
     );
   };
   // Long text and the category path need the full row.
-  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || ["textarea", "inventory", "video", "variations"].includes(f.type || "");
+  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || ["textarea", "inventory", "variations"].includes(f.type || "");
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
@@ -1165,8 +1168,6 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         "etsy_specifics",
         [
           ...liveCategoryFields(listing, "etsy"),
-          { key: "etsy_specifics.videoId", label: "Listing video", type: "video",
-            help: "Etsy takes one video of 3 to 15 seconds and plays it without sound. Saving a draft does not publish it." },
           { key: "etsy_specifics.whoMade", label: "Who Made It?" },
           { key: "etsy_specifics.whatIsIt", label: "What Is It?" },
           { key: "etsy_specifics.whenMade", label: "When Was It Made?" },

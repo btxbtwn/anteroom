@@ -71,7 +71,8 @@ _GAP_FIXES = {
     "package_dimensions_in": "anteroom conversations fields --conv-id CONV --path package_dimensions_in --value 13x10x3",
     "sku": "anteroom conversations fields --conv-id CONV --path sku --value NEW-SKU",
     "etsy_specifics.when_made": 'anteroom conversations fields --conv-id CONV --path etsy_specifics.when_made --value "Before 2007 (Vintage)"',
-    "marketplace_photos.depop": 'anteroom conversations fields --conv-id CONV --path marketplace_photos.depop --value ["PHOTO_ID"]',
+    **{f"marketplace_photos.{marketplace}": f'anteroom conversations fields --conv-id CONV --path marketplace_photos.{marketplace} --value ["PHOTO_ID"]'
+       for marketplace in ("ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild")},
     "price": "anteroom set-price --conversation CONV --price 29.99 --all-marketplaces",
 }
 

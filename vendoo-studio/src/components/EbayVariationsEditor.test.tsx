@@ -16,7 +16,7 @@ const variations: EbayVariations = {
 
 describe("eBay variations", () => {
   it("renders each variation's values, stock, price and SKU, and per-color photos, without saving", () => {
-    const html = renderToStaticMarkup(<EbayVariationsEditor convId="c1" value={variations}
+    const html = renderToStaticMarkup(<EbayVariationsEditor convId="c1" listing={{}} value={variations}
       aspects={[{ name: "Size", selection_only: false, options: ["S", "M", "L"] }, { name: "Color", selection_only: true, options: ["Red", "Blue"] }]}
       onChange={() => { throw new Error("Rendering must not save"); }} />);
     expect(html).toContain('aria-label="eBay variations"');
@@ -28,6 +28,14 @@ describe("eBay variations", () => {
     expect(html).toContain('aria-label="Remove front.jpg for Red"');
     expect(html).toContain('aria-label="Use back.jpg for Blue"');
     expect(html).toContain("Add variation");
+  });
+
+  it("offers only the photos the eBay form sends", () => {
+    const html = renderToStaticMarkup(<EbayVariationsEditor convId="c1" listing={{ marketplace_photos: { ebay: ["p2"] } }} value={variations}
+      aspects={[{ name: "Size", selection_only: false, options: ["M", "L"] }, { name: "Color", selection_only: true, options: ["Red", "Blue"] }]}
+      onChange={() => undefined} />);
+    expect(html).toContain('aria-label="Use back.jpg for Blue"');
+    expect(html).not.toContain("front.jpg");
   });
 
   it("totals stock, ignoring blank and invalid quantities", () => {

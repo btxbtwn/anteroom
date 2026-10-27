@@ -4,7 +4,7 @@
  * (MIT, (c) 2026 T3 Tools Inc.): a media dialog with corner close, side
  * navigation and a caption line under the image.
  */
-import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, RotateCcwIcon, RotateCwIcon, SlidersHorizontalIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon, RotateCcwIcon, RotateCwIcon, SlidersHorizontalIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -56,6 +56,10 @@ export function PhotoThumb({
   onRemove,
   removeLabel,
   removing,
+  onAdd,
+  addLabel,
+  badge,
+  numbered = true,
   controlsTabbable = true,
   controlsInViewerOnTouch = false,
   className,
@@ -72,6 +76,13 @@ export function PhotoThumb({
   onRemove?: () => void;
   removeLabel?: string;
   removing?: boolean;
+  /** Puts a photo left off a marketplace form back on it. */
+  onAdd?: () => void;
+  addLabel?: string;
+  /** A short note in the corner, such as a marketplace's limit leaving the photo off. */
+  badge?: string;
+  /** Show the photo's place in the send order; off for photos that are not sent. */
+  numbered?: boolean;
   controlsTabbable?: boolean;
   /** On a touch screen, leave rotate and delete to the viewer a tap opens, where a stray tap cannot hit them. */
   controlsInViewerOnTouch?: boolean;
@@ -104,9 +115,32 @@ export function PhotoThumb({
       >
         <LazyImage src={url} className="size-full" />
       </div>
-      <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded-sm bg-black/60 px-1 font-mono text-[9px] text-white/90 leading-3.5 tabular-nums">
-        {String(number).padStart(2, "0")}
-      </span>
+      {numbered ? (
+        <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded-sm bg-black/60 px-1 font-mono text-[9px] text-white/90 leading-3.5 tabular-nums">
+          {String(number).padStart(2, "0")}
+        </span>
+      ) : null}
+      {badge ? (
+        <span className="pointer-events-none absolute right-0.5 bottom-0.5 rounded-sm bg-black/70 px-1 text-[9px] text-white leading-3.5">
+          {badge}
+        </span>
+      ) : null}
+      {onAdd ? (
+        <Button
+          variant="overlay"
+          size="icon-micro"
+          tabIndex={controlsTabbable ? undefined : -1}
+          className="absolute right-0.5 bottom-0.5"
+          aria-label={addLabel ?? `Add photo ${number}`}
+          title={addLabel ?? "Add photo"}
+          onClick={(event) => {
+            event.stopPropagation();
+            onAdd();
+          }}
+        >
+          <PlusIcon />
+        </Button>
+      ) : null}
       {onRotate ? (
         <Button
           variant="overlay"
