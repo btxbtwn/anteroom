@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.419 — 2026-10-26
+
+- Share Poshmark listings to your followers, one or many at a time: select items in the sidebar and choose **Share / offers**. You review each item and confirm once; shares go out a few seconds apart and stop at the first limit Poshmark reports.
+- Send a Poshmark offer to everyone who liked a listing. Set the lowest price you accept for each listing first: an offer below it is never sent, and Poshmark's own minimum discount is shown in the review. Choose a shipping discount, or none, for each offer.
+- If Anteroom or Chrome stops before a share or offer is confirmed, it shows as needing a check and is never sent again on its own. Mercari, Depop, Etsy, Vinted and Sellwild tools are not added yet; what each marketplace offers is listed in the parity notes.
+
 ## 0.1.418 — 2026-10-26
 
 - Depop drafts now keep everything Anteroom sends: category, size, condition, brand, photos, location and shipping. Anteroom no longer sends a blank SKU, which made Depop quietly keep only the description and price, and it waits until Depop has finished processing new photos before adding them.
