@@ -182,7 +182,7 @@ describe("native form values", () => {
     const fields: NativeFormRow[] = [
       { key: "mercari_specifics.shippingMethod", options: ["Prepaid label", "Ship on your own"], optionValues: { "Prepaid label": "MERCARI", "Ship on your own": "SOYO" } },
       { key: "mercari_specifics.shippingPayerId", options: ["Yes (Recommended)", "No"], optionValues: { "Yes (Recommended)": "2", No: "1" }, defaultValue: "1" },
-      { key: "mercari_specifics.smartPricing.enabled", type: "boolean", defaultValue: false },
+      { key: "mercari_specifics.smartPricing.enabled", defaultValue: false },
       { key: "mercari_specifics.smartPricing.minimumPrice" },
     ];
     const context = { tab: "mercari", listing: {}, local: {}, fields, categoryStale: false };

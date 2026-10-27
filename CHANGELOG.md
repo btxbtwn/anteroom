@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.457 — 2026-10-27
+
+- The Mercari tab now matches Mercari’s own sell page: the same sections (Product info, Shipping, Pricing, Smart pricing), fields and wording in the same order, every category Mercari offers in its order — including a category’s “All …” choice — and sizes under Mercari’s size groups. Brand has “No brand / Not sure” as a choice, and you can set the ZIP an item ships from. Size type, the separate No brand switch and the package weight rows are gone from this tab.
+
 ## 0.1.456 — 2026-10-27
 
 - After generating a listing, Anteroom now fills each marketplace’s category fields it can tell from the photos and details, such as Depop’s Type and Fit for jeans or eBay’s Rise, choosing only from that marketplace’s own choices. Fields you set or locked are left alone, anything it can’t tell stays empty, and chat lists what it filled.
