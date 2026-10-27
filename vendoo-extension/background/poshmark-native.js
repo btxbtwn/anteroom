@@ -38,7 +38,7 @@ async function poshmarkShippingDiscounts(deadline) {
   const rows = await poshmarkClient(deadline, '').call('GET', `/vm-rest/users/${account.user_id}/seller_shipping_discounts/post`, undefined,
     { step: 'shipping-discounts', what: 'shipping discounts' });
   if (!Array.isArray(rows) || rows.some(row => !/^[a-f0-9]{24}$/.test(String(row.id)) || typeof row.label !== 'string')) {
-    throw marketplaceError('Poshmark’s shipping discounts changed. Refresh choices.', { code: 'schema_drift' });
+    throw marketplaceError('Poshmark’s shipping discounts changed. Reopen the listing to try again.', { code: 'schema_drift' });
   }
   return rows.filter(row => row.enabled !== false);
 }

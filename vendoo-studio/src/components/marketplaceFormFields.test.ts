@@ -287,14 +287,6 @@ describe("marketplace form fields", () => {
       const material = fields.find((field) => field.label.startsWith("Material"));
       expect(material?.options, tab).toEqual(["Cotton", "Denim"]);
       expect(material?.selectionOnly, tab).toBe(true);
-      const all = fieldsForMarketplaceForm(item, tab, forms, true).map((field) => field.label.replace(/\s*\*$/, ""));
-      if (["ebay", "poshmark", "mercari", "depop", "sellwild"].includes(tab)) {
-        expect(all, tab).not.toContain("Holiday");
-        expect(all, tab).not.toContain("SKU");
-      } else {
-        expect(all, tab).toContain("Holiday");
-        expect(all, tab).toContain("SKU");
-      }
     }
   });
 });

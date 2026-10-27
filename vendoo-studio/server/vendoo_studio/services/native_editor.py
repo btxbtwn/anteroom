@@ -34,7 +34,7 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
         answer = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form",
                                               {"marketplace": marketplace, "listing": snapshot}, timeout=35)
     except browser_bridge.BrowserBridgeError as exc:
-        raise NativeMarketplaceError(502, "Chrome could not read the marketplace form. Refresh choices.") from exc
+        raise NativeMarketplaceError(502, "Chrome could not read the marketplace form. Reopen the listing to try again.") from exc
     form = answer.get("form") if isinstance(answer, dict) and answer.get("ok") else None
     if not isinstance(form, dict) or form.get("marketplace") != marketplace or form.get("native") is not True:
         message = answer.get("error") if isinstance(answer, dict) else None
@@ -142,8 +142,7 @@ async def ebay_form(snapshot: dict) -> dict:
                    *[field(f"ebay_specifics.{key}", label, details.get(key)) for key, label in
                      (("primaryStoreCategory", "Primary store category"), ("secondaryStoreCategory", "Secondary store category"))],
                    *package(snapshot)])
-    return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields,
-            "notes": ["Category aspects and condition choices come from eBay. Shipping, payment and return policies come from Settings."]}
+    return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields}
 
 
 async def _ebay_variations_field(snapshot: dict, category: str, schema: list[dict]) -> list[dict]:
@@ -202,7 +201,7 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
         try:
             allowed = await marketplace_schemas.ebay_listing_types(await EbayClient.connect(), category)
         except Exception:  # noqa: BLE001 - fixed price needs no lookup; List checks auctions again
-            note = "eBay's auction rules for this category could not be loaded. Refresh choices."
+            note = "eBay's auction rules for this category could not be loaded. Reopen the listing to try again."
     auction_lengths = allowed.get(AUCTION) or []
     offers_auction = bool(auction_lengths) or kind == AUCTION
     kinds = [FIXED_PRICE] + ([AUCTION] if offers_auction else [])
@@ -262,4 +261,4 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
             row = next(row for row in fields if row["path"] == "package_dimensions_in")
             row.update(value=" × ".join(str(side) for side in package_sides(snapshot)), help="Dimensions for the selected Sellwild packaging.")
     return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
-            "fields": fields, "notes": ["Category and condition use Sellwild’s own catalog. Description is optional."]}
+            "fields": fields}

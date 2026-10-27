@@ -627,8 +627,6 @@ export function StructuredEditor({
   });
   // Direct listing forms are the category's fields plus that marketplace's standard
   // rows. They do not expand. Other editors can still open every saved field.
-  const [showAllTab, setShowAllTab] = React.useState<string | null>(null);
-  const showAll = !nativeTab && showAllTab === tab;
   const categoryForm = nativeTab ? nativeQuery.data : forms?.forms.find((form) => form.marketplace === tab);
   const loadedCategoryId = nativeTab
     ? (nativeQuery.isPlaceholderData ? nativeQuery.data?.category_id : undefined)
@@ -643,7 +641,7 @@ export function StructuredEditor({
       // No form yet: don't invent a lone marketplace-price row while the real rows load.
       if (nativeTab && !nativeQuery.data) return [];
       const source = nativeTab ? (nativeQuery.data ? [nativeQuery.data] : []) : forms?.forms;
-      const built = fieldsForMarketplaceForm(listing, tab, source, showAll);
+      const built = fieldsForMarketplaceForm(listing, tab, source);
       const rows = nativeTab
         ? nativeEditorDependencies(built, listing)
         : withDropdownOptions(built, tab, dropdownOptions?.forms);
@@ -655,7 +653,7 @@ export function StructuredEditor({
           : field
       ));
     },
-    [nativeTab, nativeQuery.data, forms, listing, tab, showAll, dropdownOptions?.forms, inventoryLocation?.location],
+    [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
   );
   const [local, setLocal] = React.useState<Record<string, string | string[]>>({});
   const dirty = React.useRef<Record<string, string | string[]>>({});
@@ -728,11 +726,25 @@ export function StructuredEditor({
   const viewFields = fields.map((field) => presentNativeField(field, viewContext));
   const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
   const formNotes = nativeTab
-    ? (tab === "mercari"
-      ? nativeFormNotes(tab, listing, local, fields)
-      : [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing, local, fields)])
+    ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing, local, fields)]
     : [];
   const sections = groupFieldsIntoSections(renderedFields);
+  // Only loading, errors and gaps get a line; a form that loaded fine needs none.
+  const formStatus = nativeTab && !nativeQuery.data && nativeQuery.isFetching
+    ? "Loading the marketplace’s category fields and choices…"
+    : nativeTab && nativeQuery.isError && !nativeQuery.data
+      ? (nativeQuery.error instanceof Error ? nativeQuery.error.message : "The marketplace form could not be loaded. Reopen the listing to try again.")
+      : categoryStale
+        ? "Updating this category’s fields…"
+        : nativeTab && nativeQuery.isFetching
+          ? "Refreshing choices…"
+          : !nativeTab && formsQuery.isFetching
+            ? "Refreshing category fields and choices…"
+            : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
+              ? "Some choices could not be refreshed. Check the source below each field before listing."
+              : categoryForm?.known === false
+                ? "The full category form is unavailable. Reference choices are shown where available."
+                : null;
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
     // A format or shipping change narrows the choices. Show the choice that fits
@@ -827,37 +839,7 @@ export function StructuredEditor({
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
     <div ref={formRef} key={tab} className="flex flex-col">
-      {tab !== "general" && <div className="flex items-start justify-between gap-3 border-b py-3 text-xs text-muted-foreground">
-        <p role="status">{nativeTab && !nativeQuery.data && nativeQuery.isFetching
-          ? "Loading the marketplace’s category fields and choices…"
-          : nativeTab && nativeQuery.isError && !nativeQuery.data
-            ? (nativeQuery.error instanceof Error ? nativeQuery.error.message : "The marketplace form could not be loaded. Refresh choices.")
-            : categoryStale
-              ? "Updating this category’s fields…"
-              : nativeTab && nativeQuery.isFetching
-                ? "Refreshing choices…"
-                : !nativeTab && formsQuery.isFetching
-              ? "Refreshing category fields and choices…"
-              : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
-                ? "Some choices could not be refreshed. Check the source below each field before listing."
-                : categoryForm?.known === false
-                  ? "The full category form is unavailable. Reference choices are shown where available."
-                  : categoryForm?.known && showAll
-                    ? "Every saved field is showing. Values you do not see on the category form stay saved."
-                    : categoryForm?.known
-                      ? "This category's fields are showing."
-                      : nativeTab
-                        ? "Fields and choices come from the catalog direct List uses."
-                        : "Choices depend on this category. Reference choices may differ from the marketplace."}</p>
-        <div className="flex shrink-0 gap-1">
-          {!nativeTab && categoryForm?.known && <Button type="button" variant="ghost" size="sm" aria-pressed={showAll}
-            onClick={() => setShowAllTab(showAll ? null : tab)}>{showAll ? "Show category fields" : "Show all fields"}</Button>}
-          <Button type="button" variant="ghost" size="sm" onClick={() => {
-            if (nativeTab) { void nativeQuery.refetch(); return; }
-            void formsQuery.refetch(); void dropdownQuery.refetch();
-          }}>Refresh choices</Button>
-        </div>
-      </div>}
+      {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
         const filled = section.fields.filter((f) => {
@@ -884,7 +866,7 @@ export function StructuredEditor({
                   {f.help && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
-                  {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Refresh choices to load this field.</p>}
+                  {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
                   {f.optionsSource && f.optionsSource !== "saved" && <p className="mt-1 text-xs text-muted-foreground">
                     {f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"}
                   </p>}
@@ -1137,9 +1119,8 @@ function limitToCategoryForm(
   rows: EditorField[],
   forms: MarketplaceForm[] | undefined,
   tab: string,
-  showAll: boolean,
 ): EditorField[] {
-  if (showAll || tab === "general") return rows;
+  if (tab === "general") return rows;
   const form = forms?.find((entry) => entry.marketplace === tab);
   const core = new Set((CATEGORY_FORM_LABELS[tab] ?? []).map(foldFieldName));
   const listed = (field: EditorField) => {
@@ -1181,17 +1162,13 @@ export function fieldsForMarketplaceForm(
   listing: ListingData | undefined,
   tab: string,
   forms: MarketplaceForm[] | undefined,
-  showAll = false,
 ): EditorField[] {
   const catalog = forms?.find((form) => form.marketplace === tab);
-  // Direct listing forms are standard rows plus that category's fields, even
-  // when a caller asks for every saved field.
-  const revealAll = showAll && !DIRECT_FORM_MARKETS.has(tab);
   // A direct marketplace with its native catalog, or with no category schema yet,
   // does not fall back to a hand-kept form. A known category schema still merges.
   if (DIRECT_FORM_MARKETS.has(tab) && (catalog?.native || !catalog?.fields.length)) {
     const rows = catalog?.native ? schemaFieldsForTab(forms, tab) || [] : [];
-    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(independentRows(rows, tab), tab), listing, tab), forms, tab, revealAll);
+    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(independentRows(rows, tab), tab), listing, tab), forms, tab);
   }
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
@@ -1223,7 +1200,6 @@ export function fieldsForMarketplaceForm(
     finishMarketplaceRows(withoutObjects(withMarketplacePrice(independentRows(named, tab), tab)), listing, tab),
     forms,
     tab,
-    revealAll,
   );
 }
 
