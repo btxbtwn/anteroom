@@ -8,7 +8,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.442 — 2026-10-27
 
-- Depop offers to likers now work, both the ones you send and your automatic rules. Anteroom sends the same single "Send offer to all likers" request Depop's Selling Hub sends, never goes below your floor or Depop's lowest allowed offer, skips items with several sizes, and never resends an offer whose result it could not confirm. Rules stay off until you turn them on.
+- Depop offers send to one buyer per request and count one recipient. Sending to every liker remains incomplete. Anteroom never goes below your floor or Depop's lowest allowed offer, skips items with several sizes, and never resends an offer whose result it could not confirm. Rules stay off until you turn them on.
 
 ## 0.1.441 — 2026-10-27
 

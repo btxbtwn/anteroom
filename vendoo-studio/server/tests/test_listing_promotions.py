@@ -87,20 +87,20 @@ class ListingPromotionsTest(unittest.TestCase):
                                                                            "action": "share"}).status_code, 400)
         self.bridge.assert_not_called()
 
-    def test_depop_offer_records_the_reach_depop_expected(self):
+    def test_depop_offer_finishes_without_claiming_the_preview_count_was_delivered(self):
         conv = ConversationRepo(self.db).create(title="Depop tee")
         conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"depop": "https://www.depop.com/products/seller-vintage-tee/"}})
         self.db.commit()
         self.check = {"ok": True, "price_cents": 5000, "like_count": 4, "minimum_discount_percent": 5,
                       "maximum_discount_percent": 90, "offer_price_cents": 4250, "shipping_discounts": []}
-        self.sent = {"ok": True, "state": "done", "recipient_count": 4}
+        self.sent = {"ok": True, "state": "done"}
         response = self.client.post("/api/promotions/preview", json={"conversation_ids": [conv.id], "marketplace": "depop",
                                                                      "action": "offer", "discount_percent": 15, "floors": {conv.id: "40"}})
         row = response.json()["rows"][0]
         self.assertEqual((row["state"], row["listing_id"], row["offer_price"], row["like_count"]), ("preview", "seller-vintage-tee", "42.50", 4))
         done = self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True}).json()
         self.assertEqual(done["state"], "done")
-        self.assertEqual(done["note"], "Offer of $42.50 sent to likers. Depop counted 4 likers for it.")
+        self.assertEqual(done["note"], "Offer of $42.50 sent to likers.")
         payload = self.calls("marketplace.promote")[0].args[2]
         self.assertEqual((payload["marketplace"], payload["offer_price_cents"], payload["floor_cents"]), ("depop", 4250, 4000))
         self.assertEqual(len(self.calls("marketplace.promote")), 1)

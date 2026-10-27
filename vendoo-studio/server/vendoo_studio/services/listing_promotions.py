@@ -365,10 +365,8 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
         row.state, row.note = "unknown", UNKNOWN_NOTE
     elif result.get("ok") is True and result.get("state") == "done":
         row.state = "done"
-        reach = result.get("recipient_count")
         row.note = "Shared to your followers." if row.action == "share" else (
-            f"Offer of ${dollars(row.offer_price_cents)} sent to likers."
-            + (f" {NAMES.get(row.marketplace, row.marketplace)} counted {reach} {'liker' if reach == 1 else 'likers'} for it." if isinstance(reach, int) and reach > 0 else ""))
+            f"Offer of ${dollars(row.offer_price_cents)} sent to likers.")
     elif result.get("safe_to_retry") is True:
         row.state = "failed"
         row.note = str(result.get("error") or "The marketplace refused this.")[:300]

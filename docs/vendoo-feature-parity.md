@@ -72,7 +72,7 @@ and Vinted only on UK and US Enterprise accounts
 | Etsy | List, import, delist, sale detection | **Have** | Official API: `services/etsy_listings.py`, `routes/etsy.py` (`/import`), relay `order.paid` |
 | Poshmark | List, delist, relist, sale detection, sharing, offers | **Partial** | List, draft, update, delist, sale detection: `background/poshmark-native.js`, `services/chrome_sales.py`. Share to followers and offers to likers, seller-started or on a schedule or rule: `services/listing_promotions.py`, `services/promotion_automations.py`, `background/marketplace-promotions.js`. Not yet verified on a real listing (see [Automations](#automations-offers-sharing-refresh)) |
 | Mercari | List, delist, relist, sale detection, offers | **Partial** | Same as Poshmark, `background/mercari-native.js`. No Promote. Offers to likers, manual and automatic (`checkMercariPromotion`/`offerMercari`), since 0.1.440 from Mercari's own `offerToLikerable`, `offerToLikerInit` and `createOfferToLikers`; unit-tested against the recorded shapes, not yet verified on a real listing |
-| Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. Offers to likers, manual and automatic (`checkDepopPromotion`/`offerDepop`, 0.1.442), use the Selling Hub's own requests read from the seller's signed-in session: the offers list for the liker count, the send-all preview for the recipient and Depop's lowest allowed offer, then one `POST /presentation/api/v1/products/{id}/offers/`. Send-all is one POST, as the web client sent it; whether that reaches every liker is not yet confirmed (see gap 4). Not yet verified on a real account. Depop has no free refresh (paid Boost only); see `docs/direct-form-parity.md` |
+| Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. Offers to eligible likers, manual and automatic (`checkDepopPromotion`/`offerDepop`, 0.1.443), use the send-all preview and one bulk-offer job. Anteroom waits for job `SUCCESS`, never resubmits an uncertain job, and does not report a delivered count from the preview. Verified against Depop's public client code and automated tests; real sending from Anteroom still needs verification (see gap 4). Depop has no free refresh (paid Boost only); see `docs/direct-form-parity.md` |
 | Vinted | UK/Enterprise only | **Have** | `background/vinted-native.js`, `services/vinted_listing.py`; Anteroom covers more than the seller's Vendoo plan does |
 | Sellwild | Logo only | **Have** | `background/sellwild-native.js`, `services/sellwild_listing.py` |
 | Facebook Marketplace | List, delist, sale detection | **Partial** | Linked from Vendoo's links or the seller's, shown in the Marketplaces panel, state read on request (**Check on Facebook**) and sale detection, opt-in, through the signed-in Chrome session: `background/facebook-native.js`, `services/facebook_listing.py`, `services/chrome_sales.py`. Unit-tested; not yet verified on a real listing. All **23 active items** Vendoo listed there read as live Facebook listings (checked on a copy of the live database). **Missing**: delist, import and List, which need Facebook's GraphQL requests recorded from the signed-in client; see [direct-form-parity.md](direct-form-parity.md#facebook-marketplace) and gap 2 |
@@ -246,20 +246,22 @@ Most important first.
    they fail as refusals and nothing is resent. *Verify:* send one offer
    from Anteroom on a real listing and check the amount and recipients on
    Mercari.
-   Depop's were recorded from the Selling Hub and filled in 0.1.442. One
-   "Send offer to all likers" sent exactly one
-   `POST /presentation/api/v1/products/{id}/offers/` with
-   `{ offer_recipient_id, offer_currency, offer_value }`, the recipient
-   taken from `GET /presentation/api/v1/offers/products/{id}/offers/send-all/`.
-   Anteroom sends that same single request and never one per liker. The
-   preview's recipient plus `offer_additional_recipients_count` is recorded
-   as the expected reach. *Still to confirm on a real account:* that the one
-   POST reaches every liker (and not only the named recipient), that
-   `offer_count` in `GET /presentation/api/v1/offers/me/products/` is the
-   number of likers an offer can still reach, that `sellers_lowest_offer_value`
-   is Depop's lowest allowed offer, and the next-page parameter of that list
-   (only `page_info.has_more` was seen, so an item past the first page is
-   refused). The web client also sent a `depop-device-id` header that
+   Depop's captured `POST /presentation/api/v1/products/{id}/offers/`
+   sent to only one buyer, confirmed by the seller. The bulk flow was then
+   verified read-only in public client build `32efdfd/40383035456-1`,
+   chunks `1j50bfzgf582l.js` (module 846394) and `19dd43ms3it4l.js`:
+   `GET /presentation/api/v1/offers/products/{id}/offers/send-all/` previews
+   eligible likers and the lowest allowed price; `POST` to that path plus
+   `jobs/` creates one bulk job with `{offer_currency, offer_value}` and
+   returns `job_id`; `GET jobs/{job_id}/` reports `QUEUED`, `PROCESSING`,
+   `SUCCESS` or `FAILURE`. Anteroom implements this in 0.1.443, polls at
+   one-second intervals, and reports success only after `SUCCESS`. A failed,
+   timed-out or unreadable job is uncertain: block the item and pause its rule,
+   never submit it again. The preview's eligible count is not a delivered
+   count. `/offers/me/products/` lists active offers, so it is not used to
+   decide eligibility. *Still to verify:* one real bulk offer from Anteroom,
+   the recipients and price on Depop, and its lowest allowed offer value.
+   The web client also sent a `depop-device-id` header that
    Anteroom's Depop calls do not send; if Depop refuses the offer without
    it, the refusal is final and nothing is resent.
    `POST /api/marketplaces/{mercari|depop}/record?goal=offers` records

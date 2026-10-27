@@ -149,18 +149,17 @@ async function offerPoshmark(payload, deadline) {
 // per buyer, not on listings with several sizes, shipping not included. Its
 // partner Selling API requires at least 5% off; the web client is assumed to
 // be no looser. Depop's Selling Hub (read 2026-10-26):
-// - likers: GET /presentation/api/v1/offers/me/products/ lists the seller's
-//   items that have likers to offer to, with offer_count. Only
-//   page_info.has_more was seen, never the next-page parameter, so an item
-//   past the first page is refused rather than guessed at.
+// The /offers/me/products/ list counts active offers, not eligible likers.
+// Read eligibility from the send-all preview for this product instead.
 // - preview: GET /presentation/api/v1/offers/products/{id}/offers/send-all/
 //   names one offer_recipient_id plus offer_additional_recipients_count
 //   others, and sellers_lowest_offer_value, the lowest offer Depop allows.
-// - offer: POST /presentation/api/v1/products/{id}/offers/ with
-//   { offer_recipient_id, offer_currency, offer_value }, answered 200 with no
-//   body. "Send offer to all likers" sent exactly one such POST, with the
-//   preview's recipient. Anteroom sends that same single request, never one
-//   per liker, and records the preview's reach as the expected recipients.
+// - bulk offer: POST /presentation/api/v1/offers/products/{id}/offers/send-all/jobs/
+//   with { offer_currency, offer_value }, then GET jobs/{job_id}/ until
+//   SUCCESS or FAILURE. Verified in public client modules 846394 and 19dd43ms3it4l.
+//   The captured /products/{id}/offers/ POST was a single-buyer offer, as the
+//   seller confirmed. Never use it for bulk sends or count preview recipients
+//   as delivered offers. Do not enable Depop's own auto-send setting.
 const PENDING_OFFER_REQUESTS = {
   mercari: {
     likers: { operationName: 'offerToLikerable', sha256Hash: '37bcc049bd1bf9241387cf44f4a2742a653f2e3dca8150c26d00aa27e30cc825',
@@ -174,18 +173,17 @@ const PENDING_OFFER_REQUESTS = {
       created: data => data?.createOfferToLikers?.numOffersCreated },
   },
   depop: {
-    likers: { path: () => '/presentation/api/v1/offers/me/products/', read: depopOfferLikers },
     preview: { path: product => `/presentation/api/v1/offers/products/${product.id}/offers/send-all/`, read: depopOfferPreview },
-    offer: { method: 'POST', path: product => `/presentation/api/v1/products/${product.id}/offers/`,
-      body: (preview, offerCents) => ({ offer_recipient_id: preview.recipient_id, offer_currency: 'USD', offer_value: (offerCents / 100).toFixed(2) }),
-      confirmed: ({ status, data }) => status >= 200 && status < 300 && !/<html|<!doctype/i.test(String(data || '')) },
+    offer: { method: 'POST', path: product => `/presentation/api/v1/offers/products/${product.id}/offers/send-all/jobs/`,
+      body: offerCents => ({ offer_currency: 'USD', offer_value: (offerCents / 100).toFixed(2) }) },
+    job: { path: (product, id) => `/presentation/api/v1/offers/products/${product.id}/offers/send-all/jobs/${encodeURIComponent(id)}/` },
   },
 };
 const DEPOP_OFFER_MIN_PERCENT = 5;
 
 function pendingOfferRequests(marketplace) {
   const requests = PENDING_OFFER_REQUESTS[marketplace];
-  if (!requests?.likers || !requests?.offer) {
+  if (!(marketplace === 'depop' ? requests?.preview : requests?.likers) || !requests?.offer) {
     throw marketplaceError(`Anteroom cannot send ${marketplaceLabel(marketplace)} offers yet: its offer request still needs to be read from the signed-in site.`,
       { code: 'not_captured' });
   }
@@ -277,7 +275,7 @@ async function offerMercari(payload, deadline) {
   return { ok: true, state: 'done', recipient_count: created };
 }
 
-// The offer POST answers 200 with no body, so it is read as text.
+// All bulk-offer replies are JSON, including the job ID and status.
 async function depopOfferCall(method, path, deadline, step, { body, expect } = {}) {
   return await marketplaceFetch(`${DEPOP_WEBAPI}${path}`, { marketplace: 'depop', step, method, credentials: 'omit', deadline,
     headers: { Accept: 'application/json', Authorization: await depopBearer(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
@@ -294,21 +292,6 @@ function depopOfferDrift(what) {
   return marketplaceError(`Depop’s ${what} changed. Anteroom needs an update before sending offers.`, { code: 'schema_drift' });
 }
 
-// The item's row in the Selling Hub offers list. No row means no liker an offer can reach.
-function depopOfferLikers(body, product) {
-  if (!Array.isArray(body?.objects)) throw depopOfferDrift('offers list');
-  const row = body.objects.find(entry => String(entry?.product_id) === String(product.id));
-  if (!row) {
-    if (body.page_info?.has_more === true) {
-      throw marketplaceError('Depop lists this item past the first page of its offers. Send this offer from Depop’s Selling Hub.',
-        { code: 'not_captured' });
-    }
-    return { like_count: 0 };
-  }
-  if (!/^\d{1,6}$/.test(String(row.offer_count ?? ''))) throw depopOfferDrift('offers list');
-  return { like_count: Number(row.offer_count) };
-}
-
 function depopOfferPreview(body, product) {
   const recipient = Number(body?.offer_recipient_id);
   const others = String(body?.offer_additional_recipients_count ?? '');
@@ -320,7 +303,7 @@ function depopOfferPreview(body, product) {
     throw depopOfferDrift('send-offer preview');
   }
   if (String(body.price_currency || '').toUpperCase() !== 'USD') throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.');
-  return { recipient_id: recipient, reach: 1 + Number(others), lowest_cents: lowest, current_cents: currentCents };
+  return { eligible_count: 1 + Number(others), lowest_cents: lowest, current_cents: currentCents };
 }
 
 async function depopOfferState(requests, slug, deadline) {
@@ -335,12 +318,10 @@ async function depopOfferState(requests, slug, deadline) {
   const currency = String(product.price_currency ?? product.pricing?.currency_name ?? product.currency ?? '').toUpperCase();
   const price = Math.round((depopProductPrice(product) || 0) * 100);
   if (currency !== 'USD' || !(price > 0)) throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.', { code: 'schema_drift' });
-  const { like_count: likes } = requests.likers.read((await depopOfferCall('GET', requests.likers.path(product), deadline, 'likers')).data, product);
-  if (!likes) return { product, price, likes: 0, highest: centOffer(price, DEPOP_OFFER_MIN_PERCENT) };
   const preview = requests.preview.read((await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview')).data, product);
   // A marked-down item is offered against its current price, as Depop's preview shows it.
   const basis = preview.current_cents ? Math.min(price, preview.current_cents) : price;
-  return { product, price, likes, preview, lowest: preview.lowest_cents, highest: centOffer(basis, DEPOP_OFFER_MIN_PERCENT) };
+  return { product, price, likes: preview.eligible_count, preview, lowest: preview.lowest_cents, highest: centOffer(basis, DEPOP_OFFER_MIN_PERCENT) };
 }
 
 async function checkDepopPromotion(payload, deadline) {
@@ -359,11 +340,25 @@ async function offerDepop(payload, deadline) {
   if (state.lowest && offer < state.lowest) {
     throw marketplaceError(`Depop allows offers of at least $${(state.lowest / 100).toFixed(2)} on this item. Review the offer again.`);
   }
-  // One request, as Depop's own "Send offer to all likers" sends it. Never repeated, never one per liker.
-  const response = await depopOfferCall(requests.offer.method, requests.offer.path(state.product), deadline, 'offer',
-    { body: requests.offer.body(state.preview, offer), expect: 'text' });
-  if (!requests.offer.confirmed(response)) throw marketplaceError('Depop did not confirm the offer.', { code: 'uncertain', rejected: false });
-  return { ok: true, state: 'done', recipient_count: state.preview.reach };
+  // Create exactly one bulk job. Never submit it again, even if polling fails.
+  const { data } = await depopOfferCall(requests.offer.method, requests.offer.path(state.product), deadline, 'offer',
+    { body: requests.offer.body(offer) });
+  try {
+    const id = data?.job_id;
+    if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(id)) throw depopOfferDrift('offer job');
+    while (Date.now() < deadline) {
+      const { data: job } = await depopOfferCall('GET', requests.job.path(state.product, id), deadline, 'offer-status');
+      // The web client treats SUCCESS as completion, but exposes no delivered count.
+      if (job?.status === 'SUCCESS') return { ok: true, state: 'done' };
+      if (!['QUEUED', 'PROCESSING'].includes(job?.status)) throw depopOfferDrift('offer job status');
+      await marketplaceSleep(1000);
+    }
+    throw marketplaceError('Depop has not confirmed the bulk offer. Check its Selling Hub before sending again.', { code: 'uncertain' });
+  } catch (error) {
+    // A created job may already have sent offers, including on FAILURE.
+    throw marketplaceError('Depop did not confirm completion of the bulk offer. Check its Selling Hub before sending again.',
+      { code: 'uncertain', rejected: false, marketplace_message: error.marketplace_message });
+  }
 }
 
 const MARKETPLACE_PROMOTIONS = {

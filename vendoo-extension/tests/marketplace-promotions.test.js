@@ -298,12 +298,10 @@ test('Mercari offer outcomes: a lost or unreadable reply is uncertain; a refusal
 
 // Shapes from the seller's Selling Hub; every value is made up.
 const DEPOP = 'webapi.depop.com/presentation/api/v1';
-const DEPOP_OFFERS = `GET ${DEPOP}/offers/me/products/`;
 const DEPOP_PREVIEW = `GET ${DEPOP}/offers/products/999/offers/send-all/`;
-const DEPOP_SEND = `POST ${DEPOP}/products/999/offers/`;
+const DEPOP_SEND = `POST ${DEPOP}/offers/products/999/offers/send-all/jobs/`;
+const DEPOP_JOB = `GET ${DEPOP}/offers/products/999/offers/send-all/jobs/offer-job-1/`;
 const depopProduct = { slug: SLUG, id: 999, user_id: 55, status: 'STATUS_ONSALE', price_amount: '50.00', price_currency: 'USD' };
-const depopRow = (id, count) => ({ product_id: id, description: 'Vintage tee', price_amount: '50.00', price_currency: 'USD',
-  variant_set: 1, variant_id: 2, offer_count: String(count), picture_data: { id: 1, formats: {} } });
 const depopPrice = item => ({ price: item, total_estimated_price_amount: '55.00', price_break_down: { item_price: item } });
 const depopPreview = (overrides = {}) => ({ product_id: 999, product_description: 'Vintage tee', offer_recipient_id: 4242,
   offer_recipient_username: 'buyer', offer_additional_recipients_count: '2',
@@ -312,15 +310,15 @@ const depopPreview = (overrides = {}) => ({ product_id: 999, product_description
 const depopAnswers = (overrides = {}) => ({
   [`GET ${DEPOP}/users/me/`]: [200, { id: 55 }],
   [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, depopProduct],
-  [DEPOP_OFFERS]: [200, { objects: [depopRow(123, 9), depopRow(999, 3)], page_info: { has_more: false } }],
   [DEPOP_PREVIEW]: [200, depopPreview()],
-  [DEPOP_SEND]: [200, null],
+  [DEPOP_SEND]: [200, { job_id: 'offer-job-1' }],
+  [DEPOP_JOB]: [200, { status: 'SUCCESS' }],
   ...overrides,
 });
 const depopOffer = (run, overrides = {}) => run.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'depop',
   action: 'offer', listing_id: SLUG, confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4250, floor_cents: 4000, ...overrides } });
 
-test('Depop check reads the offers list and send-all preview, signed in, without writing', async () => {
+test('Depop check reads eligible likers from the send-all preview, without requiring active offers or writing', async () => {
   const check = offerWorker('depop', depopAnswers());
   for (const percent of [15, 60]) {
     await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
@@ -332,31 +330,55 @@ test('Depop check reads the offers list and send-all preview, signed in, without
   assert.equal(check.results[1].offer_price_cents, null);
   assert.ok(check.requests.every(r => r.key.startsWith('GET') && r.headers.Authorization === 'Bearer depop-token'));
 
-  const none = offerWorker('depop', depopAnswers({ [DEPOP_OFFERS]: [200, { objects: [depopRow(123, 9)], page_info: { has_more: false } }] }));
+  assert.ok(!check.requests.some(r => r.key.includes('/offers/me/products/')));
+  const none = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: [400, { message: 'No eligible likers' }] }));
   await none.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
     listing_id: SLUG, discount_percent: 15 } });
-  assert.equal(none.results[0].like_count, 0);
-  assert.ok(!none.requests.some(r => r.key === DEPOP_PREVIEW));
-
-  // The next-page parameter was never seen, so a later page is refused, not guessed.
-  const more = offerWorker('depop', depopAnswers({ [DEPOP_OFFERS]: [200, { objects: [depopRow(123, 9)], page_info: { has_more: true } }] }));
-  await more.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+  assert.equal(none.results[0].ok, false);
+  assert.ok(none.requests.every(r => r.key.startsWith('GET')));
+  const single = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: [200, depopPreview({ offer_additional_recipients_count: '0' })] }));
+  await single.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
     listing_id: SLUG, discount_percent: 15 } });
-  assert.deepEqual([more.results[0].ok, more.results[0].error_code], [false, 'not_captured']);
-  assert.equal(more.requests.filter(r => r.key === DEPOP_OFFERS).length, 1);
+  assert.equal(single.results[0].like_count, 1);
 });
 
-test('Depop send-all is the one POST its web client sends, to the preview’s recipient, never repeated', async () => {
-  const sent = offerWorker('depop', depopAnswers());
+test('Depop submits one bulk job, waits for success, and never invents a delivered count or repeats the POST', async () => {
+  const statuses = ['QUEUED', 'PROCESSING', 'SUCCESS'];
+  const sent = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: () => [200, { status: statuses.shift() }] }));
   await depopOffer(sent);
   await depopOffer(sent);
-  assert.deepEqual(sent.results[0], { ok: true, state: 'done', recipient_count: 3 });
+  assert.deepEqual(sent.results[0], { ok: true, state: 'done' });
   assert.deepEqual(sent.results[1], sent.results[0]);
   const posts = sent.requests.filter(r => r.key.startsWith('POST'));
-  assert.deepEqual(posts.map(r => [r.key, r.body]), [[DEPOP_SEND, { offer_recipient_id: 4242, offer_currency: 'USD', offer_value: '42.50' }]]);
+  assert.deepEqual(posts.map(r => [r.key, r.body]), [[DEPOP_SEND, { offer_currency: 'USD', offer_value: '42.50' }]]);
+  assert.equal(sent.requests.filter(r => r.key === DEPOP_JOB).length, 3);
   assert.equal(posts[0].headers.Authorization, 'Bearer depop-token');
   assert.equal(posts[0].headers['Content-Type'], 'application/json');
   assert.equal(sent.store['promotion_action-1'].finished, true);
+});
+
+test('a Depop bulk job with a failed, lost, malformed or timed out status remains uncertain and never resends', async () => {
+  for (const answer of [[200, { status: 'FAILURE' }], [200, { status: 'UNKNOWN' }], [200, {}],
+    [401, {}], [429, {}], [502, 'bad gateway']]) {
+    const run = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: answer }));
+    await depopOffer(run);
+    await depopOffer(run);
+    assert.deepEqual([run.results[0].ok, run.results[0].error_code, run.results[0].safe_to_retry], [false, 'uncertain', false]);
+    assert.equal(run.requests.filter(r => r.key === DEPOP_SEND).length, 1);
+    assert.deepEqual(run.results[1], run.results[0]);
+  }
+  for (const job of [{}, { job_id: '../other' }, { job_id: 123 }]) {
+    const run = offerWorker('depop', depopAnswers({ [DEPOP_SEND]: [200, job] }));
+    await depopOffer(run);
+    assert.deepEqual([run.results[0].error_code, run.results[0].safe_to_retry], ['uncertain', false]);
+    assert.ok(!run.requests.some(r => r.key === DEPOP_JOB));
+  }
+  const timed = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: [200, { status: 'PROCESSING' }] }));
+  vm.runInContext('globalThis.testNow = Date.now(); Date = class extends Date { static now() { return globalThis.testNow; } }', timed.c);
+  timed.c.marketplaceSleep = async () => { timed.c.testNow += 61000; };
+  await depopOffer(timed);
+  assert.deepEqual([timed.results[0].error_code, timed.results[0].safe_to_retry], ['uncertain', false]);
+  assert.equal(timed.requests.filter(r => r.key === DEPOP_SEND).length, 1);
 });
 
 test('Depop never offers below the floor or its lowest offer, above 5% off, on a changed price, several sizes or someone else’s item', async () => {
@@ -370,7 +392,7 @@ test('Depop never offers below the floor or its lowest offer, above 5% off, on a
     [{ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...depopProduct, variants: { 1: { quantity: 1 }, 2: { quantity: 1 } } }] }, {}],
     [{ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...depopProduct, user_id: 8 }] }, {}],
     [{ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...depopProduct, status: 'STATUS_SOLD' }] }, {}],
-    [{ [DEPOP_OFFERS]: [200, { objects: [], page_info: { has_more: false } }] }, {}],
+    [{ [DEPOP_PREVIEW]: [400, { message: 'No eligible likers' }] }, {}],
     [{ [DEPOP_PREVIEW]: [200, depopPreview({ offer_recipient_id: null })] }, {}],
     [{ [DEPOP_PREVIEW]: [200, depopPreview({ product_id: 123 })] }, {}],
     [{ [DEPOP_PREVIEW]: [200, depopPreview({ price_currency: 'GBP' })] }, {}],
