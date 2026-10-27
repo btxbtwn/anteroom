@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.443 — 2026-10-27
+
+- Removed the “Unsent edits” tag from the listing header and the “unsent” tag from sidebar listings.
+
 ## 0.1.442 — 2026-10-27
 
 - Nothing changes in the app. A check that Anteroom runs on every change, that a stuck send fails and the next one in line still goes out, no longer fails at random.
