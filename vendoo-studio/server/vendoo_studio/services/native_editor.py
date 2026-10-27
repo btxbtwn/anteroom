@@ -34,7 +34,7 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
         answer = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form",
                                               {"marketplace": marketplace, "listing": snapshot}, timeout=35)
     except browser_bridge.BrowserBridgeError as exc:
-        raise NativeMarketplaceError(502, "Chrome could not read the marketplace form. Refresh choices.") from exc
+        raise NativeMarketplaceError(502, "Chrome could not read the marketplace form. Reopen the listing to try again.") from exc
     form = answer.get("form") if isinstance(answer, dict) and answer.get("ok") else None
     if not isinstance(form, dict) or form.get("marketplace") != marketplace or form.get("native") is not True:
         message = answer.get("error") if isinstance(answer, dict) else None
@@ -201,7 +201,7 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
         try:
             allowed = await marketplace_schemas.ebay_listing_types(await EbayClient.connect(), category)
         except Exception:  # noqa: BLE001 - fixed price needs no lookup; List checks auctions again
-            note = "eBay's auction rules for this category could not be loaded. Refresh choices."
+            note = "eBay's auction rules for this category could not be loaded. Reopen the listing to try again."
     auction_lengths = allowed.get(AUCTION) or []
     offers_auction = bool(auction_lengths) or kind == AUCTION
     kinds = [FIXED_PRICE] + ([AUCTION] if offers_auction else [])
