@@ -98,11 +98,13 @@ function depopEditorForm(listing, attributes, parcels = []) {
   const category = depopCategory(listing, attributes);
   const choices = [];
   for (const group of attributes.group || []) {
-    for (const department of group.department || []) {
-      const departmentName = depopName((attributes.department || []).find(row => row.id === department)) || department;
-      for (const product of group.product_types || []) choices.push({
-        label: `${departmentName} > ${depopName(group)} > ${depopName(product)}`, value: `${department}_${product.id}`,
-      });
+    if (group.status === 'inactive') continue;
+    for (const product of group.product_types || []) {
+      if (product.status === 'inactive') continue;
+      for (const department of product.department || group.department || []) {
+        const departmentName = depopName((attributes.department || []).find(row => row.id === department)) || department;
+        choices.push({ label: `${departmentName} > ${depopName(group)} > ${depopName(product)}`, value: `${department}_${product.id}` });
+      }
     }
   }
   const mapping = (attributes.category_size_mapping || []).find(row => row.department === category?.department && row.product_type === category?.productType);
@@ -112,34 +114,49 @@ function depopEditorForm(listing, attributes, parcels = []) {
   const posted = depopFormFields(listing, attributes);
   const extraValues = category ? depopAttributeValues(listing, category, attributes).values : {};
   const brands = attributes.brand || attributes.brands || [];
+  const live = row => row && row.status !== 'inactive';
+  // Condition and Color in the order and wording Depop's catalog gives them, limited to the slugs direct List sends.
+  const pageChoices = (definition, known) => (definition?.attributes || [])
+    .filter(row => live(row) && known.has(row.id) && depopPageName(row))
+    .map(row => ({ label: depopPageName(row), value: row.id }));
+  const full = depopDescription(listing);
+  const base = depopBaseDescription(listing).slice(0, DEPOP_MAX_DESCRIPTION);
+  const hashtags = full.startsWith(base) ? full.slice(base.length).trim() : '';
+  // Depop's sell page, top to bottom. Hashtags go at the end of the description,
+  // and the page names its field labels in plain English ("Body fit").
   const fields = [
-    ...nativeEditorBase(listing, { marketplace: 'depop', title: false, maxDescription: DEPOP_MAX_DESCRIPTION, minPrice: 1, maxPrice: 9999999999.99 }),
+    { ...nativeEditorBase(listing, { marketplace: 'depop', title: false, maxDescription: DEPOP_MAX_DESCRIPTION })[0],
+      ...(hashtags ? { help: `List adds the hashtags ${hashtags} to the end.` } : {}) },
     nativeEditorChoice('direct_category_ids.depop', 'Category', depopDirectId(category), choices,
       { required: true, clears: ['depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'],
         help: 'Changing category clears its size and category attributes.' }),
+  ];
+  for (const id of category?.attributeIds || []) {
+    const attr = (attributes.generic_attributes || []).find(row => row.id === id);
+    const options = depopShownChoices(attr, category);
+    if (!options.length) continue;
+    const legacy = id === 'material' ? specifics.material : id === 'occasion' ? specifics.occasion : /-type$/.test(id) ? specifics.type : [];
+    const value = extraValues[id] ?? specifics.attributes?.[id] ?? legacy ?? [];
+    fields.push(nativeEditorChoice(`depop_specifics.attributes.${id}`, depopPageName(attr) || id, value,
+      options.map(row => ({ label: depopPageName(row), value: row.id })),
+      { required: Boolean(attr.is_mandatory), multi: true, category_specific: true, max_values: Math.max(1, Number(attr.max_selection) || 1) }));
+  }
+  fields.push(
     nativeEditorChoice('depop_specifics.brand', 'Brand', depopBrandLabel(brands.find(row => row.id === depopBrand(listing, attributes))) || listing.brand,
       [...new Set(brands.map(depopBrandLabel).filter(Boolean))]),
     nativeEditorChoice('depop_specifics.condition', 'Condition', depopCondition(specifics.condition || listing.form?.overrides?.condition || listing.condition),
-      [...DEPOP_CONDITIONS].map(value => ({ label: value.replace(/^used_/, '').replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()), value })), { required: true }),
-    nativeEditorChoice('primaryColor', 'Primary Color', depopColour(listing.primaryColor),
-      [...DEPOP_COLOURS].map(value => ({ label: value.replace(/^./, c => c.toUpperCase()), value }))),
-    nativeEditorChoice('secondaryColor', 'Secondary Color', depopColour(listing.secondaryColor),
-      [...DEPOP_COLOURS].map(value => ({ label: value.replace(/^./, c => c.toUpperCase()), value }))),
-  ];
+      pageChoices(attributes.condition, DEPOP_CONDITIONS), { required: true }),
+    nativeEditorChoice('depop_specifics.colour', 'Color', posted.colour || [],
+      pageChoices(attributes.colour, DEPOP_COLOURS), { multi: true, max_values: 2 }),
+  );
   if (set) fields.push(nativeEditorChoice('depop_specifics.nativeSizeId', 'Size',
     resolvedSize?.id ?? specifics.nativeSizeId ?? specifics.size ?? '',
     (set.sizes || []).map(row => ({ label: depopName(row), value: row.id })), { required: true, category_specific: true }));
-  for (const id of category?.attributeIds || []) {
-    const attr = (attributes.generic_attributes || []).find(row => row.id === id);
-    if (!attr) continue;
-    const options = (attr.attributes || []).filter(row => row.status !== 'inactive');
-    const legacy = id === 'material' ? specifics.material : id === 'occasion' ? specifics.occasion : /-type$/.test(id) ? specifics.type : [];
-    const value = extraValues[id] ?? specifics.attributes?.[id] ?? legacy ?? [];
-    fields.push(nativeEditorChoice(`depop_specifics.attributes.${id}`, depopName(attr) || id, value,
-      options.map(row => ({ label: depopName(row), value: row.id })),
-      { required: Boolean(attr.is_mandatory), multi: true, category_specific: true, max_values: Math.max(1, Number(attr.max_selection) || 1) }));
-  }
-  for (const key of ['age', 'source', 'style']) {
+  fields.push(
+    nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
+    nativeEditorField('depop_specifics.sku', 'SKU', specifics.sku ?? listing.sku ?? '', { max_length: 50 }),
+  );
+  for (const key of ['source', 'age', 'style']) {
     const attr = !Array.isArray(attributes[key]) && attributes[key]?.attributes ? attributes[key]
       : (attributes.generic_attributes || []).find(row => row.id === key);
     const options = Array.isArray(attributes[key]) ? attributes[key] : attr?.attributes || [];
@@ -147,11 +164,10 @@ function depopEditorForm(listing, attributes, parcels = []) {
       options.filter(row => row.status !== 'inactive').map(row => ({ label: depopName(row), value: row.id })),
       { multi: true, max_values: Math.max(1, Number(attr?.max_selection) || 3) }));
   }
-  fields.push(nativeEditorChoice('depop_specifics.parcelSize', 'Parcel Size', specifics.parcelSize || '',
+  const [price] = nativeEditorBase(listing, { title: false, minPrice: 1, maxPrice: 9999999999.99 }).filter(row => row.path === 'price');
+  fields.push({ ...price, label: 'Item price' },
+  nativeEditorChoice('depop_specifics.parcelSize', 'Package size', specifics.parcelSize || '',
     parcels.map(row => String(row.title)), { required: true }),
-  nativeEditorField('tags', 'Hashtags', listing.tags || [], { multi: true, max_values: DEPOP_MAX_HASHTAGS }),
-  nativeEditorField('depop_specifics.sku', 'SKU', specifics.sku ?? listing.sku ?? '', { max_length: 50 }),
-  nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
   nativeEditorField('depop_specifics.worldwideShipping.enabled', 'Offer worldwide shipping', specifics.worldwideShipping?.enabled === true,
     { input_type: 'boolean' }),
   // Always present so turning worldwide shipping on shows the fee without reloading the form.

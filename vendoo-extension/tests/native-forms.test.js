@@ -271,3 +271,53 @@ test('form reader answers a stalled catalog once and ignores its late completion
   assert.equal(sent.length, 1);
   assert.deepEqual(cleared, [42]);
 });
+
+// Rules read from Depop's sell page by picking every live category on 2026-10-27.
+test('Depop form lists the sell page fields in its order, as the page shows them', () => {
+  const c = loadWorker();
+  const en = (en, us = en) => ({ name_i18n: { en, 'en-US': us } });
+  const attributes = { ...DEPOP,
+    department: [{ id: 'menswear', ...en('Men') }, { id: 'kidswear', ...en('Kids') }],
+    group: [
+      { id: 'bottoms', ...en('Bottoms'), department: ['menswear', 'kidswear'], product_types: [
+        { id: 'jeans', ...en('Jeans'), attribute_ids: ['bottom-fit', 'bottom-style', 'body-fit', 'size-fit'] },
+        { id: 'oxfords', ...en('Oxfords'), status: 'inactive', attribute_ids: [] },
+        { id: 'skorts', ...en('Skorts'), department: ['kidswear'], attribute_ids: [] },
+      ] },
+    ],
+    condition: { attributes: [{ id: 'brand_new', ...en('Brand new') }, { id: 'used_good', ...en('Used - Good') }] },
+    colour: { attributes: [{ id: 'blue', ...en('Blue') }, { id: 'black', ...en('Black') }, { id: 'teal', ...en('Teal') }] },
+    generic_attributes: [
+      // Type: a men's-only field, so a kids' category does not show it.
+      { id: 'bottom-fit', ...en('Type'), max_selection: 3, attributes: [{ id: 'ripped', ...en('Ripped'), department: ['menswear'] }] },
+      // Fit: nameless and retired choices are not offered.
+      { id: 'bottom-style', ...en('Fit'), max_selection: 2, attributes: [
+        { id: 'straight', ...en('Straight '), department: ['menswear', 'kidswear'] }, { id: 'tapered', name_i18n: {} },
+        { id: 'flare', ...en('Flare'), status: 'inactive' }] },
+      // The page names this field and its choices in plain English, not the US name.
+      { id: 'body-fit', ...en('Body fit', 'Size grouping'), max_selection: 2, attributes: [
+        { id: 'tall', ...en('Tall'), department: ['menswear'] }, { id: 'maternity', ...en('Maternity'), department: ['womenswear'] }] },
+      { id: 'size-fit', ...en('Sizing'), status: 'inactive', attributes: [{ id: 'runs-large', ...en('Runs large') }] },
+    ] };
+  const listing = { direct_category_ids: { depop: 'menswear_jeans' }, description: 'Dark wash', tags: ['denim'],
+    primaryColor: 'Blue', secondaryColor: 'Black' };
+  const form = clean(call(c, 'depopEditorForm', listing, attributes, [{ title: 'Medium' }]));
+  assert.deepEqual(form.fields.map(row => row.label), [
+    'Description', 'Category', 'Type', 'Fit', 'Body fit', 'Brand', 'Condition', 'Color', 'Size', 'Quantity', 'SKU',
+    'Source', 'Age', 'Style', 'Item price', 'Package size', 'Offer worldwide shipping', 'Worldwide Shipping',
+  ]);
+  const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
+  assert.deepEqual(rows.Category.options, ['Men > Bottoms > Jeans', 'Kids > Bottoms > Jeans', 'Kids > Bottoms > Skorts']);
+  assert.deepEqual(rows.Fit.options, ['Straight']);
+  assert.deepEqual(rows['Body fit'].options, ['Tall', 'Maternity']);
+  assert.deepEqual(rows.Condition.options, ['Brand new', 'Used - Good']);
+  assert.deepEqual(rows.Color.options, ['Blue', 'Black']);
+  assert.deepEqual(rows.Color.value, ['blue', 'black']);
+  assert.equal(rows.Color.max_values, 2);
+  assert.match(rows.Description.help, /#denim/);
+  assert.equal(rows['Item price'].path, 'price');
+  const kids = clean(call(c, 'depopEditorForm', { ...listing, direct_category_ids: { depop: 'kidswear_jeans' } }, attributes, []));
+  assert.ok(!kids.fields.some(row => row.label === 'Type'));
+  // The form's Color picks are what direct List posts.
+  assert.deepEqual(clean(call(c, 'depopFormFields', { ...listing, depop_specifics: { colour: ['navy'] } }).colour), ['navy']);
+});
