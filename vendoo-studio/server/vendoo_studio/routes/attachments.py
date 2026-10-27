@@ -10,8 +10,10 @@ from vendoo_studio.services.chat_attachments import (
     MAX_ATTACHMENTS,
     STORED_MIME,
     attachment_path,
+    attachment_thumbnail,
     save_attachments,
 )
+from vendoo_studio.services.photos import THUMBNAIL_SIZES
 
 router = APIRouter(tags=["attachments"])
 
@@ -34,10 +36,23 @@ def store_uploads(uploads: list[AttachmentUpload]) -> list[dict]:
 
 
 @router.get("/api/chat-attachments/{attachment_id}")
-def serve_attachment(attachment_id: str):
+def serve_attachment(attachment_id: str, size: int | None = None):
     path = attachment_path(attachment_id)
     if path is None or not path.is_file():
         raise HTTPException(404, "Attachment not found")
+    # The chat grid is a few dozen pixels. The original stays for the lightbox.
+    if size is not None:
+        if size not in THUMBNAIL_SIZES:
+            raise HTTPException(400, "Unsupported thumbnail size")
+        try:
+            thumb = attachment_thumbnail(path, size)
+        except Exception:
+            raise HTTPException(404, "Attachment not found") from None
+        return FileResponse(
+            str(thumb),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
     # Ids are random and never reused, so a browser may keep the image.
     return FileResponse(
         str(path),

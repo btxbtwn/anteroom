@@ -8,6 +8,7 @@ import { BulkPriceDropDialog } from "./BulkPriceDropDialog";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { ListingThumb, SelectCheckbox, ShelfHeader } from "./sidebar/ListingBits";
+import { displayCoverUrl } from "./sidebar/coverSrc";
 
 export const SUGGESTION_KIND_LABELS: Record<SuggestionKind, string> = {
   failed: "Fix failed listing",
@@ -180,7 +181,7 @@ function SuggestionRow({
   const label = suggestionCaption(suggestion, compact);
   const body = (
     <>
-      <ListingThumb src={suggestion.cover_photo_url} />
+      <ListingThumb src={displayCoverUrl(suggestion.cover_photo_url)} />
       <div className="min-w-0 flex-1">
         <div className={cn("text-sm font-medium leading-snug", compact && "truncate")}>{suggestion.title}</div>
         {compact ? (

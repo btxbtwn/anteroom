@@ -3,6 +3,7 @@ import { EllipsisIcon, Globe2Icon } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import { api } from "../api/client";
 import { jobsPollMs } from "../api/polling";
+import { useListingSessionActive } from "./listingSession";
 import { cn } from "../lib/utils";
 import { RegenerateListingButton, useClearListing } from "./ClearListingButton";
 import { OpenListingButton } from "./OpenListingButton";
@@ -34,10 +35,11 @@ function notesVendooUrl(notes?: string | null): string | null {
 
 /** The listing's own job, plus the Vendoo ids the notes remember after a clear. */
 function useListingJob(convId: string) {
+  const sessionActive = useListingSessionActive();
   const { data: jobs } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
+    refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
   const { data: conversation } = useQuery({
     queryKey: ["conversation", convId],

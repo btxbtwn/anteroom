@@ -5,6 +5,7 @@ import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, jobsPollMs, pollMs } from "../a
 import type { BrowserField } from "../api/client";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { ChatPanel } from "../components/ChatPanel";
+import { ListingSession } from "../components/listingSession";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { BrowserPreview } from "../components/BrowserPreview";
 import { ListingSidebar } from "../components/ListingSidebar";
@@ -893,13 +894,15 @@ export function App() {
                   {listingTabs.tabs.map((tab) => (
                     <div className="listing-workspace-main listing-session" key={`${tab.id}:${tab.nonce}`} hidden={tab.id !== selectedConvId}>
                       <div className="chat-column">
-                        <ChatPanel
-                          convId={tab.id}
-                          queuedMessage={tab.queuedMessage}
-                          onQueuedMessageConsumed={() => dispatchListingTab({ type: "message", id: tab.id, value: null })}
-                          browser={tab.id === selectedConvId && browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
-                          onBrowserFieldsChange={setBrowserFields}
-                        />
+                        <ListingSession active={tab.id === selectedConvId && activeView === "listings"}>
+                          <ChatPanel
+                            convId={tab.id}
+                            queuedMessage={tab.queuedMessage}
+                            onQueuedMessageConsumed={() => dispatchListingTab({ type: "message", id: tab.id, value: null })}
+                            browser={tab.id === selectedConvId && browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
+                            onBrowserFieldsChange={setBrowserFields}
+                          />
+                        </ListingSession>
                       </div>
                     </div>
                   ))}
@@ -924,30 +927,32 @@ export function App() {
                   listingTabs.tabs.map((tab) => (
                     <div className="listing-session" key={`${tab.id}:${tab.nonce}`} hidden={tab.id !== selectedConvId}>
                       <Suspense fallback={null}>
-                        <ListingEditor
-                          convId={tab.id}
-                          reviewTab={tab.reviewTab}
-                          onReviewTabChange={(value) => dispatchListingTab({ type: "review", id: tab.id, value })}
-                          onOpenBrowser={(jobId) => openBrowser.mutate(jobId)}
-                          browserOpen={tab.id === selectedConvId && browserOpen}
-                          onAskChat={(text) => {
-                            dispatchListingTab({ type: "message", id: tab.id, value: text });
-                            setMobilePane("workspace");
-                          }}
-                          onCleared={() => {
-                            clearListingWorkspace(tab.id);
-                          }}
-                          onEditInventoryLocation={openEbayInventoryLocation}
-                          onBulkListingsCreated={(listings, generate) => {
-                            if (generate) void generateBatch(listings);
-                            const first = listings[0]?.convId;
-                            if (!first) return;
-                            setSelectedConvId(first);
-                            goListings();
-                            setMobilePane("workspace");
-                            setMobileSidebarOpen(false);
-                          }}
-                        />
+                        <ListingSession active={tab.id === selectedConvId && activeView === "listings"}>
+                          <ListingEditor
+                            convId={tab.id}
+                            reviewTab={tab.reviewTab}
+                            onReviewTabChange={(value) => dispatchListingTab({ type: "review", id: tab.id, value })}
+                            onOpenBrowser={(jobId) => openBrowser.mutate(jobId)}
+                            browserOpen={tab.id === selectedConvId && browserOpen}
+                            onAskChat={(text) => {
+                              dispatchListingTab({ type: "message", id: tab.id, value: text });
+                              setMobilePane("workspace");
+                            }}
+                            onCleared={() => {
+                              clearListingWorkspace(tab.id);
+                            }}
+                            onEditInventoryLocation={openEbayInventoryLocation}
+                            onBulkListingsCreated={(listings, generate) => {
+                              if (generate) void generateBatch(listings);
+                              const first = listings[0]?.convId;
+                              if (!first) return;
+                              setSelectedConvId(first);
+                              goListings();
+                              setMobilePane("workspace");
+                              setMobileSidebarOpen(false);
+                            }}
+                          />
+                        </ListingSession>
                       </Suspense>
                     </div>
                   ))

@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
+import { useListingSessionActive } from "./listingSession";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
 import { EbayVariationsEditor, normalizeVariations, variationTotal } from "./EbayVariationsEditor";
 import { MarketplaceMedia } from "./MarketplaceMedia";
@@ -122,10 +123,11 @@ export function ListingEditor({
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [fieldTarget, setFieldTarget] = React.useState<{ field: string; sequence: number } | null>(null);
   const editorRef = React.useRef<HTMLDivElement>(null);
+  const sessionActive = useListingSessionActive();
   const { data: jobs, isLoading: jobsLoading } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
+    refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
   const { data: photos, isLoading: photosLoading } = useQuery({
     queryKey: ["photos", convId],
@@ -229,7 +231,7 @@ export function ListingEditor({
   const { data } = useQuery({
     queryKey: ["listing", convId],
     queryFn: () => api.listings.get(convId),
-    refetchInterval: schemaProbeActive ? 3000 : false,
+    refetchInterval: sessionActive && schemaProbeActive ? 3000 : false,
   });
 
   const { data: uiPrefs } = useQuery({
@@ -314,7 +316,7 @@ export function ListingEditor({
   const { data: activity } = useQuery({
     queryKey: ["activity", convId],
     queryFn: () => api.conversations.activity(convId),
-    refetchInterval: (query) => activityPollMs(Boolean(query.state.data?.busy)),
+    refetchInterval: (query) => (sessionActive ? activityPollMs(Boolean(query.state.data?.busy)) : false),
   });
   const generating = chatBusy || Boolean(activity?.busy) || schemaProbeActive;
   const askChat = generating ? undefined : onAskChat;
@@ -1467,6 +1469,7 @@ function SendToVendooButton({
   onSelectBlocker: (field: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const sessionActive = useListingSessionActive();
   const [error, setError] = React.useState<string | null>(null);
   const sendLock = React.useRef(false);
   const bound = Boolean(vendooItemId);
@@ -1492,13 +1495,13 @@ function SendToVendooButton({
   const { data: extStatus } = useQuery({
     queryKey: ["extension-status"],
     queryFn: api.extension.status,
-    refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
+    refetchInterval: () => (sessionActive ? pollMs(EXTENSION_STATUS_POLL_MS) : false),
   });
 
   const { data: jobs } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
+    refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
 
   const listingJob = jobs?.find((j) => j.conversation_id === convId && j.status !== "cancelled" && j.mode !== "native_marketplace");
@@ -1518,7 +1521,7 @@ function SendToVendooButton({
     queryKey: ["fill-log", listingJobId],
     queryFn: () => api.jobs.fillLog(listingJobId!),
     enabled: Boolean(listingJobId),
-    refetchInterval: () => fillLogPollMs(listingJob?.status),
+    refetchInterval: () => (sessionActive ? fillLogPollMs(listingJob?.status) : false),
   });
   const { data: hiddenData } = useQuery({
     queryKey: ["settings-hidden-fields", convId],

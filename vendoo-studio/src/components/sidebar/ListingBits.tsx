@@ -1,9 +1,11 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { CheckIcon, ChevronDownIcon, ImageIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 /** Square cover thumbnail shared by sidebar rows, suggestions and bulk dialogs. */
 export function ListingThumb({ src, dimmed = false, className }: { src?: string | null; dimmed?: boolean; className?: string }) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const showImage = Boolean(src) && src !== failedSrc;
   return (
     <div
       aria-hidden="true"
@@ -12,14 +14,15 @@ export function ListingThumb({ src, dimmed = false, className }: { src?: string 
         className,
       )}
     >
-      {src ? (
+      {showImage ? (
         <img
           className={cn("block size-full object-cover transition-opacity", dimmed && "opacity-55")}
-          src={src}
+          src={src ?? undefined}
           alt=""
           loading="lazy"
           decoding="async"
           draggable={false}
+          onError={() => setFailedSrc(src ?? null)}
         />
       ) : (
         <ImageIcon className="size-4 opacity-70" />
