@@ -483,10 +483,10 @@ test('a cancel after the post exists still removes it, with its own short limit'
   const original = c.fetch;
   c.fetch = async (url, options = {}) => {
     const answer = await original(url, options);
-    if (new URL(url).pathname.endsWith('/media/scratch')) vm.runInContext('activeNativeOperation.cancelled = true', c);
+    if (new URL(url).pathname.endsWith('/media/scratch')) vm.runInContext('nativeOperationFor("poshmark").cancelled = true', c);
     return answer;
   };
-  vm.runInContext("activeNativeOperation = { id: 'op-1', cancelled: false, controller: new AbortController() }", c);
+  vm.runInContext("claimNativeOperation('poshmark', 'op-1')", c);
   const result = await c.runPoshmarkApi(msg);
   assert.equal(result.ok, false);
   assert.equal(result.safe_to_retry, true);

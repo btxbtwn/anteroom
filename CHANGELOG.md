@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.448 — 2026-10-27
+## 0.1.449 — 2026-10-27
 
 - The listing assistant no longer writes "Does Not Apply". A field that doesn't fit the item is left empty, and Anteroom remembers you don't need to fill it.
+
+## 0.1.448 — 2026-10-27
+
+- List, update and save drafts on several marketplaces at the same time instead of one after another. Bulk List and Update now work on up to three items at once. Two items on the same marketplace still take turns, and Delist still waits for listings to finish.
 
 ## 0.1.447 — 2026-10-27
 

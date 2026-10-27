@@ -1409,7 +1409,7 @@ async function depopShopUrl(request, payload) {
 }
 
 async function depopAction(action, payload) {
-  if (activeNativeOperation?.cancelled) throw marketplaceError('Marketplace action cancelled.', { code: 'network' });
+  if (nativeOperationFor('depop')?.cancelled) throw marketplaceError('Marketplace action cancelled.', { code: 'network' });
   const result = await depopApiAction(action, payload);
   if (!result || result.error) {
     const error = marketplaceError(result?.error || 'Depop did not confirm the result.', { code: result?.error_code || 'uncertain',

@@ -140,7 +140,7 @@ test('Vinted reports a known listing missing from the live wardrobe when that li
 test('a sale check waits while another marketplace action is running', async () => {
   const { c } = worker({});
   c.fetch = async () => { throw new Error('should not read'); };
-  vm.runInContext('activeNativeOperation = { id: "busy" }', c);
+  vm.runInContext('claimNativeOperation("*", "busy")', c);
   assert.deepEqual(await read(c, 'poshmark', ['aaaaaaaaaaaaaaaaaaaaaaaa']), { ok: true, sales: [], skipped: true });
-  vm.runInContext('activeNativeOperation = null', c);
+  vm.runInContext('nativeOperations.clear()', c);
 });

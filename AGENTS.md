@@ -100,7 +100,7 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 - API keys and sign-in tokens never enter the database in plain text, logs, frontend responses, or extension messages. On the Mac they live in macOS Keychain. When the hosted API takes over generation (step 4 of `docs/cloud-architecture.md`), they move to Supabase Vault, encrypted at rest, and are never returned to any client.
 - On the Mac, bind Anteroom only to `127.0.0.1`. The hosted API on Fly.io is the only part that accepts connections from outside, and it requires a Supabase session on every request except health checks and marketplace webhooks. The Mac worker connects to it outbound and binds nothing. Optional private Tailscale Serve (Settings → Connections) may proxy Tailnet HTTPS to that loopback port; never Funnel and never bind to `0.0.0.0`.
 - Require human approval before sending to Vendoo.
-- Allow one automation job at a time. Additional approved Sends may wait in a FIFO queue and start when the current job finishes, fails, or is cancelled.
+- Allow one Vendoo automation job at a time. Additional approved Sends may wait in a FIFO queue and start when the current job finishes, fails, or is cancelled. Direct marketplace List, Update and Save draft actions may run side by side, one per marketplace, but never alongside a Vendoo job, a delist or a page inspection.
 - Do not introduce Redis, MongoDB, Celery, or provider substitutions unless explicitly requested.
 - Approved cloud services (2026-10-26, see `docs/cloud-architecture.md`):
   - **Supabase** for accounts, Postgres, photo storage, Realtime and Vault. Every seller table has row-level security keyed to the seller's `user_id`.

@@ -33,7 +33,10 @@ Action = Literal["list", "delist", "relist", "update", "not_listed"]
 Name = Literal["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop",
          "sellwild": "Sellwild", "vinted": "Vinted"}
-_running = False
+# Items with a bulk action in flight. List and Update run several items at
+# once and take turns on each marketplace; any other action holds "*" alone.
+SIDE_BY_SIDE_ACTIONS = frozenset({"list", "update"})
+_running: set[str] = set()
 
 
 class PreviewRequest(BaseModel):
@@ -136,18 +139,21 @@ def preview(db: Session, body: PreviewRequest) -> dict:
 
 async def perform(db: Session, body: PerformRequest) -> dict:
     """One reviewed item. Every marketplace named is tried once; nothing retries."""
-    global _running
     from vendoo_studio.services.automations import AutomationBusy
+    from vendoo_studio.services.native_marketplaces import blocking_job
 
     if body.confirm is not True:
         raise HTTPException(400, "Review and confirm this marketplace action first.")
-    if _running:
+    side_by_side = body.action in SIDE_BY_SIDE_ACTIONS
+    if body.conversation_id in _running or "*" in _running or (_running and not side_by_side):
         raise HTTPException(409, "Another marketplace action is running. Wait for it to finish.")
-    _running = True
+    key = body.conversation_id if side_by_side else "*"
+    _running.add(key)
     try:
         with start_gate():
             db.expire_all()
-            if JobRepo(db).get_active():
+            repo = JobRepo(db)
+            if blocking_job(repo, None) if side_by_side else repo.get_active():
                 raise HTTPException(409, "A marketplace job is running. Wait for it to finish.")
             current = review_row(db, body.conversation_id, body.action, list(body.marketplaces))
             if current["skip_reason"] or current["skipped"]:
@@ -161,7 +167,7 @@ async def perform(db: Session, body: PerformRequest) -> dict:
         except AutomationBusy as exc:
             raise HTTPException(409, str(exc) or "A marketplace job is running. Wait for it to finish.") from exc
     finally:
-        _running = False
+        _running.discard(key)
     return {"conversation_id": body.conversation_id, "action": body.action, "marketplaces": list(body.marketplaces),
             "ok": bool(result.get("ok")), "state": result.get("state"), "error": result.get("error"),
             "errors": result.get("errors") or {}, "down": list(result.get("down") or [])}

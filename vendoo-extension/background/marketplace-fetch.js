@@ -19,7 +19,7 @@ function marketplaceLabel(marketplace) {
 
 // Structured per-step log. Never cookies, tokens, URLs with queries or listing text.
 function marketplaceLog(marketplace, step, details = {}) {
-  const fields = { op: activeNativeOperation?.id || null, step, ...details };
+  const fields = { op: nativeOperationFor(marketplace)?.id || null, step, ...details };
   const text = Object.entries(fields).filter(([, value]) => value != null && value !== '')
     .map(([key, value]) => `${key}=${value}`).join(' ');
   console.log(`[${String(marketplace || 'market').toUpperCase()}] ${text}`);
@@ -149,11 +149,12 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
   const label = marketplaceLabel(marketplace);
   const write = !['GET', 'HEAD'].includes(method);
   await ensureMarketplaceRequestContext();
+  const operation = guard ? nativeOperationFor(marketplace) : null;
   for (let attempt = 0; ; attempt += 1) {
-    if (guard && (activeNativeOperation?.cancelled || Date.now() >= deadline)) throw marketplaceStopped(marketplace);
+    if (guard && (operation?.cancelled || Date.now() >= deadline)) throw marketplaceStopped(marketplace);
     const remaining = deadline - Date.now();
     const signals = [AbortSignal.timeout(Math.max(500, Math.min(timeoutMs, remaining)))];
-    if (guard && activeNativeOperation?.controller) signals.push(activeNativeOperation.controller.signal);
+    if (operation?.controller) signals.push(operation.controller.signal);
     const started = Date.now();
     let response;
     let failure = null;
@@ -161,7 +162,7 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       response = await fetch(url, { method, headers, credentials, ...(body === undefined ? {} : { body }),
         signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0] });
     } catch (error) {
-      const cancelled = guard && activeNativeOperation?.cancelled;
+      const cancelled = operation?.cancelled === true;
       failure = marketplaceError(cancelled ? `The ${label} action was cancelled.`
         : `${label} did not answer${error?.name === 'TimeoutError' ? ' in time' : ''}.`,
       { code: write ? 'uncertain' : 'network', rejected: false });

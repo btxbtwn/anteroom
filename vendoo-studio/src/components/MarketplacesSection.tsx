@@ -35,6 +35,7 @@ type Tone = "live" | "neutral" | "busy" | "attention" | "failed" | "idle";
 type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; detail?: string | null; said?: string | null };
 
 const BUSY = new Set(["saving", "publishing", "updating"]);
+type ActionKind = "check" | "list" | "save_draft" | "update" | "cancel" | "reset" | "reconnect";
 export const ETSY_NOT_ELIGIBLE = "Etsy only allows vintage (20+ years), handmade or craft supplies. This item doesn't qualify.";
 
 /** A record whose job is running now. A busy state with no job running is unconfirmed until checked. */
@@ -190,10 +191,11 @@ export function MarketplacesLayout({
     staleTime: 15_000,
   });
 
+  // Each marketplace tracks its own request, so starting one never locks the others.
+  const [starting, setStarting] = useState<Partial<Record<NativeMarketplace, ActionKind>>>({});
+  const [actionErrors, setActionErrors] = useState<Partial<Record<NativeMarketplace, string>>>({});
   const action = useMutation({
-    mutationFn: async ({ marketplace, kind, draftUrl }: {
-      marketplace: NativeMarketplace; kind: "check" | "list" | "save_draft" | "update" | "cancel" | "reset" | "reconnect"; draftUrl?: string;
-    }) => {
+    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: ActionKind; draftUrl?: string }) => {
       if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
       if (kind === "cancel") return api.nativeMarketplaces.cancel(convId, marketplace);
       if (kind === "reset") return api.nativeMarketplaces.reset(convId, marketplace);
@@ -208,7 +210,13 @@ export function MarketplacesLayout({
       return api.nativeMarketplaces.list(convId, marketplace, revisionId);
     },
     retry: false,
-    onSettled: () => {
+    onMutate: ({ marketplace, kind }) => {
+      setStarting((current) => ({ ...current, [marketplace]: kind }));
+      setActionErrors((current) => ({ ...current, [marketplace]: undefined }));
+    },
+    onError: (error, { marketplace }) => setActionErrors((current) => ({ ...current, [marketplace]: error.message })),
+    onSettled: (_data, _error, { marketplace }) => {
+      setStarting((current) => ({ ...current, [marketplace]: undefined }));
       void queryClient.invalidateQueries({ queryKey: nativeKey });
       void queryClient.invalidateQueries({ queryKey: ["native-editor-form", convId] });
       void queryClient.invalidateQueries({ queryKey: liveKey });
@@ -301,13 +309,15 @@ export function MarketplacesLayout({
       { confirmLabel: "I checked it myself" })) action.mutate({ marketplace, kind: "reset" });
   }
 
-  const busy = disabled || action.isPending || delist.isPending || mark.isPending || recordSale.isPending || native.isPending || native.isError;
+  const busy = disabled || delist.isPending || mark.isPending || recordSale.isPending || native.isPending || native.isError;
   const statuses = ORDER.map((marketplace) => rowStatus(marketplace, listings[marketplace],
     NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined, revisionId, etsyEligible));
   const removable = ORDER.filter((marketplace) => deletable(listings[marketplace]));
   const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
 
   const running = (marketplace: Marketplace) => isRunning(drafts[marketplace as NativeMarketplace]);
+  const startingOn = (marketplace: Marketplace) => Boolean(starting[marketplace as NativeMarketplace]);
+  const actionError = Object.values(actionErrors).filter(Boolean).join(" ");
   const unconfirmed = (marketplace: Marketplace) => NATIVE.has(marketplace)
     && ["saving", "publishing", "updating", "unknown"].includes(drafts[marketplace as NativeMarketplace]?.state ?? "");
   const retryIn = (marketplace: Marketplace) => {
@@ -342,27 +352,27 @@ export function MarketplacesLayout({
   function actions(marketplace: Marketplace, status: Status): ReactNode {
     const m = marketplace as NativeMarketplace;
     if (running(marketplace)) {
-      return <Button size="xs" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ marketplace: m, kind: "cancel" })}>Cancel</Button>;
+      return <Button size="xs" variant="outline" disabled={startingOn(m)} onClick={() => action.mutate({ marketplace: m, kind: "cancel" })}>Cancel</Button>;
     }
     if (unconfirmed(marketplace)) {
       return (
         <>
-          <Button size="xs" variant="ghost" disabled={action.isPending} onClick={() => void resetNow(m)}>I checked it myself…</Button>
-          <Button size="xs" variant="outline" disabled={action.isPending} onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check result</Button>
+          <Button size="xs" variant="ghost" disabled={startingOn(m)} onClick={() => void resetNow(m)}>I checked it myself…</Button>
+          <Button size="xs" variant="outline" disabled={startingOn(m)} onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check result</Button>
         </>
       );
     }
     if (updatable(marketplace, status)) {
-      const pending = action.isPending && action.variables?.marketplace === m && action.variables?.kind === "update";
-      return <Button size="xs" variant="outline" disabled={busy} onClick={() => void updateNow(m)}>{pending ? "Updating…" : "Update…"}</Button>;
+      const pending = starting[m] === "update";
+      return <Button size="xs" variant="outline" disabled={busy || startingOn(m)} onClick={() => void updateNow(m)}>{pending ? "Updating…" : "Update…"}</Button>;
     }
     if (!listable(marketplace, status)) return null;
-    const pending = action.isPending && action.variables?.marketplace === m;
+    const pending = startingOn(m);
     const wait = retryIn(marketplace);
     return <>
-      {REMOTE_DRAFT.has(marketplace) && <Button size="xs" variant="ghost" disabled={busy || listBlocked(marketplace)}
+      {REMOTE_DRAFT.has(marketplace) && <Button size="xs" variant="ghost" disabled={busy || pending || listBlocked(marketplace)}
         onClick={() => action.mutate({ marketplace: m, kind: "save_draft" })}>Save draft</Button>}
-      <Button size="xs" variant="outline" disabled={busy || listBlocked(marketplace)} onClick={() => void listNow(m)}>
+      <Button size="xs" variant="outline" disabled={busy || pending || listBlocked(marketplace)} onClick={() => void listNow(m)}>
         {pending ? "Working…" : wait > 0 ? `Retry in ${wait}s` : "List…"}</Button>
     </>;
   }
@@ -376,7 +386,7 @@ export function MarketplacesLayout({
     const canDelist = deletable(entry);
     return (
       <Menu>
-        <MenuTrigger render={<Button variant="ghost" size="icon-xs" className="shrink-0" aria-label={`${name} actions`} disabled={busy} />}>
+        <MenuTrigger render={<Button variant="ghost" size="icon-xs" className="shrink-0" aria-label={`${name} actions`} disabled={busy || startingOn(m)} />}>
           <EllipsisIcon />
         </MenuTrigger>
         <MenuPopup align="end" width="content">
@@ -441,11 +451,11 @@ export function MarketplacesLayout({
     const code = draft.error_code;
     const buttons: ReactNode[] = [];
     if (code === "signed_out") {
-      buttons.push(<Button key="reconnect" size="xs" variant="outline" disabled={action.isPending}
+      buttons.push(<Button key="reconnect" size="xs" variant="outline" disabled={startingOn(m)}
         onClick={() => action.mutate({ marketplace: m, kind: "reconnect" })}>Reconnect {name}</Button>);
     }
     if (code === "challenge") {
-      buttons.push(<Button key="open" size="xs" variant="outline" disabled={action.isPending}
+      buttons.push(<Button key="open" size="xs" variant="outline" disabled={startingOn(m)}
         onClick={() => action.mutate({ marketplace: m, kind: "reconnect" })}>Open {name}</Button>);
     }
     if (code === "missing_fields" && onEditField) {
@@ -565,8 +575,8 @@ export function MarketplacesLayout({
           onClick={() => startSale("other")}>Record a sale…</Button>
       </nav>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
-        {(native.error || live.error || action.error || delist.error || mark.error) && (
-          <p role="alert" className="text-destructive-foreground text-xs">{(mark.error || action.error || delist.error || native.error || live.error)?.message}</p>
+        {(native.error || live.error || actionError || delist.error || mark.error) && (
+          <p role="alert" className="text-destructive-foreground text-xs">{mark.error?.message || actionError || (delist.error || native.error || live.error)?.message}</p>
         )}
         {selling && <MarkSoldForm key={selling.key} initial={selling.marketplace} pending={recordSale.isPending}
           error={recordSale.error?.message} onSubmit={(sale) => recordSale.mutate(sale)} onCancel={() => setSelling(null)} />}
@@ -599,7 +609,7 @@ export function MarketplacesLayout({
                   <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"
                     value={draftLinks[selectedMarketplace as NativeMarketplace] || ""}
                     onChange={(event) => setDraftLinks({ ...draftLinks, [selectedMarketplace]: event.target.value })} />
-                  <Button size="xs" variant="outline" disabled={action.isPending || !draftLinks[selectedMarketplace as NativeMarketplace]?.trim()}
+                  <Button size="xs" variant="outline" disabled={startingOn(selectedMarketplace) || !draftLinks[selectedMarketplace as NativeMarketplace]?.trim()}
                     onClick={() => action.mutate({ marketplace: selectedMarketplace as NativeMarketplace, kind: "check", draftUrl: draftLinks[selectedMarketplace as NativeMarketplace]?.trim() })}>Check link</Button>
                 </div>
               );
