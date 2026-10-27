@@ -212,13 +212,44 @@ async function handleMarketplaceConnect(msg) {
 // header names, and value types. Never header values, cookies, listing text,
 // photos, or response values. Facebook's recording runs until the seller
 // closes the tab, so one session can cover its selling list, mark as sold,
-// delete and composer requests.
+// delete and composer requests. An offers recording starts on the seller's
+// listings, also runs until the tab closes, and keeps the page's reads too,
+// because the likers list is fetched rather than posted.
 const MARKETPLACE_RECORD_START = {
   mercari: 'https://www.mercari.com/sell/',
   sellwild: 'https://sellwild.com/sell',
   facebook: 'https://www.facebook.com/marketplace/you/selling',
 };
+const MARKETPLACE_OFFER_RECORD_START = {
+  mercari: 'https://www.mercari.com/mypage/listings/active/',
+  depop: 'https://www.depop.com/',
+};
 const RECORD_LIMIT_MS = 5 * 60 * 1000;
+const RECORD_MAX_REQUESTS = 400;
+
+// Path segments holding item ids or numbers become :id, so a recorded path
+// names the endpoint without naming the listing.
+function recordedPath(url) {
+  return url.origin + url.pathname.split('/')
+    .map(part => (part.length >= 6 && /\d/.test(part) ? ':id' : part)).join('/');
+}
+
+// A GET GraphQL request carries its operation in the query string.
+function recordedQuery(url) {
+  const params = url.searchParams;
+  if (!params.has('operationName')) return { kind: 'query', names: [...new Set(params.keys())].sort() };
+  const parsed = name => { try { return JSON.parse(params.get(name) || '{}'); } catch { return {}; } };
+  return recordedBody(JSON.stringify({ operationName: params.get('operationName'),
+    variables: parsed('variables'), extensions: parsed('extensions') }));
+}
+
+// Writes are always kept. Reads are kept only in an offers recording and only
+// when the page fetched them, not documents, scripts or images.
+function recordedRequest(event, goal) {
+  if (['HEAD', 'OPTIONS'].includes(event.request.method)) return false;
+  if (event.request.method !== 'GET') return true;
+  return goal === 'offers' && ['XHR', 'Fetch'].includes(event.type);
+}
 
 function valueShape(value, depth = 0) {
   if (Array.isArray(value)) return value.length ? [valueShape(value[0], depth + 1)] : [];
@@ -298,7 +329,8 @@ function draftSaved(entry) {
 
 async function handleMarketplaceRecord(msg) {
   const marketplace = msg.payload?.marketplace;
-  const url = MARKETPLACE_RECORD_START[marketplace];
+  const goal = msg.payload?.goal === 'offers' ? 'offers' : 'draft';
+  const url = (goal === 'offers' ? MARKETPLACE_OFFER_RECORD_START : MARKETPLACE_RECORD_START)[marketplace];
   if (!url || activeNativeOperation || activeJob || activePatch) {
     sendBrowserResult(msg, { ok: false, error: url ? 'Wait for the current listing action to finish.' : 'Recording is not set up for this marketplace.' });
     return;
@@ -316,13 +348,14 @@ async function handleMarketplaceRecord(msg) {
     const finished = new Promise(resolve => { finish = resolve; });
     listener = (source, method, event) => {
       if (source.tabId !== tab.id) return;
-      if (method === 'Network.requestWillBeSent' && !['GET', 'HEAD', 'OPTIONS'].includes(event.request.method)) {
+      if (method === 'Network.requestWillBeSent' && entries.size < RECORD_MAX_REQUESTS && recordedRequest(event, goal)) {
         let target;
         try { target = new URL(event.request.url); } catch { return; }
-        const entry = { method: event.request.method, url: target.origin + target.pathname,
+        const entry = { method: event.request.method, url: recordedPath(target),
           header_names: Object.keys(event.request.headers || {}).map(name => name.toLowerCase()).sort(),
           content_type: Object.entries(event.request.headers || {}).find(([name]) => name.toLowerCase() === 'content-type')?.[1] || null };
         entries.set(event.requestId, entry);
+        if (event.request.method === 'GET') entry.query = recordedQuery(target);
         const record = raw => { if (raw) entry.body = recordedBody(raw, entry.content_type); };
         // File uploads arrive as base64 postDataEntries rather than postData.
         const entriesText = (event.request.postDataEntries || []).map(part => part.bytes ? atob(part.bytes) : '').join('');
@@ -341,7 +374,9 @@ async function handleMarketplaceRecord(msg) {
         const entry = entries.get(event.requestId);
         chrome.debugger.sendCommand({ tabId: tab.id }, 'Network.getResponseBody', { requestId: event.requestId }).then(result => {
           entry.response = recordedResponse(result.base64Encoded ? atob(result.body) : result.body);
-        }).catch(() => {}).finally(() => { if (marketplace !== 'facebook' && draftSaved(entry)) setTimeout(finish, 1500); });
+        }).catch(() => {}).finally(() => {
+          if (marketplace !== 'facebook' && goal === 'draft' && draftSaved(entry)) setTimeout(finish, 1500);
+        });
       }
     };
     chrome.debugger.onEvent.addListener(listener);
@@ -352,7 +387,7 @@ async function handleMarketplaceRecord(msg) {
     });
     await Promise.race([finished, closed, new Promise(resolve => setTimeout(resolve, RECORD_LIMIT_MS))]);
     const requests = [...entries.values()];
-    sendBrowserResult(msg, { ok: true, marketplace, draft_saved: requests.some(draftSaved), requests });
+    sendBrowserResult(msg, { ok: true, marketplace, goal, draft_saved: requests.some(draftSaved), requests });
   } catch (error) {
     sendBrowserResult(msg, { ok: false, error: `Recording stopped: ${String(error.message || error)}`, requests: [...entries.values()] });
   } finally {
