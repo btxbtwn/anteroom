@@ -34,6 +34,19 @@ describe("marketplace form fields", () => {
       type: "variations", defaultValue: value, variationAspects: aspects,
     });
   });
+  it("shows Depop's own Size and Size grouping once on a bottoms listing", () => {
+    const jeans = { ...listing, title: "Jack & Jones jeans", category_path: "Men > Jeans", department: "Men",
+      depop_specifics: { size: "34\"", sizeGrouping: "Does Not Apply" } };
+    const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "menswear_jeans", fields: [
+      { key: "depop_specifics.nativeSizeId", path: "depop_specifics.nativeSizeId", label: "Size", value: "34", required: true,
+        multi: false, selection_only: true, options: ["34"], options_source: "marketplace" },
+      { key: "depop_specifics.attributes.body-fit", path: "depop_specifics.attributes.body-fit", label: "Size grouping", value: [],
+        required: false, multi: true, selection_only: true, options: ["Petite", "Tall"], options_source: "marketplace" },
+    ] };
+    const labels = fieldsForMarketplaceForm(jeans, "depop", [form]).map((field) => field.label.replace(/\s*\*$/, "").toLowerCase());
+    expect(labels.filter((label) => label === "size")).toHaveLength(1);
+    expect(labels.filter((label) => label === "size grouping")).toHaveLength(1);
+  });
   it("keeps the category-specific flag so a category change can replace only those rows", () => {
     const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "womenswear_tops", fields: [
       { key: "price", path: "price", label: "Price", value: 20, required: true, multi: false, selection_only: false, options: [], input_type: "number" },

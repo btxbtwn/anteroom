@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.449 — 2026-10-27
+
+- On pants and jeans, Depop shows one Size and one Size grouping field again. The extra copies with “outside these reference choices” warnings are gone, and Depop’s own fields still start from the size you saved.
+
 ## 0.1.448 — 2026-10-27
 
 - List, update and save drafts on several marketplaces at the same time instead of one after another. Bulk List and Update now work on up to three items at once. Two items on the same marketplace still take turns, and Delist still waits for listings to finish.
