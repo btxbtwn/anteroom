@@ -433,18 +433,6 @@ export function ListingEditor({
           />
           {conversation?.unsent_edits ? (
             <>
-              <Badge
-                variant="info"
-                title={
-                  directMarketplaces.length
-                    ? `This listing has changed since it was listed on ${directMarketplaces.map(marketplaceName).join(", ")}. Update it there from Marketplaces.`
-                    : vendooEnabled
-                      ? "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
-                      : "This listing has changed since it was last saved."
-                }
-              >
-                Unsent edits
-              </Badge>
               {/* Discard pulls Vendoo's copy, which a directly listed item no longer follows. */}
               {vendooEnabled && !directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
                 <InlineButton
