@@ -211,6 +211,7 @@ async def _run() -> None:
                 if not page_token:
                     break
             _delete_missing(db, conv_repo, seen_ids)
+            await _convert_label_ids(db)
             # An empty response with bound listings is treated as a quiet Vendoo
             # session above, so it cannot establish that analytics is current.
             inventory_verified = bool(seen_ids) or not conv_repo.vendoo_bound_item_ids()
@@ -228,6 +229,22 @@ async def _run() -> None:
         _progress.running = False
         _progress.current_title = ""
         _progress.finished_at = utcnow().isoformat()
+
+
+async def _convert_label_ids(db) -> None:
+    """Store the imported items' Vendoo label ids as names, so no id outlives the import."""
+    from vendoo_studio.services import vendoo_label_catalog
+    from vendoo_studio.services.vendoo_create import LOOKUP_TIMEOUT_SEC, label_display_map
+
+    try:
+        names = await label_display_map(None, timeout=LOOKUP_TIMEOUT_SEC)
+        result = vendoo_label_catalog.convert_stored_labels(db, names)
+    except Exception:  # noqa: BLE001 - the import itself finished; Settings can convert later
+        log.warning("Vendoo label ids not converted after import", exc_info=True)
+        db.rollback()
+        return
+    if result["unknown"]:
+        log.warning("Vendoo label ids with no name after import: %s", ", ".join(result["unknown"]))
 
 
 def _delete_missing(db, conv_repo, seen_ids: set[str]) -> None:

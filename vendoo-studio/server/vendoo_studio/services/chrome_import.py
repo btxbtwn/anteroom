@@ -98,12 +98,13 @@ def _text(value, limit: int) -> str:
     return value.strip()[:limit] if isinstance(value, str) else ""
 
 
-def _tokens(text: str) -> set[str]:
+def title_tokens(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", text.lower()))
 
 
-def _similarity(a: str, b: str) -> float:
-    left, right = _tokens(a), _tokens(b)
+def title_similarity(a: str, b: str) -> float:
+    """0 to 1: how alike two listing titles read, whatever the word order."""
+    left, right = title_tokens(a), title_tokens(b)
     if not left or not right:
         return 0.0
     overlap = 2 * len(left & right) / (len(left) + len(right))
@@ -112,7 +113,7 @@ def _similarity(a: str, b: str) -> float:
 
 def _candidates(db: Session) -> list[tuple[str, str, set[str]]]:
     rows = db.query(Conversation.id, Conversation.title).filter(Conversation.title.isnot(None)).all()
-    return [(conv_id, title, _tokens(title)) for conv_id, title in rows if title and title.strip()]
+    return [(conv_id, title, title_tokens(title)) for conv_id, title in rows if title and title.strip()]
 
 
 def _local_price(db: Session, conv_id: str) -> float | None:
@@ -132,9 +133,9 @@ def suggested_match(db: Session, marketplace: str, title: str, price: float | No
     """
     from vendoo_studio.services.marketplace_delist import listings
 
-    words = _tokens(title)
+    words = title_tokens(title)
     # Only items that share a word are compared closely.
-    scored = sorted(((_similarity(title, local), conv_id, local) for conv_id, local, tokens in items if tokens & words), reverse=True)
+    scored = sorted(((title_similarity(title, local), conv_id, local) for conv_id, local, tokens in items if tokens & words), reverse=True)
     for score, conv_id, local in scored[:5]:
         if score < MATCH_THRESHOLD:
             break

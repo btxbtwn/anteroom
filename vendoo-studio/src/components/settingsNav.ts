@@ -67,6 +67,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     searchTerms: ["duplicate", "vendoo", "links", "same item"],
   },
   {
+    id: "similar-items",
+    title: "Similar items",
+    section: "listings",
+    targetId: "similar-items",
+    searchTerms: ["duplicate finder", "duplicates", "similar", "merge", "same item", "listed twice"],
+  },
+  {
     id: "appearance",
     title: "Theme",
     section: "general",
