@@ -8,7 +8,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.449 — 2026-10-27
 
-- On pants and jeans, Depop shows one Size and one Size grouping field again. The extra copies with “outside these reference choices” warnings are gone, and Depop’s own fields still start from the size you saved.
+- eBay, Poshmark, Mercari, Depop and Sellwild tabs now show exactly the fields that marketplace’s own form has, in its order. Anteroom no longer adds its own Size, Size Grouping, price or offer rows to them, so pants and jeans no longer show Size twice on Depop, and Price sits where the marketplace puts it.
 
 ## 0.1.448 — 2026-10-27
 

@@ -129,9 +129,7 @@ type SizeRow = {
 function sizeLeaf(key: string): string {
   const leaf = (key.split(".").pop() || "").toLowerCase().replace(/[^a-z]/g, "");
   if (leaf === "sizetype") return "sizeType";
-  // A marketplace's own form names these by its catalog: its size id, and Depop's body fit.
-  if (leaf === "sizegrouping" || leaf === "bodyfit") return "sizeGrouping";
-  if (leaf === "nativesizeid") return "size";
+  if (leaf === "sizegrouping") return "sizeGrouping";
   return leaf;
 }
 
