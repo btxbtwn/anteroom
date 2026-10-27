@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.442 — 2026-10-27
+
+- Depop offers to likers now work, both the ones you send and your automatic rules. Anteroom sends the same single "Send offer to all likers" request Depop's Selling Hub sends, never goes below your floor or Depop's lowest allowed offer, skips items with several sizes, and never resends an offer whose result it could not confirm. Rules stay off until you turn them on.
+
 ## 0.1.441 — 2026-10-27
 
 - Listing forms stay on screen while you edit. Changing a price, brand, condition, format, or shipping choice no longer reloads the form. Choosing a category, or an update that sets the category, is what changes it. The form shows the fields every listing on that marketplace has, plus the fields that category needs, such as size and attributes. Turning on Depop worldwide shipping shows its fee without a reload, and switching eBay's format or Mercari's shipping method shows or hides those rows in place.
