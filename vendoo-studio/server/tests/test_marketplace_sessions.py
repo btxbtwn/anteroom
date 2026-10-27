@@ -84,6 +84,20 @@ def test_vinted_connect_is_a_session_summary():
     assert "secret" not in response.text
 
 
+def test_offer_recording_passes_its_goal_and_only_where_offers_exist():
+    request = AsyncMock(return_value={"ok": True, "goal": "offers", "requests": []})
+    with patch("vendoo_studio.services.browser_bridge.request", new=request):
+        client = TestClient(app)
+        assert client.post("/api/marketplaces/depop/record?goal=offers").status_code == 200
+        assert client.post("/api/marketplaces/depop/record").status_code == 404
+        assert client.post("/api/marketplaces/sellwild/record?goal=offers").status_code == 404
+        assert client.post("/api/marketplaces/mercari/record?goal=publish").status_code == 422
+        assert client.post("/api/marketplaces/mercari/record").status_code == 200
+    assert [call.args[2] for call in request.await_args_list] == [
+        {"marketplace": "depop", "goal": "offers"}, {"marketplace": "mercari", "goal": "draft"},
+    ]
+
+
 def test_unknown_marketplace_connect_is_rejected():
     with patch("vendoo_studio.services.browser_bridge.request", new=AsyncMock()) as request:
         response = TestClient(app).post("/api/marketplaces/ebay/connect")

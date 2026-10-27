@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -753,6 +754,7 @@ async def reload_extension():
 
 
 _SESSION_MARKETS = ("depop", "poshmark", "mercari", "sellwild", "vinted", "facebook")
+_RECORDABLE = {"draft": {"mercari", "sellwild", "facebook"}, "offers": {"mercari", "depop"}}
 _SESSION_STATES = {"signed_in", "expired", "signed_out", "unknown"}
 
 
@@ -822,20 +824,24 @@ async def connect_marketplace(marketplace: str):
 
 
 @router.post("/api/marketplaces/{marketplace}/record")
-async def record_marketplace_draft(marketplace: str):
-    """Record the shape of a marketplace's own draft save while the seller saves one by hand.
+async def record_marketplace_requests(marketplace: str, goal: Literal["draft", "offers"] = "draft"):
+    """Record the shape of a marketplace's own requests while the seller acts by hand.
 
-    Opens one tab for the seller and returns request shapes only (operation names,
-    GraphQL query text, paths, header names, value types), never values or session data.
+    ``draft`` records a draft save; ``offers`` records the likers list and an offer
+    sent to likers, reads included. Opens one tab for the seller and returns request
+    shapes only (operation names, GraphQL query text, paths, header names, value
+    types), never values or session data.
     """
     from types import SimpleNamespace
 
     from vendoo_studio.services import browser_bridge
 
-    if marketplace not in {"mercari", "sellwild", "facebook"}:
+    if marketplace not in _RECORDABLE[goal]:
         raise HTTPException(404, "Recording is not set up for this marketplace.")
     try:
-        return await browser_bridge.request(SimpleNamespace(id=None), "marketplace.record", {"marketplace": marketplace}, timeout=330)
+        return await browser_bridge.request(
+            SimpleNamespace(id=None), "marketplace.record", {"marketplace": marketplace, "goal": goal}, timeout=330,
+        )
     except browser_bridge.BrowserBridgeError as exc:
         raise HTTPException(502, str(exc)) from exc
 

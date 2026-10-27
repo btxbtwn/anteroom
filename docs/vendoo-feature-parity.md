@@ -242,6 +242,8 @@ Most important first.
    Depop's likers read and send-offer request (method, path, body, success
    shape, any headers), fill `PENDING_OFFER_REQUESTS`, and remove them from
    `AWAITING_CAPTURE` in `services/listing_promotions.py`.
+   `POST /api/marketplaces/{mercari|depop}/record?goal=offers` records
+   those shapes, reads included, while the seller sends one offer by hand.
 5. **No background removal, crop or photo adjustments.** *Fix:* add crop
    and adjustments beside rotate, and background removal to white (a local
    model or a provider API).

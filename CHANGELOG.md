@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.434 — 2026-10-27
+
+- Anteroom can now watch while you send one offer to likers by hand on Mercari or Depop, so it can learn how each site sends offers. It keeps only the shape of the requests, never prices, items or your account details. This is the step that lets Mercari and Depop offer rules turn on.
+
 ## 0.1.433 — 2026-10-26
 
 - Labels are yours now, not Vendoo's. Items imported from Vendoo sometimes showed a code like `g8MHWF7K…` instead of the label's name. Settings → Listings → Inventory → **Vendoo label IDs** → **Convert to names** saves every label as its name, and each Vendoo import does the same for the items it brings in. A code Vendoo has no name for stays on the item and is listed there, so no label is lost.
