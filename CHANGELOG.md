@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.417 — 2026-10-26
+## 0.1.418 — 2026-10-26
 
 - Anteroom now refuses an update whose signature is missing or damaged, so an update can no longer lose access to your saved sign-ins. Releases are ready to be signed with an Apple Developer ID certificate; once that is set up, updates stop asking for your Mac password.
+
+## 0.1.417 — 2026-10-26
+
+- Saving an eBay draft no longer stops after eBay saves the offer with “eBay did not confirm the listing”. Check finds an auction draft whose reply was lost, and saving again reuses it.
 
 ## 0.1.416 — 2026-10-26
 
