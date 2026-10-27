@@ -298,7 +298,11 @@ function poshmarkByName(catalog, names) {
 function poshmarkCategory(catalog, listing) {
   const direct = listing.direct_category_ids?.poshmark;
   const directIds = typeof direct === 'string' ? direct.split('/') : Array.isArray(direct) ? direct : [];
-  const found = poshmarkFromIds(catalog, directIds)
+  const fromDirect = poshmarkFromIds(catalog, directIds);
+  // A stored id that already names the leaf wins. An older sub-category value
+  // only fills in when that id stopped at the parent category.
+  if (fromDirect?.leaf && fromDirect.leaf !== fromDirect.category.id) return fromDirect;
+  const found = fromDirect
     || poshmarkFromIds(catalog, listing.form?.overrides?.categoryV2?.path || listing.marketplace_category_objects?.poshmark?.path)
     || poshmarkByName(catalog, poshmarkNames(listing));
   return found && poshmarkWithSubcategory(catalog, found, listing.poshmark_specifics?.subcategory);

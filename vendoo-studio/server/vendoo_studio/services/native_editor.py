@@ -99,8 +99,10 @@ async def ebay_form(snapshot: dict) -> dict:
         filled_from_general = {"size": "Filled from General. A change here stays on eBay.",
                                "department": "Filled from General. A change here stays on eBay."}
         constraints = marketplace_schemas.constraints_by_label(values)
+        # Every aspect from this category is on the form. Condition stays on every eBay listing.
         fields.append(field(f"ebay_specifics.{name}", name, value, required=row["required"], multi=row["multi"],
                             **({"help": filled_from_general[name.casefold()]} if name.casefold() in filled_from_general else {}),
+                            **({"category_specific": True} if not condition else {}),
                             selection_only=row["mode"] == "selection",
                             options=list(dict.fromkeys(v["label"] for v in values)),
                             option_values={v["label"]: str(v["id"]) for v in values}, options_source="marketplace",
@@ -110,11 +112,16 @@ async def ebay_form(snapshot: dict) -> dict:
     terms = best_offer_terms(snapshot.get("form") or {}, str(price_for(snapshot, "ebay") or 0), snapshot)
     from vendoo_studio.services import ebay_variations
 
+    from vendoo_studio.services.ebay_listings import AUCTION, FIXED_PRICE
+
     varied = ebay_variations.has_variations(snapshot)
-    selling = await _ebay_format_fields(snapshot, category, details, varied)
-    auction = any(row["key"] == "ebay_specifics.auctionStartPrice" for row in selling)
-    variations = await _ebay_variations_field(snapshot, category, schema, auction)
-    offers = [] if auction or varied else [
+    kind = marketplace_schemas._ebay_listing_type(details.get("listingFormat")) or FIXED_PRICE
+    # Auction prices, offers and variations all travel with the category. The
+    # editor shows the ones the current format uses, so a format change does
+    # not load the form again.
+    selling = await _ebay_format_fields(snapshot, category, details)
+    variations = await _ebay_variations_field(snapshot, category, schema)
+    offers = [
         field("ebay_specifics.bestOffer.enabled", "Allow offers", terms.get("bestOfferEnabled", True), input_type="boolean"),
         field("ebay_specifics.bestOffer.autoAcceptPrice", "Automatically accept offers at", (terms.get("autoAcceptPrice") or {}).get("value", ""), input_type="number",
               help="Clear this amount to turn off automatic acceptance."),
@@ -124,7 +131,7 @@ async def ebay_form(snapshot: dict) -> dict:
     quantity = (field("quantity", "Quantity", ebay_variations.total_quantity(snapshot), input_type="number", locked=True,
                       help="The quantity is the total of the variations.") if varied else
                 field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number",
-                      **({"help": "An eBay auction sells one item."} if auction else {})))
+                      **({"help": "An eBay auction sells one item."} if kind == AUCTION else {})))
     fields.extend([*selling,
                    *variations,
                    quantity,
@@ -136,20 +143,21 @@ async def ebay_form(snapshot: dict) -> dict:
                      (("primaryStoreCategory", "Primary store category"), ("secondaryStoreCategory", "Secondary store category"))],
                    *package(snapshot)])
     return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields,
-            "notes": ["Category aspects and condition choices come from eBay. Shipping, payment and return policies come from Settings.",
-                      *(["An auction uses Starting bid and Buy It Now, not Price."] if auction else []),
-                      *(["With variations, Price is the price of any variation left without its own. eBay takes no offers "
-                         "on a listing with variations."] if varied else [])]}
+            "notes": ["Category aspects and condition choices come from eBay. Shipping, payment and return policies come from Settings."]}
 
 
-async def _ebay_variations_field(snapshot: dict, category: str, schema: list[dict], auction: bool) -> list[dict]:
-    """Variations: what they differ by (aspects eBay enables for variations in this leaf) and one row each."""
+async def _ebay_variations_field(snapshot: dict, category: str, schema: list[dict]) -> list[dict]:
+    """Variations: what they differ by (aspects eBay enables for variations in this leaf) and one row each.
+
+    Included whenever this category allows them. The editor hides the row during
+    an auction that has no variation rows yet.
+    """
     from vendoo_studio.services import ebay_variations, marketplace_schemas
     from vendoo_studio.services.ebay_client import EbayClient
 
     varied = ebay_variations.has_variations(snapshot)
     value = ebay_variations.raw(snapshot) if varied else {"aspects": [], "rows": [], "photos": {}}
-    if not category or (auction and not varied):
+    if not category:
         return []
     supported: bool | None = None
     try:
@@ -168,15 +176,20 @@ async def _ebay_variations_field(snapshot: dict, category: str, schema: list[dic
     elif supported is None:
         help_text += " eBay's variation rules for this category could not be loaded; List checks them again."
     return [field(ebay_variations.FIELD, "Variations", value, input_type="variations", variation_aspects=aspects,
-                  help=help_text)]
+                  category_specific=True, help=help_text)]
 
 
 _FORMAT_CLEARS = ["ebay_specifics.listingDuration", "ebay_specifics.auctionStartPrice",
                   "ebay_specifics.auctionReservePrice", "ebay_specifics.auctionBuyItNow"]
 
 
-async def _ebay_format_fields(snapshot: dict, category: str, details: dict, varied: bool = False) -> list[dict]:
-    """Format, duration and auction prices. Auction and its lengths come from eBay's rules for the category."""
+async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> list[dict]:
+    """Format, duration and auction prices for this category.
+
+    When the category allows an auction, the payload carries fixed-price and
+    auction rows together. The editor locks duration and hides the auction
+    prices while the listing is fixed price.
+    """
     from vendoo_studio.services import marketplace_schemas
     from vendoo_studio.services.ebay_client import EbayClient
     from vendoo_studio.services.ebay_listings import (AUCTION, DEFAULT_AUCTION_DURATION, FIXED_PRICE, FORMAT_LABELS,
@@ -190,23 +203,23 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict, vari
             allowed = await marketplace_schemas.ebay_listing_types(await EbayClient.connect(), category)
         except Exception:  # noqa: BLE001 - fixed price needs no lookup; List checks auctions again
             note = "eBay's auction rules for this category could not be loaded. Refresh choices."
-    kinds = [FIXED_PRICE] + ([AUCTION] if (allowed.get(AUCTION) and not varied) or kind == AUCTION else [])
-    if varied and kind != AUCTION:
-        note = "A listing with variations is fixed price. Remove the variations to sell at auction."
-    elif not allowed.get(AUCTION) and not note and category:
+    auction_lengths = allowed.get(AUCTION) or []
+    offers_auction = bool(auction_lengths) or kind == AUCTION
+    kinds = [FIXED_PRICE] + ([AUCTION] if offers_auction else [])
+    if not offers_auction and not note and category:
         note = "eBay does not offer auctions in this category."
     rows = [field("ebay_specifics.listingFormat", "Format", kind, selection_only=True, required=True,
                   options=[FORMAT_LABELS[value] for value in kinds],
                   option_values={FORMAT_LABELS[value]: value for value in kinds}, options_source="marketplace",
                   clears=_FORMAT_CLEARS, **({"help": note} if note else {}))]
-    if kind != AUCTION:
+    if not offers_auction:
         rows.append(field("ebay_specifics.listingDuration", "Duration", "GTC", locked=True,
                           options=[duration_label("GTC")], option_values={duration_label("GTC"): "GTC"},
                           help="eBay fixed-price listings run Good 'Til Cancelled."))
         return rows
-    lengths = allowed.get(AUCTION) or []
-    chosen = marketplace_schemas.ebay_duration(details.get("listingDuration")) or (
-        DEFAULT_AUCTION_DURATION if DEFAULT_AUCTION_DURATION in lengths or not lengths else lengths[0])
+    lengths = list(dict.fromkeys(["GTC", *auction_lengths]))
+    chosen = "GTC" if kind != AUCTION else marketplace_schemas.ebay_duration(details.get("listingDuration")) or (
+        DEFAULT_AUCTION_DURATION if DEFAULT_AUCTION_DURATION in auction_lengths or not auction_lengths else auction_lengths[0])
     rows += [
         field("ebay_specifics.listingDuration", "Duration", chosen, selection_only=True, required=True,
               options=[duration_label(value) for value in lengths],
@@ -235,12 +248,13 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
                             option_values={row["label"]: str(row["id"]) for row in options}, options_source="marketplace"))
     if picks["category_id"] in VEHICLE_CATEGORIES:
         details = snapshot.get("sellwild_specifics") or {}
-        fields.extend(field(f"sellwild_specifics.{key}", label, details.get(key), required=True)
+        fields.extend(field(f"sellwild_specifics.{key}", label, details.get(key), required=True, category_specific=True)
                       for key, label in (("vin", "VIN"), ("mileage", "Mileage")))
     else:
         template = str((snapshot.get("sellwild_specifics") or {}).get("parcelTemplate") or "")
         options = [{"id": "", "label": "Custom package dimensions"}, *catalog["parcel_templates"]]
         fields.append(field("sellwild_specifics.parcelTemplate", "Packaging", template, selection_only=True,
+                            category_specific=True,
                             options=[row["label"] for row in options], option_values={row["label"]: row["id"] for row in options},
                             options_source="marketplace"))
         fields.extend(package(snapshot))

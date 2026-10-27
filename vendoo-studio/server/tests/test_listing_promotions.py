@@ -85,11 +85,6 @@ class ListingPromotionsTest(unittest.TestCase):
             self.assertEqual(response.status_code, 422, body)
         self.assertEqual(self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], "marketplace": "mercari",
                                                                            "action": "share"}).status_code, 400)
-        # Mercari offers wait for a capture of its signed-in request.
-        response = self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], "marketplace": "mercari",
-                                                                     "action": "offer", "discount_percent": 10})
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("signed-in site", response.json()["detail"])
         self.bridge.assert_not_called()
 
     def test_depop_offer_records_the_reach_depop_expected(self):
@@ -105,19 +100,18 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual((row["state"], row["listing_id"], row["offer_price"], row["like_count"]), ("preview", "seller-vintage-tee", "42.50", 4))
         done = self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True}).json()
         self.assertEqual(done["state"], "done")
-        self.assertEqual(done["note"], "Offer of $42.50 sent to likers. Depop expected it to reach 4 likers.")
+        self.assertEqual(done["note"], "Offer of $42.50 sent to likers. Depop counted 4 likers for it.")
         payload = self.calls("marketplace.promote")[0].args[2]
         self.assertEqual((payload["marketplace"], payload["offer_price_cents"], payload["floor_cents"]), ("depop", 4250, 4000))
         self.assertEqual(len(self.calls("marketplace.promote")), 1)
 
-    def test_mercari_offer_once_captured_has_no_shipping_choice(self):
+    def test_mercari_offer_has_no_shipping_choice(self):
         item = "m12345678901"
         conv = ConversationRepo(self.db).create(title="Mercari jacket")
         conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"mercari": f"https://www.mercari.com/us/item/{item}/"}})
         self.db.commit()
-        self.enterContext(patch.dict(listing_promotions.AWAITING_CAPTURE, {"mercari": frozenset()}))
-        self.check = {"ok": True, "price_cents": 5000, "like_count": 4, "minimum_discount_percent": 10,
-                      "maximum_discount_percent": 99, "offer_price_cents": 4000, "shipping_discounts": []}
+        self.check = {"ok": True, "price_cents": 5000, "like_count": 4, "minimum_discount_percent": 20,
+                      "maximum_discount_percent": 48, "offer_price_cents": 4000, "shipping_discounts": []}
         response = self.client.post("/api/promotions/preview", json={"conversation_ids": [conv.id], "marketplace": "mercari",
                                                                      "action": "offer", "discount_percent": 20, "floors": {conv.id: "30"}})
         row = response.json()["rows"][0]
@@ -227,5 +221,5 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual(self.db.get(ListingPromotion, row["id"]).state, "unknown")
         history = self.client.get("/api/promotions").json()
         self.assertEqual(history["supported"], {"poshmark": ["offer", "share"], "mercari": ["offer"], "depop": ["offer"]})
-        self.assertEqual(history["awaiting_capture"], {"mercari": ["offer"]})
+        self.assertEqual(history["awaiting_capture"], {})
         self.assertEqual(history["history"][0]["state"], "unknown")

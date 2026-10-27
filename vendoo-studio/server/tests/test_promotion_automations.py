@@ -115,12 +115,6 @@ class PromotionAutomationsTest(unittest.TestCase):
                      {**SHARE, "scope": "items", "conversation_ids": []}):
             self.assertIn(self.client.post("/api/promotion-automations", json=body).status_code, (400, 422), body)
 
-    def test_mercari_rules_save_but_cannot_be_turned_on_until_captured(self):
-        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None})
-        self.assertFalse(saved["available"])
-        response = self.client.post(f"/api/promotion-automations/{saved['id']}/enable", json={"confirm": True})
-        self.assertEqual(response.status_code, 409)
-
     def test_depop_rules_save_off_and_turn_on_only_when_asked(self):
         saved = self.create({**OFFER, "marketplace": "depop", "shipping_label": None})
         self.assertTrue(saved["available"])
@@ -128,6 +122,60 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(self.tick(), 0)
         self.assertTrue(self.enable(saved["id"])["enabled"])
         self.bridge.assert_not_called()
+
+    def mercari_items(self, count):
+        items = []
+        for index in range(count):
+            conv = ConversationRepo(self.db).create(title=f"Mercari {index}")
+            item = f"m{index + 1:011d}"
+            conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"mercari": f"https://www.mercari.com/us/item/{item}/"}})
+            self.db.add(MarketplaceOfferFloor(marketplace="mercari", listing_id=item, conversation_id=conv.id, floor_cents=3000))
+            self.likes[item] = 3
+            items.append((conv, item))
+        self.db.commit()
+        return items
+
+    def test_a_mercari_offer_rule_starts_off_and_pauses_on_an_unknown_result(self):
+        (first, first_item), (second, second_item) = self.mercari_items(2)
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [first.id, second.id]})
+        self.assertEqual((saved["enabled"], saved["available"]), (False, True))
+        self.due(saved["id"])
+        self.assertEqual(self.tick(), 0)
+        self.bridge.assert_not_called()
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        for item in (first_item, second_item):
+            self.sent[item] = browser_bridge.BrowserBridgeError("Chrome did not answer in time.")
+        self.tick()
+        sent = self.promoted()
+        self.assertEqual(len(sent), 1)
+        unknown = sent[0]["listing_id"]
+        automation = self.db.get(PromotionAutomation, saved["id"])
+        self.assertFalse(automation.enabled)
+        self.assertIn("not confirmed", automation.paused_reason)
+        # Back on, the unconfirmed listing stays blocked; the other one is offered once.
+        self.sent.clear()
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        sent = self.promoted()
+        self.assertEqual([payload["listing_id"] for payload in sent], [unknown, ({first_item, second_item} - {unknown}).pop()])
+        self.assertEqual((sent[1]["marketplace"], sent[1]["offer_price_cents"], sent[1]["shipping_discount_id"]), ("mercari", 4000, None))
+
+    def test_a_mercari_sign_out_stops_the_round_and_pauses(self):
+        items = self.mercari_items(2)
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [conv.id for conv, _item in items]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        for _conv, item in items:
+            self.sent[item] = {"ok": False, "safe_to_retry": True, "error_code": "signed_out", "error": "Mercari asked to sign in again."}
+        self.tick()
+        self.assertEqual(len(self.promoted()), 1)
+        automation = self.db.get(PromotionAutomation, saved["id"])
+        self.assertFalse(automation.enabled)
+        self.assertIn("sign in", automation.paused_reason)
 
     def test_a_share_round_follows_order_exclusions_cap_and_speed(self):
         newest, _middle, oldest = self.items[1], self.items[0], self.items[2]

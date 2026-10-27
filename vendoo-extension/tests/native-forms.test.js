@@ -55,7 +55,17 @@ test('Poshmark form uses native category, group and size IDs and only supported 
   assert.deepEqual(fields['poshmark_specifics.shippingDiscountId'].option_values, { 'Buyer Shipping: Free': 'discount-1' });
   assert.deepEqual(fields['poshmark_specifics.availability'].option_values, { 'For Sale': 'available', 'Not For Sale': 'not_for_sale' });
   assert.equal(fields['poshmark_specifics.sellerNotes'].value, '');
-  assert.equal(fields['direct_category_ids.poshmark'].value, 'men/shirts');
+  assert.equal(fields['direct_category_ids.poshmark'].value, 'men/shirts/tees');
+  assert.equal(fields['direct_category_ids.poshmark'].option_values['Men > Shirts > Tees'], 'men/shirts/tees');
+  assert.equal(fields['direct_category_ids.poshmark'].option_values['Men > Shirts > None'], 'men/shirts');
+  assert.equal(fields['direct_category_ids.poshmark'].option_values['Men > Shoes'], 'men/shoes');
+  assert.equal(fields['poshmark_specifics.subcategory'], undefined);
+  const kept = call(c, 'poshmarkCategory', POSH, { ...POSH_LISTING, poshmark_specifics: { subcategory: 'None' } });
+  assert.equal(kept.leaf, 'tees');
+  const parent = call(c, 'poshmarkCategory', POSH, { ...POSH_LISTING, direct_category_ids: { poshmark: 'men/shirts' }, poshmark_specifics: { subcategory: 'None' } });
+  assert.equal(parent.leaf, 'shirts');
+  const narrowed = call(c, 'poshmarkCategory', POSH, { ...POSH_LISTING, direct_category_ids: { poshmark: 'men/shirts' }, poshmark_specifics: { subcategory: 'Tees' } });
+  assert.equal(narrowed.leaf, 'tees');
   const inventory = fields['poshmark_specifics.inventoryRows'];
   assert.equal(inventory.input_type, 'inventory');
   assert.deepEqual(inventory.value, [{ sizeSetId: 'standard', sizeId: 'M', quantity: 1, sku: '' }]);
@@ -96,26 +106,30 @@ test('explicit Smart Pricing off and empty style tags survive older form default
   assert.equal(call(c, 'poshmarkSmartMinimum', listing, 16), 8);
 });
 
-test('Mercari ship on your own shows seller-paid shipping and hides prepaid package controls', () => {
+test('Mercari ship on your own keeps the package rows and records seller-paid shipping', () => {
   const c = loadWorker();
   const form = call(c, 'mercariEditorForm', { title: 'A tee', direct_category_ids: { mercari: 1 },
     mercari_specifics: { shippingMethod: 'SOYO', shippingPayerId: 1 } }, MERCARI);
   const fields = Object.fromEntries(form.fields.map(row => [row.path, row]));
   assert.equal(fields['mercari_specifics.shippingMethod'].value, 'SOYO');
   assert.equal(fields['mercari_specifics.shippingPayerId'].value, 2);
-  assert.equal(fields['mercari_specifics.shippingPayerId'].locked, true);
-  assert.equal(fields['mercari_specifics.shippingClassId'], undefined);
-  assert.equal(fields.weight_oz, undefined);
+  assert.notEqual(fields['mercari_specifics.shippingPayerId'].locked, true);
+  assert.deepEqual(fields['mercari_specifics.shippingPayerId'].option_values, { Buyer: '1', Seller: '2' });
+  assert.ok(fields['mercari_specifics.shippingClassId']);
+  assert.ok(fields.weight_oz);
+  assert.ok(fields.package_dimensions_in);
 });
 
-test('Depop worldwide shipping exposes its fee only when enabled with native monetary limits', () => {
+test('Depop worldwide shipping fee keeps its monetary limits even when the offer is off', () => {
   const c = loadWorker();
   const listing = { direct_category_ids: { depop: 'menswear_jeans' }, depop_specifics: { worldwideShipping: { enabled: true, price: 0 } } };
   const form = call(c, 'depopEditorForm', listing, DEPOP);
   const fee = form.fields.find(row => row.path === 'depop_specifics.worldwideShipping.price');
   assert.deepEqual([fee.value, fee.min_value, fee.max_value, fee.step], [0, 0, 99.99, 0.01]);
   listing.depop_specifics.worldwideShipping.enabled = false;
-  assert.ok(!call(c, 'depopEditorForm', listing, DEPOP).fields.some(row => row.path === fee.path));
+  const hidden = call(c, 'depopEditorForm', listing, DEPOP).fields.find(row => row.path === fee.path);
+  assert.equal(hidden.input_type, 'number');
+  assert.equal(hidden.max_value, 99.99);
 });
 
 test('Depop form reads native general attribute objects, maximums and category attributes', () => {
@@ -130,6 +144,9 @@ test('Depop form reads native general attribute objects, maximums and category a
   assert.deepEqual(fields['depop_specifics.attributes.bottom-fit'].options, ['Straight']);
   assert.ok(fields['depop_specifics.attributes.bottom-fit'].required);
   assert.equal(fields['depop_specifics.nativeSizeId'].value, 1);
+  assert.equal(fields['depop_specifics.nativeSizeId'].category_specific, true);
+  assert.equal(fields['depop_specifics.attributes.bottom-fit'].category_specific, true);
+  assert.ok(!fields['depop_specifics.age'].category_specific);
   assert.ok(!form.fields.some(row => row.path === 'title'));
 });
 

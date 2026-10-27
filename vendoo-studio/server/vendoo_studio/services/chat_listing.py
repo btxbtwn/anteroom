@@ -69,64 +69,6 @@ def _stamp_learned_fields(db: Session, listing: dict) -> dict:
     return listing
 
 
-def _patch_changes_category(operations: list[dict] | None) -> bool:
-    for op in operations or []:
-        if not isinstance(op, dict):
-            continue
-        path = str(op.get("path") or "").replace("~1", "/").rstrip("/").lower()
-        if path.endswith("category_path") or path.endswith("categorypath"):
-            return True
-    return False
-
-
-def _requested_category_path(operations: list[dict] | None) -> str:
-    requested = ""
-    for op in operations or []:
-        if not isinstance(op, dict) or op.get("op") not in {"replace", "add"}:
-            continue
-        path = str(op.get("path") or "").replace("~1", "/").rstrip("/").lower()
-        if path.endswith("category_path") or path.endswith("categorypath"):
-            requested = str(op.get("value") or "").strip()
-    return requested
-
-
-async def _maybe_resolve_vendoo_category(
-    db: Session,
-    conv_id: str,
-    *,
-    operations: list[dict] | None = None,
-) -> None:
-    if not _patch_changes_category(operations):
-        return
-    from vendoo_studio.services.category_lookup import resolve_listing_category
-
-    result = await resolve_listing_category(
-        db,
-        conv_id,
-        query=_requested_category_path(operations),
-    )
-    repo = ConversationRepo(db)
-    if result.get("skipped"):
-        return
-    if result.get("ok") and result.get("path"):
-        repo.add_message(
-            conv_id,
-            "system",
-            f"Matched Vendoo category: {result['path']}",
-            provider="system",
-            model="",
-        )
-        return
-    if result.get("error"):
-        repo.add_message(
-            conv_id,
-            "system",
-            f"Could not match a Vendoo category yet: {result['error']}",
-            provider="system",
-            model="",
-        )
-
-
 def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict]) -> bool:
     from vendoo_studio.services.fill_log import (
         FillLogService,
@@ -397,7 +339,9 @@ async def persist_chat_result(
             db, conv_id, full_text, provider, user_message=user_message
         )
         if saved:
-            await _maybe_resolve_vendoo_category(db, conv_id, operations=operations)
+            from vendoo_studio.services.agent_categories import apply_saved_agent_category
+
+            await apply_saved_agent_category(db, conv_id, operations=operations, source_text=full_text)
     elif stream_error or not full_text.strip():
         stream_repo.add_message(
             conv_id,

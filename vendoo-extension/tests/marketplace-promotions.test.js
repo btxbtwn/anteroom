@@ -185,83 +185,115 @@ function offerWorker(marketplace, answers) {
   return { c, requests, results, store };
 }
 
-const MERCARI_FAKE = `PENDING_OFFER_REQUESTS.mercari = {
-  likers: { operationName: 'fakeLikersQuery', sha256Hash: 'l'.repeat(64), variables: id => ({ id }),
-    read: data => ({ like_count: data.likers.count, lowest_price_cents: data.likers.low }) },
-  offer: { operationName: 'fakeOfferMutation', sha256Hash: 'o'.repeat(64), variables: (id, cents) => ({ id, cents }),
-    confirmed: data => data.offer?.ok === true },
-}`;
+// Replies in the shapes Mercari's offer screen recorded (2026-10-27), with made-up values.
+const OFFER_SEND = 'POST www.mercari.com/v1/api createOfferToLikers';
+const mercariItem = (item = {}) => [200, { data: { item: { itemId: ITEM, status: 'on_sale', price: 5000, seller: { id: 77 }, ...item } } }];
+const mercariLikerable = (eligible = true, item = {}) => [200, { data: { offer: { offerToLikerable: eligible, __typename: 'Offer' },
+  item: { id: ITEM, price: 5000, numLikes: 4, name: 'Jacket', photos: [], shippingPayer: { id: 1, name: 'Buyer', code: 'buyer' },
+    shippingClasses: [{ id: 1, fee: 799, rateType: 'FIXED', standardFee: 799, nonPromotionalFee: 799 }], ...item } } }];
+const mercariBounds = (lowerLimitCents = 2550, higherLimitCents = 4050) => [200, { data: {
+  offerToLikerBounds: { lowerLimitCents, higherLimitCents, suggestedPriceCents: 4000, __typename: 'OfferToLikerBounds' },
+  item: { shippingClasses: [], shippingPayer: { id: 1 } } } }];
 const mercariAnswers = (overrides = {}) => ({
   'GET www.mercari.com/v1/initialize': [200, { csrf: 'csrf', accessToken: 'token', user: { userId: 77, name: 'Seller' } }],
-  'POST www.mercari.com/v1/api sellFetchItemsDetails': [200, { data: { item: { itemId: ITEM, status: 'on_sale', price: 5000, seller: { id: 77 } } } }],
-  'POST www.mercari.com/v1/api fakeLikersQuery': [200, { data: { likers: { count: 4, low: 4500 } } }],
-  'POST www.mercari.com/v1/api fakeOfferMutation': [200, { data: { offer: { ok: true } } }],
+  'POST www.mercari.com/v1/api sellFetchItemsDetails': mercariItem(),
+  'POST www.mercari.com/v1/api offerToLikerable': mercariLikerable(),
+  'POST www.mercari.com/v1/api offerToLikerInit': mercariBounds(),
+  [OFFER_SEND]: [200, { data: { createOfferToLikers: { numOffersCreated: 3, __typename: 'CreateOfferToLikersResponse' } } }],
   ...overrides,
 });
+const mercariOffer = (c, payload = {}) => c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'mercari',
+  action: 'offer', listing_id: ITEM, confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000, ...payload } });
 
-test('Mercari offers refuse before any request until their requests are captured', async () => {
-  for (const [marketplace, id] of [['mercari', ITEM]]) {
-    const { c, requests, results } = offerWorker(marketplace, {});
-    await c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace, action: 'offer', listing_id: id, discount_percent: 20 } });
-    await c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace, action: 'offer', listing_id: id, confirm: true,
-      action_id: 'action-1', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000 } });
-    await c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace, action: 'share', listing_id: id, confirm: true,
-      action_id: 'action-2' } });
-    assert.deepEqual(results.map(r => [r.ok, r.error_code, r.safe_to_retry]), [[false, 'not_captured', true], [false, 'not_captured', true], [false, 'rejected', true]]);
-    assert.deepEqual(requests, []);
-  }
+test('an uncaptured marketplace refuses before any request; Mercari never shares', async () => {
+  const depop = offerWorker('depop', {});
+  vm.runInContext('PENDING_OFFER_REQUESTS.depop = { likers: null, offer: null }', depop.c);
+  await depop.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG, discount_percent: 20 } });
+  await depop.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG, confirm: true,
+    action_id: 'action-1', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000 } });
+  assert.deepEqual(depop.results.map(r => [r.ok, r.error_code, r.safe_to_retry]), [[false, 'not_captured', true], [false, 'not_captured', true]]);
+  assert.deepEqual(depop.requests, []);
+  const mercari = offerWorker('mercari', mercariAnswers());
+  await mercari.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'mercari', action: 'share', listing_id: ITEM,
+    confirm: true, action_id: 'action-2' } });
+  assert.deepEqual([mercari.results[0].ok, mercari.results[0].error_code], [false, 'rejected']);
+  assert.deepEqual(mercari.requests, []);
 });
 
-test('Mercari offer to likers follows its lowest-price rule and sends the captured operation once', async () => {
+test('Mercari check reads eligibility and Mercari’s own offer range, in whole dollars, without sending', async () => {
   const check = offerWorker('mercari', mercariAnswers());
-  vm.runInContext(MERCARI_FAKE, check.c);
-  for (const percent of [15, 20]) {
+  for (const percent of [15, 20, 50]) {
     await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'mercari', action: 'offer',
       listing_id: ITEM, discount_percent: percent } });
   }
-  // 10% below the $45 low is $40.50, so whole dollars allow $40: at least 20% off $50.
-  assert.deepEqual(check.results[0], { ok: true, price_cents: 5000, like_count: 4, minimum_discount_percent: 20, maximum_discount_percent: 99,
+  // $25.50 to $40.50 in cents becomes $26 to $40: 20% to 48% off $50.
+  assert.deepEqual(check.results[0], { ok: true, price_cents: 5000, like_count: 4, minimum_discount_percent: 20, maximum_discount_percent: 48,
     shipping_discounts: [], offer_price_cents: null });
   assert.equal(check.results[1].offer_price_cents, 4000);
-  assert.ok(!check.requests.some(r => r.key.endsWith('fakeOfferMutation')));
-
-  const sent = offerWorker('mercari', mercariAnswers());
-  vm.runInContext(MERCARI_FAKE, sent.c);
-  const payload = { marketplace: 'mercari', action: 'offer', listing_id: ITEM, confirm: true, action_id: 'action-1',
-    price_cents: 5000, offer_price_cents: 4000, floor_cents: 3500 };
-  await sent.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload });
-  await sent.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload });
-  assert.deepEqual(sent.results[0], { ok: true, state: 'done', recipient_count: 4 });
-  assert.deepEqual(sent.results[1], sent.results[0]);
-  const offers = sent.requests.filter(r => r.key.endsWith('fakeOfferMutation'));
-  assert.equal(offers.length, 1);
-  assert.deepEqual(offers[0].body.variables, { id: ITEM, cents: 4000 });
-  assert.equal(offers[0].body.extensions.persistedQuery.sha256Hash, 'o'.repeat(64));
+  assert.equal(check.results[2].offer_price_cents, null);
+  assert.ok(!check.requests.some(r => r.key === OFFER_SEND));
+  const reads = check.requests.filter(r => /offerToLiker(able|Init)$/.test(r.key));
+  assert.deepEqual(reads[0].body, { operationName: 'offerToLikerable', variables: { itemId: ITEM },
+    extensions: { persistedQuery: { version: 1, sha256Hash: '37bcc049bd1bf9241387cf44f4a2742a653f2e3dca8150c26d00aa27e30cc825' } } });
+  assert.equal(reads[1].body.extensions.persistedQuery.sha256Hash, 'babbde0d58f82b3803f24247c0e9f007688c75e3c3b9cbef96a7b33f055cc64a');
+  assert.deepEqual(reads[1].body.variables, { itemId: ITEM });
+  assert.ok(reads.every(r => r.headers['x-csrf-token'] === 'csrf' && r.headers.authorization === 'Bearer token'
+    && !('x-socure-device-token' in r.headers)));
 });
 
-test('Mercari never offers below the floor, above its rule, on a changed price or someone else’s item', async () => {
+test('Mercari sends createOfferToLikers once, in cents, and answers a repeat from the journal', async () => {
+  const sent = offerWorker('mercari', mercariAnswers());
+  await mercariOffer(sent.c, { floor_cents: 3500 });
+  await mercariOffer(sent.c, { floor_cents: 3500 });
+  assert.deepEqual(sent.results[0], { ok: true, state: 'done', recipient_count: 3 });
+  assert.deepEqual(sent.results[1], sent.results[0]);
+  const offers = sent.requests.filter(r => r.key === OFFER_SEND);
+  assert.equal(offers.length, 1);
+  assert.deepEqual(offers[0].body, { operationName: 'createOfferToLikers', variables: { input: { itemId: ITEM, offerPrice: 4000 } },
+    extensions: { persistedQuery: { version: 1, sha256Hash: '00c320abe9a24e864ad765b06b0276517b423e12f66203a27ffd9edd95ff36e6' } } });
+});
+
+test('Mercari never offers outside the floor or its range, on a changed price, or on an item it refuses', async () => {
   const cases = [
     [{}, { offer_price_cents: 4000, floor_cents: 4500 }],
-    [{}, { offer_price_cents: 4100, floor_cents: 3000 }],
+    [{}, { offer_price_cents: 3950, floor_cents: 3000 }],
     [{}, { offer_price_cents: 4500, floor_cents: 3000 }],
-    [{}, { price_cents: 6000, offer_price_cents: 4000, floor_cents: 3000 }],
-    [{ 'POST www.mercari.com/v1/api sellFetchItemsDetails': [200, { data: { item: { itemId: ITEM, status: 'on_sale', price: 5000, seller: { id: 8 } } } }] }, {}],
-    [{ 'POST www.mercari.com/v1/api sellFetchItemsDetails': [200, { data: { item: { itemId: ITEM, status: 'sold_out', price: 5000, seller: { id: 77 } } } }] }, {}],
-    [{ 'POST www.mercari.com/v1/api fakeLikersQuery': [200, { data: { likers: { count: 0, low: 5000 } } }] }, {}],
+    [{}, { offer_price_cents: 2500, floor_cents: 1000 }],
+    [{}, { price_cents: 6000 }],
+    [{ 'POST www.mercari.com/v1/api sellFetchItemsDetails': mercariItem({ seller: { id: 8 } }) }, {}],
+    [{ 'POST www.mercari.com/v1/api sellFetchItemsDetails': mercariItem({ status: 'sold_out' }) }, {}],
+    [{ 'POST www.mercari.com/v1/api offerToLikerable': mercariLikerable(true, { numLikes: 0 }) }, {}],
+    [{ 'POST www.mercari.com/v1/api offerToLikerable': mercariLikerable(false) }, {}],
+    [{ 'POST www.mercari.com/v1/api offerToLikerable': mercariLikerable(true, { price: 50 }) }, {}],
+    // Bounds in dollars, or at the price, mean the units or the rule changed.
+    [{ 'POST www.mercari.com/v1/api offerToLikerInit': mercariBounds(25, 40) }, {}],
+    [{ 'POST www.mercari.com/v1/api offerToLikerInit': mercariBounds(2550, 5000) }, {}],
+    [{ 'POST www.mercari.com/v1/api offerToLikerInit': [200, { data: { offerToLikerBounds: null } }] }, {}],
   ];
   for (const [answers, overrides] of cases) {
     const run = offerWorker('mercari', mercariAnswers(answers));
-    vm.runInContext(MERCARI_FAKE, run.c);
-    await run.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'mercari', action: 'offer', listing_id: ITEM,
-      confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000, ...overrides } });
-    assert.equal(run.results[0].ok, false, JSON.stringify(overrides));
-    assert.ok(!run.requests.some(r => r.key.endsWith('fakeOfferMutation')), JSON.stringify(overrides));
+    await mercariOffer(run.c, overrides);
+    const label = JSON.stringify([Object.keys(answers), overrides]);
+    assert.deepEqual([run.results[0].ok, run.results[0].safe_to_retry], [false, true], label);
+    assert.ok(!run.requests.some(r => r.key === OFFER_SEND), label);
   }
-  const lost = offerWorker('mercari', mercariAnswers({ 'POST www.mercari.com/v1/api fakeOfferMutation': [502, 'bad gateway'] }));
-  vm.runInContext(MERCARI_FAKE, lost.c);
-  await lost.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'mercari', action: 'offer', listing_id: ITEM,
-    confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000 } });
-  assert.deepEqual([lost.results[0].error_code, lost.results[0].safe_to_retry], ['uncertain', false]);
+});
+
+test('Mercari offer outcomes: a lost or unreadable reply is uncertain; a refusal is sent only once', async () => {
+  const outcomes = [
+    [[502, 'bad gateway'], 'uncertain', false],
+    [[200, { data: { createOfferToLikers: null } }], 'uncertain', false],
+    [[200, { data: { createOfferToLikers: { numOffersCreated: 0 } } }], 'rejected', true],
+    [[401, { message: 'Unauthorized' }], 'signed_out', true],
+    [[429, { message: 'Too many requests' }], 'rate_limited', true],
+  ];
+  for (const [answer, code, safe] of outcomes) {
+    const run = offerWorker('mercari', mercariAnswers({ [OFFER_SEND]: answer }));
+    await mercariOffer(run.c);
+    assert.deepEqual([run.results[0].ok, run.results[0].error_code, run.results[0].safe_to_retry], [false, code, safe], JSON.stringify(answer));
+    assert.equal(run.requests.filter(r => r.key === OFFER_SEND).length, 1, JSON.stringify(answer));
+    assert.equal(run.store['promotion_action-1'].finished, true);
+  }
 });
 
 // Shapes from the seller's Selling Hub; every value is made up.
