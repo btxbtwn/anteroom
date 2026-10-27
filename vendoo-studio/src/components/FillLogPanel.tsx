@@ -18,6 +18,7 @@ import {
 import { mergeDraftItem } from "./fillLog/draftForms";
 import { fieldMatchKey, isProtectedEbayField } from "./fillLog/fieldKeys";
 import { formSyncCounts, vendooTextForField, type FormSyncCounts } from "./fillLog/fieldSync";
+import { useVendooEnabled } from "../vendooMode";
 import {
   EMPTY_CELL,
   UNREAD_CELL,
@@ -111,6 +112,7 @@ export function FillLogPanel({
 }) {
   const queryClient = useQueryClient();
   const sessionActive = useListingSessionActive();
+  const vendooOn = useVendooEnabled();
   const report = useFillLog(jobId, jobStatus);
   const { data: extStatus } = useQuery({
     queryKey: ["extension-status"],
@@ -130,7 +132,7 @@ export function FillLogPanel({
   const { data: schemaForms } = useQuery({
     queryKey: ["listing-fields", conversationId],
     queryFn: () => api.vendooApi.listingFields(conversationId || ""),
-    enabled: Boolean(conversationId),
+    enabled: Boolean(conversationId) && vendooOn,
     staleTime: 60_000,
   });
   // The category's own options win over the static lists in Ask-chat prompts.
@@ -152,7 +154,7 @@ export function FillLogPanel({
   const hasDraft = Boolean(vendooItemId || vendooUrl);
   const chromeConnected = Boolean(extStatus?.connected);
 
-  const draftQuery = useVendooDraft(jobId, hasDraft && chromeConnected);
+  const draftQuery = useVendooDraft(jobId, vendooOn && hasDraft && chromeConnected);
   const draft = draftQuery.data;
   const { sourceForms, fromVendooDraft } = sourceFormsForJob(
     mergeDraftItem(draft),
@@ -167,7 +169,8 @@ export function FillLogPanel({
   const sourceKey = visibleSourceForms.map((form) => form.id).join("|");
   const forms = filterForms(visibleSourceForms, query, missingOnly, listing);
   const selectedForm = forms.find((form) => form.id === selected) || forms[0];
-  const selectedCounts = selectedForm ? formSyncCounts(selectedForm, listing, fromVendooDraft) : null;
+  const showVendoo = vendooOn && fromVendooDraft;
+  const selectedCounts = selectedForm ? formSyncCounts(selectedForm, listing, showVendoo) : null;
 
   React.useEffect(() => {
     if (!report) return;
@@ -286,7 +289,9 @@ export function FillLogPanel({
       toastManager.add({
         type: "error",
         title: "Keep this field visible",
-        description: `${field.label} is required for eBay category specifics to load on Vendoo.`,
+        description: vendooOn
+          ? `${field.label} is required for eBay category specifics to load on Vendoo.`
+          : `${field.label} is required for eBay category specifics.`,
       });
       setOpenMenu(null);
       return;
@@ -394,11 +399,11 @@ export function FillLogPanel({
         )}
       </div>
 
-      {draftQuery.isFetching && (
+      {vendooOn && draftQuery.isFetching && (
         <p className="pr-notice">Reading the Vendoo draft…</p>
       )}
 
-      {hasDraft && !fromVendooDraft && !draftQuery.isFetching && (
+      {vendooOn && hasDraft && !fromVendooDraft && !draftQuery.isFetching && (
         <p className="pr-notice">
           {chromeConnected
             ? "Waiting for the Vendoo draft to load."
@@ -406,7 +411,7 @@ export function FillLogPanel({
         </p>
       )}
 
-      {draftQuery.error && (
+      {vendooOn && draftQuery.error && (
         <div className="text-xs text-error">{(draftQuery.error as Error).message || "Could not read the Vendoo draft"}</div>
       )}
       {draft?.api_error && <div className="pr-meta">API: {draft.api_error}</div>}
@@ -414,7 +419,9 @@ export function FillLogPanel({
       {!sourceForms.length ? (
         <div className="pr-empty">
           <p>
-            {draftQuery.isFetching
+            {!vendooOn
+              ? "These are the fields Anteroom has for this listing."
+              : draftQuery.isFetching
               ? "Reading the Vendoo draft…"
               : !chromeConnected && hasDraft
                 ? "Connect Chrome to read Vendoo fields. Ask chat can still write listing values."
@@ -422,7 +429,7 @@ export function FillLogPanel({
                   ? "Could not load marketplace fields from this Vendoo draft yet."
                   : "Send this listing to Vendoo to review each marketplace form."}
           </p>
-          {!chromeConnected && hasDraft && <ConnectChromeButton />}
+          {vendooOn && !chromeConnected && hasDraft && <ConnectChromeButton />}
         </div>
       ) : !forms.length ? (
         <div className="pr-empty">
@@ -443,7 +450,7 @@ export function FillLogPanel({
             </div>
             <div className="pr-tree" role="list">
               {forms.map((form) => {
-                const counts = formSyncCounts(form, listing, fromVendooDraft);
+                const counts = formSyncCounts(form, listing, showVendoo);
                 return (
                 <button
                   key={form.id}
@@ -453,7 +460,7 @@ export function FillLogPanel({
                 >
                   <span className="pr-name">{form.label}</span>
                   <LiveStatusChip status={form.liveStatus} />
-                  <FormSyncCountsView counts={counts} fromVendooDraft={fromVendooDraft} />
+                  <FormSyncCountsView counts={counts} fromVendooDraft={showVendoo} />
                 </button>
                 );
               })}
@@ -465,7 +472,7 @@ export function FillLogPanel({
                 <span className="pr-diff-path">{selectedForm.label}</span>
                 <LiveStatusChip status={selectedForm.liveStatus} />
                 {selectedCounts && (
-                  <FormSyncCountsView counts={selectedCounts} fromVendooDraft={fromVendooDraft} />
+                  <FormSyncCountsView counts={selectedCounts} fromVendooDraft={showVendoo} />
                 )}
               </div>
               <details key={selectedForm.id} className="pr-field-details" open={Boolean(query || missingOnly)}>
@@ -487,11 +494,11 @@ export function FillLogPanel({
                   groupFields(selectedForm.fields).map((group) => (
                   <div key={group.label || "fields"} className="pr-section-block">
                     {group.label ? <div className="pr-section">{group.label}</div> : null}
-                    <div className="pr-field-table-head" aria-hidden="true">
+                    <div className={`pr-field-table-head${vendooOn ? "" : " is-direct"}`} aria-hidden="true">
                       <span className="pr-field-table-gap" />
                       <span>Field</span>
                       <span>Listing</span>
-                      <span>Vendoo</span>
+                      {vendooOn ? <span>Vendoo</span> : null}
                       <span />
                     </div>
                     {group.fields.map((field) => {
@@ -507,12 +514,12 @@ export function FillLogPanel({
                         : "");
                       const rowClass = field.notApplicable
                         ? "is-na"
-                        : !fromVendooDraft
-                          ? "is-unknown"
+                        : !showVendoo
+                          ? (listingEmpty ? "is-unknown" : "is-add")
                           : field.missing
                             ? "is-del"
                             : "is-add";
-                      const gutter = field.notApplicable ? "~" : !fromVendooDraft ? "?" : field.missing ? "-" : "+";
+                      const gutter = field.notApplicable ? "~" : !showVendoo ? (listingEmpty ? "?" : "+") : field.missing ? "-" : "+";
                       const listingCell = field.notApplicable
                         ? "Does not apply"
                         : (listingText || EMPTY_CELL);
@@ -520,21 +527,23 @@ export function FillLogPanel({
                         ? UNREAD_CELL
                         : (vendooText || EMPTY_CELL);
                       return (
-                        <div key={field.key} className={`pr-field-row ${rowClass}`}>
+                        <div key={field.key} className={`pr-field-row ${rowClass}${vendooOn ? "" : " is-direct"}`}>
                           <span className="pr-field-gutter">{gutter}</span>
                           <span className="pr-field-name">{field.label}</span>
                           <span className={`pr-field-cell${listingEmpty && !field.notApplicable ? " is-empty" : " is-filled"}`}>
                             {listingCell}
                           </span>
-                          <span className={`pr-field-cell${
-                            !fromVendooDraft
-                              ? " is-unknown"
-                              : field.missing && !field.notApplicable
-                                ? " is-empty"
-                                : " is-filled"
-                          }`}>
-                            {vendooCell}
-                          </span>
+                          {vendooOn ? (
+                            <span className={`pr-field-cell${
+                              !fromVendooDraft
+                                ? " is-unknown"
+                                : field.missing && !field.notApplicable
+                                  ? " is-empty"
+                                  : " is-filled"
+                            }`}>
+                              {vendooCell}
+                            </span>
+                          ) : null}
                           <div className="pr-field-row-actions">
                             {leftover && !field.notApplicable && (
                               <span className={`pr-issue-badge is-${issueKind(leftover)}`} title={leftover.reason || issueLabel(leftover)}>

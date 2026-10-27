@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
 
 from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
@@ -164,6 +165,30 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+class _VendooOffMiddleware:
+    """Answer Vendoo routes with 409 while the seller has Vendoo turned off.
+
+    Added before CORS so a browser still receives the CORS headers on that 409.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            from vendoo_studio.services.user_settings import vendoo_enabled
+            from vendoo_studio.services.vendoo_gate import VENDOO_OFF_DETAIL, vendoo_request_blocked
+
+            path = scope.get("path") or ""
+            method = scope.get("method") or "GET"
+            if vendoo_request_blocked(method, path) and not vendoo_enabled():
+                response = JSONResponse({"detail": VENDOO_OFF_DETAIL}, status_code=409)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_VendooOffMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,

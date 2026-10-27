@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.436 — 2026-10-27
+
+- Settings → Listings → **Send to Vendoo** can be turned off. While it is off, Anteroom does not call Vendoo: nothing is sent, imported, opened in the draft browser, or synced. You list on each marketplace directly, and nothing publishes until you confirm it.
+- Vendoo-only controls hide while it is off: linking a draft, opening a listing in Vendoo, discard, relist, duplicate Vendoo links, Vendoo label IDs, sync from Vendoo, Vendoo API logs, and the send-to-Vendoo setup. Labels, photos, chat, listing forms, history, and marketplace accounts stay. Turn the switch back on when you want Vendoo again.
+
 ## 0.1.435 — 2026-10-27
 
 - Photos in a listing, pictures in chat, and covers in the sidebar are shown small, so Anteroom uses far less memory and the Mac spends less time catching up.

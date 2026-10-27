@@ -7,6 +7,7 @@ import { staleSuggestionIds } from "../bulkPriceDrop";
 import { BulkPriceDropDialog } from "./BulkPriceDropDialog";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
+import { useVendooEnabled } from "../vendooMode";
 import { ListingThumb, SelectCheckbox, ShelfHeader } from "./sidebar/ListingBits";
 import { displayCoverUrl } from "./sidebar/coverSrc";
 
@@ -69,6 +70,7 @@ export function SuggestionsPanel({
   canSelect?: (suggestion: Suggestion) => boolean;
   onToggleSelect?: (id: string, shift: boolean) => void;
 }) {
+  const vendooOn = useVendooEnabled();
   const { data, isFetched } = useQuery({
     queryKey: ["suggestions"],
     queryFn: api.suggestions.list,
@@ -84,7 +86,9 @@ export function SuggestionsPanel({
       variant="ghost"
       size="xs"
       className="mx-2 mt-1 mb-0.5 self-start"
-      title="Review a lower price for each stale listing. Saves in Anteroom only; nothing is sent to Vendoo."
+      title={vendooOn
+        ? "Review a lower price for each stale listing. Saves in Anteroom only; nothing is sent to Vendoo."
+        : "Review a lower price for each stale listing. Saves in Anteroom only."}
       onClick={() => setMarkdownIds(staleIds)}
     >
       {markDownStaleLabel(staleIds.length)}

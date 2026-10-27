@@ -60,6 +60,10 @@ def start() -> dict:
 
     if _task is not None and not _task.done():
         raise RuntimeError("A Vendoo import is already running.")
+    from vendoo_studio.services.user_settings import vendoo_enabled
+
+    if not vendoo_enabled():
+        return {**status(), "running": False, "skipped": True, "reason": "vendoo off"}
     _progress = BulkImportProgress(running=True, started_at=utcnow().isoformat())
     _task = asyncio.create_task(_run())
     return status()

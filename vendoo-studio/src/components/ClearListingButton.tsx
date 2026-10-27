@@ -11,6 +11,7 @@ import {
   useChatBusy,
 } from "./chat/liveChatStore";
 import { RefreshCwIcon } from "lucide-react";
+import { useVendooEnabled } from "../vendooMode";
 import { RegeneratePriceDialog } from "./RegeneratePriceDialog";
 import { Button } from "./ui/button";
 
@@ -22,6 +23,16 @@ const CLEAR_WARNING = [
 const REGENERATE_WARNING = [
   "Rewrite this listing from scratch?",
   "Chat and every generated field are discarded, then the listing is written again from your photos and item details. Measurements, flaws, COG, labels and notes are kept. Vendoo is unchanged until you send again.",
+].join("\n");
+
+const CLEAR_WARNING_DIRECT = [
+  "Clear this listing and start over?",
+  "Photos, chat, generated fields, and item details will be removed. This listing stays in the sidebar as a blank draft.",
+].join("\n");
+
+const REGENERATE_WARNING_DIRECT = [
+  "Rewrite this listing from scratch?",
+  "Chat and every generated field are discarded, then the listing is written again from your photos and item details. Measurements, flaws, COG, labels and notes are kept.",
 ].join("\n");
 
 export async function refreshAfterReset(queryClient: QueryClient, convId: string) {
@@ -44,6 +55,7 @@ export async function refreshAfterReset(queryClient: QueryClient, convId: string
     mutation must outlive the menu popup the click came from. */
 export function useClearListing(convId: string, onCleared?: () => void) {
   const queryClient = useQueryClient();
+  const vendooOn = useVendooEnabled();
   const reset = useMutation({
     mutationFn: () => api.conversations.reset(convId),
     onSuccess: () => {
@@ -64,7 +76,7 @@ export function useClearListing(convId: string, onCleared?: () => void) {
   return {
     isPending: reset.isPending,
     async clear() {
-      const confirmed = await confirmDialog(CLEAR_WARNING, {
+      const confirmed = await confirmDialog(vendooOn ? CLEAR_WARNING : CLEAR_WARNING_DIRECT, {
         variant: "destructive",
         confirmLabel: "Clear listing",
       });
@@ -93,6 +105,7 @@ export function RegenerateListingButton({
   onRegenerated?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const vendooOn = useVendooEnabled();
   const busy = useChatBusy(convId);
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const { data: photos } = useQuery({
@@ -145,7 +158,7 @@ export function RegenerateListingButton({
   });
 
   async function confirmFullRegenerate() {
-    const confirmed = await confirmDialog(REGENERATE_WARNING, {
+    const confirmed = await confirmDialog(vendooOn ? REGENERATE_WARNING : REGENERATE_WARNING_DIRECT, {
       variant: "destructive",
       confirmLabel: "Rewrite",
     });

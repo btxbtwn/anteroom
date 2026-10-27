@@ -15,6 +15,7 @@ import { displayCoverUrl } from "./coverSrc";
 import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
 import { inventoryStatus, listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
+import { useVendooEnabled } from "../../vendooMode";
 
 const HOVER_STATUS_DELAY_MS = 280;
 
@@ -60,12 +61,13 @@ export function ListingRow({
   const coverUrl = displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url);
   const status = inventoryStatus(listing);
   const partial = partialSale(listing, status);
+  const queryClient = useQueryClient();
+  const vendooOn = useVendooEnabled();
   const statusTitle = partial ? `Active · ${partial}`
     : status === "active" && String(listing.status || "draft") !== "active"
       ? "Listed directly from Anteroom."
-      : statusHint(status);
+      : statusHint(status, vendooOn);
   const settledAt = settled ? compactRelativeTime(listing.settled_at || listing.updated_at) : "";
-  const queryClient = useQueryClient();
   const itemRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const skipRenameBlur = useRef(false);
@@ -328,12 +330,14 @@ export function ListingRow({
             {listing.unsent_edits ? (
               <ListingTag
                 tone="info"
-                title="Edited in Anteroom since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
+                title={vendooOn
+                  ? "Edited in Anteroom since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
+                  : "Edited in Anteroom since this listing was last saved."}
               >
                 unsent
               </ListingTag>
             ) : null}
-            {relistMarketplaces.length ? (
+            {vendooOn && relistMarketplaces.length ? (
               <ListingTag
                 tone="warning"
                 title={relistStageNow === "list"
@@ -445,7 +449,7 @@ export function ListingRow({
             </ul>
           ) : (
             <div className="px-0.5 py-1 text-2xs leading-snug text-muted-foreground">
-              {missingStatus
+              {missingStatus && vendooOn
                 ? "Pull from Vendoo to load live status."
                 : "No marketplace status yet."}
             </div>

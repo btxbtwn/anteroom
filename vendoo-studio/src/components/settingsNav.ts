@@ -306,6 +306,21 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
 ];
 
+const VENDOO_ONLY_SEARCH_IDS = new Set([
+  "duplicate-vendoo-links",
+  "vendoo-api-logs",
+  "category-trees",
+  "vendoo-sync",
+]);
+
+/** Search rows that only exist while Send to Vendoo is on. The switch itself stays. */
+export function settingsSearchItemsForMode(vendooOn: boolean): readonly SettingsSearchItem[] {
+  if (vendooOn) return SETTINGS_SEARCH_ITEMS;
+  return SETTINGS_SEARCH_ITEMS
+    .filter((item) => !VENDOO_ONLY_SEARCH_IDS.has(item.id))
+    .map((item) => (item.id === "chrome" ? { ...item, title: "Chrome" } : item));
+}
+
 function normalize(text: string): string {
   return text.trim().toLowerCase().replace(/\s+/g, " ");
 }

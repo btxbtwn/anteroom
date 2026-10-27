@@ -402,23 +402,25 @@ export function ListingEditor({
             <HistoryIcon />
             History
           </Button>
-          <VendooLinkControl
-            convId={convId}
-            itemId={importedItemId}
-            url={importedUrl}
-            onLinked={(linkedItemId) => {
-              // Claim the auto-attach key so the effect doesn't race this import.
-              ensureAttemptKey.current = `${convId}:${linkedItemId}`;
-              queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
-              queryClient.invalidateQueries({ queryKey: ["conversations"] });
-              queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
-              ensureDraftMutation.mutate({ importDraft: true });
-            }}
-          />
+          {vendooEnabled ? (
+            <VendooLinkControl
+              convId={convId}
+              itemId={importedItemId}
+              url={importedUrl}
+              onLinked={(linkedItemId) => {
+                // Claim the auto-attach key so the effect doesn't race this import.
+                ensureAttemptKey.current = `${convId}:${linkedItemId}`;
+                queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
+                queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
+                ensureDraftMutation.mutate({ importDraft: true });
+              }}
+            />
+          ) : null}
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
           <ListingSyncStatus
             convId={convId}
-            bound={Boolean(listingJob?.vendoo_item_id || importedItemId)}
+            bound={vendooEnabled && Boolean(listingJob?.vendoo_item_id || importedItemId)}
           />
           {conversation?.unsent_edits ? (
             <>
@@ -427,13 +429,15 @@ export function ListingEditor({
                 title={
                   directMarketplaces.length
                     ? `This listing has changed since it was listed on ${directMarketplaces.map(marketplaceName).join(", ")}. Update it there from Marketplaces.`
-                    : "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                    : vendooEnabled
+                      ? "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                      : "This listing has changed since it was last saved."
                 }
               >
                 Unsent edits
               </Badge>
               {/* Discard pulls Vendoo's copy, which a directly listed item no longer follows. */}
-              {!directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
+              {vendooEnabled && !directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
                 <InlineButton
                   tone="muted"
                   className="text-xs"
@@ -453,14 +457,14 @@ export function ListingEditor({
       <SoldElsewhereNotice
         convId={convId}
         openInVendoo={
-          listingJob ? (
+          vendooEnabled && listingJob ? (
             <OpenListingButton jobId={listingJob.id} vendooItemId={importedItemId} vendooUrl={importedUrl} />
           ) : null
         }
       />
 
 
-      {relistMarketplaces.length > 0 && (
+      {vendooEnabled && relistMarketplaces.length > 0 && (
         <Alert
           variant="warning"
           role="status"
@@ -510,7 +514,7 @@ export function ListingEditor({
         </Alert>
       )}
 
-      {schemaProbeActive && (
+      {vendooEnabled && schemaProbeActive && (
         <Alert variant="info" role="status" className="mx-3 mt-2.5 shrink-0">
           <Spinner />
           <AlertDescription>

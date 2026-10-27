@@ -7,6 +7,7 @@ import { ListingChangeList } from "./ListingChangeList";
 import { listingChanges } from "./listingChanges";
 import { ListingReviewDialog } from "./ListingReviewDialog";
 import { FieldLabel, NativeSelect } from "./ListingFormControls";
+import { useVendooEnabled } from "../vendooMode";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
 
@@ -17,6 +18,7 @@ export function ListingHistory({ convId, listing, revisionId, busy, onClose }: {
   busy: boolean;
   onClose: () => void;
 }) {
+  const vendooOn = useVendooEnabled();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<{ selectedId: string; revisionId: string } | null>(null);
@@ -48,7 +50,9 @@ export function ListingHistory({ convId, listing, revisionId, busy, onClose }: {
         {restore.isPending ? "Restoring…" : confirming ? "Confirm restore" : "Restore this version"}
       </Button>
     }>
-      <p className="text-muted-foreground">Compare an earlier version with the current listing. Restoring changes Anteroom only; it does not send anything to Vendoo or restore photos.</p>
+      <p className="text-muted-foreground">{vendooOn
+        ? "Compare an earlier version with the current listing. Restoring changes Anteroom only; it does not send anything to Vendoo or restore photos."
+        : "Compare an earlier version with the current listing. Restoring changes Anteroom only and does not restore photos."}</p>
       {revisions.isPending ? <LoadingLine label="Loading history…" /> : revisions.isError ? <p role="alert" className="text-destructive-foreground">{revisions.error.message}</p> : !earlier.length ? <p className="text-muted-foreground">No earlier versions yet.</p> : (
         <>
           <div>

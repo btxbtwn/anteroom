@@ -146,6 +146,7 @@ export function ItemDetails({ convId }: Props) {
     queryKey: ["settings-ui"],
     queryFn: api.settings.ui,
   });
+  const vendooOn = uiPrefs?.vendoo_enabled !== false;
 
   const { data: packageDimensionSettings } = useQuery({
     queryKey: ["settings-package-dimensions"],
@@ -607,7 +608,7 @@ export function ItemDetails({ convId }: Props) {
         </div>
       </InspectorSection>
 
-      {history.length > 0 && (
+      {vendooOn && history.length > 0 && (
         <InspectorSection title="Vendoo History" titleId={`item-section-history-${convId}`}>
           <dl className="flex flex-col gap-0.5">
             {history.map((row) => (
