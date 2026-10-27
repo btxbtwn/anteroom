@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.455 — 2026-10-27
+
+- The Depop tab is laid out like Depop’s sell page: the same headings (Description, Info, Enhance your listing, Item price, Shipping), Size and Quantity side by side, and Depop’s own hint under each field.
+
 ## 0.1.454 — 2026-10-27
 
 - The Depop tab now matches Depop’s own sell page for every category: the same fields in the same order, with Depop’s names and choices. Retired categories and fields such as the empty “Sizing” row are gone, Color is one field that takes up to two colors, and the hashtags Anteroom adds show under Description instead of in a separate field.

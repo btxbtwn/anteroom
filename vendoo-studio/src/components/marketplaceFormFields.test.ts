@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MarketplaceForm } from "../api/types";
-import { fieldsForMarketplaceForm, nativeEditorDependencies } from "./ListingEditor";
+import { fieldsForMarketplaceForm, nativeEditorDependencies, nativeFormSections } from "./ListingEditor";
 
 const listing = {
   title: "Nike tee",
@@ -126,6 +126,25 @@ describe("marketplace form fields", () => {
     expect(nativeEditorDependencies(fields, { ebay_specifics: { sizeType: "Regular" } })[1].options).toEqual(["M", "S"]);
     expect(nativeEditorDependencies(fields, { ebay_specifics: { sizeType: "Petites" } })[1].options).toEqual(["M"]);
   });
+  it("keeps a marketplace form's headings, order and half-width rows", () => {
+    const row = (key: string, label: string, section: string, width?: "half") => ({ key, path: key, label, value: "",
+      required: false, multi: false, selection_only: false, options: [], section, ...(width ? { width } : {}) });
+    const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "menswear_jeans", fields: [
+      row("depop_specifics.description", "Description", "Description"),
+      row("depop_specifics.brand", "Brand", "Info"),
+      row("depop_specifics.nativeSizeId", "Size", "Info", "half"),
+      row("quantity", "Quantity", "Info", "half"),
+      row("depop_specifics.source", "Source", "Enhance your listing"),
+      row("price", "Item price", "Item price"),
+    ] };
+    const fields = fieldsForMarketplaceForm(listing, "depop", [form]);
+    expect(nativeFormSections(fields).map((section) => [section.title, section.fields.map((field) => field.label)])).toEqual([
+      ["Description", ["Description"]], ["Info", ["Brand", "Size", "Quantity"]],
+      ["Enhance your listing", ["Source"]], ["Item price", ["Item price"]],
+    ]);
+    expect(fields.filter((field) => field.width === "half").map((field) => field.label)).toEqual(["Size", "Quantity"]);
+  });
+
   it("never substitutes a Vendoo or reference form for a direct marketplace", () => {
     for (const tab of ["ebay", "poshmark", "mercari", "depop", "sellwild"]) {
       expect(fieldsForMarketplaceForm(listing, tab, undefined)).toEqual([]);
