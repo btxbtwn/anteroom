@@ -23,6 +23,17 @@ describe("marketplace form fields", () => {
       type: "inventory", defaultValue: rows, inventoryGroups: groups,
     });
   });
+  it("keeps the eBay variations object and the aspects eBay lets vary", () => {
+    const value = { aspects: ["Size"], rows: [{ values: { Size: "M" }, quantity: 2 }, { values: { Size: "L" }, quantity: 1 }], photos: {} };
+    const aspects = [{ name: "Size", selection_only: false, options: ["M", "L"] }];
+    const form: MarketplaceForm = { marketplace: "ebay", native: true, known: true, category_id: "15687", fields: [
+      { key: "ebay_specifics.variations", path: "ebay_specifics.variations", label: "Variations", value, required: false,
+        multi: false, selection_only: false, options: [], input_type: "variations", variation_aspects: aspects },
+    ] };
+    expect(fieldsForMarketplaceForm(listing, "ebay", [form]).find((row) => row.key === "ebay_specifics.variations")).toMatchObject({
+      type: "variations", defaultValue: value, variationAspects: aspects,
+    });
+  });
   it("preserves native numeric limits and precision", () => {
     const form: MarketplaceForm = { marketplace: "depop", native: true, known: true, category_id: "menswear_tshirts", fields: [
       { key: "depop_specifics.worldwideShipping.price", path: "depop_specifics.worldwideShipping.price", label: "Worldwide Shipping", value: 0,

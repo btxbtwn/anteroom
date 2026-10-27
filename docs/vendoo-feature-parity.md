@@ -236,7 +236,7 @@ Most important first.
    for active listings through the Chrome bridge, like eBay and Etsy.
 9. **No eBay listing video.** *Fix:* add eBay video upload through the
    Media API next to the Poshmark video.
-10. *(Closed in 0.1.420: bulk condition, color, tags and category, and bulk
+10. *(Closed in 0.1.421: bulk condition, color, tags and category, and bulk
     Update on eBay, Etsy, Poshmark and Depop.)*
 11. **Smaller gaps:** different photos per marketplace, label analytics, a
     finder for similar items, live Update on Mercari, Vinted and Sellwild, and
