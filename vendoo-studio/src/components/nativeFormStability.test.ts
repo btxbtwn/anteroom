@@ -109,6 +109,22 @@ describe("native form values", () => {
     )).toBe("3000");
   });
 
+  it("shows Sellwild's weight and sides only for the packages its page asks them for", () => {
+    const keys = ["weight", "height", "width", "depth"].map((side) => `sellwild_specifics.package.${side}`);
+    const fields = [
+      { key: "sellwild_specifics.parcelTemplate", optionValues: {
+        "Custom Package Dimensions": "", "Small Flat Rate Box": "USPS_SmallFlatRateBox", "Soft Pack (poly mailer)": "USPS_SoftPack",
+      } },
+      ...keys.map((key) => ({ key, locked: true })),
+    ];
+    const shown = (pick: string) => keys.filter((key) => nativeFieldVisible({ key }, {
+      tab: "sellwild", listing: {}, local: { "sellwild_specifics.parcelTemplate": pick }, fields, categoryStale: false,
+    }));
+    expect(shown("Custom Package Dimensions")).toEqual(keys);
+    expect(shown("Soft Pack (poly mailer)")).toEqual(["sellwild_specifics.package.weight"]);
+    expect(shown("Small Flat Rate Box")).toEqual([]);
+  });
+
   it("hides the previous category's rows, and reveals a toggle's row without reloading", () => {
     const fields = [
       { key: "price" },

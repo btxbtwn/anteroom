@@ -1,89 +1,113 @@
 {
-  "source": "Sellwild public web catalog, 2026-10-26",
+  "source": "Sellwild sell page (sellwild.com/sell), 2026-10-27: categories in the picker order, Pets > Adoption hidden; packages in the page order",
   "parcel_templates": [
-    {
-      "id": "USPS_FlatRateEnvelope",
-      "label": "Flat Rate Envelope",
-      "length": 12.5,
-      "width": 9.5,
-      "height": 0.75
-    },
-    {
-      "id": "USPS_FlatRateLegalEnvelope",
-      "label": "Flat Rate Legal Envelope",
-      "length": 15,
-      "width": 9.5,
-      "height": 0.75
-    },
-    {
-      "id": "USPS_FlatRatePaddedEnvelope",
-      "label": "Flat Rate Padded Envelope",
-      "length": 12.5,
-      "width": 9.5,
-      "height": 1
-    },
-    {
-      "id": "USPS_FlatRateCardboardEnvelope",
-      "label": "Flat Rate Cardboard Envelope",
-      "length": 12.5,
-      "width": 9.5,
-      "height": 0.75
-    },
-    {
-      "id": "USPS_FlatRateWindowEnvelope",
-      "label": "Flat Rate Window Envelope",
-      "length": 10,
-      "width": 5,
-      "height": 0.75
-    },
-    {
-      "id": "USPS_SmallFlatRateEnvelope",
-      "label": "Small Flat Rate Envelope",
-      "length": 10,
-      "width": 6,
-      "height": 0.8
-    },
     {
       "id": "USPS_SmallFlatRateBox",
       "label": "Small Flat Rate Box",
       "length": 8.6875,
       "width": 5.4375,
-      "height": 1.75
+      "height": 1.75,
+      "flat_rate": true,
+      "featured": true
     },
     {
       "id": "USPS_MediumFlatRateBox1",
       "label": "Medium Flat Rate Box 1",
       "length": 11.25,
       "width": 8.75,
-      "height": 6
+      "height": 6,
+      "flat_rate": true,
+      "featured": true
     },
     {
       "id": "USPS_MediumFlatRateBox2",
       "label": "Medium Flat Rate Box 2",
       "length": 14,
       "width": 12,
-      "height": 3.5
+      "height": 3.5,
+      "flat_rate": true,
+      "featured": true
     },
     {
       "id": "USPS_LargeFlatRateBox",
       "label": "Large Flat Rate Box",
       "length": 12.25,
       "width": 12.25,
-      "height": 6
+      "height": 6,
+      "flat_rate": true,
+      "featured": true
+    },
+    {
+      "id": "USPS_FlatRateEnvelope",
+      "label": "Flat Rate Envelope",
+      "length": 12.5,
+      "width": 9.5,
+      "height": 0.75,
+      "flat_rate": true,
+      "featured": false
+    },
+    {
+      "id": "USPS_FlatRateLegalEnvelope",
+      "label": "Flat Rate Legal Envelope",
+      "length": 15,
+      "width": 9.5,
+      "height": 0.75,
+      "flat_rate": true,
+      "featured": false
+    },
+    {
+      "id": "USPS_FlatRatePaddedEnvelope",
+      "label": "Flat Rate Padded Envelope",
+      "length": 12.5,
+      "width": 9.5,
+      "height": 1,
+      "flat_rate": true,
+      "featured": false
+    },
+    {
+      "id": "USPS_FlatRateCardboardEnvelope",
+      "label": "Flat Rate Cardboard Envelope",
+      "length": 12.5,
+      "width": 9.5,
+      "height": 0.75,
+      "flat_rate": true,
+      "featured": false
+    },
+    {
+      "id": "USPS_FlatRateWindowEnvelope",
+      "label": "Flat Rate Window Envelope",
+      "length": 10,
+      "width": 5,
+      "height": 0.75,
+      "flat_rate": true,
+      "featured": false
+    },
+    {
+      "id": "USPS_SmallFlatRateEnvelope",
+      "label": "Small Flat Rate Envelope",
+      "length": 10,
+      "width": 6,
+      "height": 0.8,
+      "flat_rate": true,
+      "featured": false
     },
     {
       "id": "USPS_SoftPack",
       "label": "Soft Pack (poly mailer)",
       "length": 0,
       "width": 0,
-      "height": 0
+      "height": 0,
+      "flat_rate": false,
+      "featured": false
     },
     {
       "id": "USPS_IrregularParcel",
       "label": "Irregular Parcel",
       "length": 4,
       "width": 4,
-      "height": 4
+      "height": 4,
+      "flat_rate": false,
+      "featured": false
     }
   ],
   "conditions": [
@@ -114,48 +138,20 @@
       "label": "Vehicles > Cars"
     },
     {
-      "id": 57,
-      "label": "Sports > Bikes"
-    },
-    {
-      "id": 61,
-      "label": "Home & Garden > Furniture"
-    },
-    {
-      "id": 62,
-      "label": "Home & Garden > Appliances"
-    },
-    {
-      "id": 64,
-      "label": "Home & Garden > Lawn & Garden"
-    },
-    {
-      "id": 66,
-      "label": "Kids & Baby > Baby Clothes"
-    },
-    {
-      "id": 69,
-      "label": "Fashion > Shoes"
-    },
-    {
-      "id": 74,
-      "label": "Art & Collectibles > Art"
-    },
-    {
-      "id": 95,
-      "label": "Vehicles > Motorcycles"
-    },
-    {
-      "id": 157,
-      "label": "Vehicles > Parts"
-    },
-    {
       "id": 158,
       "label": "Vehicles > Electric Cars"
     },
     {
+      "id": 291,
+      "label": "Vehicles > SUVs"
+    },
+    {
       "id": 159,
       "label": "Vehicles > Classics, Collectors, and SuperCars"
+    },
+    {
+      "id": 292,
+      "label": "Vehicles > Vans & Minivans"
     },
     {
       "id": 160,
@@ -164,6 +160,10 @@
     {
       "id": 161,
       "label": "Vehicles > Trucks"
+    },
+    {
+      "id": 95,
+      "label": "Vehicles > Motorcycles"
     },
     {
       "id": 162,
@@ -176,6 +176,14 @@
     {
       "id": 164,
       "label": "Vehicles > Trailers"
+    },
+    {
+      "id": 157,
+      "label": "Vehicles > Parts"
+    },
+    {
+      "id": 172,
+      "label": "Electronics > Cameras"
     },
     {
       "id": 165,
@@ -206,10 +214,6 @@
       "label": "Electronics > Video Games"
     },
     {
-      "id": 172,
-      "label": "Electronics > Cameras"
-    },
-    {
       "id": 173,
       "label": "Music > Guitars / Bass"
     },
@@ -224,6 +228,34 @@
     {
       "id": 176,
       "label": "Music > Keyboards / Pianos"
+    },
+    {
+      "id": 207,
+      "label": "Music > Vinyl"
+    },
+    {
+      "id": 208,
+      "label": "Music > Cassette Tapes"
+    },
+    {
+      "id": 209,
+      "label": "Music > CDs"
+    },
+    {
+      "id": 211,
+      "label": "Music > Music Memorabilia"
+    },
+    {
+      "id": 236,
+      "label": "Movies > DVDs"
+    },
+    {
+      "id": 237,
+      "label": "Movies > Blu-ray"
+    },
+    {
+      "id": 238,
+      "label": "Movies > VHS"
     },
     {
       "id": 177,
@@ -242,16 +274,164 @@
       "label": "Tools > Parts / DIY Kits"
     },
     {
-      "id": 184,
-      "label": "Fashion > Accessories"
-    },
-    {
       "id": 185,
       "label": "Tools > Tools & Machines"
     },
     {
+      "id": 269,
+      "label": "Fashion > Dresses"
+    },
+    {
+      "id": 270,
+      "label": "Fashion > Tops & Shirts"
+    },
+    {
+      "id": 271,
+      "label": "Fashion > Sweaters & Hoodies"
+    },
+    {
+      "id": 272,
+      "label": "Fashion > Coats & Jackets"
+    },
+    {
+      "id": 273,
+      "label": "Fashion > Pants & Jeans"
+    },
+    {
+      "id": 274,
+      "label": "Fashion > Skirts"
+    },
+    {
+      "id": 275,
+      "label": "Fashion > Shorts"
+    },
+    {
+      "id": 276,
+      "label": "Fashion > Activewear"
+    },
+    {
+      "id": 277,
+      "label": "Fashion > Swimwear"
+    },
+    {
+      "id": 278,
+      "label": "Fashion > Sleepwear & Intimates"
+    },
+    {
+      "id": 279,
+      "label": "Fashion > Suits & Blazers"
+    },
+    {
+      "id": 280,
+      "label": "Fashion > Sneakers"
+    },
+    {
+      "id": 281,
+      "label": "Fashion > Boots"
+    },
+    {
+      "id": 282,
+      "label": "Fashion > Heels"
+    },
+    {
+      "id": 283,
+      "label": "Fashion > Sandals"
+    },
+    {
+      "id": 284,
+      "label": "Fashion > Flats & Loafers"
+    },
+    {
+      "id": 285,
+      "label": "Fashion > Handbags & Purses"
+    },
+    {
+      "id": 69,
+      "label": "Fashion > Shoes"
+    },
+    {
+      "id": 286,
+      "label": "Fashion > Wallets"
+    },
+    {
+      "id": 184,
+      "label": "Fashion > Accessories"
+    },
+    {
+      "id": 240,
+      "label": "Fashion > Beauty & Fragrance"
+    },
+    {
+      "id": 287,
+      "label": "Fashion > Backpacks"
+    },
+    {
+      "id": 288,
+      "label": "Fashion > Hats"
+    },
+    {
+      "id": 289,
+      "label": "Fashion > Sunglasses & Eyewear"
+    },
+    {
+      "id": 290,
+      "label": "Fashion > Belts"
+    },
+    {
+      "id": 61,
+      "label": "Home & Garden > Furniture"
+    },
+    {
+      "id": 62,
+      "label": "Home & Garden > Appliances"
+    },
+    {
+      "id": 64,
+      "label": "Home & Garden > Lawn & Garden"
+    },
+    {
       "id": 186,
       "label": "Home & Garden > Home Decor"
+    },
+    {
+      "id": 241,
+      "label": "Home & Garden > Kitchen & Dining"
+    },
+    {
+      "id": 242,
+      "label": "Home & Garden > Holiday & Seasonal"
+    },
+    {
+      "id": 247,
+      "label": "Home & Garden > Bedding & Bath"
+    },
+    {
+      "id": 262,
+      "label": "Jewelry > Earrings"
+    },
+    {
+      "id": 263,
+      "label": "Jewelry > Necklaces & Pendants"
+    },
+    {
+      "id": 264,
+      "label": "Jewelry > Bracelets & Bangles"
+    },
+    {
+      "id": 265,
+      "label": "Jewelry > Rings"
+    },
+    {
+      "id": 266,
+      "label": "Jewelry > Watches"
+    },
+    {
+      "id": 267,
+      "label": "Jewelry > Brooches & Pins"
+    },
+    {
+      "id": 268,
+      "label": "Jewelry > Charms"
     },
     {
       "id": 188,
@@ -260,6 +440,14 @@
     {
       "id": 189,
       "label": "Jewelry > Mens Jewelry"
+    },
+    {
+      "id": 244,
+      "label": "Sports > Fan Gear"
+    },
+    {
+      "id": 57,
+      "label": "Sports > Bikes"
     },
     {
       "id": 190,
@@ -278,12 +466,100 @@
       "label": "Sports > Kayaks, Paddle Boards, & Other Non-Motorized Watercraft"
     },
     {
+      "id": 293,
+      "label": "Sports > Fan Apparel"
+    },
+    {
+      "id": 294,
+      "label": "Sports > Fan Footwear & Socks"
+    },
+    {
+      "id": 295,
+      "label": "Sports > Fan Phone Cases & Tech"
+    },
+    {
+      "id": 296,
+      "label": "Sports > Flags & Banners"
+    },
+    {
+      "id": 297,
+      "label": "Sports > Fan Home & Tailgate"
+    },
+    {
+      "id": 298,
+      "label": "Sports > Fan Car Accessories"
+    },
+    {
+      "id": 299,
+      "label": "Sports > Fan Accessories"
+    },
+    {
+      "id": 74,
+      "label": "Art & Collectibles > Art"
+    },
+    {
       "id": 194,
       "label": "Art & Collectibles > Antiques & Vintage"
     },
     {
       "id": 195,
       "label": "Art & Collectibles > Collectibles"
+    },
+    {
+      "id": 248,
+      "label": "Art & Collectibles > Vintage Print Ads"
+    },
+    {
+      "id": 249,
+      "label": "Art & Collectibles > Business Cards"
+    },
+    {
+      "id": 250,
+      "label": "Art & Collectibles > Matchbook Covers"
+    },
+    {
+      "id": 251,
+      "label": "Art & Collectibles > Postcards"
+    },
+    {
+      "id": 252,
+      "label": "Art & Collectibles > Engravings & Antique Prints"
+    },
+    {
+      "id": 253,
+      "label": "Art & Collectibles > Billheads, Letters & Documents"
+    },
+    {
+      "id": 254,
+      "label": "Art & Collectibles > Vintage Photographs"
+    },
+    {
+      "id": 255,
+      "label": "Art & Collectibles > Pins & Badges"
+    },
+    {
+      "id": 256,
+      "label": "Art & Collectibles > Magazines & Periodicals"
+    },
+    {
+      "id": 257,
+      "label": "Art & Collectibles > Maps & Travel Brochures"
+    },
+    {
+      "id": 258,
+      "label": "Art & Collectibles > Trade Cards"
+    },
+    {
+      "id": 259,
+      "label": "Art & Collectibles > Stamps & Postal History"
+    },
+    {
+      "id": 260,
+      "label": "Art & Collectibles > Figurines"
+    },
+    {
+      "id": 261,
+      "label": "Art & Collectibles > Rocks, Minerals & Fossils"
     },
     {
       "id": 196,
@@ -298,6 +574,18 @@
       "label": "Games, Toys, Hobbies > Trading Cards"
     },
     {
+      "id": 243,
+      "label": "Games, Toys, Hobbies > Sewing & Crafts"
+    },
+    {
+      "id": 245,
+      "label": "Games, Toys, Hobbies > Plush & Stuffed Animals"
+    },
+    {
+      "id": 66,
+      "label": "Kids & Baby > Baby Clothes"
+    },
+    {
       "id": 200,
       "label": "Kids & Baby > Cribs & Strollers"
     },
@@ -310,32 +598,16 @@
       "label": "Kids & Baby > Costumes & Accessories"
     },
     {
+      "id": 246,
+      "label": "Kids & Baby > Kids Clothing"
+    },
+    {
       "id": 204,
       "label": "Pets > Pet Supplies"
     },
     {
       "id": 205,
       "label": "Pets > Pet Food"
-    },
-    {
-      "id": 206,
-      "label": "Pets > Adoption"
-    },
-    {
-      "id": 207,
-      "label": "Music > Vinyl"
-    },
-    {
-      "id": 208,
-      "label": "Music > Cassette Tapes"
-    },
-    {
-      "id": 209,
-      "label": "Music > CDs"
-    },
-    {
-      "id": 211,
-      "label": "Music > Music Memorabilia"
     },
     {
       "id": 212,
@@ -432,258 +704,6 @@
     {
       "id": 235,
       "label": "Books > Steampunk"
-    },
-    {
-      "id": 236,
-      "label": "Movies > DVDs"
-    },
-    {
-      "id": 237,
-      "label": "Movies > Blu-ray"
-    },
-    {
-      "id": 238,
-      "label": "Movies > VHS"
-    },
-    {
-      "id": 240,
-      "label": "Fashion > Beauty & Fragrance"
-    },
-    {
-      "id": 241,
-      "label": "Home & Garden > Kitchen & Dining"
-    },
-    {
-      "id": 242,
-      "label": "Home & Garden > Holiday & Seasonal"
-    },
-    {
-      "id": 243,
-      "label": "Games, Toys, Hobbies > Sewing & Crafts"
-    },
-    {
-      "id": 244,
-      "label": "Sports > Fan Gear"
-    },
-    {
-      "id": 245,
-      "label": "Games, Toys, Hobbies > Plush & Stuffed Animals"
-    },
-    {
-      "id": 246,
-      "label": "Kids & Baby > Kids Clothing"
-    },
-    {
-      "id": 247,
-      "label": "Home & Garden > Bedding & Bath"
-    },
-    {
-      "id": 248,
-      "label": "Art & Collectibles > Vintage Print Ads"
-    },
-    {
-      "id": 249,
-      "label": "Art & Collectibles > Business Cards"
-    },
-    {
-      "id": 250,
-      "label": "Art & Collectibles > Matchbook Covers"
-    },
-    {
-      "id": 251,
-      "label": "Art & Collectibles > Postcards"
-    },
-    {
-      "id": 252,
-      "label": "Art & Collectibles > Engravings & Antique Prints"
-    },
-    {
-      "id": 253,
-      "label": "Art & Collectibles > Billheads, Letters & Documents"
-    },
-    {
-      "id": 254,
-      "label": "Art & Collectibles > Vintage Photographs"
-    },
-    {
-      "id": 255,
-      "label": "Art & Collectibles > Pins & Badges"
-    },
-    {
-      "id": 256,
-      "label": "Art & Collectibles > Magazines & Periodicals"
-    },
-    {
-      "id": 257,
-      "label": "Art & Collectibles > Maps & Travel Brochures"
-    },
-    {
-      "id": 258,
-      "label": "Art & Collectibles > Trade Cards"
-    },
-    {
-      "id": 259,
-      "label": "Art & Collectibles > Stamps & Postal History"
-    },
-    {
-      "id": 260,
-      "label": "Art & Collectibles > Figurines"
-    },
-    {
-      "id": 261,
-      "label": "Art & Collectibles > Rocks, Minerals & Fossils"
-    },
-    {
-      "id": 262,
-      "label": "Jewelry > Earrings"
-    },
-    {
-      "id": 263,
-      "label": "Jewelry > Necklaces & Pendants"
-    },
-    {
-      "id": 264,
-      "label": "Jewelry > Bracelets & Bangles"
-    },
-    {
-      "id": 265,
-      "label": "Jewelry > Rings"
-    },
-    {
-      "id": 266,
-      "label": "Jewelry > Watches"
-    },
-    {
-      "id": 267,
-      "label": "Jewelry > Brooches & Pins"
-    },
-    {
-      "id": 268,
-      "label": "Jewelry > Charms"
-    },
-    {
-      "id": 269,
-      "label": "Fashion > Dresses"
-    },
-    {
-      "id": 270,
-      "label": "Fashion > Tops & Shirts"
-    },
-    {
-      "id": 271,
-      "label": "Fashion > Sweaters & Hoodies"
-    },
-    {
-      "id": 272,
-      "label": "Fashion > Coats & Jackets"
-    },
-    {
-      "id": 273,
-      "label": "Fashion > Pants & Jeans"
-    },
-    {
-      "id": 274,
-      "label": "Fashion > Skirts"
-    },
-    {
-      "id": 275,
-      "label": "Fashion > Shorts"
-    },
-    {
-      "id": 276,
-      "label": "Fashion > Activewear"
-    },
-    {
-      "id": 277,
-      "label": "Fashion > Swimwear"
-    },
-    {
-      "id": 278,
-      "label": "Fashion > Sleepwear & Intimates"
-    },
-    {
-      "id": 279,
-      "label": "Fashion > Suits & Blazers"
-    },
-    {
-      "id": 280,
-      "label": "Fashion > Sneakers"
-    },
-    {
-      "id": 281,
-      "label": "Fashion > Boots"
-    },
-    {
-      "id": 282,
-      "label": "Fashion > Heels"
-    },
-    {
-      "id": 283,
-      "label": "Fashion > Sandals"
-    },
-    {
-      "id": 284,
-      "label": "Fashion > Flats & Loafers"
-    },
-    {
-      "id": 285,
-      "label": "Fashion > Handbags & Purses"
-    },
-    {
-      "id": 286,
-      "label": "Fashion > Wallets"
-    },
-    {
-      "id": 287,
-      "label": "Fashion > Backpacks"
-    },
-    {
-      "id": 288,
-      "label": "Fashion > Hats"
-    },
-    {
-      "id": 289,
-      "label": "Fashion > Sunglasses & Eyewear"
-    },
-    {
-      "id": 290,
-      "label": "Fashion > Belts"
-    },
-    {
-      "id": 291,
-      "label": "Vehicles > SUVs"
-    },
-    {
-      "id": 292,
-      "label": "Vehicles > Vans & Minivans"
-    },
-    {
-      "id": 293,
-      "label": "Sports > Fan Apparel"
-    },
-    {
-      "id": 294,
-      "label": "Sports > Fan Footwear & Socks"
-    },
-    {
-      "id": 295,
-      "label": "Sports > Fan Phone Cases & Tech"
-    },
-    {
-      "id": 296,
-      "label": "Sports > Flags & Banners"
-    },
-    {
-      "id": 297,
-      "label": "Sports > Fan Home & Tailgate"
-    },
-    {
-      "id": 298,
-      "label": "Sports > Fan Car Accessories"
-    },
-    {
-      "id": 299,
-      "label": "Sports > Fan Accessories"
     },
     {
       "id": 300,

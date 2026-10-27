@@ -578,7 +578,8 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
         preset = next((row for row in sellwild_catalog()["parcel_templates"] if row["id"] == template), None)
         sides = package_sides(snapshot)
         extra["sellwild"] = {**chosen(snapshot, record), "parcel_template": template,
-                             "fixed_package": bool(preset and all(preset[side] > 0 for side in ("length", "width", "height"))),
+                             # A flat-rate package has no Weight field on Sellwild's page; every other package asks for one.
+                             "fixed_package": bool(preset and preset.get("flat_rate")),
                              "package_dimensions": dict(zip(("depth", "width", "height"), sides, strict=True)) if sides else None}
     return {
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
