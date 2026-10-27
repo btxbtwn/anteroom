@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.429 — 2026-10-27
+
+- Your Facebook Marketplace listings now show under Marketplaces, including the ones Vendoo listed there. Press **Check on Facebook** to see whether one is still live, pending or sold; Anteroom only looks, and nothing on Facebook changes.
+- Turn on **Detect sales** for Facebook in Settings → Connections to have Anteroom notice when a Facebook listing is marked sold. It is off until you turn it on, and it reads a few listings at a time every 20 to 40 minutes, because Facebook watches closely for automated visits.
+- Anteroom can't delete Facebook listings yet. Delete them on Facebook, then choose **Mark as not listed**. Delisting the other marketplaces after a sale leaves Facebook for you and says so.
+
 ## 0.1.428 — 2026-10-27
 
 - Multiple-choice fields, such as Occasion, Theme, Season, and Features, show the selected values inside the field. Extra values wrap onto another line in that same field.
