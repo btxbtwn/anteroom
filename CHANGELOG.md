@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.430 — 2026-10-26
+
+- Automations has a new **Sharing and offers to likers** section. Set up a Poshmark sharing schedule: which listings, the order, how fast, the times of day and a daily cap of up to 6,000 shares. Every share and every skipped listing shows in the activity log.
+- Make an offer rule for Poshmark likers: the discount, which listings it covers, a floor you set for each listing, listings to leave out, and how long or how many likes a listing needs first. Each round only offers to people who liked a listing since the last offer, and never below your floor.
+- Nothing runs until you turn a schedule or rule on, and **Pause all** stops them. If Poshmark starts limiting you, or Anteroom cannot tell whether an offer or share went through, the rule pauses and that listing waits for you to check it; Anteroom never sends it again on its own.
+- Mercari and Depop offer rules can be set up, but stay off until Anteroom has learned how those sites send offers.
+
 ## 0.1.429 — 2026-10-27
 
 - Your Facebook Marketplace listings now show under Marketplaces, including the ones Vendoo listed there. Press **Check on Facebook** to see whether one is still live, pending or sold; Anteroom only looks, and nothing on Facebook changes.
