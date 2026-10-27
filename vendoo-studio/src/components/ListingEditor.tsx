@@ -1052,6 +1052,7 @@ function finishMarketplaceRows(rows: EditorField[], listing: ListingData | undef
   let visible = tab === "mercari"
     ? rows.filter((field) => field.native || !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()))
     : rows;
+  if (native) return visible;
   if (tab === "depop") {
     for (const row of depopMeasurementFields(listing)) {
       if (!visible.some((field) => field.key === row.key)) visible = [...visible, row];
@@ -1060,7 +1061,6 @@ function finishMarketplaceRows(rows: EditorField[], listing: ListingData | undef
       visible = visible.filter((field) => field.key !== "depop_specifics.sizeGrouping");
     }
   }
-  if (native) return visible;
   if (tab === "ebay") {
     for (const row of BEST_OFFER_ROWS) {
       if (!visible.some((field) => field.key === row.key)) visible = [...visible, row];

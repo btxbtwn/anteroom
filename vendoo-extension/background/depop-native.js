@@ -43,8 +43,10 @@ function depopChosenPhotos(photos) {
 function depopFormFields(listing, attributes) {
   const specifics = listing?.form?.specifics || {};
   const fields = {};
-  const colour = [listing?.primaryColor, listing?.secondaryColor].map(depopColour).filter(Boolean);
-  if (colour.length) fields.colour = [...new Set(colour)].slice(0, 2);
+  // The Depop form's own Color picks, otherwise General's primary and secondary color.
+  const own = listing?.depop_specifics?.colour;
+  const colour = (Array.isArray(own) ? own : [listing?.primaryColor, listing?.secondaryColor]).map(depopColour).filter(Boolean);
+  if (colour.length || Array.isArray(own)) fields.colour = [...new Set(colour)].slice(0, 2);
   const condition = depopCondition(listing?.depop_specifics?.condition || listing?.form?.overrides?.condition || listing?.condition);
   if (condition) fields.condition = condition;
   for (const key of ['age', 'source', 'style']) {
@@ -356,6 +358,18 @@ const DEPOP_FIT_ATTRIBUTE = { petite: 'petite', plus: 'plussize', 'big_&_tall': 
 // Material, occasion, body fit and the product type's own type attribute
 // (jacket-type, dress-type, …) as Depop's attribute value ids, limited to the
 // attributes this product type has and to each one's maximum.
+// The sell page's rule for a category field, read across every live category on
+// 2026-10-27: retired fields and retired or nameless choices are left out, and a
+// field shows only when one of its choices is for the category's department.
+// Field names and choices use plain English ("Body fit", "Holiday").
+const depopPageName = entry => String(entry?.name_i18n?.en ?? entry?.name_i18n?.['en-US'] ?? entry?.name ?? '').trim();
+function depopShownChoices(attribute, category) {
+  if (!attribute || attribute.status === 'inactive') return [];
+  const options = (attribute.attributes || []).filter(option => option.status !== 'inactive' && depopPageName(option));
+  const forDepartment = options.some(option => !Array.isArray(option.department) || option.department.includes(category?.department));
+  return forDepartment ? options : [];
+}
+
 function depopAttributeValues(listing, category, attributes) {
   const specifics = listing.depop_specifics || {};
   const asList = value => (Array.isArray(value) ? value : String(value || '').split(',')).map(item => String(item).trim()).filter(Boolean);
@@ -365,12 +379,12 @@ function depopAttributeValues(listing, category, attributes) {
   const missing = [];
   for (const id of category.attributeIds) {
     const attribute = attributes.generic_attributes.find(entry => entry.id === id);
-    if (!attribute) continue;
-    const options = (attribute.attributes || []).filter(option => option.status !== 'inactive');
+    const options = depopShownChoices(attribute, category);
+    if (!options.length) continue;
     const labels = Object.hasOwn(specifics.attributes || {}, id) ? asList(specifics.attributes[id])
       : wanted[id] || (/-type$/.test(id) ? asList(specifics.type) : []);
-    const ids = [...new Set(labels.map(label => options.find(option => marketplaceNameKey(depopName(option)) === marketplaceNameKey(label)
-      || marketplaceNameKey(option.id) === marketplaceNameKey(label))?.id).filter(Boolean))];
+    const ids = [...new Set(labels.map(label => options.find(option => [depopPageName(option), depopName(option), option.id]
+      .some(name => marketplaceNameKey(name) === marketplaceNameKey(label)))?.id).filter(Boolean))];
     const chosen = ids.slice(0, Math.max(1, Number(attribute.max_selection) || 1));
     if (chosen.length) values[id] = chosen;
     else if (attribute.is_mandatory) missing.push({ field: id, needs: `a ${depopName(attribute).toLowerCase() || id}` });

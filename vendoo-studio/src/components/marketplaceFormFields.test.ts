@@ -176,16 +176,14 @@ describe("marketplace form fields", () => {
     expect(etsy.find((field) => field.key === "condition")?.key).toBe("condition");
   });
 
-  it("shows Depop measurement rows, which Depop's form posts", () => {
+  it("adds no measurement rows to Depop, whose sell page has none", () => {
     const measured = fieldsForMarketplaceForm({
       ...listing,
       depop_specifics: {
         measurements: { unit: "in", values: [{ id: "pit_to_pit", label: "Pit to pit", value: "22", unit: "in" }] },
       },
     }, "depop", undefined);
-    expect(measured.find((field) => field.label === "Pit to pit")).toMatchObject({
-      key: "depop_specifics.measurements.values.0.value",
-    });
+    expect(measured).toEqual([]);
   });
 
   it("fills bottoms sizes only on forms that are not the marketplace's own", () => {
