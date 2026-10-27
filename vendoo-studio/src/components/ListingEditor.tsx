@@ -1,10 +1,11 @@
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
+import type { EbayVariationAspect, EbayVariations, Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
+import { EbayVariationsEditor, normalizeVariations, variationTotal } from "./EbayVariationsEditor";
 import { ListingVideoPicker } from "./ListingVideoPicker";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
@@ -86,8 +87,9 @@ interface EditorField {
   minValue?: number;
   maxValue?: number;
   step?: number;
-  defaultValue?: string | string[] | number | boolean | NativeInventoryRow[];
+  defaultValue?: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   inventoryGroups?: NativeInventoryGroup[];
+  variationAspects?: EbayVariationAspect[];
   native?: boolean;
   optionValues?: Record<string, string>;
   clears?: string[];
@@ -701,6 +703,14 @@ export function StructuredEditor({
         setListingEditorValue(updated, f.key, rows);
         onChange(updated);
       }} />;
+    if (f.type === "variations") return <EbayVariationsEditor convId={convId}
+      value={normalizeVariations(f.defaultValue)} aspects={f.variationAspects || []} disabled={f.locked} onChange={value => {
+        const updated = cloneListing(listing);
+        setListingEditorValue(updated, f.key, value);
+        // The listing's quantity is the stock across its variations.
+        if (value.rows.length) setListingEditorValue(updated, "quantity", variationTotal(value));
+        onChange(updated);
+      }} />;
     if (f.native && f.key === "direct_category_ids.ebay") return <EbayCategorySelect id={id} value={text} onChange={(categoryId, path) => {
       const updated = cloneListing(listing);
       setListingEditorValue(updated, f.key, categoryId);
@@ -752,7 +762,7 @@ export function StructuredEditor({
     );
   };
   // Long text and the category path need the full row.
-  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || ["textarea", "inventory", "video"].includes(f.type || "");
+  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || ["textarea", "inventory", "video", "variations"].includes(f.type || "");
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
@@ -1053,13 +1063,14 @@ function schemaFieldsForTab(
   // An unknown leaf still answers with the marketplace's own controls and the
   // values this listing holds, so render whatever rows came back.
   if (!form?.fields.length) return null;
-  return form.fields.filter((field) => !isPlainObject(field.value)).map((field) => ({
+  return form.fields.filter((field) => !isPlainObject(field.value) || field.input_type === "variations").map((field) => ({
     // Schema keys are Vendoo labels ("Sleeve Length"); listing JSON uses camelCase.
     // getListingEditorValue / setListingEditorValue bridge the two.
     key: form.native ? field.path || field.key : `${tab}_specifics.${field.key}`,
     native: form.native,
     type: field.input_type,
     inventoryGroups: field.inventory_groups,
+    variationAspects: field.variation_aspects,
     minValue: field.min_value,
     maxValue: field.max_value,
     step: field.step,

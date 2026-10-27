@@ -477,6 +477,30 @@ export interface NativeInventoryRow {
   sku?: string;
 }
 
+/** One eBay variation: its value for each aspect the listing varies by, stock, and optional SKU and price. */
+export interface EbayVariationRow {
+  values: Record<string, string>;
+  quantity: number | string;
+  sku?: string;
+  price?: string | number;
+}
+
+/** ``ebay_specifics.variations``: one eBay listing with variations. */
+export interface EbayVariations {
+  aspects: string[];
+  photosBy?: string;
+  rows: EbayVariationRow[];
+  /** Photo IDs for each value of the photos aspect. */
+  photos: Record<string, string[]>;
+}
+
+/** An aspect eBay lets vary in the category, with its choices. */
+export interface EbayVariationAspect {
+  name: string;
+  selection_only: boolean;
+  options: string[];
+}
+
 export interface NativeInventoryGroup {
   id: string;
   label: string;
@@ -486,10 +510,11 @@ export interface NativeInventoryGroup {
 export interface MarketplaceFormField {
   key: string;
   label: string;
-  value: string | string[] | number | boolean | NativeInventoryRow[];
+  value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "video";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "video" | "variations";
   inventory_groups?: NativeInventoryGroup[];
+  variation_aspects?: EbayVariationAspect[];
   min_value?: number;
   max_value?: number;
   step?: number;

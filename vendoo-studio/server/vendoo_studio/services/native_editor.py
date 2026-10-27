@@ -98,18 +98,26 @@ async def ebay_form(snapshot: dict) -> dict:
                             **({"value_constraints": constraints} if constraints else {})))
     details = snapshot.get("ebay_specifics") or {}
     terms = best_offer_terms(snapshot.get("form") or {}, str(price_for(snapshot, "ebay") or 0), snapshot)
-    selling = await _ebay_format_fields(snapshot, category, details)
+    from vendoo_studio.services import ebay_variations
+
+    varied = ebay_variations.has_variations(snapshot)
+    selling = await _ebay_format_fields(snapshot, category, details, varied)
     auction = any(row["key"] == "ebay_specifics.auctionStartPrice" for row in selling)
-    offers = [] if auction else [
+    variations = await _ebay_variations_field(snapshot, category, schema, auction)
+    offers = [] if auction or varied else [
         field("ebay_specifics.bestOffer.enabled", "Allow offers", terms.get("bestOfferEnabled", True), input_type="boolean"),
         field("ebay_specifics.bestOffer.autoAcceptPrice", "Automatically accept offers at", (terms.get("autoAcceptPrice") or {}).get("value", ""), input_type="number",
               help="Clear this amount to turn off automatic acceptance."),
         field("ebay_specifics.bestOffer.minimumOfferPrice", "Decline offers below", (terms.get("autoDeclinePrice") or {}).get("value", ""), input_type="number",
               help="Clear this amount to turn off automatic declines."),
     ]
+    quantity = (field("quantity", "Quantity", ebay_variations.total_quantity(snapshot), input_type="number", locked=True,
+                      help="The quantity is the total of the variations.") if varied else
+                field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number",
+                      **({"help": "An eBay auction sells one item."} if auction else {})))
     fields.extend([*selling,
-                   field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number",
-                         **({"help": "An eBay auction sells one item."} if auction else {})),
+                   *variations,
+                   quantity,
                    field("sku", "SKU", seller_sku(snapshot), locked=True, help="SKU comes from Item Details."),
                    field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}), input_type="textarea", max_length=1000),
                    field("ebay_specifics.videoId", "Listing video", details.get("videoId"), input_type="video",
@@ -121,14 +129,45 @@ async def ebay_form(snapshot: dict) -> dict:
                    *package(snapshot)])
     return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields,
             "notes": ["Category aspects and condition choices come from eBay. Shipping, payment and return policies come from Settings.",
-                      *(["An auction uses Starting bid and Buy It Now, not Price."] if auction else [])]}
+                      *(["An auction uses Starting bid and Buy It Now, not Price."] if auction else []),
+                      *(["With variations, Price is the price of any variation left without its own. eBay takes no offers "
+                         "on a listing with variations."] if varied else [])]}
+
+
+async def _ebay_variations_field(snapshot: dict, category: str, schema: list[dict], auction: bool) -> list[dict]:
+    """Variations: what they differ by (aspects eBay enables for variations in this leaf) and one row each."""
+    from vendoo_studio.services import ebay_variations, marketplace_schemas
+    from vendoo_studio.services.ebay_client import EbayClient
+
+    varied = ebay_variations.has_variations(snapshot)
+    value = ebay_variations.raw(snapshot) if varied else {"aspects": [], "rows": [], "photos": {}}
+    if not category or (auction and not varied):
+        return []
+    supported: bool | None = None
+    try:
+        supported = await marketplace_schemas.ebay_variations_supported(await EbayClient.connect(), category)
+    except Exception:  # noqa: BLE001 - List checks it again before anything is written
+        supported = None
+    aspects = [{"name": row["name"], "selection_only": row["mode"] == "selection",
+                "options": list(dict.fromkeys(entry["label"] for entry in row.get("values") or []))}
+               for row in schema if row.get("variations") and row.get("id") != "condition"]
+    if supported is False and not varied:
+        return []
+    help_text = ("Each variation has its own quantity, SKU and price. eBay lists them as one fixed-price listing "
+                 "without offers.")
+    if supported is False:
+        help_text = "eBay does not take variations in this category. Remove them to list it."
+    elif supported is None:
+        help_text += " eBay's variation rules for this category could not be loaded; List checks them again."
+    return [field(ebay_variations.FIELD, "Variations", value, input_type="variations", variation_aspects=aspects,
+                  help=help_text)]
 
 
 _FORMAT_CLEARS = ["ebay_specifics.listingDuration", "ebay_specifics.auctionStartPrice",
                   "ebay_specifics.auctionReservePrice", "ebay_specifics.auctionBuyItNow"]
 
 
-async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> list[dict]:
+async def _ebay_format_fields(snapshot: dict, category: str, details: dict, varied: bool = False) -> list[dict]:
     """Format, duration and auction prices. Auction and its lengths come from eBay's rules for the category."""
     from vendoo_studio.services import marketplace_schemas
     from vendoo_studio.services.ebay_client import EbayClient
@@ -143,8 +182,10 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
             allowed = await marketplace_schemas.ebay_listing_types(await EbayClient.connect(), category)
         except Exception:  # noqa: BLE001 - fixed price needs no lookup; List checks auctions again
             note = "eBay's auction rules for this category could not be loaded. Refresh choices."
-    kinds = [FIXED_PRICE] + ([AUCTION] if allowed.get(AUCTION) or kind == AUCTION else [])
-    if not allowed.get(AUCTION) and not note and category:
+    kinds = [FIXED_PRICE] + ([AUCTION] if (allowed.get(AUCTION) and not varied) or kind == AUCTION else [])
+    if varied and kind != AUCTION:
+        note = "A listing with variations is fixed price. Remove the variations to sell at auction."
+    elif not allowed.get(AUCTION) and not note and category:
         note = "eBay does not offer auctions in this category."
     rows = [field("ebay_specifics.listingFormat", "Format", kind, selection_only=True, required=True,
                   options=[FORMAT_LABELS[value] for value in kinds],
