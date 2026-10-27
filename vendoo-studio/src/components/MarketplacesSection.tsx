@@ -188,6 +188,9 @@ export function MarketplacesLayout({
     queryFn: () => api.nativeMarketplaces.preflight(convId),
     enabled: Boolean(revisionId),
     staleTime: 15_000,
+    // Every save is a new revision. Keep the last answer on screen until the new one
+    // arrives, so the pane above the form does not collapse and shift the form.
+    placeholderData: (previous) => previous,
   });
 
   const action = useMutation({
