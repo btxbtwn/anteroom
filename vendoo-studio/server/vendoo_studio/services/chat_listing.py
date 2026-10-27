@@ -35,7 +35,7 @@ def _sync_category_override(db: Session, conv_id: str, listing: dict) -> None:
 
 def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operations: list[dict] | None = None) -> dict:
     from vendoo_studio.models.validation import normalize_listing_dropdowns
-    from vendoo_studio.services.listing_generate import align_size_fields
+    from vendoo_studio.services.listing_generate import align_size_fields, clear_not_applicable_values
 
     updated = align_listing_gender(listing, operations)
     stamped = _stamp_learned_fields(db, updated)
@@ -46,6 +46,7 @@ def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operation
     from vendoo_studio.services.seller_overrides import preserving_locks
 
     def _normalize(candidate: dict) -> None:
+        clear_not_applicable_values(candidate)
         align_size_fields(candidate, previous_size=None if previous_size is None else str(previous_size))
         normalize_listing_dropdowns(candidate)
 

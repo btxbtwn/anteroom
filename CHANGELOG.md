@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.448 — 2026-10-27
+
+- The listing assistant no longer writes "Does Not Apply". A field that doesn't fit the item is left empty, and Anteroom remembers you don't need to fill it.
+
 ## 0.1.447 — 2026-10-27
 
 - Clicking a listing no longer opens a tab. Anteroom shows one listing at a time, and the listing's name appears in the title bar. Use the **+** beside the listings search to start a new listing.

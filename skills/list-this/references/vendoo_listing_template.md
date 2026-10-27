@@ -210,10 +210,7 @@ Depop: No title field → use Universal Description only
     "closure": "Pullover",
     "fabricType": "Knit",
     "accents": "Logo",
-    "performanceActivity": "N/A",
-    "style": "Graphic Tee",
-    "mpn": "Does Not Apply",
-    "upc": "Does Not Apply"
+    "style": "Graphic Tee"
   },
   
   "etsy_specifics": {
@@ -312,7 +309,7 @@ All eBay Item Specifics fields. Use Appendix values.
 - `tags`: Up to 13 tags (letters/numbers/spaces/hyphen/apostrophe only; max 20 chars each)
 - `renewalOption`
 - Shipping profile, processing time, and return policy are account-level Etsy settings — leave them out
-- `category_specifics`: T-shirt optional fields after Show Optional Fields. Use live Etsy dropdown values from `vendoo-dropdown-options.json` (`clothingStyle`, `sleeveLength`, `neckline`, `closure`, `graphic`, `fabricPattern`). Fill every applicable row. Use Does Not Apply only for `graphic` / `collarStyle` / `occasion` / `holiday` / `sustainability` when they literally do not apply.
+- `category_specifics`: T-shirt optional fields after Show Optional Fields. Use live Etsy dropdown values from `vendoo-dropdown-options.json` (`clothingStyle`, `sleeveLength`, `neckline`, `closure`, `graphic`, `fabricPattern`). Fill every applicable row. Leave out `graphic` / `collarStyle` / `occasion` / `holiday` / `sustainability` only when they literally do not apply. Never write Does Not Apply.
 
 **Poshmark Specifics:**
 - `originalPrice`: always 0
@@ -336,7 +333,7 @@ Use these lists only to select valid dropdown values. Outputs should still be th
 ## **eBay Optional Fields - Value Lists**
 
 * “Show Optional Fields” – REQUIRED  
-* Fill every applicable optional row. Use Does Not Apply only when the attribute literally does not apply (MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced — never Does Not Apply or Lightweight. Never leave Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, or Unit Type blank.  
+* Fill every applicable optional row. Leave a row out only when the attribute literally does not apply (MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Never write Does Not Apply. Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced — never Lightweight. Never leave Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, or Unit Type blank.  
 * Accents: Beaded, Bow, Button, Crochet, Embroidered, Fringe, Fur Trim, Glitter, Jewel, Logo, Pleated, Quilted, Rhinestone, Ruffle, Sequin, Strap, Studded, Tasseled, Zipper  
 * Character: (if applicable) Disney, Marvel, Band name, etc.  
 * Closure: Zip, Button, Snap, Tie, Pullover, Hook & Eye, Elastic, Toggle, Velcro, Drawstring, Clasp, Lace-up, Magnetic  
@@ -361,12 +358,12 @@ Use these lists only to select valid dropdown values. Outputs should still be th
 * Strap Type (if applicable): Adjustable, Convertible, Spaghetti, Tank, Halter, Strapless, Racerback, Crisscross  
 * Style (choose 1): Basic, Camisole, Cropped, Jersey, Kimono, Ringer, Tunic  
 * Theme: 80s; 90s; Animals; Anime; Army; Art; Aztec; Beach; Beer; Biker; Bird; Bohemian; Butterfly; Cars; Cartoon; Cat; Christmas; City; Classic; Coins; College; Colorful; Comics; Countries; Cowboy; Dad; Designer; Dog; Fish; Flag; Flower; Funny; Geek; Gothic; Grunge; Halloween; Hawaiian; Heart; Hip Hop; Hippie; Hipster; Holiday; Horror; Horse; Indian; Italian; Korean; Leopard; London; Love; Marine; Metal; Money; Moon; Motorcycle; Movie; Music; Nature; Nautical; Nerd; Outdoor; Owl; Paris; Patriotic; Peasant; Preppy; Princess; Punk; Quotes; Rainbow; Retro; Rock; School; Shell; Ski; Skull; Snake; Southwestern; Space; Sports; Stars; Steampunk; Tattoo; Teacher; Tortoise; Transportation; Tribal; Tropical; Unicorn; University; USA; Wedding; Western; Zebra  
-* Unit Quantity: 1; Unit Type: Unit; Vintage: Yes / No; MPN: Does Not Apply; UPC: Does Not Apply
+* Unit Quantity: 1; Unit Type: Unit; Vintage: Yes / No; MPN and UPC: leave out unless printed on the tag
 
 ## **Etsy Optional Fields - Value Lists**
 
 * “Show Optional Fields” – REQUIRED  
-* Fill every applicable optional row. Use Does Not Apply only when the attribute literally does not apply (Graphic, Collar style, Holiday, Occasion, Sustainability). Always fill Clothing style, Sleeve length, Neckline, Closure, and Fabric pattern.  
+* Fill every applicable optional row. Leave a row out only when the attribute literally does not apply (Graphic, Collar style, Holiday, Occasion, Sustainability). Never write Does Not Apply. Always fill Clothing style, Sleeve length, Neckline, Closure, and Fabric pattern.  
 * Clothing Style (up to 1): ---- ; Western & cowboy ; Minimalist ; Boho & hippie ; Gothic ; Harajuku ; Lolita ; Military ; Mod ; Preppy ; Rave ; Pin-up & rockabilly ; Rocker ; Menswear  
 * Closure (up to 3): Zipper; Buttons; Tie; Pullover; Elastic; Hook & eye; Snap; Drawstring; Lace-up; Toggle; Velcro  
 * Jacket Style: ----; Motorcycle; Bomber; Cape; Jean; Overcoat; Parka; Peacoat; Puffer; Raincoat; Track; Trench; Windbreaker; Nehru; Sherwani  
