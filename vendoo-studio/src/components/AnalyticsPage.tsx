@@ -212,7 +212,7 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
             {data.inventory.undated_count > 0 ? <PageNote>{data.inventory.undated_count} active {data.inventory.undated_count === 1 ? "listing has" : "listings have"} no list date and cannot be aged.</PageNote> : null}
           </PageSection>
 
-          <DiscountSuggestions listings={data.stale} onOpenListing={onOpenListing} />
+          <DiscountSuggestions listings={data.stale} staleDays={data.stale_days} onOpenListing={onOpenListing} />
 
           <PageSection
             aria-label="Active listings"

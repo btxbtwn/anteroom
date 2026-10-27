@@ -67,6 +67,8 @@ class SetupGuideSettingsTest(unittest.TestCase):
                 "listing_names": "title",
                 "model_favorites": [],
                 "vendoo_enabled": True,
+                "stale_listing_days": 60,
+                "label_colors": {},
             },
         )
         self.assertEqual(
@@ -79,6 +81,8 @@ class SetupGuideSettingsTest(unittest.TestCase):
                 "listing_names": "title",
                 "model_favorites": [],
                 "vendoo_enabled": True,
+                "stale_listing_days": 60,
+                "label_colors": {},
             },
         )
         self.assertEqual(

@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.420 — 2026-10-26
+
+- Edit fields for selected items now also changes condition, primary and secondary color, tags, and the shared, eBay and Depop categories. Categories are picked from the same searches the item editor uses, and you review every change before it is saved.
+- **Marketplaces** for selected items gains **Update**: it writes each item's saved listing onto the listings already live on the eBay, Etsy, Poshmark and Depop you tick. You review and confirm first; items run one at a time, each marketplace once, and a failed update leaves the live listing as it was. Nothing is listed or taken down.
+- **Mark as not listed** works on many items at once. Only Anteroom's record changes; the marketplace is not contacted.
+- Delete selected items from Anteroom after reviewing them. Nothing is delisted, and an item still live on a marketplace is left out until you delist it or mark it not listed.
+- Choose when a listing counts as stale (15 to 120 days) and give labels colors, under Settings → Listings → Inventory.
+
 ## 0.1.419 — 2026-10-26
 
 - Anteroom now refuses an update whose signature is missing or damaged, so an update can no longer lose access to your saved sign-ins. Releases are ready to be signed with an Apple Developer ID certificate; once that is set up, updates stop asking for your Mac password.

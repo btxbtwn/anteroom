@@ -40,6 +40,7 @@ export function useListingSelection({
   const [copyIds, setCopyIds] = useState<string[] | null>(null);
   const [editIds, setEditIds] = useState<string[] | null>(null);
   const [marketIds, setMarketIds] = useState<string[] | null>(null);
+  const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
   const selectionAnchor = useRef<string | null>(null);
 
   const selectedIds = useMemo(() => {
@@ -57,14 +58,14 @@ export function useListingSelection({
   useEffect(() => {
     if (!selecting || bulk.running) return;
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds || editIds || copyIds || marketIds) return;
+      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds || editIds || copyIds || marketIds || deleteIds) return;
       setSelecting(false);
       setPickedIds(new Set());
       selectionAnchor.current = null;
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds, editIds, copyIds, marketIds]);
+  }, [selecting, bulk.running, pricePrompt, reviewPrompt, markdownIds, editIds, copyIds, marketIds, deleteIds]);
 
   const exitSelecting = useCallback(() => {
     setSelecting(false);
@@ -159,5 +160,7 @@ export function useListingSelection({
     setCopyIds,
     marketIds,
     setMarketIds,
+    deleteIds,
+    setDeleteIds,
   };
 }

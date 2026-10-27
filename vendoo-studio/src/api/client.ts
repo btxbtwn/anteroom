@@ -2,6 +2,8 @@ import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, Temp
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
 import type { ListingVideo, ListingVideoLibrary } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
+import type { BulkDeleteResult, BulkDeleteRow } from "./bulkDelete";
+import type { LabelColor } from "../labelColors";
 import type { BulkMarketplaceAction, BulkMarketplacePerform, BulkMarketplacePreview, BulkMarketplaceResult } from "./bulkMarketplace";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
@@ -242,6 +244,9 @@ export const api = {
     sync: () => request<{started: boolean}>("/catalog/sync", {method: "POST"}),
     dropdownOptions: () =>
       request<{ forms: Record<string, Record<string, string[]>> }>("/catalog/dropdown-options"),
+    searchCategories: (q: string, marketplace: string) =>
+      request<{ results: { kind: string; marketplace: string; id: string; path: string; label: string }[] }>(
+        `/catalog/search?${new URLSearchParams({ q, marketplace, kind: "category", top_k: "15" })}`),
   },
   suggestions: {
     list: () => request<SuggestionsResponse>("/suggestions"),
@@ -555,6 +560,12 @@ export const api = {
       request<BulkMarketplacePreview>("/listings/marketplace-actions/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds, action, marketplaces }) }),
     perform: (body: BulkMarketplacePerform) =>
       request<BulkMarketplaceResult>("/listings/marketplace-actions/perform", { method: "POST", body: JSON.stringify(body) }),
+  },
+  bulkDelete: {
+    preview: (conversationIds: string[]) =>
+      request<{ rows: BulkDeleteRow[] }>("/listings/bulk-delete/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds }) }),
+    delete: (rows: { conversation_id: string; review_token: string }[]) =>
+      request<BulkDeleteResult>("/listings/bulk-delete/delete", { method: "POST", body: JSON.stringify({ rows, confirm: true }) }),
   },
   salesLedger: {
     list: (filters: SalesLedgerFilters, page = 1) => request<SalesLedgerPage>(`/sales-ledger?${salesLedgerParams(filters, page)}`),
@@ -1113,6 +1124,8 @@ export const api = {
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
         vendoo_enabled: boolean;
+        stale_listing_days: number;
+        label_colors: Record<string, LabelColor>;
       }>("/settings/ui"),
     setUi: (body: {
       recent_vendoo_labels?: string[];
@@ -1124,6 +1137,8 @@ export const api = {
       forget_label?: string;
       model_favorites?: ModelFavorite[];
       vendoo_enabled?: boolean;
+      stale_listing_days?: number;
+      label_colors?: Record<string, LabelColor>;
     }) =>
       request<{
         ok: boolean;
@@ -1134,6 +1149,8 @@ export const api = {
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
         vendoo_enabled: boolean;
+        stale_listing_days: number;
+        label_colors: Record<string, LabelColor>;
       }>("/settings/ui", { method: "PUT", body: JSON.stringify(body) }),
     formulas: () =>
       request<{

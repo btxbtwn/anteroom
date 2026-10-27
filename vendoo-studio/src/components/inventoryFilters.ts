@@ -359,13 +359,15 @@ export function labelCounts(listings: FilterableListing[]): Record<string, numbe
   return counts;
 }
 
-/** How many listings each staleness cutoff would keep. */
+/** How many listings each staleness cutoff would keep, including the seller's own stale threshold. */
 export function staleCounts(
   listings: FilterableListing[],
   now: number = Date.now(),
+  thresholdDays?: number,
 ): Record<number, number> {
   const counts: Record<number, number> = {};
-  for (const days of STALE_DAY_OPTIONS) {
+  const options = [...new Set([...STALE_DAY_OPTIONS, ...(thresholdDays ? [thresholdDays] : [])])].sort((a, b) => a - b);
+  for (const days of options) {
     counts[days] = listings.filter((listing) => isStale(listing, days, now)).length;
   }
   return counts;

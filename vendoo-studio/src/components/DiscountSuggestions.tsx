@@ -3,14 +3,16 @@ import { formatDays, formatMoney } from "./analyticsFormat";
 import { EmptyRow, ListRow, PageSection, RowList } from "./WorkspacePage";
 
 /**
- * Listings 60+ days old with no sale: the ones to cut past the everyday 25% in
+ * Listings past the seller's stale threshold with no sale: the ones to cut past the everyday 25% in
  * the next sale event, as deep as their cost after fees allows.
  */
 export function DiscountSuggestions({
   listings,
+  staleDays = 60,
   onOpenListing,
 }: {
   listings: AnalyticsStaleListing[];
+  staleDays?: number;
   onOpenListing: (id: string) => void;
 }) {
   return (
@@ -18,12 +20,12 @@ export function DiscountSuggestions({
       aria-label="Discount deeper"
       title="Discount deeper"
       description={<>
-        Active listings up 60 days or more, oldest first. Give these 35–40% off in the next sale instead of 25%, as deep
+        Active listings up {staleDays} days or more, oldest first. Give these 35–40% off in the next sale instead of 25%, as deep
         as still covers what the item cost after 20% fees. Items with no cost recorded get 35%.
       </>}
     >
       {listings.length === 0 ? (
-        <EmptyRow>Nothing has been listed 60 days without selling.</EmptyRow>
+        <EmptyRow>Nothing has been listed {staleDays} days without selling.</EmptyRow>
       ) : (
         <RowList>
             {listings.map((listing) => (

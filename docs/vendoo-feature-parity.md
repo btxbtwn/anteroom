@@ -103,12 +103,12 @@ Vendoo: up to 240 items, from the inventory page
 
 | Vendoo bulk action | Anteroom | Evidence |
 | --- | --- | --- |
-| Bulk Edit: title, description, SKU, price, brand, condition, color, tags, category, size; **Save and relist** ([Bulk edit](https://help.vendoo.co/en/articles/10438710-bulk-edit-edit-your-listings-in-bulk)) | **Partial** | `routes/bulk_edit.py`, `services/bulk_edit.py`: title, description, brand, size, SKU, price, cost, quantity and labels for up to 300 items. No condition, color, tags or category, and no bulk push of edits to live listings (bulk actions are List, Delist and Relist only) |
+| Bulk Edit: title, description, SKU, price, brand, condition, color, tags, category, size; **Save and relist** ([Bulk edit](https://help.vendoo.co/en/articles/10438710-bulk-edit-edit-your-listings-in-bulk)) | **Have** | `routes/bulk_edit.py`, `services/bulk_edit.py`: title, description, brand, size, SKU, price, cost, quantity, condition, colors, tags, labels and the shared, eBay and Depop categories (verified leaves) for up to 300 items. Save and relist is two reviewed steps: bulk edit, then **Update** in the bulk marketplace dialog (`services/bulk_marketplace.py`, eBay, Etsy, Poshmark and Depop) |
 | Bulk Edit Labels | **Have** | `services/bulk_edit.py` `labels_mode` add / remove / replace |
 | Bulk Copy | **Have** | **Select → Copy items**, up to 300 (`components/sidebar/BulkSelection.tsx`) |
-| Bulk List, Bulk Delist, Bulk Delist & Relist | **Have** | `routes/bulk_marketplace.py` (`/preview`, `/perform`), up to 100 items, one confirmation, named marketplaces |
-| Bulk Delete (from Vendoo only) | **Missing** | Delete is one item at a time: `routes/conversations.py` `DELETE /{conv_id}` |
-| Bulk Mark as Not Listed | **Partial** | Per item and marketplace: **Mark as not listed** (`MarketplacesSection.tsx`, `marketplace_delist.MARKS`); no bulk |
+| Bulk List, Bulk Delist, Bulk Delist & Relist, Bulk Update | **Have** | `routes/bulk_marketplace.py` (`/preview`, `/perform`), up to 100 items, one confirmation, named marketplaces. Update covers eBay, Etsy, Poshmark and Depop |
+| Bulk Delete (from Vendoo only) | **Have** | `routes/bulk_delete.py`, up to 300 items, reviewed and confirmed; refuses items still live on a marketplace and never delists |
+| Bulk Mark as Not Listed | **Have** | `not_listed` action in `services/bulk_marketplace.py`, local record only (`marketplace_delist.mark`) |
 | Completion sound | **N/A** | Anteroom shows per-item results in the dialog |
 
 ## Inventory management
@@ -117,8 +117,8 @@ Vendoo: up to 240 items, from the inventory page
 | --- | --- | --- | --- |
 | Drafted / listed / sold columns | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Partial** | Sidebar filters exist, but **Sold** and **Active** come from Vendoo's status: `repositories/queries.py:345-379` copies `notes.vendooStatus` into `Conversation.status`, and only `vendoo_watch.py`, `vendoo_import.py` and `vendoo_bulk_import.py` write it. A direct sale records a `MarketplaceSale` and marks that marketplace sold, but never sets the item to sold. See gap 1 |
 | Search, sort, filter (title, SKU, price, platforms listed / not listed, dates, labels) | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Have** | Inventory search by title, SKU and label, status filters (README, **Inside Anteroom**) |
-| Custom labels, color-coded | [Labels](https://help.vendoo.co/en/articles/6260284-vendoo-custom-labels-for-inventory-management) | **Partial** | Local labels with bulk edit; no label colors. Migrated labels that are Vendoo IDs are shown through `services/vendoo_label_catalog.py` |
-| Stale listing warning (15–120 days, configurable) | [Stale inventory](https://help.vendoo.co/en/articles/6260291-vendoo-s-stale-inventory-system), [Custom settings](https://help.vendoo.co/en/articles/6260256-vendoo-custom-settings) | **Partial** | Fixed 60 days in Suggestions (`services/suggestions.py` `STALE_MIN_DAYS`) and Analytics (`inventory_analytics.STALE_DAYS`); Automations can act after any number of listed days (CHANGELOG 0.1.402). No configurable warning threshold. Listed dates also come from Vendoo notes for migrated items |
+| Custom labels, color-coded | [Labels](https://help.vendoo.co/en/articles/6260284-vendoo-custom-labels-for-inventory-management) | **Have** | Local labels with bulk edit; label colors in Settings → Listings → Inventory (`user_settings.LABEL_COLORS`). Migrated labels that are Vendoo IDs are shown through `services/vendoo_label_catalog.py` |
+| Stale listing warning (15–120 days, configurable) | [Stale inventory](https://help.vendoo.co/en/articles/6260291-vendoo-s-stale-inventory-system), [Custom settings](https://help.vendoo.co/en/articles/6260256-vendoo-custom-settings) | **Have** | 15–120 days, default 60, in Settings → Listings → Inventory (`user_settings.get_stale_listing_days`), used by Suggestions, Analytics and the sidebar stale filter; Automations can act after any number of listed days (CHANGELOG 0.1.402). Listed dates also come from Vendoo notes for migrated items |
 | Duplicate Finder | [What changed 2026](https://help.vendoo.co/en/articles/16091202-what-changed-in-vendoo-2026) | **Partial** | Duplicate Vendoo links (`routes/conversations.py` `/vendoo-link-duplicates`); linking a marketplace URL already on another item is rejected (`marketplace_delist.mark`). No finder for similar items |
 | CSV inventory and sales export | [CSV export](https://help.vendoo.co/en/articles/6260286-how-to-download-a-csv-inventory-spreadsheet-and-sales-report) | **Have** | `routes/sales_ledger.py` `/export/sales.csv`, `/export/inventory.csv`. Columns are fixed, not customizable |
 | Import active listings from each marketplace | [Import](https://help.vendoo.co/en/articles/6260276-how-to-import-your-items-in-vendoo) | **Partial** | eBay and Etsy import whole listings (`routes/ebay.py`, `routes/etsy.py` `/import`). Poshmark, Mercari, Depop, Vinted and Sellwild can only be linked to an existing item by pasting the URL (`marketplace_listings` `/{marketplace}/mark`). Vendoo import (`routes/imports.py`) is the migration path |
@@ -236,13 +236,12 @@ Most important first.
    for active listings through the Chrome bridge, like eBay and Etsy.
 9. **No eBay listing video.** *Fix:* add eBay video upload through the
    Media API next to the Poshmark video.
-10. **Bulk edit lacks condition, color, tags and category, and there is no
-    bulk Update of live listings.** *Fix:* add those fields and an Update
-    action in the bulk marketplace dialog.
-11. **Smaller gaps:** different photos per marketplace, bulk delete, bulk
-    mark as not listed, configurable stale threshold, label colors and label
-    analytics, a finder for similar items, live Update on Mercari, Vinted and
-    Sellwild.
+10. *(Closed in 0.1.420: bulk condition, color, tags and category, and bulk
+    Update on eBay, Etsy, Poshmark and Depop.)*
+11. **Smaller gaps:** different photos per marketplace, label analytics, a
+    finder for similar items, live Update on Mercari, Vinted and Sellwild, and
+    bulk category for Etsy, Poshmark and Mercari (the item editor does not
+    change those either).
 
 Before deleting the Send path, move the shared section builders out of the
 `vendoo_*` modules (see **Naming** above).

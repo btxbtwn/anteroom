@@ -35,7 +35,6 @@ _AGING = (
     ("Over 3 months", 90, None),
 )
 # Listings this old with no sale get a deeper cut than the everyday event one.
-STALE_DAYS = 60
 EVENT_PERCENT = 25
 # Deepest first; the first that still covers the item's cost after fees wins.
 DEEP_PERCENTS = (40, 35)
@@ -271,6 +270,7 @@ def summarize(
         "price_tiers": _price_tiers(sales),
         "aging": _aging(items, now),
         "stale": _stale(items, now),
+        "stale_days": _stale_days(),
         "recent": _recent(sales, events or []),
         "oldest": _oldest(items, now),
     }
@@ -496,14 +496,21 @@ def deep_discount(price: float, floor: int | None) -> int | None:
     return None
 
 
+def _stale_days() -> int:
+    from vendoo_studio.services.user_settings import get_stale_listing_days
+
+    return get_stale_listing_days()
+
+
 def _stale(items: list[AnalyticsItem], now: datetime) -> list[dict[str, Any]]:
-    """Active listings past ``STALE_DAYS``, oldest first, with how deep to cut."""
+    """Active listings past the seller's stale threshold, oldest first, with how deep to cut."""
+    stale_days = _stale_days()
     rows = []
     for item in items:
         if item.status != "active" or item.listed_at is None or item.price <= 0:
             continue
         days = int((now - item.listed_at).total_seconds() // 86_400)
-        if days < STALE_DAYS:
+        if days < stale_days:
             continue
         floor = lowest_price(item.cost)
         percent = deep_discount(item.price, floor)

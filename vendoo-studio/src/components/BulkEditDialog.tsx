@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { BULK_FIELDS, bulkEditsFromInputs, bulkReviewTokens, type BulkEdits, type BulkField, type BulkReviewRow } from "../api/bulkEdit";
+import { BULK_FIELDS, CHOICE_FIELDS, bulkEditsFromInputs, bulkReviewTokens, type BulkCategories, type BulkEdits, type BulkField, type BulkReviewRow, type ListMode } from "../api/bulkEdit";
+import { EbayCategorySelect, TreeCategorySelect } from "./ListingFormControls";
 import { PriceDialog } from "./PriceDropParts";
 import { PageError, PageNote } from "./WorkspacePage";
 import { Button } from "./ui/button";
@@ -10,14 +11,38 @@ import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
-const LABELS: Record<BulkField, string> = { title: "Title", description: "Description", brand: "Brand", size: "Size", sku: "SKU", price: "Price", cost: "Cost", quantity: "Quantity" };
+const LABELS: Record<BulkField, string> = { title: "Title", description: "Description", brand: "Brand", size: "Size", sku: "SKU", price: "Price", cost: "Cost", quantity: "Quantity",
+  condition: "Condition", primaryColor: "Primary color", secondaryColor: "Secondary color" };
+const NO_COLOR = "__none__";
+type CategoryScope = "general" | "ebay" | "depop";
+const CATEGORY_SCOPES: { scope: CategoryScope; label: string; note: string }[] = [
+  { scope: "general", label: "Shared category", note: "The category every marketplace starts from." },
+  { scope: "ebay", label: "eBay category", note: "eBay’s own category, from eBay’s category search. Its item specifics reload when you open each item." },
+  { scope: "depop", label: "Depop category", note: "Depop’s own category. A Depop size picked for the old category is cleared." },
+];
+
+function ListModeSelect({ label, value, onChange, disabled }: { label: string; value: ListMode; onChange: (value: ListMode) => void; disabled: boolean }) {
+  const noun = label.toLowerCase();
+  return <Select value={value} onValueChange={(next) => { if (next) onChange(next as ListMode); }} disabled={disabled}>
+    <SelectTrigger aria-label={`${label} action`}><SelectValue /></SelectTrigger>
+    <SelectPopup><SelectItem value="keep">Keep {noun}</SelectItem><SelectItem value="add">Add {noun}</SelectItem><SelectItem value="remove">Remove {noun}</SelectItem><SelectItem value="replace">Replace all {noun}</SelectItem></SelectPopup>
+  </Select>;
+}
 function show(value: unknown): string { return value == null ? "Not set" : typeof value === "string" ? value || "Empty" : JSON.stringify(value); }
 
 export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: string[]; onClose: () => void }) {
   const client = useQueryClient();
   const [fields, setFields] = useState<Partial<Record<BulkField, string>>>({});
-  const [labelsMode, setLabelsMode] = useState<BulkEdits["labels_mode"]>("keep");
+  const [labelsMode, setLabelsMode] = useState<ListMode>("keep");
   const [labels, setLabels] = useState("");
+  const [tagsMode, setTagsMode] = useState<ListMode>("keep");
+  const [tags, setTags] = useState("");
+  const [categories, setCategories] = useState<Partial<Record<CategoryScope, { id: string; path: string } | null>>>({});
+  const { data: dropdowns } = useQuery({ queryKey: ["catalog-dropdown-options"], queryFn: api.catalog.dropdownOptions, staleTime: Infinity });
+  const choices = (field: BulkField): string[] => {
+    const vendoo = dropdowns?.forms?.vendoo || {};
+    return field === "condition" ? vendoo.condition || [] : vendoo.primaryColor || [];
+  };
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<{ edits: BulkEdits; rows: BulkReviewRow[] } | null>(null);
   const [skips, setSkips] = useState<Set<string>>(new Set());
@@ -32,7 +57,31 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
     } });
   const busy = preview.isPending || apply.isPending;
   const tokens = review ? bulkReviewTokens(review.rows.filter((row) => !skips.has(row.conversation_id))) : [];
-  const submitReview = () => { setError(null); try { preview.mutate(bulkEditsFromInputs(fields, labelsMode, labels)); } catch (error) { setError((error as Error).message); } };
+  const submitReview = () => {
+    setError(null);
+    try {
+      const unpicked = Object.entries(categories).find(([, value]) => value === null);
+      if (unpicked) throw new Error(`Pick the ${CATEGORY_SCOPES.find((entry) => entry.scope === unpicked[0])!.label.toLowerCase()} from the search, or uncheck it.`);
+      const category: BulkCategories = {};
+      if (categories.general) category.general = categories.general.id;
+      if (categories.depop) category.depop = categories.depop.id;
+      if (categories.ebay) category.ebay = categories.ebay;
+      preview.mutate(bulkEditsFromInputs(fields, labelsMode, labels, { tagsMode, tagsText: tags, category }));
+    } catch (error) { setError((error as Error).message); }
+  };
+  const fieldControl = (field: BulkField) => {
+    const value = fields[field] ?? "";
+    const set = (next: string) => setFields({ ...fields, [field]: next });
+    if (CHOICE_FIELDS.has(field)) {
+      const blank = field === "secondaryColor";
+      return <Select value={value || (blank ? NO_COLOR : "")} onValueChange={(next) => { if (next) set(next === NO_COLOR ? "" : next as string); }} disabled={busy}>
+        <SelectTrigger aria-label={LABELS[field]}><SelectValue placeholder={`Choose ${LABELS[field].toLowerCase()}`} /></SelectTrigger>
+        <SelectPopup>{blank ? <SelectItem value={NO_COLOR}>No secondary color</SelectItem> : null}{choices(field).map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectPopup>
+      </Select>;
+    }
+    if (field === "description") return <Textarea aria-label={LABELS[field]} value={value} disabled={busy} onChange={(event) => set(event.target.value)} />;
+    return <Input aria-label={LABELS[field]} inputMode={["price", "cost", "quantity"].includes(field) ? "decimal" : "text"} value={value} disabled={busy} onChange={(event) => set(event.target.value)} />;
+  };
   return <PriceDialog title={apply.data ? "Bulk edit results" : review ? "Review bulk edits" : `Edit ${conversationIds.length} listings`} className="max-w-3xl" busy={busy} onClose={onClose}
     description="Save changes in Anteroom. Publishing, updating live listings and delisting require separate marketplace actions. Each saved edit has a revision you can restore."
     footer={apply.data ? <Button onClick={onClose}>Done</Button> : <>
@@ -48,11 +97,24 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
       <label className="flex items-center gap-2 font-medium"><Checkbox disabled={Boolean(row.skip_reason) || busy} checked={!row.skip_reason && !skips.has(row.conversation_id)} onCheckedChange={(checked) => setSkips((previous) => { const next = new Set(previous); if (checked) next.delete(row.conversation_id); else next.add(row.conversation_id); return next; })} />{row.title}</label>
       {row.skip_reason ? <p className="text-muted-foreground">{row.skip_reason}</p> : row.changes.map((change) => <div key={change.field} className="break-words text-xs"><p className="font-medium">{change.field.replace(/_/g, " ")}</p><pre className="whitespace-pre-wrap break-words font-sans">{show(change.old)} → {show(change.new)}</pre></div>)}
     </li>)}</ul> : <div className="space-y-4">
-      <PageNote>Check only the fields to replace on every selected item. Unchecked fields stay as they are. Blank description, brand or SKU clears that field; blank cost means unknown. Prices and quantities are whole numbers. Size and price changes include the editor’s dependent fields in the review.</PageNote>
+      <PageNote>Check only the fields to replace on every selected item. Unchecked fields stay as they are. Blank description, brand or SKU clears that field; blank cost means unknown. Categories must be picked from the search. Prices and quantities are whole numbers. Size and price changes include the editor’s dependent fields in the review.</PageNote>
       {BULK_FIELDS.map((field) => <div key={field} className="space-y-1"><label className="flex items-center gap-2"><Checkbox checked={fields[field] !== undefined} disabled={busy} onCheckedChange={(checked) => setFields((previous) => { const next = { ...previous }; if (checked) next[field] = ""; else delete next[field]; return next; })} />Replace {LABELS[field]}</label>
-        {fields[field] !== undefined ? field === "description" ? <Textarea aria-label={LABELS[field]} value={fields[field]} disabled={busy} onChange={(event) => setFields({ ...fields, [field]: event.target.value })} /> : <Input aria-label={LABELS[field]} inputMode={["price", "cost", "quantity"].includes(field) ? "decimal" : "text"} value={fields[field]} disabled={busy} onChange={(event) => setFields({ ...fields, [field]: event.target.value })} /> : null}
+        {fields[field] !== undefined ? fieldControl(field) : null}
       </div>)}
-      <div className="space-y-2"><p>Labels</p><Select value={labelsMode} onValueChange={(value) => { if (value) setLabelsMode(value); }} disabled={busy}><SelectTrigger aria-label="Label action"><SelectValue /></SelectTrigger><SelectPopup><SelectItem value="keep">Keep labels</SelectItem><SelectItem value="add">Add labels</SelectItem><SelectItem value="remove">Remove labels</SelectItem><SelectItem value="replace">Replace all labels</SelectItem></SelectPopup></Select>
+      {CATEGORY_SCOPES.map(({ scope, label, note }) => <div key={scope} className="space-y-1">
+        <label className="flex items-center gap-2"><Checkbox checked={scope in categories} disabled={busy} onCheckedChange={(checked) => setCategories((previous) => { const next = { ...previous }; if (checked) next[scope] = null; else delete next[scope]; return next; })} />Replace {label}</label>
+        {scope in categories ? <>
+          {scope === "ebay"
+            ? <EbayCategorySelect id="bulk-category-ebay" value={categories.ebay?.path || ""} onChange={(id, path) => setCategories((previous) => ({ ...previous, ebay: { id, path } }))} />
+            : <TreeCategorySelect id={`bulk-category-${scope}`} marketplace={scope} name={scope === "general" ? "shared" : "Depop"} disabled={busy}
+              value={categories[scope]?.path || ""} onChange={(id, path) => setCategories((previous) => ({ ...previous, [scope]: { id, path } }))} />}
+          <PageNote>{note}</PageNote>
+        </> : null}
+      </div>)}
+      <div className="space-y-2"><p>Tags</p><ListModeSelect label="Tags" value={tagsMode} onChange={setTagsMode} disabled={busy} />
+        {tagsMode !== "keep" ? <><Input aria-label="Tags, comma separated" value={tags} disabled={busy} onChange={(event) => setTags(event.target.value)} /><PageNote>Comma-separated search tags. Etsy keeps the first 13 it accepts.</PageNote></> : null}
+      </div>
+      <div className="space-y-2"><p>Labels</p><ListModeSelect label="Labels" value={labelsMode} onChange={setLabelsMode} disabled={busy} />
         {labelsMode !== "keep" ? <><Input aria-label="Labels, comma separated" value={labels} disabled={busy} onChange={(event) => setLabels(event.target.value)} /><PageNote>Comma-separated labels. Replacing with an empty list clears all labels.</PageNote></> : null}
       </div>
     </div>}

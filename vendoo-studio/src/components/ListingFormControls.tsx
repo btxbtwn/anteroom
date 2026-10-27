@@ -225,6 +225,29 @@ export function EbayCategorySelect({ id, value, onChange }: {
   </div>;
 }
 
+/** A final category from one of Anteroom's synced category trees (the shared tree or Depop's). */
+export function TreeCategorySelect({ id, marketplace, name, value, onChange, disabled }: {
+  id: string; marketplace: "general" | "depop"; name: string; value: string; onChange: (id: string, path: string) => void; disabled?: boolean;
+}) {
+  const [query, setQuery] = React.useState("");
+  const [search, setSearch] = React.useState("");
+  React.useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const result = useQuery({ queryKey: ["catalog-category-search", marketplace, search],
+    queryFn: () => api.catalog.searchCategories(search, marketplace), enabled: search.length >= 3 && search !== value, retry: false });
+  const choices = (result.data?.results || []).filter((row) => row.kind === "category" && row.marketplace === marketplace);
+  return <div>
+    <SearchableSelect id={id} fieldKey={`category.${marketplace}`} value={value} disabled={disabled}
+      options={[...new Set([value, ...choices.map((row) => row.path)].filter(Boolean))]} onSearch={setQuery}
+      onChange={(label) => { const choice = choices.find((row) => row.path === label); if (choice) onChange(choice.id, choice.path); }} />
+    <p role="status" className="mt-1 text-xs text-muted-foreground">{result.isError ? `${name} category search failed. Sync categories in Settings and try again.`
+      : result.isFetching ? `Searching ${name} categories…` : search.length >= 3 && search !== value
+        ? `${choices.length} ${name} categories found.` : `Type at least 3 characters to search ${name} categories.`}</p>
+  </div>;
+}
+
 /** A category's multiple values stay an array, including values awaiting correction. */
 export function SearchableMultiSelect({
   id, fieldKey, value, options, onChange, disabled, selectionOnly = true, maxValues, maxLength, choicesVerified = true,
