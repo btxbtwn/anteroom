@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.420 — 2026-10-26
+
+- A sale Anteroom detects now turns the item Sold in Inventory and counts in Analytics, without waiting for Vendoo. An item with more than one unit stays Active and shows how many have sold, such as "1 of 3 sold". A sale Vendoo already recorded is counted once.
+- Mark as sold now asks where it sold, when, and for how much, including shipping and fees, and saves it under Sales records. For a sale in person or anywhere else, choose **Other / in person**, or use **Record a sale** in the Marketplaces panel. Afterwards Anteroom offers to delist the item from your other marketplaces; nothing is delisted unless you confirm.
+
 ## 0.1.419 — 2026-10-26
 
 - Anteroom now refuses an update whose signature is missing or damaged, so an update can no longer lose access to your saved sign-ins. Releases are ready to be signed with an Apple Developer ID certificate; once that is set up, updates stop asking for your Mac password.
