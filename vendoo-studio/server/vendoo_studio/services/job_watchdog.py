@@ -124,6 +124,9 @@ def fail_stalled_jobs(db: Session, *, now: datetime | None = None) -> list[str]:
             from vendoo_studio.services.native_marketplaces import mark_interrupted
 
             mark_interrupted(db, job.id)
+            from vendoo_studio.services.listing_promotions import mark_interrupted as promotions_interrupted
+
+            promotions_interrupted(db, job.id)
         if reason == "dead":
             # Nothing in this process runs it, so resuming cannot double up.
             repo.requeue_interrupted_send(job.id)

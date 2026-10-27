@@ -46,6 +46,7 @@ importScripts('background/sellwild-native.js');
 importScripts('background/vinted-native.js');
 importScripts('background/native-marketplaces.js');
 importScripts('background/marketplace-delete.js');
+importScripts('background/marketplace-promotions.js');
 importScripts('background/marketplace-sessions.js');
 importScripts('background/marketplace-sales.js');
 importScripts('background/marketplace-import.js');
@@ -639,6 +640,13 @@ async function handleStudioMessage(msg) {
 
     case 'marketplace.delete': {
       await handleMarketplaceDelete(msg);
+      break;
+    }
+
+    case 'marketplace.promotion_check':
+    case 'marketplace.promote':
+    case 'marketplace.promotion_result': {
+      await handleMarketplacePromotion(msg);
       break;
     }
 

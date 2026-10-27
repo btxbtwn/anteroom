@@ -7,6 +7,7 @@ import type { LabelColor } from "../labelColors";
 import type { BulkMarketplaceAction, BulkMarketplacePerform, BulkMarketplacePreview, BulkMarketplaceResult } from "./bulkMarketplace";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
+import type { Promotion, PromotionFloor, PromotionHistory, PromotionMarketplace, PromotionPreview, PromotionPreviewRequest, PromotionResult } from "./promotions";
 import type {
   SendPreview,
   BackupSnapshot,
@@ -573,6 +574,19 @@ export const api = {
       request<BulkMarketplacePreview>("/listings/marketplace-actions/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds, action, marketplaces }) }),
     perform: (body: BulkMarketplacePerform) =>
       request<BulkMarketplaceResult>("/listings/marketplace-actions/perform", { method: "POST", body: JSON.stringify(body) }),
+  },
+  promotions: {
+    history: () => request<PromotionHistory>("/promotions"),
+    floors: (conversationIds: string[], marketplace: PromotionMarketplace) =>
+      request<Record<string, PromotionFloor>>("/promotions/floors", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds, marketplace }) }),
+    preview: (body: PromotionPreviewRequest) =>
+      request<PromotionPreview>("/promotions/preview", { method: "POST", body: JSON.stringify(body) }),
+    perform: (id: string, shippingDiscountId?: string) =>
+      request<PromotionResult>(`/promotions/${encodeURIComponent(id)}/perform`, { method: "POST",
+        body: JSON.stringify({ confirm: true, ...(shippingDiscountId ? { shipping_discount_id: shippingDiscountId } : {}) }) }),
+    check: (id: string) => request<Promotion>(`/promotions/${encodeURIComponent(id)}/check`, { method: "POST" }),
+    markChecked: (id: string) =>
+      request<Promotion>(`/promotions/${encodeURIComponent(id)}/checked`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
   },
   bulkDelete: {
     preview: (conversationIds: string[]) =>
