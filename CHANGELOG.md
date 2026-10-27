@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.451 — 2026-10-27
+## 0.1.452 — 2026-10-27
 
 - The Sync button and the green Ready badge are gone from the listing toolbar. Nothing needs checking by hand: List and Delist report their own results, and a sale still delists the item everywhere else. When an eBay or Etsy sale is for an item with more than one in stock, Anteroom now reads what's left right away, so it knows whether to delist the rest. A List or Update that stalls is checked as soon as Anteroom gives up on it.
+
+## 0.1.451 — 2026-10-27
+
+- eBay, Poshmark, Mercari, Depop and Sellwild tabs now show exactly the fields that marketplace’s own form has, in its order. Anteroom no longer adds its own Size, Size Grouping, price or offer rows to them, so pants and jeans no longer show Size twice on Depop, and Price sits where the marketplace puts it.
 
 ## 0.1.450 — 2026-10-27
 
