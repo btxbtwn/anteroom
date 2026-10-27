@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.436 — 2026-10-27
+
+- When Anteroom watches you send an offer or save a draft by hand to learn a marketplace's requests, it now keeps what it saw even if the request that started it is interrupted. Only one of these recordings runs at a time.
+
 ## 0.1.435 — 2026-10-27
 
 - Photos in a listing, pictures in chat, and covers in the sidebar are shown small, so Anteroom uses far less memory and the Mac spends less time catching up.
