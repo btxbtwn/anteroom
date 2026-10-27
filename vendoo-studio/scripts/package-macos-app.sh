@@ -128,7 +128,15 @@ for pattern in ("*.dist-info", "*.egg-info"):
         if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)
             removed += 1
-print(f"Removed {removed} package-metadata directories before deep sign")
+# PyInstaller adds Frameworks/<pkg>.dist-info links to Resources/. With the
+# directories gone those links point nowhere, and a dangling link fails the
+# strict signature check the updater runs before installing.
+dangling = 0
+for path in app.rglob("*"):
+    if path.is_symlink() and not path.exists():
+        path.unlink()
+        dangling += 1
+print(f"Removed {removed} package-metadata directories and {dangling} dangling links before deep sign")
 PY
 echo "Deep-signing app with identity: $SIGN_IDENTITY"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
@@ -141,19 +149,28 @@ if [[ "$CODESIGN_DV" == *"not signed at all"* ]]; then
   echo "Packaged app is unsigned." >&2
   exit 1
 fi
-if ! codesign --verify "$APP" 2>verify.err; then
-  cat verify.err >&2
-  if grep -Eq 'modified|invalid|not signed|Team ID' verify.err; then
-    exit 1
-  fi
-  echo "codesign --verify reported a non-fatal warning; continuing."
-fi
+# The updater refuses any download that fails this same check.
+codesign --verify --deep --strict --verbose=1 "$APP"
 REQUIREMENT="$(codesign -d -r- "$APP" 2>&1)"
 echo "$REQUIREMENT"
 if [[ "$CODESIGN_DV" == *"Signature=adhoc"* ]] || \
    [[ "$REQUIREMENT" != *"certificate leaf"* && "$REQUIREMENT" != *"anchor "* ]]; then
   echo "Signed app has no certificate-based designated requirement." >&2
   exit 1
+fi
+# Keychain only trusts later builds by their Apple Team ID. A certificate that
+# Apple did not issue has none, so macOS ties saved sign-ins to this exact
+# build and asks for the Mac password once after every update.
+TEAM_ID="$(printf '%s\n' "$CODESIGN_DV" | sed -n 's/^TeamIdentifier=//p' | head -1)"
+if [[ -z "$TEAM_ID" || "$TEAM_ID" == "not set" ]]; then
+  MESSAGE="Signed without an Apple Team ID: macOS will ask for the Keychain password once after this update. Run scripts/setup-signing.sh with a Developer ID Application certificate to stop that."
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "::warning title=Keychain prompt on update::$MESSAGE"
+  else
+    echo "Warning: $MESSAGE" >&2
+  fi
+else
+  echo "Signed with Apple Team ID $TEAM_ID: updates keep Keychain access."
 fi
 
 PAYLOAD="$RELEASE/payload"

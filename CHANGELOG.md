@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.419 — 2026-10-26
+## 0.1.420 — 2026-10-26
 
 - List one eBay item in several sizes or colors. Under Marketplaces → eBay, choose what the variations differ by (eBay offers the choices it allows for the category), then give each variation its own quantity, and optionally its own SKU, price and photos. Save draft keeps it private on eBay and checks what eBay saved; List publishes it as one listing. eBay sells variations at a fixed price without offers.
 - Update changes the quantities, prices and photos of a live listing with variations, and Delist ends the whole listing. Selling one size no longer counts the item as sold out: Sync reads what is left of each variation.
+
+## 0.1.419 — 2026-10-26
+
+- Anteroom now refuses an update whose signature is missing or damaged, so an update can no longer lose access to your saved sign-ins. Releases are ready to be signed with an Apple Developer ID certificate; once that is set up, updates stop asking for your Mac password.
 
 ## 0.1.418 — 2026-10-26
 

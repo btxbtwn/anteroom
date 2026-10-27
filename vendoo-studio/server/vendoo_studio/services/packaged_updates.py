@@ -237,12 +237,12 @@ def _verify_archive_digest(archive: Path, expected: str | None) -> None:
 
 
 def _verify_app_signature(app_path: Path) -> None:
-    """Require a code signature (including ad-hoc).
+    """Require an intact signature from a signing certificate.
 
-    Releases are ad-hoc signed, not Developer ID / notarized. ``codesign
-    --verify --deep --strict`` rejects the PyInstaller Python.framework as
-    "bundle format is ambiguous", so integrity for updates is the GitHub
-    zip SHA-256 digest; this check only rejects completely unsigned bundles.
+    Keychain lets an update keep the saved sign-ins only when it is signed by
+    the same certificate as the installed app. An ad-hoc or broken signature
+    would lose that access, so such a download is refused rather than
+    installed. The zip's SHA-256 digest from the release is checked separately.
     """
     if os.environ.get("VENDOO_STUDIO_SKIP_CODESIGN") == "1":
         return
@@ -254,6 +254,19 @@ def _verify_app_signature(app_path: Path) -> None:
     detail = (display.stderr or display.stdout or "").strip()
     if display.returncode != 0 or "code object is not signed at all" in detail:
         raise PackagedUpdateError("The update is not signed by a trusted identity.")
+    if "Signature=adhoc" in detail:
+        raise PackagedUpdateError("The update is not signed with Anteroom's certificate.")
+    verify = subprocess.run(
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app_path)],
+        capture_output=True,
+        text=True,
+    )
+    if verify.returncode != 0:
+        reason = (verify.stderr or verify.stdout or "").strip().splitlines()
+        raise PackagedUpdateError(
+            "The update's code signature is damaged"
+            + (f": {reason[-1]}" if reason else ".")
+        )
 
 
 def _path_inside(root: Path, candidate: Path) -> bool:
