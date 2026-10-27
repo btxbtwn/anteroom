@@ -272,7 +272,7 @@ test('import reads wait for a running listing action and reject malformed IDs wi
   const { c, requests } = vinted();
   assert.equal((await listing(c, 'vinted', '../4401')).ok, false);
   assert.equal((await listing(c, 'ebay', '123')).ok, false);
-  require('node:vm').runInContext('activeNativeOperation = { id: "op" }', c);
+  require('node:vm').runInContext('claimNativeOperation("*", "op")', c);
   assert.equal((await page(c, 'vinted')).error_code, 'busy');
   assert.equal((await listing(c, 'vinted', '4401')).error_code, 'busy');
   assert.equal(requests.length, 0);

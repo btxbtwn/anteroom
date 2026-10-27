@@ -425,7 +425,7 @@ function importFailure(error) {
 
 async function readMarketplaceImportPage(marketplace, cursor) {
   if (!IMPORT_MARKETS.includes(marketplace)) return { ok: false, error: 'Unsupported marketplace.', error_code: 'rejected' };
-  if (activeNativeOperation) return { ok: false, error: 'Wait for the current listing action to finish.', error_code: 'busy' };
+  if (nativeOperationsRunning()) return { ok: false, error: 'Wait for the current listing action to finish.', error_code: 'busy' };
   try {
     const clean = typeof cursor === 'string' && cursor.length <= 300 ? cursor : null;
     const page = await IMPORT_READERS[marketplace].page(clean, Date.now() + IMPORT_DEADLINE_MS);
@@ -439,7 +439,7 @@ async function readMarketplaceImportListing(marketplace, listingId) {
   if (!IMPORT_MARKETS.includes(marketplace)) return { ok: false, error: 'Unsupported marketplace.', error_code: 'rejected' };
   const id = marketplace === 'poshmark' ? String(listingId || '').toLowerCase() : String(listingId || '');
   if (!IMPORT_LISTING_ID[marketplace].test(id)) return { ok: false, error: 'This is not a listing ID for that marketplace.', error_code: 'rejected' };
-  if (activeNativeOperation) return { ok: false, error: 'Wait for the current listing action to finish.', error_code: 'busy' };
+  if (nativeOperationsRunning()) return { ok: false, error: 'Wait for the current listing action to finish.', error_code: 'busy' };
   try {
     return { ok: true, listing: await IMPORT_READERS[marketplace].listing(id, Date.now() + IMPORT_DEADLINE_MS) };
   } catch (error) {

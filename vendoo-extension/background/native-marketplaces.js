@@ -1,6 +1,28 @@
 // Native forms use the seller's existing session. No cookie/token export.
 // Single-use mutation commands are journaled; reconnects only read results.
-let activeNativeOperation = null;
+// A listing action holds only its own marketplace, so different marketplaces run
+// side by side. Delist and promotions hold every marketplace ('*').
+const nativeOperations = new Map();
+
+function nativeOperationFor(marketplace) {
+  return nativeOperations.get(marketplace) || nativeOperations.get('*') || null;
+}
+
+function nativeOperationsRunning() {
+  return nativeOperations.size > 0;
+}
+
+// Returns the claimed operation, or null when Chrome is busy for that scope.
+function claimNativeOperation(scope, id) {
+  if (activeJob || activePatch || nativeOperations.has('*') || (scope === '*' ? nativeOperations.size > 0 : nativeOperations.has(scope))) return null;
+  const operation = { id, scope, tabId: null, cancelled: false, controller: new AbortController() };
+  nativeOperations.set(scope, operation);
+  return operation;
+}
+
+function releaseNativeOperation(operation) {
+  if (operation && nativeOperations.get(operation.scope) === operation) nativeOperations.delete(operation.scope);
+}
 
 function nativeDraftUrl(platform, raw) {
   try {
@@ -114,8 +136,9 @@ async function handleNativeMarketplaceMessage(msg) {
   if (msg.type === 'marketplace.result') {
     if (!stored && msg.payload.context?.draft_url) stored = { finished: false, context: msg.payload.context };
     if (stored && !stored.context && msg.payload.context) stored = { ...stored, context: msg.payload.context };
-    if (stored?.context && !activeNativeOperation && !activeJob && !activePatch && (!stored.finished || (!stored.result?.ok && !stored.result?.safe_to_retry))) {
-      activeNativeOperation = { id: operationId, tabId: null, cancelled: false, controller: new AbortController() };
+    const recovery = stored?.context && (!stored.finished || (!stored.result?.ok && !stored.result?.safe_to_retry))
+      ? claimNativeOperation(stored.context.marketplace, operationId) : null;
+    if (recovery) {
       try {
         const recovered = await recoverNativeMarketplace({ ...stored.context, ...msg.payload.context,
           draft_url: msg.payload.context?.draft_url || stored.receipt_url || stored.context.draft_url,
@@ -126,13 +149,13 @@ async function handleNativeMarketplaceMessage(msg) {
           sendBrowserResult(msg, { finished: true, result: recovered });
           return;
         }
-      } finally { activeNativeOperation = null; }
+      } finally { releaseNativeOperation(recovery); }
     }
     // A finished Depop publish used to keep only the draft link. Read the public product before answering.
     if (stored?.finished && stored.result?.ok && stored.result.state === 'published' && stored.context?.marketplace === 'depop'
-        && !stored.result.listing_url && stored.publish_job_id && !activeNativeOperation && !activeJob && !activePatch) {
-      activeNativeOperation = { id: operationId, tabId: null, cancelled: false, controller: new AbortController() };
-      try {
+        && !stored.result.listing_url && stored.publish_job_id) {
+      const reading = claimNativeOperation('depop', operationId);
+      if (reading) try {
         const status = await depopApiAction('publish_status', {
           ...stored.context, ...msg.payload.context, publish_job_id: stored.publish_job_id,
           action: 'publish', deadline: Date.now() + 50000,
@@ -142,7 +165,7 @@ async function handleNativeMarketplaceMessage(msg) {
           await chrome.storage.local.set({ [key]: stored });
         }
       } catch { /* The listing is already live. A missing link stays missing. */ }
-      finally { activeNativeOperation = null; }
+      finally { releaseNativeOperation(reading); }
     }
     sendBrowserResult(msg, stored?.finished ? { finished: true, result: stored.result } : { finished: false });
     return;
@@ -152,11 +175,13 @@ async function handleNativeMarketplaceMessage(msg) {
       : marketplaceFailure(new Error('This action is already in progress or interrupted. Check its result.'), false));
     return;
   }
-  if (activeNativeOperation || activeJob || activePatch) {
-    sendBrowserResult(msg, nativeRefusal('Another automation job is running.'));
+  const marketplace = msg.payload.marketplace;
+  const operation = claimNativeOperation(marketplace, operationId);
+  if (!operation) {
+    sendBrowserResult(msg, nativeRefusal(activeJob || activePatch || nativeOperations.has('*')
+      ? 'Another automation job is running.' : `Another ${marketplaceLabel(marketplace)} action is running.`));
     return;
   }
-  activeNativeOperation = { id: operationId, tabId: null, cancelled: false, controller: new AbortController() };
   try {
     const context = { marketplace: msg.payload.marketplace, action: msg.payload.action, draft_url: msg.payload.draft_url,
       listing_id: msg.payload.listing_id, local_draft_id: msg.payload.local_draft_id, revision_id: msg.payload.revision_id,
@@ -166,14 +191,15 @@ async function handleNativeMarketplaceMessage(msg) {
     const journal = (await chrome.storage.local.get(key))[key];
     await chrome.storage.local.set({ [key]: { ...journal, finished: true, result } });
     sendBrowserResult(msg, result);
-  } finally { activeNativeOperation = null; }
+  } finally { releaseNativeOperation(operation); }
 }
 
 async function cancelNativeMarketplaceOperation(jobId) {
-  if (activeNativeOperation?.id !== jobId) return;
-  activeNativeOperation.cancelled = true;
-  activeNativeOperation.controller?.abort();
-  const tabId = activeNativeOperation.tabId;
+  const operation = [...nativeOperations.values()].find(candidate => candidate.id === jobId);
+  if (!operation) return;
+  operation.cancelled = true;
+  operation.controller?.abort();
+  const tabId = operation.tabId;
   if (tabId != null) {
     await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN',
       func: id => { globalThis.__anteroomCancelledNativeOperation = id; }, args: [jobId] }).catch(() => {});

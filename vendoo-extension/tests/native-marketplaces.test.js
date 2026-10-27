@@ -148,7 +148,7 @@ test('the controller never repeats a Poshmark listing after a completed or inter
 
 test('a cancel aborts the request in flight', async () => {
   const s = setup();
-  vm.runInContext("activeNativeOperation = { id: 'op-9', tabId: null, cancelled: false, controller: new AbortController() }", s.context);
+  vm.runInContext("claimNativeOperation('depop', 'op-9')", s.context);
   let signal;
   s.context.fetch = (_url, options) => new Promise((_resolve, reject) => {
     signal = options.signal;
@@ -161,4 +161,40 @@ test('a cancel aborts the request in flight', async () => {
   const error = await pending.catch(value => value);
   assert.equal(signal.aborted, true);
   assert.equal(error.code, 'uncertain');
+});
+
+test('different marketplaces run side by side, but one marketplace runs one action at a time', async () => {
+  const s = setup();
+  const finish = {};
+  s.context.runNativeMarketplace = msg => new Promise(resolve => {
+    finish[msg.payload.marketplace] = () => resolve({ ok: true, state: 'draft' });
+  });
+  const message = (id, marketplace) => ({ type: 'marketplace.execute', job_id: id,
+    payload: { ...s.msg.payload, operation_id: id, marketplace } });
+  const posh = s.context.handleNativeMarketplaceMessage(message('a1', 'poshmark'));
+  const mercari = s.context.handleNativeMarketplaceMessage(message('b2', 'mercari'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(typeof finish.poshmark, 'function');
+  assert.equal(typeof finish.mercari, 'function');
+  await s.context.handleNativeMarketplaceMessage(message('c3', 'poshmark'));
+  assert.equal(s.replies[0].ok, false);
+  assert.match(s.replies[0].error, /Another Poshmark action/);
+  assert.equal(call(s.context, 'claimNativeOperation', '*', 'delete-1'), null);
+  await s.context.cancelNativeMarketplaceOperation('b2');
+  assert.equal(s.context.nativeOperationFor('mercari').cancelled, true);
+  assert.equal(s.context.nativeOperationFor('poshmark').cancelled, false);
+  finish.poshmark();
+  finish.mercari();
+  await Promise.all([posh, mercari]);
+  assert.equal(call(s.context, 'nativeOperationsRunning'), false);
+});
+
+test('a delist holds every marketplace', () => {
+  const c = loadWorker();
+  const operation = c.claimNativeOperation('*', 'delete-1');
+  assert.ok(operation);
+  assert.equal(call(c, 'claimNativeOperation', 'mercari', 'op'), null);
+  assert.equal(c.nativeOperationFor('depop'), operation);
+  c.releaseNativeOperation(operation);
+  assert.ok(call(c, 'claimNativeOperation', 'mercari', 'op'));
 });

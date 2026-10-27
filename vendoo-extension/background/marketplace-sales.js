@@ -221,7 +221,7 @@ const SALE_READERS = { depop: depopSales, mercari: mercariSales, poshmark: poshm
   facebook: facebookSales };
 
 async function readMarketplaceSales(marketplace, listingIds) {
-  if (activeNativeOperation) return { ok: true, sales: [], skipped: true };
+  if (nativeOperationsRunning()) return { ok: true, sales: [], skipped: true };
   const read = SALE_READERS[marketplace];
   if (!read) return { ok: false, error: 'Could not check sales.' };
   const ids = (Array.isArray(listingIds) ? listingIds : [])

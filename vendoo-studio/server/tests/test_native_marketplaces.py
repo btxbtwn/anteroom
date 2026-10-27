@@ -866,6 +866,22 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
         self.bridge.assert_not_called()
 
+    def test_listing_runs_beside_other_marketplaces_but_not_its_own(self):
+        repo = JobRepo(self.db)
+        other = ConversationRepo(self.db).create(title="Other item")
+        repo.create(other.id, self.rev.id, LISTING, status="dispatched", current_step="native_poshmark_list")
+        started = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(started.status_code, 200, started.text)
+        refused = self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(refused.status_code, 409)
+        self.assertIn("Another Poshmark action", refused.json()["detail"])
+
+    def test_delist_and_inspection_still_hold_every_marketplace(self):
+        for step in ("native_delist", "native_poshmark_inspect"):
+            job = JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step=step)
+            self.assertEqual(native.blocking_job(JobRepo(self.db), "mercari").id, job.id)
+            JobRepo(self.db).update_status(job.id, "completed")
+
     def test_restart_marks_cut_off_actions_unconfirmed_and_reconcile_reads_them(self):
         repo = JobRepo(self.db)
         job = repo.create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_poshmark_list")
