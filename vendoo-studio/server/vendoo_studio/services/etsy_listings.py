@@ -302,7 +302,7 @@ def _key(text: str) -> str:
 # Listing keys that are never category properties.
 _NOT_PROPERTIES = frozenset(_key(key) for key in (
     "who_made", "what_is", "when_made", "section", "materials", "tags", "styles", "style", "category_specifics",
-    "shipping_profile_id", "return_policy_id", "readiness_state_id", "listing_type", "renewal_option"))
+    "shipping_profile_id", "return_policy_id", "readiness_state_id", "listing_type", "renewal_option", "videoId"))
 
 
 def _answers(snapshot: dict) -> dict[str, list[str]]:
@@ -565,6 +565,97 @@ async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: 
     record({"etsy_photos_complete": True})
 
 
+VIDEO_FIELD = "etsy_specifics.videoId"
+_VIDEO_EXTENSIONS = {"video/mp4": "mp4", "video/quicktime": "mov", "video/x-flv": "flv", "video/x-msvideo": "avi",
+                     "video/3gpp": "3gp", "video/mpeg": "mpeg"}
+
+
+def _video_choice(snapshot: dict) -> dict | None | bool:
+    """The video this revision selects: a video, None to clear it, False when the form never touched it."""
+    details = snapshot.get("etsy_specifics") if isinstance(snapshot.get("etsy_specifics"), dict) else {}
+    if "videoId" not in details:
+        return False
+    wanted = str(details.get("videoId") or "")
+    if not wanted:
+        return None
+    video = snapshot.get("_native_video")
+    if not isinstance(video, dict) or video.get("id") != wanted or not video.get("checksum"):
+        raise missing("Choose the Etsy video again before listing.", VIDEO_FIELD)
+    return video
+
+
+async def _listing_videos(item_id: str) -> list[dict]:
+    found = await marketplace_accounts.etsy_api("GET", f"listings/{item_id}/videos")
+    return [video for video in found.get("results") or [] if isinstance(video, dict)]
+
+
+def _active_videos(videos: list[dict]) -> list[str]:
+    # Older listings keep inactive videos; only active ones show.
+    return [str(video.get("video_id")) for video in videos if video.get("video_state") == "active"]
+
+
+async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding: dict,
+                      record: Callable[[dict], None]) -> None:
+    """Make the listing's one video the selected file, or none. Each file is uploaded once.
+
+    A removed video stays on Etsy's servers, so it is attached again by ID
+    instead of uploaded. An upload whose reply was lost is the one active video
+    left after Anteroom removed the others, and is adopted rather than repeated.
+    """
+    from vendoo_studio.services.listing_videos import video_bytes
+
+    choice = _video_choice(snapshot)
+    if choice is False:
+        return
+    videos = await _listing_videos(item_id)
+    active = _active_videos(videos)
+    saved = binding.get("etsy_video") if isinstance(binding.get("etsy_video"), dict) else {}
+    same = choice is not None and saved.get("checksum") == choice["checksum"]
+    known = str(saved.get("video_id") or "") if same else ""
+    if same and saved.get("pending") and not known and active:
+        if len(active) > 1:
+            raise ValueError("Etsy has more than one video on this listing and has not confirmed which Anteroom uploaded. "
+                             "Check the listing in Etsy before trying again.")
+        known = active[0]
+        record({"etsy_video": {"checksum": choice["checksum"], "video_id": known}})
+    for video_id in [video_id for video_id in active if video_id != known]:
+        await write("DELETE", f"shops/{shop_id}/listings/{item_id}/videos/{video_id}", "video")
+        record({"etsy_pending_write": None})
+    if choice is None:
+        record({"etsy_video": None})
+        return
+    if any(str(video.get("video_id")) == known and video.get("video_state") == "flagged" for video in videos):
+        raise missing("Etsy flagged this video. Choose another video or clear it.", VIDEO_FIELD)
+    if known and known in active:
+        return
+    if known:
+        uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video", data={"video_id": known})
+    else:
+        record({"etsy_video": {"checksum": choice["checksum"], "pending": True}})
+        data = await asyncio.to_thread(video_bytes, choice)
+        name = f"{choice['id']}.{_VIDEO_EXTENSIONS.get(choice.get('mime_type'), 'mp4')}"
+        uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video",
+                               data={"name": name}, files={"video": (name, data, choice.get("mime_type"))}, timeout=300)
+    video_id = str(uploaded.get("video_id") or "")
+    if not re.fullmatch(r"[1-9]\d*", video_id):
+        raise ValueError("Etsy did not confirm the video. Check the listing before another upload.")
+    record({"etsy_video": {"checksum": choice["checksum"], "video_id": video_id}, "etsy_pending_write": None})
+
+
+async def _video_kept(item_id: str, snapshot: dict, binding: dict) -> bool:
+    """Whether Etsy shows exactly the selected video, active, or none once cleared."""
+    choice = _video_choice(snapshot)
+    if choice is False:
+        return True
+    expected: list[str] = []
+    if choice is not None:
+        saved = binding.get("etsy_video") if isinstance(binding.get("etsy_video"), dict) else {}
+        if saved.get("checksum") != choice["checksum"] or not saved.get("video_id"):
+            return False
+        expected = [str(saved["video_id"])]
+    return _active_videos(await _listing_videos(item_id)) == expected
+
+
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                   record: Callable[[dict], None], active: Callable[[], bool], *, confirm: bool = False,
                   shipping_profile_id: str | None = None, readiness_state_id: str | None = None,
@@ -614,9 +705,12 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
             record({"etsy_pending_write": None})
             await _sync_photos(write, shop_id, item_id, remote, photos, binding, record)
+            await _sync_video(write, shop_id, item_id, snapshot, binding, record)
             remote = await _read(shop_id, item_id)
             if remote.get("state") != "active" or not _matches(remote, snapshot):
                 raise ValueError("Etsy has not confirmed the update on the live listing. Check it before trying again.")
+            if not await _video_kept(item_id, snapshot, binding):
+                raise ValueError("Etsy did not keep the listing video. Check the live listing before trying again.")
             return _success(remote)
 
         if action == "publish":
@@ -630,6 +724,10 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                 return _success(remote)
             if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images"):
                 raise ValueError("Etsy did not accept this listing's fields or photos.")
+            if not await _video_kept(item_id, snapshot, binding):
+                # A flagged, removed or missing video is never published. Save Draft uploads it again.
+                raise ListingProblem("Etsy does not show the selected video on this draft. Save Draft again, or clear the video.",
+                                     "missing_fields", fields=[{"field": VIDEO_FIELD, "message": "Etsy does not show this video."}])
             remote = await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "publish", data={"state": "active"})
             # A successful response is a receipt; a later read failure must not
             # discard it and invite a second paid activation.
@@ -712,11 +810,14 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                                  "rejected", fields=[{"field": f"etsy_specifics.category_specifics.{name}", "message": "Etsy did not keep it."}
                                                      for name in lost])
         await _sync_photos(write, shop_id, item_id, remote, photos, binding, record)
+        await _sync_video(write, shop_id, item_id, snapshot, binding, record)
         remote = await _read(shop_id, item_id)
         if remote.get("state") != "draft" or not _matches(remote, snapshot) or not remote.get("images"):
             raise ValueError("Etsy did not retain the private draft fields and photos. Check its result.")
         if binding.get("etsy_photo_ids") and len(remote["images"]) != len(binding["etsy_photo_ids"]):
             raise ValueError("Etsy did not retain every draft photo. Check its result.")
+        if not await _video_kept(item_id, snapshot, binding):
+            raise ValueError("Etsy did not keep the listing video. Check its result.")
         return _success(remote)
     except Exception as exc:
         return _failure(exc, safe=not attempted or rejected,
@@ -736,8 +837,9 @@ async def check(snapshot: dict, binding: dict, candidate: str | None) -> dict:
                 # The draft is created first; with no draft, nothing reached Etsy.
                 return {"ok": False, "safe_to_retry": True, "error": "Etsy has no draft from this listing. List again."}
         remote = await _read(shop_id, listing_id(candidate))
+        video_kept = await _video_kept(listing_id(candidate), snapshot, binding)
         if binding["action"] in {"publish", "update"}:
-            if remote.get("state") == "active" and _matches(remote, snapshot):
+            if remote.get("state") == "active" and _matches(remote, snapshot) and video_kept:
                 return _success(remote)
             if binding["action"] == "publish" and remote.get("state") == "draft":
                 # Activation is one state change: still a draft means it did not happen.
@@ -748,7 +850,7 @@ async def check(snapshot: dict, binding: dict, candidate: str | None) -> dict:
             raise ValueError("The Etsy item is no longer a private draft. Check the native listing.")
         expected = binding.get("etsy_photo_ids")
         complete = bool(remote.get("images")) and (not expected or len(remote["images"]) == len(expected))
-        if _matches(remote, snapshot) and complete:
+        if _matches(remote, snapshot) and complete and video_kept:
             return _success(remote)
         if not binding.get("etsy_pending_write") or found:
             # Found by title after a lost create: nothing after the create can have run.

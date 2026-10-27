@@ -984,3 +984,190 @@ class EbayAuctionTest(unittest.IsolatedAsyncioTestCase):
                                          {"listingType": "FIXED_PRICE_ITEM", "durationValues": ["GTC"]}])
         self.assertEqual(await marketplace_schemas.ebay_listing_types(client, "15687"),
                          {"AUCTION": ["DAYS_3", "DAYS_7"], "FIXED_PRICE": ["GTC"]})
+
+
+class VideoClient(Client):
+    """eBay with the Media API's video resource: created, uploaded, then processed."""
+
+    def __init__(self, states=("PROCESSING", "LIVE"), **kwargs):
+        super().__init__(**kwargs)
+        self.videos = {}
+        self.states = list(states)
+
+    async def request(self, method, path, **kwargs):
+        if path == "/commerce/media/v1_beta/video" and method == "POST":
+            self.calls.append((method, path, kwargs))
+            video_id = f"v{len(self.videos) + 1}"
+            self.videos[video_id] = {"videoId": video_id, "status": "PENDING_UPLOAD", "size": kwargs["body"]["size"]}
+            return {"receiptId": video_id}
+        if path.startswith("/commerce/media/v1_beta/video/"):
+            self.calls.append((method, path, kwargs))
+            video_id = path.split("/")[5]
+            if video_id not in self.videos:
+                raise EbayFailure("eBay returned HTTP 404.", 404)
+            video = self.videos[video_id]
+            if path.endswith("/upload"):
+                assert len(kwargs["binary"]) == video["size"]
+                video["status"] = "PROCESSING"
+                return {}
+            if video["status"] != "PENDING_UPLOAD" and self.states:
+                video["status"] = self.states.pop(0)
+            return dict(video)
+        return await super().request(method, path, **kwargs)
+
+
+class EbayVideoTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        import hashlib
+
+        from vendoo_studio.services import listing_videos
+
+        self.temp = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(patch.object(ebay_listings, "PHOTOS_DIR", self.temp))
+        self.enterContext(patch.object(listing_videos, "VIDEOS_DIR", Path(self.temp)))
+        self.enterContext(patch.object(ebay_listings, "VIDEO_POLL_S", 0))
+        Path(self.temp, "tee.jpg").write_bytes(b"image")
+        Path(self.temp, "clip.video").write_bytes(b"clip-bytes")
+        self.photo = SimpleNamespace(id="p1", stored_filename="tee.jpg", mime_type="image/jpeg")
+        self.video = {"id": "vid1", "stored_filename": "clip.video", "size_bytes": 10, "mime_type": "video/mp4",
+                      "duration_seconds": 8, "checksum": hashlib.sha256(b"clip-bytes").hexdigest()}
+        self.listing = {**LISTING, "ebay_specifics": {**LISTING["ebay_specifics"], "videoId": "vid1"}, "_native_video": self.video}
+        self.binding = {}
+        self.enterContext(patch("vendoo_studio.services.marketplace_schemas.load_rows", return_value=None))
+        self.enterContext(patch("vendoo_studio.services.marketplace_schemas.save_rows"))
+        self.enterContext(patch.object(ebay_listings, "get_ebay_listing_defaults", lambda: {}))
+
+    def record(self, values):
+        self.binding.update(values)
+
+    async def run_action(self, client, action="save_draft", listing=None):
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            return await ebay_listings.execute(action, listing or self.listing, [self.photo], self.binding, self.record,
+                                               lambda: True, confirm=action == "list", conversation_id="abc123")
+
+    def media(self, client, suffix=""):
+        return [call for call in client.calls if call[1].startswith("/commerce/media/v1_beta/video") and call[1].endswith(suffix)
+                and call[0] == "POST"]
+
+    async def test_save_draft_creates_uploads_waits_and_attaches_one_video(self):
+        client = VideoClient()
+        result = await self.run_action(client)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["state"], "draft")
+        created = [call for call in self.media(client) if call[1] == "/commerce/media/v1_beta/video"]
+        self.assertEqual(len(created), 1)
+        self.assertEqual(created[0][2]["body"]["classification"], ["ITEM"])
+        self.assertEqual(created[0][2]["body"]["size"], 10)
+        self.assertEqual(self.media(client, "/upload")[0][2]["binary"], b"clip-bytes")
+        self.assertEqual(client.items["ar-abc123"]["product"]["videoIds"], ["v1"])
+        self.assertEqual(self.binding["ebay_video"], {"checksum": self.video["checksum"], "video_id": "v1"})
+        self.assertFalse(any(call[1].endswith("/publish") for call in client.calls))
+        # The video was LIVE before the inventory item named it.
+        put = next(index for index, call in enumerate(client.calls) if call[0] == "PUT")
+        live = max(index for index, call in enumerate(client.calls) if call[1] == "/commerce/media/v1_beta/video/v1")
+        self.assertLess(live, put)
+
+    async def test_a_retry_reuses_the_journal_and_uploads_only_while_ebay_waits(self):
+        client = VideoClient()
+        client.videos["v7"] = {"videoId": "v7", "status": "PENDING_UPLOAD", "size": 10}
+        self.binding["ebay_video"] = {"checksum": self.video["checksum"], "video_id": "v7"}
+        self.assertTrue((await self.run_action(client))["ok"])
+        self.assertFalse([call for call in self.media(client) if call[1] == "/commerce/media/v1_beta/video"])
+        self.assertEqual(len(self.media(client, "/upload")), 1)
+        client.calls.clear()
+        client.states = ["LIVE"]
+        self.assertTrue((await self.run_action(client))["ok"])
+        self.assertFalse(self.media(client), "a processed video is never created or uploaded again")
+        self.assertEqual(client.items["ar-abc123"]["product"]["videoIds"], ["v7"])
+
+    async def test_list_refuses_a_blocked_or_failed_video_before_writing(self):
+        for state in ("BLOCKED", "PROCESSING_FAILED"):
+            self.binding = {}
+            client = VideoClient(states=(state,))
+            result = await self.run_action(client, "list")
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["error_code"], "missing_fields")
+            self.assertEqual(result["fields"][0]["field"], "ebay_specifics.videoId")
+            self.assertFalse(client.items)
+            self.assertFalse(any(call[1].endswith("/publish") for call in client.calls))
+
+    async def test_list_stops_while_ebay_is_still_processing(self):
+        client = VideoClient(states=["PROCESSING"] * 3)
+        with patch.object(ebay_listings, "VIDEO_WAIT_S", 0):
+            result = await self.run_action(client, "list")
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["safe_to_retry"])
+        self.assertIn("still processing", result["error"])
+        self.assertFalse(client.items)
+        self.assertFalse(any(call[1].endswith("/publish") for call in client.calls))
+
+    async def test_list_publishes_with_the_processed_video(self):
+        client = VideoClient()
+        result = await self.run_action(client, "list")
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(client.items["ar-abc123"]["product"]["videoIds"], ["v1"])
+        self.assertTrue(client.calls[-1][1].endswith("/publish"))
+
+    async def test_a_changed_file_is_refused_before_ebay_creates_anything(self):
+        Path(self.temp, "clip.video").write_bytes(b"other-byte")
+        client = VideoClient()
+        result = await self.run_action(client)
+        self.assertFalse(result["ok"])
+        self.assertIn("changed", result["error"])
+        self.assertFalse(self.media(client))
+
+    async def test_clearing_leaves_no_video_and_read_back_catches_one_that_stayed(self):
+        cleared = {**self.listing, "ebay_specifics": {**self.listing["ebay_specifics"], "videoId": ""}, "_native_video": None}
+        client = VideoClient()
+        self.assertTrue((await self.run_action(client, listing=cleared))["ok"])
+        self.assertNotIn("videoIds", client.items["ar-abc123"]["product"])
+        self.assertFalse(self.media(client))
+        # eBay keeping an old video is a mismatch, not a saved draft.
+        stale = VideoClient()
+
+        async def keep_old(method, path, **kwargs):
+            result = await VideoClient.request(stale, method, path, **kwargs)
+            if method == "PUT" and "/inventory_item/" in path:
+                stale.items[path.rsplit("/", 1)[-1]]["product"]["videoIds"] = ["v9"]
+            return result
+
+        stale.request = keep_old
+        self.binding = {}
+        result = await self.run_action(stale, listing=cleared)
+        self.assertFalse(result["ok"])
+        self.assertIn("did not keep the listing video", result["error"])
+
+    async def test_a_listing_that_never_touched_video_sends_and_reads_nothing_about_it(self):
+        client = VideoClient()
+        self.assertTrue((await self.run_action(client, listing=LISTING))["ok"])
+        self.assertFalse([call for call in client.calls if "/video" in call[1]])
+
+    async def test_check_reads_the_saved_video_without_uploading(self):
+        client = VideoClient()
+        self.assertTrue((await self.run_action(client))["ok"])
+        client.calls.clear()
+        self.binding["action"] = "save_draft"
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            checked = await ebay_listings.check(self.binding, self.listing, self.record)
+        self.assertTrue(checked["ok"], checked)
+        self.assertFalse([call for call in client.calls if call[0] != "GET"])
+        client.items["ar-abc123"]["product"]["videoIds"] = []
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            checked = await ebay_listings.check(self.binding, self.listing, self.record)
+        self.assertFalse(checked["ok"])
+
+    async def test_trading_revise_sends_and_removes_the_video(self):
+        client = SimpleNamespace(request=AsyncMock(return_value={}))
+        fields = {"format": {"format": ebay_listings.FIXED_PRICE}, "quantity": 1, "title": "Tee", "description": "Soft",
+                  "price": "24.00", "condition": "NEW", "condition_descriptors": [], "condition_description": ""}
+        live = {"type": "FixedPriceItem", "soldQuantity": "0", "title": "Tee", "price": "24.00", "videoIds": ["v1"]}
+        with patch("vendoo_studio.services.ebay_actions.owned_listing", AsyncMock(return_value=live)):
+            await ebay_listings._revise_by_item_id(client, "123456789012", fields, None, ["v1"])
+            sent = ET.fromstring(client.request.call_args.kwargs["xml"])
+            self.assertEqual(sent.findtext("e:Item/e:VideoDetails/e:VideoID", namespaces=NS), "v1")
+            live["videoIds"] = []
+            await ebay_listings._revise_by_item_id(client, "123456789012", fields, None, [])
+            sent = ET.fromstring(client.request.call_args.kwargs["xml"])
+            self.assertIn("Item.VideoDetails.VideoID", [node.text for node in sent.findall("e:DeletedField", NS)])
+            with self.assertRaisesRegex(ValueError, "not confirmed"):
+                await ebay_listings._revise_by_item_id(client, "123456789012", fields, None, ["v2"])

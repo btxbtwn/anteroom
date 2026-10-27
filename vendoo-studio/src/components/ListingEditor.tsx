@@ -692,7 +692,7 @@ export function StructuredEditor({
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
     const text = formFieldText(local[f.key]);
-    if (f.type === "video") return <ListingVideoPicker convId={convId} selectedId={text} disabled={f.locked}
+    if (f.type === "video") return <ListingVideoPicker convId={convId} marketplace={f.key.split("_specifics.")[0]} selectedId={text} disabled={f.locked}
       onSelect={id => commitField(f.key, id)} />;
     if (f.type === "inventory") return <NativeInventoryEditor
       value={Array.isArray(f.defaultValue) ? f.defaultValue.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : []}
@@ -1154,6 +1154,8 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         "etsy_specifics",
         [
           ...liveCategoryFields(listing, "etsy"),
+          { key: "etsy_specifics.videoId", label: "Listing video", type: "video",
+            help: "Etsy takes one video of 3 to 15 seconds and plays it without sound. Saving a draft does not publish it." },
           { key: "etsy_specifics.whoMade", label: "Who Made It?" },
           { key: "etsy_specifics.whatIsIt", label: "What Is It?" },
           { key: "etsy_specifics.whenMade", label: "When Was It Made?" },
