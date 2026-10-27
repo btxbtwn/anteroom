@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.451 — 2026-10-27
+## 0.1.452 — 2026-10-27
 
 - A listing's actions are easier to find. Regenerate, Record a sale and Delist everywhere sit together at the bottom of the marketplace list, with sync status and the More menu below them. History is at the end of the form, and the empty bar above the form is gone.
 - Marketplaces say Listed instead of Live. Each marketplace's bar shows its name with View listing beside it, and Update only appears once you've changed the listing since it was last sent there.
+
+## 0.1.451 — 2026-10-27
+
+- eBay, Poshmark, Mercari, Depop and Sellwild tabs now show exactly the fields that marketplace’s own form has, in its order. Anteroom no longer adds its own Size, Size Grouping, price or offer rows to them, so pants and jeans no longer show Size twice on Depop, and Price sits where the marketplace puts it.
 
 ## 0.1.450 — 2026-10-27
 

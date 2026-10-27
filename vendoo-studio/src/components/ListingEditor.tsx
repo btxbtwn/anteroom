@@ -905,9 +905,9 @@ function independentFieldKey(tab: string, key: string): string {
 function independentRows(rows: EditorField[], tab: string): EditorField[] {
   if (tab === "general") return rows;
   return mergeEditorFields(rows.flatMap((field) => {
-    // The marketplace price row is added separately and already follows General
-    // until this form sets its own price. The shared Price row would edit every form.
-    if (field.key === "price" && MARKETPLACE_PRICE_KEYS[tab]) return [];
+    // The form's Price edits this marketplace's own price, which follows General
+    // until it is set here. The shared price would change every form.
+    if (field.key === "price" && MARKETPLACE_PRICE_KEYS[tab]) return [{ ...field, key: MARKETPLACE_PRICE_KEYS[tab] }];
     const key = independentFieldKey(tab, field.key);
     const inherited = Boolean(field.locked && /change it there/i.test(field.help || ""));
     if (key === field.key && !inherited) return [field];
@@ -1048,7 +1048,7 @@ const BEST_OFFER_ROWS: EditorField[] = [
   { key: "ebay_specifics.bestOffer.minimumOfferPrice", label: "Minimum Offer Price", type: "number" },
 ];
 
-function finishMarketplaceRows(rows: EditorField[], listing: ListingData | undefined, tab: string): EditorField[] {
+function finishMarketplaceRows(rows: EditorField[], listing: ListingData | undefined, tab: string, native = false): EditorField[] {
   let visible = tab === "mercari"
     ? rows.filter((field) => field.native || !MERCARI_DERIVED_LABELS.has(field.label.replace(/\s*\*$/, "").toLowerCase()))
     : rows;
@@ -1060,6 +1060,7 @@ function finishMarketplaceRows(rows: EditorField[], listing: ListingData | undef
       visible = visible.filter((field) => field.key !== "depop_specifics.sizeGrouping");
     }
   }
+  if (native) return visible;
   if (tab === "ebay") {
     for (const row of BEST_OFFER_ROWS) {
       if (!visible.some((field) => field.key === row.key)) visible = [...visible, row];
@@ -1174,7 +1175,8 @@ export function fieldsForMarketplaceForm(
   // does not fall back to a hand-kept form. A known category schema still merges.
   if (DIRECT_FORM_MARKETS.has(tab) && (catalog?.native || !catalog?.fields.length)) {
     const rows = catalog?.native ? schemaFieldsForTab(forms, tab) || [] : [];
-    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(independentRows(rows, tab), tab), listing, tab), forms, tab);
+    // The marketplace's own form, row for row: nothing is added to it here.
+    return limitToCategoryForm(finishMarketplaceRows(independentRows(rows, tab), listing, tab, true), forms, tab);
   }
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
