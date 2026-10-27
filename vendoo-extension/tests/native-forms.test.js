@@ -106,18 +106,17 @@ test('explicit Smart Pricing off and empty style tags survive older form default
   assert.equal(call(c, 'poshmarkSmartMinimum', listing, 16), 8);
 });
 
-test('Mercari ship on your own keeps the package rows and records seller-paid shipping', () => {
+test('Mercari ship on your own records seller-paid shipping, and the form keeps only the page\'s shipping fields', () => {
   const c = loadWorker();
-  const form = call(c, 'mercariEditorForm', { title: 'A tee', direct_category_ids: { mercari: 1 },
+  const form = call(c, 'mercariEditorForm', { title: 'A tee', direct_category_ids: { mercari: 1 }, zipCode: '70125',
     mercari_specifics: { shippingMethod: 'SOYO', shippingPayerId: 1 } }, MERCARI);
   const fields = Object.fromEntries(form.fields.map(row => [row.path, row]));
   assert.equal(fields['mercari_specifics.shippingMethod'].value, 'SOYO');
   assert.equal(fields['mercari_specifics.shippingPayerId'].value, 2);
-  assert.notEqual(fields['mercari_specifics.shippingPayerId'].locked, true);
-  assert.deepEqual(fields['mercari_specifics.shippingPayerId'].option_values, { Buyer: '1', Seller: '2' });
+  assert.deepEqual(fields['mercari_specifics.shippingPayerId'].option_values, { 'Yes (Recommended)': '2', No: '1' });
+  assert.equal(fields['mercari_specifics.shipsFrom'].value, '70125');
   assert.ok(fields['mercari_specifics.shippingClassId']);
-  assert.ok(fields.weight_oz);
-  assert.ok(fields.package_dimensions_in);
+  assert.ok(!fields.weight_oz && !fields.package_dimensions_in);
 });
 
 test('Depop worldwide shipping fee keeps its monetary limits even when the offer is off', () => {
@@ -190,7 +189,7 @@ test('explicit Depop choices stay on their canonical fields and category changes
   }
 });
 
-test('Mercari shows the seller’s brand and an unavailable parent label without offering the parent', () => {
+test('Mercari shows the seller’s brand and offers a category with subcategories the way its picker does', () => {
   const c = loadWorker();
   const listing = { brand: 'GB girls', form: { overrides: { brand: '30138', categoryV2: {
     id: '1877', displayPath: ['Kids', 'Girls tops & t-shirts'], hasChildren: true,
@@ -199,11 +198,33 @@ test('Mercari shows the seller’s brand and an unavailable parent label without
   const brand = form.fields.find(row => row.label === 'Brand');
   assert.equal(brand.path, 'mercari_specifics.brand');
   assert.equal(brand.value, 'GB Girls');
-  assert.equal(brand.option_values['No brand'], 'No Brand/Not sure');
-  assert.ok(form.fields.some(row => row.path === 'mercari_specifics.sizeType'));
-  const category = form.fields.find(row => row.label === 'Category');
-  assert.equal(category.option_values['Kids > Girls tops & t-shirts'], '1877');
-  assert.ok(!category.options.includes('Kids > Girls tops & t-shirts'));
+  assert.equal(brand.option_values['No brand / Not sure'], 'No Brand/Not sure');
+  assert.ok(!form.fields.some(row => ['mercari_specifics.sizeType', 'mercari_specifics.noBrand'].includes(row.path)));
+  // Subcategories by display order, then the category's own "All ..." pick; a top-level category is not offered.
+  assert.deepEqual(form.fields.find(row => row.label === 'Category').options,
+    ['Tees', 'Kids > Girls tops & t-shirts > Girls (4+)', 'Kids > Girls tops & t-shirts']);
+  assert.ok(!call(c, 'mercariCategory', listing).parent);
+  assert.ok(call(c, 'mercariCategory', { form: { overrides: { categoryV2: { id: '3', displayPath: ['Kids'], hasChildren: true } } } }).parent);
+});
+
+// Mercari's sell page, read 2026-10-27: its sections, field names and order, and the size group headings.
+test('Mercari form follows the sell page sections and order', () => {
+  const c = loadWorker();
+  const master = { ...MERCARI, itemSizeSubGroups: [{ id: 11, title: 'Standard', sizeIds: [1] }, { id: 12, title: 'Petite', sizeIds: [2] }],
+    itemSizes: [{ id: 1, title: 'XS', subtitle: '(0-2)', itemSizeSubGroupId: 11 }, { id: 2, title: 'XS', subtitle: '(0-2)', itemSizeSubGroupId: 12 }] };
+  const form = clean(call(c, 'mercariEditorForm', { direct_category_ids: { mercari: 1 }, title: 'A tee', price: 20 }, master));
+  assert.deepEqual(form.fields.map(row => [row.section, row.label.replace(/ \*$/, '')]), [
+    ['Product info', 'Title'], ['Product info', 'Description'], ['Product info', 'Category'], ['Product info', 'Brand'],
+    ['Product info', 'Condition'], ['Product info', 'Size'],
+    ['Shipping', 'Ships from'], ['Shipping', 'Shipping method'], ['Shipping', 'Shipping label'], ['Shipping', 'Offer buyers free shipping?'],
+    ['Pricing', 'Item price'], ['Smart pricing', 'Adjusts price automatically'], ['Smart pricing', 'Minimum price'],
+  ]);
+  const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
+  assert.deepEqual(rows.Condition.options, ['New', 'Like new', 'Good', 'Fair', 'Poor']);
+  assert.deepEqual(rows['Shipping method'].options, ['Prepaid label', 'Ship on your own']);
+  assert.deepEqual(rows.Size.options, ['XS (0-2) · Standard', 'XS (0-2) · Petite']);
+  assert.deepEqual(rows.Size.option_groups, { 'XS (0-2) · Standard': 'Standard', 'XS (0-2) · Petite': 'Petite' });
+  assert.ok(form.fields.every(row => !row.width));
 });
 
 test('Depop read-back catches cleared attributes, old sizes and general choices the draft failed to keep', () => {

@@ -54,10 +54,26 @@ function mercariCatalogData(deadline) {
   });
 }
 
+// Every category in the order Mercari's category picker shows it: top-level
+// categories as listed, each one's subcategories by display order, and a
+// category with subcategories after them, where its "All ..." row sits.
 function mercariCatalogCategories(master) {
   const categories = new Map(master.itemCategories.map(row => [Number(row.id), row]));
   const parents = new Set(master.itemCategories.map(row => Number(row.parentId)));
-  return master.itemCategories.map(row => {
+  const children = new Map();
+  for (const row of master.itemCategories) {
+    const parent = categories.has(Number(row.parentId)) ? Number(row.parentId) : 0;
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(row);
+  }
+  const ordered = [];
+  const visit = row => {
+    const below = (children.get(Number(row.id)) || []).slice().sort((a, b) => Number(a.displayOrder) - Number(b.displayOrder));
+    for (const child of below) visit(child);
+    ordered.push(row);
+  };
+  for (const row of children.get(0) || []) visit(row);
+  return ordered.map(row => {
     const names = [], seen = new Set();
     let current = row;
     while (current && !seen.has(current.id)) {
@@ -159,7 +175,16 @@ function mercariCategory(listing) {
   const id = /^\d{1,6}$/.test(direct) ? direct
     : resolved?.id ?? listing.marketplace_category_ids?.mercari ?? listing.mercari_specifics?.categoryId;
   if (!/^\d{1,6}$/.test(String(id ?? ''))) return null;
-  return { id: Number(id), parent: resolved?.hasChildren === true && String(resolved.id) === String(id) };
+  // Mercari's sell page offers a category with subcategories through its "All ..."
+  // row, except at the top level (read 2026-10-27).
+  return { id: Number(id), parent: resolved?.hasChildren === true && String(resolved.id) === String(id)
+    && (resolved.displayPath || []).length <= 1 };
+}
+
+// The ZIP the item ships from: the Mercari form's own, else the ones Studio filled.
+function mercariShipsFrom(listing) {
+  return [listing.mercari_specifics?.shipsFrom, listing.form?.ships_from_zip, listing.zipCode, listing.form?.specifics?.shipping?.location]
+    .map(value => String(value ?? '').trim()).find(value => /^\d{5}$/.test(value)) || '';
 }
 
 function mercariCategoryId(listing) {
@@ -360,8 +385,7 @@ function mercariCommon(listing) {
     const size = mercariSize(listing, categoryId);
     if (size.id) common.sizeId = size.id;
   }
-  const zip = [listing.form?.ships_from_zip, listing.zipCode, specifics.shipping?.location].map(value => String(value ?? '').trim())
-    .find(value => /^\d{5}$/.test(value));
+  const zip = mercariShipsFrom(listing);
   const weight = mercariWeightOz(listing);
   const ownShipping = listing.mercari_specifics?.shippingMethod === 'SOYO';
   const chosenPayer = listing.mercari_specifics?.shippingPayerId ?? specifics.shipping?.payerId;

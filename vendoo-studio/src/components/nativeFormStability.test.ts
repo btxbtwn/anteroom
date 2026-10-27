@@ -125,7 +125,7 @@ describe("native form values", () => {
       local: { "depop_specifics.worldwideShipping.enabled": "true" },
     })).toBe(true);
     expect(nativeFieldVisible(
-      { key: "weight_oz" },
+      { key: "mercari_specifics.shippingClassId" },
       {
         tab: "mercari",
         listing: {},
@@ -178,19 +178,17 @@ describe("native form values", () => {
     ]);
   });
 
-  it("locks Mercari's payer to the seller while ship on your own is selected", () => {
+  it("hides Mercari's free-shipping choice under ship on your own, and the minimum price until Smart pricing is on", () => {
     const fields: NativeFormRow[] = [
-      { key: "mercari_specifics.shippingMethod", options: ["Mercari shipping", "Ship on your own"], optionValues: { "Mercari shipping": "MERCARI", "Ship on your own": "SOYO" } },
-      { key: "mercari_specifics.shippingPayerId", options: ["Buyer", "Seller"], optionValues: { Buyer: "1", Seller: "2" }, defaultValue: "1" },
+      { key: "mercari_specifics.shippingMethod", options: ["Prepaid label", "Ship on your own"], optionValues: { "Prepaid label": "MERCARI", "Ship on your own": "SOYO" } },
+      { key: "mercari_specifics.shippingPayerId", options: ["Yes (Recommended)", "No"], optionValues: { "Yes (Recommended)": "2", No: "1" }, defaultValue: "1" },
+      { key: "mercari_specifics.smartPricing.enabled", type: "boolean", defaultValue: false },
+      { key: "mercari_specifics.smartPricing.minimumPrice" },
     ];
-    const payer = presentNativeField(fields[1], {
-      tab: "mercari",
-      listing: {},
-      local: { "mercari_specifics.shippingMethod": "Ship on your own" },
-      fields,
-      categoryStale: false,
-    });
-    expect(payer).toMatchObject({ locked: true, options: ["Seller"], defaultValue: "2" });
-    expect(nativeFormNotes("mercari", {}, { "mercari_specifics.shippingMethod": "Ship on your own" }, fields)).toEqual([]);
+    const context = { tab: "mercari", listing: {}, local: {}, fields, categoryStale: false };
+    expect(nativeFieldVisible(fields[1], context)).toBe(true);
+    expect(nativeFieldVisible(fields[1], { ...context, local: { "mercari_specifics.shippingMethod": "Ship on your own" } })).toBe(false);
+    expect(nativeFieldVisible(fields[3], context)).toBe(false);
+    expect(nativeFieldVisible(fields[3], { ...context, local: { "mercari_specifics.smartPricing.enabled": "true" } })).toBe(true);
   });
 });
