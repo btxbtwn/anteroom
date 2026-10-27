@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.454 — 2026-10-27
+
+- The Depop tab now matches Depop’s own sell page for every category: the same fields in the same order, with Depop’s names and choices. Retired categories and fields such as the empty “Sizing” row are gone, Color is one field that takes up to two colors, and the hashtags Anteroom adds show under Description instead of in a separate field.
+
 ## 0.1.453 — 2026-10-27
 
 - The Sync button and the green Ready badge are gone from the listing toolbar. Nothing needs checking by hand: List and Delist report their own results, and a sale still delists the item everywhere else. When an eBay or Etsy sale is for an item with more than one in stock, Anteroom now reads what's left right away, so it knows whether to delist the rest. A List or Update that stalls is checked as soon as Anteroom gives up on it.
