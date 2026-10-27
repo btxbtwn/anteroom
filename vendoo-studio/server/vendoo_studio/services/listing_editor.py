@@ -71,6 +71,9 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     from vendoo_studio.services.vendoo_import import parse_notes
 
     listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv_repo.get(conv_id).notes))
+    from vendoo_studio.services.agent_categories import map_general_category
+
+    map_general_category(db, previous_json, listing_data)
     from vendoo_studio.services.seller_overrides import capture_locked, restore_locked
 
     # Validation rewrites dropdown keys. A value the seller owns is put back.

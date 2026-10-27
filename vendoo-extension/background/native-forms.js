@@ -21,14 +21,28 @@ function nativeEditorBase(listing, { marketplace, title = true, maxTitle, maxDes
   ];
 }
 
-function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts = []) {
-  const resolved = poshmarkCategory(catalog, listing);
-  const categoryChoices = [];
+function poshmarkCategoryChoices(catalog) {
+  const choices = [];
   for (const department of catalog.catalog?.departments || []) {
     for (const category of department.categories || []) {
-      categoryChoices.push({ label: `${department.display} > ${category.display}`, value: `${department.id}/${category.id}` });
+      const features = category.category_features || [];
+      const base = `${department.display} > ${category.display}`;
+      const id = `${department.id}/${category.id}`;
+      if (!features.length) {
+        choices.push({ label: base, value: id });
+        continue;
+      }
+      // None is a real last step, so a category that has narrower choices is not saved on its own.
+      choices.push({ label: `${base} > None`, value: id });
+      for (const feature of features) choices.push({ label: `${base} > ${feature.display}`, value: `${id}/${feature.id}` });
     }
   }
+  return choices;
+}
+
+function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts = []) {
+  const resolved = poshmarkCategory(catalog, listing);
+  const categoryChoices = poshmarkCategoryChoices(catalog);
   const category = resolved?.category;
   const nativeSize = category ? poshmarkSize(category, listing, { kids: resolved.department.display === 'Kids', leaf: resolved.leaf }) : null;
   const sets = category?.size_sets || [];
@@ -39,12 +53,9 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
   }];
   const fields = [
     ...nativeEditorBase(listing, { marketplace: 'poshmark', maxTitle: 80, maxDescription: 1500, minPrice: 3, priceStep: 1 }),
-    nativeEditorChoice('direct_category_ids.poshmark', 'Category', resolved ? `${resolved.department.id}/${category.id}` : '', categoryChoices,
+    nativeEditorChoice('direct_category_ids.poshmark', 'Category', poshmarkDirectId(resolved), categoryChoices,
       { required: true, clears: ['poshmark_specifics.subcategory', 'poshmark_specifics.sizeSetId', 'poshmark_specifics.nativeSizeId', 'poshmark_specifics.inventoryRows'],
-        help: 'Changing category clears its sub-category and size selections.' }),
-    nativeEditorChoice('poshmark_specifics.subcategory', 'Sub-category',
-      specifics.subcategory || (category?.category_features || []).find(row => row.id === resolved?.leaf)?.display || 'None',
-      ['None', ...(category?.category_features || []).map(row => row.display)]),
+        help: 'Pick a department, then a category. When that category has a narrower choice, pick one to finish. Changing category clears the size.' }),
     nativeEditorField('poshmark_specifics.brand', 'Brand',
       Object.hasOwn(specifics, 'brand') ? specifics.brand : (listing.brand ?? listing.form?.overrides?.brand)),
     nativeEditorChoice('poshmark_specifics.condition', 'Condition', poshmarkCondition(listing), [
@@ -52,7 +63,7 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
       { label: 'Good', value: 'ug' }, { label: 'Fair', value: 'uf' },
     ], { required: true }),
     nativeEditorField('poshmark_specifics.inventoryRows', 'Size and inventory', inventoryRows,
-      { input_type: 'inventory', required: true, inventory_groups: [
+      { input_type: 'inventory', required: true, category_specific: true, inventory_groups: [
         ...sets.map(set => ({ id: set.id, label: set.name || set.tags?.join(' / ') || set.id,
           sizes: (set.size_systems?.us?.sizes || []).map(size => ({ id: size.id, label: size.display || size.id })) })),
         { id: 'custom', label: 'Custom size', sizes: [] },
@@ -118,7 +129,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
   ];
   if (set) fields.push(nativeEditorChoice('depop_specifics.nativeSizeId', 'Size',
     resolvedSize?.id ?? specifics.nativeSizeId ?? specifics.size ?? '',
-    (set.sizes || []).map(row => ({ label: depopName(row), value: row.id })), { required: true }));
+    (set.sizes || []).map(row => ({ label: depopName(row), value: row.id })), { required: true, category_specific: true }));
   for (const id of category?.attributeIds || []) {
     const attr = (attributes.generic_attributes || []).find(row => row.id === id);
     if (!attr) continue;
@@ -127,7 +138,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
     const value = extraValues[id] ?? specifics.attributes?.[id] ?? legacy ?? [];
     fields.push(nativeEditorChoice(`depop_specifics.attributes.${id}`, depopName(attr) || id, value,
       options.map(row => ({ label: depopName(row), value: row.id })),
-      { required: Boolean(attr.is_mandatory), multi: true, max_values: Math.max(1, Number(attr.max_selection) || 1) }));
+      { required: Boolean(attr.is_mandatory), multi: true, category_specific: true, max_values: Math.max(1, Number(attr.max_selection) || 1) }));
   }
   for (const key of ['age', 'source', 'style']) {
     const attr = !Array.isArray(attributes[key]) && attributes[key]?.attributes ? attributes[key]
@@ -143,9 +154,10 @@ function depopEditorForm(listing, attributes, parcels = []) {
   nativeEditorField('depop_specifics.sku', 'SKU', specifics.sku ?? listing.sku ?? '', { max_length: 50 }),
   nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
   nativeEditorField('depop_specifics.worldwideShipping.enabled', 'Offer worldwide shipping', specifics.worldwideShipping?.enabled === true,
-    { input_type: 'boolean' }));
-  if (specifics.worldwideShipping?.enabled === true) fields.push(nativeEditorField('depop_specifics.worldwideShipping.price', 'Worldwide Shipping',
-    specifics.worldwideShipping.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01 }));
+    { input_type: 'boolean' }),
+  // Always present so turning worldwide shipping on shows the fee without reloading the form.
+  nativeEditorField('depop_specifics.worldwideShipping.price', 'Worldwide Shipping',
+    specifics.worldwideShipping?.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01 }));
   return { marketplace: 'depop', native: true, known: true, category_id: depopDirectId(category), fields,
     notes: ['Buyer pays for Depop shipping. Location comes from the ship-from address selected in Settings.',
       ...(!parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [])] };
@@ -188,7 +200,7 @@ function mercariEditorForm(listing, master) {
   if (listing.form?.sizes?.length || size.none === 'unknown') fields.push(nativeEditorChoice('mercari_specifics.nativeSizeId', 'Size',
     size.id ?? specifics.nativeSizeId ?? specifics.size ?? listing.size ?? '',
     sizeChoices,
-    { required: true, help: 'Sizes from Mercari for this category. The same name in two groups is labeled with its group.' }));
+    { required: true, category_specific: true, help: 'Sizes from Mercari for this category. The same name in two groups is labeled with its group.' }));
   fields.push(nativeEditorChoice('mercari_specifics.sizeType', 'Size type', specifics.sizeType || specifics.sizeGroup || '',
     ['Regular', 'Petite', 'Plus', 'Tall', 'Juniors', 'Maternity', 'Big & Tall'].map(label => ({ label, value: label })),
     { help: 'Used when Mercari lists that size in more than one group. Blank uses the size type on General, then the regular or standard group.' }));
@@ -196,9 +208,10 @@ function mercariEditorForm(listing, master) {
     [{ label: 'Mercari shipping', value: 'MERCARI' }, { label: 'Ship on your own', value: 'SOYO' }], { required: true }),
     nativeEditorField('weight_oz', 'Packed weight (oz)', mercariWeightOz(listing), { locked: true, help: 'Change the package in Item Details.' }),
     nativeEditorField('package_dimensions_in', 'Package dimensions (in)', listing.package_dimensions_in, { locked: true }),
+    // Both payers, the label, and the package stay on the form. The editor locks
+    // the payer and hides the package while Ship on your own is selected.
     nativeEditorChoice('mercari_specifics.shippingPayerId', 'Who pays shipping', ownShipping ? 2 : specifics.shippingPayerId ?? 1,
-      ownShipping ? [{ label: 'Seller', value: 2 }] : [{ label: 'Buyer', value: 1 }, { label: 'Seller', value: 2 }],
-      { locked: ownShipping, ...(ownShipping ? { help: 'Ship on your own is paid by the seller.' } : {}) }),
+      [{ label: 'Buyer', value: 1 }, { label: 'Seller', value: 2 }]),
     nativeEditorChoice('mercari_specifics.shippingClassId', 'Shipping label', listing.form?.specifics?.shipping?.carrierId || '',
       (listing.form?.shipping_classes || []).map(row => ({ label: `${row.carrierDisplayName} · ${row.name} · $${(row.fee / 100).toFixed(2)}`, value: row.id })),
       { required: true, help: 'Live Mercari labels for this package. Change packed weight and dimensions in Item Details.' }),
@@ -206,8 +219,8 @@ function mercariEditorForm(listing, master) {
     nativeEditorField('mercari_specifics.smartPricing.minimumPrice', 'Floor price', specifics.smartPricing?.minimumPrice ?? '',
       { input_type: 'number', required: specifics.smartPricing?.enabled === true, help: 'The lowest whole-dollar price Smart Pricing may use.' }));
   return { marketplace: 'mercari', native: true, known: true, category_id: String(category || ''),
-    fields: ownShipping ? fields.filter(row => !['mercari_specifics.shippingClassId', 'weight_oz', 'package_dimensions_in'].includes(row.path)) : fields,
-    notes: [ownShipping ? 'Buy and provide your own shipping label; the seller pays.' : 'Prepaid label choices and rates come from Mercari for this package.'] };
+    fields,
+    notes: ['Prepaid label choices and rates come from Mercari for this package. Ship on your own is paid by the seller.'] };
 }
 
 async function handleNativeMarketplaceForm(msg) {

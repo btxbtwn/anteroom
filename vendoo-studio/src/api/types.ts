@@ -570,6 +570,8 @@ export interface MarketplaceFormField {
   options_source?: "marketplace" | "vendoo" | "reference" | "saved";
   /** False when this row is saved data the category form does not show. Absent means it is on the form. */
   on_form?: boolean;
+  /** True when choosing a different category adds or removes this row. */
+  category_specific?: boolean;
 }
 
 /** A marketplace's form for one listing. ``known`` is false when no schema is cached. */

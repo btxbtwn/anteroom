@@ -95,7 +95,7 @@ export function formFieldText(value: unknown): string {
   return text === "[object Object]" ? "" : text;
 }
 
-function editorValuePresent(value: unknown): boolean {
+export function editorValuePresent(value: unknown): boolean {
   if (value == null) return false;
   if (typeof value === "string") return value.trim() !== "" && value.trim() !== "[object Object]";
   if (typeof value === "number" || typeof value === "boolean") return true;
