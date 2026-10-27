@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.417 — 2026-10-26
+
+- Saving an eBay draft no longer stops after eBay saves the offer with “eBay did not confirm the listing”. Check finds an auction draft whose reply was lost, and saving again reuses it.
+
 ## 0.1.416 — 2026-10-26
 
 - Items you listed directly on a marketplace no longer show **Unsent edits** just because Vendoo still has an older copy. The chip now means the live marketplace listings are behind: press **Update** under Marketplaces to clear it. Discard is hidden on those items, so it can no longer roll a regenerated listing back to Vendoo's version.
