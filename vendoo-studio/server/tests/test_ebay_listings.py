@@ -142,6 +142,10 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.object(ebay_listings, "get_ebay_listing_defaults", lambda: dict(self.defaults)))
 
     def record(self, values):
+        # The record is a table: only its columns can be written.
+        from vendoo_studio.models.marketplace_listing import FIELDS
+
+        self.assertLessEqual(set(values), set(FIELDS))
         self.binding.update(values)
 
     def active(self):
@@ -858,8 +862,14 @@ class FormatClient(Client):
 
 class EbayAuctionTest(unittest.IsolatedAsyncioTestCase):
     setUp = EbayListingsTest.setUp
-    record = EbayListingsTest.record
     active = EbayListingsTest.active
+
+    def record(self, values):
+        # The record is a table: only its columns can be written.
+        from vendoo_studio.models.marketplace_listing import FIELDS
+
+        self.assertLessEqual(set(values), set(FIELDS))
+        self.binding.update(values)
 
     async def run_action(self, action, listing, client, **kwargs):
         with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
@@ -879,7 +889,6 @@ class EbayAuctionTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("availableQuantity", body)
         self.assertNotIn("bestOfferTerms", body["listingPolicies"])
         self.assertEqual(client.items["ar-abc123"]["availability"]["shipToLocationAvailability"]["quantity"], 1)
-        self.assertEqual(self.binding["ebay_format"], "AUCTION")
 
     async def test_an_auction_without_buy_it_now_or_reserve_sends_only_the_starting_bid(self):
         specifics = {**AUCTION_LISTING["ebay_specifics"], "auctionReservePrice": "", "auctionBuyItNow": ""}
@@ -938,6 +947,29 @@ class EbayAuctionTest(unittest.IsolatedAsyncioTestCase):
         # List then publishes the saved offer rather than making another.
         result = await self.run_action("list", AUCTION_LISTING, client)
         self.assertTrue(result["ok"], result)
+        self.assertEqual(list(client.offers), ["offer-1"])
+
+    async def test_a_lost_auction_offer_reply_is_found_by_its_format(self):
+        client = FormatClient()
+        original = client.request
+
+        async def lost(method, path, **kwargs):
+            answer = await original(method, path, **kwargs)
+            if (method, path) == ("POST", "/sell/inventory/v1/offer"):
+                raise ebay_listings.httpx.ReadTimeout("lost")
+            return answer
+
+        client.request = lost
+        result = await self.run_action("save_draft", AUCTION_LISTING, client)
+        self.assertEqual(result["error_code"], "uncertain")
+        self.binding["action"] = "save_draft"
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            checked = await ebay_listings.check(self.binding, AUCTION_LISTING, self.record)
+        self.assertEqual(checked, {"ok": True, "state": "draft"})
+        self.assertEqual(self.binding["ebay_offer_id"], "offer-1")
+        # Saving again reuses that offer.
+        client.request = original
+        self.assertTrue((await self.run_action("save_draft", AUCTION_LISTING, client))["ok"])
         self.assertEqual(list(client.offers), ["offer-1"])
 
     async def test_a_saved_draft_ebay_stored_differently_is_reported(self):
