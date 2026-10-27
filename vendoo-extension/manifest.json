@@ -31,6 +31,7 @@
     "https://www.vinted.com/*",
     "https://vinted.com/*",
     "https://api.www.vinted.com/*",
+    "https://www.facebook.com/*",
     "http://127.0.0.1:4318/*",
     "ws://127.0.0.1:4318/*",
     "https://us.vendoo.co/*",

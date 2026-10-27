@@ -35,6 +35,9 @@ describe("marketplace choice controls", () => {
     expect(html).toContain('aria-label="Remove Obsolete"');
     expect(html).toContain("Unavailable saved values: Obsolete");
     expect(html).toContain("Choose at most 2 values.");
+    const field = html.slice(html.indexOf('data-slot="multi-select"'), html.indexOf('data-slot="combobox-popup"'));
+    expect(field).toContain('aria-label="Remove Spring"');
+    expect(field).toContain('data-listing-field="ebay_specifics.season"');
   });
 
   it("offers a clear control for a saved Depop style", () => {

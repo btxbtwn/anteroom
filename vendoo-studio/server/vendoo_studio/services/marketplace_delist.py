@@ -1,7 +1,9 @@
 """Seller-confirmed delisting: delete an item's live listings on named marketplaces.
 
 Delist means the listing is removed from the marketplace. eBay has no delete,
-so its listing is ended; Sellwild gives sellers only its own delist. The
+so its listing is ended; Sellwild gives sellers only its own delist. Facebook
+listings are linked and watched for sales, but the seller deletes them on
+Facebook: its delete request has not been recorded from a signed-in client. The
 marketplace where the item sold is never touched. Nothing here runs on a
 timer, a queue, or a retry: each call names its marketplaces and carries the
 seller's confirmation. Deleting is safe to repeat, because every marketplace
@@ -30,8 +32,10 @@ from vendoo_studio.services.listing_result import scrub
 from vendoo_studio.services.marketplace_identity import listing_id, listing_reference
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
-MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
+MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "facebook")
 BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop", "sellwild", "vinted"}
+# Linked and watched, but Anteroom cannot delete them: the seller does that on the marketplace.
+MANUAL_DELIST = frozenset({"facebook"})
 
 class DelistError(RuntimeError):
     def __init__(self, status_code: int, detail: str):
@@ -157,6 +161,7 @@ def listings(db: Session, conv_id: str) -> dict:
             record = {}
         result[marketplace] = {"url": url or record.get("url"), "listing_id": item_id, "source": source,
                                "sold_here": sold_here, "state": record.get("state") or "live",
+                               "can_delist": marketplace not in MANUAL_DELIST,
                                "error": record.get("error"), "marketplace_message": record.get("marketplace_message"),
                                "at": record.get("at")}
     return result
@@ -304,6 +309,9 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         raise DelistError(400, "Confirm the delist before anything is deleted.")
     if not names or any(name not in MARKETPLACES for name in names):
         raise DelistError(400, "Name the marketplaces to delist.")
+    if manual := [name for name in names if name in MANUAL_DELIST]:
+        label = ", ".join(name.title() for name in manual)
+        raise DelistError(409, f"Anteroom can't delete {label} listings yet. Delete it on {label}, then choose Mark as not listed.")
     known = listings(db, conv_id)
     for name in names:
         entry = known.get(name)
