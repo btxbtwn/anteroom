@@ -77,8 +77,16 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm -f "$RUNNER_TEMP/signing.p12"
+          # Sign with whatever certificate the secret holds (a Developer ID
+          # Application certificate, or the older self-signed one), by hash so
+          # the name never has to match.
           security find-identity -p codesigning "$KEYCHAIN"
-          echo "MACOS_SIGNING_IDENTITY=List This Studio Signing" >> "$GITHUB_ENV"
+          IDENTITIES="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/^ *[0-9]+\) [0-9A-F]{40} /{print $2}' | sort -u)"
+          if [[ "$(printf '%s\n' "$IDENTITIES" | grep -c .)" != "1" ]]; then
+            echo "MACOS_SIGNING_CERT_P12_BASE64 must hold exactly one code-signing certificate with its private key." >&2
+            exit 1
+          fi
+          echo "MACOS_SIGNING_IDENTITY=$IDENTITIES" >> "$GITHUB_ENV"
       - name: Package app
         working-directory: vendoo-studio
         env:
@@ -173,13 +181,8 @@ jobs:
               exit 1
             fi
           fi
-          if ! codesign --verify "$APP" 2>verify.err; then
-            cat verify.err >&2
-            if grep -Eq 'modified|invalid|not signed|Team ID' verify.err; then
-              exit 1
-            fi
-            echo "codesign --verify reported a non-fatal warning; continuing."
-          fi
+          # Same check the updater runs before it installs a download.
+          codesign --verify --deep --strict --verbose=1 "$APP"
           echo "OK: packaged app has an intact deep code signature"
       - name: Publish GitHub release
         if: github.ref == 'refs/heads/main'
