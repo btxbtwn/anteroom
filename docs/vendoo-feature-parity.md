@@ -90,8 +90,8 @@ and Vinted only on UK and US Enterprise accounts
 | Delist / relist one item | [Delist & Relist](https://help.vendoo.co/en/articles/6260258-vendoo-s-bulk-delist-relist-feature) | **Have** | `routes/marketplace_listings.py` (`/delist`), List from `routes/native_marketplaces.py`; covers items Vendoo listed through `vendooListingUrls`. Not Facebook (`marketplace_delist.MANUAL_DELIST`), which the seller deletes on Facebook |
 | Multi-quantity | [Multi-quantity sales](https://help.vendoo.co/en/articles/6626694-how-to-handle-sold-multi-quantity-items) | **Have** | Quantity on every form, Poshmark per-size quantities and SKUs (0.1.408), partial-sale handling `services/sale_inventory.py` |
 | Multi-variation | [Variations](https://help.vendoo.co/en/articles/6260275-how-do-i-handle-multi-variation-listings-in-vendoo) | **N/A** | Vendoo does not support it either. Anteroom has Poshmark size inventory; eBay variations are open in direct-form-parity.md |
-| Different photos per marketplace (Photo Manager) | [Photos per marketplace](https://help.vendoo.co/en/articles/6619124-can-i-use-different-photos-on-different-marketplaces) | **Missing** | Direct List sends every item photo: `native_marketplaces.py` sets `photo_ids` from all of the item's photos |
-| Listing videos (Poshmark, eBay; 5–15 s) | [Crosslisting app](https://www.vendoo.co/cross-listing-app) | **Partial** | Poshmark only: `services/listing_videos.py`, `native_marketplaces.py:579` (`if marketplace == "poshmark"`). No eBay video |
+| Different photos per marketplace (Photo Manager) | [Photos per marketplace](https://help.vendoo.co/en/articles/6619124-can-i-use-different-photos-on-different-marketplaces) | **Have** (0.1.431) | Each marketplace form (eBay, Etsy, Poshmark, Mercari, Depop, Vinted, Sellwild) shows its photos at the top, in send order, with its limit (24, 20, 16, 12, 8, 20, 20). It uses the item's photos until the seller unticks, reorders or adds photos on that form only; Reset to item photos goes back. The pick is `marketplace_photos.<marketplace>` on the listing and form-only photos are `photos.marketplace`; `services/marketplace_media.py` resolves it and Direct List, Save Draft and Update send it (`native_marketplaces._photos`). A change re-requires a Vendoo review. Request-level tests only; the Vendoo send keeps the item's photos |
+| Listing videos (Poshmark, eBay; 5–15 s) | [Crosslisting app](https://www.vendoo.co/cross-listing-app) | **Have** | Poshmark, eBay and Etsy (`services/listing_videos.py`, `VIDEO_RULES`). Since 0.1.431 the video is a tile in the form's photos, added like a photo, only on those three; eBay and Etsy have request-level tests only |
 | eBay business policies; Etsy shipping and return profiles | [eBay policies](https://help.vendoo.co/en/articles/6260282-how-to-use-ebay-s-business-policies-in-vendoo), [Etsy profiles](https://help.vendoo.co/en/articles/6260281-how-to-use-etsy-shipping-profiles-and-return-policies-in-vendoo) | **Have** | Policy access on connect (0.1.392); Etsy shop shipping and processing profiles in `services/etsy_listings.py` |
 | eBay promotions, international shipping | [eBay promotions](https://help.vendoo.co/en/articles/6812458-how-do-i-opt-into-ebay-promotions), [Global shipping](https://help.vendoo.co/en/articles/6812485-how-do-i-opt-into-global-shipping-on-ebay) | **Have** | eBay marketing controls under Marketplaces → eBay (`services/ebay_workspace.py`); shipping comes from the eBay policy |
 | Listing templates | [Templates](https://help.vendoo.co/en/articles/6260273-how-to-create-listing-templates-in-vendoo) | **Have** | `routes/listing_templates.py` (create, apply with review, new draft from a template) |
@@ -251,15 +251,15 @@ Most important first.
    "Other / in person" marketplace, and offer to delist the others.
 7. **Final Vendoo import.** *Fix:* run one full Vendoo import, then cancel.
    Label IDs are converted to names by the import and by Settings → Listings →
-   Inventory → **Vendoo label IDs** (0.1.431); IDs Vendoo never names stay visible there.
+   Inventory → **Vendoo label IDs** (0.1.432); IDs Vendoo never names stay visible there.
 8. ~~**Poshmark, Mercari, Depop, Vinted and Sellwild listings made outside
    Anteroom cannot be imported.**~~ Done: import through the Chrome bridge
    (unit-tested; real-account verification pending). Multi-size listings remain.
-9. **No eBay listing video.** *Fix:* add eBay video upload through the
-   Media API next to the Poshmark video.
+9. ~~**No eBay listing video.**~~ Fixed in 0.1.422 (eBay and Etsy), in the
+   form's photos since 0.1.431.
 10. *(Closed in 0.1.421: bulk condition, color, tags and category, and bulk
     Update on eBay, Etsy, Poshmark and Depop.)*
-11. **Smaller gaps:** different photos per marketplace, live Update on Mercari, Vinted and Sellwild, and
+11. **Smaller gaps:** live Update on Mercari, Vinted and Sellwild, and
     bulk category for Etsy, Poshmark and Mercari (the item editor does not
     change those either).
 

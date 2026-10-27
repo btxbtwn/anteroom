@@ -70,7 +70,7 @@ def delete(conv_id: str, video_id: str, db: Session = Depends(get_db)):
     revision = ListingRepo(db).get_revision(current.current_revision_id) if current else None
     listing = revision.listing_json if revision else {}
     if any(isinstance(value, dict) and value.get("videoId") == video_id for value in listing.values()):
-        raise HTTPException(409, "Clear this video from the listing form before deleting it.")
+        raise HTTPException(409, "Remove this video from every marketplace form before deleting it.")
     path = videos.video_path(row)
     db.delete(row)
     db.commit()

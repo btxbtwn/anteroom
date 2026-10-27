@@ -108,6 +108,8 @@ export interface Photo {
   url: string;
   /** The edits served in place of the kept original; null when unedited. */
   edits?: PhotoEdits | null;
+  /** Set for a photo added on one marketplace's form; only that marketplace can send it. */
+  marketplace?: string | null;
 }
 
 /** A crop as fractions of the turned and straightened photo. */
@@ -543,7 +545,7 @@ export interface MarketplaceFormField {
   label: string;
   value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "video" | "variations";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations";
   inventory_groups?: NativeInventoryGroup[];
   variation_aspects?: EbayVariationAspect[];
   min_value?: number;

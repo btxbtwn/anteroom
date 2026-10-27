@@ -419,7 +419,7 @@ class ConversationRepo:
     def get_messages(self, conv_id: str) -> list[Message]:
         return self.db.query(Message).filter(Message.conversation_id == conv_id).order_by(Message.created_at).all()
 
-    def add_photo(self, conv_id: str, original_filename: str, stored_filename: str, mime_type: str, size_bytes: int, checksum: str | None = None, width: int | None = None, height: int | None = None) -> Photo:
+    def add_photo(self, conv_id: str, original_filename: str, stored_filename: str, mime_type: str, size_bytes: int, checksum: str | None = None, width: int | None = None, height: int | None = None, marketplace: str | None = None) -> Photo:
         max_order = self.db.query(Photo).filter(Photo.conversation_id == conv_id).count()
         photo = Photo(
             conversation_id=conv_id,
@@ -431,6 +431,7 @@ class ConversationRepo:
             checksum=checksum,
             width=width,
             height=height,
+            marketplace=marketplace,
         )
         self.db.add(photo)
         _recheck_error_flag(self.db, conv_id)
@@ -439,7 +440,14 @@ class ConversationRepo:
         return photo
 
     def get_photos(self, conv_id: str) -> list[Photo]:
-        return self.db.query(Photo).filter(Photo.conversation_id == conv_id).order_by(Photo.display_order).all()
+        """The item's photos, in item order. Photos added on one marketplace's form are not among them."""
+        return (self.db.query(Photo).filter(Photo.conversation_id == conv_id, Photo.marketplace.is_(None))
+                .order_by(Photo.display_order).all())
+
+    def get_all_photos(self, conv_id: str) -> list[Photo]:
+        """The item's photos, then each marketplace's own, in the order they were added."""
+        return (self.db.query(Photo).filter(Photo.conversation_id == conv_id)
+                .order_by(Photo.marketplace.is_not(None), Photo.display_order).all())
 
     def delete_photo(self, conv_id: str, photo_id: str) -> bool:
         photo = self.db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id).first()
@@ -465,7 +473,8 @@ class ConversationRepo:
 
     def reorder_photos(self, conv_id: str, ordered_ids: list[str]) -> list[Photo]:
         for idx, photo_id in enumerate(ordered_ids):
-            photo = self.db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id).first()
+            photo = self.db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id,
+                                                Photo.marketplace.is_(None)).first()
             if photo:
                 photo.display_order = idx
         self.db.commit()
@@ -488,7 +497,7 @@ def _recheck_error_flag(db: Session, conv_id: str) -> None:
         return
     revision = db.get(ListingRevision, listing.current_revision_id) if listing.current_revision_id else None
     data = copy.deepcopy(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
-    photo_count = db.query(Photo).filter(Photo.conversation_id == conv_id).count()
+    photo_count = db.query(Photo).filter(Photo.conversation_id == conv_id, Photo.marketplace.is_(None)).count()
     validation = validate_listing(data, photo_count, require_photos=True)
     listing.validation_status = "valid" if validation.valid else "error"
     listing.validation_errors = validation.errors + validation.warnings

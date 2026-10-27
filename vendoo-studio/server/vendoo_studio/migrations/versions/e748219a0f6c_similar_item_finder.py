@@ -1,7 +1,7 @@
 """Similar item finder: photo fingerprints and pair reviews
 
 Revision ID: e748219a0f6c
-Revises: ea3c87866204
+Revises: c5a8d3e17f42
 Create Date: 2026-10-26 21:07:01.752476
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = 'e748219a0f6c'
-down_revision = 'ea3c87866204'
+down_revision = 'c5a8d3e17f42'
 branch_labels = None
 depends_on = None
 

@@ -6,13 +6,19 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.431 — 2026-10-26
+## 0.1.432 — 2026-10-26
 
 - Labels are yours now, not Vendoo's. Items imported from Vendoo sometimes showed a code like `g8MHWF7K…` instead of the label's name. Settings → Listings → Inventory → **Vendoo label IDs** → **Convert to names** saves every label as its name, and each Vendoo import does the same for the items it brings in. A code Vendoo has no name for stays on the item and is listed there, so no label is lost.
 - Analytics shows sales by label, with your label colors.
 - Find items listed twice: Settings → Listings → **Similar items** lists pairs that share a photo or SKU, or have matching titles with the same brand and size. Open both to compare, keep one and merge the other into it (its marketplace links, sales and labels move over and it goes to Finished), or mark them as different. Nothing is deleted or delisted.
 =======
 
+
+
+## 0.1.431 — 2026-10-27
+
+- Every marketplace form now shows its photos at the top: the photos that marketplace gets, in order, and how many it takes. Untick a photo, drag to reorder, or add photos for that marketplace only (a stock photo for eBay, a collage for Depop); **Reset to item photos** goes back. List, Save Draft and Update send that form's photos. Items you have not changed still send all their photos.
+- Video is no longer a separate button at the bottom of the form. On eBay, Etsy and Poshmark, add a video in the same photos, by dropping or choosing the file the same way as a photo; each form says what that marketplace accepts. Depop, Mercari, Vinted and Sellwild take no video from their websites, so their forms offer none.
 
 ## 0.1.430 — 2026-10-26
 

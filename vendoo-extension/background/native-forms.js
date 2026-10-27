@@ -44,8 +44,6 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
       specifics.subcategory || (category?.category_features || []).find(row => row.id === resolved?.leaf)?.display || 'None',
       ['None', ...(category?.category_features || []).map(row => row.display)]),
     nativeEditorField('brand', 'Brand', listing.brand ?? listing.form?.overrides?.brand),
-    nativeEditorField('poshmark_specifics.videoId', 'Listing video', specifics.videoId || '',
-      { input_type: 'video', help: 'Poshmark supports one video shorter than 15 seconds. Saving a draft does not publish it.' }),
     nativeEditorChoice('poshmark_specifics.condition', 'Condition', poshmarkCondition(listing), [
       { label: 'New With Tags (NWT)', value: 'nwt' }, { label: 'Like New', value: 'uln' },
       { label: 'Good', value: 'ug' }, { label: 'Fair', value: 'uf' },

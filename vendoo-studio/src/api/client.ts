@@ -1,6 +1,6 @@
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
-import type { ListingVideo, ListingVideoLibrary } from "./listingVideos";
+import type { ListingVideo, ListingVideoLibrary, MarketplaceMediaRules } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
 import type { BulkDeleteResult, BulkDeleteRow } from "./bulkDelete";
 import type { LabelColor } from "../labelColors";
@@ -224,6 +224,9 @@ async function followAssistant(
 }
 
 export const api = {
+  marketplaceMedia: {
+    rules: () => request<MarketplaceMediaRules>("/marketplace-media"),
+  },
   listingVideos: {
     list: (convId: string) => request<ListingVideoLibrary>(`/conversations/${convId}/videos`),
     delete: (convId: string, videoId: string) => request<OkResponse>(`/conversations/${convId}/videos/${videoId}`, { method: "DELETE" }),
@@ -728,7 +731,9 @@ export const api = {
       request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
     activity: (id: string) => request<ConversationActivity>(`/conversations/${id}/activity`),
     messages: (id: string) => request<Message[]>(`/conversations/${id}/messages`),
-    photos: (id: string) => request<Photo[]>(`/conversations/${id}/photos`),
+    /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
+    photos: (id: string, marketplace?: string) =>
+      request<Photo[]>(`/conversations/${id}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`),
     deletePhoto: (convId: string, photoId: string) =>
       request<OkResponse>(`/conversations/${convId}/photos/${photoId}`, { method: "DELETE" }),
     /** Rotate the stored image clockwise by `degrees` (90, -90 or 180). */
@@ -771,9 +776,10 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(orderedIds),
       }),
-    uploadPhotos: (convId: string, files: File[]): Promise<PhotoUploadResult> => {
+    uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => {
       const form = new FormData();
       files.forEach((f) => form.append("files", f));
+      if (marketplace) form.append("marketplace", marketplace);
       return fetch(`${BASE}/conversations/${convId}/photos`, { method: "POST", body: form }).then(
         async (r) => {
           const data = await r.json();
