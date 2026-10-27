@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.421 — 2026-10-26
+
+- Photos can now be edited in the listing editor: open a photo and press **Edit**. Crop to a square or another marketplace shape, rotate and straighten, adjust exposure, brightness and contrast, or remove the background and put white or any colour behind the item. Background removal runs on your Mac; the photo is not uploaded anywhere. Your original photo is always kept, and **Reset to original** brings it back. Marketplaces, Vendoo sends and Etsy drafts get the edited photo, and editing a photo means a pending automation approval or reviewed Vendoo send has to be reviewed again.
+
 ## 0.1.420 — 2026-10-26
 
 - List one eBay item in several sizes or colors. Under Marketplaces → eBay, choose what the variations differ by (eBay offers the choices it allows for the category), then give each variation its own quantity, and optionally its own SKU, price and photos. Save draft keeps it private on eBay and checks what eBay saved; List publishes it as one listing. eBay sells variations at a fixed price without offers.
