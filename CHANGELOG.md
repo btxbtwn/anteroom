@@ -6,9 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.444 — 2026-10-27
+## 0.1.445 — 2026-10-27
 
 - Marketplace forms are cleaner: the “This category’s fields are showing” line, the notes about where each marketplace’s choices come from, and the Refresh choices and Show all fields buttons are gone. A line only appears while a form loads or when it could not be loaded.
+
+## 0.1.444 — 2026-10-27
+
+- Regenerate and the three-dot menu now sit beside History, Sync, and Ready in a single, tidier listing header.
+- Listing forms and the left sidebar open wider by default, with a narrower chat panel. You can still drag the dividers to suit your screen.
 
 ## 0.1.443 — 2026-10-27
 
