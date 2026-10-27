@@ -118,6 +118,7 @@ class PhotoResponse(BaseModel):
     created_at: str
     url: str
     edits: dict | None = None
+    marketplace: str | None = None
 
 
 @router.post("", response_model=ConversationResponse)
@@ -479,16 +480,18 @@ async def cancel_conversation_jobs(db: Session, conv_id: str) -> int:
 
 
 @router.get("/{conv_id}/photos")
-def get_photos(conv_id: str, db: Session = Depends(get_db)):
+def get_photos(conv_id: str, marketplace: str | None = None, db: Session = Depends(get_db)):
+    """The item's photos, or with ``marketplace`` the photos added on that marketplace's form only."""
     repo = ConversationRepo(db)
-    return [_photo_response(p) for p in repo.get_photos(conv_id)]
-
+    photos = repo.get_photos(conv_id) if marketplace is None else [
+        p for p in repo.get_all_photos(conv_id) if p.marketplace == marketplace]
+    return [_photo_response(p) for p in photos]
 
 
 @router.delete("/{conv_id}/photos/{photo_id}")
 def delete_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
-    photos = repo.get_photos(conv_id)
+    photos = repo.get_all_photos(conv_id)
     target = next((p for p in photos if p.id == photo_id), None)
     if not target:
         raise HTTPException(404, "Photo not found")
@@ -841,4 +844,5 @@ def _photo_response(photo) -> PhotoResponse:
         created_at=photo.created_at.isoformat() if photo.created_at else "",
         url=photo_url(photo.id, photo.checksum),
         edits=photo.edits,
+        marketplace=photo.marketplace,
     )

@@ -33,9 +33,11 @@ as such; it must not silently override an explicit marketplace selection.
 ## Listing videos
 
 Researched 2026-10-26 from each marketplace's API documentation or current web
-client. Anteroom keeps one video per marketplace: the seller selects it on that
-marketplace's form (`<marketplace>_specifics.videoId`), and limits come from
-`VIDEO_RULES` in `services/listing_videos.py`.
+client. Anteroom keeps one video per marketplace: the seller adds it in the
+photos at the top of that marketplace's form, the same way as a photo
+(`<marketplace>_specifics.videoId`), and limits come from `VIDEO_RULES` in
+`services/listing_videos.py`. Forms of marketplaces without video offer none.
+Each form's own photos are described in `services/marketplace_media.py`.
 
 | Marketplace | Video | Limits Anteroom applies | How it attaches |
 | --- | --- | --- | --- |

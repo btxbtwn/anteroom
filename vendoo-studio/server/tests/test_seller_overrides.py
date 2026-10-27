@@ -17,7 +17,7 @@ from vendoo_studio.services.department_review import _recommendation, review_dep
 from vendoo_studio.services.depop_measurements import depop_measurements_from_notes, sync_depop_measurements
 from vendoo_studio.services.direct_preflight import gap, with_fix
 from vendoo_studio.services.error_log import install, list_entries, query_entries
-from vendoo_studio.services.native_marketplaces import _depop_photos
+from vendoo_studio.services.marketplace_media import photos_for
 from vendoo_studio.services.registry import _leaf_named_by_listing
 from vendoo_studio.services.seller_overrides import (
     apply_field_updates,
@@ -222,8 +222,8 @@ class PetiteAndJacketTest(unittest.TestCase):
 
 class DepopPhotoCapTest(unittest.TestCase):
     def test_nine_photos_send_the_first_eight_with_a_warning(self):
-        photos = [SimpleNamespace(id=str(index)) for index in range(9)]
-        chosen, warning = _depop_photos({}, photos)
+        photos = [SimpleNamespace(id=str(index), marketplace=None) for index in range(9)]
+        chosen, warning = photos_for({}, photos, "depop")
         self.assertEqual([photo.id for photo in chosen], [str(index) for index in range(8)])
         self.assertIn("8", warning)
 

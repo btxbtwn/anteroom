@@ -39,8 +39,7 @@ def review_inputs(db, conv_id: str) -> tuple[dict, str]:
         "revision_id": revisions[0].id,
         "snapshot": snapshot,
         "photo_ids": [p.id for p in photos],
-        # An edit keeps the photo's ID, so the approval covers each file's content too.
-        "photo_versions": photo_versions(photos),
+        "photo_versions": photo_versions(repo.get_all_photos(conv_id), revisions[0].listing_json),
         "binding": vendoo_binding(conv.notes),
         "marketplaces": get_selected_marketplaces(),
     }
@@ -48,8 +47,12 @@ def review_inputs(db, conv_id: str) -> tuple[dict, str]:
     return inputs, fingerprint
 
 
-def photo_versions(photos) -> list[list[str | None]]:
-    return [[photo.id, photo.checksum] for photo in photos]
+def photo_versions(photos, listing: dict | None) -> dict:
+    """What an approval's photos depend on: each file's content, since an edit keeps
+    the photo's ID, and each marketplace form's own photos and order."""
+    picks = listing.get("marketplace_photos") if isinstance(listing, dict) else None
+    return {"files": [[photo.id, photo.checksum, photo.marketplace] for photo in photos],
+            "marketplaces": picks if isinstance(picks, dict) else {}}
 
 
 def remember_review(inputs: dict, fingerprint: str, preparation: dict) -> str:

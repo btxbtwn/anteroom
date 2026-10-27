@@ -39,6 +39,8 @@ export function PhotoDropOverlay({ title, hint, busy, busyLabel, onFiles }: Prop
       // Without this the drop never lands and the webview navigates to the file.
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      // A marketplace form's photos take their own drop; the item-wide prompt would say otherwise.
+      setDragging(!(event.target instanceof Element && event.target.closest("[data-marketplace-media]")));
     };
     const onDropCapture = () => {
       depth = 0;

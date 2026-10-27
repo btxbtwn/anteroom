@@ -1320,6 +1320,9 @@ def persist_generated_listing(
         previous_listing = revisions[0].listing_json if revisions and isinstance(revisions[0].listing_json, dict) else {}
         if previous_listing.get("seller_fields"):
             listing["seller_fields"] = list(previous_listing["seller_fields"])
+        from vendoo_studio.services.marketplace_media import keep_media
+
+        keep_media(previous_listing, listing)
         asking = _asking_price(seller)
         if asking and not is_locked(listing, "price"):
             listing["price"] = asking
