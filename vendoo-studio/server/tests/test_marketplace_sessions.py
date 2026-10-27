@@ -40,7 +40,7 @@ def test_session_status_returns_only_the_chrome_summaries():
         response = TestClient(app).get("/api/marketplaces/sessions")
     assert response.status_code == 200
     body = response.json()
-    assert set(body["sessions"]) == {"depop", "poshmark", "mercari", "sellwild", "vinted"}
+    assert set(body["sessions"]) == {"depop", "poshmark", "mercari", "sellwild", "vinted", "facebook"}
     assert body["sessions"]["depop"]["label"] == "ada"
     assert body["sessions"]["poshmark"]["label"] is None
     assert body["sessions"]["mercari"]["state"] == "unknown"

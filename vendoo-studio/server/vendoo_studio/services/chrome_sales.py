@@ -8,6 +8,10 @@ there. A sold item counts only when Anteroom still has it live on that
 marketplace, so a sale Anteroom already knows, or one it never listed, is not
 reported. The extension returns listing IDs only. Delisting the other
 marketplaces happens only when the seller turned that option on.
+
+Facebook has no seller list Anteroom can read yet, so each listing's own page
+is read: a few listings per check, taking turns, with a longer gap between
+checks than the other shops.
 """
 from __future__ import annotations
 
@@ -23,10 +27,13 @@ from vendoo_studio.services.user_settings import sale_detection_enabled
 
 log = logging.getLogger("vendoo_studio.chrome_sales")
 
-CHROME_MARKETS = ("poshmark", "mercari", "depop", "sellwild", "vinted")
+CHROME_MARKETS = ("poshmark", "mercari", "depop", "sellwild", "vinted", "facebook")
 POLL_INTERVAL_S = 30
 MIN_GAP_S = 4 * 60
 MAX_GAP_S = 12 * 60
+GAPS = {"facebook": (20 * 60, 40 * 60)}
+# Listings read per check, for marketplaces read one listing at a time.
+BATCH = {"facebook": 6}
 MAX_CHECKED = 5000
 MAX_REPORTED = 40
 
@@ -37,13 +44,15 @@ _LISTING_ID = {
     "depop": re.compile(r"^[a-z0-9][a-z0-9-]{0,200}$"),
     "sellwild": re.compile(r"^\d{1,15}$"),
     "vinted": re.compile(r"^\d{1,15}$"),
+    "facebook": re.compile(r"^\d{6,20}$"),
 }
 _HOST = {"poshmark": "poshmark.com", "mercari": "mercari.com", "depop": "depop.com", "sellwild": "sellwild.com",
-         "vinted": "vinted.com"}
+         "vinted": "vinted.com", "facebook": "facebook.com"}
 
 _task: asyncio.Task | None = None
 _next: dict[str, float] = {}
 _errors: dict[str, str] = {}
+_turn: dict[str, int] = {}
 
 
 def check_errors() -> dict[str, str]:
@@ -55,8 +64,9 @@ def clear_check_error(marketplace: str) -> None:
 
 
 def arm_next(marketplace: str, now: float) -> float:
-    """The next check for this shop, somewhere between four and twelve minutes out."""
-    due = now + random.uniform(MIN_GAP_S, MAX_GAP_S)
+    """The next check for this shop, somewhere between four and twelve minutes out (Facebook: 20 to 40)."""
+    low, high = GAPS.get(marketplace, (MIN_GAP_S, MAX_GAP_S))
+    due = now + random.uniform(low, high)
     _next[marketplace] = due
     return due
 
@@ -75,6 +85,16 @@ def normalize_sales(marketplace: str, raw: object) -> list[str]:
         if isinstance(listing, str) and pattern.fullmatch(listing) and listing not in found:
             found.append(listing)
     return found
+
+
+def next_batch(marketplace: str, listing_ids: list[str]) -> list[str]:
+    """This check's share of the listings, for marketplaces read one listing at a time. The next check starts after it."""
+    size = BATCH.get(marketplace)
+    if not size or len(listing_ids) <= size:
+        return listing_ids[:MAX_CHECKED]
+    start = _turn.get(marketplace, 0) % len(listing_ids)
+    _turn[marketplace] = start + size
+    return (listing_ids[start:] + listing_ids[:start])[:size]
 
 
 def live_listing_ids(marketplace: str, *, session_factory=None) -> list[str]:
@@ -134,7 +154,7 @@ async def check_marketplace(marketplace: str) -> bool:
         clear_check_error(marketplace)
         return True
     live = await asyncio.to_thread(live_listing_ids, marketplace)
-    listing_ids = live[:MAX_CHECKED]
+    listing_ids = next_batch(marketplace, live)
     if not listing_ids:
         clear_check_error(marketplace)
         return True

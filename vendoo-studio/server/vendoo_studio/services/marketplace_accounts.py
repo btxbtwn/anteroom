@@ -40,6 +40,7 @@ NAMES = {
     "mercari": "Mercari",
     "sellwild": "Sellwild",
     "vinted": "Vinted",
+    "facebook": "Facebook",
 }
 SIGN_IN_TIMEOUT_S = 10 * 60
 POLL_INTERVAL_S = 2
@@ -355,7 +356,7 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
 
         session_factory = SessionLocal
     from vendoo_studio.models.marketplace_sale import MarketplaceSale
-    from vendoo_studio.services.marketplace_delist import MARKETPLACES, DelistError, delist, listings
+    from vendoo_studio.services.marketplace_delist import MANUAL_DELIST, MARKETPLACES, DelistError, delist, listings
 
     notes: dict[str, str] = {}
     groups: dict[str, list[str]] = {}
@@ -386,13 +387,15 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
         except DelistError as exc:
             text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
         else:
-            live = [
+            up = [
                 name for name in MARKETPLACES
                 if (entry := known.get(name))
                 and entry.get("state") == "live"
                 and entry.get("listing_id")
                 and not entry.get("sold_here")
             ]
+            live = [name for name in up if name not in MANUAL_DELIST]
+            by_hand = [name for name in up if name in MANUAL_DELIST]
             if not live:
                 text = "It isn't listed anywhere else."
             else:
@@ -409,6 +412,9 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
                     }
                     done = [name for name in live if name not in failed]
                     text = _delist_sentence(done, failed)
+            if by_hand:
+                hand = f"Delete it on {_join_names(by_hand)} yourself; Anteroom can't delist it there."
+                text = hand if not live else f"{text} {hand}"
         for sale_id in groups[conv_id]:
             notes[sale_id] = text
     return notes

@@ -875,15 +875,17 @@ def set_listing_formulas(*, title: object = None, description: object = None) ->
 
 
 SALE_DETECTION_KEY = "sale_detection"
-SALE_DETECTION_MARKETS = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
+SALE_DETECTION_MARKETS = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "facebook")
+# Facebook is strict about automated reads, so its checks wait for the seller to turn them on.
+SALE_DETECTION_OFF_BY_DEFAULT = frozenset({"facebook"})
 
 
 def get_sale_detection() -> dict[str, bool]:
-    """Whether each marketplace should record a sale. Missing means on."""
+    """Whether each marketplace should record a sale. Missing means on, except where off by default."""
     raw = read_settings().get(SALE_DETECTION_KEY)
     stored = raw if isinstance(raw, dict) else {}
     return {
-        market: stored.get(market) is not False
+        market: stored.get(market) is True if market in SALE_DETECTION_OFF_BY_DEFAULT else stored.get(market) is not False
         for market in SALE_DETECTION_MARKETS
     }
 
