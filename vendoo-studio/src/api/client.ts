@@ -81,7 +81,7 @@ import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
 import type { DelistMarketplace, FacebookCheck, MarketplaceListings, MarketplaceMark, SellerSale, SellerSaleResult } from "./marketplaceListings";
-import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
@@ -537,7 +537,6 @@ export const api = {
     form: (convId: string, marketplace: string, revisionId?: string | null) =>
       request<MarketplaceForm>(`/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
-    sync: (convId: string) => request<NativeSync>(`/conversations/${convId}/native-marketplaces/sync`, { method: "POST" }),
     preflight: (convId: string, sellwild?: { categoryId?: number; conditionId?: number }) => {
       const params = new URLSearchParams();
       if (sellwild?.categoryId) params.set("sellwild_category_id", String(sellwild.categoryId));

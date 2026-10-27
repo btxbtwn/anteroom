@@ -15,7 +15,7 @@ import { SendProgress, sendProgressLabel } from "./SendProgress";
 import { ListingBlockers } from "./ListingBlockers";
 import { ListingHistory } from "./ListingHistory";
 import { blockerTarget, isEbayInventoryLocationEdit, matchingEditorField } from "./listingChanges";
-import { ListingSyncStatus } from "./ListingSyncStatus";
+import { useListingSync } from "./useListingSync";
 import { OpenListingButton } from "./OpenListingButton";
 import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -63,7 +63,6 @@ import { CategoryTreeSelect, EbayCategorySelect, FieldLabel, InspectorSection, S
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
-import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
 import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
@@ -334,6 +333,7 @@ export function ListingEditor({
   const listingTitle = String(listing.title || "Listing");
   const importedItemId = listingJob?.vendoo_item_id || notesVendooItemId(conversation?.notes);
   const importedUrl = listingJob?.vendoo_url || notesVendooUrl(conversation?.notes);
+  const { vendooConflict } = useListingSync(convId, vendooEnabled && Boolean(importedItemId));
 
   // Studio writes the Vendoo *form*. Vendoo carries a form change onto a live
   // marketplace listing only when the seller delists and relists it there, so
@@ -412,10 +412,6 @@ export function ListingEditor({
             />
           ) : null}
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
-          <ListingSyncStatus
-            convId={convId}
-            bound={vendooEnabled && Boolean(listingJob?.vendoo_item_id || importedItemId)}
-          />
           {conversation?.unsent_edits ? (
             <>
               {/* Discard pulls Vendoo's copy, which a directly listed item no longer follows. */}
@@ -424,7 +420,9 @@ export function ListingEditor({
                   tone="muted"
                   className="text-xs"
                   disabled={discardUnsent.isPending || generating}
-                  title="Replace this listing with the copy Vendoo has"
+                  title={vendooConflict
+                    ? "Vendoo's copy and this listing were both edited, so this listing was kept. Discard takes Vendoo's copy instead."
+                    : "Replace this listing with the copy Vendoo has"}
                   onClick={() => void confirmDiscardUnsent()}
                 >
                   {discardUnsent.isPending ? "Pulling…" : "Discard"}
@@ -432,7 +430,6 @@ export function ListingEditor({
               ) : null}
             </>
           ) : null}
-          {data?.can_send && !generating && <Badge variant="success">Ready</Badge>}
           <ListingReviewActions
             convId={convId}
             onCleared={onCleared}

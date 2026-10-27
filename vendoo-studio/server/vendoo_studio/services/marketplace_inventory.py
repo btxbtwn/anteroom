@@ -1,8 +1,9 @@
-"""Seller-requested observations of linked listings. Never write to a marketplace."""
+"""Reads of linked eBay and Etsy listings, taken after a sale. Never write to a marketplace."""
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+import logging
 import math
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,9 @@ from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRe
 from vendoo_studio.services import ebay_import, ebay_workspace, etsy_import, keychain
 from vendoo_studio.services.ebay_client import EbayClient, EbayFailure, assert_identity
 from vendoo_studio.services.etsy_workspace import EtsyClient, EtsyFailure
+
+
+log = logging.getLogger("vendoo_studio.marketplace_inventory")
 
 
 class InventoryCheckError(ValueError):
@@ -114,7 +118,7 @@ async def observe(db: Session, conv_id: str, marketplace: str, listing_id: str) 
     db.expire_all()
     current = listings(db, conv_id).get(marketplace) or {}
     if current.get("listing_id") != listing_id or current.get("state") != "live":
-        raise InventoryCheckError("This item's marketplace link or status changed. Sync again.")
+        raise InventoryCheckError("This item's marketplace link or status changed during the read.")
     listing = ListingRepo(db).get_current(conv_id)
     revision = db.get(ListingRevision, listing.current_revision_id) if listing and listing.current_revision_id else None
     snapshot = revision.listing_json if revision else {}
@@ -137,3 +141,28 @@ async def observe(db: Session, conv_id: str, marketplace: str, listing_id: str) 
         observation["variations"] = [{"sku": row["sku"], "quantity": row["quantity"]} for row in result["variations"]]
     MarketplaceListingRepo(db).save(conv_id, marketplace, {"inventory_observation": observation})
     return {"listing_id": listing_id, **result, "differences": differences}
+
+
+async def read_after_sales(sale_ids: list[str], *, session_factory) -> None:
+    """Read eBay or Etsy stock once after a sale, when Anteroom cannot tell what is left.
+
+    A one-of-a-kind item is sold out without a read. An item with more than one
+    unit needs the marketplace's own stock, read after the sale, before anything
+    is delisted elsewhere. A failed read leaves the stock unknown.
+    """
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
+    from vendoo_studio.services.sale_inventory import stock_after_sale
+
+    with session_factory() as db:
+        sales = db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).all()
+        targets = {(sale.conversation_id, sale.marketplace, sale.listing_id) for sale in sales
+                   if sale.marketplace in {"ebay", "etsy"} and sale.conversation_id and sale.listing_id
+                   and sale.order_status in PAID_STATUSES}
+        for conv_id, marketplace, listing_id in sorted(targets):
+            if stock_after_sale(db, conv_id, marketplace, listing_id)["status"] != "unknown":
+                continue
+            try:
+                await observe(db, conv_id, marketplace, listing_id)
+            except Exception as exc:  # noqa: BLE001 - the sale is recorded either way
+                # The exception text can carry marketplace responses; log its type only.
+                log.info("Could not read %s stock for %s: %s", marketplace, conv_id, type(exc).__name__)

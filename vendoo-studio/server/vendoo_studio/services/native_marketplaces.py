@@ -835,62 +835,6 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
         schedule_advance_job_queue()
 
 
-async def sync(conv_id: str, db: Session) -> dict:
-    """The seller's Sync: settle unconfirmed results and look for sales of this item's direct listings.
-
-    Read-only, like Check. Read eBay/Etsy listing state and inventory directly;
-    ask Chrome marketplaces for sales. Never replace local listing fields.
-    """
-    from vendoo_studio.services import chrome_sales
-    from vendoo_studio.services.marketplace_delist import listings as live_listings
-
-    _conversation(db, conv_id)
-    checked: dict[str, str | None] = {}
-    observations = {}
-    for marketplace, record in MarketplaceListingRepo(db).for_conversation(conv_id).items():
-        if record.get("state") not in UNSETTLED_STATES or not record.get("job_id") or _running(record):
-            continue
-        try:
-            await check_result(conv_id, marketplace, db)
-            checked[marketplace] = None
-        except NativeMarketplaceError as exc:
-            checked[marketplace] = str(exc)
-    for marketplace, entry in live_listings(db, conv_id).items():
-        if checked.get(marketplace):
-            continue
-        if (entry.get("state") != "live" or not entry.get("listing_id")
-                or (entry.get("sold_here") and marketplace not in API_MARKETPLACES)):
-            continue
-        if marketplace in API_MARKETPLACES:
-            from vendoo_studio.services.marketplace_inventory import InventoryCheckError, observe
-            from vendoo_studio.services.marketplace_accounts import SignInRequired
-            from vendoo_studio.services.ebay_client import EbayFailure
-            from vendoo_studio.services.etsy_workspace import EtsyFailure
-
-            if _running(_record(db, conv_id, marketplace)):
-                checked[marketplace] = "A marketplace action is running. Wait for it to finish, then sync again."
-                continue
-            try:
-                observations[marketplace] = await observe(db, conv_id, marketplace, entry["listing_id"])
-                checked[marketplace] = None
-            except (InventoryCheckError, SignInRequired, EbayFailure, EtsyFailure) as exc:
-                checked[marketplace] = scrub(str(exc))
-            except Exception:  # noqa: BLE001 - one failed read must not stop the other marketplaces
-                checked[marketplace] = f"Could not check {NAMES[marketplace]}. Check its connection and sync again."
-            continue
-        if marketplace not in chrome_sales.CHROME_MARKETS:
-            continue
-        ok = await chrome_sales.check_now(marketplace)
-        checked[marketplace] = None if ok else f"Chrome could not check {NAMES[marketplace]}. Connect Chrome and sync again."
-    from vendoo_studio.services.relay_sales import reconcile_unmatched
-
-    reconcile_unmatched(db, conversation_id=conv_id)
-    return {"checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "marketplaces": {name: {"ok": error is None, "error": error,
-                                     **({"inventory": observations[name]} if name in observations else {})}
-                             for name, error in checked.items()}}
-
-
 def reset(conv_id: str, marketplace: Marketplace, db: Session) -> dict:
     """The seller looked on the marketplace themselves. Clear an unconfirmed record; never touch the marketplace."""
     _conversation(db, conv_id)

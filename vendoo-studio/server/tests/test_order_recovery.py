@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 import pytest
 import test_etsy_import
 import test_ebay_import
+from test_marketplace_inventory import read_listings
 
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.queries import ListingRepo
@@ -269,8 +270,7 @@ def test_quantity_change_invalidates_stock_read_without_editing_local_quantity(r
 
     conv_id = recovery.client.post("/api/etsy/import", json={"listing_id": "555"}).json()["conversation_id"]
     recover(recovery)
-    response = recovery.client.post(f"/api/conversations/{conv_id}/native-marketplaces/sync")
-    assert response.status_code == 200
+    read_listings(recovery, conv_id)
     assert stock_after_sale(recovery.db, conv_id, "etsy", "555")["status"] == "remaining"
     recovery.remote.receipts[0]["transactions"][0]["quantity"] = 2
     recovery.remote.receipts[0]["updated_timestamp"] += 1
@@ -284,7 +284,7 @@ def test_cancellation_clears_the_direct_sale_flag_without_relisting(recovery):
     conv_id = recovery.client.post("/api/etsy/import", json={"listing_id": "555"}).json()["conversation_id"]
     recover(recovery)
     recovery.remote.offering["quantity"] = 0
-    recovery.client.post(f"/api/conversations/{conv_id}/native-marketplaces/sync")
+    read_listings(recovery, conv_id)
     assert recovery.client.get(f"/api/conversations/{conv_id}/marketplace-listings").json()["etsy"]["sold_here"] is True
     recovery.remote.receipts[0]["status"] = "canceled"
     recovery.remote.receipts[0]["updated_timestamp"] += 1

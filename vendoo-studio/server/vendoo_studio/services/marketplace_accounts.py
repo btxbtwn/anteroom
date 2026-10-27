@@ -424,7 +424,15 @@ async def announce_sales(sale_ids: list[str], *, session_factory=None) -> None:
     """Tell the seller about new sales. Delist the other marketplaces only when they opted in."""
     from vendoo_studio.services.user_settings import autodelist_enabled
 
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.services.marketplace_inventory import read_after_sales
+
     notes: dict[str, str] = {}
+    try:
+        # What is left of a multi-unit item decides whether it is delisted elsewhere.
+        await read_after_sales(sale_ids, session_factory=session_factory or SessionLocal)
+    except Exception:  # noqa: BLE001 - the sale is already recorded
+        log.exception("could not read stock after a sale")
     try:
         notes = await autodelist_for_sales(sale_ids, session_factory=session_factory)
     except Exception:  # noqa: BLE001 - the sale is already recorded

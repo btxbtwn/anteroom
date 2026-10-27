@@ -156,8 +156,11 @@ class SweepTest(unittest.IsolatedAsyncioTestCase):
         with patch("vendoo_studio.database.SessionLocal", sessions), \
              patch("vendoo_studio.routes.extension.extension_manager", manager), \
              patch("vendoo_studio.routes.extension.dispatch_queued_jobs", AsyncMock()) as dispatch, \
+             patch("vendoo_studio.services.native_marketplaces.reconcile", AsyncMock(return_value=0)) as reconcile, \
              patch.object(job_watchdog, "fail_stalled_jobs", fail):
             self.assertEqual(await job_watchdog.sweep(), [job.id])
+        # The stalled job's result is read before the next one starts.
+        reconcile.assert_awaited_once_with(chrome=True)
         self.assertEqual(len(db_threads), 1)
         self.assertNotEqual(db_threads[0], loop_thread)
         self.assertTrue(mine.cancelled())
