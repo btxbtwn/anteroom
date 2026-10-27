@@ -109,6 +109,9 @@ interface EditorField {
   optionsSource?: "marketplace" | "vendoo" | "reference" | "saved";
   /** Choosing another category adds or removes this row. */
   categorySpecific?: boolean;
+  /** The marketplace form's heading for this field. */
+  section?: string;
+  width?: "half";
 }
 
 export function ListingEditor({
@@ -734,7 +737,9 @@ export function StructuredEditor({
   const formNotes = nativeTab
     ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing, local, fields)]
     : [];
-  const sections = groupFieldsIntoSections(renderedFields);
+  // A marketplace form that names its headings keeps them, with its order and row layout.
+  const pageLayout = nativeTab && renderedFields.some((field) => field.section);
+  const sections = pageLayout ? nativeFormSections(renderedFields) : groupFieldsIntoSections(renderedFields);
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
   const formStatus = nativeTab && !nativeQuery.data && nativeQuery.isFetching
     ? "Loading the marketplace’s category fields and choices…"
@@ -866,14 +871,14 @@ export function StructuredEditor({
           >
             <div className="grid min-w-0 grid-cols-2 gap-3 max-[900px]:grid-cols-1">
               {section.fields.map((f) => (
-                <div key={f.key} className={cn("min-w-0", fullWidth(f) && "col-span-full")}>
+                <div key={f.key} className={cn("min-w-0", (pageLayout ? f.width !== "half" : fullWidth(f)) && "col-span-full")}>
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
                   {control(f)}
                   {f.help && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
                   {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
-                  {f.optionsSource && f.optionsSource !== "saved" && <p className="mt-1 text-xs text-muted-foreground">
+                  {!nativeTab && f.optionsSource && f.optionsSource !== "saved" && <p className="mt-1 text-xs text-muted-foreground">
                     {f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"}
                   </p>}
                 </div>
@@ -884,6 +889,18 @@ export function StructuredEditor({
       })}
     </div>
   );
+}
+
+/** Consecutive fields under the same marketplace heading, in the form's own order. */
+export function nativeFormSections<T extends { key: string; section?: string }>(fields: T[]): { id: string; title: string; fields: T[] }[] {
+  const sections: { id: string; title: string; fields: T[] }[] = [];
+  for (const field of fields) {
+    const title = field.section || "Listing";
+    const last = sections[sections.length - 1];
+    if (last && last.title === title) last.fields.push(field);
+    else sections.push({ id: `${sections.length}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, title, fields: [field] });
+  }
+  return sections;
 }
 
 function fieldLeaf(key: string): string {
@@ -1249,6 +1266,8 @@ function schemaFieldsForTab(
     // A Vendoo category attribute is replaced when the category changes.
     // The marketplace's own controls, such as title and price, stay.
     ...(field.category_specific || (!form.native && !coreFieldLabel(tab, field.label)) ? { categorySpecific: true } : {}),
+    ...(field.section ? { section: field.section } : {}),
+    ...(field.width ? { width: field.width } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),
   }));
 }

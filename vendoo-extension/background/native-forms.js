@@ -128,8 +128,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
     { ...nativeEditorBase(listing, { marketplace: 'depop', title: false, maxDescription: DEPOP_MAX_DESCRIPTION })[0],
       ...(hashtags ? { help: `List adds the hashtags ${hashtags} to the end.` } : {}) },
     nativeEditorChoice('direct_category_ids.depop', 'Category', depopDirectId(category), choices,
-      { required: true, clears: ['depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'],
-        help: 'Changing category clears its size and category attributes.' }),
+      { required: true, clears: ['depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'] }),
   ];
   for (const id of category?.attributeIds || []) {
     const attr = (attributes.generic_attributes || []).find(row => row.id === id);
@@ -173,8 +172,31 @@ function depopEditorForm(listing, attributes, parcels = []) {
   // Always present so turning worldwide shipping on shows the fee without reloading the form.
   nativeEditorField('depop_specifics.worldwideShipping.price', 'Worldwide Shipping',
     specifics.worldwideShipping?.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01 }));
-  return { marketplace: 'depop', native: true, known: true, category_id: depopDirectId(category), fields,
+  return { marketplace: 'depop', native: true, known: true, category_id: depopDirectId(category), fields: depopPageLayout(fields),
     notes: !parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [] };
+}
+
+// Depop's sell page, read 2026-10-27: its headings, the hint under each field,
+// and Size, Quantity and SKU at half width (Size and Quantity share a row).
+function depopPageLayout(fields) {
+  const hints = {
+    'depop_specifics.colour': 'Select up to two colors',
+    'depop_specifics.source': max => `What kind of item is this? Add up to ${max}`,
+    'depop_specifics.age': max => `Do you know when this item was made? Add up to ${max}`,
+    'depop_specifics.style': max => `Pick relevant tags to describe this item's style. Add up to ${max}`,
+    'depop_specifics.parcelSize': "Your selection sets your shipping label and the buyer's shipping cost.",
+  };
+  const section = path => path === 'depop_specifics.description' ? 'Description'
+    : ['depop_specifics.source', 'depop_specifics.age', 'depop_specifics.style'].includes(path) ? 'Enhance your listing'
+      : path === 'price' ? 'Item price'
+        : path === 'depop_specifics.parcelSize' || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
+          : 'Info';
+  return fields.map(field => {
+    const hint = field.path.startsWith('depop_specifics.attributes.') ? `Select up to ${field.max_values}` : hints[field.path];
+    return { ...field, section: section(field.path),
+      ...(['depop_specifics.nativeSizeId', 'quantity', 'depop_specifics.sku'].includes(field.path) ? { width: 'half' } : {}),
+      ...(hint ? { help: [typeof hint === 'function' ? hint(field.max_values) : hint, field.help].filter(Boolean).join(' ') } : {}) };
+  });
 }
 
 function mercariEditorForm(listing, master) {

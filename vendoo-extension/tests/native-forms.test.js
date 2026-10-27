@@ -337,6 +337,14 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   assert.equal(rows.Color.max_values, 2);
   assert.match(rows.Description.help, /#denim/);
   assert.equal(rows['Item price'].path, 'price');
+  // The page's headings and row layout.
+  const headings = [];
+  for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
+  assert.deepEqual(headings, ['Description', 'Info', 'Enhance your listing', 'Item price', 'Shipping']);
+  assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label), ['Size', 'Quantity', 'SKU']);
+  assert.equal(rows.Type.help, 'Select up to 3');
+  assert.equal(rows.Color.help, 'Select up to two colors');
+  assert.equal(rows.Age.help, 'Do you know when this item was made? Add up to 1');
   const kids = clean(call(c, 'depopEditorForm', { ...listing, direct_category_ids: { depop: 'kidswear_jeans' } }, attributes, []));
   assert.ok(!kids.fields.some(row => row.label === 'Type'));
   // The form's Color picks are what direct List posts.
