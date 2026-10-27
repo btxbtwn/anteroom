@@ -244,11 +244,10 @@ export function MarketplacesLayout({
     setSelling((current) => ({ marketplace, key: (current?.key ?? 0) + 1 }));
   }
 
-  const UPDATABLE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "depop"]);
-
   async function updateNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
-    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.`,
+    const extra = marketplace === "sellwild" ? " Sellwild may hold the edit for review." : "";
+    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.${extra}`,
       { confirmLabel: `Update on ${name}` })) action.mutate({ marketplace, kind: "update" });
   }
   async function listNow(marketplace: NativeMarketplace) {
@@ -310,7 +309,7 @@ export function MarketplacesLayout({
   }
 
   function updatable(marketplace: Marketplace, status: Status): boolean {
-    return UPDATABLE.has(marketplace) && status.tone === "live" && status.label === "Live" && !unconfirmed(marketplace);
+    return NATIVE.has(marketplace) && status.tone === "live" && status.label === "Live" && !unconfirmed(marketplace);
   }
 
   function actions(marketplace: Marketplace, status: Status): ReactNode {
