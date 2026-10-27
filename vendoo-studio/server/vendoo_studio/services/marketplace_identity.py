@@ -54,3 +54,19 @@ def listing_reference(marketplace: str, url: str | None) -> tuple[str, str] | No
 def listing_id(marketplace: str, url: str | None) -> str | None:
     reference = listing_reference(marketplace, url)
     return reference[0] if reference else None
+
+
+_PUBLIC = {
+    "ebay": "https://www.ebay.com/itm/{}",
+    "etsy": "https://www.etsy.com/listing/{}",
+    "poshmark": "https://poshmark.com/listing/{}",
+    "mercari": "https://www.mercari.com/us/item/{}/",
+    "depop": "https://www.depop.com/products/{}/",
+    "sellwild": "https://sellwild.com/product/{}",
+    "vinted": "https://www.vinted.com/items/{}",
+}
+
+
+def public_listing_url(marketplace: str, item_id: str) -> str:
+    """The public link for a listing ID, in the form listing_reference reads back."""
+    return _PUBLIC[marketplace].format(item_id)

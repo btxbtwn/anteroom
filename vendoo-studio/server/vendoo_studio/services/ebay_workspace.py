@@ -367,4 +367,5 @@ async def listing(client: EbayClient, listing_id: str) -> dict:
             "categoryName": text("e:PrimaryCategory/e:CategoryName"),
             "condition": text("e:ConditionDisplayName"), "conditionDescription": text("e:ConditionDescription"),
             "specifics": specifics,
-            "images": [node.text for node in item.findall("e:PictureDetails/e:PictureURL", NS) if node.text]}
+            "images": [node.text for node in item.findall("e:PictureDetails/e:PictureURL", NS) if node.text],
+            "videoIds": [node.text for node in item.findall("e:VideoDetails/e:VideoID", NS) if node.text]}

@@ -63,10 +63,48 @@ describe("direct Etsy inventory import", () => {
     const submit = vi.spyOn(api.etsy, "importListing").mockRejectedValue(new Error("Unsupported variation listing"));
     const ebay = vi.spyOn(api.ebay, "importListing");
     renderToStaticMarkup(<InventoryImport marketplace="etsy" accountKey="42:1" onOpenListing={vi.fn()} />);
-    await useMutation.mock.calls[useMutation.mock.calls.length - 1][0].mutationFn(["555"]);
+    await useMutation.mock.calls[useMutation.mock.calls.length - 1][0].mutationFn([{ id: "555" }]);
     expect(submit).toHaveBeenCalledWith("555");
     expect(ebay).not.toHaveBeenCalled();
     submit.mockRestore();
     ebay.mockRestore();
+  });
+});
+
+describe("Chrome marketplace inventory import", () => {
+  it("asks the seller to review a likely match instead of selecting it with the page", () => {
+    useQuery.mockReturnValue({ isSuccess: true, data: { total: null, has_more: true, next_cursor: "next-1", rows: [
+      { id: "bbbbbbbbbbbbbbbbbbbbbbbb", title: "Denim jacket", price: "45.00", quantity: 1, conversation_id: null, reason: null,
+        match: { conversation_id: "local-jacket", title: "Levi's denim jacket", score: 0.9, price: 80, price_differs: true } },
+    ] } });
+    const html = renderToStaticMarkup(<InventoryImport marketplace="poshmark" accountKey="poshmark" onOpenListing={vi.fn()} />);
+    expect(html).toContain("Poshmark listing link or ID");
+    expect(html).toContain("Reads your Poshmark closet through Chrome");
+    expect(html).toContain("Looks like “Levi&#x27;s denim jacket” in Anteroom (priced $80 there)");
+    expect(html).toContain("Link to this item");
+    expect(html).toContain("does not change or publish listings");
+    // "Select this page" has nothing to select: the only row waits for review.
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Select this page<\/button>/);
+  });
+
+  it("reads Chrome pages by cursor and links a reviewed match through the Chrome import", async () => {
+    const { api } = await import("../api/client");
+    const candidates = vi.spyOn(api.chromeImport, "importCandidates").mockResolvedValue({ rows: [], total: null, has_more: false, next_cursor: null });
+    const submit = vi.spyOn(api.chromeImport, "importListing").mockResolvedValue({
+      conversation_id: "local-jacket", listing_id: "4401", reused: true, linked: true, photo_count: 3, warnings: [] });
+    const etsy = vi.spyOn(api.etsy, "importListing");
+    renderToStaticMarkup(<InventoryImport marketplace="vinted" accountKey="vinted" onOpenListing={vi.fn()} />);
+    const options = useQuery.mock.calls[useQuery.mock.calls.length - 1][0];
+    expect(options.queryKey).toEqual(["inventory-import", "vinted", "vinted", 1, null]);
+    await options.queryFn();
+    expect(candidates).toHaveBeenCalledWith("vinted", null);
+    const mutation = useMutation.mock.calls[useMutation.mock.calls.length - 1][0];
+    await mutation.mutationFn([{ id: "4401", link: "local-jacket" }, { id: "4402" }]);
+    expect(submit).toHaveBeenNthCalledWith(1, "vinted", "4401", "local-jacket");
+    expect(submit).toHaveBeenNthCalledWith(2, "vinted", "4402", undefined);
+    expect(etsy).not.toHaveBeenCalled();
+    candidates.mockRestore();
+    submit.mockRestore();
+    etsy.mockRestore();
   });
 });

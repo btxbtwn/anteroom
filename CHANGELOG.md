@@ -6,10 +6,19 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.422 — 2026-10-26
+## 0.1.424 — 2026-10-26
 
 - A sale Anteroom detects now turns the item Sold in Inventory and counts in Analytics, without waiting for Vendoo. An item with more than one unit stays Active and shows how many have sold, such as "1 of 3 sold". A sale Vendoo already recorded is counted once.
 - Mark as sold now asks where it sold, when, and for how much, including shipping and fees, and saves it under Sales records. For a sale in person or anywhere else, choose **Other / in person**, or use **Record a sale** in the Marketplaces panel. Afterwards Anteroom offers to delist the item from your other marketplaces; nothing is delisted unless you confirm.
+
+## 0.1.423 — 2026-10-26
+
+- You can now import your active Poshmark, Mercari, Depop, Sellwild and Vinted listings into Anteroom from each marketplace's page, using your sign-in in Chrome. Anteroom shows what it found first, opens items you already have instead of copying them, and asks before linking a listing to an item that looks the same. Importing only reads the marketplace; nothing there is changed, published or delisted.
+
+## 0.1.422 — 2026-10-26
+
+- Add a listing video on eBay and Etsy, the same way as on Poshmark: upload it on that marketplace's form, then Save Draft or List. eBay takes one MP4 or MOV up to 150 MB and List waits until eBay has processed it; Etsy takes one video of 3 to 15 seconds. Anteroom checks that the marketplace kept the video, never uploads the same file twice, and will not list with a video the marketplace blocked or could not process. Clear video removes it.
+- Depop, Mercari, Vinted and Sellwild don't accept listing videos from their websites, so their forms have no video picker.
 
 ## 0.1.421 — 2026-10-26
 

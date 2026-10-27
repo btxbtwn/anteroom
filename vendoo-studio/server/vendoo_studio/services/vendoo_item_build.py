@@ -390,6 +390,8 @@ def _listing_section(
     section = default_listing_section(marketplace)
     raw = listing.get(SPECIFICS_SOURCES.get(marketplace, f"{marketplace}_specifics"))
     specifics = dict(raw) if isinstance(raw, dict) else {}
+    # A listing video is uploaded by Anteroom's direct List, never through Vendoo.
+    specifics.pop("videoId", None)
     if marketplace == "ebay":
         from vendoo_studio.models.ebay_fields import normalize_ebay_sizes
 
