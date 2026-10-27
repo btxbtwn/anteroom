@@ -533,3 +533,29 @@ def test_promotions_upgrade_keeps_previous_release_data_and_starts_empty(engine,
                                "VALUES ('f2', 'poshmark', 'abc', 3000, '2026-10-26')")
     assert recorded_revision(engine) == head_revision()
     assert inspect_database(engine.url.database).clean
+
+
+def test_similar_items_upgrade_keeps_previous_release_items_and_photos(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "3ece513f8e0d")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status, notes) VALUES ('coat', 'Wool coat', 'active', '{\"vendooLabels\": \"A19\"}')")
+        connection.execute("INSERT INTO photos (id,conversation_id,original_filename,stored_filename,mime_type,size_bytes,display_order,checksum) "
+                           "VALUES ('front','coat','front.jpg','saved.jpg','image/jpeg',10,0,'abc')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT title, notes FROM conversations").fetchone() == ("Wool coat", '{"vendooLabels": "A19"}')
+        assert connection.execute("SELECT checksum FROM photos").fetchone() == ("abc",)
+        assert connection.execute("SELECT count(*) FROM photo_fingerprints").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM similar_item_reviews").fetchone() == (0,)
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("INSERT INTO conversations (id, title) VALUES ('copy', 'Wool coat')")
+        connection.execute("INSERT INTO similar_item_reviews (id, first_id, second_id, decision) VALUES ('r1', 'coat', 'copy', 'dismissed')")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO similar_item_reviews (id, first_id, second_id, decision) VALUES ('r2', 'coat', 'copy', 'merged')")
+        connection.execute("DELETE FROM conversations WHERE id='copy'")
+        assert connection.execute("SELECT count(*) FROM similar_item_reviews").fetchone() == (0,)
+    assert recorded_revision(engine) == head_revision()
+    assert inspect_database(engine.url.database).clean

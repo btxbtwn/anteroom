@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.428 — 2026-10-26
+
+- Labels are yours now, not Vendoo's. Items imported from Vendoo sometimes showed a code like `g8MHWF7K…` instead of the label's name. Settings → Listings → Inventory → **Vendoo label IDs** → **Convert to names** saves every label as its name, and each Vendoo import does the same for the items it brings in. A code Vendoo has no name for stays on the item and is listed there, so no label is lost.
+- Analytics shows sales by label, with your label colors.
+- Find items listed twice: Settings → Listings → **Similar items** lists pairs that share a photo or SKU, or have matching titles with the same brand and size. Open both to compare, keep one and merge the other into it (its marketplace links, sales and labels move over and it goes to Finished), or mark them as different. Nothing is deleted or delisted.
+
 ## 0.1.427 — 2026-10-26
 
 - Share Poshmark listings to your followers, one or many at a time: select items in the sidebar and choose **Share / offers**. You review each item and confirm once; shares go out a few seconds apart and stop at the first limit Poshmark reports.

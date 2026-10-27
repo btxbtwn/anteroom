@@ -76,6 +76,8 @@ class AnalyticsItem:
     refunds: float = 0.0
     # The sales-ledger line this sale row came from, if any.
     sale_id: str | None = None
+    # The seller's labels from Item Details.
+    labels: tuple[str, ...] = ()
 
     @property
     def has_cost(self) -> bool:
@@ -156,7 +158,7 @@ def load_rows(db) -> list[AnalyticsItem]:
     from vendoo_studio.models.sourcing import SourceBox
     from vendoo_studio.services.item_status import paid_lines, statuses
     from vendoo_studio.services.sell_through import _days_between, _parse_moment
-    from vendoo_studio.services.vendoo_import import VENDOO_MARKETPLACE_ALIASES, parse_notes
+    from vendoo_studio.services.vendoo_import import VENDOO_MARKETPLACE_ALIASES, parse_notes, split_vendoo_labels
 
     facets = {
         conv_id: (price, cost, brand, category)
@@ -212,6 +214,7 @@ def load_rows(db) -> list[AnalyticsItem]:
             marketplace=_marketplace(sale, dates, notes, VENDOO_MARKETPLACE_ALIASES),
             days_listed=None,
             box_id=box_id,
+            labels=tuple(split_vendoo_labels(notes.get("vendooLabels"))),
         )
         vendoo = None
         if str(notes.get("vendooStatus") or "") == "sold":
@@ -229,7 +232,9 @@ def load_rows(db) -> list[AnalyticsItem]:
             )
         # A send in flight keeps its one row, as before; its sales count once it settles.
         sales = [] if effective in _BUSY else _item_sales(base, vendoo, lines.get(conv_id, []), listed_text)
-        if effective != "sold" or not sales:
+        # Unsold stock merged into another item is counted there; its sales still count here.
+        merged_away = bool(notes.get("mergedInto")) and effective != "sold"
+        if (effective != "sold" or not sales) and not merged_away:
             # Not sold, or sold with no sale on record (a bare Vendoo label or mark).
             fallback_sold = effective == "sold" and not sales
             rows.append(replace(base, sold_at=derived.sold_at) if fallback_sold else base)
@@ -367,6 +372,7 @@ def summarize(
         "marketplaces": _ranked_groups(_groups(sales, _marketplace_key)),
         "categories": _ranked_groups(_groups(sales, _category_key)),
         "brands": _ranked_groups(_groups(sales, _brand_key)),
+        "labels": _label_groups(sales),
         "price_tiers": _price_tiers(sales),
         "aging": _aging(items, now),
         "stale": _stale(items, now),
@@ -531,6 +537,23 @@ def _category_key(item: AnalyticsItem) -> tuple[str, str]:
 def _brand_key(item: AnalyticsItem) -> tuple[str, str]:
     label = item.brand.strip()
     return label.casefold(), label
+
+
+def _label_groups(sales: list[AnalyticsItem]) -> list[dict[str, Any]]:
+    """A sale counts once under each of its item's labels, with the color the seller gave the label."""
+    from vendoo_studio.services.user_settings import LABEL_COLORS_KEY, get_ui_prefs
+
+    colors = {label.casefold(): color for label, color in get_ui_prefs()[LABEL_COLORS_KEY].items()}
+    groups: dict[str, tuple[str, list[AnalyticsItem]]] = {}
+    for item in sales:
+        keys = {label.casefold(): label for label in reversed(item.labels)}
+        for key, label in keys.items():
+            groups.setdefault(key, (label, []))[1].append(item)
+    rows = _ranked_groups({
+        key: {"id": key, "label": label, **_sales_stats(rows)}
+        for key, (label, rows) in groups.items()
+    })
+    return [{**row, "color": colors.get(row["id"])} for row in rows]
 
 
 def _ranked_groups(groups: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:

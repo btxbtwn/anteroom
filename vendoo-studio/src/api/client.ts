@@ -53,6 +53,9 @@ import type {
   ValidationResult,
   VendooBulkImport,
   VendooLabelSync,
+  VendooLabelConversion,
+  SimilarItems,
+  SimilarMerge,
   VendooItemResult,
   MarketplaceForm,
   SuggestionsResponse,
@@ -769,6 +772,16 @@ export const api = {
       request<VendooBulkImport>("/imports/vendoo/bulk/cancel", { method: "POST" }),
     syncLabels: () => request<VendooLabelSync>("/imports/vendoo/labels", { method: "POST" }),
     labelSyncStatus: () => request<VendooLabelSync>("/imports/vendoo/labels"),
+    labelNames: () => request<VendooLabelConversion>("/imports/vendoo/label-names"),
+    convertLabelNames: () => request<VendooLabelConversion>("/imports/vendoo/label-names", { method: "POST" }),
+  },
+
+  similarItems: {
+    list: () => request<SimilarItems>("/similar-items"),
+    dismiss: (firstId: string, secondId: string) =>
+      request<{ ok: boolean }>("/similar-items/dismiss", { method: "POST", body: JSON.stringify({ first_id: firstId, second_id: secondId }) }),
+    merge: (keepId: string, mergeId: string) =>
+      request<SimilarMerge>("/similar-items/merge", { method: "POST", body: JSON.stringify({ keep_id: keepId, merge_id: mergeId }) }),
   },
 
   listings: {

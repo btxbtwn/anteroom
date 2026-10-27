@@ -1,13 +1,11 @@
 """Persistent Vendoo inventory-label id → display-name map.
 
-An item's ``labels`` array is Firestore ids. Item Details should show names.
-``list_labels`` is the source of truth, but Regenerate cannot wait on a silent
-Chrome — and once that read times out, raw ids stick in notes forever.
-
-This cache is filled whenever Studio learns a mapping (catalog read,
-``labelDetails`` on an imported item, name→id resolve for save). Later lookups
-use it first so opaque ids still become "Women" / "To List" when Chrome is
-quiet.
+A Vendoo item's ``labels`` array is Firestore ids; Anteroom stores names.
+This cache is filled whenever Anteroom learns a mapping (catalog read,
+``labelDetails`` on an imported item, name→id resolve for save), and
+``convert_stored_labels`` uses it to turn the ids already stored into names
+once. Nothing reads it to display a label: it exists for the Vendoo import and
+Send to Vendoo, and goes with them.
 """
 from __future__ import annotations
 
@@ -35,8 +33,13 @@ def catalog_path() -> Path:
 
 
 def looks_like_label_id(value: str) -> bool:
-    """True for an opaque Vendoo label id, not a seller-facing name."""
-    return bool(_FIRESTORE_ID_RE.fullmatch(str(value or "").strip()))
+    """True for an opaque Vendoo label id, not a seller-facing name.
+
+    Ids are random mixed case; a 20-letter name such as ``dirtywhitesportstees``
+    is one case only.
+    """
+    text = str(value or "").strip()
+    return bool(_FIRESTORE_ID_RE.fullmatch(text)) and text != text.lower() and text != text.upper()
 
 
 def _read_disk() -> dict[str, str]:
@@ -122,6 +125,88 @@ def apply(labels: list[Any], names: dict[str, str] | None = None) -> list[str]:
 
 def has_opaque_ids(labels: list[Any]) -> bool:
     return any(looks_like_label_id(str(label).strip()) for label in (labels or []) if str(label).strip())
+
+
+def convert_stored_labels(db, names: dict[str, str] | None = None, *, dry_run: bool = False) -> dict[str, Any]:
+    """Rewrite every stored Vendoo label id as its name, so labels are Anteroom's own.
+
+    Covers Item Details (``notes.vendooLabels``), every listing revision, and
+    the label colors and recent labels in settings. Unknown ids stay as they
+    are and are reported, so no label is dropped. Running it again changes
+    nothing that is already a name.
+    """
+    from sqlalchemy import func
+
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.listing import ListingRevision
+    from vendoo_studio.services import user_settings
+    from vendoo_studio.services.vendoo_import import merge_notes, parse_notes, split_vendoo_labels
+
+    catalog = load() if names is None else names
+    unknown: set[str] = set()
+    converted = 0
+    items: set[str] = set()
+
+    def rename(labels: list[Any]) -> list[str] | None:
+        nonlocal converted
+        out: list[str] = []
+        changed = False
+        for raw in labels:
+            label = str(raw).strip()
+            name = catalog.get(label, "")
+            if name and name != label:
+                converted += 1
+                changed = True
+                label = name
+            elif looks_like_label_id(label):
+                unknown.add(label)
+            out.append(label)
+        if not changed:
+            return None
+        # An id and its name on the same item become one label.
+        unique: dict[str, str] = {}
+        for label in out:
+            unique.setdefault(label.casefold(), label)
+        return list(unique.values())
+
+    for conv in db.query(Conversation).filter(Conversation.notes.like("%vendooLabels%")):
+        renamed = rename(split_vendoo_labels(parse_notes(conv.notes).get("vendooLabels")))
+        if renamed is not None:
+            items.add(conv.id)
+            if not dry_run:
+                conv.notes = merge_notes(conv.notes, {"vendooLabels": ", ".join(renamed)})
+    revisions = db.query(ListingRevision).filter(
+        func.json_array_length(ListingRevision.listing_json, "$.labels") > 0
+    )
+    for revision in revisions:
+        data = revision.listing_json if isinstance(revision.listing_json, dict) else {}
+        renamed = rename(data.get("labels") or [])
+        if renamed is not None:
+            items.add(revision.conversation_id)
+            if not dry_run:
+                revision.listing_json = {**data, "labels": renamed}
+    if not dry_run:
+        db.commit()
+
+    if not dry_run:
+        prefs = user_settings.get_ui_prefs()
+        colors = dict(prefs[user_settings.LABEL_COLORS_KEY])
+        named = {label.casefold() for label in colors}
+        recolored: dict[str, str] = {}
+        for label, color in colors.items():
+            name = catalog.get(label) or label
+            # A color the seller gave the name itself wins over the id's.
+            if name != label and name.casefold() in named:
+                continue
+            recolored[name] = color
+        recent = list(prefs[user_settings.RECENT_LABELS_KEY])
+        renamed_recent = list(dict.fromkeys(catalog.get(label) or label for label in recent))
+        if recolored != colors or renamed_recent != recent:
+            user_settings.set_ui_prefs(
+                label_colors=recolored if recolored != colors else None,
+                recent_vendoo_labels=renamed_recent if renamed_recent != recent else None,
+            )
+    return {"items": len(items), "converted": converted, "unknown": sorted(unknown)}
 
 
 def clear_for_tests() -> None:

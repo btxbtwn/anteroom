@@ -524,12 +524,9 @@ async def reset_conversation(
     from vendoo_studio.services.streaming import stop_generation
     from vendoo_studio.services.hidden_fields import clear_listing_hidden_fields
     from vendoo_studio.services.listing_carryover import carryover_updates
-    from vendoo_studio.services import vendoo_label_catalog
-    from vendoo_studio.services.vendoo_create import apply_label_display_names
     from vendoo_studio.services.vendoo_import import (
         merge_notes,
         parse_notes,
-        split_vendoo_labels,
         vendoo_binding,
     )
 
@@ -549,22 +546,9 @@ async def reset_conversation(
         # measurements and flaws in the description — move there first.
         revisions = ListingRepo(db).get_revisions(conv_id)
         latest = dict(revisions[0].listing_json) if revisions else None
-        # Label names come from the cached catalog only. Label sync keeps it
-        # fresh; asking Chrome here held Regenerate for the whole lookup
-        # timeout whenever Chrome was slow, and names are a nicety.
-        label_names = vendoo_label_catalog.load()
-        if label_names and isinstance(latest, dict) and latest.get("labels"):
-            latest["labels"] = apply_label_display_names(latest["labels"], label_names)
         carried = carryover_updates(latest, parse_notes(notes))
         if carried:
             notes = merge_notes(notes, carried)
-        # Fix opaque label ids already sitting in Item Details from an earlier import.
-        if label_names:
-            existing = split_vendoo_labels(parse_notes(notes).get("vendooLabels"))
-            if existing:
-                named = apply_label_display_names(existing, label_names)
-                if named != existing:
-                    notes = merge_notes(notes, {"vendooLabels": ", ".join(named)})
 
     # Stop Chrome fill/repair before the wipe deletes the job rows.
     await cancel_conversation_jobs(db, conv_id)
@@ -782,21 +766,12 @@ def _vendoo_dates(notes: dict) -> dict:
 
 
 def _conv_response(conv, extras: dict | None = None) -> ConversationResponse:
-    from vendoo_studio.services import vendoo_label_catalog
     from vendoo_studio.services.marketplace_delist import removed_marketplaces
-    from vendoo_studio.services.vendoo_import import merge_notes, parse_notes, split_vendoo_labels
+    from vendoo_studio.services.vendoo_import import parse_notes, split_vendoo_labels
 
     notes = parse_notes(conv.notes)
     notes_json = conv.notes
-    # Opaque Firestore ids left when list_labels timed out: rename from cache so
-    # Item Details and the sidebar show "Women" without another Regenerate.
     raw_labels = split_vendoo_labels(notes.get("vendooLabels"))
-    if vendoo_label_catalog.has_opaque_ids(raw_labels):
-        named = vendoo_label_catalog.apply(raw_labels)
-        if named != raw_labels:
-            notes_json = merge_notes(conv.notes, {"vendooLabels": ", ".join(named)})
-            notes = parse_notes(notes_json)
-            raw_labels = named
 
     row = extras or {}
     marketplaces = notes.get("vendooMarketplaces")

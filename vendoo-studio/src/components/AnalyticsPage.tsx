@@ -6,6 +6,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { AnalyticsGroup, AnalyticsRange, AnalyticsSales, InventoryAnalytics } from "../api/types";
+import { labelDotClass, type LabelColor } from "../labelColors";
 import { cn } from "../lib/utils";
 import { ANALYTICS_RANGES, formatChange, formatDays, formatMoney } from "./analyticsFormat";
 import { marketplaceName } from "./marketplaceNames";
@@ -190,10 +191,11 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
             <SalesChart periods={data.periods} />
           </PageSection>
 
-          <div className="grid gap-8 @3xl/page:grid-cols-3 @3xl/page:gap-6">
+          <div className="grid gap-8 @3xl/page:grid-cols-2 @3xl/page:gap-6">
             <PerformanceList title="Marketplaces" rows={data.marketplaces} marketplace />
             <PerformanceList title="Categories" rows={data.categories} />
             <PerformanceList title="Brands" rows={data.brands} />
+            <PerformanceList title="Labels" rows={data.labels} />
           </div>
 
           <PriceTiers tiers={data.price_tiers} />
@@ -454,7 +456,7 @@ const RANK_METRICS: { value: RankMetric; label: string }[] = [
 
 function PerformanceList({ title, rows, marketplace = false }: {
   title: string;
-  rows: AnalyticsGroup[];
+  rows: (AnalyticsGroup & { color?: LabelColor | null })[];
   marketplace?: boolean;
 }) {
   const [metric, setMetric] = useState<RankMetric>("revenue");
@@ -485,7 +487,12 @@ function PerformanceList({ title, rows, marketplace = false }: {
           {ranked.map((row) => (
             <ListRow
               key={row.id}
-              title={marketplace ? marketplaceName(row.id) : row.label}
+              title={marketplace ? marketplaceName(row.id) : row.color ? (
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden className={cn("size-2 shrink-0 rounded-full", labelDotClass(row.color))} />
+                  {row.label}
+                </span>
+              ) : row.label}
               meta={`${saleCount(row.count)}${row.median_days != null ? ` · ${formatDays(row.median_days)} median` : ""}`}
               value={metric === "count" ? row.count : row[metric] == null ? "—" : formatMoney(row[metric])}
               valueHint={metric === "profit" ? (row.profit_known === 0 ? "Cost missing" : `Cost on ${row.profit_known}/${row.count} · fees on ${row.fees_known}/${row.profit_known}`) : undefined}

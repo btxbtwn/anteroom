@@ -118,9 +118,9 @@ Vendoo: up to 240 items, from the inventory page
 | --- | --- | --- | --- |
 | Drafted / listed / sold columns | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Have** | `services/item_status.py` derives Active / Sold / partly sold from Anteroom's own listings and the sales ledger, over Vendoo's imported label; `reconcile_job_statuses` applies it (0.1.422) |
 | Search, sort, filter (title, SKU, price, platforms listed / not listed, dates, labels) | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Have** | Inventory search by title, SKU and label, status filters (README, **Inside Anteroom**) |
-| Custom labels, color-coded | [Labels](https://help.vendoo.co/en/articles/6260284-vendoo-custom-labels-for-inventory-management) | **Have** | Local labels with bulk edit; label colors in Settings → Listings → Inventory (`user_settings.LABEL_COLORS`). Migrated labels that are Vendoo IDs are shown through `services/vendoo_label_catalog.py` |
+| Custom labels, color-coded | [Labels](https://help.vendoo.co/en/articles/6260284-vendoo-custom-labels-for-inventory-management) | **Have** | Local labels with bulk edit; label colors in Settings → Listings → Inventory (`user_settings.LABEL_COLORS`). Labels are stored as names: Settings → Listings → Inventory → **Vendoo label IDs** converts the IDs migrated items carried, and each Vendoo import converts the ones it brings in (`vendoo_label_catalog.convert_stored_labels`) |
 | Stale listing warning (15–120 days, configurable) | [Stale inventory](https://help.vendoo.co/en/articles/6260291-vendoo-s-stale-inventory-system), [Custom settings](https://help.vendoo.co/en/articles/6260256-vendoo-custom-settings) | **Have** | 15–120 days, default 60, in Settings → Listings → Inventory (`user_settings.get_stale_listing_days`), used by Suggestions, Analytics and the sidebar stale filter; Automations can act after any number of listed days (CHANGELOG 0.1.402). Listed dates also come from Vendoo notes for migrated items |
-| Duplicate Finder | [What changed 2026](https://help.vendoo.co/en/articles/16091202-what-changed-in-vendoo-2026) | **Partial** | Duplicate Vendoo links (`routes/conversations.py` `/vendoo-link-duplicates`); linking a marketplace URL already on another item is rejected (`marketplace_delist.mark`). No finder for similar items |
+| Duplicate Finder | [What changed 2026](https://help.vendoo.co/en/articles/16091202-what-changed-in-vendoo-2026) | **Have** | Settings → Listings → **Similar items** (`routes/similar_items.py`, `services/similar_items.py`): pairs that share a photo file or SKU, or whose titles match (the Chrome import's matcher) with brand and size agreeing; alike cover photos rank a pair higher. The seller opens, merges (marketplace links, sales and labels move; the other item goes to Finished) or dismisses. Never deletes or delists. Duplicate Vendoo links stay (`/vendoo-link-duplicates`) |
 | CSV inventory and sales export | [CSV export](https://help.vendoo.co/en/articles/6260286-how-to-download-a-csv-inventory-spreadsheet-and-sales-report) | **Have** | `routes/sales_ledger.py` `/export/sales.csv`, `/export/inventory.csv`. Columns are fixed, not customizable |
 | Import active listings from each marketplace | [Import](https://help.vendoo.co/en/articles/6260276-how-to-import-your-items-in-vendoo) | **Have** | eBay and Etsy import whole listings (`routes/ebay.py`, `routes/etsy.py` `/import`). Poshmark, Mercari, Depop, Vinted and Sellwild import active listings through the Chrome bridge (`routes/chrome_import.py`, `services/chrome_import.py`, `background/marketplace-import.js`), with exact link matching first and a suggested match the seller reviews. Multi-size Poshmark and Depop listings are not imported yet. Vendoo import (`routes/imports.py`) is the migration path |
 | Import sold items | [Import sold](https://help.vendoo.co/en/articles/6760021-can-i-import-sold-items) | **Partial** | eBay and Etsy order recovery (`services/order_recovery.py`); Vendoo's sold history came in with the Vendoo import |
@@ -152,7 +152,7 @@ off integrated marketplaces
 | --- | --- | --- |
 | Revenue, profit, ASP, counts, previous period, any date range | **Have** | `routes/analytics.py` `AnalyticsResponse`; `services/inventory_analytics.py` reads the sales ledger (`marketplace_sales`, recorded amounts) with the imported Vendoo sale, one row per order (0.1.422). Ledger lines not linked to an item are not counted |
 | By marketplace, category, brand | **Partial** | `marketplaces`, `categories`, `brands` groups; same data source |
-| By custom label | **Missing** | No label grouping in `AnalyticsResponse` |
+| By custom label | **Have** | `labels` group in `AnalyticsResponse` with each label's color; a sale counts under each of its item's labels; same data source |
 | eBay earnings and fees | **Have** | `services/ebay_finances.py` (0.1.397) |
 | Expenses / ad spend | **Have** (beyond Vendoo) | `routes/ad_spend.py`, sourcing-box cost allocation |
 
@@ -192,7 +192,7 @@ listing.
 | Component | What it does | Class |
 | --- | --- | --- |
 | `services/vendoo_watch.py`, `services/vendoo_label_sync.py` | Pull Vendoo's draft / active / sold status, dates and sale into `notes.vendooStatus`, `vendooDates`, `vendooSale` | **Still needed** until the inventory status (`repositories/queries.py:345-379`) and Analytics (`services/inventory_analytics.py`) read Anteroom's own listings and sales |
-| `services/vendoo_label_catalog.py`, `vendoo_import.split_vendoo_labels` | Vendoo label ID → name | **Still needed** while migrated items carry Vendoo label IDs; convert them to names once, then remove |
+| `services/vendoo_label_catalog.py` | Vendoo label ID → name, used by the Vendoo import, Send to Vendoo and the one-time conversion | **Remove** with the Vendoo import and Send path. Nothing reads it to show a label: stored labels are names. `vendoo_import.split_vendoo_labels` only splits the stored label string (**Naming**) |
 | `services/vendoo_import.py`, `services/vendoo_bulk_import.py`, `routes/imports.py` (`/vendoo`, `/vendoo/bulk`, `/vendoo/labels`) | Migration from Vendoo | **Still needed** for one final full import before cancelling; then **Remove** |
 | Facebook Marketplace listings (23 active items) | Only Vendoo can delist them or see their sales | **Still needed** until those items are delisted on Facebook |
 | `services/category_tree.py` (trees "used by Vendoo's forms") read by `direct_preflight.seeded_leaf` / `seeded_subcategories` | Stored category trees used by direct List checks | **Still needed** as stored data; refreshing them needs Vendoo. Replace with the native catalogs before removing |
@@ -231,8 +231,9 @@ Most important first.
    price, fees or shipping, and in-person sales have nowhere to go.
    *Fix:* let Mark as sold create a sale record with amounts, with an
    "Other / in person" marketplace, and offer to delist the others.
-7. **Final Vendoo import and label conversion.** *Fix:* run one full Vendoo
-   import, convert Vendoo label IDs to names, and only then cancel.
+7. **Final Vendoo import.** *Fix:* run one full Vendoo import, then cancel.
+   Label IDs are converted to names by the import and by Settings → Listings →
+   Inventory → **Vendoo label IDs** (0.1.428); IDs Vendoo never names stay visible there.
 8. ~~**Poshmark, Mercari, Depop, Vinted and Sellwild listings made outside
    Anteroom cannot be imported.**~~ Done: import through the Chrome bridge
    (unit-tested; real-account verification pending). Multi-size listings remain.
@@ -240,8 +241,7 @@ Most important first.
    Media API next to the Poshmark video.
 10. *(Closed in 0.1.421: bulk condition, color, tags and category, and bulk
     Update on eBay, Etsy, Poshmark and Depop.)*
-11. **Smaller gaps:** different photos per marketplace, label analytics, a
-    finder for similar items, live Update on Mercari, Vinted and Sellwild, and
+11. **Smaller gaps:** different photos per marketplace, live Update on Mercari, Vinted and Sellwild, and
     bulk category for Etsy, Poshmark and Mercari (the item editor does not
     change those either).
 
