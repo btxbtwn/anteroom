@@ -313,7 +313,48 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertIn("size", refused["error"])
         mercari = self.client.post(f"{self.base}/mercari/update", json={"revision_id": revised.id, "confirm": True})
         self.assertEqual(mercari.status_code, 409)
-        self.assertIn("cannot be updated", mercari.text)
+        self.assertIn("not live on Mercari", mercari.text)
+
+    def live_on(self, platform, listing_id, url, **record):
+        MarketplaceListingRepo(self.db).save(self.conv.id, platform, {
+            "state": "published", "listing_id": listing_id, "listing_url": url, "revision_id": self.rev.id, **record})
+        self.rev = ListingRepo(self.db).save_revision(self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
+
+    def update(self, platform):
+        self.enterContext(patch.object(native.direct_preflight, "gaps", return_value=[]))
+        response = self.client.post(f"{self.base}/{platform}/update", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.run_jobs()
+        return self.record(platform)
+
+    def test_mercari_vinted_and_sellwild_update_the_live_listing_in_place(self):
+        cases = [("mercari", "m123456789", LIVE["mercari"], {"photo_ids": ["kept"]}),
+                 ("vinted", "4567890123", "https://www.vinted.com/items/4567890123", {}),
+                 ("sellwild", "123", SELLWILD_URL, {"photo_ids": ["photos-from-an-earlier-list"], **SELLWILD})]
+        for platform, listing_id, url, record in cases:
+            with self.subTest(platform=platform):
+                self.live_on(platform, listing_id, url, **record)
+                self.bridge.reset_mock()
+                self.bridge.return_value = {"ok": True, "state": "published", "listing_url": url}
+                updated = self.update(platform)
+                self.assertEqual(self.actions(), ["update"])
+                payload = self.bridge.call_args.args[2]
+                self.assertEqual((payload["action"], payload["listing_id"], payload["confirm"]), ("update", listing_id, True))
+                self.assertEqual((updated["state"], updated["listing_id"], updated["revision_id"]), ("published", listing_id, self.rev.id))
+                if platform == "mercari":
+                    self.assertEqual(updated["photo_ids"], ["kept"])
+
+    def test_a_sellwild_edit_held_for_review_settles_as_pending_review(self):
+        self.live_on("sellwild", "123", SELLWILD_URL, **SELLWILD)
+        self.bridge.return_value = {"ok": True, "state": "pending_review", "listing_url": SELLWILD_URL}
+        self.assertEqual(self.update("sellwild")["state"], "pending_review")
+
+    def test_a_live_update_answer_naming_another_listing_is_not_trusted(self):
+        self.live_on("vinted", "4567890123", "https://www.vinted.com/items/4567890123")
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": "https://www.vinted.com/items/999"}
+        updated = self.update("vinted")
+        self.assertNotEqual(updated["state"], "published")
+        self.assertEqual(self.actions(), ["update"])
 
     def test_a_refused_poshmark_listing_can_be_tried_again(self):
         self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error": "Poshmark needs a size.", "error_code": "rejected"}

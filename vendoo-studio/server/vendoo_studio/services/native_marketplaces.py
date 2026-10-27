@@ -16,6 +16,11 @@ Vinted saves a draft and then publishes it, the same as Mercari and Depop.
 Both steps run in the extension background with no Vinted tab, and only after
 the seller confirms List. A lost reply is read back and never creates a second
 draft. Delist deletes the live listing through the signed-in Chrome session.
+
+Update writes the saved revision onto the listing already live, on every
+marketplace here, after one seller confirmation. It never publishes a draft,
+relists or creates a second listing; each marketplace's answer is checked by
+reading the listing back.
 """
 from __future__ import annotations
 
@@ -219,7 +224,7 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
                 raise NativeMarketplaceError(502, "Chrome answered for a different draft. Check the native listing.")
         expected = "draft" if action == "save_draft" else "published"
         state = result.get("state")
-        if not (state == expected or (marketplace == "sellwild" and action == "publish" and state == "pending_review")):
+        if not (state == expected or (marketplace == "sellwild" and action in {"publish", "update"} and state == "pending_review")):
             return {"state": "unknown", **_CLEARED_ERROR, "error": UNKNOWN, "error_code": "uncertain"}
         values = {"state": state, **_CLEARED_ERROR}
         # Listed, but a setting did not stick (Poshmark's Smart Pricing). Shown on the live row.
@@ -372,8 +377,6 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         raise NativeMarketplaceError(400, f"Saving a private {name} draft is not supported.")
     if kind != "save_draft" and body.confirm is not True:
         raise NativeMarketplaceError(400, f"Confirm updating the live {name} listing." if kind == "update" else f"Confirm listing on {name}.")
-    if kind == "update" and marketplace not in {"ebay", "etsy", "poshmark", "depop"}:
-        raise NativeMarketplaceError(409, f"A live {name} listing cannot be updated from Anteroom yet.")
     if kind in {"list", "save_draft"}:
         from vendoo_studio.services.marketplace_delist import listings as live_listings
 
@@ -413,7 +416,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         if record.get("state") in UNSETTLED_STATES:
             raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
         extra: dict = {}
-        if marketplace in {"poshmark", "mercari", "depop"}:
+        # A Mercari update keeps the photos already on the live item.
+        if marketplace in {"poshmark", "depop"} or (marketplace == "mercari" and kind != "update"):
             extra["photo_ids"] = [photo.id for photo in photos]
         if kind == "update":
             from vendoo_studio.services.marketplace_delist import listings as live_listings
@@ -425,7 +429,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         elif record.get("state") in {"published", "pending_review"}:
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
         if marketplace == "sellwild":
-            if record.get("photo_ids") != [p.id for p in photos]:
+            # An update keeps the photos already on the live listing.
+            if kind == "list" and record.get("photo_ids") != [p.id for p in photos]:
                 raise NativeMarketplaceError(409, "The photos changed. List on Sellwild again.")
             choice = chosen(snapshot, record)
             if not choice["category_id"] or not choice["condition_id"]:

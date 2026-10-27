@@ -222,16 +222,17 @@ def updates(monkeypatch, calls):
     return calls
 
 
-def test_update_reviews_only_live_listings_on_marketplaces_that_support_it(db, client, updates):
+def test_update_reviews_only_live_listings(db, client, updates):
     live = _item(db, "Live", live_on_ebay=True)
     fresh = _item(db, "Fresh")
-    MarketplaceListingRepo(db).save(live.id, "mercari", {"state": "published", "listing_id": "m1", "listing_url": "https://www.mercari.com/us/item/m1/"})
+    MarketplaceListingRepo(db).save(live.id, "mercari", {"state": "published", "listing_id": "m123456789",
+                                                         "listing_url": "https://www.mercari.com/us/item/m123456789/"})
 
     rows = {row["title"]: row for row in _preview(client, [live.id, fresh.id], "update", ["ebay", "poshmark", "mercari"])}
 
-    assert rows["Live"]["marketplaces"] == ["ebay"] and rows["Live"]["review_token"]
+    assert rows["Live"]["marketplaces"] == ["ebay", "mercari"] and rows["Live"]["review_token"]
     reasons = " ".join(entry["reason"] for entry in rows["Live"]["skipped"])
-    assert "Not listed on Poshmark" in reasons and "cannot update a live Mercari" in reasons
+    assert "Not listed on Poshmark" in reasons
     assert rows["Fresh"]["skip_reason"] and rows["Fresh"]["review_token"] is None
     assert updates == []
 

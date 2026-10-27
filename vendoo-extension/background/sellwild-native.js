@@ -1,8 +1,10 @@
-// Sellwild publishing from the extension worker, with no marketplace tab.
+// Sellwild publishing and live edits from the extension worker, with no marketplace tab.
 // Sellwild has no drafts: its own sell page creates the listing, uploads the
 // photos to the presigned S3 URLs it gets back, then confirm-photos activates
-// it (read from sellwild.com's web client, 2026-10-24). Only a seller-confirmed
-// Publish runs this, once; a lost reply is never retried.
+// it (read from sellwild.com's web client, 2026-10-24). Its edit page
+// (/account/my-listings/[id], build TfctsWXpff2fKS, 2026-10-26) saves with
+// PUT /api/listings/{id}/edit. Only a seller-confirmed Publish or Update runs
+// these, once; a lost reply is never retried.
 const SELLWILD = 'https://sellwild.com';
 const SELLWILD_MAX_PHOTOS = 20;
 const SELLWILD_PHOTO_EDGE = 1280;
@@ -74,6 +76,23 @@ function sellwildCreateBody(listing, choice, address, photoCount) {
     photos: photoCount };
 }
 
+// What Sellwild would refuse in this listing, before anything is sent.
+function sellwildMissing(listing, choice, box) {
+  const vehicle = SELLWILD_VEHICLES.has(Number(choice.category_id));
+  const specifics = listing.sellwild_specifics || {};
+  const title = String(listing.title || '').trim();
+  return [(title.length < 3 || title.length > 255) && { field: 'title', needs: 'a title of 3 to 255 characters' },
+    !(Number(listing.price) >= 5 && Number(listing.price) <= SELLWILD_MAX_PRICE) && { field: 'price', needs: 'a price from $5 to $999,999' },
+    !(Number.isInteger(Number(choice.category_id)) && Number(choice.category_id) > 0) && { field: 'sellwild_specifics.nativeCategoryId', needs: 'a Sellwild category' },
+    !(Number.isInteger(Number(choice.condition_id)) && Number(choice.condition_id) > 0) && { field: 'sellwild_specifics.nativeConditionId', needs: 'a Sellwild condition' },
+    vehicle && !String(specifics.vin || '').trim() && { field: 'sellwild_specifics.vin', needs: "the vehicle's VIN" },
+    vehicle && !String(specifics.mileage || '').trim() && { field: 'sellwild_specifics.mileage', needs: "the vehicle's mileage" },
+    !vehicle && !choice.fixed_package && !sellwildWeightLb(listing) && { field: 'weight', needs: 'a package weight' },
+    !vehicle && !box && { field: 'dimensions', needs: 'package dimensions' },
+    !vehicle && box && Math.max(box.depth, box.width, box.height) >= SELLWILD_MAX_SIDE_IN
+      && { field: 'dimensions', needs: `a package under ${SELLWILD_MAX_SIDE_IN} inches on every side` }].filter(Boolean);
+}
+
 async function runSellwildNative(msg, recovery = false) {
   const p = { ...msg.payload, deadline: Date.now() + 150000 };
   const key = `native_operation_${p.operation_id}`;
@@ -81,6 +100,7 @@ async function runSellwildNative(msg, recovery = false) {
     const journal = (await chrome.storage.local.get(key))[key] || {};
     await chrome.storage.local.set({ [key]: { ...journal, ...receipt } });
   };
+  if (p.action === 'update') return await updateSellwildListing(p, recovery);
   if (p.action !== 'publish') return marketplaceFailure(marketplaceError('Sellwild drafts are saved in Anteroom.'), true);
   if (recovery) {
     const journal = (await chrome.storage.local.get(key))[key] || {};
@@ -98,20 +118,8 @@ async function runSellwildNative(msg, recovery = false) {
     const photos = p.photos || [];
     const choice = p.sellwild || {};
     const box = p.sellwild?.package_dimensions || sellwildBox(listing);
-    const vehicle = SELLWILD_VEHICLES.has(Number(choice.category_id));
-    const specifics = listing.sellwild_specifics || {};
-    const title = String(listing.title || '').trim();
-    const missing = [(title.length < 3 || title.length > 255) && { field: 'title', needs: 'a title of 3 to 255 characters' },
-      !(Number(listing.price) >= 5 && Number(listing.price) <= SELLWILD_MAX_PRICE) && { field: 'price', needs: 'a price from $5 to $999,999' },
-      !(Number.isInteger(Number(choice.category_id)) && Number(choice.category_id) > 0) && { field: 'sellwild_specifics.nativeCategoryId', needs: 'a Sellwild category' },
-      !(Number.isInteger(Number(choice.condition_id)) && Number(choice.condition_id) > 0) && { field: 'sellwild_specifics.nativeConditionId', needs: 'a Sellwild condition' },
-      vehicle && !String(specifics.vin || '').trim() && { field: 'sellwild_specifics.vin', needs: "the vehicle's VIN" },
-      vehicle && !String(specifics.mileage || '').trim() && { field: 'sellwild_specifics.mileage', needs: "the vehicle's mileage" },
-      !vehicle && !choice.fixed_package && !sellwildWeightLb(listing) && { field: 'weight', needs: 'a package weight' },
-      !vehicle && !box && { field: 'dimensions', needs: 'package dimensions' },
-      !vehicle && box && Math.max(box.depth, box.width, box.height) >= SELLWILD_MAX_SIDE_IN
-        && { field: 'dimensions', needs: `a package under ${SELLWILD_MAX_SIDE_IN} inches on every side` },
-      (!photos.length || photos.length > SELLWILD_MAX_PHOTOS) && { field: 'photos', needs: `between 1 and ${SELLWILD_MAX_PHOTOS} photos` }].filter(Boolean);
+    const missing = [...sellwildMissing(listing, choice, box),
+      ...(!photos.length || photos.length > SELLWILD_MAX_PHOTOS ? [{ field: 'photos', needs: `between 1 and ${SELLWILD_MAX_PHOTOS} photos` }] : [])];
     if (missing.length) throw marketplaceMissing('sellwild', missing);
 
     const session = await sellwildFetch('/api/auth/session', { deadline: p.deadline, step: 'session' });
@@ -159,5 +167,102 @@ async function runSellwildNative(msg, recovery = false) {
     const result = marketplaceFailure(error, safe);
     if (created) result.error = `${result.error} Sellwild listing ${created.id} exists but is not active; check your Sellwild listings before another attempt.`;
     return result;
+  }
+}
+
+// The fields Sellwild's edit page compares to name what changed. Its edit
+// schema requires title, price and categoryId; the rest are sent only when
+// they change. Leaving out ``photo`` keeps the photos already on the listing.
+const SELLWILD_EDIT_FIELDS = ['title', 'text', 'price', 'categoryId', 'itemCondition', 'shippable', 'weight', 'height', 'width', 'depth', 'parcelTemplate'];
+const SELLWILD_EDIT_REQUIRED = ['title', 'price', 'categoryId'];
+const SELLWILD_EDIT_LABELS = { title: 'title', text: 'description', price: 'price', categoryId: 'category', itemCondition: 'condition',
+  shippable: 'shipping', weight: 'package weight', height: 'package size', width: 'package size', depth: 'package size',
+  parcelTemplate: 'package', vin: 'VIN', mileage: 'mileage' };
+const SELLWILD_LIVE_READ_WAITS_MS = [0, 700, 1500];
+
+function sellwildSame(key, a, b) {
+  if (key === 'shippable') return (a === true || Number(a) === 1) === (b === true || Number(b) === 1);
+  if (['title', 'text', 'parcelTemplate', 'vin', 'mileage'].includes(key)) return marketplaceText(String(a ?? '')) === marketplaceText(String(b ?? ''));
+  const empty = value => value == null || value === '';
+  return empty(a) || empty(b) ? empty(a) && empty(b) : Number(a) === Number(b);
+}
+
+function sellwildLiveFields(listing) {
+  return { title: listing.title, text: listing.text ?? listing.description, price: listing.price,
+    categoryId: listing.categoryId ?? listing.category?.id, itemCondition: listing.itemCondition, shippable: listing.shippable,
+    weight: listing.weight, height: listing.height, width: listing.width, depth: listing.depth, parcelTemplate: listing.parcelTemplate,
+    vin: listing.vin, mileage: listing.mileage };
+}
+
+function sellwildDifferences(live, wanted) {
+  return [...new Set(Object.keys(wanted).filter(key => !sellwildSame(key, live[key], wanted[key])).map(key => SELLWILD_EDIT_LABELS[key] || key))];
+}
+
+async function updateSellwildListing(p, recovery) {
+  const id = String(p.listing_id || '');
+  if (!/^[1-9]\d{0,14}$/.test(id)) return marketplaceFailure(marketplaceError('A Sellwild listing link is required before updating.'), true);
+  const listing = p.listing || {};
+  const choice = p.sellwild || {};
+  const vehicle = SELLWILD_VEHICLES.has(Number(choice.category_id));
+  const { photos: _count, vin, mileage, ...form } = sellwildCreateBody(listing, choice, {}, 0);
+  const wanted = Object.fromEntries(Object.entries({ ...form, ...(vehicle ? { vin, mileage } : {}) })
+    .filter(([key]) => SELLWILD_EDIT_FIELDS.includes(key) || (vehicle && ['vin', 'mileage'].includes(key))));
+  const read = async () => {
+    const body = await sellwildFetch(`/api/listings/${id}`, { deadline: p.deadline, step: 'read' });
+    if (String(body?.listing?.id ?? '') !== id) throw marketplaceError('Sellwild did not return this listing.', { code: 'schema_drift' });
+    return body.listing;
+  };
+  let stage = 'prepare';
+  try {
+    if (recovery) {
+      // A lost reply's context has the listing, not the category choice.
+      const differ = sellwildDifferences(sellwildLiveFields(await read()),
+        Object.fromEntries(['title', 'text', 'price'].map(key => [key, wanted[key]])));
+      if (!differ.length) return { ok: true, state: 'published', listing_url: sellwildListingUrl(id, wanted.title) };
+      return marketplaceFailure(marketplaceError(`Sellwild has not confirmed the update (${differ.join(', ')} still differ). Check the live listing.`,
+        { code: 'uncertain', rejected: false }), false);
+    }
+    if (p.confirm !== true) throw marketplaceError('Confirm updating the live Sellwild listing.');
+    const missing = sellwildMissing(listing, choice, p.sellwild?.package_dimensions || sellwildBox(listing));
+    if (missing.length) throw marketplaceMissing('sellwild', missing);
+    const session = await sellwildFetch('/api/auth/session', { deadline: p.deadline, step: 'session' });
+    if (!session?.user) throw marketplaceError('Sign in to Sellwild: reconnect it in Anteroom. Updating will not open a tab.', { code: 'signed_out' });
+    const current = await read();
+    if (String(current.user?.id ?? current.userId ?? '') !== String(session.user.id)) {
+      throw marketplaceError('This Sellwild listing belongs to another account. Nothing was changed.');
+    }
+    if (Number(current.status) !== 1) throw marketplaceError('This Sellwild listing is not live. Nothing was changed.');
+    const live = sellwildLiveFields(current);
+    const changed = Object.keys(wanted).filter(key => !sellwildSame(key, live[key], wanted[key]));
+    if (!changed.length) return { ok: true, state: 'published', listing_url: sellwildListingUrl(id, wanted.title) };
+    const body = Object.fromEntries(Object.entries(wanted).filter(([key]) => SELLWILD_EDIT_REQUIRED.includes(key) || changed.includes(key)));
+    stage = 'writing';
+    const edit = await sellwildFetch(`/api/listings/${id}/edit`, { method: 'PUT', deadline: p.deadline, step: 'update', body });
+    if (edit?.success !== true) {
+      throw marketplaceError('Sellwild did not save the edit.', { code: 'rejected', rejected: edit?.success === false,
+        marketplace_message: marketplaceBodyMessage(edit) });
+    }
+    stage = 'written';
+    // Fresh reads decide the outcome, with a short wait for Sellwild's read-after-write lag.
+    let differ = ['listing'];
+    let after = null;
+    for (const wait of SELLWILD_LIVE_READ_WAITS_MS) {
+      if (wait) {
+        if (Date.now() + wait > p.deadline - 2000) break;
+        await marketplaceSleep(wait);
+      }
+      after = await read();
+      differ = sellwildDifferences(sellwildLiveFields(after), wanted);
+      if (!differ.length) break;
+    }
+    if (differ.length) {
+      throw marketplaceError(`Sellwild did not keep this listing's ${differ.join(', ')}. Check the live listing.`,
+        { code: 'uncertain', rejected: false, marketplace_message: `read back differs: ${differ.join(', ')}` });
+    }
+    const reviewing = edit.underReview === true || Number(after.status) !== 1;
+    return { ok: true, state: reviewing ? 'pending_review' : 'published', listing_url: sellwildListingUrl(id, String(after.title || wanted.title)) };
+  } catch (error) {
+    const safe = !recovery && (stage === 'prepare' || (stage === 'writing' && error.rejected === true));
+    return marketplaceFailure(error, safe);
   }
 }

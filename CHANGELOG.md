@@ -6,7 +6,7 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.432 — 2026-10-26
+## 0.1.433 — 2026-10-26
 
 - Labels are yours now, not Vendoo's. Items imported from Vendoo sometimes showed a code like `g8MHWF7K…` instead of the label's name. Settings → Listings → Inventory → **Vendoo label IDs** → **Convert to names** saves every label as its name, and each Vendoo import does the same for the items it brings in. A code Vendoo has no name for stays on the item and is listed there, so no label is lost.
 - Analytics shows sales by label, with your label colors.
@@ -14,6 +14,11 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 =======
 
 
+
+
+## 0.1.432 — 2026-10-27
+
+- **Update…** now works on live Mercari, Vinted and Sellwild listings, both on an item and in the bulk **Update** action. Anteroom edits the listing that is already up instead of making you delist and relist, so it keeps its likes, views, listing age and photos. It changes only what you edited, never lists a draft or creates a second listing, and reads the listing back afterwards to make sure the change stuck. Sellwild may hold an edited listing for review.
 
 ## 0.1.431 — 2026-10-27
 
