@@ -211,6 +211,24 @@ Existing linked items keep their edits and photos. Conflicting identities are
 reported, and missing photos are shown for follow-up. Importing reads Etsy and
 saves local inventory; it never changes a live listing or contacts Vendoo.
 
+### Importing from Poshmark, Mercari, Depop, Sellwild and Vinted
+
+Sign in to the marketplace in Chrome with the extension connected, then open
+**Marketplaces → Poshmark** (or Mercari, Depop, Sellwild, Vinted) and use
+**Import from …**. The extension reads your own active listings in the
+background, with no tab, about one request a second. Each listing is checked
+against the signed-in account and must still be for sale; listings priced in
+another currency, or Poshmark and Depop listings with several sizes, are not
+imported.
+
+A listing already linked to an item opens that item. A listing that looks like
+an item you already have is not selected with the page: choose **Link to this
+item** to attach the listing to it (its edits and photos stay as they are), or
+tick it to import a new item. Imports save the title, description, price,
+quantity, brand, size, condition, category and photos, and link the listing so
+sale detection watches it. Importing only reads the marketplace; it never edits,
+publishes or delists anything there.
+
 ### Checking linked marketplace inventory
 
 Open an item and click **Sync** to check its linked eBay and Etsy listings
