@@ -20,6 +20,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { SettingsCode, SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+import { useVendooEnabled } from "../../vendooMode";
 
 function CategoryTreesRow() {
   const queryClient = useQueryClient();
@@ -565,14 +566,17 @@ function MarketplaceSection() {
 }
 
 export function ConnectionsSettings() {
+  const vendooOn = useVendooEnabled();
   return (
     <>
       <MarketplaceSection />
-      <SettingsSection id="connections" title="Vendoo">
+      <SettingsSection id="connections" title={vendooOn ? "Vendoo" : "Chrome"}>
         <ExtensionConnectionRow />
         <SettingsRow
-          title="Vendoo in Chrome"
-          description="Connect Chrome opens Vendoo in your everyday Chrome and reloads Anteroom's listing extension so it matches this build. Send to Vendoo creates or updates a draft over Vendoo's API using that signed-in session."
+          title={vendooOn ? "Vendoo in Chrome" : "Chrome"}
+          description={vendooOn
+            ? "Connect Chrome opens Vendoo in your everyday Chrome and reloads Anteroom's listing extension so it matches this build. Send to Vendoo creates or updates a draft over Vendoo's API using that signed-in session."
+            : "Connect Chrome is still required. Listing on a marketplace opens that marketplace in this Chrome."}
           control={<ConnectChromeButton className={buttonVariants({ size: "xs", variant: "outline" })} />}
         />
         <SettingsRow
@@ -582,7 +586,7 @@ export function ConnectionsSettings() {
         >
           <ExtensionLoadPath compact hideHint />
         </SettingsRow>
-        <CategoryTreesRow />
+        {vendooOn ? <CategoryTreesRow /> : null}
       </SettingsSection>
       <SettingsSection id="remote-access" title="Remote access">
         <TailscaleHttpsRow />

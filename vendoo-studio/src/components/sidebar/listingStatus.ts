@@ -30,11 +30,18 @@ const MARKETPLACE_STATUS_ORDER = [
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const MARKETPLACE_ID_ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };
 
+const STATUS_HINTS_DIRECT: Record<string, string> = {
+  ...STATUS_HINTS,
+  failed: "The last send failed",
+  listing: "Anteroom is sending this listing",
+};
+
 /** Why a listing reads the way it does. Anteroom's own listings and sales outrank Vendoo's label. */
-export function statusHint(status: string): string {
-  const hint = STATUS_HINTS[status];
+export function statusHint(status: string, vendooOn = true): string {
+  const hint = (vendooOn ? STATUS_HINTS : STATUS_HINTS_DIRECT)[status];
   if (hint) return hint;
-  return `${status.replace(/_/g, " ")} · follows Vendoo`;
+  const plain = status.replace(/_/g, " ");
+  return vendooOn ? `${plain} · follows Vendoo` : plain;
 }
 
 function marketplaceLabel(id: string): string {

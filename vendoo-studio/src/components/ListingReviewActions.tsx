@@ -6,6 +6,7 @@ import { jobsPollMs } from "../api/polling";
 import { useListingSessionActive } from "./listingSession";
 import { cn } from "../lib/utils";
 import { RegenerateListingButton, useClearListing } from "./ClearListingButton";
+import { useVendooEnabled } from "../vendooMode";
 import { OpenListingButton } from "./OpenListingButton";
 import { Button } from "./ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
@@ -65,8 +66,9 @@ export function ListingBrowserButton({
   browserOpen?: boolean;
   onOpenBrowser?: (jobId: string) => void;
 }) {
+  const vendooOn = useVendooEnabled();
   const { listingJob } = useListingJob(convId);
-  if (!listingJob || !onOpenBrowser) return null;
+  if (!vendooOn || !listingJob || !onOpenBrowser) return null;
   if (!listingJob.vendoo_item_id && !listingJob.vendoo_url) return null;
 
   return (
@@ -130,11 +132,12 @@ export function ListingReviewActions({
   /** The browser toggle, which sits with this listing's actions. */
   children?: ReactNode;
 }) {
+  const vendooOn = useVendooEnabled();
   const { listingJob, importedItemId, importedUrl } = useListingJob(convId);
 
   return (
     <div className={cn("ms-auto flex shrink-0 items-center gap-1", className)} onMouseDown={onMouseDown}>
-      {listingJob ? (
+      {vendooOn && listingJob ? (
         <OpenListingButton
           jobId={listingJob.id}
           vendooItemId={listingJob.vendoo_item_id || importedItemId}

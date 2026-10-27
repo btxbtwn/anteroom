@@ -59,10 +59,12 @@ function render(
   payload: InventoryAnalytics,
   run: Partial<VendooBulkImport> = { running: false },
   starting = false,
+  vendooOn = true,
 ) {
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: starting });
   useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) =>
     queryKey[0] === "vendoo-bulk-import" ? { data: run }
+      : queryKey[0] === "settings-ui" ? { data: { vendoo_enabled: vendooOn } }
       : { data: payload, isLoading: false, isError: false, isFetching: false },
   );
   return renderToStaticMarkup(<InventoryAnalyticsView onOpenListing={vi.fn()} />);
@@ -97,6 +99,11 @@ describe("InventoryAnalyticsView", () => {
     expect(html).toContain("2 sales need sales data");
     expect(html).toContain("Across all time");
     expect(html).toContain("Add the missing details in Vendoo, then resync");
+    expect(render({ ...data, incomplete_sales: [
+      { conversation_id: "undated", title: "Undated jacket", missing: ["sale date"] },
+    ] }, { running: false }, false, false)).toContain("Add the missing details on the listing");
+    expect(render(data, { running: false }, false, false)).not.toContain("Resync Vendoo data");
+    expect(render(data, { running: false }, false, false)).toContain("Sales and inventory from your listings.");
     expect(html).toContain("Undated jacket");
     expect(html).toContain("Missing sale date, sale price, fees");
     expect(html).toContain("Old boots");

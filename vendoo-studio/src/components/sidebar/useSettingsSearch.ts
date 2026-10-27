@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { searchSettings, type SettingsSearchItem } from "../settingsNav";
+import { useVendooEnabled } from "../../vendooMode";
+import { searchSettings, settingsSearchItemsForMode, type SettingsSearchItem } from "../settingsNav";
 
 export type SettingsSearch = ReturnType<typeof useSettingsSearch>;
 
@@ -15,7 +16,11 @@ export function useSettingsSearch(
   const [settingsQuery, setSettingsQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const settingsSearchRef = useRef<HTMLInputElement>(null);
-  const settingsResults = useMemo(() => searchSettings(settingsQuery), [settingsQuery]);
+  const vendooOn = useVendooEnabled();
+  const settingsResults = useMemo(
+    () => searchSettings(settingsQuery, settingsSearchItemsForMode(vendooOn)),
+    [settingsQuery, vendooOn],
+  );
   const isSettingsSearching = settingsQuery.trim().length > 0;
 
   useEffect(() => {

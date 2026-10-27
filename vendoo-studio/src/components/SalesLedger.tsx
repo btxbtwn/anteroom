@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { FINANCIAL_FIELDS, type FinancialEntry, type FinancialField, type SalesLedgerPage, type SalesLedgerRow } from "../api/salesLedger";
 import { pollMs } from "../api/polling";
 import { marketplaceName } from "./marketplaceNames";
+import { useVendooEnabled } from "../vendooMode";
 import { EmptyRow, PageError, PageHeader, PageNote, PageSection, PageSkeleton, Panel } from "./WorkspacePage";
 import { Button, buttonVariants } from "./ui/button";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, DialogPopup, DialogTitle } from "./ui/dialog";
@@ -31,6 +32,7 @@ export function SalesLedgerSummary({ summary }: { summary: SalesLedgerPage["summ
 }
 
 export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+  const vendooOn = useVendooEnabled();
   const queryClient = useQueryClient();
   const [today] = useState(() => new Date().toISOString().slice(0, 10));
   const [start, setStart] = useState(() => new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10));
@@ -45,7 +47,9 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
     enabled: valid, retry: false, refetchInterval: () => pollMs(15000) });
   const data = valid ? query.data : undefined;
   return <>
-    <PageHeader title="Analytics" description="Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales without Vendoo." actions={<div className="flex flex-wrap gap-2">
+    <PageHeader title="Analytics" description={vendooOn
+      ? "Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales without Vendoo."
+      : "Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales from here."} actions={<div className="flex flex-wrap gap-2">
       <a className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} download>Export inventory CSV</a>
       {valid ? <a className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.salesCsv(filters)} download>Export sales CSV</a> : <Button size="sm" variant="outline" disabled>Export sales CSV</Button>}
     </div>}>

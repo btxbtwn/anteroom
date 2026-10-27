@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import type { Photo } from "../api/types";
 import { moveItem } from "../photoDrop";
 import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
+import { useVendooEnabled } from "../vendooMode";
 import { toastManager } from "./ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
 import { photoThumbUrl } from "../photoThumb";
@@ -36,6 +37,7 @@ interface Props {
  * rewrite keeps and treats as fact. Only the x and Cancel close it.
  */
 export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) {
+  const vendooOn = useVendooEnabled();
   const [rows, setRows] = useState<Record<string, ItemDetails> | null>(null);
   const savedRef = useRef<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -176,8 +178,9 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
           <p className="confirm-dialog-description">
             Drag photos to set their order; the first one is the cover, and a click enlarges one. Rotate or remove a photo from its corners.
             Chat and every generated field are discarded, then each listing is written again from its
-            photos and these details, one at a time. Flaws and notes are kept. Vendoo stays as it is
-            until you send again. Read from photos fills blank measurements from yardstick photos; check them before rewriting.
+            photos and these details, one at a time. Flaws and notes are kept.
+            {vendooOn ? " Vendoo stays as it is until you send again." : ""}
+            {" "}Read from photos fills blank measurements from yardstick photos; check them before rewriting.
           </p>
         </div>
         <ul className="bulk-upload-groups" aria-label="Each listing's photos and details">

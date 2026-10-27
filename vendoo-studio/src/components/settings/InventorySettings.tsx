@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { useVendooEnabled } from "../../vendooMode";
 import { LABEL_COLORS, labelColor, labelDotClass, type LabelColor } from "../../labelColors";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -75,8 +76,13 @@ export function InventorySettings() {
 
 /** Items imported from Vendoo can carry its label IDs; converting stores each as its name. Shown only while any remain. */
 function VendooLabelIdsRow() {
+  const vendooOn = useVendooEnabled();
   const queryClient = useQueryClient();
-  const { data: pending } = useQuery({ queryKey: ["vendoo-label-names"], queryFn: api.imports.labelNames });
+  const { data: pending } = useQuery({
+    queryKey: ["vendoo-label-names"],
+    queryFn: api.imports.labelNames,
+    enabled: vendooOn,
+  });
   const convert = useMutation({
     mutationFn: api.imports.convertLabelNames,
     onSuccess: (result) => {
@@ -85,7 +91,7 @@ function VendooLabelIdsRow() {
     },
   });
   const result = convert.data;
-  if (!pending || (!pending.converted && !pending.unknown.length && !result)) return null;
+  if (!vendooOn || !pending || (!pending.converted && !pending.unknown.length && !result)) return null;
   const waiting = pending.converted + pending.unknown.length;
   return (
     <SettingsRow

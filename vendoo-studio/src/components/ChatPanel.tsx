@@ -27,6 +27,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "
 import { Spinner } from "./ui/spinner";
 import type { BrowserField } from "../api/client";
 import type { Message } from "../api/types";
+import { useVendooEnabled } from "../vendooMode";
 
 interface Props {
   convId: string;
@@ -43,6 +44,7 @@ function messageRowPadding(m: Message): string {
 }
 
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, browser, onBrowserFieldsChange }: Props) {
+  const vendooOn = useVendooEnabled();
   const [input, setInput] = useState("");
   // Quotes live inline in the composer itself, T3 Code style: `input` is the
   // markdown prompt, and a quote inside it is its citation link.
@@ -152,14 +154,14 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
     return Boolean(json && isListingJson(json));
   }) || (listing?.listing && isListingJson(JSON.stringify(listing.listing))));
   const streamFailed = isStreamError(streamText);
-  const streamVisible = streamFailed ? "" : assistantDisplayText(streamText);
+  const streamVisible = streamFailed ? "" : assistantDisplayText(streamText, vendooOn);
   // Persist finishes (and messages refetch) before the SSE stream is cleared —
   // hide the live reply once the same assistant prose is already on screen.
   const streamAlreadyPersisted = Boolean(
     streamVisible
       && messages?.some((m) => {
         if (m.role !== "assistant" && m.role !== "model") return false;
-        return assistantDisplayText(m.text) === streamVisible;
+        return assistantDisplayText(m.text, vendooOn) === streamVisible;
       }),
   );
   const showStreamBubble = Boolean(streamText && !streamFailed && !streamAlreadyPersisted);
@@ -201,7 +203,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
   const composerPlaceholder = busy
     ? "Queue a follow-up…"
     : browser
-    ? "Tell Anteroom what to fix in the Vendoo draft..."
+    ? (vendooOn ? "Tell Anteroom what to fix in the Vendoo draft..." : "Tell Anteroom what to fix in this listing...")
     : !hasPhotos
     ? "Upload photos to begin"
     : awaitingSellerAnswers

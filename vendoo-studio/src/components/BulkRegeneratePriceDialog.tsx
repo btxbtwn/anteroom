@@ -10,6 +10,7 @@ import {
   type BulkPriceSuggestion,
   type BulkRegenerateListing,
 } from "../bulkRegenerate";
+import { useVendooEnabled } from "../vendooMode";
 import { money, PriceChip, PriceDialog, PriceRow, PriceRows, PriceSection, PriceStatus } from "./PriceDropParts";
 import { Button } from "./ui/button";
 
@@ -41,6 +42,7 @@ export function BulkRegeneratePriceDialog({
   onClose: () => void;
   onConfirm: (drops: Map<string, BulkPriceDrop>) => void;
 }) {
+  const vendooOn = useVendooEnabled();
   const [choice, setChoice] = useState<BulkPriceChoice>({ kind: "keep" });
   const [suggestions, setSuggestions] = useState<Map<string, BulkPriceSuggestion | null>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -87,7 +89,7 @@ export function BulkRegeneratePriceDialog({
     () => bulkPriceDrops(listings, choice, suggestions),
     [choice, listings, suggestions],
   );
-  const warning = bulkRegenerateWarning(listings.length);
+  const warning = bulkRegenerateWarning(listings.length, vendooOn);
   const [title, description] = warning.split("\n");
   const dropping = drops.size > 0;
 

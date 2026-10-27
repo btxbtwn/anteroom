@@ -478,7 +478,9 @@ async def dispatch_queued_jobs():
     the slot free and start the same job.
     """
     from vendoo_studio.services.category_tree import syncing
-    if syncing():
+    from vendoo_studio.services.user_settings import vendoo_enabled
+
+    if not vendoo_enabled() or syncing():
         return
     async with _dispatch_lock():
         picked = await asyncio.to_thread(_next_dispatch)
