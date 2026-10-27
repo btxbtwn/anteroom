@@ -210,14 +210,16 @@ const depopName = entry => String(entry?.name_i18n?.['en-US'] ?? entry?.name_i18
 
 // Depop's taxonomy. The partner host api.depop.com/api/v3/attributes/ answers
 // 403 "not authorized" without a partner token, so a direct list never starts.
-// The listing site itself splits the same document across two public reads:
-// categories, brands and attributes, then the category size sets.
+// The listing site splits the same document across two reads: categories,
+// brands and attributes, then the category size sets. Both refuse a request
+// that does not carry the seller's session, and the form then has no choices.
 async function depopAttributes(deadline) {
   return await marketplaceCatalog('depop:attributes', () => marketplaceCatalogRead('depop', 'category and size list', async () => {
+    const authorization = await depopBearer();
     const read = async path => {
       const { data } = await marketplaceFetch(`${DEPOP_WEBAPI}${path}`, {
         marketplace: 'depop', step: 'catalog', credentials: 'omit',
-        headers: { Accept: 'application/json' }, deadline, timeoutMs: 30000,
+        headers: { Accept: 'application/json', Authorization: authorization }, deadline, timeoutMs: 12000,
       });
       return data && typeof data === 'object' ? data : {};
     };
@@ -230,7 +232,7 @@ async function depopAttributes(deadline) {
       throw marketplaceError('Depop\'s category list changed.', { code: 'schema_drift' });
     }
     return data;
-  }));
+  }, { signedIn: true }));
 }
 
 async function depopBearer() {

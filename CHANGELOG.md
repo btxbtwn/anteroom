@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.443 — 2026-10-27
+## 0.1.444 — 2026-10-27
 
 - Depop offers now use its bulk send to eligible likers, for offers you approve and rules you turn on. Anteroom waits for Depop to finish, respects your floor and Depop's price limit, and stops without resending if the result is unclear. Rules stay off until you enable them. The earlier recording sent to only one buyer; this uses Depop's separate bulk flow.
+
+## 0.1.443 — 2026-10-27
+
+- Removed the “Unsent edits” tag from the listing header and the “unsent” tag from sidebar listings.
 
 ## 0.1.442 — 2026-10-27
 

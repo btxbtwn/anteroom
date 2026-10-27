@@ -327,16 +327,6 @@ export function ListingRow({
           <div className="mt-0.5 flex items-center gap-2">
             <ListingStatusLabel status={status} title={statusTitle} />
             {partial ? <span className="truncate text-2xs text-sidebar-muted-foreground">{partial}</span> : null}
-            {listing.unsent_edits ? (
-              <ListingTag
-                tone="info"
-                title={vendooOn
-                  ? "Edited in Anteroom since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
-                  : "Edited in Anteroom since this listing was last saved."}
-              >
-                unsent
-              </ListingTag>
-            ) : null}
             {vendooOn && relistMarketplaces.length ? (
               <ListingTag
                 tone="warning"
