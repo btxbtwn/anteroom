@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
+import { CategoryTreeSelect, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
 
 describe("marketplace choice controls", () => {
   it("identifies an unsupported saved choice without silently clearing it", () => {
@@ -46,5 +46,59 @@ describe("marketplace choice controls", () => {
     expect(html).toContain("Casual");
     expect(html).toContain("Minimalist");
     expect(html).toContain("Indie");
+  });
+});
+
+describe("category tree dropdown", () => {
+  const ignore = () => { throw new Error("Rendering must not save"); };
+
+  it("groups the first dropdown by category and commits a last-step row", () => {
+    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
+      value="Fashion > Shoes" choices={[
+        { label: "Fashion > Shoes", id: "69" },
+        { label: "Fashion > Tops", id: "70" },
+        { label: "Home & Garden > Furniture", id: "61" },
+      ]} onChange={ignore} />);
+    expect(html.match(/<select/g)).toHaveLength(1);
+    expect(html).toContain('label="Fashion"');
+    expect(html).toContain(">Shoes</option>");
+    expect(html).toContain('label="Home &amp; Garden"');
+    expect(html).toContain('data-listing-field="sellwild_specifics.nativeCategoryId"');
+    expect(html).not.toContain("continue until the last one");
+  });
+
+  it("keeps a second dropdown open for a category that is not the last step", () => {
+    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.depop"
+      value="Men > Bottoms > Jeans" choices={[
+        { label: "Men > Bottoms > Jeans", id: "menswear_jeans" },
+        { label: "Men > Tops > T-shirts", id: "menswear_tshirts" },
+        { label: "Women > Dresses > Mini", id: "womenswear_mini" },
+      ]} onChange={ignore} />);
+    expect(html.match(/<select/g)).toHaveLength(2);
+    expect(html).toContain('label="Men"');
+    expect(html).toContain(">Bottoms</option>");
+    expect(html).toContain(">Jeans</option>");
+    expect(html).toContain('aria-label="Next category"');
+    expect(html).not.toContain("continue until the last one");
+  });
+
+  it("does not ask for another step when every row in the list is a last step", () => {
+    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
+      value="" choices={[
+        { label: "Fashion > Shoes", id: "69" },
+        { label: "Home & Garden > Furniture", id: "61" },
+      ]} onChange={ignore} />);
+    expect(html).not.toContain("continue until the last one");
+    expect(html).toContain(">Shoes</option>");
+  });
+
+  it("asks the seller to continue when no category is chosen yet", () => {
+    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.mercari"
+      value="" choices={[
+        { label: "Kids > Girls tops > Girls (4+)", id: "1911" },
+      ]} onChange={ignore} />);
+    expect(html).toContain("Choose a category group, then continue until the last one.");
+    expect(html).toContain('label="Kids"');
+    expect(html).toContain(">Girls tops</option>");
   });
 });

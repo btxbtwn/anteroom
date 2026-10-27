@@ -56,8 +56,10 @@ import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
-import { EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect } from "./ListingFormControls";
+import { pathCategoryChoices } from "./categoryTree";
+import { CategoryTreeSelect, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect } from "./ListingFormControls";
 import { groupFieldsIntoSections } from "./listingFieldSections";
+import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
@@ -103,6 +105,8 @@ interface EditorField {
   maxValues?: number | null;
   maxLength?: number | null;
   optionsSource?: "marketplace" | "vendoo" | "reference" | "saved";
+  /** Choosing another category adds or removes this row. */
+  categorySpecific?: boolean;
 }
 
 export function ListingEditor({
@@ -246,10 +250,15 @@ export function ListingEditor({
   });
   const directMarketplaces = conversation?.direct_marketplaces ?? [];
 
+  const savedCategories = listingCategorySignature(data?.listing);
   const updateMutation = useMutation({
     mutationFn: (listing: ListingData) => api.listings.update(convId, listing),
     onSuccess: async (_result, listing) => {
       await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
+      // The category schema is the field list. Other edits leave it alone.
+      if (listingCategorySignature(listing) !== savedCategories) {
+        queryClient.invalidateQueries({ queryKey: ["listing-fields", convId] });
+      }
       // A SKU edit is copied into Item Details.
       if ((listing.sku || "") !== (data?.listing?.sku || "")) {
         queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
@@ -574,21 +583,33 @@ export function StructuredEditor({
 }) {
   const formRef = React.useRef<HTMLDivElement>(null);
   const nativeTab = DIRECT_FORM_MARKETS.has(tab);
+  // The form's rows come from the category. A price, brand, format, or shipping
+  // edit must not start a new read: that used to drop every row until the form
+  // answered, leaving only the marketplace price on screen. A new category,
+  // chosen here or written onto the listing, is what loads a new set of rows.
+  const formStructureKey = nativeFormStructureKey(listing, tab);
   const nativeQuery = useQuery({
-    queryKey: ["native-editor-form", convId, tab, revisionId],
-    queryFn: () => api.nativeMarketplaces.form(convId, tab, revisionId),
+    queryKey: ["native-editor-form", convId, tab, formStructureKey],
+    queryFn: () => api.nativeMarketplaces.form(convId, tab),
     enabled: nativeTab,
-    staleTime: 60_000,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
     retry: false,
+    placeholderData: (previous, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      if (!previous || previous.marketplace !== tab || key?.[1] !== convId || key?.[2] !== tab) return undefined;
+      return previous;
+    },
   });
-  // What Vendoo says this listing's category actually renders, rather than a
-  // list kept by hand here. Falls back to the static one while it loads, or
-  // for a category no schema has been fetched for.
+  // The category schema is this form. It is read again when the category
+  // changes, and a price or brand edit does not fetch it again.
   const formsQuery = useQuery({
     queryKey: ["listing-fields", convId],
     queryFn: () => api.vendooApi.listingFields(convId),
     enabled: !nativeTab,
-    staleTime: 60_000,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    placeholderData: (previous) => previous,
   });
   const { data: forms } = formsQuery;
   const dropdownQuery = useQuery({
@@ -603,12 +624,23 @@ export function StructuredEditor({
     queryFn: api.settings.ebayInventoryLocation,
     staleTime: 30_000,
   });
-  // Show all is per tab and starts collapsed, so a marketplace opens on its category form.
+  // Direct listing forms are the category's fields plus that marketplace's standard
+  // rows. They do not expand. Other editors can still open every saved field.
   const [showAllTab, setShowAllTab] = React.useState<string | null>(null);
-  const showAll = showAllTab === tab;
+  const showAll = !nativeTab && showAllTab === tab;
   const categoryForm = nativeTab ? nativeQuery.data : forms?.forms.find((form) => form.marketplace === tab);
+  const loadedCategoryId = nativeTab
+    ? (nativeQuery.isPlaceholderData ? nativeQuery.data?.category_id : undefined)
+    : (formsQuery.isPlaceholderData ? forms?.forms.find((form) => form.marketplace === tab)?.category_id : undefined);
+  const categoryStale = categorySpecificFieldsStale(
+    loadedCategoryId,
+    nativeFormCategoryKey(listing, tab),
+    nativeTab ? nativeQuery.isPlaceholderData : formsQuery.isPlaceholderData,
+  );
   const fields = React.useMemo(
     () => {
+      // No form yet: don't invent a lone marketplace-price row while the real rows load.
+      if (nativeTab && !nativeQuery.data) return [];
       const source = nativeTab ? (nativeQuery.data ? [nativeQuery.data] : []) : forms?.forms;
       const built = fieldsForMarketplaceForm(listing, tab, source, showAll);
       const rows = nativeTab
@@ -638,11 +670,10 @@ export function StructuredEditor({
   React.useEffect(() => {
     const init: Record<string, string | string[]> = {};
     fields.forEach((f) => {
-      if (f.type === "inventory") return;
-      const val = getListingEditorValue(listing, f.key);
-      // Schema labels ("Sleeve Length") don't match JSON keys ("sleeveLength");
-      // the fields API already resolved the value — use it when the path miss.
-      const value = (f.native || f.locked) && f.defaultValue !== undefined ? f.defaultValue : (val ?? f.defaultValue);
+      if (f.type === "inventory" || f.type === "variations") return;
+      // The saved listing is the source of truth. The form payload only fills a
+      // choice the listing has not stored yet, so an edit does not wait for a reload.
+      const value = resolvedEditorValue(f, listing);
       const label = (v: string) => Object.entries(f.optionValues || {}).find(([, id]) => id === v)?.[0] ?? v;
       const followed = f.label.endsWith(" price") && f.key.includes("_specifics.")
         && !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(f.key));
@@ -662,10 +693,17 @@ export function StructuredEditor({
     if (local[key] == null) return;
     const field = fields.find((entry) => entry.key === key);
     if (field?.locked) return;
-    const before = getListingEditorValue(listing, key);
     const text = formFieldText(local[key]);
     if (text.trim() === "[object Object]") return;
-    if (text === formFieldText(before) || text === formFieldText(field?.defaultValue)) return;
+    // Compare with what the control was showing. The form's original value stays
+    // in defaultValue and must not block a later edit that happens to match it.
+    const labelOf = (value: string) => Object.entries(field?.optionValues || {}).find(([, id]) => id === value)?.[0] ?? value;
+    const followed = Boolean(field && field.label.endsWith(" price") && field.key.includes("_specifics.")
+      && !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(field.key)));
+    const current = followed && listing?.price != null
+      ? formFieldText(listing.price)
+      : labelOf(formFieldText(field ? resolvedEditorValue(field, listing) : getListingEditorValue(listing, key)));
+    if (text === current) return;
     const updated = cloneListing(listing);
     setListingEditorValue(updated, key, field?.type === "number" ? coerce(text) : text);
     onChange(updated);
@@ -690,21 +728,41 @@ export function StructuredEditor({
     onChange(updated);
   };
 
-  const sections = groupFieldsIntoSections(fields);
+  const viewContext = { tab, listing, local, fields, categoryStale };
+  const viewFields = fields.map((field) => presentNativeField(field, viewContext));
+  const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
+  const formNotes = nativeTab
+    ? (tab === "mercari"
+      ? nativeFormNotes(tab, listing, local, fields)
+      : [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing, local, fields)])
+    : [];
+  const sections = groupFieldsIntoSections(renderedFields);
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
-    const text = formFieldText(local[f.key]);
+    // A format or shipping change narrows the choices. Show the choice that fits
+    // now when the typed value belonged to the previous set.
+    const typed = formFieldText(local[f.key]);
+    const fallback = formFieldText(f.defaultValue);
+    const fallbackLabel = Object.entries(f.optionValues || {}).find(([, optionId]) => optionId === fallback)?.[0] ?? fallback;
+    const text = f.options?.length && !f.options.includes(typed)
+      && ["ebay_specifics.listingDuration", "ebay_specifics.listingFormat", "mercari_specifics.shippingPayerId"].includes(f.key)
+      ? (f.options.includes(fallbackLabel) ? fallbackLabel : f.options.includes(fallback) ? fallback : f.options[0] ?? typed)
+      : typed;
     if (f.type === "video") return <ListingVideoPicker convId={convId} marketplace={f.key.split("_specifics.")[0]} selectedId={text} disabled={f.locked}
       onSelect={id => commitField(f.key, id)} />;
-    if (f.type === "inventory") return <NativeInventoryEditor
-      value={Array.isArray(f.defaultValue) ? f.defaultValue.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : []}
-      groups={f.inventoryGroups || []} disabled={f.locked} onChange={rows => {
-        const updated = cloneListing(listing);
-        setListingEditorValue(updated, f.key, rows);
-        onChange(updated);
-      }} />;
+    if (f.type === "inventory") {
+      const stored = resolvedEditorValue(f, listing);
+      const rows = Array.isArray(stored) ? stored.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : [];
+      return <NativeInventoryEditor
+        value={rows}
+        groups={f.inventoryGroups || []} disabled={f.locked} onChange={(next) => {
+          const updated = cloneListing(listing);
+          setListingEditorValue(updated, f.key, next);
+          onChange(updated);
+        }} />;
+    }
     if (f.type === "variations") return <EbayVariationsEditor convId={convId}
-      value={normalizeVariations(f.defaultValue)} aspects={f.variationAspects || []} disabled={f.locked} onChange={value => {
+      value={normalizeVariations(resolvedEditorValue(f, listing))} aspects={f.variationAspects || []} disabled={f.locked} onChange={value => {
         const updated = cloneListing(listing);
         setListingEditorValue(updated, f.key, value);
         // The listing's quantity is the stock across its variations.
@@ -717,6 +775,9 @@ export function StructuredEditor({
       setListingEditorValue(updated, "direct_category_ids.ebay_path", path);
       onChange(updated);
     }} />;
+    const categoryChoices = f.native && !f.multi ? pathCategoryChoices(f) : null;
+    if (categoryChoices) return <CategoryTreeSelect key={text} id={id} fieldKey={f.key} value={text} choices={categoryChoices}
+      disabled={f.locked} onChange={(choice) => commitField(f.key, choice.label)} />;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
     if (f.key === "description" || f.type === "textarea") {
@@ -768,11 +829,15 @@ export function StructuredEditor({
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
     <div ref={formRef} key={tab} className="flex flex-col">
       {tab !== "general" && <div className="flex items-start justify-between gap-3 border-b py-3 text-xs text-muted-foreground">
-        <p role="status">{nativeTab && nativeQuery.isFetching
+        <p role="status">{nativeTab && !nativeQuery.data && nativeQuery.isFetching
           ? "Loading the marketplace’s category fields and choices…"
-          : nativeTab && nativeQuery.isError
+          : nativeTab && nativeQuery.isError && !nativeQuery.data
             ? (nativeQuery.error instanceof Error ? nativeQuery.error.message : "The marketplace form could not be loaded. Refresh choices.")
-            : !nativeTab && formsQuery.isFetching
+            : categoryStale
+              ? "Updating this category’s fields…"
+              : nativeTab && nativeQuery.isFetching
+                ? "Refreshing choices…"
+                : !nativeTab && formsQuery.isFetching
               ? "Refreshing category fields and choices…"
               : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
                 ? "Some choices could not be refreshed. Check the source below each field before listing."
@@ -786,7 +851,7 @@ export function StructuredEditor({
                         ? "Fields and choices come from the catalog direct List uses."
                         : "Choices depend on this category. Reference choices may differ from the marketplace."}</p>
         <div className="flex shrink-0 gap-1">
-          {categoryForm?.known && <Button type="button" variant="ghost" size="sm" aria-pressed={showAll}
+          {!nativeTab && categoryForm?.known && <Button type="button" variant="ghost" size="sm" aria-pressed={showAll}
             onClick={() => setShowAllTab(showAll ? null : tab)}>{showAll ? "Show category fields" : "Show all fields"}</Button>}
           <Button type="button" variant="ghost" size="sm" onClick={() => {
             if (nativeTab) { void nativeQuery.refetch(); return; }
@@ -794,11 +859,17 @@ export function StructuredEditor({
           }}>Refresh choices</Button>
         </div>
       </div>}
-      {nativeTab && nativeQuery.data?.notes?.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
+      {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
-        const filled = section.fields.filter((f) => f.type === "inventory"
-          ? Array.isArray(f.defaultValue) && f.defaultValue.length > 0
-          : formFieldText(local[f.key]).trim() !== "").length;
+        const filled = section.fields.filter((f) => {
+          if (f.type === "inventory" || f.type === "variations") {
+            const stored = resolvedEditorValue(f, listing);
+            if (Array.isArray(stored)) return stored.length > 0;
+            const rows = stored && typeof stored === "object" ? (stored as { rows?: unknown }).rows : undefined;
+            return Array.isArray(rows) && rows.length > 0;
+          }
+          return formFieldText(local[f.key]).trim() !== "";
+        }).length;
         return (
           <InspectorSection
             key={section.id}
@@ -971,16 +1042,25 @@ const CATEGORY_FORM_LABELS: Record<string, string[]> = {
     "When Was It Made?", "Etsy category"],
   sellwild: ["Title", "Description", "Price", "Sellwild price", "Category", "Condition"],
   vinted: ["Title", "Description", "Price", "Vinted price", "Category", "Condition", "Brand", "Size",
-    "Color", "Package size"],
+    "Color", "Package size", "Material"],
+  grailed: ["Title", "Description", "Price", "Condition", "Designer", "Brand"],
+  facebook: ["Title", "Description", "Price", "Condition", "Brand"],
 };
+
+function coreFieldLabel(tab: string, label: string): boolean {
+  const folded = foldFieldName(label.replace(/\s*\*$/, ""));
+  return (CATEGORY_FORM_LABELS[tab] ?? []).some((item) => foldFieldName(item) === folded);
+}
 
 function foldFieldName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 /**
- * A known category shows its own attributes plus the marketplace's real controls.
- * Saved values the form does not show stay on the listing; Show all reveals their rows.
+ * A known category shows its own attributes plus the marketplace's standard
+ * controls. Until that schema is loaded, only those controls show. Saved values
+ * the form does not show stay on the listing. Direct listing forms never expand
+ * past that set.
  */
 function limitToCategoryForm(
   rows: EditorField[],
@@ -990,18 +1070,23 @@ function limitToCategoryForm(
 ): EditorField[] {
   if (showAll || tab === "general") return rows;
   const form = forms?.find((entry) => entry.marketplace === tab);
-  if (!form?.known) return rows;
+  const core = new Set((CATEGORY_FORM_LABELS[tab] ?? []).map(foldFieldName));
+  const listed = (field: EditorField) => {
+    if (field.key.includes(".measurements.")) return true;
+    const label = foldFieldName(field.label.replace(/\s*\*$/, ""));
+    return core.has(label);
+  };
+  if (!form?.known) return core.size ? rows.filter(listed) : rows;
   const allowed = new Set(
     form.fields
       .filter((field) => field.on_form !== false)
       .flatMap((field) => [foldFieldName(field.label), foldFieldName(field.key)]),
   );
-  const core = new Set((CATEGORY_FORM_LABELS[tab] ?? []).map(foldFieldName));
   return rows.filter((field) => {
-    if (field.key.includes(".measurements.")) return true;
+    if (listed(field)) return true;
     const label = foldFieldName(field.label.replace(/\s*\*$/, ""));
     const leaf = foldFieldName(field.key.split(".").pop() || "");
-    return core.has(label) || allowed.has(label) || allowed.has(leaf);
+    return allowed.has(label) || allowed.has(leaf);
   });
 }
 
@@ -1013,11 +1098,14 @@ export function fieldsForMarketplaceForm(
   showAll = false,
 ): EditorField[] {
   const catalog = forms?.find((form) => form.marketplace === tab);
+  // Direct listing forms are standard rows plus that category's fields, even
+  // when a caller asks for every saved field.
+  const revealAll = showAll && !DIRECT_FORM_MARKETS.has(tab);
   // A direct marketplace with its native catalog, or with no category schema yet,
   // does not fall back to a hand-kept form. A known category schema still merges.
   if (DIRECT_FORM_MARKETS.has(tab) && (catalog?.native || !catalog?.fields.length)) {
     const rows = catalog?.native ? schemaFieldsForTab(forms, tab) || [] : [];
-    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(rows, tab), listing, tab), forms, tab, showAll);
+    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(rows, tab), listing, tab), forms, tab, revealAll);
   }
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
@@ -1049,7 +1137,7 @@ export function fieldsForMarketplaceForm(
     finishMarketplaceRows(withoutObjects(withMarketplacePrice(named, tab)), listing, tab),
     forms,
     tab,
-    showAll,
+    revealAll,
   );
 }
 
@@ -1088,6 +1176,9 @@ function schemaFieldsForTab(
     maxLength: field.max_length,
     optionsSource: field.options_source,
     options: field.options,
+    // A Vendoo category attribute is replaced when the category changes.
+    // The marketplace's own controls, such as title and price, stay.
+    ...(field.category_specific || (!form.native && !coreFieldLabel(tab, field.label)) ? { categorySpecific: true } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),
   }));
 }
@@ -1154,7 +1245,8 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         { key: "size", label: "Size" },
         { key: "sku", label: "SKU" },
         { key: "zipCode", label: "Inventory location" },
-        { key: "category_path", label: "Category" },
+        { key: "category_path", label: "Category",
+          help: "Applied to each marketplace form. Name the last category, such as Men > Shirts > Tees. Each marketplace form keeps its own category list." },
         { key: "department", label: "Department" },
         { key: "weight_oz", label: "Package Weight (oz)", type: "number" },
         { key: "package_dimensions_in", label: "Package Dimensions (LxWxH in)" },

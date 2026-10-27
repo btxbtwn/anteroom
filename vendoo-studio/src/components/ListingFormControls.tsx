@@ -7,6 +7,7 @@ import { ChevronDownIcon } from "lucide-react";
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { catalogLeafChoices, categoryChoiceAt, categoryPathKey, categorySegments, categorySteps, type CategoryChoice } from "./categoryTree";
 import { cn } from "../lib/utils";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "./ui/combobox";
 import { toggleVariants } from "./ui/toggle";
@@ -202,10 +203,90 @@ export function SearchableSelect({
   );
 }
 
-/** Category names from eBay's own taxonomy search; selecting one stores its ID. */
+/**
+ * Grouped category dropdowns. The seller keeps picking until the row is the
+ * last one in its branch. A group does not save, so the form stays put.
+ */
+export function CategoryTreeSelect({
+  id, fieldKey, value, choices, disabled, onChange,
+}: {
+  id: string;
+  fieldKey: string;
+  value: string;
+  choices: readonly CategoryChoice[];
+  disabled?: boolean;
+  onChange: (choice: CategoryChoice) => void;
+}) {
+  // A group is not saved. This remembers the open branch; the parent remounts the control when the saved category changes.
+  const [path, setPath] = React.useState<string[] | null>(null);
+  const selected = path ?? categorySegments(value);
+  const selectedKey = categoryPathKey(selected);
+  const steps = React.useMemo(
+    () => categorySteps(choices, selectedKey ? categorySegments(selectedKey) : []),
+    [choices, selectedKey],
+  );
+  const atLeaf = categoryChoiceAt(choices, selected);
+  const savedKnown = Boolean(value) && Boolean(categoryChoiceAt(choices, categorySegments(value)));
+  const hasDeeper = steps.some((step) => step.menu.groups.some((group) => group.items.some((item) => !item.terminal)));
+  const choose = (next: string, index: number) => {
+    if (!next) {
+      if (index === 0) return;
+      const previous = steps[index - 1]?.value;
+      setPath(previous ? categorySegments(previous) : []);
+      return;
+    }
+    const nextPath = categorySegments(next);
+    setPath(nextPath);
+    const choice = categoryChoiceAt(choices, nextPath);
+    if (choice) onChange(choice);
+  };
+  if (!steps.length) {
+    return <p role="status" className="text-xs text-muted-foreground">No categories are available yet. Refresh choices.</p>;
+  }
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      {steps.map((step, index) => (
+        <NativeSelect
+          key={`level-${index}`}
+          id={index === 0 ? id : `${id}-level-${index}`}
+          data-listing-field={index === 0 ? fieldKey : undefined}
+          aria-label={index === 0 ? undefined : "Next category"}
+          disabled={disabled}
+          value={step.value}
+          onChange={(event) => choose(event.target.value, index)}
+        >
+          <option value="">{index === 0 ? "Choose a category" : "Choose a narrower category"}</option>
+          {step.menu.groups.map((group) => (
+            <optgroup key={group.heading} label={group.heading}>
+              {group.items.map((item) => {
+                const key = categoryPathKey(item.path);
+                return <option key={key} value={key}>{item.label}</option>;
+              })}
+            </optgroup>
+          ))}
+        </NativeSelect>
+      ))}
+      {!atLeaf && hasDeeper && <p className="text-xs text-muted-foreground">Choose a category group, then continue until the last one.</p>}
+      {Boolean(value) && !savedKnown && path == null && (
+        <p role="alert" className="text-xs text-warning-foreground">Saved category “{value}” is not in this list. Choose one to replace it.</p>
+      )}
+    </div>
+  );
+}
+
+/** eBay categories from the synced tree. Search stays available until that tree is complete. */
 export function EbayCategorySelect({ id, value, onChange }: {
   id: string; value: string; onChange: (id: string, path: string) => void;
 }) {
+  const tree = useQuery({
+    queryKey: ["catalog-categories", "ebay"],
+    queryFn: () => api.catalog.categories("ebay"),
+    staleTime: Infinity,
+    retry: false,
+  });
+  const leaves = React.useMemo(() => catalogLeafChoices(tree.data), [tree.data]);
+  const treeReady = !tree.isPending;
+  const searchFallback = treeReady && (leaves.length === 0 || tree.data?.complete === false);
   const [query, setQuery] = React.useState("");
   const [search, setSearch] = React.useState("");
   React.useEffect(() => {
@@ -213,15 +294,25 @@ export function EbayCategorySelect({ id, value, onChange }: {
     return () => clearTimeout(timer);
   }, [query]);
   const result = useQuery({ queryKey: ["ebay-category-search", search],
-    queryFn: () => api.ebay.read("categories", { q: search }), enabled: search.length >= 3 && search !== value, retry: false });
+    queryFn: () => api.ebay.read("categories", { q: search }),
+    enabled: searchFallback && search.length >= 3 && search !== value, retry: false });
   const choices = (result.data?.rows || []).map((row) => ({ id: row.id, path: [row.subtitle, row.title].filter(Boolean).join(" › ") }));
+  if (!treeReady) return <p role="status" className="text-xs text-muted-foreground">Loading categories…</p>;
+  const searchPanel = (
+    <>
+      {leaves.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Search if the category is not in the list yet.</p>}
+      <SearchableSelect id={leaves.length ? `${id}-search` : id} fieldKey="direct_category_ids.ebay" value={value}
+        options={[...new Set([value, ...choices.map((row) => row.path)].filter(Boolean))]} onSearch={setQuery}
+        onChange={(label) => { const choice = choices.find((row) => row.path === label); if (choice) onChange(choice.id, choice.path); }} />
+      <p role="status" className="mt-1 text-xs text-muted-foreground">{result.isError ? "eBay category search failed. Check its connection and try again."
+        : result.isFetching ? "Searching eBay categories…" : search.length >= 3 && search !== value
+          ? `${choices.length} eBay categories found.` : "Type at least 3 characters to search eBay categories."}</p>
+    </>
+  );
   return <div>
-    <SearchableSelect id={id} fieldKey="direct_category_ids.ebay" value={value}
-      options={[...new Set([value, ...choices.map((row) => row.path)].filter(Boolean))]} onSearch={setQuery}
-      onChange={(label) => { const choice = choices.find((row) => row.path === label); if (choice) onChange(choice.id, choice.path); }} />
-    <p role="status" className="mt-1 text-xs text-muted-foreground">{result.isError ? "eBay category search failed. Check its connection and try again."
-      : result.isFetching ? "Searching eBay categories…" : search.length >= 3 && search !== value
-        ? `${choices.length} eBay categories found.` : "Type at least 3 characters to search eBay categories."}</p>
+    {leaves.length > 0 && <CategoryTreeSelect key={value} id={id} fieldKey="direct_category_ids.ebay" value={value} choices={leaves}
+      onChange={(choice) => onChange(choice.id, choice.label.split(" > ").join(" › "))} />}
+    {searchFallback ? searchPanel : null}
   </div>;
 }
 

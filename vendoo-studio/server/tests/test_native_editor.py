@@ -156,7 +156,9 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         rows = [{"id": "condition", "name": "Condition", "required": True, "multi": False, "mode": "selection",
                  "values": [{"id": "1000", "label": "New"}, {"id": "3000", "label": "Pre-owned"}]},
                 {"id": "Season", "name": "Season", "required": False, "multi": True, "mode": "selection", "max_length": 65,
-                 "values": [{"id": "Spring", "label": "Spring"}, {"id": "Summer", "label": "Summer"}]}]
+                 "usage": "RECOMMENDED", "values": [{"id": "Spring", "label": "Spring"}, {"id": "Summer", "label": "Summer"}]},
+                {"id": "Theme", "name": "Theme", "required": False, "multi": False, "mode": "free_text", "usage": "OPTIONAL",
+                 "values": []}]
         listing = {"direct_category_ids": {"ebay": "15687"}, "condition": "Good", "ebay_specifics": {"season": ["Spring", "Summer"]}}
         with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)):
             form = await native_editor.ebay_form(listing)
@@ -166,6 +168,11 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["ebay_specifics.Season"]["value"], ["Spring", "Summer"])
         self.assertTrue(fields["ebay_specifics.Season"]["multi"])
         self.assertEqual(fields["ebay_specifics.Season"]["max_length"], 65)
+        self.assertTrue(fields["ebay_specifics.Season"]["category_specific"])
+        self.assertNotIn("on_form", fields["ebay_specifics.Season"])
+        self.assertNotIn("on_form", fields["ebay_specifics.Theme"])
+        self.assertTrue(fields["ebay_specifics.Theme"]["category_specific"])
+        self.assertNotIn("category_specific", fields["ebay_specifics.Condition"])
         self.assertEqual(fields["ebay_specifics.bestOffer.enabled"]["input_type"], "boolean")
         self.assertNotIn("locked", fields["ebay_specifics.conditionDescription"])
         self.assertEqual(fields["ebay_specifics.conditionDescription"]["max_length"], 1000)
@@ -188,15 +195,18 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["ebay_specifics.listingFormat"]["option_values"], {"Fixed price": "FIXED_PRICE", "Auction": "AUCTION"})
         self.assertEqual(fields["ebay_specifics.listingFormat"]["value"], "AUCTION")
         self.assertIn("ebay_specifics.auctionStartPrice", fields["ebay_specifics.listingFormat"]["clears"])
-        self.assertEqual(fields["ebay_specifics.listingDuration"]["option_values"], {"3 days": "DAYS_3", "7 days": "DAYS_7"})
+        self.assertEqual(fields["ebay_specifics.listingDuration"]["option_values"],
+                         {"Good 'Til Cancelled": "GTC", "3 days": "DAYS_3", "7 days": "DAYS_7"})
+        self.assertFalse(fields["ebay_specifics.listingDuration"].get("locked"))
         self.assertEqual(fields["ebay_specifics.listingDuration"]["value"], "DAYS_7")
         self.assertEqual(fields["ebay_specifics.auctionStartPrice"]["value"], "9.99")
         self.assertIn("ebay_specifics.auctionBuyItNow", fields)
-        self.assertNotIn("ebay_specifics.bestOffer.enabled", fields)
+        self.assertIn("ebay_specifics.bestOffer.enabled", fields)
         fixed_fields = {row["path"]: row for row in fixed["fields"]}
+        self.assertEqual(set(fields), set(fixed_fields))
         self.assertEqual(fixed_fields["ebay_specifics.listingFormat"]["value"], "FIXED_PRICE")
-        self.assertTrue(fixed_fields["ebay_specifics.listingDuration"]["locked"])
-        self.assertNotIn("ebay_specifics.auctionStartPrice", fixed_fields)
+        self.assertEqual(fixed_fields["ebay_specifics.listingDuration"]["value"], "GTC")
+        self.assertIn("ebay_specifics.auctionStartPrice", fixed_fields)
         self.assertIn("ebay_specifics.bestOffer.enabled", fixed_fields)
         # No auction in the category: Auction is not offered.
         with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)), \

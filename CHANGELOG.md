@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.440 — 2026-10-27
+
+- Listing forms stay on screen while you edit. Changing a price, brand, condition, format, or shipping choice no longer reloads the form. Choosing a category, or an update that sets the category, is what changes it. The form shows the fields every listing on that marketplace has, plus the fields that category needs, such as size and attributes. Turning on Depop worldwide shipping shows its fee without a reload, and switching eBay's format or Mercari's shipping method shows or hides those rows in place.
+- Category on a listing form is a grouped dropdown. Pick a group, then keep picking until the last category in that branch.
+- The listing assistant can choose a category too. It picks the last category in that branch, the same way the category list does, and the form updates to the fields that category needs.
+- Each marketplace form has its own category list. The category on General fills the matching last category on those forms, and they then show the fields that category needs.
+
 ## 0.1.426 — 2026-10-26
 
 - Edit fields for selected items now also changes condition, primary and secondary color, tags, and the shared, eBay and Depop categories. Categories are picked from the same searches the item editor uses, and you review every change before it is saved.

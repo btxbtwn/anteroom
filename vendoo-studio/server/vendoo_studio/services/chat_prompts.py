@@ -26,8 +26,6 @@ from vendoo_studio.services.listing_generate import (
     seller_item_details,
 )
 from vendoo_studio.services.listing_provider import get_photo_provider
-from vendoo_studio.services.registry import MEN_TSHIRT_PATH, WOMEN_TOPS_PATH
-
 log = logging.getLogger("vendoo_studio.chat")
 
 
@@ -83,8 +81,9 @@ def current_listing_prompt(db: Session, conv_id: str) -> str:
         f"department: {listing.get('department') or ''}\n"
         f"category_path: {listing.get('category_path') or ''}\n"
         f"ebay_specifics.department: {(ebay or {}).get('department') or ''}\n"
-        "If the seller changes gender or category, replace department, category_path, "
-        "and ebay_specifics.department together. Do not leave a women's category on a men's item.\n"
+        "If the seller changes gender or category, replace department and category_path together. "
+        "category_path names the last category in the branch, such as Men > Shirts > Tees. "
+        "Do not leave a women's category on a men's item.\n"
     )
 
 
@@ -160,7 +159,9 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             '{"fields":[{"path":"depop_specifics.style","value":[]}]}\n'
             "Paths look like sku, price, mercari_specifics.brand, poshmark_specifics.size, "
             "ebay_specifics.inseam, ebay_specifics.bestOffer.minimumOfferPrice, depop_specifics.measurements, "
-            "or marketplace_category_ids.mercari. An empty value clears the field and it stays cleared. "
+            "direct_category_ids.ebay, direct_category_ids.poshmark, direct_category_ids.depop, "
+            "direct_category_ids.mercari, or sellwild_specifics.nativeCategoryId. "
+            "An empty value clears the field and it stays cleared. "
             "An empty mercari_specifics.brand, or the value \"No Brand/Not sure\", lists that item on Mercari "
             "with no brand and leaves the main brand unchanged. When Mercari has the same size in more than one "
             "group, set mercari_specifics.sizeType or mercari_specifics.sizeGroup (Regular, Petite, Plus, Tall). "
@@ -170,8 +171,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             "eBay Best Offer is enabled (Yes or No), autoAcceptPrice, and minimumOfferPrice, "
             "and the minimum must be below the auto-accept price, which must be below the item price.\n"
             "Do not use a JSON Patch array. Do not rewrite unrelated listing fields.\n"
-            "Anteroom saves the listing JSON and refreshes the Forms/Fields UI; "
-            "filling the live Vendoo draft is a separate later step.\n\n"
+            "Anteroom saves the listing and the form updates.\n\n"
         )
     else:
         change_instructions = (
@@ -179,13 +179,20 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             "1. Write a short confirmation of what you changed (department, category, marketplace fields).\n"
             "2. Then include a JSON Patch array in a fenced json code block so the listing can be saved. "
             "The seller will not see that block.\n"
-            'Example confirmation: "This is a men\'s T-shirt. I moved it to Men > Men\'s Clothing > Shirts > T-Shirts."\n'
+            'Example confirmation: "This is a men\'s T-shirt. I moved it to Men > Shirts > Tees."\n'
             "Example patch:\n"
             "```json\n"
             '[{"op": "replace", "path": "/department", "value": "Men"},'
-            f'{{"op": "replace", "path": "/category_path", "value": "{MEN_TSHIRT_PATH}"}},'
-            '{"op": "replace", "path": "/ebay_specifics/department", "value": "Men"}]\n'
-            "```\n\n"
+            '{"op": "replace", "path": "/category_path", "value": "Men > Shirts > Tees"}]\n'
+            "```\n"
+            "Save a category only when it is the last one in that branch. "
+            "Anteroom stores each marketplace's own category id from that path, and the listing form updates. "
+            "You can set one marketplace yourself when you know its id: "
+            "direct_category_ids.ebay together with direct_category_ids.ebay_path, "
+            "direct_category_ids.poshmark, direct_category_ids.depop, direct_category_ids.mercari, "
+            "or sellwild_specifics.nativeCategoryId. "
+            "Use that marketplace's own id. "
+            "On Poshmark, None is the last step when you want a category that still has narrower choices.\n\n"
         )
 
     system_prompt = {
@@ -205,7 +212,9 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             "- Never ask the seller clarifying questions. Infer from the photos and notes already provided.\n"
             "- Never ask the seller to upload or attach photos when product photos are already present.\n"
             "- Be conservative with brand and size: use photo/tag/logo evidence and seller notes only; leave unsupported facts empty — never invent, never ask.\n"
-            f"- General Vendoo category paths must use Vendoo taxonomy: women's shirts and T-shirts end at {WOMEN_TOPS_PATH}, never Shirts & Blouses. Men's T-shirts use {MEN_TSHIRT_PATH}.\n"
+            "- A category is the last choice in its branch, written Department > Category > Last category, such as Men > Shirts > Tees. "
+            "A group that still has a narrower choice is not saved. "
+            "On Poshmark, finish with None when you want a category that still has narrower choices.\n"
             "- Title MUST follow Brand Size Vibe Item Color Fit exactly (max 80 chars) from the Formula Reference below.\n"
             "- The size in the title must be the size field verbatim. Men's bottoms size is the waist alone (34), never waist x inseam (34x34). "
             "Each marketplace form then gets the bottoms size it accepts (eBay waist and inseam, Poshmark Waist 32, women's 0-24, Petite/Plus/Tall).\n"
