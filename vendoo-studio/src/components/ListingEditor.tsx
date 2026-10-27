@@ -268,13 +268,20 @@ export function ListingEditor({
     }
   }, [listingJob?.mode, listingJob?.status, listingJob?.id, convId, queryClient]);
 
+  // Shared with the Marketplaces rail. An item already on Facebook shows Facebook even when it is not a selected marketplace.
+  const { data: liveListings } = useQuery({
+    queryKey: ["marketplace-listings", convId],
+    queryFn: () => api.marketplaceListings.get(convId),
+  });
+  const onFacebook = Boolean(liveListings?.facebook);
   const tabs = React.useMemo(() => {
     const selected = new Set(marketplaceSettings?.selected ?? ["ebay", "etsy", "poshmark", "mercari", "depop"]);
+    if (onFacebook) selected.add("facebook");
     return [
       "general",
       ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => id === "vinted" || selected.has(id)),
     ];
-  }, [marketplaceSettings?.selected]);
+  }, [marketplaceSettings?.selected, onFacebook]);
 
   React.useEffect(() => {
     if (!tabs.includes(editTab)) setEditTab("general");
