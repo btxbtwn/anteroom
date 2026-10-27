@@ -37,9 +37,7 @@ SUPPORTED: dict[str, frozenset[str]] = {
 }
 # Built against fakes; the signed-in web client's request has not been captured
 # yet (docs/vendoo-feature-parity.md, gap 4). Nothing is sent while listed here.
-AWAITING_CAPTURE: dict[str, frozenset[str]] = {
-    "depop": frozenset({"offer"}),
-}
+AWAITING_CAPTURE: dict[str, frozenset[str]] = {}
 # Marketplaces whose offers carry a seller shipping discount the seller picks.
 SHIPPING_DISCOUNTS = frozenset({"poshmark"})
 MAX_ITEMS = 100

@@ -91,8 +91,7 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
     nativeEditorField('poshmark_specifics.poshmarkSku', 'SKU', specifics.poshmarkSku ?? listing.sku ?? '', { max_length: 50 }),
     nativeEditorField('poshmark_specifics.originalPrice', 'Original Price', poshmarkOriginalPrice(listing), { input_type: 'number', min_value: 0, step: 1 }),
   ];
-  return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields,
-    notes: ['Category, size and shipping-discount choices come from Poshmark. Additional Details are private seller notes.'] };
+  return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields };
 }
 
 function depopEditorForm(listing, attributes, parcels = []) {
@@ -159,8 +158,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
   nativeEditorField('depop_specifics.worldwideShipping.price', 'Worldwide Shipping',
     specifics.worldwideShipping?.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01 }));
   return { marketplace: 'depop', native: true, known: true, category_id: depopDirectId(category), fields,
-    notes: ['Buyer pays for Depop shipping. Location comes from the ship-from address selected in Settings.',
-      ...(!parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [])] };
+    notes: !parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [] };
 }
 
 function mercariEditorForm(listing, master) {
@@ -219,17 +217,25 @@ function mercariEditorForm(listing, master) {
     nativeEditorField('mercari_specifics.smartPricing.minimumPrice', 'Floor price', specifics.smartPricing?.minimumPrice ?? '',
       { input_type: 'number', required: specifics.smartPricing?.enabled === true, help: 'The lowest whole-dollar price Smart Pricing may use.' }));
   return { marketplace: 'mercari', native: true, known: true, category_id: String(category || ''),
-    fields,
-    notes: ['Prepaid label choices and rates come from Mercari for this package. Ship on your own is paid by the seller.'] };
+    fields };
 }
 
 async function handleNativeMarketplaceForm(msg) {
   const { marketplace, listing = {} } = msg.payload || {};
-  const deadline = Date.now() + 30000;
+  const deadline = Date.now() + 20000;
+  let answered = false;
+  const reply = result => {
+    if (answered) return;
+    answered = true;
+    sendBrowserResult(msg, result);
+  };
+  // A catalog read that never settles used to leave the form on "Loading…"
+  // until Anteroom gave up and reported that Chrome had not answered.
+  const timer = setTimeout(() => reply({ ok: false, error: 'The marketplace catalog did not answer in time. Refresh choices.' }), 20000);
   try {
     if (marketplace === 'poshmark') {
       const [catalog, tags, discounts] = await Promise.all([poshmarkCatalogData(deadline), poshmarkStyleTags(deadline), poshmarkShippingDiscounts(deadline)]);
-      sendBrowserResult(msg, { ok: true, form: poshmarkEditorForm(listing, catalog, tags, discounts) });
+      reply({ ok: true, form: poshmarkEditorForm(listing, catalog, tags, discounts) });
     } else if (marketplace === 'depop') {
       const attributes = await depopAttributes(deadline);
       let parcels = [];
@@ -237,14 +243,16 @@ async function handleNativeMarketplaceForm(msg) {
         const providers = await depopAccountRead(`/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD&itemCost=${encodeURIComponent(String(listing.price || 1))}`, 'parcel sizes', deadline);
         parcels = (Array.isArray(providers) ? providers : providers?.objects || []).flatMap(row => row.parcelSizes || row.parcel_sizes || []);
       } catch { /* Catalog fields remain usable without an account shipping read. */ }
-      sendBrowserResult(msg, { ok: true, form: depopEditorForm(listing, attributes, parcels) });
+      reply({ ok: true, form: depopEditorForm(listing, attributes, parcels) });
     } else if (marketplace === 'mercari') {
       const master = await mercariCatalogData(deadline);
       const prepared = mercariShippingListing(listing, await mercariShippingClasses(listing, deadline));
-      sendBrowserResult(msg, { ok: true, form: mercariEditorForm(prepared, master) });
+      reply({ ok: true, form: mercariEditorForm(prepared, master) });
     }
-    else sendBrowserResult(msg, { ok: false, error: 'This marketplace has no Chrome form reader.' });
+    else reply({ ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {
-    sendBrowserResult(msg, { ok: false, error: error.message || 'The marketplace catalog could not be read.' });
+    reply({ ok: false, error: error.message || 'The marketplace catalog could not be read.' });
+  } finally {
+    clearTimeout(timer);
   }
 }

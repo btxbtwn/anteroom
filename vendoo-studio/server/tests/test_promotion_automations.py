@@ -115,11 +115,13 @@ class PromotionAutomationsTest(unittest.TestCase):
                      {**SHARE, "scope": "items", "conversation_ids": []}):
             self.assertIn(self.client.post("/api/promotion-automations", json=body).status_code, (400, 422), body)
 
-    def test_depop_rules_save_but_cannot_be_turned_on_until_captured(self):
+    def test_depop_rules_save_off_and_turn_on_only_when_asked(self):
         saved = self.create({**OFFER, "marketplace": "depop", "shipping_label": None})
-        self.assertFalse(saved["available"])
-        response = self.client.post(f"/api/promotion-automations/{saved['id']}/enable", json={"confirm": True})
-        self.assertEqual(response.status_code, 409)
+        self.assertTrue(saved["available"])
+        self.assertFalse(saved["enabled"])
+        self.assertEqual(self.tick(), 0)
+        self.assertTrue(self.enable(saved["id"])["enabled"])
+        self.bridge.assert_not_called()
 
     def mercari_items(self, count):
         items = []

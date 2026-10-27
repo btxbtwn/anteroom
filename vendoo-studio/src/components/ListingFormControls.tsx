@@ -241,7 +241,7 @@ export function CategoryTreeSelect({
     if (choice) onChange(choice);
   };
   if (!steps.length) {
-    return <p role="status" className="text-xs text-muted-foreground">No categories are available yet. Refresh choices.</p>;
+    return <p role="status" className="text-xs text-muted-foreground">No categories are available yet. Reopen the listing to try again.</p>;
   }
   return (
     <div className="flex min-w-0 flex-col gap-2">

@@ -276,11 +276,5 @@ export function nativeFormNotes(
     }
     return notes;
   }
-  if (tab === "mercari") {
-    const own = shownChoice(fields, local, listing, "mercari_specifics.shippingMethod") === "SOYO";
-    return [own
-      ? "Buy and provide your own shipping label; the seller pays."
-      : "Prepaid label choices and rates come from Mercari for this package."];
-  }
   return [];
 }

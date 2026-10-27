@@ -191,8 +191,6 @@ describe("native form values", () => {
       categoryStale: false,
     });
     expect(payer).toMatchObject({ locked: true, options: ["Seller"], defaultValue: "2" });
-    expect(nativeFormNotes("mercari", {}, { "mercari_specifics.shippingMethod": "Ship on your own" }, fields)).toEqual([
-      "Buy and provide your own shipping label; the seller pays.",
-    ]);
+    expect(nativeFormNotes("mercari", {}, { "mercari_specifics.shippingMethod": "Ship on your own" }, fields)).toEqual([]);
   });
 });
