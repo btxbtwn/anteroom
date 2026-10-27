@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.456 — 2026-10-27
+
+- After generating a listing, Anteroom now fills each marketplace’s category fields it can tell from the photos and details, such as Depop’s Type and Fit for jeans or eBay’s Rise, choosing only from that marketplace’s own choices. Fields you set or locked are left alone, anything it can’t tell stays empty, and chat lists what it filled.
+
 ## 0.1.455 — 2026-10-27
 
 - The Depop tab is laid out like Depop’s sell page: the same headings (Description, Info, Enhance your listing, Item price, Shipping), Size and Quantity side by side, and Depop’s own hint under each field.
