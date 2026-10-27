@@ -92,7 +92,7 @@ const FirstRunGuide = lazy(() =>
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "awaiting_extension", "dispatched"]);
 const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
-/* The listings sidebar opens, and never narrows, below the width that fits its footer buttons. */
+/* Open wider for listing titles; resizing still stops at the footer's minimum width. */
 const SIDEBAR_WIDTH: PanelWidthLimits = { min: SIDEBAR_FOOTER_WIDTH, max: 420, maxVw: 30 };
 const THREADS_WIDTH: PanelWidthLimits = { min: 200, max: 420, maxVw: 30 };
 /* Min 420 so the inspector can't shrink under the titlebar listing chrome.
@@ -155,7 +155,7 @@ export function App() {
   const [threadsCollapsed, setThreadsCollapsed] = usePanelCollapsed("threads");
   const panelWidthStyle = {
     // A width the seller dragged to wins, unless it would clip the footer buttons.
-    "--sidebar-width": `${Math.max(sidebarWidth ?? 0, SIDEBAR_WIDTH.min)}px`,
+    "--sidebar-width": `${Math.max(sidebarWidth ?? 340, SIDEBAR_WIDTH.min)}px`,
     "--sidebar-min-width": `${SIDEBAR_WIDTH.min}px`,
     ...(detailWidth ? { "--detail-width": `${detailWidth}px` } : {}),
     ...(threadsWidth ? { "--threads-width": `${threadsWidth}px` } : {}),

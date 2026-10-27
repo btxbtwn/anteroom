@@ -595,10 +595,10 @@
 }
 
 /* Same paper as the chat column — no left hairline — so the inspector reads as
-   part of the workspace instead of a bolted-on black strip. Default 600px fits
-   a marketplace rail beside the form. */
+   part of the workspace instead of a bolted-on black strip. Default 720px gives
+   the form more room beside its marketplace rail, leaving a narrower chat. */
 .detail-panel {
-  width: clamp(420px, var(--detail-width, 600px), 50vw);
+  width: clamp(420px, var(--detail-width, 720px), 50vw);
   flex-shrink: 0;
   min-width: 0;
   background: var(--color-inspector);
