@@ -341,6 +341,15 @@ class EbayVariationsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ebay_specifics.variations.rows.1.values.Size", fields)
 
 
+    def test_cached_aspect_check_takes_a_varied_aspect_from_the_rows(self):
+        rows = [{"id": "Size", "name": "Size", "required": True, "multi": False, "mode": "free_text", "variations": True, "values": []},
+                {"id": "Brand", "name": "Brand", "required": True, "multi": False, "mode": "free_text", "values": []}]
+        with patch("vendoo_studio.services.category_fields.load_rows", return_value=rows):
+            self.assertEqual(ebay_listings._cached_aspect_gaps(VARIED, VARIED["form"]), [])
+            gaps = ebay_listings._cached_aspect_gaps(LISTING, LISTING["form"])
+        self.assertEqual([item["field"] for item in gaps], ["ebay_specifics.Size"])
+
+
 class VariationStockTest(unittest.TestCase):
     def test_stock_is_read_per_variation_and_summed(self):
         from vendoo_studio.services.marketplace_inventory import _ebay_variations
