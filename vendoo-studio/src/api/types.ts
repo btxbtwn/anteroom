@@ -28,6 +28,9 @@ export interface ConversationSummary {
   direct_marketplaces?: string[];
   /** Marketplaces Anteroom delisted directly. Vendoo may still call the item listed there. */
   removed_marketplaces?: string[];
+  /** Units sold on Anteroom's sales ledger, and the most the item was offered with. */
+  units_sold?: number;
+  quantity?: number | null;
   /** Each marketplace listing's own page, where Vendoo recorded one. */
   vendoo_listing_urls?: Record<string, string>;
   /** Vendoo's own time tracking: when the item was created, last modified,
@@ -102,6 +105,33 @@ export interface Photo {
   height: number | null;
   created_at: string;
   url: string;
+  /** The edits served in place of the kept original; null when unedited. */
+  edits?: PhotoEdits | null;
+}
+
+/** A crop as fractions of the turned and straightened photo. */
+export interface CropBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Non-destructive edits, rendered by the server from the original upload. */
+export interface PhotoEdits {
+  /** Quarter turns, clockwise. */
+  rotate: 0 | 90 | 180 | 270;
+  /** Degrees clockwise, -45 to 45. */
+  straighten: number;
+  crop: CropBox | null;
+  /** Stops, -2 to 2. */
+  exposure: number;
+  /** -100 to 100. */
+  brightness: number;
+  /** -100 to 100. */
+  contrast: number;
+  /** Colour behind the cut-out item, as #rrggbb; null keeps the photo's own background. */
+  background: string | null;
 }
 
 export interface PhotoUploadResult {
@@ -477,6 +507,30 @@ export interface NativeInventoryRow {
   sku?: string;
 }
 
+/** One eBay variation: its value for each aspect the listing varies by, stock, and optional SKU and price. */
+export interface EbayVariationRow {
+  values: Record<string, string>;
+  quantity: number | string;
+  sku?: string;
+  price?: string | number;
+}
+
+/** ``ebay_specifics.variations``: one eBay listing with variations. */
+export interface EbayVariations {
+  aspects: string[];
+  photosBy?: string;
+  rows: EbayVariationRow[];
+  /** Photo IDs for each value of the photos aspect. */
+  photos: Record<string, string[]>;
+}
+
+/** An aspect eBay lets vary in the category, with its choices. */
+export interface EbayVariationAspect {
+  name: string;
+  selection_only: boolean;
+  options: string[];
+}
+
 export interface NativeInventoryGroup {
   id: string;
   label: string;
@@ -486,10 +540,11 @@ export interface NativeInventoryGroup {
 export interface MarketplaceFormField {
   key: string;
   label: string;
-  value: string | string[] | number | boolean | NativeInventoryRow[];
+  value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "video";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "video" | "variations";
   inventory_groups?: NativeInventoryGroup[];
+  variation_aspects?: EbayVariationAspect[];
   min_value?: number;
   max_value?: number;
   step?: number;

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.conversation import Conversation, Photo, new_id
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
+from vendoo_studio.services.marketplace_identity import public_listing_url
 
 
 def owners_by_id(db: Session, marketplace: str, listing_id: str) -> list[Conversation]:
@@ -23,7 +24,7 @@ def owners_by_id(db: Session, marketplace: str, listing_id: str) -> list[Convers
 
 
 def create_import(db: Session, marketplace: str, snapshot: dict, listing_id: str, photos: list[dict], binding: dict | None = None) -> Conversation:
-    public_url = {"ebay": f"https://www.ebay.com/itm/{listing_id}", "etsy": f"https://www.etsy.com/listing/{listing_id}"}[marketplace]
+    public_url = public_listing_url(marketplace, listing_id)
     conv = Conversation(id=new_id(), title=snapshot["title"], status="active")
     revision = ListingRevision(id=new_id(), conversation_id=conv.id, listing_json=snapshot, source=f"{marketplace}_import")
     try:

@@ -818,6 +818,33 @@ def test_changed_item_context_cannot_use_a_stale_marketplace_approval(db, client
     assert response.status_code == 409 and calls == []
 
 
+def test_editing_a_photo_cannot_use_a_stale_marketplace_approval(db, client, monkeypatch, tmp_path):
+    from io import BytesIO
+
+    from PIL import Image
+
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services import photo_edits, photos
+    calls = []
+    async def remove(*_args,**_kwargs):
+        calls.append("removed")
+        return {"ok":True}
+    monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist",remove)
+    monkeypatch.setattr(photos,"PHOTOS_DIR",str(tmp_path))
+    buffer = BytesIO()
+    Image.new("RGB",(40,30),"gray").save(buffer,"JPEG")
+    (tmp_path/"coat.jpg").write_bytes(buffer.getvalue())
+    conv = _item(db,title="Coat",price=40,department="Men",category="Coats",marketplace="ebay",days=70)
+    photo = ConversationRepo(db).add_photo(conv.id,"coat.jpg","coat.jpg","image/jpeg",len(buffer.getvalue()),checksum="c"*64,width=40,height=30)
+    task = automations.create_automation(db,{"schedule":{"kind":"daily","time":"09:00"},"filters":{"conversation_ids":[conv.id]},"actions":[{"type":"delist"}],"marketplaces":["ebay"],"activate":True})
+    client.post(f"/api/automations/{task['id']}/run",json={})
+    approval = client.get("/api/automations/approvals").json()[0]
+    edited = photo_edits.save_edits(ConversationRepo(db),photo,photo_edits.PhotoEdits(exposure=0.5))
+    assert edited.id == photo.id and edited.source_filename == "coat.jpg"
+    response=client.post(f"/api/automations/approvals/{approval['id']}/approve",json=_approval_body(approval))
+    assert response.status_code == 409 and calls == []
+
+
 def test_new_proposals_supersede_old_cards_without_rewriting_them(db, client):
     from vendoo_studio.models.automation import AutomationApproval
     conv = _item(db,title="Coat",price=40,department="Men",category="Coats",marketplace="ebay",days=70)

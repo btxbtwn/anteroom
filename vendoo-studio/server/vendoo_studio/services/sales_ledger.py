@@ -12,11 +12,13 @@ from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation, utcnow
-from vendoo_studio.models.marketplace_sale import MarketplaceSale
+from vendoo_studio.models.marketplace_sale import OTHER_MARKETPLACE, MarketplaceSale
 from vendoo_studio.services.api_job_lock import start_gate
 
 AMOUNTS = ("item_revenue", "shipping_credit", "refunds", "fees", "shipping_cost", "item_cost")
 MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted")
+# Where a sale can be recorded: the marketplaces, plus anywhere else (in person, Instagram).
+SALE_MARKETPLACES = (*MARKETPLACES, OTHER_MARKETPLACE)
 PAGE_SIZE = 50
 BASIS_FIELDS = ("marketplace", "order_id", "line_id", "listing_id", "conversation_id", "quantity", "order_status", "order_updated_at", "order_observed_at")
 
@@ -93,7 +95,7 @@ def sale_out(sale: MarketplaceSale, title: str | None) -> dict:
     net, profit = totals(financials, stale)
     raw = sale.financials if isinstance(sale.financials, dict) else {}
     return {"id": sale.id, "marketplace": sale.marketplace, "order_id": sale.order_id, "line_id": sale.line_id,
-            "listing_id": sale.listing_id, "quantity": sale.quantity, "order_status": sale.order_status,
+            "listing_id": sale.listing_id, "quantity": sale.quantity, "order_status": sale.order_status, "source": sale.source,
             "alert_state": sale.state, "conversation_id": sale.conversation_id, "title": title,
             "sold_at": _iso(sale.sold_at), "received_at": _iso(sale.received_at),
             "financials": financials, "financials_stale": stale, "financial_revision": sale.financial_revision,
@@ -137,7 +139,7 @@ def save_financials(db: Session, sale_id: str, body: FinancialSave) -> dict:
 def sale_query(db: Session, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None):
     if start > end or start < date(1970, 1, 1) or end > datetime.now(UTC).date():
         raise LedgerError("Choose a valid UTC date range from 1970 through today.")
-    if marketplace is not None and marketplace not in MARKETPLACES:
+    if marketplace is not None and marketplace not in SALE_MARKETPLACES:
         raise LedgerError("Choose a supported marketplace.")
     moment = func.coalesce(MarketplaceSale.sold_at, MarketplaceSale.received_at)
     query = db.query(MarketplaceSale, Conversation.title).outerjoin(Conversation, Conversation.id == MarketplaceSale.conversation_id).filter(
@@ -183,3 +185,70 @@ def list_sales(db: Session, start: date, end: date, marketplace: str | None = No
     totals = summary(query)
     rows = [sale_out(*row) for row in query.offset((page - 1) * PAGE_SIZE).limit(PAGE_SIZE).all()]
     return {"rows": rows, "summary": totals, "page": page, "has_more": page * PAGE_SIZE < totals["lines"]}
+
+
+class SellerSale(FinancialEntry):
+    """A sale the seller records with Mark as sold, on a marketplace or anywhere else."""
+    marketplace: str
+    sold_on: date
+    quantity: int = Field(default=1, ge=1, le=10_000, strict=True)
+    # One per form submission, so a double click records one sale.
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
+
+
+def record_seller_sale(db: Session, conv_id: str, body: SellerSale) -> dict:
+    """Record a sale with its amounts. Never touches a marketplace.
+
+    A sale on a named marketplace that leaves no units also marks that
+    marketplace sold, so Delist never removes the listing that sold. The
+    response lists the other live listings, for the seller to delist through
+    the confirmed Delist if they choose; nothing is delisted here.
+    """
+    from vendoo_studio.services import marketplace_delist
+    from vendoo_studio.services.item_status import status_for
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    if body.marketplace not in SALE_MARKETPLACES:
+        raise LedgerError("Choose where the item sold.")
+    today = datetime.now(UTC).date()
+    if body.sold_on > today or body.sold_on < date(1970, 1, 1):
+        raise LedgerError("Choose the day it sold, today or earlier.")
+    order_id = f"seller-{body.request_id}"
+    with start_gate():
+        conv = db.get(Conversation, conv_id)
+        if conv is None:
+            raise LedgerError("Item not found.", 404)
+        existing = db.query(MarketplaceSale).filter_by(marketplace=body.marketplace, order_id=order_id, line_id="1").first()
+        if existing is not None:
+            if existing.conversation_id != conv_id:
+                raise LedgerError("This sale was recorded for another item.", 409)
+        else:
+            known = marketplace_delist.listings(db, conv_id).get(body.marketplace) or {} if body.marketplace in MARKETPLACES else {}
+            sold_at = utcnow().replace(tzinfo=None) if body.sold_on == today else datetime.combine(body.sold_on, time(12))
+            sale = MarketplaceSale(
+                marketplace=body.marketplace, order_id=order_id, line_id="1", listing_id=known.get("listing_id"),
+                quantity=body.quantity, order_status="paid", conversation_id=conv_id, source="seller",
+                # The seller made the record, so there is no alert to review.
+                state="dismissed", sold_at=sold_at, resolved_at=utcnow(),
+            )
+            amounts = body.model_dump(include={"currency", *AMOUNTS})
+            if any(amounts[key] is not None for key in AMOUNTS):
+                sale.financials = {**amounts, "order_basis": order_basis(sale), "updated_at": _iso(utcnow()), "source": "seller"}
+                sale.financial_revision = 1
+            db.add(sale)
+            db.commit()
+            existing = sale
+        sale_id = existing.id
+        status = status_for(db, conv_id, parse_notes(conv.notes))
+        if status.status == "sold" and body.marketplace in MARKETPLACES:
+            listing = marketplace_delist.listings(db, conv_id).get(body.marketplace) or {}
+            if not listing.get("sold_here"):
+                marketplace_delist._mark(db, conv_id, body.marketplace, "sold", None)
+    listings = marketplace_delist.listings(db, conv_id)
+    offer = [] if status.status != "sold" else [
+        name for name, entry in listings.items()
+        if name != body.marketplace and entry.get("listing_id") and not entry.get("sold_here")
+        and entry.get("state") not in {"deleted", "deleting"}
+    ]
+    return {"sale": get_sale(db, sale_id), "status": status.status, "units_sold": status.units_sold,
+            "quantity": status.quantity, "listings": listings, "delist_offer": offer}

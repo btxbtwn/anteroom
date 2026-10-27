@@ -327,9 +327,9 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
     if not isinstance(snapshot, dict) or not str(snapshot.get("title") or "").strip():
         raise NativeMarketplaceError(400, "Add a listing title first.")
     snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
-    if marketplace == "poshmark":
-        from vendoo_studio.services.listing_videos import selected_video
+    from vendoo_studio.services.listing_videos import VIDEO_MARKETPLACES, selected_video
 
+    if marketplace in VIDEO_MARKETPLACES:
         try:
             snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace)
         except ValueError as exc:

@@ -26,12 +26,12 @@ Pushes to `main` that touch Anteroom, the extension, or listing skills also buil
 
 The packaged app does not git-pull. **Check for updates** compares the stamped build SHA against the GitHub release and, if newer, downloads the zip, replaces the `.app`, and relaunches. All Anteroom data stays in `~/Library/Application Support/Anteroom` (listings, photos, drafts, hidden fields, settings, fill logs, logs). API keys remain in macOS Keychain. Settings → Data shows the folder path.
 
-Release builds require `MACOS_SIGNING_IDENTITY` to name the same persistent code-signing certificate across updates. CI imports it from `MACOS_SIGNING_CERT_P12_BASE64` and `MACOS_SIGNING_CERT_PASSWORD`; release packaging fails if the certificate is missing. Ad-hoc signatures change the app's Keychain identity on every build. Moving from an older ad-hoc build may require allowing Keychain access once. Credentials are updated in place and are never rewritten at startup.
+Release builds are signed with the certificate in the GitHub secrets `MACOS_SIGNING_CERT_P12_BASE64` and `MACOS_SIGNING_CERT_PASSWORD`; packaging fails rather than fall back to ad-hoc signing when they are missing, and the updater refuses any download that is ad-hoc signed or fails `codesign --verify --deep --strict`. Keychain recognises later builds by their Apple Team ID, which only an Apple-issued certificate carries. Signed with a self-signed certificate, each update gets a new `cdhash` in the Keychain item's partition list, so macOS asks for the Mac password once per update (the release job warns about it). Signed with a **Developer ID Application** certificate, it asks once more and then never again. To switch, follow the steps at the top of `scripts/setup-signing.sh` and run it with the exported `.p12`. Credentials are updated in place and are never rewritten at startup.
 
 The recipient:
 
 1. Unzips the archive and moves **Anteroom** into Applications.
-2. Control-clicks the app and chooses **Open** the first time (ad-hoc signed, not notarized).
+2. Control-clicks the app and chooses **Open** the first time (not notarized).
 3. Signs in with ChatGPT or enters a Xiaomi MiMo API key in Settings.
 4. Clicks **Connect Chrome**. Anteroom opens Vendoo in everyday Chrome and copies the listing extension into an Anteroom-managed folder. Load that unpacked folder once from Settings → Connections (`chrome://extensions/` → Developer mode → Load unpacked).
 
@@ -210,6 +210,24 @@ and price. Multiple products or offerings are rejected instead of being combined
 Existing linked items keep their edits and photos. Conflicting identities are
 reported, and missing photos are shown for follow-up. Importing reads Etsy and
 saves local inventory; it never changes a live listing or contacts Vendoo.
+
+### Importing from Poshmark, Mercari, Depop, Sellwild and Vinted
+
+Sign in to the marketplace in Chrome with the extension connected, then open
+**Marketplaces → Poshmark** (or Mercari, Depop, Sellwild, Vinted) and use
+**Import from …**. The extension reads your own active listings in the
+background, with no tab, about one request a second. Each listing is checked
+against the signed-in account and must still be for sale; listings priced in
+another currency, or Poshmark and Depop listings with several sizes, are not
+imported.
+
+A listing already linked to an item opens that item. A listing that looks like
+an item you already have is not selected with the page: choose **Link to this
+item** to attach the listing to it (its edits and photos stay as they are), or
+tick it to import a new item. Imports save the title, description, price,
+quantity, brand, size, condition, category and photos, and link the listing so
+sale detection watches it. Importing only reads the marketplace; it never edits,
+publishes or delists anything there.
 
 ### Checking linked marketplace inventory
 

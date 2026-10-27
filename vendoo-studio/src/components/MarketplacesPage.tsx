@@ -10,7 +10,7 @@ import { EtsyWorkspace } from "./etsy/EtsyWorkspace";
 import { EbayWorkspace } from "./ebay/EbayWorkspace";
 import { PageHeader, WorkspacePage } from "./WorkspacePage";
 
-const MARKETPLACES = ["ebay", "etsy", "poshmark", "depop", "sellwild"] as const;
+const MARKETPLACES = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"] as const;
 export type Marketplace = (typeof MARKETPLACES)[number];
 
 export function MarketplacesPage({ marketplace, onMarketplaceChange, onOpenListing }: {
@@ -45,5 +45,5 @@ export function MarketplacePanel({ marketplace, onOpenListing }: {
 }) {
   if (marketplace === "ebay") return <EbayWorkspace onOpenListing={onOpenListing} />;
   if (marketplace === "etsy") return <EtsyWorkspace onOpenListing={onOpenListing} />;
-  return <ChannelWorkspace marketplace={marketplace} />;
+  return <ChannelWorkspace marketplace={marketplace} onOpenListing={onOpenListing} />;
 }

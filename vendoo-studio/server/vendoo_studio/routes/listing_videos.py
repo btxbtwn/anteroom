@@ -22,7 +22,8 @@ def _conversation(db: Session, conv_id: str):
 def library(conv_id: str, db: Session = Depends(get_db)):
     _conversation(db, conv_id)
     rows = db.query(ListingVideo).filter_by(conversation_id=conv_id).order_by(ListingVideo.created_at, ListingVideo.id).all()
-    return {"videos": [videos.video_view(row) for row in rows], "max_bytes": videos.MAX_VIDEO_BYTES}
+    return {"videos": [videos.video_view(row) for row in rows], "max_bytes": videos.MAX_VIDEO_BYTES,
+            "rules": videos.VIDEO_RULES}
 
 
 @router.post("/api/conversations/{conv_id}/videos")

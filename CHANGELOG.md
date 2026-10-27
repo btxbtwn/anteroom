@@ -6,9 +6,36 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.419 — 2026-10-26
+## 0.1.425 — 2026-10-26
 
 - Updating a live Depop listing no longer fails with “Depop did not keep the updated price” when Depop's reply simply leaves the price out. After saving, Anteroom reads the listing again the way Depop's edit page does, waits a few seconds if Depop is slow to show the change, and only then reports which of the price, category or size Depop did not keep.
+
+## 0.1.424 — 2026-10-26
+
+- A sale Anteroom detects now turns the item Sold in Inventory and counts in Analytics, without waiting for Vendoo. An item with more than one unit stays Active and shows how many have sold, such as "1 of 3 sold". A sale Vendoo already recorded is counted once.
+- Mark as sold now asks where it sold, when, and for how much, including shipping and fees, and saves it under Sales records. For a sale in person or anywhere else, choose **Other / in person**, or use **Record a sale** in the Marketplaces panel. Afterwards Anteroom offers to delist the item from your other marketplaces; nothing is delisted unless you confirm.
+
+## 0.1.423 — 2026-10-26
+
+- You can now import your active Poshmark, Mercari, Depop, Sellwild and Vinted listings into Anteroom from each marketplace's page, using your sign-in in Chrome. Anteroom shows what it found first, opens items you already have instead of copying them, and asks before linking a listing to an item that looks the same. Importing only reads the marketplace; nothing there is changed, published or delisted.
+
+## 0.1.422 — 2026-10-26
+
+- Add a listing video on eBay and Etsy, the same way as on Poshmark: upload it on that marketplace's form, then Save Draft or List. eBay takes one MP4 or MOV up to 150 MB and List waits until eBay has processed it; Etsy takes one video of 3 to 15 seconds. Anteroom checks that the marketplace kept the video, never uploads the same file twice, and will not list with a video the marketplace blocked or could not process. Clear video removes it.
+- Depop, Mercari, Vinted and Sellwild don't accept listing videos from their websites, so their forms have no video picker.
+
+## 0.1.421 — 2026-10-26
+
+- Photos can now be edited in the listing editor: open a photo and press **Edit**. Crop to a square or another marketplace shape, rotate and straighten, adjust exposure, brightness and contrast, or remove the background and put white or any colour behind the item. Background removal runs on your Mac; the photo is not uploaded anywhere. Your original photo is always kept, and **Reset to original** brings it back. Marketplaces, Vendoo sends and Etsy drafts get the edited photo, and editing a photo means a pending automation approval or reviewed Vendoo send has to be reviewed again.
+
+## 0.1.420 — 2026-10-26
+
+- List one eBay item in several sizes or colors. Under Marketplaces → eBay, choose what the variations differ by (eBay offers the choices it allows for the category), then give each variation its own quantity, and optionally its own SKU, price and photos. Save draft keeps it private on eBay and checks what eBay saved; List publishes it as one listing. eBay sells variations at a fixed price without offers.
+- Update changes the quantities, prices and photos of a live listing with variations, and Delist ends the whole listing. Selling one size no longer counts the item as sold out: Sync reads what is left of each variation.
+
+## 0.1.419 — 2026-10-26
+
+- Anteroom now refuses an update whose signature is missing or damaged, so an update can no longer lose access to your saved sign-ins. Releases are ready to be signed with an Apple Developer ID certificate; once that is set up, updates stop asking for your Mac password.
 
 ## 0.1.418 — 2026-10-26
 

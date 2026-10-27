@@ -83,6 +83,8 @@ class EtsyListingsTest(unittest.TestCase):
             result = self.failure(method, path)
             if result:
                 raise result
+        if "/videos" in path:
+            return self.video_request(method, path, kwargs)
         if path.endswith("/shipping-profiles"):
             return {"results": [{"shipping_profile_id": 99, "title": "Buyer pays", "origin_postal_code": "never-expose",
                                  "profile_type": "calculated" if self.calculated else "manual"}]}
@@ -132,6 +134,26 @@ class EtsyListingsTest(unittest.TestCase):
             self.inventory = {"products": [{"sku": "keep-sku", "property_values": [], "offerings": [{
                 "price": copy.deepcopy(self.remote["price"]), "quantity": 1, "is_enabled": True, "readiness_state_id": 88}]}]}
         return copy.deepcopy(self.remote)
+
+    def video_request(self, method, path, kwargs):
+        videos = self.__dict__.setdefault("videos", [])
+        if method == "GET":
+            return {"count": len(videos), "results": copy.deepcopy(videos)}
+        if method == "DELETE":
+            video_id = int(path.rsplit("/", 1)[-1])
+            for video in videos:
+                if video["video_id"] == video_id:
+                    video["video_state"] = "deleted"
+            return {}
+        data = kwargs.get("data") or {}
+        if "video_id" in data:
+            video = next(video for video in videos if video["video_id"] == int(data["video_id"]))
+            video["video_state"] = "active"
+            return copy.deepcopy(video)
+        self.video_uploads = getattr(self, "video_uploads", 0) + 1
+        video = {"video_id": 5000 + self.video_uploads, "video_state": "active"}
+        videos.append(video)
+        return copy.deepcopy(video)
 
     # --- helpers -----------------------------------------------------------------
 
@@ -280,6 +302,25 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertTrue(binding["etsy_photos_complete"])
         self.calls.clear()
         self.execute("save_draft", binding, photos=kept)
+        self.assertFalse(any(c[3] for c in self.calls))
+
+    def test_an_edited_photo_is_uploaded_again_in_its_place(self):
+        binding = {}
+        self.execute("save_draft", binding)
+        photos = ConversationRepo(self.db).get_photos(self.conv.id)
+        Path(self.temp, "edited.jpg").write_bytes(b"edited image")
+        ConversationRepo(self.db).replace_photo_file(
+            photos[0], {"stored_filename": "edited.jpg", "size_bytes": 12, "checksum": "e" * 64, "width": 1, "height": 1},
+            source_filename=photos[0].stored_filename, edits={"rotate": 90})
+        self.calls.clear()
+        result = self.execute("save_draft", binding, photos=photos)
+        self.assertEqual(result["state"], "draft", result)
+        self.assertEqual([c[:2] for c in self.writes()], [("PATCH", "shops/123/listings/123456"),
+                                                           ("DELETE", "shops/123/listings/123456/images/1001"),
+                                                           ("POST", "shops/123/listings/123456/images")])
+        self.assertEqual(binding["etsy_image_checksums"][photos[0].id], "e" * 64)
+        self.calls.clear()
+        self.execute("save_draft", binding, photos=photos)
         self.assertFalse(any(c[3] for c in self.calls))
 
     def test_update_changes_the_live_listing_and_does_not_create_another(self):
@@ -530,3 +571,120 @@ class RelayMultipartTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("multipart/form-data; boundary=", requests[0].headers["content-type"])
         self.assertIn(b"photo-bytes", requests[0].content)
         self.assertIn(b'name="rank"', requests[0].content)
+
+
+class EtsyVideoTest(EtsyListingsTest):
+    """Listing videos on Etsy, through the same fake shop. Only the video tests run here."""
+
+    def setUp(self):
+        import hashlib
+
+        from vendoo_studio.services import listing_videos
+
+        super().setUp()
+        self.videos = []
+        self.enterContext(patch.object(listing_videos, "VIDEOS_DIR", Path(self.temp)))
+        Path(self.temp, "clip.video").write_bytes(b"clip-bytes")
+        self.video = {"id": "vid1", "stored_filename": "clip.video", "size_bytes": 10, "mime_type": "video/mp4",
+                      "duration_seconds": 8, "checksum": hashlib.sha256(b"clip-bytes").hexdigest()}
+        self.snapshot = {**copy.deepcopy(LISTING), "_native_video": self.video}
+        self.snapshot["etsy_specifics"]["videoId"] = "vid1"
+
+    def video_writes(self):
+        return [call for call in self.calls if "/videos" in call[1] and call[0] != "GET"]
+
+    def save(self, binding, snapshot=None):
+        return self.execute("save_draft", binding, snapshot=copy.deepcopy(snapshot or self.snapshot))
+
+    def test_save_draft_uploads_the_video_once_and_reads_it_back(self):
+        binding = {}
+        result = self.save(binding)
+        self.assertTrue(result["ok"], result)
+        uploads = [call for call in self.video_writes() if call[0] == "POST"]
+        self.assertEqual(len(uploads), 1)
+        self.assertTrue(uploads[0][3], "the file goes as multipart")
+        self.assertEqual(uploads[0][2]["name"], "vid1.mp4")
+        self.assertEqual(binding["etsy_video"], {"checksum": self.video["checksum"], "video_id": "5001"})
+        self.calls.clear()
+        self.assertTrue(self.save(binding)["ok"])
+        self.assertFalse(self.video_writes(), "saving the same revision again uploads nothing")
+
+    def test_a_lost_upload_reply_is_adopted_not_repeated(self):
+        binding = {}
+        self.assertTrue(self.save(binding)["ok"])
+        self.calls.clear()
+        binding["etsy_video"] = {"checksum": self.video["checksum"], "pending": True}
+        self.assertTrue(self.save(binding)["ok"])
+        self.assertFalse(self.video_writes())
+        self.assertEqual(binding["etsy_video"]["video_id"], "5001")
+        self.videos.append({"video_id": 7000, "video_state": "active"})
+        binding["etsy_video"] = {"checksum": self.video["checksum"], "pending": True}
+        result = self.save(binding)
+        self.assertFalse(result["ok"])
+        self.assertIn("more than one video", result["error"])
+
+    def test_a_removed_video_is_attached_again_without_uploading(self):
+        binding = {}
+        self.assertTrue(self.save(binding)["ok"])
+        self.videos[0]["video_state"] = "inactive"
+        self.calls.clear()
+        self.assertTrue(self.save(binding)["ok"])
+        self.assertEqual([call[2] for call in self.video_writes()], [{"video_id": "5001"}])
+
+    def test_clearing_deletes_the_video_and_a_new_file_replaces_it(self):
+        binding = {}
+        self.assertTrue(self.save(binding)["ok"])
+        cleared = copy.deepcopy(self.snapshot)
+        cleared["etsy_specifics"]["videoId"] = ""
+        cleared["_native_video"] = None
+        self.calls.clear()
+        self.assertTrue(self.save(binding, cleared)["ok"])
+        self.assertEqual([call[:2] for call in self.video_writes()], [("DELETE", "shops/123/listings/123456/videos/5001")])
+        self.assertIsNone(binding["etsy_video"])
+        Path(self.temp, "clip.video").write_bytes(b"clip-bytes")
+        self.assertTrue(self.save(binding)["ok"])
+        self.assertEqual([video["video_state"] for video in self.videos], ["deleted", "active"])
+
+    def test_publish_refuses_a_flagged_or_missing_video(self):
+        binding = {}
+        self.assertTrue(self.save(binding)["ok"])
+        self.videos[0]["video_state"] = "flagged"
+        self.calls.clear()
+        result = self.execute("publish", binding, snapshot=copy.deepcopy(self.snapshot))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "missing_fields")
+        self.assertEqual(result["fields"][0]["field"], "etsy_specifics.videoId")
+        self.assertFalse(self.writes())
+        result = self.save(binding)
+        self.assertFalse(result["ok"])
+        self.assertIn("flagged", result["error"])
+
+    def test_publish_lists_with_the_active_video(self):
+        binding = {}
+        self.assertTrue(self.save(binding)["ok"])
+        result = self.execute("publish", binding, snapshot=copy.deepcopy(self.snapshot))
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["state"], "published")
+
+    def test_check_matches_the_video_without_writing(self):
+        binding = {}
+        self.assertTrue(self.save(binding)["ok"])
+        binding["action"] = "save_draft"
+        self.calls.clear()
+        self.assertTrue(asyncio.run(etsy_listings.check(self.snapshot, binding, URL))["ok"])
+        self.videos[0]["video_state"] = "deleted"
+        self.assertFalse(asyncio.run(etsy_listings.check(self.snapshot, binding, URL))["ok"])
+        self.assertFalse(self.writes())
+
+    def test_a_changed_file_never_reaches_etsy(self):
+        Path(self.temp, "clip.video").write_bytes(b"other-byte")
+        binding = {}
+        result = self.save(binding)
+        self.assertFalse(result["ok"])
+        self.assertIn("changed", result["error"])
+        self.assertFalse([call for call in self.video_writes() if call[0] == "POST"])
+
+
+# Only the video tests run in the subclass; the inherited ones already ran above.
+for _name in [name for name in vars(EtsyListingsTest) if name.startswith("test_")]:
+    setattr(EtsyVideoTest, _name, None)

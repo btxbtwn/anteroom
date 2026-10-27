@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
-from vendoo_studio.services import marketplace_delist
+from vendoo_studio.services import marketplace_delist, sales_ledger
 
 router = APIRouter(prefix="/api/conversations/{conv_id}/marketplace-listings", tags=["marketplace-listings"])
 
@@ -43,5 +43,16 @@ def mark(conv_id: str, marketplace: str, body: MarkRequest, db: Session = Depend
 async def delist(conv_id: str, body: DelistRequest, db: Session = Depends(get_db)):
     try:
         return await marketplace_delist.delist(db, conv_id, body.marketplaces, body.confirm)
+    except marketplace_delist.DelistError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+
+
+@router.post("/sold")
+def record_sale(conv_id: str, body: sales_ledger.SellerSale, db: Session = Depends(get_db)):
+    """Mark as sold: record the sale and its amounts. Delisting the rest is the seller's separate, confirmed step."""
+    try:
+        return sales_ledger.record_seller_sale(db, conv_id, body)
+    except sales_ledger.LedgerError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
     except marketplace_delist.DelistError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc

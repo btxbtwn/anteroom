@@ -9,6 +9,7 @@ only reads.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import html
@@ -16,6 +17,7 @@ import re
 from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
+import time
 from typing import Any
 
 from vendoo_studio.config import PHOTOS_DIR
@@ -47,6 +49,9 @@ _SKIP = {
     "autoaccept", "autoacceptprice", "autodeclineprice", "minimumoffer", "minimumofferprice",
     "storecategoryname", "storecategory2name",
     "listingformat", "listingduration", "auctionstartprice", "auctionreserveprice", "auctionbuyitnow",
+    "videoid",
+    # Rows of their own (``ebay_variations``), never an aspect.
+    "variations",
 }
 # Identifiers eBay asks branded items to answer, Does Not Apply included.
 _IDENTIFIER_ASPECTS = {"mpn"}
@@ -813,6 +818,93 @@ async def _image_urls(client: EbayClient, photos: list, binding: dict, record: C
     return [image["url"] for image in images]
 
 
+# eBay's Media API processes an uploaded video before a listing can show it.
+VIDEO_WAIT_S = 240
+VIDEO_POLL_S = 3
+VIDEO_FIELD = "ebay_specifics.videoId"
+
+
+def _video_choice(snapshot: dict) -> dict | None | bool:
+    """The video this revision selects: a video, None to clear it, False when the form never touched it."""
+    details = snapshot.get("ebay_specifics") if isinstance(snapshot.get("ebay_specifics"), dict) else {}
+    if "videoId" not in details:
+        return False
+    wanted = str(details.get("videoId") or "")
+    if not wanted:
+        return None
+    video = snapshot.get("_native_video")
+    if not isinstance(video, dict) or video.get("id") != wanted or not video.get("checksum"):
+        raise missing("Choose the eBay video again before listing.", VIDEO_FIELD)
+    return video
+
+
+async def _video_status(client: EbayClient, video_id: str) -> dict | None:
+    return await _not_found(client.request("GET", f"/commerce/media/v1_beta/video/{segment(video_id)}"))
+
+
+async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: Callable[[dict], None],
+                     active: Callable[[], bool]) -> list[str]:
+    """The eBay video ID for this revision. Each file is created once and uploaded only while eBay waits for it.
+
+    A video whose create reply was lost is never attached to anything, and eBay
+    removes unused videos after 30 days, so creating it again cannot change a listing.
+    """
+    from vendoo_studio.services.listing_videos import video_bytes
+
+    video = _video_choice(snapshot)
+    if not video:
+        return []
+    saved = binding.get("ebay_video") if isinstance(binding.get("ebay_video"), dict) else {}
+    video_id = str(saved.get("video_id") or "") if saved.get("checksum") == video["checksum"] else ""
+    status = await _video_status(client, video_id) if video_id else None
+    data = await asyncio.to_thread(video_bytes, video) if status is None or status.get("status") == "PENDING_UPLOAD" else b""
+    if not active():
+        raise ValueError("The eBay listing stopped before it finished. List again to continue.")
+    if status is None:
+        # Never created for this file, or eBay removed it after 30 unused days.
+        created = await client.request("POST", "/commerce/media/v1_beta/video", body={
+            "title": ebay_title(snapshot) or "Listing video", "size": int(video["size_bytes"]), "classification": ["ITEM"]})
+        video_id = str(created.get("videoId") or created.get("receiptId") or "")
+        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", video_id):
+            raise EbayFailure("eBay did not confirm the video. Check the item before trying again.")
+        record({"ebay_video": {"checksum": video["checksum"], "video_id": video_id}})
+        status = {"status": "PENDING_UPLOAD"}
+    if status.get("status") == "PENDING_UPLOAD":
+        # Upload only while eBay still waits for the file; once it has it, the status moves on.
+        await client.request("POST", f"/commerce/media/v1_beta/video/{segment(video_id)}/upload", binary=data)
+    return [video_id]
+
+
+async def _wait_for_video(client: EbayClient, video_ids: list[str], active: Callable[[], bool]) -> None:
+    """Wait until eBay has processed the video. A blocked or failed video is never attached."""
+    if not video_ids:
+        return
+    deadline = time.monotonic() + VIDEO_WAIT_S
+    while True:
+        status = await _video_status(client, video_ids[0])
+        state = str((status or {}).get("status") or "")
+        if status is None:
+            raise ValueError("eBay no longer has this video. Try again to upload it.")
+        if state == "LIVE":
+            return
+        if state in {"BLOCKED", "PROCESSING_FAILED"}:
+            reason = "blocked it" if state == "BLOCKED" else "could not process it"
+            raise missing(f"eBay {reason}. Choose another video or clear it.", VIDEO_FIELD)
+        if time.monotonic() >= deadline or not active():
+            raise ValueError("eBay is still processing the video. Try again in a few minutes; it will not be uploaded again.")
+        await asyncio.sleep(VIDEO_POLL_S)
+
+
+async def _confirm_video(client: EbayClient, sku: str, snapshot: dict, video_ids: list[str]) -> None:
+    """Read the inventory item back: it holds exactly the selected video, or none once cleared."""
+    if _video_choice(snapshot) is False:
+        return
+    item = await client.request("GET", f"/sell/inventory/v1/inventory_item/{segment(sku)}")
+    saved = (item.get("product") or {}).get("videoIds") if isinstance(item.get("product"), dict) else None
+    if sorted(str(value) for value in saved or []) != sorted(video_ids):
+        raise ValueError("eBay did not keep the listing video. Check the item before trying again.")
+
+
 def _listing_url(listing_id: str) -> str:
     if not re.fullmatch(r"\d{6,20}", listing_id):
         raise ValueError("eBay did not confirm the listing ID. Check eBay before listing again.")
@@ -833,16 +925,33 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
         raise missing("Add an eBay title and description before listing.", *[name for name, value in (("title", title), ("description", description)) if not value])
     if len(description_html(description)) > LISTING_DESCRIPTION_MAX:
         raise missing("eBay descriptions are at most 500,000 characters. Shorten it.", "description")
+    from vendoo_studio.services import ebay_variations
+    from vendoo_studio.services.seller_overrides import price_for
+    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_enabled
+
+    varied = ebay_variations.has_variations(snapshot)
     try:
         quantity = int(str(snapshot.get("quantity") or 1).strip())
     except ValueError:
         quantity = 0
-    if not 1 <= quantity <= 10000:
+    if varied:
+        # Each variation has its own stock; the listing's quantity is their sum.
+        quantity = ebay_variations.total_quantity(snapshot) or 0
+    elif not 1 <= quantity <= 10000:
         raise missing("Enter an eBay quantity from 1 to 10000.", "quantity")
-    from vendoo_studio.services.seller_overrides import price_for
-    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_enabled
-
     chosen = listing_format(snapshot)
+    if varied:
+        # eBay: a listing with variations is fixed price, Good 'Til Cancelled, without Best Offer.
+        if chosen["format"] != FIXED_PRICE:
+            raise missing("An eBay listing with variations is fixed price. Choose Fixed price, or remove the variations.",
+                          "ebay_specifics.listingFormat")
+        offer = (snapshot.get("ebay_specifics") or {}).get("bestOffer")
+        if isinstance(offer, dict) and "enabled" in offer and best_offer_enabled(offer):
+            raise missing("eBay does not take offers on a listing with variations. Turn off Allow offers.",
+                          "ebay_specifics.bestOffer.enabled")
+        if (snapshot.get("ebay_specifics") or {}).get("videoId"):
+            raise missing("eBay does not take a video on a listing with variations. Clear the video, or remove the variations.",
+                          VIDEO_FIELD)
     if chosen["format"] == AUCTION:
         if quantity != 1:
             raise missing("An eBay auction sells one item. Set quantity to 1.", "quantity")
@@ -862,9 +971,12 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
     condition_note = condition_description(snapshot, form)
     if len(condition_note) > 1000:
         raise missing("eBay condition descriptions are at most 1,000 characters.", "ebay_specifics.conditionDescription")
-    return {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
-            "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
-            "condition_description": condition_note, "format": chosen}
+    fields = {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
+              "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
+              "condition_description": condition_note, "format": chosen}
+    if varied:
+        fields["variations"] = ebay_variations.plan(snapshot, price)
+    return fields
 
 
 @requirement("ebay")
@@ -904,14 +1016,25 @@ def _cached_aspect_gaps(snapshot: dict, form: dict) -> list[dict]:
         return []
     if not rows:
         return []
+    from vendoo_studio.services import ebay_variations
+
+    aspects = ebay_aspects(snapshot, form)
+    if ebay_variations.has_variations(snapshot):
+        try:
+            # An aspect the variations differ by is answered on each row, not under item specifics.
+            aspects = ebay_variations.with_first_values(aspects, ebay_variations.plan(snapshot, "1.00"))
+        except ListingProblem:
+            pass
     try:
-        _match_aspects(rows, ebay_aspects(snapshot, form))
+        _match_aspects(rows, aspects)
     except ListingProblem as exc:
         return [gap(item["field"], item["message"]) for item in exc.fields or []]
     return []
 
 
-async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict, terms: dict | None = None) -> dict:
+async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict, terms: dict | None = None,
+                             video_ids: list[str] | None = None) -> dict:
+    """``video_ids`` None leaves the video alone; an empty list removes it."""
     """A pasted eBay link has an item ID and no inventory offer. Revise that listing in place."""
     from xml.etree import ElementTree as ET
 
@@ -933,6 +1056,8 @@ async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict, 
     condition_note_applies = fields["condition"] != "NEW" and not fields["condition_descriptors"]
     if condition_note_applies and not fields["condition_description"]:
         ET.SubElement(root, "DeletedField").text = "Item.ConditionDescription"
+    if video_ids == []:
+        ET.SubElement(root, "DeletedField").text = "Item.VideoDetails.VideoID"
     item = ET.SubElement(root, "Item")
     for name, value in {"ItemID": listing_id, "Title": fields["title"], "Description": description_html(fields["description"]),
                         "StartPrice": fields["price"], "Quantity": str(fields["quantity"])}.items():
@@ -941,9 +1066,12 @@ async def _revise_by_item_id(client: EbayClient, listing_id: str, fields: dict, 
         ET.SubElement(item, "ConditionDescription").text = fields["condition_description"]
     if terms:
         _best_offer_xml(item, terms)
+    if video_ids:
+        ET.SubElement(ET.SubElement(item, "VideoDetails"), "VideoID").text = video_ids[0]
     await client.request("POST", "/ws/api.dll", xml=trading_xml(root), call="ReviseFixedPriceItem")
     after = await owned_listing(client, listing_id)
     if (after["title"] != fields["title"] or str(after.get("price")) != fields["price"]
+            or (video_ids is not None and sorted(after.get("videoIds") or []) != sorted(video_ids))
             or (condition_note_applies and after.get("conditionDescription", "") != fields["condition_description"])):
         raise ValueError("eBay has not confirmed the update. Check the live listing before trying again.")
     return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}
@@ -957,7 +1085,8 @@ def _dimensions(snapshot: dict) -> dict:
     return {**get_package_dimensions(), "unit": "INCH"}
 
 
-def _inventory_body(fields: dict, aspects: dict, image_urls: list[str], snapshot: dict, form: dict) -> dict:
+def _inventory_body(fields: dict, aspects: dict, image_urls: list[str], snapshot: dict, form: dict,
+                    video_ids: list[str] | None = None) -> dict:
     ounces = Decimal(package_ounces(snapshot, form))
     # A quoted weight is what made the inventory service answer 25001 instead of saving the item.
     weight = int(ounces) if ounces == int(ounces) else float(ounces)
@@ -975,6 +1104,9 @@ def _inventory_body(fields: dict, aspects: dict, image_urls: list[str], snapshot
     }
     if fields.get("condition_descriptors"):
         body["conditionDescriptors"] = fields["condition_descriptors"]
+    if video_ids:
+        # eBay supports one video per listing. The item is replaced whole, so leaving it out clears it.
+        body["product"]["videoIds"] = video_ids
     return body
 
 
@@ -983,8 +1115,10 @@ def _usd(value: str) -> dict:
 
 
 def offer_terms(form: dict, fields: dict, snapshot: dict) -> dict | None:
-    """Best Offer terms for a fixed-price offer. An auction carries none."""
-    return None if fields["format"]["format"] == AUCTION else best_offer_terms(form, fields["price"], snapshot)
+    """Best Offer terms for a fixed-price offer. An auction or a listing with variations carries none."""
+    if fields["format"]["format"] == AUCTION or fields.get("variations"):
+        return None
+    return best_offer_terms(form, fields["price"], snapshot)
 
 
 def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) -> dict:
@@ -1012,7 +1146,7 @@ def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) ->
 
 
 async def _update_live(snapshot: dict, photos: list, binding: dict, record: Callable[[dict], None],
-                       active: Callable[[], bool]) -> dict:
+                       active: Callable[[], bool], conversation_id: str = "") -> dict:
     """Replace fields on the listing that is already live. Never publishes a second one.
 
     Every write here is a replace, so a lost reply is safe to send again.
@@ -1034,8 +1168,24 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         offer_id = str(binding.get("ebay_offer_id") or "")
         if not re.fullmatch(r"\d{6,20}", listing_id):
             raise ValueError("eBay has not confirmed which live listing to update.")
+        if fields.get("variations") or binding.get("ebay_group_key"):
+            from vendoo_studio.services import ebay_variations
+
+            if not fields.get("variations"):
+                raise ValueError("This eBay listing has variations. Keep at least two, or end it on eBay and list it again.")
+            base = str(binding.get("ebay_sku") or ebay_sku(snapshot, binding, conversation_id))
+            chosen = ebay_variations.assign_skus(fields["variations"], base)
+            chosen = await ebay_variations.check_category(client, fields["category_id"], chosen)
+            fields = {**fields, "variations": chosen}
+            aspects = await _complete_aspects(client, fields["category_id"],
+                                              ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen))
+            await _check_condition(client, fields["category_id"], fields["condition"])
+            return await ebay_variations.update_live(client, snapshot, form, fields, photos, binding, record, active, aspects)
         if not offer_id:
-            return await _revise_by_item_id(client, listing_id, fields, best_offer_terms(form, fields["price"], snapshot))
+            video_ids = await _video_ids(client, snapshot, binding, record, active)
+            await _wait_for_video(client, video_ids, active)
+            return await _revise_by_item_id(client, listing_id, fields, best_offer_terms(form, fields["price"], snapshot),
+                                            None if _video_choice(snapshot) is False else video_ids)
         offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
         current_id = str((offer.get("listing") or {}).get("listingId") or "")
         if offer.get("status") != "PUBLISHED" or current_id != listing_id:
@@ -1049,8 +1199,11 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
             raise ValueError("eBay did not return this listing's SKU. Check eBay before updating it.")
         record({"ebay_sku": sku, "ebay_offer_id": offer_id, "ebay_listing_id": listing_id})
         image_urls = await _image_urls(client, photos, binding, record, active)
+        video_ids = await _video_ids(client, snapshot, binding, record, active)
+        await _wait_for_video(client, video_ids, active)
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
-                             body=_inventory_body(fields, aspects, image_urls, snapshot, form))
+                             body=_inventory_body(fields, aspects, image_urls, snapshot, form, video_ids))
+        await _confirm_video(client, sku, snapshot, video_ids)
         policies = offer.get("listingPolicies") if isinstance(offer.get("listingPolicies"), dict) else {}
         policies = {**policies, "bestOfferTerms": offer_terms(form, fields, snapshot)}
         body = _offer_body(sku, fields, offer.get("merchantLocationKey"), policies)
@@ -1071,7 +1224,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
     if action == "update":
         if confirm is not True:
             return failure("Confirm updating the live eBay listing.", "rejected", safe=True)
-        return await _update_live(snapshot, photos, binding, record, active)
+        return await _update_live(snapshot, photos, binding, record, active, conversation_id)
     pending: str | None = None
     try:
         if action not in {"list", "save_draft"} or (action == "list" and confirm is not True):
@@ -1088,6 +1241,21 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         problem = best_offer_error(snapshot)
         if problem:
             raise ValueError(problem)
+        if fields.get("variations"):
+            from vendoo_studio.services import ebay_variations
+
+            chosen = ebay_variations.assign_skus(fields["variations"], ebay_sku(snapshot, binding, conversation_id))
+            chosen = await ebay_variations.check_category(client, fields["category_id"], chosen)
+            fields = {**fields, "variations": chosen}
+            aspects = await _complete_aspects(client, fields["category_id"],
+                                              ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen))
+            await _check_condition(client, fields["category_id"], fields["condition"])
+            in_flight: dict = {"write": None}
+            try:
+                return await ebay_variations.execute(action, client, snapshot, form, fields, photos, binding, record, active,
+                                                     conversation_id, in_flight, aspects)
+            finally:
+                pending = in_flight["write"]
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
         await _check_condition(client, fields["category_id"], fields["condition"])
         await _check_format(client, fields["category_id"], fields["format"])
@@ -1105,10 +1273,14 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             if live:
                 return live
         image_urls = await _image_urls(client, photos, binding, record, active)
+        video_ids = await _video_ids(client, snapshot, binding, record, active)
+        # Save Draft and List both wait: eBay attaches only a processed video.
+        await _wait_for_video(client, video_ids, active)
         # From here eBay may hold an inventory item under this SKU, and it is this item's.
         record({"ebay_sku": sku, "ebay_inventory_written": True})
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
-                             body=_inventory_body(fields, aspects, image_urls, snapshot, form))
+                             body=_inventory_body(fields, aspects, image_urls, snapshot, form, video_ids))
+        await _confirm_video(client, sku, snapshot, video_ids)
         body = _offer_body(sku, fields, choices["merchantLocationKey"], {
             "fulfillmentPolicyId": choices["fulfillmentPolicyId"], "paymentPolicyId": choices["paymentPolicyId"],
             "returnPolicyId": choices["returnPolicyId"], "bestOfferTerms": offer_terms(form, fields, snapshot),
@@ -1153,6 +1325,10 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
             # The SKU is saved before anything is written.
             return resumable("Nothing reached eBay. List again.")
         client = await EbayClient.connect()
+        from vendoo_studio.services import ebay_variations
+
+        if binding.get("ebay_group_key") and (snapshot is None or ebay_variations.has_variations(snapshot)):
+            return await ebay_variations.check(client, binding, snapshot, record)
         if binding.get("action") == "update" and snapshot:
             return await _check_update(client, binding, snapshot)
         # The format is the revision's: a lost reply may have left an offer only eBay knows about.
@@ -1171,6 +1347,7 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
                 differences = offer_differences(offer, sku, _listing_fields(snapshot, form))
                 if differences:
                     raise ValueError(f"eBay saved different values for: {', '.join(differences)}. Save the draft again.")
+                await _confirm_video(client, sku, snapshot, _checked_video_ids(snapshot, binding))
                 return {"ok": True, "state": "draft"}
             return resumable("eBay has this listing saved but not live. List again to publish it.")
         return resumable("eBay has no listing for this item. List again.")
@@ -1208,6 +1385,17 @@ def offer_differences(offer: dict, sku: str, fields: dict) -> list[str]:
     return [name for name, same in checks.items() if not same]
 
 
+def _checked_video_ids(snapshot: dict, binding: dict) -> list[str]:
+    """The video ID a check expects, from the journal of this file. Checks never upload."""
+    video = _video_choice(snapshot)
+    if not video:
+        return []
+    saved = binding.get("ebay_video") if isinstance(binding.get("ebay_video"), dict) else {}
+    if saved.get("checksum") != video["checksum"] or not saved.get("video_id"):
+        raise ValueError("eBay has not confirmed the video for this revision. Check the item before trying again.")
+    return [str(saved["video_id"])]
+
+
 async def _check_update(client: EbayClient, binding: dict, snapshot: dict) -> dict:
     title = ebay_title(snapshot)
     expected = dollars(money_cents(str(snapshot.get("price")))) if listing_format(snapshot)["format"] == FIXED_PRICE else ""
@@ -1217,7 +1405,8 @@ async def _check_update(client: EbayClient, binding: dict, snapshot: dict) -> di
         from vendoo_studio.services.ebay_actions import owned_listing
 
         live = await owned_listing(client, listing_id)
-        if live["title"] != title or str(live.get("price")) != expected:
+        if (live["title"] != title or str(live.get("price")) != expected
+                or (_video_choice(snapshot) is not False and sorted(live.get("videoIds") or []) != _checked_video_ids(snapshot, binding))):
             raise ValueError("eBay has not confirmed the update. Check the live listing before trying again.")
         return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}
     offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
@@ -1231,6 +1420,8 @@ async def _check_update(client: EbayClient, binding: dict, snapshot: dict) -> di
         same_price = str((offer.get("pricingSummary") or {}).get("price", {}).get("value") or "") == expected
     if product.get("title") != title or not same_price:
         raise ValueError("eBay has not confirmed the update. Check the live listing before trying again.")
+    if _video_choice(snapshot) is not False and sorted(map(str, product.get("videoIds") or [])) != _checked_video_ids(snapshot, binding):
+        raise ValueError("eBay has not confirmed the listing video. Check the live listing before trying again.")
     listing_id = str((offer.get("listing") or {}).get("listingId") or listing_id)
     if offer.get("status") == "PUBLISHED" and listing_id:
         return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}

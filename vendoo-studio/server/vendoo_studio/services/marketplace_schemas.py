@@ -25,9 +25,11 @@ from typing import Literal
 
 from vendoo_studio.services.category_fields import load_rows, save_rows
 
-EBAY_ASPECTS = "ebay_aspects_v2"
+# v3 keeps aspectEnabledForVariations, so older cached rows are read again.
+EBAY_ASPECTS = "ebay_aspects_v3"
 EBAY_CONDITIONS = "ebay_conditions"
 EBAY_LISTING_TYPES = "ebay_listing_types"
+EBAY_LISTING_STRUCTURE = "ebay_listing_structure"
 ETSY_PROPERTIES = "etsy_properties"
 _TAXONOMY_MAX_AGE_S = 24 * 3600
 _etsy_taxonomy: dict[str, object] = {"at": 0.0, "leaves": ()}
@@ -113,6 +115,8 @@ def _ebay_field(aspect: dict) -> dict:
         "mode": "selection" if constraint.get("aspectMode") == "SELECTION_ONLY" else "free_text",
         "multi": constraint.get("itemToAspectCardinality") == "MULTI", "max_values": None,
         "max_length": constraint.get("aspectMaxLength"),
+        # eBay lets this aspect tell the variations of one listing apart.
+        "variations": bool(constraint.get("aspectEnabledForVariations")),
         "values": values,
     }
 
@@ -205,6 +209,22 @@ async def ebay_listing_types(client, category_id: str) -> dict[str, list[str]]:
     if answer:
         save_rows(EBAY_LISTING_TYPES, category_id, [answer])
     return answer
+
+
+async def ebay_variations_supported(client, category_id: str) -> bool | None:
+    """Whether eBay takes multi-variation listings in the leaf (``getListingStructurePolicies``). None: eBay did not say."""
+    category_id = _category(category_id)
+    cached = load_rows(EBAY_LISTING_STRUCTURE, category_id)
+    if cached:
+        return bool(cached[0].get("variations"))
+    body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_structure_policies",
+                                params={"filter": f"categoryIds:{{{category_id}}}"})
+    policy = next((row for row in body.get("listingStructurePolicies") or [] if str(row.get("categoryId")) == category_id), None)
+    if policy is None or "variationsSupported" not in policy:
+        return None
+    supported = bool(policy["variationsSupported"])
+    save_rows(EBAY_LISTING_STRUCTURE, category_id, [{"variations": supported}])
+    return supported
 
 
 def _etsy_field(prop: dict) -> dict:

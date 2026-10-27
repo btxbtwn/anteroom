@@ -237,10 +237,18 @@ def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | No
     return listings(db, conv_id)
 
 
-async def _delete_ebay(item_id: str) -> dict:
+async def _delete_ebay(item_id: str, record: dict | None = None) -> dict:
     from vendoo_studio.services.ebay_client import EbayClient, EbayFailure
 
     client = await EbayClient.connect()
+    record = record or {}
+    group_key = str(record.get("ebay_group_key") or "")
+    offers = record.get("ebay_variant_offers") if isinstance(record.get("ebay_variant_offers"), dict) else {}
+    if group_key and offers and str(record.get("ebay_listing_id") or "") == item_id:
+        # A listing with variations Anteroom made: end the whole group, and keep its offers to list again.
+        from vendoo_studio.services.ebay_variations import end_group
+
+        return await end_group(client, group_key, [str(offer_id) for offer_id in offers.values()])
     try:
         await client.trading("EndFixedPriceItem", {"ItemID": item_id, "EndingReason": "NotAvailable"})
     except EbayFailure as exc:
@@ -322,7 +330,7 @@ async def delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
             repo.add_event(job.id, "native_progress", "native_delist", {"marketplace": name, "step": "delist", "label": "Delisting"})
             try:
                 if name == "ebay":
-                    result = await _delete_ebay(entry["listing_id"])
+                    result = await _delete_ebay(entry["listing_id"], MarketplaceListingRepo(db).get(conv_id, "ebay"))
                 elif name == "etsy":
                     result = await _delete_etsy(entry["listing_id"])
                 else:

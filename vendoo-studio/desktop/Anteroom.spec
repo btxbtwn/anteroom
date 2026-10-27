@@ -87,6 +87,9 @@ hiddenimports = [
     "PIL.ImageDraw",
     "PIL.ImageOps",
     "pillow_heif",
+    # Background removal: Apple Vision's on-device subject mask (services/photo_edits.py).
+    "Vision",
+    "Quartz",
 ]
 
 try:

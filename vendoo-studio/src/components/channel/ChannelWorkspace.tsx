@@ -3,23 +3,26 @@ import { useQuery } from "@tanstack/react-query";
 import { ExternalLinkIcon } from "lucide-react";
 import { api } from "../../api/client";
 import { formatDays, formatMoney } from "../analyticsFormat";
+import { InventoryImport } from "../InventoryImport";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { marketplaceName } from "../marketplaceNames";
 import { PageError, PageNote } from "../WorkspacePage";
 import { Input } from "../ui/input";
 import "../ebay/ebay.css";
 
-/** Marketplaces Studio reaches through Vendoo and the extension rather than a direct API connection. */
-export type ChannelMarketplace = "poshmark" | "depop" | "sellwild";
+/** Marketplaces Studio reaches through the seller's signed-in Chrome rather than a direct API connection. */
+export type ChannelMarketplace = "poshmark" | "mercari" | "depop" | "sellwild" | "vinted";
 
 const CHANNEL_URLS: Record<ChannelMarketplace, string> = {
   poshmark: "https://poshmark.com",
+  mercari: "https://www.mercari.com",
   depop: "https://www.depop.com",
   sellwild: "https://sellwild.com",
+  vinted: "https://www.vinted.com",
 };
 
-/** One marketplace's workspace, laid out like eBay's: a channel heading, then its sales dashboard. */
-export function ChannelWorkspace({ marketplace }: { marketplace: ChannelMarketplace }) {
+/** One marketplace's workspace, laid out like eBay's: a channel heading, its sales dashboard, then import. */
+export function ChannelWorkspace({ marketplace, onOpenListing }: { marketplace: ChannelMarketplace; onOpenListing: (id: string) => void }) {
   const name = marketplaceName(marketplace);
   return <div className="ebay-workspace" data-marketplace={marketplace}>
     <header className="ebay-page-heading">
@@ -31,6 +34,7 @@ export function ChannelWorkspace({ marketplace }: { marketplace: ChannelMarketpl
       </div>
     </header>
     <div className="ebay-tab-content"><ChannelDashboard marketplace={marketplace} /></div>
+    <div className="ebay-tab-content"><InventoryImport key={marketplace} marketplace={marketplace} accountKey={marketplace} onOpenListing={onOpenListing} /></div>
   </div>;
 }
 

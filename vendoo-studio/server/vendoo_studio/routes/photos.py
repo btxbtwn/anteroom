@@ -11,14 +11,14 @@ from vendoo_studio.database import get_db
 from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes.conversations import _photo_response
+from vendoo_studio.services import photo_edits
+from vendoo_studio.services.photo_edits import BackgroundRemovalError, PhotoEdits
 from vendoo_studio.services.photos import (
     THUMBNAIL_MIME,
     THUMBNAIL_SIZES,
-    delete_thumbnails,
     get_or_create_thumbnail,
     photo_url,
     process_upload,
-    rotate_file,
 )
 
 router = APIRouter(tags=["photos"])
@@ -105,29 +105,60 @@ class RotateRequest(BaseModel):
     degrees: int
 
 
-@router.post("/api/conversations/{conv_id}/photos/{photo_id}/rotate")
-def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session = Depends(get_db)):
-    repo = ConversationRepo(db)
+def _photo(repo: ConversationRepo, conv_id: str, photo_id: str):
     photo = next((p for p in repo.get_photos(conv_id) if p.id == photo_id), None)
     if not photo:
         raise HTTPException(404, "Photo not found")
+    return photo
 
+
+def _save(repo: ConversationRepo, photo, edits: PhotoEdits):
     try:
-        meta = rotate_file(photo.stored_filename, photo.mime_type, body.degrees)
+        return _photo_response(photo_edits.save_edits(repo, photo, edits))
     except FileNotFoundError:
         raise HTTPException(404, "Photo file not found") from None
     except ValueError as e:
         raise HTTPException(400, str(e)) from None
 
-    previous = photo.stored_filename
+
+@router.post("/api/conversations/{conv_id}/photos/{photo_id}/rotate")
+def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session = Depends(get_db)):
+    if body.degrees not in (90, -90, 180):
+        raise HTTPException(400, "Rotate by 90, -90 or 180 degrees")
+    repo = ConversationRepo(db)
+    photo = _photo(repo, conv_id, photo_id)
+    return _save(repo, photo, photo_edits.current_edits(photo).turned(body.degrees))
+
+
+@router.put("/api/conversations/{conv_id}/photos/{photo_id}/edits")
+def edit_photo(conv_id: str, photo_id: str, body: PhotoEdits, db: Session = Depends(get_db)):
+    """Replace the photo's edits; they render from the original upload, which is kept."""
+    repo = ConversationRepo(db)
+    return _save(repo, _photo(repo, conv_id, photo_id), body)
+
+
+@router.delete("/api/conversations/{conv_id}/photos/{photo_id}/edits")
+def reset_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
+    repo = ConversationRepo(db)
     try:
-        photo = repo.replace_photo_file(photo, meta)
-    except Exception:
-        os.remove(Path(PHOTOS_DIR) / meta["stored_filename"])
-        raise
-    (Path(PHOTOS_DIR) / previous).unlink(missing_ok=True)
-    delete_thumbnails(previous)
-    return _photo_response(photo)
+        return _photo_response(photo_edits.reset_edits(repo, _photo(repo, conv_id, photo_id)))
+    except FileNotFoundError:
+        raise HTTPException(404, "The original photo file is missing") from None
+
+
+@router.post("/api/conversations/{conv_id}/photos/{photo_id}/edits/preview")
+def preview_photo_edits(conv_id: str, photo_id: str, body: PhotoEdits, crop: bool = True, db: Session = Depends(get_db)):
+    """A smaller JPEG of the edits, for the editor; ``crop=false`` leaves the frame whole to draw the crop on."""
+    from fastapi.responses import Response
+
+    photo = _photo(ConversationRepo(db), conv_id, photo_id)
+    try:
+        image = photo_edits.preview_jpeg(photo.source_filename or photo.stored_filename, body, crop=crop)
+    except FileNotFoundError:
+        raise HTTPException(404, "Photo file not found") from None
+    except BackgroundRemovalError as e:
+        raise HTTPException(400, str(e)) from None
+    return Response(image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/photos/{photo_id}")

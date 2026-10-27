@@ -57,12 +57,17 @@ class MarketplaceListing(Base):
     ebay_inventory_written = Column(Boolean, nullable=True)
     # [{"photo_id", "checksum", "url"}] in listing order.
     ebay_images = Column(JSON, nullable=True)
+    # A listing with variations: its inventory item group, and {variation SKU: offer ID}.
+    ebay_group_key = Column(String, nullable=True)
+    ebay_variant_offers = Column(JSON, nullable=True)
 
     etsy_shop_id = Column(String, nullable=True)
     etsy_pending_write = Column(String, nullable=True)
     etsy_photo_ids = Column(JSON, nullable=True)
     # {photo_id: listing_image_id}
     etsy_image_ids = Column(JSON, nullable=True)
+    # {photo_id: checksum} of each uploaded file, so an edited photo is uploaded again.
+    etsy_image_checksums = Column(JSON, nullable=True)
     etsy_photos_complete = Column(Boolean, nullable=True)
     etsy_shipping_profile_id = Column(String, nullable=True)
     etsy_readiness_state_id = Column(String, nullable=True)

@@ -1,16 +1,17 @@
-"""Sales and inventory totals from the imported Vendoo workspace.
+"""Sales and inventory totals from Anteroom's own records and the imported Vendoo history.
 
-The sidebar already knows status, price, and dates. Analytics also needs the
-sold price, cost, brand, and category, which live on the current listing and
-in the Vendoo notes. This reads those columns and nothing else, then groups
-them. It does not call Vendoo.
+Status comes from ``services/item_status.py``. Sales come from the sales
+ledger (``marketplace_sales``, with its recorded amounts) and from the Vendoo
+sale in each item's notes, one row per order. Price, cost, brand and category
+live on the current listing. This reads those and nothing else, then groups
+them. It calls no marketplace and not Vendoo.
 """
 
 from __future__ import annotations
 
 import math
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -73,6 +74,9 @@ class AnalyticsItem:
     shipping_credit: float = 0.0
     box_id: str | None = None
     missing_sale_details: tuple[str, ...] = ()
+    refunds: float = 0.0
+    # The sales-ledger line this sale row came from, if any.
+    sale_id: str | None = None
 
     @property
     def has_cost(self) -> bool:
@@ -82,7 +86,7 @@ class AnalyticsItem:
     def net(self) -> float:
         """What the sale brought in before the item's own cost."""
         return (
-            (self.sold_price or 0.0) + self.shipping_credit
+            (self.sold_price or 0.0) + self.shipping_credit - self.refunds
             - (self.fees or 0.0) - self.shipping_cost
         )
 
@@ -138,12 +142,20 @@ def inventory_analytics(
 
 
 def load_rows(db) -> list[AnalyticsItem]:
-    """Every listing as an analytics row. Current revision only."""
+    """Every listing as analytics rows. Current revision only.
+
+    An item that is not sold is one row. Each sale is a row of its own with
+    status ``sold``: Anteroom's sales ledger (``marketplace_sales``, with the
+    amounts recorded on it) plus the imported Vendoo sale. When both hold the
+    same order, one row stands for it (see ``_item_sales``). An item with some
+    units sold and some left is an active row plus a row per sale.
+    """
     from sqlalchemy import func
 
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.listing import Listing, ListingRevision
     from vendoo_studio.models.sourcing import SourceBox
+    from vendoo_studio.services.item_status import paid_lines, statuses
     from vendoo_studio.services.sell_through import _days_between, _parse_moment
     from vendoo_studio.services.vendoo_import import VENDOO_MARKETPLACE_ALIASES, parse_notes
 
@@ -165,45 +177,133 @@ def load_rows(db) -> list[AnalyticsItem]:
     # Pieces that were not worth listing add their cost to the ones that were.
     box_share = {box.id: _money(box.landed / box.sellable) for box in db.query(SourceBox).all() if box.sellable}
     rows: list[AnalyticsItem] = []
-    conversations = db.query(
-        Conversation.id,
-        Conversation.title,
-        Conversation.status,
-        Conversation.notes,
-        Conversation.box_id,
-    ).all()
-    for conv_id, title, status, notes_raw, box_id in conversations:
-        notes = parse_notes(notes_raw)
+    conversations = [
+        (conv_id, title, status, parse_notes(notes_raw), box_id)
+        for conv_id, title, status, notes_raw, box_id in db.query(
+            Conversation.id,
+            Conversation.title,
+            Conversation.status,
+            Conversation.notes,
+            Conversation.box_id,
+        ).all()
+    ]
+    own = statuses(db, [(conv_id, notes) for conv_id, _title, _status, notes, _box in conversations])
+    lines = paid_lines(db)
+    for conv_id, title, status, notes, box_id in conversations:
         price, cost, brand, category = facets.get(conv_id, (None, None, None, None))
         dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
         sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
         listed_text = str(dates.get("listed") or "")
-        sold_text = str(dates.get("sold") or sale.get("soldAt") or "")
-        effective = _effective_status(str(status or ""), notes)
-        sold_price = _amount(sale.get("price"))
-        asking = _number(price)
+        derived = own[conv_id]
+        effective = str(status) if str(status or "") in _BUSY else derived.status
         sale_cost = _amount(sale.get("cost"))
         own_cost = sale_cost if sale_cost is not None else _amount(cost)
-        rows.append(AnalyticsItem(
+        unit_cost = own_cost if own_cost is not None else box_share.get(box_id)
+        base = AnalyticsItem(
             conversation_id=conv_id,
             title=(str(title or "").strip() or "Untitled listing"),
             status=effective,
-            price=asking,
-            cost=own_cost if own_cost is not None else box_share.get(box_id),
+            price=_number(price),
+            cost=unit_cost,
             brand=str(brand or "").strip(),
             category=_category_label(category),
-            sold_price=sold_price,
-            sold_at=_parse_moment(sold_text),
+            sold_price=None,
+            sold_at=None,
             listed_at=_parse_moment(listed_text),
             marketplace=_marketplace(sale, dates, notes, VENDOO_MARKETPLACE_ALIASES),
-            days_listed=_days_between(listed_text, sold_text),
-            fees=_amount(sale.get("fees")),
-            shipping_cost=_amount(sale.get("shippingCost")) or 0.0,
-            shipping_credit=_amount(sale.get("shippingCredit")) or 0.0,
+            days_listed=None,
             box_id=box_id,
-            missing_sale_details=tuple(str(gap) for gap in sale.get("missing") or ()),
-        ))
+        )
+        vendoo = None
+        if str(notes.get("vendooStatus") or "") == "sold":
+            sold_text = str(dates.get("sold") or sale.get("soldAt") or "")
+            vendoo = replace(
+                base,
+                status="sold",
+                sold_price=_amount(sale.get("price")),
+                sold_at=_parse_moment(sold_text),
+                days_listed=_days_between(listed_text, sold_text),
+                fees=_amount(sale.get("fees")),
+                shipping_cost=_amount(sale.get("shippingCost")) or 0.0,
+                shipping_credit=_amount(sale.get("shippingCredit")) or 0.0,
+                missing_sale_details=tuple(str(gap) for gap in sale.get("missing") or ()),
+            )
+        # A send in flight keeps its one row, as before; its sales count once it settles.
+        sales = [] if effective in _BUSY else _item_sales(base, vendoo, lines.get(conv_id, []), listed_text)
+        if effective != "sold" or not sales:
+            # Not sold, or sold with no sale on record (a bare Vendoo label or mark).
+            fallback_sold = effective == "sold" and not sales
+            rows.append(replace(base, sold_at=derived.sold_at) if fallback_sold else base)
+        rows.extend(sales)
     return rows
+
+
+def _item_sales(base: AnalyticsItem, vendoo: AnalyticsItem | None, lines: list, listed_text: str) -> list[AnalyticsItem]:
+    """One row per sale. A Vendoo sale and a ledger line for the same order become one.
+
+    Vendoo keeps one sale per item and no order ID, so the same order is the
+    ledger line on Vendoo's marketplace (any marketplace when Vendoo did not
+    say) closest in time to Vendoo's sale. That row takes the ledger's recorded
+    amounts and fills any it lacks from Vendoo.
+    """
+    from vendoo_studio.services.sell_through import _days_between
+
+    ordered = sorted(lines, key=lambda line: (line.sold_at or line.received_at, line.id))
+    rows = [_ledger_row(base, line, listed_text, _days_between) for line in ordered]
+    if vendoo is None:
+        return rows
+    candidates = [index for index, line in enumerate(ordered)
+                  if vendoo.marketplace == "unknown" or line.marketplace == vendoo.marketplace]
+    if not candidates:
+        return [vendoo, *rows]
+
+    def distance(index: int) -> float:
+        moment = rows[index].sold_at
+        return abs((moment - vendoo.sold_at).total_seconds()) if moment and vendoo.sold_at else float(index)
+
+    match = min(candidates, key=distance)
+    ledger = rows[match]
+    recorded = ledger.sold_price is not None or ledger.fees is not None
+    rows[match] = replace(
+        ledger,
+        sold_price=ledger.sold_price if ledger.sold_price is not None else vendoo.sold_price,
+        fees=ledger.fees if ledger.fees is not None else vendoo.fees,
+        shipping_cost=ledger.shipping_cost if recorded else vendoo.shipping_cost,
+        shipping_credit=ledger.shipping_credit if recorded else vendoo.shipping_credit,
+        cost=ledger.cost if ledger.cost is not None else vendoo.cost,
+        sold_at=vendoo.sold_at or ledger.sold_at,
+        days_listed=vendoo.days_listed if vendoo.days_listed is not None else ledger.days_listed,
+        missing_sale_details=() if recorded else vendoo.missing_sale_details,
+    )
+    return rows
+
+
+def _ledger_row(base: AnalyticsItem, line, listed_text: str, days_between) -> AnalyticsItem:
+    """A sales-ledger line as a sold row, with the amounts the seller or marketplace recorded."""
+    from vendoo_studio.services.sales_ledger import financial_values
+
+    moment = line.sold_at or line.received_at
+    sold_at = moment.replace(tzinfo=UTC) if moment and moment.tzinfo is None else moment
+    data, stale = financial_values(line)
+    # Analytics totals are in dollars; another currency is a sale with no amount here.
+    data = data if data and not stale and data.get("currency") == "USD" else {}
+    units = line.quantity if type(line.quantity) is int and line.quantity > 0 else 1
+    revenue, refunds = _amount(data.get("item_revenue")), _amount(data.get("refunds"))
+    item_cost = _amount(data.get("item_cost"))
+    return replace(
+        base,
+        status="sold",
+        sold_price=revenue,
+        sold_at=sold_at,
+        marketplace=line.marketplace,
+        days_listed=days_between(listed_text, sold_at.isoformat()) if sold_at else None,
+        fees=_amount(data.get("fees")),
+        shipping_cost=_amount(data.get("shipping_cost")) or 0.0,
+        shipping_credit=_amount(data.get("shipping_credit")) or 0.0,
+        refunds=refunds or 0.0,
+        cost=item_cost if item_cost is not None else (base.cost * units if base.cost is not None else None),
+        sale_id=line.id,
+    )
 
 
 def summarize(
