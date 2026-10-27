@@ -460,3 +460,27 @@ def test_marketplace_review_upgrade_preserves_tasks_but_expires_unpinned_pending
         assert connection.execute("SELECT title,revision_id,status,action,targets,review_basis FROM automation_approvals WHERE id='card'").fetchone() == ("Existing coat","old-rev","superseded","publish","{}","")
         assert "require_approval" not in {row[1] for row in connection.execute("PRAGMA table_info(automations)")}
     assert inspect_database(engine.url.database).clean
+
+
+def test_promotions_upgrade_keeps_previous_release_data_and_starts_empty(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "151f7674a7c7")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status) VALUES ('posh-item', 'Existing coat', 'active')")
+        connection.execute("INSERT INTO listing_templates (id, name, fields, revision, created_at, updated_at) "
+                           "VALUES ('tpl', 'Coats', '{}', 1, '2026-10-26', '2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT title, status FROM conversations WHERE id='posh-item'").fetchone() == ("Existing coat", "active")
+        assert connection.execute("SELECT name FROM listing_templates WHERE id='tpl'").fetchone() == ("Coats",)
+        assert connection.execute("SELECT count(*) FROM listing_promotions").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM marketplace_offer_floors").fetchone() == (0,)
+        connection.execute("INSERT INTO marketplace_offer_floors (id, marketplace, listing_id, conversation_id, floor_cents, updated_at) "
+                           "VALUES ('f1', 'poshmark', 'abc', 'posh-item', 2500, '2026-10-26')")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO marketplace_offer_floors (id, marketplace, listing_id, floor_cents, updated_at) "
+                               "VALUES ('f2', 'poshmark', 'abc', 3000, '2026-10-26')")
+    assert recorded_revision(engine) == head_revision()
+    assert inspect_database(engine.url.database).clean

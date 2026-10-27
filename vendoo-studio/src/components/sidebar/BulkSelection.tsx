@@ -1,6 +1,7 @@
 import { BulkCopyDialog } from "../BulkCopyDialog";
 import { BulkEditDialog } from "../BulkEditDialog";
 import { BulkMarketplaceDialog } from "../BulkMarketplaceDialog";
+import { PromotionDialog } from "../PromotionDialog";
 import { BulkRegeneratePriceDialog } from "../BulkRegeneratePriceDialog";
 import { BulkPriceDropDialog } from "../BulkPriceDropDialog";
 import { RegenerateReviewDialog } from "../RegenerateReviewDialog";
@@ -18,7 +19,7 @@ export function BulkActionBar({
   selection: ListingSelection;
   eligibleIds: string[];
 }) {
-  const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, setEditIds, setCopyIds, setMarketIds, exitSelecting } = selection;
+  const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, setEditIds, setCopyIds, setMarketIds, setPromoteIds, exitSelecting } = selection;
   return (
     <div
       className="flex shrink-0 flex-col gap-1.5 border-t border-sidebar-border px-(--sidebar-content-inset) py-2 max-[900px]:sticky max-[900px]:bottom-0 max-[900px]:z-10 max-[900px]:bg-sidebar max-[900px]:pb-[max(8px,env(safe-area-inset-bottom,0px))]"
@@ -45,6 +46,8 @@ export function BulkActionBar({
           title="Review separate draft copies of up to 300 selected items" onClick={() => setCopyIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Copy items</Button>
         <Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 100}
           title="Review List, Delist or Relist on named marketplaces for up to 100 listings" onClick={() => setMarketIds(eligibleIds.filter((id) => selectedIds.has(id)))}>List / delist</Button>
+        <Button type="button" variant="outline" size="xs" disabled={bulk.running || selectedIds.size === 0 || selectedIds.size > 100}
+          title="Review sharing or offers to likers for up to 100 live listings" onClick={() => setPromoteIds(eligibleIds.filter((id) => selectedIds.has(id)))}>Share / offers</Button>
         <Button
           type="button"
           variant="destructive"
@@ -90,6 +93,8 @@ export function BulkSelectionDialogs({ selection, onOpenListing }: { selection: 
     setCopyIds,
     marketIds,
     setMarketIds,
+    promoteIds,
+    setPromoteIds,
     pricePrompt,
     setPricePrompt,
     reviewPrompt,
@@ -103,6 +108,7 @@ export function BulkSelectionDialogs({ selection, onOpenListing }: { selection: 
     <>
       {copyIds ? <BulkCopyDialog conversationIds={copyIds} onOpenListing={(id) => { setCopyIds(null); exitSelecting(); onOpenListing(id); }} onClose={() => { setCopyIds(null); exitSelecting(); }} /> : null}
       {marketIds ? <BulkMarketplaceDialog conversationIds={marketIds} onClose={() => { setMarketIds(null); exitSelecting(); }} /> : null}
+      {promoteIds ? <PromotionDialog conversationIds={promoteIds} onClose={() => { setPromoteIds(null); exitSelecting(); }} /> : null}
       {editIds ? <BulkEditDialog conversationIds={editIds} onClose={() => { setEditIds(null); exitSelecting(); }} /> : null}
       {pricePrompt ? (
         <BulkRegeneratePriceDialog

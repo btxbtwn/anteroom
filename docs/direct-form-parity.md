@@ -71,6 +71,28 @@ as such; it must not silently override an explicit marketplace selection.
 Private listing identifiers, photos, account responses and diagnostic captures
 stay outside the repository. The audit must not publish or delist test items.
 
+## Sharing, offers and refreshing
+
+Seller tools on live listings, checked 2026-10-26. Each action is started by the
+seller from a selection (sidebar → **Share / offers**), names the marketplace
+and the action, is reviewed per item and confirmed once. Items then run one at
+a time holding the automation slot. Every send is journaled in Anteroom
+(`listing_promotions`) and in the extension before it is made; a lost reply is
+**unknown** and is never repeated, and **Check result** only reads the
+extension's journal. Nothing here is scheduled, and nothing lists or delists.
+
+| Marketplace | Tool | Status | Source |
+| --- | --- | --- | --- |
+| Poshmark | Share to followers (one or selected listings) | Implemented, unit-tested, not yet verified on a real listing | Web client `app.e95611750f89b1732f92.js`: `sharePost` sends `PUT /vm-rest/users/self/shared_posts/{post}` and handles `SharePostRequestLimitExceededError`, `ValidationError` and a `share_post` captcha. Anteroom spaces shares 4–7 seconds apart and stops the batch at the first limit or check. |
+| Poshmark | Offer to likers, with a required floor per listing | Implemented, unit-tested, not yet verified on a real listing | Same client and chunk `53.2a6596cdc30f9542d899.js` (offer modal): `makeSellerOffer` sends `POST /vm-rest/posts/{post}/likes/users/offers` with `offer_amount {val, currency_code}`, `seller_shipping_discount {id}` and `offer_api_version: 3`. Maximum offer is `floor(price × (100 − minimum_seller_offer_discount_percent) / 100)` in whole dollars; the public `/vm-rest/meta/feature_settings?client_app=web_feature_settings` `offer_to_likers__us` reads 10% minimum, 79% maximum (Anteroom takes the strictest enabled variant). Shipping discounts come from `/vm-rest/users/{id}/seller_shipping_discounts/offer?price_amount=…&object_id={post}`; the seller chooses one or none per offer. Anteroom also refuses an offer on a listing with no likers and allows one offer per listing per 24 hours. |
+| Mercari | Promote (price drop of at least 5% that notifies likers, once per 24 hours) and Offer to likers (at least 10% off, up to 50 recent likers, 24 hours) | Exists on Mercari; not implemented | [How does the Promote button work?](https://www.mercari.com/us/help_center/article/347/). The web client's persisted GraphQL operations for these could not be read: mercari.com answers a plain fetch with a Cloudflare check, and this work had no browser session. Capture the operation names and hashes from the signed-in web client before adding them. No separate refresh exists. |
+| Depop | Refresh / bump | Not supported by Depop | Depop's help centre has no free bump; it recommends refreshing photos, description and price, and sells [Boosted Listings](https://depophelp.zendesk.com/hc/en-gb/articles/10110299060753-Boosted-Listings) (paid, fee on the sale). [Repop](https://depophelp.zendesk.com/hc/en-gb/articles/12803766422289-Repop) relists a sold item. Re-saving a listing to fake a bump is not added. |
+| Depop | Send offer to likers | Exists on Depop; not implemented | [Send Offer](https://depophelp.zendesk.com/hc/en-gb/articles/15495796917777-Send-Offer): from notifications or My Depop, to one or all likers in the seller's country, one active offer per buyer, not for multi-size listings, 14 days to respond, shipping not included. depop.com answered 403 to a plain fetch, so the web request could not be read here. |
+| Etsy | Offers to favoriters | Not available through Etsy's API | Set in Shop Manager → Marketing → Sales and discounts ([help](https://help.etsy.com/hc/en-us/articles/115014260108-How-to-Set-Up-Sales-and-Discounts-for-Your-Shop)); Etsy sends them automatically. The Open API v3 spec (`/openapi/generated/oas/3.0.0.json`, read 2026-10-26) has no offer, coupon or manual renew endpoint, only `should_auto_renew` on a listing. |
+| Vinted | Bump | Paid, not added | [What is an item Bump?](https://www.vinted.com/help/340-what-is-item-bump) and [Buying a Bump](https://www.vinted.com/help/450-buying-a-bump): a paid 3 or 7 day boost bought at checkout. Anteroom does not make purchases. |
+| Sellwild | Share, bump, offers to likers | None found | Sellwild's seller guides list [discounts](https://sellwild.com/guides/seller/my-discounts) (timed price drops with a floor), [coupons](https://sellwild.com/guides/seller/coupons) and BOGO, not sharing or bumping. |
+| eBay | Offers to interested buyers | Implemented earlier (Offers tab) | `services/ebay_offers.py`, eBay Negotiation API. |
+
 ## Completion checks
 
 1. Compare visible native controls and conditional states with Anteroom.
