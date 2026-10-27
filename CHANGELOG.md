@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.443 — 2026-10-27
+
+- Depop offers now use its bulk send to eligible likers, for offers you approve and rules you turn on. Anteroom waits for Depop to finish, respects your floor and Depop's price limit, and stops without resending if the result is unclear. Rules stay off until you enable them. The earlier recording sent to only one buyer; this uses Depop's separate bulk flow.
+
 ## 0.1.442 — 2026-10-27
 
-- Depop offers send to one buyer per request and count one recipient. Sending to every liker remains incomplete. Anteroom never goes below your floor or Depop's lowest allowed offer, skips items with several sizes, and never resends an offer whose result it could not confirm. Rules stay off until you turn them on.
+- Nothing changes in the app. A check that Anteroom runs on every change, that a stuck send fails and the next one in line still goes out, no longer fails at random.
 
 ## 0.1.441 — 2026-10-27
 
