@@ -147,8 +147,8 @@ export function validationErrorsPrompt(
   return `Fix these Anteroom validation errors so Send to Vendoo can proceed for "${title}".
 
 Update EVERY field listed below so the errors clear. Use photo analysis and seller notes. Do not invent unsupported facts.
-For eBay Season intelligently choose exactly one of Spring, Summer, Fall, or Winter from the item (title, fabric, type, photos). Never leave it blank and never use Does Not Apply.
-For every marketplace field shown after Show Optional Fields (eBay, Etsy, Depop, and others): fill a real value when it pertains to the item. Use Does Not Apply only when it literally does not apply.
+For eBay Season intelligently choose exactly one of Spring, Summer, Fall, or Winter from the item (title, fabric, type, photos). Never leave it blank.
+For every marketplace field shown after Show Optional Fields (eBay, Etsy, Depop, and others): fill a real value when it pertains to the item. When it does not apply, send it with an empty value and "status": "not_applicable" — never write "Does Not Apply".
 ${OPTIONS_RULE}
 Required fields must not be cleared to resolve an error. Reuse supported values from the current listing. For an unidentified brand, use Unbranded; include that brand before the size in the title. Copy the listing's department into eBay department. If captured department options exclude it, explain the category/schema mismatch rather than choose an inaccurate department. Set Poshmark original price to 0.
 
@@ -268,7 +268,7 @@ ${fields.length ? `Targets:\n${fieldLines(fields)}\n\n` : ""}${replyShape(
 Pause reason:
 ${detail}
 
-For each field below: use a real value when it pertains to the item. Use Does Not Apply only when it literally does not apply. Prefer photo analysis and seller notes. Do not invent unsupported brands or materials.
+For each field below: use a real value when it pertains to the item. When it does not apply, send it with an empty value and "status": "not_applicable" — never write "Does Not Apply". Prefer photo analysis and seller notes. Do not invent unsupported brands or materials.
 
 Fields:
 ${fieldLines(fields) || "- (see pause reason)"}

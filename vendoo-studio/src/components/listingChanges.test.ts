@@ -21,6 +21,13 @@ describe("listing review", () => {
     expect(blockerTarget("photos").reviewTab).toBe("input");
     expect(blockerTarget("price").tab).toBe("general");
   });
+  it("sends a missing category to the marketplace form that has the category control", () => {
+    expect(blockerTarget("direct_category_ids.depop").tab).toBe("depop");
+    expect(blockerTarget("direct_category_ids.mercari").tab).toBe("mercari");
+    expect(blockerTarget("marketplace_category_ids.ebay").tab).toBe("ebay");
+    expect(blockerTarget("marketplace_category_ids.etsy").tab).toBe("general");
+    expect(matchingEditorField([{ key: "price" }, { key: "direct_category_ids.ebay" }], "marketplace_category_ids.ebay")).toBe("direct_category_ids.ebay");
+  });
   it("matches Vendoo labels to nested listing keys", () => {
     expect(matchingEditorField([{ key: "ebay_specifics.Sleeve Length" }], "ebay_specifics.category_specifics.sleeveLength")).toBe("ebay_specifics.Sleeve Length");
     expect(matchingEditorField([{ key: "price" }], "brand")).toBeUndefined();

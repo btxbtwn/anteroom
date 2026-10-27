@@ -492,15 +492,14 @@ async def complete_job(db: Session, job_id: str) -> None:
                 "and Etsy when-made, whose estimate must explain its reasoning instead of citing an exact date quote. "
                 "Package dimensions come from the saved listing/settings default; copy them rather than estimating them. "
                 "An existing expected value may be retried without a quote. "
-                "Optional fields that truly do not apply may use value 'Does Not Apply' or not_applicable with evidence. "
+                "Never write the value 'Does Not Apply'. An optional field that truly does not apply goes in not_applicable with evidence. "
                 "For eBay fields shown after Show Optional Fields: fill every applicable row with a real value. "
-                "Does Not Apply is allowed only when the attribute literally does not apply "
-                "(MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). "
+                "Only MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, and Sleeve Type may be not_applicable. "
                 "Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced on the tag or seller notes "
-                "(greater than 0, at most 1 decimal). Never Does Not Apply, never Lightweight/Midweight/Heavyweight. "
-                "Season must be exactly one of Spring, Summer, Fall, or Winter — never Does Not Apply. "
+                "(greater than 0, at most 1 decimal). Never Lightweight/Midweight/Heavyweight. "
+                "Season must be exactly one of Spring, Summer, Fall, or Winter. "
                 "For Etsy fields shown after Show Optional Fields: fill every applicable row with a real Etsy dropdown value. "
-                "Does Not Apply is allowed only for Graphic, Collar style, Holiday, Occasion, and Sustainability when they truly do not apply. "
+                "Only Graphic, Collar style, Holiday, Occasion, and Sustainability may be not_applicable. "
                 "Always fill Clothing style, Sleeve length, Neckline, Closure, and Fabric pattern. "
                 "For Depop fields shown after Show Optional Fields: fill Source, Age, Style (3), Occasion (3), and Parcel Size. "
                 "Parcel Size must match the packaged weight: under 4oz Extra extra small, under 8oz Extra small, "
@@ -508,11 +507,11 @@ async def complete_job(db: Session, job_id: str) -> None:
                 "Omit Size Grouping for Regular sizing. Fill Material only from tag evidence. "
                 "Brand: when the item's brand is not one of the offered options, answer Other for Depop "
                 "and No Brand/Not sure for Mercari — never substitute a different brand. "
-                "Across every marketplace: fill every applicable optional/item-specific field; Does Not Apply only when it literally does not apply. "
+                "Across every marketplace: fill every applicable optional/item-specific field; not_applicable only when it literally does not apply. "
                 "Infer supportable product facts from photo analysis and seller notes only. "
                 "Do not invent garment measurements, material, age, origin, brand, or other product facts beyond that evidence. "
                 "Never ask the seller clarifying questions, including routine apparel shipping weight or package size. "
-                "Never use Unknown/N/A/Does not apply to hide a missing fact. Only mark an optional field not applicable when evidence establishes that. "
+                "Never use Unknown or N/A to hide a missing fact. Only mark an optional field not applicable when evidence establishes that. "
                 "When a real value is needed but evidence does not support one, put it in no_evidence — including required fields. "
                 "Do not put applicable marketplace optional apparel fields in no_evidence just to clear the gap — keep repairing or leave for review. "
                 "Do not publish or claim completion.\n\n"
@@ -687,7 +686,7 @@ async def complete_job(db: Session, job_id: str) -> None:
                 db,
                 job,
                 "Marketplace optional fields still need real values (Show Optional Fields). "
-                "Fill applicable rows or mark only true non-applicable attributes as Does Not Apply: "
+                "Fill applicable rows, or leave empty only the attributes that do not apply: "
                 + ", ".join(f"{f['marketplace']} / {f['field']}" for f in blocked_optionals),
                 blocked_optionals,
                 waiting=False,

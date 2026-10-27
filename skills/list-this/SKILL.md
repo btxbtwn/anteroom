@@ -221,7 +221,7 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 | **Personalize** | "No" (always) |
 | **Vintage** | "No" (unless actually vintage) |
 | **Occasion** | Casual, Workwear, Formal, etc. |
-| **Season** | Exactly one of Spring, Summer, Fall, or Winter — inferred from the item (never blank, never Does Not Apply, never "All Seasons" as Season). |
+| **Season** | Exactly one of Spring, Summer, Fall, or Winter — inferred from the item (never blank, never "All Seasons" as Season). |
 | **Theme** | Space, Music, Sports, etc. when supportable |
 | **Unit Quantity** | "1" (always for single items) |
 | **Unit Type** | "Unit" (always) |
@@ -229,13 +229,13 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 | **Inseam** | If provided in measurements |
 | **Waist** | If provided in measurements |
 
-**Pitfall: Skipping any of these fields causes the Vendoo eBay form to show them blank. After "Show Optional Fields", fill every applicable row — non-negotiable unless the attribute literally does not apply (then use Does Not Apply only for MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced on the tag or seller notes — never Does Not Apply and never the word Lightweight (eBay rejects non-numeric values; do not invent a number). Never leave Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, or Unit Type blank. Season must be Spring/Summer/Fall/Winter. Verify they are present in `ebay_specifics` before outputting.**
+**Pitfall: Skipping any of these fields causes the Vendoo eBay form to show them blank. After "Show Optional Fields", fill every applicable row — non-negotiable unless the attribute literally does not apply (then leave the row out — allowed only for MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced on the tag or seller notes — never the word Lightweight (eBay rejects non-numeric values; do not invent a number). Never leave Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, or Unit Type blank. Season must be Spring/Summer/Fall/Winter. Verify they are present in `ebay_specifics` before outputting.**
 
-**Pitfall: Etsy Show Optional Fields are also non-negotiable.** Fill Clothing style, Sleeve length, Neckline, Closure, and Fabric pattern with exact Etsy dropdown values. Use Does Not Apply only for Graphic, Collar style, Holiday, Occasion, and Sustainability when they literally do not apply — never leave those rows blank.
+**Pitfall: Etsy Show Optional Fields are also non-negotiable.** Fill Clothing style, Sleeve length, Neckline, Closure, and Fabric pattern with exact Etsy dropdown values. Leave out Graphic, Collar style, Holiday, Occasion, and Sustainability only when they literally do not apply.
 
 **Pitfall: Depop Show Optional Fields are also non-negotiable.** Fill Source, Age, Style (exactly 3), Occasion (exactly 3), and Parcel Size. Omit Size Grouping for Regular sizing (it does not apply). Fill Material only from tag evidence. Never leave applicable optional rows blank.
 
-**Does Not Apply stays in the listing, never on the form.** Keep writing it wherever the rules above call for it — Anteroom shows the row as answered so it is not chased again. Anteroom and the extension push a blank to the marketplace form instead of the phrase, because eBay renders "Does Not Apply" verbatim as an item specific.
+**Never write "Does Not Apply".** A field that does not apply to the item stays empty — leave it out of the JSON. Anteroom records it as reviewed so it is not chased again, and blanks any "Does Not Apply" a model still writes. eBay renders the phrase verbatim as an item specific.
 
 **Pitfall: eBay Season has no "All Seasons" option.** Choose exactly one of Spring, Summer, Fall, or Winter from the garment (fabric, sleeve, type, title cues). For year-round items, put `"All Seasons"` under **Features** and still set Season to the primary wear season.
 
@@ -269,7 +269,7 @@ Measurements: {See photos OR specific measurements}
 - NEVER include pricing details in the description: no prices, dollar amounts, comps, sold-listing counts, market or resale value, MSRP, discounts, offers, or notes about pricing confidence. Pricing belongs in the price field only.
 
 ### eBay Jackets and Coats: Required Outer Shell Material
-Fill `ebay_specifics.category_specifics["Outer Shell Material"]` for jackets/coats (use the live schema key if supplied). Prefer readable shell composition or seller notes; otherwise make the best guess from photos, texture, construction, and reliable exact-model research. Choose a supported eBay value; never blank or Does Not Apply. Estimate the shell, not lining/down fill; never invent percentages or claim leather over faux leather without evidence. Material/fabricType does not replace this field. Flag estimates in the description: "Outer shell estimated as polyester; tag not visible." Preserve description structure; do not copy estimates into Depop's tag-only Material. Never ask the seller.
+Fill `ebay_specifics.category_specifics["Outer Shell Material"]` for jackets/coats (use the live schema key if supplied). Prefer readable shell composition or seller notes; otherwise make the best guess from photos, texture, construction, and reliable exact-model research. Choose a supported eBay value; never blank. Estimate the shell, not lining/down fill; never invent percentages or claim leather over faux leather without evidence. Material/fabricType does not replace this field. Flag estimates in the description: "Outer shell estimated as polyester; tag not visible." Preserve description structure; do not copy estimates into Depop's tag-only Material. Never ask the seller.
 
 ### Etsy Digital Download Description Formula
 Use this override only when the Etsy listing is a digital product.

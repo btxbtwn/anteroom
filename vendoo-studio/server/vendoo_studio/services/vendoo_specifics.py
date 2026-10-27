@@ -395,9 +395,9 @@ _DECLINED = frozenset({
     "does not apply", "doesn't apply", "not applicable", "n a", "na", "none",
     "no", "not specified", "unspecified", "unknown", "other",
 })
-# The literal "this attribute does not apply" answers, already normalized. The
-# listing keeps them so Studio can show the field was answered; a marketplace
-# form never gets the phrase itself.
+# The literal "this attribute does not apply" answers, already normalized.
+# Studio saves them as an empty, reviewed field, and a marketplace form never
+# gets the phrase itself.
 _NOT_APPLICABLE = frozenset({
     "does not apply", "doesn t apply", "doesnt apply", "not applicable", "n a", "na",
 })

@@ -38,13 +38,24 @@ export function isEbayInventoryLocationEdit(field: string): boolean {
   return field === "settings.ebay.merchant_location_key";
 }
 
+/** Marketplaces whose form has its own category control. */
+const FORM_CATEGORY_MARKETS = new Set(["ebay", "poshmark", "mercari", "depop", "sellwild"]);
+
+function formCategoryMarket(field: string): string | undefined {
+  const marketplace = field.match(/^(?:direct|marketplace)_category_ids\.([a-z]+)$/)?.[1];
+  return marketplace && FORM_CATEGORY_MARKETS.has(marketplace) ? marketplace : undefined;
+}
+
 export function blockerTarget(field: string): { reviewTab: "input" | "forms"; tab: string; field: string } {
   if (field === "photos") return { reviewTab: "input", tab: "general", field };
-  const marketplace = field.match(/^([a-z]+)_specifics(?:\.|$)/)?.[1];
+  const marketplace = field.match(/^([a-z]+)_specifics(?:\.|$)/)?.[1] ?? formCategoryMarket(field);
   return { reviewTab: "forms", tab: marketplace || "general", field };
 }
 
 export function matchingEditorField(fields: { key: string }[], target: string): string | undefined {
   const normalize = (path: string) => squashFieldKey(path.replace(".category_specifics.", "."));
-  return fields.find((field) => normalize(field.key) === normalize(target))?.key;
+  // A category gap may name the mapped id; the form's control writes the direct id.
+  const categoryMarket = formCategoryMarket(target);
+  const wanted = normalize(categoryMarket ? `direct_category_ids.${categoryMarket}` : target);
+  return fields.find((field) => normalize(field.key) === wanted)?.key;
 }

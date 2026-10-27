@@ -652,7 +652,6 @@ class ValidationCasesTest(unittest.TestCase):
         )
 
     def test_etsy_category_optionals_are_filled_or_dna(self):
-        from vendoo_studio.models.listing_values import DNA_VALUE
         from vendoo_studio.models.etsy_fields import ensure_etsy_category_optionals
 
         listing = dict(VALID_LISTING)
@@ -668,10 +667,9 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertEqual(etsy["closure"], "Pullover")
         self.assertIn(etsy["fabricPattern"], {"Floral", "Solid"})
         self.assertEqual(etsy["sleeveLength"], "Short sleeve")
-        self.assertEqual(etsy["holiday"], DNA_VALUE)
-        self.assertEqual(etsy["occasion"], DNA_VALUE)
-        self.assertEqual(etsy["graphic"], DNA_VALUE)
-        self.assertEqual(etsy["sustainability"], DNA_VALUE)
+        # Rows that do not apply stay empty, never "Does Not Apply".
+        for key in ("holiday", "occasion", "graphic", "sustainability"):
+            self.assertNotIn(key, etsy)
         result = validate_listing(listing, 5, selected_marketplaces=["etsy"])
         optional_errors = [
             err for err in result.errors

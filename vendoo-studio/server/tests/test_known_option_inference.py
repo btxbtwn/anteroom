@@ -7,7 +7,7 @@ import unittest
 from vendoo_studio.models.depop_fields import ensure_depop_category_optionals, infer_depop_occasions
 from vendoo_studio.models.ebay_fields import ensure_ebay_category_optionals
 from vendoo_studio.models.etsy_fields import ensure_etsy_category_optionals
-from vendoo_studio.models.listing_values import DNA_VALUE, dropdown_field_options, infer_known_option
+from vendoo_studio.models.listing_values import dropdown_field_options, infer_known_option
 from vendoo_studio.models.validation import ensure_poshmark_style_tags
 
 
@@ -68,7 +68,7 @@ class KnownOptionInferenceTest(unittest.TestCase):
         }
         self.assertTrue(ensure_etsy_category_optionals(listing))
         self.assertEqual(listing["etsy_specifics"]["holiday"], "Christmas")
-        self.assertEqual(listing["etsy_specifics"]["occasion"], DNA_VALUE)
+        self.assertNotIn("occasion", listing["etsy_specifics"])
 
     def test_etsy_wedding_occasion_picks_chip(self):
         listing = {
