@@ -657,13 +657,18 @@ export function StructuredEditor({
   );
   const [local, setLocal] = React.useState<Record<string, string | string[]>>({});
   const dirty = React.useRef<Record<string, string | string[]>>({});
+  // Go to an "Edit …" target once. The rows rebuild on every save, and
+  // following the target again then pulled the seller back from whatever they were editing.
+  const reachedTarget = React.useRef<number | null>(null);
   React.useEffect(() => {
-    if (!target) return;
+    if (!target || reachedTarget.current === target.sequence) return;
     const key = matchingEditorField(fields, target.field);
     if (!key) return;
     const input = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-field]") || [])].find((element) => element.dataset.listingField === key);
-    input?.scrollIntoView({ block: "center" });
-    input?.focus();
+    if (!input) return;
+    reachedTarget.current = target.sequence;
+    input.scrollIntoView({ block: "center" });
+    input.focus();
   }, [target, fields]);
 
   React.useEffect(() => {
