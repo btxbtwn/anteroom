@@ -84,18 +84,40 @@ def test_vinted_connect_is_a_session_summary():
     assert "secret" not in response.text
 
 
-def test_offer_recording_passes_its_goal_and_only_where_offers_exist():
-    request = AsyncMock(return_value={"ok": True, "goal": "offers", "requests": []})
-    with patch("vendoo_studio.services.browser_bridge.request", new=request):
-        client = TestClient(app)
-        assert client.post("/api/marketplaces/depop/record?goal=offers").status_code == 200
+def test_recording_runs_in_anteroom_and_is_saved_for_later(tmp_path):
+    import time
+
+    request = AsyncMock(return_value={"ok": True, "goal": "offers", "requests": [{"method": "GET"}]})
+    with patch("vendoo_studio.services.browser_bridge.request", new=request), \
+            patch("vendoo_studio.services.marketplace_recording.RECORDINGS_DIR", tmp_path), TestClient(app) as client:
+        assert client.get("/api/marketplaces/depop/record?goal=offers").json() == {"recording": False, "result": None}
+        assert client.post("/api/marketplaces/depop/record?goal=offers").status_code == 202
+        for _ in range(50):
+            body = client.get("/api/marketplaces/depop/record?goal=offers").json()
+            if body["result"]:
+                break
+            time.sleep(0.02)
+        assert body["recording"] is False
+        assert body["result"]["requests"] == [{"method": "GET"}]
+        assert body["result"]["finished_at"]
         assert client.post("/api/marketplaces/depop/record").status_code == 404
         assert client.post("/api/marketplaces/sellwild/record?goal=offers").status_code == 404
         assert client.post("/api/marketplaces/mercari/record?goal=publish").status_code == 422
-        assert client.post("/api/marketplaces/mercari/record").status_code == 200
-    assert [call.args[2] for call in request.await_args_list] == [
-        {"marketplace": "depop", "goal": "offers"}, {"marketplace": "mercari", "goal": "draft"},
-    ]
+    assert request.await_args_list[0].args[2] == {"marketplace": "depop", "goal": "offers"}
+
+
+def test_only_one_recording_runs_at_a_time(tmp_path):
+    import asyncio
+
+    async def slow(*_args, **_kwargs):
+        await asyncio.sleep(0.5)
+        return {"ok": True, "requests": []}
+
+    with patch("vendoo_studio.services.browser_bridge.request", new=AsyncMock(side_effect=slow)), \
+            patch("vendoo_studio.services.marketplace_recording.RECORDINGS_DIR", tmp_path), TestClient(app) as client:
+        assert client.post("/api/marketplaces/mercari/record?goal=offers").status_code == 202
+        assert client.get("/api/marketplaces/mercari/record?goal=offers").json()["recording"] is True
+        assert client.post("/api/marketplaces/depop/record?goal=offers").status_code == 409
 
 
 def test_unknown_marketplace_connect_is_rejected():

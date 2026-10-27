@@ -63,6 +63,11 @@ def start(*, force: bool = False) -> dict:
             finished_at=utcnow().isoformat(),
         )
         return status()
+    from vendoo_studio.services.user_settings import vendoo_enabled
+
+    if not vendoo_enabled():
+        _progress = LabelSyncProgress(skipped=True, reason="vendoo off", finished_at=utcnow().isoformat())
+        return status()
     if not force and _last_finished_mono and (time.monotonic() - _last_finished_mono) < MIN_INTERVAL_SEC:
         _progress = LabelSyncProgress(
             skipped=True,

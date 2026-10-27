@@ -26,6 +26,16 @@ def db():
     session.close()
 
 
+@pytest.fixture(autouse=True)
+def _every_pair_stays_visible(monkeypatch):
+    """Earlier tests leave items behind, and the finder only returns the closest 200.
+
+    A pair this file just created can sort after those and disappear. These tests
+    check the match itself, so they read the full list.
+    """
+    monkeypatch.setattr(similar_items, "MAX_PAIRS", 1_000_000)
+
+
 def _picture(seed: int, *, shade: int = 0) -> Image.Image:
     image = Image.new("RGB", (240, 320), (230 - shade, 225 - shade, 220 - shade))
     draw = ImageDraw.Draw(image)
@@ -51,11 +61,15 @@ def _item(db, title: str, *, brand: str = "", size: str = "", photos: list[tuple
 
 
 def _pairs(db, *items) -> dict[frozenset[str], dict]:
-    """Suggested pairs among ``items``; other tests' items share the database."""
+    """Suggested pairs whose items are both in ``items``.
+
+    Other tests leave rows in this database. A pair is kept only when both
+    items belong to this test, so a leftover lookalike cannot count as one.
+    """
     ids = {item.id for item in items}
     return {
         key: pair for pair in similar_items.find_similar(db)["pairs"]
-        if (key := frozenset((pair["first"]["id"], pair["second"]["id"]))) & ids
+        if (key := frozenset((pair["first"]["id"], pair["second"]["id"]))) <= ids
     }
 
 

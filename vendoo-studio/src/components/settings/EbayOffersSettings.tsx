@@ -5,9 +5,11 @@ import type { EbayOffer, EbayOfferSelection } from "../../api/ebayOffers";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Spinner } from "../ui/spinner";
+import { useVendooEnabled } from "../../vendooMode";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 
 export function EbayOffersSettings() {
+  const vendooOn = useVendooEnabled();
   const queryClient = useQueryClient();
   const status = useQuery({ queryKey: ["ebay-offers"], queryFn: api.ebayOffers.status, refetchInterval: 15000 });
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -120,7 +122,7 @@ export function EbayOffersSettings() {
               {item.enabled && item.ruleId ? <Button size="xs" variant="ghost" disabled={pause.isPending}
                 onClick={() => pause.mutate(item.ruleId!)}>Pause</Button> : null}
             </div>)}
-            {!visible.length ? <p className="px-3 py-4 text-xs text-muted-foreground">{data.listings.length ? "No matching listings." : "No unsold listings with eBay links. Sync your inventory from Vendoo in Settings → Data."}</p> : null}
+            {!visible.length ? <p className="px-3 py-4 text-xs text-muted-foreground">{data.listings.length ? "No matching listings." : vendooOn ? "No unsold listings with eBay links. Sync your inventory from Vendoo in Settings → Data." : "No unsold listings with eBay links. Import them from eBay, or list from Anteroom."}</p> : null}
           </div>
           <Button size="sm" variant="outline" disabled={busy || !selectedListings.length || selectedListings.length > 50 || !discountValid || !floorsValid}
             onClick={() => {

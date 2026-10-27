@@ -46,6 +46,8 @@ describe("bulkRegenerateWarning", () => {
     expect(bulkRegenerateWarning(1)).toContain("Rewrite this listing from scratch?");
     expect(bulkRegenerateWarning(4)).toContain("Rewrite 4 listings from scratch?");
     expect(bulkRegenerateWarning(4)).toContain("one listing at a time");
+    expect(bulkRegenerateWarning(4)).toContain("Vendoo stays as it is until you send again.");
+    expect(bulkRegenerateWarning(4, false)).not.toContain("Vendoo");
   });
 });
 

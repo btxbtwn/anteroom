@@ -1,12 +1,14 @@
 import { ChevronRightIcon } from "lucide-react";
 import { ChatMarkdown } from "../ChatMarkdown";
-import { HELP_TOPICS, helpTopicMarkdown } from "./helpTopics";
+import { useVendooEnabled } from "../../vendooMode";
+import { helpTopicMarkdown, helpTopicsForMode } from "./helpTopics";
 import { SettingsSection } from "./SettingsLayout";
 
 export function HelpSettings() {
+  const topics = helpTopicsForMode(useVendooEnabled());
   return (
     <SettingsSection id="help" title="How to">
-      {HELP_TOPICS.map((topic) => (
+      {topics.map((topic) => (
         <details
           key={topic.id}
           id={topic.id}

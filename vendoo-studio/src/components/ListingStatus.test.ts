@@ -17,6 +17,13 @@ describe("statusHint", () => {
   it("still names Vendoo for a status it does not know", () => {
     expect(statusHint("some_new_state")).toBe("some new state · follows Vendoo");
   });
+
+  it("drops the Vendoo clause when Send to Vendoo is off", () => {
+    expect(statusHint("failed", false)).toBe("The last send failed");
+    expect(statusHint("listing", false)).toBe("Anteroom is sending this listing");
+    expect(statusHint("draft", false)).toBe("Not listed on any marketplace");
+    expect(statusHint("some_new_state", false)).toBe("some new state");
+  });
 });
 
 describe("listedFromImport", () => {

@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
+import { useListingSessionActive } from "./listingSession";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
 import { EbayVariationsEditor, normalizeVariations, variationTotal } from "./EbayVariationsEditor";
 import { MarketplaceMedia } from "./MarketplaceMedia";
@@ -122,10 +123,11 @@ export function ListingEditor({
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [fieldTarget, setFieldTarget] = React.useState<{ field: string; sequence: number } | null>(null);
   const editorRef = React.useRef<HTMLDivElement>(null);
+  const sessionActive = useListingSessionActive();
   const { data: jobs, isLoading: jobsLoading } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
+    refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
   const { data: photos, isLoading: photosLoading } = useQuery({
     queryKey: ["photos", convId],
@@ -229,7 +231,7 @@ export function ListingEditor({
   const { data } = useQuery({
     queryKey: ["listing", convId],
     queryFn: () => api.listings.get(convId),
-    refetchInterval: schemaProbeActive ? 3000 : false,
+    refetchInterval: sessionActive && schemaProbeActive ? 3000 : false,
   });
 
   const { data: uiPrefs } = useQuery({
@@ -314,7 +316,7 @@ export function ListingEditor({
   const { data: activity } = useQuery({
     queryKey: ["activity", convId],
     queryFn: () => api.conversations.activity(convId),
-    refetchInterval: (query) => activityPollMs(Boolean(query.state.data?.busy)),
+    refetchInterval: (query) => (sessionActive ? activityPollMs(Boolean(query.state.data?.busy)) : false),
   });
   const generating = chatBusy || Boolean(activity?.busy) || schemaProbeActive;
   const askChat = generating ? undefined : onAskChat;
@@ -400,23 +402,25 @@ export function ListingEditor({
             <HistoryIcon />
             History
           </Button>
-          <VendooLinkControl
-            convId={convId}
-            itemId={importedItemId}
-            url={importedUrl}
-            onLinked={(linkedItemId) => {
-              // Claim the auto-attach key so the effect doesn't race this import.
-              ensureAttemptKey.current = `${convId}:${linkedItemId}`;
-              queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
-              queryClient.invalidateQueries({ queryKey: ["conversations"] });
-              queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
-              ensureDraftMutation.mutate({ importDraft: true });
-            }}
-          />
+          {vendooEnabled ? (
+            <VendooLinkControl
+              convId={convId}
+              itemId={importedItemId}
+              url={importedUrl}
+              onLinked={(linkedItemId) => {
+                // Claim the auto-attach key so the effect doesn't race this import.
+                ensureAttemptKey.current = `${convId}:${linkedItemId}`;
+                queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
+                queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
+                ensureDraftMutation.mutate({ importDraft: true });
+              }}
+            />
+          ) : null}
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
           <ListingSyncStatus
             convId={convId}
-            bound={Boolean(listingJob?.vendoo_item_id || importedItemId)}
+            bound={vendooEnabled && Boolean(listingJob?.vendoo_item_id || importedItemId)}
           />
           {conversation?.unsent_edits ? (
             <>
@@ -425,13 +429,15 @@ export function ListingEditor({
                 title={
                   directMarketplaces.length
                     ? `This listing has changed since it was listed on ${directMarketplaces.map(marketplaceName).join(", ")}. Update it there from Marketplaces.`
-                    : "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                    : vendooEnabled
+                      ? "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                      : "This listing has changed since it was last saved."
                 }
               >
                 Unsent edits
               </Badge>
               {/* Discard pulls Vendoo's copy, which a directly listed item no longer follows. */}
-              {!directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
+              {vendooEnabled && !directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
                 <InlineButton
                   tone="muted"
                   className="text-xs"
@@ -451,14 +457,14 @@ export function ListingEditor({
       <SoldElsewhereNotice
         convId={convId}
         openInVendoo={
-          listingJob ? (
+          vendooEnabled && listingJob ? (
             <OpenListingButton jobId={listingJob.id} vendooItemId={importedItemId} vendooUrl={importedUrl} />
           ) : null
         }
       />
 
 
-      {relistMarketplaces.length > 0 && (
+      {vendooEnabled && relistMarketplaces.length > 0 && (
         <Alert
           variant="warning"
           role="status"
@@ -508,7 +514,7 @@ export function ListingEditor({
         </Alert>
       )}
 
-      {schemaProbeActive && (
+      {vendooEnabled && schemaProbeActive && (
         <Alert variant="info" role="status" className="mx-3 mt-2.5 shrink-0">
           <Spinner />
           <AlertDescription>
@@ -1520,6 +1526,7 @@ function SendToVendooButton({
   onSelectBlocker: (field: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const sessionActive = useListingSessionActive();
   const [error, setError] = React.useState<string | null>(null);
   const sendLock = React.useRef(false);
   const bound = Boolean(vendooItemId);
@@ -1545,13 +1552,13 @@ function SendToVendooButton({
   const { data: extStatus } = useQuery({
     queryKey: ["extension-status"],
     queryFn: api.extension.status,
-    refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
+    refetchInterval: () => (sessionActive ? pollMs(EXTENSION_STATUS_POLL_MS) : false),
   });
 
   const { data: jobs } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
+    refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
 
   const listingJob = jobs?.find((j) => j.conversation_id === convId && j.status !== "cancelled" && j.mode !== "native_marketplace");
@@ -1571,7 +1578,7 @@ function SendToVendooButton({
     queryKey: ["fill-log", listingJobId],
     queryFn: () => api.jobs.fillLog(listingJobId!),
     enabled: Boolean(listingJobId),
-    refetchInterval: () => fillLogPollMs(listingJob?.status),
+    refetchInterval: () => (sessionActive ? fillLogPollMs(listingJob?.status) : false),
   });
   const { data: hiddenData } = useQuery({
     queryKey: ["settings-hidden-fields", convId],

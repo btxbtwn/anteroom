@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { useVendooEnabled } from "../vendooMode";
 import type { AssistantChanges, AssistantFieldChange, AssistantMessage } from "../api/assistant";
 
 const FIELD_LABELS: Record<AssistantFieldChange["field"], string> = {
@@ -54,6 +55,7 @@ interface Props {
  * until the seller presses Apply.
  */
 export function AssistantChangesCard({ message, changes, onSettled }: Props) {
+  const vendooOn = useVendooEnabled();
   const [showAll, setShowAll] = useState(false);
   const apply = useMutation({
     mutationFn: () => api.assistant.applyChanges(message.id),
@@ -97,8 +99,9 @@ export function AssistantChangesCard({ message, changes, onSettled }: Props) {
       {changes.status === "proposed" ? (
         <>
           <p className="analytics-note">
-            Applying saves these in Anteroom. A listing already on Vendoo keeps its old values there until you send it
-            again.
+            {vendooOn
+              ? "Applying saves these in Anteroom. A listing already on Vendoo keeps its old values there until you send it again."
+              : "Applying saves these in Anteroom. Update the live listing on the marketplace when you want buyers to see them."}
           </p>
           {failure ? <p className="text-destructive-foreground text-sm">{failure.message || "Could not save the changes."}</p> : null}
           <div className="assistant-changes-actions">

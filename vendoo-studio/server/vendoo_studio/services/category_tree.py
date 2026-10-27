@@ -88,6 +88,10 @@ def store_children(db, marketplace: str, parent_id: str, result: dict) -> None:
 
 
 async def extract_trees() -> None:
+    from vendoo_studio.services.user_settings import vendoo_enabled
+
+    if not vendoo_enabled():
+        return
     for marketplace in MARKETPLACES:
         with SessionLocal() as db:
             tree = db.get(CategoryTree, marketplace)
@@ -103,6 +107,10 @@ async def extract_trees() -> None:
                 if not tree.roots_loaded:
                     store_children(db, marketplace, "__root", await read_children(marketplace))
                 while True:
+                    if not vendoo_enabled():
+                        tree.status, tree.error = "paused", "Vendoo is off. Turn it on to resume."
+                        db.commit()
+                        return
                     pending = db.query(CategoryTreeNode).filter_by(
                         marketplace=marketplace, children_loaded=False).limit(4).all()
                     if not pending:
@@ -148,6 +156,10 @@ async def extract_trees() -> None:
 
 def start_sync() -> None:
     global _task
+    from vendoo_studio.services.user_settings import vendoo_enabled
+
+    if not vendoo_enabled():
+        return
     if not syncing():
         _task = asyncio.create_task(extract_trees())
         _task.add_done_callback(_resume_queued_jobs)

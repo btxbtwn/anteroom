@@ -182,3 +182,32 @@ def test_the_assistant_takes_an_image_without_a_question(store, monkeypatch, tmp
         assert client.post("/api/assistant/messages", json={"text": "  "}).status_code == 422
     db.close()
     engine.dispose()
+
+
+def test_a_chat_image_grid_is_a_small_jpeg_and_deleting_removes_it(store):
+    saved = chat_attachments.save_attachment("front.png", png_data_url(800, 600))
+    app = FastAPI()
+    app.include_router(attachments_route.router)
+    with TestClient(app) as client:
+        original = client.get(f"/api/chat-attachments/{saved['id']}")
+        assert original.status_code == 200
+        assert original.headers["content-type"] == "image/png"
+
+        thumb = client.get(f"/api/chat-attachments/{saved['id']}", params={"size": 192})
+        assert thumb.status_code == 200
+        assert thumb.headers["content-type"] == "image/jpeg"
+        with Image.open(BytesIO(thumb.content)) as image:
+            assert max(image.size) <= 192
+        assert len(thumb.content) < len(original.content)
+
+        cached = store / f"{saved['id'].removesuffix('.png')}_192.jpg"
+        assert cached.is_file()
+        written_at = cached.stat().st_mtime_ns
+        again = client.get(f"/api/chat-attachments/{saved['id']}", params={"size": 192})
+        assert again.status_code == 200
+        assert cached.stat().st_mtime_ns == written_at
+        assert client.get(f"/api/chat-attachments/{saved['id']}", params={"size": 1000}).status_code == 400
+
+    chat_attachments.delete_attachments([saved])
+    assert not (store / saved["id"]).exists()
+    assert not cached.exists()

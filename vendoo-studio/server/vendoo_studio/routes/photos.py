@@ -209,3 +209,27 @@ def serve_photo_thumbnail(photo_id: str, size: int = 96, db: Session = Depends(g
         media_type=THUMBNAIL_MIME,
         headers={"Cache-Control": "private, max-age=86400"},
     )
+
+
+@router.get("/api/cover-thumb")
+async def cover_thumb(url: str):
+    """A small JPEG for a sidebar cover that lives on another host.
+
+    The row is about 40px. The original is what WebKit would decode and keep.
+    """
+    from fastapi.responses import FileResponse
+
+    from vendoo_studio.services.cover_thumb import remote_cover_thumb
+    from vendoo_studio.services.safe_fetch import UnsafeURLError
+
+    try:
+        path = await remote_cover_thumb(url)
+    except UnsafeURLError:
+        raise HTTPException(400, "That image address is not allowed") from None
+    except Exception:
+        raise HTTPException(404, "Cover image is not available") from None
+    return FileResponse(
+        str(path),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )

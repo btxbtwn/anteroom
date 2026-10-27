@@ -8,6 +8,7 @@ import { BulkPriceDropDialog } from "../BulkPriceDropDialog";
 import { RegenerateReviewDialog } from "../RegenerateReviewDialog";
 import type { BulkRegenerate, BulkRegenerateRun } from "../useBulkRegenerate";
 import type { ListingSelection } from "./useListingSelection";
+import { useVendooEnabled } from "../../vendooMode";
 import { Button } from "../ui/button";
 
 /** The bar under the list while selecting or while a bulk run is going. */
@@ -20,6 +21,7 @@ export function BulkActionBar({
   selection: ListingSelection;
   eligibleIds: string[];
 }) {
+  const vendooOn = useVendooEnabled();
   const { selectedIds, toggleSelectAll, regenerateSelected, setMarkdownIds, setEditIds, setCopyIds, setMarketIds, setPromoteIds, setDeleteIds, exitSelecting } = selection;
   return (
     <div
@@ -64,7 +66,9 @@ export function BulkActionBar({
           type="button"
           variant="outline"
           size="xs"
-          title="Review a lower price for each selected listing. Saves in Anteroom only; nothing is sent to Vendoo."
+          title={vendooOn
+            ? "Review a lower price for each selected listing. Saves in Anteroom only; nothing is sent to Vendoo."
+            : "Review a lower price for each selected listing. Saves in Anteroom only."}
           disabled={bulk.running || selectedIds.size === 0}
           onClick={() => setMarkdownIds(eligibleIds.filter((id) => selectedIds.has(id)))}
         >

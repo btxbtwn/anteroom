@@ -269,7 +269,8 @@ once and never retried, as for every other marketplace.
 **What to capture next (signed-in Chrome, with the extension from this
 release).** `POST /api/marketplaces/facebook/record` opens the seller's
 Facebook selling page and records request shapes until the tab is closed (five
-minutes at most): for each GraphQL call, the operation name, its `doc_id`, the
+minutes at most), then saves them to `recordings/` in the data folder, where
+`GET /api/marketplaces/facebook/record` reads them: for each GraphQL call, the operation name, its `doc_id`, the
 shape of its variables and of its answer, and the names of the form fields. It
 keeps no values, cookies or tokens. In that tab:
 

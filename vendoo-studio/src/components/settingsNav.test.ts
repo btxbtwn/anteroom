@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSettingsSectionId, searchSettings, SETTINGS_NAV_ITEMS, SETTINGS_SEARCH_ITEMS } from "./settingsNav";
+import { isSettingsSectionId, searchSettings, settingsSearchItemsForMode, SETTINGS_NAV_ITEMS, SETTINGS_SEARCH_ITEMS } from "./settingsNav";
 
 describe("searchSettings", () => {
   it("returns nothing for a blank query", () => {
@@ -27,6 +27,8 @@ describe("searchSettings", () => {
     expect(searchSettings("mcp").map((item) => item.id)).toEqual(["agent-cli"]);
     expect(searchSettings("claude desktop").map((item) => item.id)).toEqual(["agent-cli"]);
     expect(searchSettings("api logs").map((item) => item.id)).toEqual(["vendoo-api-logs"]);
+    expect(searchSettings("vendoo", settingsSearchItemsForMode(false)).map((item) => item.id)).toEqual(["vendoo"]);
+    expect(settingsSearchItemsForMode(false).find((item) => item.id === "chrome")?.title).toBe("Chrome");
     expect(searchSettings("inventory location").map((item) => item.id)).toEqual(["ebay-inventory-location"]);
     expect(searchSettings("ships from").map((item) => item.id)).toEqual(["ships-from-zip"]);
     expect(searchSettings("zip").map((item) => item.id).sort()).toEqual(["ebay-inventory-location", "ships-from-zip"]);
