@@ -198,7 +198,15 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
       }
       // The marketplace's own body, not only the one message field it picked.
       // Callers surface this on the job so a refusal names the field.
-      if (failure && data && typeof data === 'object') failure.response_body = marketplaceScrub(JSON.stringify(data));
+      // A plain-text refusal (Depop's presentation layer answers its 400s this
+      // way) is kept too, unless it is an HTML page.
+      if (failure && data && typeof data === 'object') {
+        failure.response_body = marketplaceScrub(JSON.stringify(data));
+        // The parsed body, for a caller that hides more than tokens. Never exported as is.
+        Object.defineProperty(failure, 'response_data', { value: data, enumerable: false });
+      } else if (failure && text && !/<html|<!doctype/i.test(text)) {
+        failure.response_body = marketplaceScrub(text);
+      }
       marketplaceLog(marketplace, step, { method, status, attempt: attempt || null, error_code: failure?.code, ms });
       if (!failure) return { status, data: expect === 'text' ? text : (data ?? {}), headers: response.headers };
     } else {
