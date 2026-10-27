@@ -205,8 +205,9 @@ const mercariAnswers = (overrides = {}) => ({
 const mercariOffer = (c, payload = {}) => c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'mercari',
   action: 'offer', listing_id: ITEM, confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000, ...payload } });
 
-test('Depop offers refuse before any request until its requests are captured; Mercari never shares', async () => {
+test('an uncaptured marketplace refuses before any request; Mercari never shares', async () => {
   const depop = offerWorker('depop', {});
+  vm.runInContext('PENDING_OFFER_REQUESTS.depop = { likers: null, offer: null }', depop.c);
   await depop.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG, discount_percent: 20 } });
   await depop.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG, confirm: true,
     action_id: 'action-1', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000 } });
@@ -295,47 +296,165 @@ test('Mercari offer outcomes: a lost or unreadable reply is uncertain; a refusal
   }
 });
 
-const DEPOP_FAKE = `PENDING_OFFER_REQUESTS.depop = {
-  likers: { path: product => '/api/v1/fake/products/' + product.id + '/likers/', read: body => ({ like_count: body.count }) },
-  offer: { method: 'POST', path: product => '/api/v1/fake/products/' + product.id + '/offers/', body: (product, cents) => ({ cents }),
-    confirmed: body => body.ok === true },
-}`;
+// Shapes from the seller's Selling Hub; every value is made up.
+const DEPOP = 'webapi.depop.com/presentation/api/v1';
+const DEPOP_PREVIEW = `GET ${DEPOP}/offers/products/999/offers/send-all/`;
+const DEPOP_SEND = `POST ${DEPOP}/offers/products/999/offers/send-all/jobs/`;
+const DEPOP_JOB = `GET ${DEPOP}/offers/products/999/offers/send-all/jobs/offer-job-1/`;
 const depopProduct = { slug: SLUG, id: 999, user_id: 55, status: 'STATUS_ONSALE', price_amount: '50.00', price_currency: 'USD' };
+const depopPrice = item => ({ price: item, total_estimated_price_amount: '55.00', price_break_down: { item_price: item } });
+const depopPreview = (overrides = {}) => ({ product_id: 999, product_description: 'Vintage tee', offer_recipient_id: 4242,
+  offer_recipient_username: 'buyer', offer_additional_recipients_count: '2',
+  prices: { original_price: depopPrice('50.00'), current_price: depopPrice('50.00') }, price_currency: 'USD', variant_set: 1,
+  variant_id: 2, shipping_cost: '5.00', sellers_lowest_offer_value: '25.00', offer_expiration_hours: 48, ...overrides });
 const depopAnswers = (overrides = {}) => ({
-  'GET webapi.depop.com/presentation/api/v1/users/me/': [200, { id: 55 }],
-  [`GET webapi.depop.com/presentation/api/v1/products/by-slug/${SLUG}/`]: [200, depopProduct],
-  'GET webapi.depop.com/api/v1/fake/products/999/likers/': [200, { count: 2 }],
-  'POST webapi.depop.com/api/v1/fake/products/999/offers/': [200, { ok: true }],
+  [`GET ${DEPOP}/users/me/`]: [200, { id: 55 }],
+  [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, depopProduct],
+  [DEPOP_PREVIEW]: [200, depopPreview()],
+  [DEPOP_SEND]: [200, { job_id: 'offer-job-1' }],
+  [DEPOP_JOB]: [200, { status: 'SUCCESS' }],
   ...overrides,
 });
+const depopOffer = (run, overrides = {}) => run.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'depop',
+  action: 'offer', listing_id: SLUG, confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4250, floor_cents: 4000, ...overrides } });
 
-test('Depop offer to likers reads the product, refuses several sizes and sends the captured request once', async () => {
+test('Depop check reads eligible likers from the send-all preview, without requiring active offers or writing', async () => {
   const check = offerWorker('depop', depopAnswers());
-  vm.runInContext(DEPOP_FAKE, check.c);
-  await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
-    listing_id: SLUG, discount_percent: 10 } });
-  assert.deepEqual(check.results[0], { ok: true, price_cents: 5000, like_count: 2, minimum_discount_percent: 5, maximum_discount_percent: 99,
-    shipping_discounts: [], offer_price_cents: 4500 });
+  for (const percent of [15, 60]) {
+    await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+      listing_id: SLUG, discount_percent: percent } });
+  }
+  // At least 5% off, and never under Depop's lowest allowed offer of $25: at most 50% off.
+  assert.deepEqual(check.results[0], { ok: true, price_cents: 5000, like_count: 3, minimum_discount_percent: 5, maximum_discount_percent: 50,
+    shipping_discounts: [], offer_price_cents: 4250 });
+  assert.equal(check.results[1].offer_price_cents, null);
   assert.ok(check.requests.every(r => r.key.startsWith('GET') && r.headers.Authorization === 'Bearer depop-token'));
 
-  const sent = offerWorker('depop', depopAnswers());
-  vm.runInContext(DEPOP_FAKE, sent.c);
-  await sent.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG,
-    confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4500, floor_cents: 4000 } });
-  assert.deepEqual(sent.results[0], { ok: true, state: 'done', recipient_count: 2 });
-  const offers = sent.requests.filter(r => r.key.startsWith('POST'));
-  assert.deepEqual(offers.map(r => r.body), [{ cents: 4500 }]);
+  assert.ok(!check.requests.some(r => r.key.includes('/offers/me/products/')));
+  const none = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: [400, { message: 'No eligible likers' }] }));
+  await none.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+    listing_id: SLUG, discount_percent: 15 } });
+  assert.equal(none.results[0].ok, false);
+  assert.ok(none.requests.every(r => r.key.startsWith('GET')));
+  const single = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: [200, depopPreview({ offer_additional_recipients_count: '0' })] }));
+  await single.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+    listing_id: SLUG, discount_percent: 15 } });
+  assert.equal(single.results[0].like_count, 1);
+});
 
-  const sized = offerWorker('depop', depopAnswers({ [`GET webapi.depop.com/presentation/api/v1/products/by-slug/${SLUG}/`]:
-    [200, { ...depopProduct, variants: { 1: { quantity: 1 }, 2: { quantity: 1 } } }] }));
-  vm.runInContext(DEPOP_FAKE, sized.c);
-  await sized.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG,
-    confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4500, floor_cents: 4000 } });
-  assert.equal(sized.results[0].ok, false);
-  assert.ok(!sized.requests.some(r => r.key.startsWith('POST')));
-  const limited = offerWorker('depop', depopAnswers({ 'POST webapi.depop.com/api/v1/fake/products/999/offers/': [429, { message: 'Slow down' }] }));
-  vm.runInContext(DEPOP_FAKE, limited.c);
-  await limited.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG,
-    confirm: true, action_id: 'action-1', price_cents: 5000, offer_price_cents: 4500, floor_cents: 4000 } });
-  assert.deepEqual([limited.results[0].error_code, limited.results[0].safe_to_retry], ['rate_limited', true]);
+test('Depop submits one bulk job, waits for success, and never invents a delivered count or repeats the POST', async () => {
+  const statuses = ['QUEUED', 'PROCESSING', 'SUCCESS'];
+  const sent = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: () => [200, { status: statuses.shift() }] }));
+  await depopOffer(sent);
+  await depopOffer(sent);
+  assert.deepEqual(sent.results[0], { ok: true, state: 'done' });
+  assert.deepEqual(sent.results[1], sent.results[0]);
+  const posts = sent.requests.filter(r => r.key.startsWith('POST'));
+  assert.deepEqual(posts.map(r => [r.key, r.body]), [[DEPOP_SEND, { offer_currency: 'USD', offer_value: '42.50' }]]);
+  assert.equal(sent.requests.filter(r => r.key === DEPOP_JOB).length, 3);
+  assert.equal(posts[0].headers.Authorization, 'Bearer depop-token');
+  assert.equal(posts[0].headers['Content-Type'], 'application/json');
+  assert.equal(sent.store['promotion_action-1'].finished, true);
+});
+
+test('a Depop bulk job with a failed, lost, malformed or timed out status remains uncertain and never resends', async () => {
+  for (const answer of [[200, { status: 'FAILURE' }], [200, { status: 'UNKNOWN' }], [200, {}],
+    [401, {}], [429, {}], [502, 'bad gateway']]) {
+    const run = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: answer }));
+    await depopOffer(run);
+    await depopOffer(run);
+    assert.deepEqual([run.results[0].ok, run.results[0].error_code, run.results[0].safe_to_retry], [false, 'uncertain', false]);
+    assert.equal(run.requests.filter(r => r.key === DEPOP_SEND).length, 1);
+    assert.deepEqual(run.results[1], run.results[0]);
+  }
+  for (const job of [{}, { job_id: '../other' }, { job_id: 123 }]) {
+    const run = offerWorker('depop', depopAnswers({ [DEPOP_SEND]: [200, job] }));
+    await depopOffer(run);
+    assert.deepEqual([run.results[0].error_code, run.results[0].safe_to_retry], ['uncertain', false]);
+    assert.ok(!run.requests.some(r => r.key === DEPOP_JOB));
+  }
+  const timed = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: [200, { status: 'PROCESSING' }] }));
+  vm.runInContext('globalThis.testNow = Date.now(); Date = class extends Date { static now() { return globalThis.testNow; } }', timed.c);
+  timed.c.marketplaceSleep = async () => { timed.c.testNow += 61000; };
+  await depopOffer(timed);
+  assert.deepEqual([timed.results[0].error_code, timed.results[0].safe_to_retry], ['uncertain', false]);
+  assert.equal(timed.requests.filter(r => r.key === DEPOP_SEND).length, 1);
+});
+
+test('the Depop worker completes the bulk job over HTTP and answers duplicates from its journal', async t => {
+  const { createServer } = require('node:http');
+  const run = offerWorker('depop', {});
+  const answers = depopAnswers();
+  const seen = [];
+  const statuses = ['QUEUED', 'PROCESSING', 'SUCCESS'];
+  const server = createServer(async (req, res) => {
+    let text = '';
+    for await (const part of req) text += part;
+    const key = `${req.method} webapi.depop.com${req.url}`;
+    seen.push({ key, body: text ? JSON.parse(text) : null });
+    const [status, body] = key === DEPOP_JOB ? [200, { status: statuses.shift() }] : answers[key] || [404, {}];
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  run.c.fetch = (url, options) => fetch(`${origin}${new URL(url).pathname}`, options);
+  await depopOffer(run);
+  const count = seen.length;
+  await depopOffer(run);
+  assert.deepEqual(run.results, [{ ok: true, state: 'done' }, { ok: true, state: 'done' }]);
+  assert.equal(seen.length, count);
+  assert.deepEqual(seen.filter(r => r.key.startsWith('POST')), [{ key: DEPOP_SEND, body: { offer_currency: 'USD', offer_value: '42.50' } }]);
+  assert.equal(seen.filter(r => r.key === DEPOP_JOB).length, 3);
+});
+
+test('Depop never offers below the floor or its lowest offer, above 5% off, on a changed price, several sizes or someone else’s item', async () => {
+  const cases = [
+    [{}, { offer_price_cents: 4250, floor_cents: 4500 }],
+    [{}, { offer_price_cents: 4800 }],
+    [{}, { offer_price_cents: 99, floor_cents: 1 }],
+    [{ [DEPOP_PREVIEW]: [200, depopPreview({ sellers_lowest_offer_value: '45.00' })] }, {}],
+    [{ [DEPOP_PREVIEW]: [200, depopPreview({ prices: { original_price: depopPrice('50.00'), current_price: depopPrice('40.00') } })] }, {}],
+    [{}, { price_cents: 6000 }],
+    [{ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...depopProduct, variants: { 1: { quantity: 1 }, 2: { quantity: 1 } } }] }, {}],
+    [{ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...depopProduct, user_id: 8 }] }, {}],
+    [{ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...depopProduct, status: 'STATUS_SOLD' }] }, {}],
+    [{ [DEPOP_PREVIEW]: [400, { message: 'No eligible likers' }] }, {}],
+    [{ [DEPOP_PREVIEW]: [200, depopPreview({ offer_recipient_id: null })] }, {}],
+    [{ [DEPOP_PREVIEW]: [200, depopPreview({ product_id: 123 })] }, {}],
+    [{ [DEPOP_PREVIEW]: [200, depopPreview({ price_currency: 'GBP' })] }, {}],
+  ];
+  for (const [answers, overrides] of cases) {
+    const run = offerWorker('depop', depopAnswers(answers));
+    await depopOffer(run, overrides);
+    const label = JSON.stringify([Object.keys(answers), overrides]);
+    assert.deepEqual([run.results[0].ok, run.results[0].safe_to_retry], [false, true], label);
+    assert.ok(!run.requests.some(r => r.key.startsWith('POST')), label);
+  }
+});
+
+test('a Depop refusal after the send is final; a lost or unreadable reply is uncertain; neither is retried', async () => {
+  const cases = [
+    [[400, { message: 'An offer is already active' }], 'rejected', true],
+    [[429, { message: 'Slow down' }], 'rate_limited', true],
+    [[401, { message: 'Unauthorised' }], 'signed_out', true],
+    [[409, { message: 'Conflict' }], 'uncertain', false],
+    [[502, 'bad gateway'], 'uncertain', false],
+    [[200, '<!doctype html><html>Sign in</html>'], 'uncertain', false],
+  ];
+  for (const [answer, code, safe] of cases) {
+    const run = offerWorker('depop', depopAnswers({ [DEPOP_SEND]: answer }));
+    await depopOffer(run);
+    assert.deepEqual([run.results[0].error_code, run.results[0].safe_to_retry], [code, safe], JSON.stringify(answer));
+    assert.equal(run.requests.filter(r => r.key === DEPOP_SEND).length, 1, JSON.stringify(answer));
+  }
+});
+
+test('Depop has no share action', async () => {
+  const run = offerWorker('depop', depopAnswers());
+  await run.c.handleMarketplacePromotion({ type: 'marketplace.promote', payload: { marketplace: 'depop', action: 'share', listing_id: SLUG,
+    confirm: true, action_id: 'action-2' } });
+  assert.deepEqual([run.results[0].ok, run.results[0].error_code], [false, 'rejected']);
+  assert.deepEqual(run.requests, []);
 });

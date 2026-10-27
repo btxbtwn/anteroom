@@ -39,6 +39,11 @@ test('Depop request context is limited to this extension and the supported API p
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/shipping/providers/depop/?ids=USPS'));
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/attributes/'));
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/attributes/categories/size-mapping/'));
+  assert.ok(covered('https://webapi.depop.com/presentation/api/v1/offers/me/products/'));
+  assert.ok(covered('https://webapi.depop.com/presentation/api/v1/offers/products/999/offers/send-all/'));
+  assert.ok(covered('https://webapi.depop.com/presentation/api/v1/offers/products/999/offers/send-all/jobs/'));
+  assert.ok(covered('https://webapi.depop.com/presentation/api/v1/offers/products/999/offers/send-all/jobs/offer-job-1/'));
+  assert.ok(covered('https://webapi.depop.com/presentation/api/v1/products/999/offers/'));
   assert.equal(receiptsTarget.test('https://webapi.depop.com/api/payments/'), false);
   assert.ok(rules.every(value => value.condition.regexFilter.length < 200));
 });
