@@ -30,9 +30,11 @@ Vendoo's. The losses on cancelling today are:
    Anteroom now links them, shows them, reads their state and can detect a
    sale (opt-in; not yet verified on a real listing), but cannot delete them:
    the seller deletes each one on Facebook.
-3. **Scheduled sharing, and offers to likers on Mercari and Depop.**
-   Poshmark sharing and offers to likers are seller-started only (no
-   schedule yet); Depop has no free refresh to copy.
+3. **Offers to likers on Mercari and Depop.** Poshmark sharing and
+   offers to likers run on schedules and rules since 0.1.430 (not yet
+   verified on a real account). Mercari and Depop offer rules are built but
+   stay off until their web requests are read from the signed-in sites;
+   Depop has no free refresh to copy.
 4. **Photo editing beyond rotate**: background removal, crop and adjustments.
 
 The full prioritized list is in [Gaps if Vendoo is cancelled today](#gaps-if-vendoo-is-cancelled-today).
@@ -69,9 +71,9 @@ and Vinted only on UK and US Enterprise accounts
 | --- | --- | --- | --- |
 | eBay | List, import, delist, relist, sale detection, offers | **Have** | Official API: `services/ebay_listings.py`, `routes/ebay.py` (`/import`), `services/marketplace_delist.py` (Trading `EndFixedPriceItem`), relay sale push `services/relay_sales.py` |
 | Etsy | List, import, delist, sale detection | **Have** | Official API: `services/etsy_listings.py`, `routes/etsy.py` (`/import`), relay `order.paid` |
-| Poshmark | List, delist, relist, sale detection, sharing, offers | **Partial** | List, draft, update, delist, sale detection: `background/poshmark-native.js`, `services/chrome_sales.py`. Share to followers and offers to likers, seller-started: `services/listing_promotions.py`, `background/marketplace-promotions.js`. Not yet verified on a real listing (see [Automations](#automations-offers-sharing-refresh)) |
-| Mercari | List, delist, relist, sale detection, offers | **Partial** | Same as Poshmark, `background/mercari-native.js`. No Promote or offers to likers: the web requests still need reading from the signed-in client |
-| Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. No offers. Depop has no free refresh (paid Boost only); see `docs/direct-form-parity.md` |
+| Poshmark | List, delist, relist, sale detection, sharing, offers | **Partial** | List, draft, update, delist, sale detection: `background/poshmark-native.js`, `services/chrome_sales.py`. Share to followers and offers to likers, seller-started or on a schedule or rule: `services/listing_promotions.py`, `services/promotion_automations.py`, `background/marketplace-promotions.js`. Not yet verified on a real listing (see [Automations](#automations-offers-sharing-refresh)) |
+| Mercari | List, delist, relist, sale detection, offers | **Partial** | Same as Poshmark, `background/mercari-native.js`. No Promote. Offers to likers are built (`checkMercariPromotion`/`offerMercari`, manual and automatic) but refuse to run until the likers read and offer mutation are captured from the signed-in client (`PENDING_OFFER_REQUESTS`, `AWAITING_CAPTURE`) |
+| Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. Offers to likers are built (`checkDepopPromotion`/`offerDepop`, manual and automatic) but refuse to run until the signed-in web requests are captured; Depop's documented offer endpoint is the partner Selling API, not the seller's web session. Depop has no free refresh (paid Boost only); see `docs/direct-form-parity.md` |
 | Vinted | UK/Enterprise only | **Have** | `background/vinted-native.js`, `services/vinted_listing.py`; Anteroom covers more than the seller's Vendoo plan does |
 | Sellwild | Logo only | **Have** | `background/sellwild-native.js`, `services/sellwild_listing.py` |
 | Facebook Marketplace | List, delist, sale detection | **Partial** | Linked from Vendoo's links or the seller's, shown in the Marketplaces panel, state read on request (**Check on Facebook**) and sale detection, opt-in, through the signed-in Chrome session: `background/facebook-native.js`, `services/facebook_listing.py`, `services/chrome_sales.py`. Unit-tested; not yet verified on a real listing. All **23 active items** Vendoo listed there read as live Facebook listings (checked on a copy of the live database). **Missing**: delist, import and List, which need Facebook's GraphQL requests recorded from the signed-in client; see [direct-form-parity.md](direct-form-parity.md#facebook-marketplace) and gap 2 |
@@ -88,8 +90,8 @@ and Vinted only on UK and US Enterprise accounts
 | Delist / relist one item | [Delist & Relist](https://help.vendoo.co/en/articles/6260258-vendoo-s-bulk-delist-relist-feature) | **Have** | `routes/marketplace_listings.py` (`/delist`), List from `routes/native_marketplaces.py`; covers items Vendoo listed through `vendooListingUrls`. Not Facebook (`marketplace_delist.MANUAL_DELIST`), which the seller deletes on Facebook |
 | Multi-quantity | [Multi-quantity sales](https://help.vendoo.co/en/articles/6626694-how-to-handle-sold-multi-quantity-items) | **Have** | Quantity on every form, Poshmark per-size quantities and SKUs (0.1.408), partial-sale handling `services/sale_inventory.py` |
 | Multi-variation | [Variations](https://help.vendoo.co/en/articles/6260275-how-do-i-handle-multi-variation-listings-in-vendoo) | **N/A** | Vendoo does not support it either. Anteroom has Poshmark size inventory; eBay variations are open in direct-form-parity.md |
-| Different photos per marketplace (Photo Manager) | [Photos per marketplace](https://help.vendoo.co/en/articles/6619124-can-i-use-different-photos-on-different-marketplaces) | **Have** (0.1.430) | Each marketplace form (eBay, Etsy, Poshmark, Mercari, Depop, Vinted, Sellwild) shows its photos at the top, in send order, with its limit (24, 20, 16, 12, 8, 20, 20). It uses the item's photos until the seller unticks, reorders or adds photos on that form only; Reset to item photos goes back. The pick is `marketplace_photos.<marketplace>` on the listing and form-only photos are `photos.marketplace`; `services/marketplace_media.py` resolves it and Direct List, Save Draft and Update send it (`native_marketplaces._photos`). A change re-requires a Vendoo review. Request-level tests only; the Vendoo send keeps the item's photos |
-| Listing videos (Poshmark, eBay; 5–15 s) | [Crosslisting app](https://www.vendoo.co/cross-listing-app) | **Have** | Poshmark, eBay and Etsy (`services/listing_videos.py`, `VIDEO_RULES`). Since 0.1.430 the video is a tile in the form's photos, added like a photo, only on those three; eBay and Etsy have request-level tests only |
+| Different photos per marketplace (Photo Manager) | [Photos per marketplace](https://help.vendoo.co/en/articles/6619124-can-i-use-different-photos-on-different-marketplaces) | **Have** (0.1.431) | Each marketplace form (eBay, Etsy, Poshmark, Mercari, Depop, Vinted, Sellwild) shows its photos at the top, in send order, with its limit (24, 20, 16, 12, 8, 20, 20). It uses the item's photos until the seller unticks, reorders or adds photos on that form only; Reset to item photos goes back. The pick is `marketplace_photos.<marketplace>` on the listing and form-only photos are `photos.marketplace`; `services/marketplace_media.py` resolves it and Direct List, Save Draft and Update send it (`native_marketplaces._photos`). A change re-requires a Vendoo review. Request-level tests only; the Vendoo send keeps the item's photos |
+| Listing videos (Poshmark, eBay; 5–15 s) | [Crosslisting app](https://www.vendoo.co/cross-listing-app) | **Have** | Poshmark, eBay and Etsy (`services/listing_videos.py`, `VIDEO_RULES`). Since 0.1.431 the video is a tile in the form's photos, added like a photo, only on those three; eBay and Etsy have request-level tests only |
 | eBay business policies; Etsy shipping and return profiles | [eBay policies](https://help.vendoo.co/en/articles/6260282-how-to-use-ebay-s-business-policies-in-vendoo), [Etsy profiles](https://help.vendoo.co/en/articles/6260281-how-to-use-etsy-shipping-profiles-and-return-policies-in-vendoo) | **Have** | Policy access on connect (0.1.392); Etsy shop shipping and processing profiles in `services/etsy_listings.py` |
 | eBay promotions, international shipping | [eBay promotions](https://help.vendoo.co/en/articles/6812458-how-do-i-opt-into-ebay-promotions), [Global shipping](https://help.vendoo.co/en/articles/6812485-how-do-i-opt-into-global-shipping-on-ebay) | **Have** | eBay marketing controls under Marketplaces → eBay (`services/ebay_workspace.py`); shipping comes from the eBay policy |
 | Listing templates | [Templates](https://help.vendoo.co/en/articles/6260273-how-to-create-listing-templates-in-vendoo) | **Have** | `routes/listing_templates.py` (create, apply with review, new draft from a template) |
@@ -162,8 +164,8 @@ off integrated marketplaces
 
 | Vendoo feature | Source | Anteroom | Evidence |
 | --- | --- | --- | --- |
-| Offers to likers/watchers, manual bulk and automatic rules (price bands, exclusions, activity log) | [Send offers](https://help.vendoo.co/en/articles/10043166-send-offers-to-likers-automatically-or-manually-in-bulk) | **Partial** | eBay: `routes/ebay_offers.py` (preview, send, rules, pause, attempts), `services/ebay_offers.py`. Poshmark, manual bulk with a required floor per listing: `services/listing_promotions.py`. **Missing**: automatic rules outside eBay, and Mercari and Depop. Grailed and Vestiaire are N/A |
-| Poshmark sharing (scheduled rounds, order, speed, up to 6,000/day, log) | [Marketplace Sharing](https://help.vendoo.co/en/articles/11003940-marketplace-sharing-tool-for-poshmark-depop-and-grailed) | **Partial** | Share one or selected listings to followers, spaced 4–7 seconds apart, stopping at Poshmark's first limit: `services/listing_promotions.py`, `background/marketplace-promotions.js`. No scheduled rounds or daily cap yet |
+| Offers to likers/watchers, manual bulk and automatic rules (price bands, exclusions, activity log) | [Send offers](https://help.vendoo.co/en/articles/10043166-send-offers-to-likers-automatically-or-manually-in-bulk) | **Partial** | eBay: `routes/ebay_offers.py` (preview, send, rules, pause, attempts), `services/ebay_offers.py`. Poshmark, manual bulk and automatic rules (listings covered, discount, required floor per listing, exclusions, minimum days listed and likes, new likers only, shipping discount, activity log, pause): `services/listing_promotions.py`, `services/promotion_automations.py`, `routes/promotion_automations.py`, Automations → Sharing and offers to likers (0.1.430). Mercari and Depop: same engine and extension handlers, unit-tested against fakes, off until their requests are captured. Nothing is verified on a real account yet. Grailed and Vestiaire are N/A |
+| Poshmark sharing (scheduled rounds, order, speed, up to 6,000/day, log) | [Marketplace Sharing](https://help.vendoo.co/en/articles/11003940-marketplace-sharing-tool-for-poshmark-depop-and-grailed) | **Partial** | Share one or selected listings to followers, spaced 4–30 seconds apart, stopping at Poshmark's first limit: `services/listing_promotions.py`, `background/marketplace-promotions.js`. Scheduled rounds (up to 6 times a day, all or chosen listings, exclusions, minimum days listed, newest/oldest/random order, slow/normal/fast, daily cap up to 6,000 counted across all shares, activity log, pause), off by default: `services/promotion_automations.py` (0.1.430). Not yet verified on a real account |
 | Depop refresh | same | **Missing** | Depop itself has no free refresh or bump (Boost is paid); see `docs/direct-form-parity.md` |
 | Grailed bump | same | **N/A** | Not a seller marketplace |
 | Scheduled delist / relist / price drops | Not in Vendoo (relist is started by hand) | **Have** (beyond Vendoo) | `routes/automations.py`, `services/automation_actions.py`; every run waits for the seller's review per item and marketplace |
@@ -227,12 +229,19 @@ Most important first.
    client ([direct-form-parity.md](direct-form-parity.md#facebook-marketplace)).
    *Fix:* record those requests and add delist; until then, delete each one on
    Facebook and choose Mark as not listed.
-3. **Poshmark sharing is seller-started only.** *Fix:* add a scheduled
-   share task through the automations approval system, off by default, with
-   Vendoo's controls (count, order, speed, daily cap, activity log).
-4. **Offers to likers on eBay and Poshmark only.** *Fix:* read Mercari's and
-   Depop's offer requests from their signed-in web clients and add them to
-   `services/listing_promotions.py`.
+3. ~~**Poshmark sharing is seller-started only.**~~ Built in 0.1.430:
+   scheduled rounds with Vendoo's controls, off by default. Still to do:
+   watch one scheduled round on a real account (spacing, daily cap, how
+   Poshmark's limit shows).
+4. **Offers to likers on Mercari and Depop are not live yet.** Automatic
+   rules are built for Poshmark, Mercari and Depop on one engine
+   (`services/promotion_automations.py`), with the Mercari and Depop
+   handlers in `background/marketplace-promotions.js`. *Fix:* capture from
+   the signed-in sites Mercari's likers read and offer-to-likers mutation
+   (operation name, persisted-query hash, variables, success shape) and
+   Depop's likers read and send-offer request (method, path, body, success
+   shape, any headers), fill `PENDING_OFFER_REQUESTS`, and remove them from
+   `AWAITING_CAPTURE` in `services/listing_promotions.py`.
 5. **No background removal, crop or photo adjustments.** *Fix:* add crop
    and adjustments beside rotate, and background removal to white (a local
    model or a provider API).
@@ -246,7 +255,7 @@ Most important first.
    Anteroom cannot be imported.**~~ Done: import through the Chrome bridge
    (unit-tested; real-account verification pending). Multi-size listings remain.
 9. ~~**No eBay listing video.**~~ Fixed in 0.1.422 (eBay and Etsy), in the
-   form's photos since 0.1.430.
+   form's photos since 0.1.431.
 10. *(Closed in 0.1.421: bulk condition, color, tags and category, and bulk
     Update on eBay, Etsy, Poshmark and Depop.)*
 11. **Smaller gaps:** label analytics, a

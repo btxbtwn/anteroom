@@ -10,12 +10,17 @@ from vendoo_studio.services import listing_promotions
 from vendoo_studio.services.listing_promotions import PromotionError
 
 router = APIRouter(prefix="/api/promotions", tags=["promotions"])
-Marketplace = Literal["poshmark"]
+Marketplace = Literal["poshmark", "mercari", "depop"]
 
 
 class FloorsRequest(BaseModel):
     conversation_ids: list[str] = Field(min_length=1, max_length=listing_promotions.MAX_ITEMS)
     marketplace: Marketplace
+
+
+class SaveFloorsRequest(BaseModel):
+    marketplace: Marketplace
+    floors: dict[str, Annotated[str, Field(max_length=20)]] = Field(min_length=1, max_length=listing_promotions.MAX_ITEMS)
 
 
 class PreviewRequest(BaseModel):
@@ -43,12 +48,21 @@ def _error(exc: PromotionError) -> HTTPException:
 @router.get("")
 def history(db: Session = Depends(get_db)):
     return {"supported": {name: sorted(actions) for name, actions in listing_promotions.SUPPORTED.items()},
+            "awaiting_capture": {name: sorted(actions) for name, actions in listing_promotions.AWAITING_CAPTURE.items()},
             "history": listing_promotions.history(db)}
 
 
 @router.post("/floors")
 def floors(body: FloorsRequest, db: Session = Depends(get_db)):
     return listing_promotions.floors(db, body.conversation_ids, body.marketplace)
+
+
+@router.put("/floors")
+def save_floors(body: SaveFloorsRequest, db: Session = Depends(get_db)):
+    try:
+        return listing_promotions.save_floors(db, body.marketplace, body.floors)
+    except PromotionError as exc:
+        raise _error(exc) from exc
 
 
 @router.post("/preview")

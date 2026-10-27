@@ -1,7 +1,7 @@
 """Photos added on one marketplace's form
 
 Revision ID: c5a8d3e17f42
-Revises: 3ece513f8e0d
+Revises: ea3c87866204
 Create Date: 2026-10-26 21:30:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = 'c5a8d3e17f42'
-down_revision = '3ece513f8e0d'
+down_revision = 'ea3c87866204'
 branch_labels = None
 depends_on = None
 
