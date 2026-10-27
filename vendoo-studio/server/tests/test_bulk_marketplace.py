@@ -1,6 +1,8 @@
 """Seller-reviewed bulk List, Delist and Relist: one confirmed request per reviewed item."""
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -197,7 +199,7 @@ def test_busy_slot_refuses_without_sending(db, client, calls, monkeypatch):
     row = _preview(client, [conv.id], "delist", ["ebay"])[0]
     monkeypatch.setattr(JobRepo, "get_active", lambda self: object())
     assert _perform(client, _body(row)).status_code == 409
-    monkeypatch.setattr(bulk_marketplace, "_running", True)
+    monkeypatch.setattr(bulk_marketplace, "_running", {"other-item"})
     monkeypatch.setattr(JobRepo, "get_active", lambda self: None)
     assert _perform(client, _body(row)).status_code == 409
     assert calls == []
@@ -290,3 +292,45 @@ def test_mark_not_listed_changes_only_anteroom(db, client, calls):
     assert result.status_code == 200, result.text and result.json()["ok"] is True
     assert "ebay" not in listings(db, conv.id)
     assert calls == []
+
+
+def test_list_starts_every_marketplace_at_once_and_takes_turns_on_each(db, monkeypatch):
+    from vendoo_studio.services import automation_actions
+
+    events = []
+
+    async def fake_list(conv_id, name, _body, _db):
+        events.append(("start", conv_id, name))
+        await asyncio.sleep(0.01)
+        events.append(("end", conv_id, name))
+        return {"ok": True, "state": "published"}
+
+    monkeypatch.setattr("vendoo_studio.services.native_marketplaces.list_now", fake_list)
+    monkeypatch.setattr(automation_actions, "_turns", {})
+    a, b = _item(db, "A"), _item(db, "B")
+
+    def revision(conv):
+        return ListingRepo(db).get_current(conv.id).current_revision_id
+
+    async def both():
+        return await asyncio.gather(automation_actions._list_remaining(db, a.id, ["ebay", "poshmark"], revision(a)),
+                                    automation_actions._list_remaining(db, b.id, ["ebay"], revision(b)))
+
+    assert all(result["ok"] for result in asyncio.run(both()))
+    # One item's marketplaces run together.
+    assert events[:2] == [("start", a.id, "ebay"), ("start", a.id, "poshmark")]
+    # A second item waits for its turn on a marketplace already in use.
+    assert events.index(("start", b.id, "ebay")) > events.index(("end", a.id, "ebay"))
+
+
+def test_bulk_list_runs_beside_another_item_but_delist_waits(db, client, calls, monkeypatch):
+    listed = _item(db, "To list")
+    live = _item(db, "Live coat", live_on_ebay=True)
+    list_row = _preview(client, [listed.id], "list", ["ebay"])[0]
+    delist_row = _preview(client, [live.id], "delist", ["ebay"])[0]
+    monkeypatch.setattr(bulk_marketplace, "_running", {"another-item"})
+    assert _perform(client, _body(delist_row)).status_code == 409
+    response = _perform(client, _body(list_row))
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True
+    assert bulk_marketplace._running == {"another-item"}

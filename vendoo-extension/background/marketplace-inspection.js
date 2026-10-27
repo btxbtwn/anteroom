@@ -127,7 +127,7 @@ async function inspectMarketplaceDocument(origin, requestedScript) {
 
 async function handleMarketplaceInspection(msg) {
   const page = MARKETPLACE_INSPECTION_PAGES[msg.payload?.marketplace];
-  if (!page || activeNativeOperation || activeJob || activePatch) {
+  if (!page || nativeOperationsRunning() || activeJob || activePatch) {
     sendBrowserResult(msg, { ok: false, error: page ? 'Another automation job is running.' : 'Unsupported marketplace.' });
     return;
   }

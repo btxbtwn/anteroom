@@ -1,7 +1,7 @@
 // Leftover field fills and per-command timeouts.
 
 async function runFillFields(jobId, payload) {
-  if (activeNativeOperation || activePatch) {
+  if (nativeOperationsRunning() || activePatch) {
     send({
       version: 1,
       type: 'job.step_failed',

@@ -128,6 +128,32 @@ def _running(record: dict) -> bool:
     return bool(record.get("job_id")) and api_job_is_live(record["job_id"])
 
 
+# Listing steps that may run beside a listing step on another marketplace.
+SIDE_BY_SIDE_STEPS = frozenset(STEP_STATE) | {"check"}
+
+
+def blocking_job(repo: JobRepo, marketplace: str | None):
+    """The active job that stops a new action on ``marketplace``, if any.
+
+    Listing actions on different marketplaces run side by side; one
+    marketplace runs one action at a time. Vendoo sends, delists and page
+    inspections still have Chrome to themselves. With no marketplace, only
+    those exclusive jobs count.
+    """
+    for job in repo.get_active():
+        step = str(job.current_step or "")
+        other = next((name for name in NAMES if step.startswith(f"native_{name}_")), None)
+        if other is None or other == marketplace or step.removeprefix(f"native_{other}_") not in SIDE_BY_SIDE_STEPS:
+            return job
+    return None
+
+
+def _busy_message(job, marketplace: str) -> str:
+    if str(job.current_step or "").startswith(f"native_{marketplace}_"):
+        return f"Another {NAMES[marketplace]} action is running. Wait for it to finish."
+    return "Another automation job is queued or running. Wait for it to finish."
+
+
 def running_marketplace(db: Session, conv_id: str) -> str | None:
     """The marketplace a direct action is running on for this item, if any."""
     for marketplace, record in MarketplaceListingRepo(db).for_conversation(conv_id).items():
@@ -437,8 +463,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
                 raise NativeMarketplaceError(409, "Choose a Sellwild category and condition first.")
         steps = _plan(marketplace, kind, record, body.revision_id)
         repo = JobRepo(db)
-        if repo.get_active():
-            raise NativeMarketplaceError(409, "Another automation job is queued or running. Wait for it to finish.")
+        if (busy := blocking_job(repo, marketplace)) is not None:
+            raise NativeMarketplaceError(409, _busy_message(busy, marketplace))
         job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{steps[0]}")
         claim_api_job(job.id)
         record = _store(db, conv_id, marketplace, {
@@ -780,7 +806,7 @@ async def check_result(conv_id: str, marketplace: Marketplace, db: Session, body
         raise NativeMarketplaceError(409, "Check the draft already linked to this listing.")
     repo = JobRepo(db)
     with start_gate():
-        if repo.get_active():
+        if blocking_job(repo, marketplace) is not None:
             raise NativeMarketplaceError(409, "Another automation job is running. Check again when it finishes.")
         # Reading Chrome's journal can open the marketplace tab: hold the slot like any other job.
         check_job = repo.create(conv_id, record.get("revision_id") or "", snapshot, status="dispatched",

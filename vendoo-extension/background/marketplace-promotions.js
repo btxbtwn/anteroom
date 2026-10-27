@@ -349,12 +349,11 @@ async function handleMarketplacePromotion(msg) {
     sendBrowserResult(msg, await checkMarketplacePromotion(payload));
     return;
   }
-  if (activeNativeOperation || activeJob || activePatch) {
+  const operation = claimNativeOperation('*', `promotion-${payload.action_id || payload.request_id || ''}`);
+  if (!operation) {
     sendBrowserResult(msg, marketplaceFailure(marketplaceError('Another automation job is running.'), true));
     return;
   }
-  activeNativeOperation = { id: `promotion-${payload.action_id || payload.request_id || ''}`, tabId: null, cancelled: false,
-    controller: new AbortController() };
   try {
     const key = promotionKey(payload.action_id);
     const stored = (await chrome.storage.local.get(key))[key];
@@ -368,5 +367,5 @@ async function handleMarketplacePromotion(msg) {
     const result = await runMarketplacePromotion(payload);
     await chrome.storage.local.set({ [key]: { finished: true, at: Date.now(), result } });
     sendBrowserResult(msg, result);
-  } finally { activeNativeOperation = null; }
+  } finally { releaseNativeOperation(operation); }
 }

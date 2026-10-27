@@ -33,7 +33,7 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set());
   const [confirmed, setConfirmed] = useState(false);
   const [tasks, setTasks] = useState<MarketplaceTask[] | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeIds, setActiveIds] = useState<ReadonlySet<string>>(new Set());
   const [stopRequested, setStopRequested] = useState(false);
   const stop = useRef(false);
   const preview = useMutation({
@@ -43,10 +43,10 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
   });
   const run = useMutation({
     mutationFn: (approved: MarketplaceTask[]) => runMarketplaceTasks(approved, api.bulkMarketplace.perform, () => stop.current,
-      (progress, active) => { setTasks(progress); setActiveId(active); }),
+      (progress, active) => { setTasks(progress); setActiveIds(active); }),
     retry: false,
     onSettled: (_result, _error, approved) => {
-      setActiveId(null);
+      setActiveIds(new Set());
       for (const key of ["conversations", "analytics", "automation-approvals"]) void client.invalidateQueries({ queryKey: [key] });
       for (const task of approved) {
         for (const key of ["marketplace-listings", "native-marketplaces", "listing"]) void client.invalidateQueries({ queryKey: [key, task.id] });
@@ -64,7 +64,7 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
     run.mutate(approved);
   };
   const footer = tasks ? <>
-    {run.isPending ? <Button variant="outline" disabled={stopRequested} onClick={() => { stop.current = true; setStopRequested(true); }}>{stopRequested ? "Stopping after this item…" : "Stop after current item"}</Button> : <>
+    {run.isPending ? <Button variant="outline" disabled={stopRequested} onClick={() => { stop.current = true; setStopRequested(true); }}>{stopRequested ? "Stopping after the items running now…" : "Stop after the items running now"}</Button> : <>
       {remaining.length ? <Button variant="outline" disabled={busy} onClick={() => preview.mutate(remaining.map((task) => task.id))}>Review remaining</Button> : null}
       <Button disabled={busy} onClick={onClose}>Done</Button>
     </>}
@@ -86,7 +86,7 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
       <PageNote>{tasks.filter((task) => task.state === "done").length} done · {tasks.filter((task) => task.state === "failed" || task.state === "unconfirmed").length} need attention · {tasks.filter((task) => task.state === "pending").length} not started</PageNote>
       {tasks.map((task) => <div key={task.id} className="min-w-0 break-words rounded-lg border p-3">
         <p className="font-medium">{task.title}</p>
-        <p className="text-xs">{activeId === task.id ? `${ACTIVE[task.request.action]} on ${names(task.request.marketplaces)}…`
+        <p className="text-xs">{activeIds.has(task.id) ? `${ACTIVE[task.request.action]} on ${names(task.request.marketplaces)}…`
           : task.state === "done" ? `${DONE[task.request.action]} on ${names(task.request.marketplaces)}`
           : task.state === "pending" ? "Not started" : task.error}</p>
       </div>)}

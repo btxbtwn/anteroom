@@ -513,7 +513,7 @@ async function handleStudioMessage(msg) {
         return;
       }
 
-      if (activeNativeOperation || activePatch || (activeJob && activeJob.job_id !== jobId)) {
+      if (nativeOperationsRunning() || activePatch || (activeJob && activeJob.job_id !== jobId)) {
         send({
           version: 1,
           type: 'job.step_failed',
@@ -584,7 +584,7 @@ async function handleStudioMessage(msg) {
     }
 
     case 'job.vendoo_api': {
-      if (activeNativeOperation) {
+      if (nativeOperationsRunning()) {
         replyVendooApi(msg, { ok: false, error: 'Another automation job is running.', results: [] });
         break;
       }

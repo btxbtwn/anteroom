@@ -137,8 +137,9 @@ async def _list_remaining(db: Session, conv_id: str, marketplaces: list[str], re
     detail: list[dict] = []
     errors: dict[str, str] = {}
     still = []
-    for name in pending:
-        outcome = await _list_one(db, conv_id, name, revision_id)
+    # Every marketplace starts at once; each waits only for its own turn.
+    outcomes = await asyncio.gather(*(_list_one(db, conv_id, name, revision_id) for name in pending))
+    for name, outcome in zip(pending, outcomes, strict=True):
         if outcome.get("ok"):
             detail.append(outcome)
         else:
@@ -167,15 +168,18 @@ async def _native_one(db: Session, conv_id: str, name: str, revision_id: str, ki
 
     verb = "relist" if kind == "list" else "update"
     start = list_now if kind == "list" else update_live
-    if JobRepo(db).get_active() and not await _wait_until_idle(db):
-        return {"ok": False, "marketplace": name, "error": f"The {name} {verb} was still running when this automation stopped waiting."}
-    try:
-        # This call follows the seller's consumed item-specific approval.
-        result = await start(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
-    except NativeMarketplaceError as exc:
-        return {"ok": False, "marketplace": name, "error": str(exc)}
-    if not await _wait_until_idle(db):
-        return {"ok": False, "marketplace": name, "error": f"The {name} {verb} was still running when this automation stopped waiting."}
+    stalled = {"ok": False, "marketplace": name, "error": f"The {name} {verb} was still running when this automation stopped waiting."}
+    # Items listed together take turns on each marketplace, so neither is refused as busy.
+    async with _turn(name):
+        if not await _wait_until_free(db, name):
+            return stalled
+        try:
+            # This call follows the seller's consumed item-specific approval.
+            result = await start(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
+        except NativeMarketplaceError as exc:
+            return {"ok": False, "marketplace": name, "error": str(exc)}
+        if result.get("job_id") and not await _wait_for_job(db, result["job_id"]):
+            return stalled
     db.expire_all()
     job = JobRepo(db).get(result["job_id"]) if result.get("job_id") else None
     # A refused start keeps the record's state (a live listing stays published), so its error decides.
@@ -189,7 +193,7 @@ async def _native_one(db: Session, conv_id: str, name: str, revision_id: str, ki
 async def update_revision(db: Session, conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
     """Write a saved revision onto listings already live, after explicit approval.
 
-    Each named marketplace is tried once, in order. A failed update leaves that
+    Each named marketplace is tried once, all at the same time. A failed update leaves that
     live listing as it was; nothing is listed, delisted or retried.
     """
     if not marketplaces:
@@ -198,8 +202,8 @@ async def update_revision(db: Session, conv_id: str, marketplaces: list[str], re
         return {"ok": False, "error": "Update needs the listing that was reviewed."}
     detail: list[dict] = []
     errors: dict[str, str] = {}
-    for name in marketplaces:
-        outcome = await _native_one(db, conv_id, name, revision_id, "update")
+    outcomes = await asyncio.gather(*(_native_one(db, conv_id, name, revision_id, "update") for name in marketplaces))
+    for name, outcome in zip(marketplaces, outcomes, strict=True):
         if outcome.get("ok"):
             detail.append(outcome)
         else:
@@ -239,6 +243,38 @@ async def _regenerate(conv_id: str) -> dict:
             return {"ok": False, "error": "Regenerate was still running when this automation stopped waiting."}
         await asyncio.sleep(0.5)
     return {"ok": True}
+
+
+_turns: dict[str, asyncio.Lock] = {}
+
+
+def _turn(marketplace: str) -> asyncio.Lock:
+    return _turns.setdefault(marketplace, asyncio.Lock())
+
+
+async def _wait_until_free(db: Session, marketplace: str) -> bool:
+    """Wait until nothing stops an action on this marketplace (see ``blocking_job``)."""
+    from vendoo_studio.services.native_marketplaces import blocking_job
+
+    deadline = asyncio.get_running_loop().time() + IDLE_TIMEOUT_S
+    while blocking_job(JobRepo(db), marketplace) is not None:
+        if asyncio.get_running_loop().time() > deadline:
+            return False
+        await asyncio.sleep(0.5)
+        db.expire_all()
+    return True
+
+
+async def _wait_for_job(db: Session, job_id: str) -> bool:
+    from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
+
+    deadline = asyncio.get_running_loop().time() + IDLE_TIMEOUT_S
+    while (job := JobRepo(db).get(job_id)) is not None and job.status in ACTIVE_JOB_STATUSES:
+        if asyncio.get_running_loop().time() > deadline:
+            return False
+        await asyncio.sleep(0.5)
+        db.expire_all()
+    return True
 
 
 async def _wait_until_idle(db: Session) -> bool:
