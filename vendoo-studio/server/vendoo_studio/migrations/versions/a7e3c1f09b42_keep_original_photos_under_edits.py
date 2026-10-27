@@ -1,7 +1,7 @@
 """Keep the original photo under non-destructive edits
 
 Revision ID: a7e3c1f09b42
-Revises: 151f7674a7c7
+Revises: a7c3e91f5d20
 Create Date: 2026-10-26 20:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = 'a7e3c1f09b42'
-down_revision = '151f7674a7c7'
+down_revision = 'a7c3e91f5d20'
 branch_labels = None
 depends_on = None
 

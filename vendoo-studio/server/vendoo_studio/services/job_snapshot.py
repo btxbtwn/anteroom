@@ -112,6 +112,11 @@ def prepare_listing_snapshot(
         poshmark["originalPrice"] = 0
     listing_snapshot["poshmark_specifics"] = poshmark
     align_listing_gender(listing_snapshot)
+    from vendoo_studio.services.depop_category import align_depop_category
+
+    # A revision saved before the Depop keys moved together can still name the
+    # old leaf in direct_category_ids. The category the seller set wins.
+    align_depop_category(listing_snapshot)
     ensure_listing_defaults(listing_snapshot)
     from vendoo_studio.services.depop_measurements import sync_depop_measurements
 

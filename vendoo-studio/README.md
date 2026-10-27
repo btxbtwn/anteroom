@@ -26,12 +26,12 @@ Pushes to `main` that touch Anteroom, the extension, or listing skills also buil
 
 The packaged app does not git-pull. **Check for updates** compares the stamped build SHA against the GitHub release and, if newer, downloads the zip, replaces the `.app`, and relaunches. All Anteroom data stays in `~/Library/Application Support/Anteroom` (listings, photos, drafts, hidden fields, settings, fill logs, logs). API keys remain in macOS Keychain. Settings → Data shows the folder path.
 
-Release builds require `MACOS_SIGNING_IDENTITY` to name the same persistent code-signing certificate across updates. CI imports it from `MACOS_SIGNING_CERT_P12_BASE64` and `MACOS_SIGNING_CERT_PASSWORD`; release packaging fails if the certificate is missing. Ad-hoc signatures change the app's Keychain identity on every build. Moving from an older ad-hoc build may require allowing Keychain access once. Credentials are updated in place and are never rewritten at startup.
+Release builds are signed with the certificate in the GitHub secrets `MACOS_SIGNING_CERT_P12_BASE64` and `MACOS_SIGNING_CERT_PASSWORD`; packaging fails rather than fall back to ad-hoc signing when they are missing, and the updater refuses any download that is ad-hoc signed or fails `codesign --verify --deep --strict`. Keychain recognises later builds by their Apple Team ID, which only an Apple-issued certificate carries. Signed with a self-signed certificate, each update gets a new `cdhash` in the Keychain item's partition list, so macOS asks for the Mac password once per update (the release job warns about it). Signed with a **Developer ID Application** certificate, it asks once more and then never again. To switch, follow the steps at the top of `scripts/setup-signing.sh` and run it with the exported `.p12`. Credentials are updated in place and are never rewritten at startup.
 
 The recipient:
 
 1. Unzips the archive and moves **Anteroom** into Applications.
-2. Control-clicks the app and chooses **Open** the first time (ad-hoc signed, not notarized).
+2. Control-clicks the app and chooses **Open** the first time (not notarized).
 3. Signs in with ChatGPT or enters a Xiaomi MiMo API key in Settings.
 4. Clicks **Connect Chrome**. Anteroom opens Vendoo in everyday Chrome and copies the listing extension into an Anteroom-managed folder. Load that unpacked folder once from Settings → Connections (`chrome://extensions/` → Developer mode → Load unpacked).
 

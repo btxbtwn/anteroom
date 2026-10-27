@@ -33,20 +33,6 @@ function depopPrice(listing) {
   return listing?.price;
 }
 
-// Depop's add-measurements ids are not published in this extension. Send the
-// structured rows Anteroom stored; the form filler matches them by label.
-function depopMeasurementBody(listing) {
-  const block = listing?.depop_specifics?.measurements;
-  const values = Array.isArray(block?.values) ? block.values : [];
-  const rows = values.filter(row => row && String(row.value ?? '').trim()).map(row => ({
-    id: String(row.id || ''),
-    label: String(row.label || ''),
-    value: String(row.value).trim(),
-    unit: String(row.unit || block.unit || 'in'),
-  }));
-  return rows.length ? { measurements: rows } : {};
-}
-
 function depopChosenPhotos(photos, listing) {
   const list = Array.isArray(photos) ? photos : [];
   const picked = listing?.marketplace_photos?.depop;
@@ -130,6 +116,21 @@ function depopParcelSize(sizes, listing) {
   return sizes.find(size => String(size?.title || '').trim().toLowerCase() === wanted) || null;
 }
 
+// The seller's country as Depop's listing site stores it: name, code, and
+// the country's own coordinates. Empty when Depop does not name a country.
+async function depopCountryLocation(request, deadline) {
+  const account = await request('GET', '/presentation/api/v1/users/me/');
+  const code = String(account?.country || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return {};
+  const { data } = await marketplaceFetch('https://assets.depop.com/web/assets/listing/location/countries.json', {
+    marketplace: 'depop', step: 'location', credentials: 'omit', deadline, retry: true,
+  });
+  const country = (Array.isArray(data) ? data : []).find(row => row?.countryCode === code);
+  if (!country?.address || !country.country || !Number.isFinite(Number(country.geoLat)) || !Number.isFinite(Number(country.geoLng))) return {};
+  return { address: country.address, country: country.country, country_code: country.countryCode,
+    geo_lat: Number(country.geoLat), geo_lng: Number(country.geoLng) };
+}
+
 // Category, brand, country-level location, and Depop Shipping. Each lookup is
 // skipped when Depop does not answer, so publish can still name what is missing.
 async function depopListingFields(request, listing, deadline) {
@@ -142,20 +143,7 @@ async function depopListingFields(request, listing, deadline) {
     if (brand) fields.brand = brand;
   } catch { /* The publish check names a missing brand. */ }
   try {
-    const account = await request('GET', '/presentation/api/v1/users/me/');
-    const code = String(account?.country || '').toUpperCase();
-    if (/^[A-Z]{2}$/.test(code)) {
-      const { data } = await marketplaceFetch('https://assets.depop.com/web/assets/listing/location/countries.json', {
-        marketplace: 'depop', step: 'location', credentials: 'omit', deadline, retry: true,
-      });
-      const country = (Array.isArray(data) ? data : []).find(row => row?.countryCode === code);
-      if (country?.address && country.country && Number.isFinite(Number(country.geoLat)) && Number.isFinite(Number(country.geoLng))) {
-        Object.assign(fields, {
-          address: country.address, country: country.country, country_code: country.countryCode,
-          geo_lat: Number(country.geoLat), geo_lng: Number(country.geoLng),
-        });
-      }
-    }
+    Object.assign(fields, await depopCountryLocation(request, deadline));
   } catch { /* The publish check names a missing location. */ }
   try {
     const settings = await request('GET', '/presentation/api/v1/users/me/settings/shipping/');
@@ -460,8 +448,10 @@ async function depopResolvedFields(payload) {
     missing.push(...extra.missing);
   }
   fields.brand = depopBrand(listing, attributes);
-  fields.sku = String(listing.depop_specifics?.sku ?? listing.sku ?? '');
-  if (fields.sku.length > 50) missing.push({ field: 'depop_specifics.sku', needs: 'a SKU of 50 characters or fewer' });
+  // Depop's listing site leaves sku off when it is blank, and so does Anteroom.
+  const sku = String(listing.depop_specifics?.sku ?? listing.sku ?? '').trim();
+  if (sku) fields.sku = sku;
+  if (sku.length > 50) missing.push({ field: 'depop_specifics.sku', needs: 'a SKU of 50 characters or fewer' });
   fields.international_shipping_cost = worldwide?.enabled === true ? internationalPrice.toFixed(2) : null;
   const parcelLabel = String(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size || '').trim();
   if (!parcelLabel) missing.push({ field: 'parcel_size', needs: 'a parcel size' });
@@ -485,38 +475,6 @@ async function depopResolvedFields(payload) {
     payer: 'buyer', parcel_size: String(parcel.id), shipping_provider_id: 'USPS', ship_from_address_id: from.id,
   }];
   Object.assign(fields, depopLocation(listing, from));
-  return fields;
-}
-
-// Category, size, colour, and brand for a live edit. Shipping stays as Depop
-// already has it. The generated title is brand, department, colour, and product type.
-async function depopLiveEditFields(listing, deadline) {
-  const stored = String(listing?.direct_category_ids?.depop || listing?.depop_specifics?.categoryId
-    || listing?.marketplace_category_ids?.depop || '');
-  if (!stored && !listing?.form?.overrides?.categoryV2 && !listing?.marketplace_category_objects?.depop) return null;
-  const attributes = await depopAttributes(deadline);
-  const category = depopCategory(listing, attributes);
-  const fields = depopFormFields(listing, attributes);
-  if (!category) return fields;
-  const gender = category.department === 'kidswear'
-    ? (/boy/i.test(String(listing.department || '')) ? 'male' : /girl/i.test(String(listing.department || '')) ? 'female' : 'unisex')
-    : category.department === 'menswear' ? 'male' : category.department === 'womenswear' ? 'female' : '';
-  Object.assign(fields, { product_type: category.productType, is_kids: category.department === 'kidswear',
-    ...(gender ? { gender } : {}) });
-  const quantity = Number(listing.quantity ?? 1);
-  const size = depopSize(listing, category, attributes);
-  if (size.problem) throw marketplaceMissing('depop', [{ field: 'size', needs: size.problem }]);
-  if (!size.none) Object.assign(fields, { variant_set: size.set, variants: { [size.id]: Number.isFinite(quantity) && quantity > 0 ? quantity : 1 } });
-  const extra = depopAttributeValues(listing, category, attributes);
-  if (extra.missing.length) throw marketplaceMissing('depop', extra.missing);
-  fields.attributes = extra.values;
-  // An unmatched brand stays as Depop already has it. Sending Other would
-  // replace a brand such as Vassarette in the title Depop generates.
-  const brand = depopBrand(listing, attributes);
-  const rows = Array.isArray(attributes?.brand) ? attributes.brand : attributes?.brands;
-  const other = depopOtherId(rows);
-  const wanted = String(listing?.depop_specifics?.brand || listing?.form?.overrides?.brand || listing?.brand || '').trim().toLowerCase();
-  if (brand && (brand !== other || !wanted || wanted === 'other' || wanted === 'unbranded')) fields.brand = brand;
   return fields;
 }
 
@@ -745,11 +703,15 @@ function depopCleanShipping(methods) {
   });
 }
 
-// The body create and update both send. Response objects from a previous
-// draft (brand records, videos, repop metadata) are not copied in: Depop
-// accepts the write and then ignores the fields.
+// The draft body Depop's own listing site sends (its web bundle's draft
+// request builder): snake_case names only, pictures as uploaded ids, and sku,
+// gender, price, quantity and shipping costs only when they have a value. An
+// empty sku is never sent: from the first save that sent sku "" (#801), Depop
+// answered 200 and kept nothing but the description and price.
+// Response objects from a previous draft (brand records, videos, repop
+// metadata) are not copied in.
 function depopDraftWriteBody(listing, fields, pictures, existing) {
-  const source = { ...depopFormFields(listing), ...depopMeasurementBody(listing), ...(fields || {}) };
+  const source = { ...depopFormFields(listing), ...(fields || {}) };
   const body = {
     description: depopDescription(listing),
     price_amount: String(depopPrice(listing) ?? ''),
@@ -757,11 +719,12 @@ function depopDraftWriteBody(listing, fields, pictures, existing) {
     pictures: depopPictureIds(pictures),
   };
   for (const key of ['address', 'age', 'attributes', 'brand', 'colour', 'condition', 'country', 'country_code',
-    'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids', 'measurements',
+    'gender', 'geo_lat', 'geo_lng', 'international_shipping_cost', 'is_kids',
     'national_shipping_cost', 'product_type', 'quantity', 'shipping_methods', 'source', 'style', 'variants']) {
     if (Object.hasOwn(source, key) && source[key] != null) body[key] = source[key];
   }
-  if (Object.hasOwn(source, 'sku')) body.sku = source.sku == null ? '' : source.sku;
+  const sku = String(source.sku ?? '').trim();
+  if (sku) body.sku = sku;
   if (body.brand && typeof body.brand === 'object') body.brand = depopFieldId(body.brand);
   if (body.condition && typeof body.condition === 'object') {
     body.condition = depopCondition(depopFieldId(body.condition)) || depopCondition(body.condition.name) || depopFieldId(body.condition);
@@ -774,12 +737,6 @@ function depopDraftWriteBody(listing, fields, pictures, existing) {
   }
   if (body.international_shipping_cost == null) delete body.international_shipping_cost;
   const prior = depopDraftDocument(existing);
-  if (!Array.isArray(body.measurements) && Array.isArray(prior.measurements) && prior.measurements.length) {
-    body.measurements = prior.measurements.map(row => ({
-      id: String(row?.id || ''), label: String(row?.label || ''), value: String(row?.value ?? '').trim(),
-      unit: String(row?.unit || 'in'),
-    })).filter(row => row.value);
-  }
   if (!Array.isArray(body.shipping_methods) && Array.isArray(prior.shipping_methods) && prior.shipping_methods.length) {
     body.shipping_methods = depopCleanShipping(prior.shipping_methods);
   }
@@ -793,7 +750,10 @@ function depopDraftWriteBody(listing, fields, pictures, existing) {
     body.variants = {};
     if (source.quantity != null) body.quantity = source.quantity;
   }
-  return depopCamelAliases(body);
+  for (const key of ['gender', 'national_shipping_cost']) {
+    if (!body[key]) delete body[key];
+  }
+  return body;
 }
 
 // The draft fields that differ from this revision: description and price, and
@@ -824,7 +784,7 @@ function depopDraftMismatch(draft, listing, fields) {
   if (fields.condition != null && depopCondition(fields.condition) !== view.condition
     && marketplaceNameKey(fields.condition) !== marketplaceNameKey(view.condition)) wrong.push('condition');
   if (fields.brand != null && depopBrandToken(view.brand) !== depopBrandToken(fields.brand)) wrong.push('brand');
-  if (Object.hasOwn(fields, 'sku') && String(view.sku || '') !== String(fields.sku ?? '')) wrong.push('SKU');
+  if (fields.sku && String(view.sku || '') !== String(fields.sku)) wrong.push('SKU');
   if (Object.hasOwn(fields, 'international_shipping_cost')) {
     const actual = view.international_shipping_cost;
     if (fields.international_shipping_cost == null ? actual != null && actual !== ''
@@ -844,36 +804,17 @@ function depopDraftMismatch(draft, listing, fields) {
   return wrong;
 }
 
-// The editor persists camelCase names. A snake_case-only body is accepted and
-// then ignored, so a reused draft still shows only the description and price
-// it already had. Both names go out; a read understands either.
-function depopCamelAliases(body) {
-  const pairs = [['price_amount', 'priceAmount'], ['price_currency', 'priceCurrency'], ['product_type', 'productType'],
-    ['variant_set', 'variantSetId'], ['is_kids', 'isKids'], ['national_shipping_cost', 'nationalShippingCost'],
-    ['international_shipping_cost', 'internationalShippingCost'], ['country_code', 'countryCode'],
-    ['geo_lat', 'geoLat'], ['geo_lng', 'geoLng'], ['pictures', 'pictureIds']];
-  for (const [snake, camel] of pairs) {
-    if (!Object.hasOwn(body, snake)) continue;
-    // Picture objects stay under pictures. pictureIds is the id list.
-    if (snake === 'pictures' && Array.isArray(body.pictures) && body.pictures.some(item => item && typeof item === 'object')) continue;
-    body[camel] = body[snake];
-  }
-  if (Array.isArray(body.shipping_methods)) {
-    body.shippingMethods = body.shipping_methods.map(method => {
-      if (!method || typeof method !== 'object') return method;
-      return { ...method,
-        ...(method.parcel_size != null ? { parcelSize: method.parcel_size } : {}),
-        ...(method.shipping_provider_id != null ? { shippingProviderId: method.shipping_provider_id } : {}),
-        ...(method.ship_from_address_id != null ? { shipFromAddressId: method.ship_from_address_id } : {}) };
-    });
-  }
-  return body;
-}
+// Keys that hold a person's name, street address, phone, email, or exact
+// position. Their values never reach a job error.
+const DEPOP_PRIVATE_KEYS = /^(?:address\d?|address_?line_?\d|line_?\d|street\d?|city|town|province|state|county|postal_?code|post_?code|zip(?:_?code)?|phone(?:_?number)?|telephone|email|first_?name|last_?name|full_?name|recipient(?:_?name)?|name_on_address|geo_(?:position_)?(?:lat|lng)|latitude|longitude|lat|lng)$/i;
 
+// A Depop body for a job error: signed URLs lose their query, and addresses,
+// names, contact details, coordinates and tokens are hidden.
 function depopSanitizedBody(value) {
   let json = '';
   try {
-    json = JSON.stringify(value, (key, item) => {
+    json = typeof value === 'string' ? value : JSON.stringify(value, (key, item) => {
+      if (key && DEPOP_PRIVATE_KEYS.test(key) && item != null && item !== '') return '[hidden]';
       if (typeof item === 'string' && item.includes('?')) {
         try {
           const url = new URL(item);
@@ -910,50 +851,6 @@ function depopPictureWrite(source) {
   return written;
 }
 
-// Fields a live product write is allowed to send. Everything else on a GET
-// (seller, likes, status, pricing) is read-only and a PUT that includes it
-// is refused. CamelCase copies are added once, at the end.
-const DEPOP_LIVE_FIELDS = [
-  ['address', 'address'],
-  ['description', 'description'],
-  ['price_currency', 'priceCurrency'],
-  ['price_amount', 'priceAmount'],
-  ['quantity', 'quantity'],
-  ['department', 'department'],
-  ['product_type', 'productType'],
-  ['condition', 'condition'],
-  ['colour', 'colour', 'color', 'colours', 'colors'],
-  ['style', 'style'],
-  ['age', 'age'],
-  ['source', 'source'],
-  ['brand', 'brand'],
-  ['brand_name', 'brandName', 'brand_name'],
-  ['attributes', 'attributes'],
-  ['national_shipping_cost', 'nationalShippingCost'],
-  ['international_shipping_cost', 'internationalShippingCost'],
-  ['shipping_methods', 'shippingMethods'],
-  ['depop_shipping', 'depopShipping'],
-  ['measurements', 'measurements'],
-  ['gender', 'gender'],
-  ['is_kids', 'isKids'],
-  ['variant_set', 'variantSetId', 'variant_set'],
-  ['variants', 'variants'],
-  ['size_set_id', 'sizeSetId', 'size_set_id'],
-  ['size_id', 'sizeId', 'size_id'],
-  ['sku', 'sku'],
-  ['country', 'country'],
-  ['country_code', 'countryCode'],
-  ['geo_lat', 'geoLat'],
-  ['geo_lng', 'geoLng'],
-];
-
-function depopTaken(source, keys) {
-  for (const key of keys) {
-    if (source[key] != null && source[key] !== '') return source[key];
-  }
-  return undefined;
-}
-
 // Which fields the read-back actually contained. This stays at the front of
 // the job error so a long body still names what came back.
 function depopReadDigest(body) {
@@ -971,79 +868,99 @@ function depopReadDigest(body) {
   return `read-back keys: ${present.join(', ') || '(none)'}`;
 }
 
-// A live edit has to send the product Depop already stored. A partial body
-// (bare picture ids, no address, no department, no quantity) is HTTP 400, and
-// the presentation layer reports that as "Request failed with status code 400".
+// The live edit body Depop's own listing site sends for
+// PUT /products/by-slug/<slug>/ (its web bundle's product request builder):
+// picture_ids rather than picture objects, geo_position_lat/lng, the country
+// code as country, attributes as an object, and no department, size_set_id,
+// size_id, measurements or camelCase copies. Every field comes from the same
+// resolution a draft save uses, so a category move carries the new category's
+// size set. Only the photo ids are taken from the live product.
 function depopLiveWriteBody(product, listing, fields) {
-  const source = depopDraftDocument(product);
-  const body = {};
-  for (const [snake, ...aliases] of DEPOP_LIVE_FIELDS) {
-    const value = depopTaken(source, [snake, ...aliases]);
-    if (value !== undefined) body[snake] = value;
-  }
-  if (body.brand && typeof body.brand === 'object') {
-    const name = body.brand.name || body.brand.title || body.brand.label;
-    if (name && body.brand_name == null) body.brand_name = String(name);
-    const id = depopFieldId(body.brand);
-    body.brand = id || (name ? String(name) : undefined);
-    if (body.brand == null) delete body.brand;
-  }
-  if (Array.isArray(body.shipping_methods)) body.shipping_methods = depopCleanShipping(body.shipping_methods);
-  if (body.national_shipping_cost != null && typeof body.national_shipping_cost !== 'object') {
-    body.national_shipping_cost = String(body.national_shipping_cost);
-  }
-  if (body.international_shipping_cost != null && typeof body.international_shipping_cost === 'object') {
-    delete body.international_shipping_cost;
-  }
-  body.description = depopDescription(listing);
-  const price = depopPrice(listing);
-  if (price != null) body.price_amount = String(price);
-  if (!body.price_currency) body.price_currency = 'USD';
-  const pictures = depopPictureWrite(source);
-  if (pictures.length) {
-    body.pictures = pictures;
-    const ids = depopPictureIds(source, null);
-    if (ids.length) body.pictureIds = ids;
-  }
-  const measurements = depopMeasurementBody(listing);
-  if (measurements.measurements?.length) body.measurements = measurements.measurements;
-  if (!fields) return depopCamelAliases(body);
-  const put = (snake, camel, value) => {
-    if (value == null) return;
-    body[snake] = value;
-    if (camel) body[camel] = value;
+  const stored = Array.isArray(product?.picture_ids) ? product.picture_ids : product;
+  const body = {
+    age: fields.age,
+    address: fields.address,
+    attributes: depopRequestAttributes(fields.attributes || {}),
+    brand: fields.brand,
+    colour: fields.colour,
+    condition: fields.condition,
+    country: fields.country_code,
+    description: depopDescription(listing),
+    ...(fields.gender ? { gender: fields.gender } : {}),
+    geo_position_lat: fields.geo_lat,
+    geo_position_lng: fields.geo_lng,
+    is_kids: fields.is_kids,
+    picture_ids: depopPictureIds(stored, null),
+    price_amount: String(depopPrice(listing) ?? ''),
+    price_currency: 'USD',
+    product_type: fields.product_type,
+    shipping_methods: depopCleanShipping(fields.shipping_methods || []),
+    ...(fields.sku ? { sku: fields.sku } : {}),
+    source: fields.source,
+    style: fields.style,
+    variant_set: fields.variant_set ?? null,
+    variants: depopRequestVariants(fields.variants || {}),
   };
-  put('product_type', 'productType', fields.product_type);
-  put('gender', null, fields.gender);
-  put('is_kids', 'isKids', fields.is_kids);
-  if (fields.attributes) body.attributes = depopRequestAttributes(fields.attributes);
-  for (const key of ['colour', 'condition', 'age', 'source', 'style']) {
-    if (Object.hasOwn(fields, key) && fields[key] != null) body[key] = fields[key];
+  if (Object.hasOwn(fields, 'international_shipping_cost')) body.international_shipping_cost = fields.international_shipping_cost;
+  if (typeof fields.quantity === 'number') body.quantity = fields.quantity;
+  return Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined));
+}
+
+// Depop's brand id on the live product. Its own debug view reads brand_id.
+function depopProductBrand(product) {
+  const id = product?.brand_id ?? depopFieldId(product?.brand);
+  return id == null || id === '' ? '' : String(id);
+}
+
+// The product type a live product reports, wherever Depop put it.
+function depopProductType(product) {
+  const value = product?.attributes?.product_type ?? product?.product_type ?? product?.productType;
+  return value == null || typeof value === 'object' ? '' : String(value);
+}
+
+const DEPOP_PICTURE_CHECK = '/presentation/api/v1/pictures/validate/';
+
+// Depop's listing site uploads a photo, then asks this endpoint until every id
+// is valid and processing is complete (ten tries, 200 ms apart), and only then
+// puts the ids on the draft. The valid ids come back in upload order.
+async function depopProcessedPhotos(request, uploaded) {
+  const ids = depopPictureIds(uploaded, null);
+  let valid = [];
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const answer = await request('POST', DEPOP_PICTURE_CHECK, { picture_ids: ids });
+    valid = (Array.isArray(answer?.valid_picture_ids) ? answer.valid_picture_ids : []).map(Number);
+    if (valid.length === ids.length && answer?.status === 'complete') break;
+    if (attempt < 9) await marketplaceSleep(200);
   }
-  if (fields.brand != null) {
-    body.brand = typeof fields.brand === 'object' ? depopFieldId(fields.brand) : fields.brand;
-    if (typeof body.brand === 'string' && body.brand && !body.brand_name && !body.brandName) body.brand_name = body.brand;
+  return ids.filter(id => valid.includes(id));
+}
+
+// The country name, code and coordinates a draft needs beside the city.
+async function depopWithCountry(request, fields, deadline) {
+  if (!DEPOP_LOCATION_KEYS.some(key => fields[key] == null)) return fields;
+  let located = {};
+  try { located = await depopCountryLocation(request, deadline); } catch { /* The publish check names a missing location. */ }
+  const out = { ...fields };
+  for (const key of DEPOP_LOCATION_KEYS) {
+    if (out[key] == null && located[key] != null) out[key] = located[key];
   }
-  if (fields.variant_set != null) {
-    put('variant_set', 'variantSetId', fields.variant_set);
-    put('size_set_id', 'sizeSetId', Number(fields.variant_set));
-    const variants = depopRequestVariants(fields.variants);
-    body.variants = variants;
-    const ids = depopVariantIds(variants);
-    if (ids.length === 1) {
-      const sizeId = Number(ids[0]);
-      put('size_id', 'sizeId', sizeId);
-      const qty = depopVariantQuantity(variants[ids[0]]);
-      if (Number.isFinite(qty)) body.quantity = qty;
-    }
-  } else if (body.quantity == null) {
-    const qty = Number(listing?.quantity ?? 1);
-    if (Number.isFinite(qty) && qty > 0) body.quantity = qty;
-  }
-  const department = fields.is_kids === true ? 'kidswear'
-    : fields.gender === 'male' ? 'menswear' : fields.gender === 'female' ? 'womenswear' : null;
-  if (department) body.department = department;
-  return depopCamelAliases(body);
+  return out;
+}
+
+// A live edit resolves the listing exactly as a draft save does, including
+// the size from the new category's size set: a size outside it stops the edit
+// before anything is sent. A brand Depop does not list keeps the product's
+// own brand, so a move never retitles Vassarette as Other.
+async function depopLiveFields(request, payload, product) {
+  if (payload.depop_fields) return await depopWithCountry(request, payload.depop_fields, payload.deadline);
+  const fields = await depopWithCountry(request, await depopResolvedFields(payload), payload.deadline);
+  const attributes = await depopAttributes(payload.deadline);
+  const other = depopOtherId(Array.isArray(attributes?.brand) ? attributes.brand : attributes?.brands || []);
+  const listing = payload.listing || {};
+  const wanted = String(listing.depop_specifics?.brand || listing.form?.overrides?.brand || listing.brand || '').trim().toLowerCase();
+  const stored = depopProductBrand(product);
+  if (fields.brand === other && wanted && wanted !== 'other' && wanted !== 'unbranded' && stored) fields.brand = stored;
+  return fields;
 }
 
 // One Depop step. Returns its result, or { error, safe_to_retry, ... } where
@@ -1065,6 +982,7 @@ async function depopApiAction(action, payload) {
       const draftWrite = payload.action === 'save_draft' && (
         (action === 'create' && method === 'POST' && path === '/presentation/api/v1/drafts/')
         || (action === 'photo' && method === 'POST' && path === '/presentation/api/v1/pictures/')
+        || (action === 'save' && method === 'POST' && path === DEPOP_PICTURE_CHECK)
         || (action === 'save' && method === 'PUT' && /^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)));
       const publishWrite = action === 'publish' && payload.action === 'publish' && payload.confirm === true
         && method === 'POST' && path === '/presentation/api/v1/drafts/products/';
@@ -1080,7 +998,8 @@ async function depopApiAction(action, payload) {
         if (publishWrite) headers['Depop-Session-Id'] = '';
       }
       // A signed photo slot only reserves an upload address, so it may be asked for again.
-      const retry = method === 'GET' || action === 'photo';
+      // Asking whether photos finished processing writes nothing either.
+      const retry = method === 'GET' || action === 'photo' || path === DEPOP_PICTURE_CHECK;
       try {
         const { data } = await marketplaceFetch(`https://webapi.depop.com${path}`, { marketplace: 'depop', step: action, method, headers,
           credentials: 'omit', deadline: payload.deadline, retry, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -1088,19 +1007,21 @@ async function depopApiAction(action, payload) {
         return data;
       } catch (error) {
         if (method !== 'GET' && !retry && error.rejected !== true) wrote = true;
-        if (error?.response_body) {
-          const detail = String(error.response_body);
-          if (detail && !String(error.marketplace_message || '').includes(detail)) {
-            error.marketplace_message = [error.marketplace_message, detail].filter(Boolean).join(' ');
-          }
-          marketplaceLog('depop', action, { method, status: error.status || null, error_code: error.code || null, body: detail });
-        }
+        const detail = error?.response_data !== undefined ? depopSanitizedBody(error.response_data) : String(error?.response_body || '');
+        // The field names a refused write carried, never their values, so the
+        // next refusal can be compared with what Depop's own site sends.
+        const sent = method !== 'GET' && body && typeof body === 'object' && error?.status >= 400 && error.status < 500
+          ? `sent: ${Object.keys(body).sort().join(', ')}` : '';
+        const extra = [detail && !String(error.marketplace_message || '').includes(detail) ? detail : '', sent].filter(Boolean);
+        if (extra.length) error.marketplace_message = [error.marketplace_message, ...extra].filter(Boolean).join(' | ');
+        if (detail || sent) marketplaceLog('depop', action, { method, status: error.status || null, error_code: error.code || null, body: detail, sent });
         throw error;
       }
     };
-    const keptError = (parts, body) => {
+    const keptError = (parts, body, reply) => {
       const error = new Error(`Depop did not keep this listing's ${parts.join(', ')}.`);
-      const detail = [depopReadDigest(body), depopSanitizedBody(body)].filter(Boolean).join(' ');
+      const answered = reply && typeof reply === 'object' && Object.keys(reply).length ? `write reply: ${depopSanitizedBody(reply)}` : '';
+      const detail = [depopReadDigest(body), answered, depopSanitizedBody(body)].filter(Boolean).join(' ');
       if (detail) error.marketplace_message = detail;
       marketplaceLog('depop', 'read-back', { body: detail || null });
       return error;
@@ -1197,20 +1118,21 @@ async function depopApiAction(action, payload) {
       let fields = payload.depop_fields;
       // A direct save has no precomputed fields. Fill category, brand, location, and shipping here.
       if (!fields) fields = await depopListingFields(request, payload.listing, payload.deadline);
-      else if (DEPOP_LOCATION_KEYS.some(key => fields[key] == null)) {
-        const located = await depopListingFields(request, payload.listing, payload.deadline);
-        fields = { ...fields };
-        for (const key of DEPOP_LOCATION_KEYS) {
-          if (fields[key] == null && located[key] != null) fields[key] = located[key];
+      else fields = await depopWithCountry(request, fields, payload.deadline);
+      let pictures = existing;
+      if (payload.uploaded_photo_ids?.length) {
+        pictures = await depopProcessedPhotos(request, payload.uploaded_photo_ids);
+        if (pictures.length !== depopPictureIds(payload.uploaded_photo_ids, null).length) {
+          throw marketplaceError(`Depop has not finished processing ${depopPictureIds(payload.uploaded_photo_ids, null).length - pictures.length} of the photos. Try again in a minute.`,
+            { code: 'rejected', marketplace_message: `valid picture ids: ${pictures.join(', ') || '(none)'}` });
         }
       }
-      const pictures = payload.uploaded_photo_ids?.length ? payload.uploaded_photo_ids : existing;
       const draft = depopDraftWriteBody(payload.listing, fields, pictures, existing);
-      if (draft.national_shipping_cost == null && existing?.national_shipping_cost != null
+      if (draft.national_shipping_cost == null && existing?.national_shipping_cost
         && typeof existing.national_shipping_cost !== 'object') {
         draft.national_shipping_cost = String(existing.national_shipping_cost);
       }
-      await request('PUT', path, draft);
+      const reply = await request('PUT', path, draft);
       let saved = await readDraft();
       for (let attempt = 0; attempt < 2 && !depopPhotosKept(saved, draft.pictures); attempt += 1) {
         await marketplaceSleep(300);
@@ -1220,7 +1142,7 @@ async function depopApiAction(action, payload) {
       const photosKept = depopPhotosKept(saved, draft.pictures);
       if (wrong.length || !photosKept) {
         const parts = [...wrong, ...(!photosKept ? ['photos'] : [])];
-        throw keptError(parts, saved);
+        throw keptError(parts, saved, reply);
       }
       return summary(saved);
     }
@@ -1248,10 +1170,12 @@ async function depopApiAction(action, payload) {
       const product = await request('GET', `/presentation/api/v1/products/by-slug/${slug}/`);
       const productId = String(product?.id || '');
       if (!/^[0-9]+$/.test(productId)) throw marketplaceError('Depop did not confirm this listing. Check it on Depop before trying again.', { code: 'schema_drift', rejected: false });
-      const fields = payload.depop_fields !== undefined
-        ? payload.depop_fields
-        : await depopLiveEditFields(payload.listing || {}, payload.deadline);
+      const fields = await depopLiveFields(request, payload, product);
       const body = depopLiveWriteBody(product, payload.listing, fields);
+      if (!body.picture_ids.length) {
+        throw marketplaceError('Depop did not return this listing\'s photo ids, so nothing was changed. Check the listing on Depop.',
+          { code: 'schema_drift', marketplace_message: depopReadDigest(product) });
+      }
       const updated = await request('PUT', `/presentation/api/v1/products/by-slug/${slug}/`, body);
       const echoed = updated && typeof updated === 'object' ? updated : {};
       const saved = echoed.price_amount != null || echoed.priceAmount != null || echoed.price != null || echoed.slug ? echoed
@@ -1260,6 +1184,11 @@ async function depopApiAction(action, payload) {
       if (price != null && depopPrice(payload.listing) != null && price !== Number(depopPrice(payload.listing))) {
         throw marketplaceError('Depop did not keep the updated price. Check the live listing.', { code: 'schema_drift', rejected: false,
           marketplace_message: depopSanitizedBody(saved) });
+      }
+      const kept = depopProductType(saved);
+      if (kept && fields.product_type && kept !== String(fields.product_type)) {
+        throw marketplaceError('Depop did not keep the new category. Check the live listing.', { code: 'schema_drift', rejected: false,
+          marketplace_message: `product type: ${kept}` });
       }
       const returned = String(saved?.slug || saved?.product_slug || '').trim().toLowerCase();
       const next = /^[a-z0-9][a-z0-9-]{0,200}$/.test(returned) ? returned : slug;
