@@ -6,6 +6,7 @@ import type { Photo } from "../api/types";
 import { toastManager } from "./ui/toast";
 import { BulkUploadDialog } from "./BulkUploadDialog";
 import { InspectorSection } from "./ListingFormControls";
+import { PhotoEditor } from "./PhotoEditor";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { Button } from "./ui/button";
 import { FolderPlusIcon, ImagePlusIcon } from "lucide-react";
@@ -33,6 +34,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropId, setDropId] = useState<string | null>(null);
   const [pendingBulkGroups, setPendingBulkGroups] = useState<PhotoFolderGroup[] | null>(null);
@@ -51,15 +53,18 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     },
   });
 
+  // A rotation or edit keeps the photo's ID and serves a new file under a new URL.
+  const replacePhoto = (changed: Photo) => {
+    queryClient.setQueryData<Photo[]>(["photos", convId], (current) =>
+      current?.map((photo) => (photo.id === changed.id ? changed : photo)),
+    );
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+  };
+
   const rotateMutation = useMutation({
     mutationFn: ({ photoId, degrees }: { photoId: string; degrees: 90 | -90 }) =>
       api.conversations.rotatePhoto(convId, photoId, degrees),
-    onSuccess: (rotated) => {
-      queryClient.setQueryData<Photo[]>(["photos", convId], (current) =>
-        current?.map((photo) => (photo.id === rotated.id ? rotated : photo)),
-      );
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    },
+    onSuccess: replacePhoto,
     onError: (err: Error) => setUploadError(err.message || "Rotate failed"),
   });
   const rotatingId = rotateMutation.isPending ? rotateMutation.variables?.photoId : null;
@@ -96,10 +101,13 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   });
 
   const previewIndex = photos?.findIndex((p) => p.id === previewId) ?? -1;
+  const editingIndex = photos?.findIndex((p) => p.id === editingId) ?? -1;
+  const editingPhoto = photos && editingIndex >= 0 ? photos[editingIndex] : null;
   const previewPhoto = photos && previewIndex >= 0 ? photos[previewIndex] : null;
 
   useEffect(() => {
     setPreviewId(null);
+    setEditingId(null);
     setDragId(null);
     setDropId(null);
   }, [convId]);
@@ -300,6 +308,11 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           index={previewIndex}
           rotating={rotateMutation.isPending}
           onRotate={(degrees) => rotate(previewPhoto.id, degrees)}
+          edited={Boolean(previewPhoto.edits)}
+          onEdit={() => {
+            setEditingId(previewPhoto.id);
+            setPreviewId(null);
+          }}
           onStep={(next) => setPreviewId(photos[next].id)}
           onMove={(delta) => {
             const next = moveItem(photos, previewIndex, previewIndex + delta);
@@ -313,6 +326,20 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
             setPreviewId(rest.length ? rest[Math.min(previewIndex, rest.length - 1)].id : null);
           }}
           onClose={() => setPreviewId(null)}
+        />
+      ) : null}
+      {editingPhoto ? (
+        <PhotoEditor
+          key={editingPhoto.id}
+          convId={convId}
+          photo={editingPhoto}
+          index={editingIndex}
+          onSaved={replacePhoto}
+          onClose={() => {
+            // Back to the enlarged photo the editor was opened from.
+            setPreviewId(editingPhoto.id);
+            setEditingId(null);
+          }}
         />
       ) : null}
       {pendingBulkGroups ? (

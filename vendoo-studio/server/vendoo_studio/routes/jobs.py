@@ -96,7 +96,7 @@ async def enqueue_send(body: SendJobRequest, db: Session = Depends(get_db)):
         )
         repo.add_event(job.id, "approved", job.current_step)
         repo.add_event(job.id, "vendoo_review", payload={
-            **review["preparation"], "photo_ids": review["photo_ids"],
+            **review["preparation"], "photo_ids": review["photo_ids"], "photo_versions": review["photo_versions"],
         })
     response = _job_response(job)
     schedule_advance_job_queue()

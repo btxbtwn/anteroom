@@ -537,17 +537,22 @@ async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: 
     if binding.get("etsy_photo_ids") is None and remote.get("images"):
         # Photos Anteroom did not upload (a pasted listing): leave them alone.
         return
-    if binding.get("etsy_photos_complete") and binding.get("etsy_photo_ids") == wanted:
-        return
     images = {str(key): str(value) for key, value in (binding.get("etsy_image_ids") or {}).items()}
+    # Like eBay's pictures, an uploaded photo is reused only while it is the same file:
+    # an edit keeps the photo's ID, so its checksum tells a changed photo apart.
+    checksums = {str(key): value for key, value in (binding.get("etsy_image_checksums") or {}).items()}
+    edited = {photo.id for photo in photos if photo.id in images and checksums.get(photo.id, photo.checksum) != photo.checksum}
+    if binding.get("etsy_photos_complete") and binding.get("etsy_photo_ids") == wanted and not edited:
+        return
     observed = {str(image.get("listing_image_id")) for image in remote.get("images") or []}
     if observed != set(images.values()):
         raise ValueError("Etsy has draft photos Anteroom has not confirmed. Check the listing in Etsy before another upload.")
     record({"etsy_photo_ids": wanted, "etsy_photos_complete": False})
-    for photo_id in [key for key in images if key not in wanted]:
+    for photo_id in [key for key in images if key not in wanted or key in edited]:
         await write("DELETE", f"shops/{shop_id}/listings/{item_id}/images/{images[photo_id]}", "photo")
         images.pop(photo_id)
-        record({"etsy_image_ids": dict(images), "etsy_pending_write": None})
+        checksums.pop(photo_id, None)
+        record({"etsy_image_ids": dict(images), "etsy_image_checksums": dict(checksums), "etsy_pending_write": None})
     for rank, photo in enumerate(photos, start=1):
         if photo.id in images:
             continue
@@ -561,7 +566,8 @@ async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: 
         if not re.fullmatch(r"[1-9]\d*", image_id):
             raise ValueError("Etsy did not confirm a photo ID. Check the draft before another upload.")
         images[photo.id] = image_id
-        record({"etsy_image_ids": dict(images), "etsy_pending_write": None})
+        checksums[photo.id] = photo.checksum
+        record({"etsy_image_ids": dict(images), "etsy_image_checksums": dict(checksums), "etsy_pending_write": None})
     record({"etsy_photos_complete": True})
 
 
@@ -685,7 +691,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             if str(remote.get("shop_id")) != shop_id or remote.get("state") != "draft":
                 raise ValueError("Etsy did not confirm a private draft. Check its result before trying again.")
             record({"draft_url": edit_url(item_id), "etsy_pending_write": None,
-                    "etsy_photo_ids": [p.id for p in photos], "etsy_image_ids": {}, "etsy_photos_complete": False,
+                    "etsy_photo_ids": [p.id for p in photos], "etsy_image_ids": {}, "etsy_image_checksums": {}, "etsy_photos_complete": False,
                     "etsy_shipping_profile_id": selected, "etsy_readiness_state_id": processing})
         else:
             item_id = listing_id(binding["draft_url"])
