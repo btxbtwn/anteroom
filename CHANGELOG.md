@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.419 — 2026-10-26
+
+- Updating a live Depop listing no longer fails with “Depop did not keep the updated price” when Depop's reply simply leaves the price out. After saving, Anteroom reads the listing again the way Depop's edit page does, waits a few seconds if Depop is slow to show the change, and only then reports which of the price, category or size Depop did not keep.
+
 ## 0.1.418 — 2026-10-26
 
 - Depop drafts now keep everything Anteroom sends: category, size, condition, brand, photos, location and shipping. Anteroom no longer sends a blank SKU, which made Depop quietly keep only the description and price, and it waits until Depop has finished processing new photos before adding them.
