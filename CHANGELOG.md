@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.441 — 2026-10-27
+
+- Nothing changes in the app. A check that Anteroom runs on every change, that a stuck send fails and the next one in line still goes out, no longer fails at random.
+
 ## 0.1.440 — 2026-10-27
 
 - Offers to likers now work on Mercari, sent by you or by a rule you turn on. Anteroom asks Mercari whether the listing can take an offer and what range it allows, sends whole-dollar offers inside that range and never below your floor, sends each one once, and pauses the rule if Mercari's answer is lost, it limits requests, or you are signed out.
