@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.442 — 2026-10-27
+
+- Nothing changes in the app. A check that Anteroom runs on every change, that a stuck send fails and the next one in line still goes out, no longer fails at random.
+
 ## 0.1.441 — 2026-10-27
 
 - Listing forms stay on screen while you edit. Changing a price, brand, condition, format, or shipping choice no longer reloads the form. Choosing a category, or an update that sets the category, is what changes it. The form shows the fields every listing on that marketplace has, plus the fields that category needs, such as size and attributes. Turning on Depop worldwide shipping shows its fee without a reload, and switching eBay's format or Mercari's shipping method shows or hides those rows in place.

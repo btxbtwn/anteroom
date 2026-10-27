@@ -249,7 +249,13 @@ class QueueAfterStallTest(unittest.IsolatedAsyncioTestCase):
 
             self.silence(a.id)
             self.assertEqual(await job_watchdog.sweep(), [a.id])
-            await asyncio.wait_for(asyncio.gather(*self.tasks), timeout=3)
+            # The second send starts only once the first has failed, so wait for both.
+            async def both_ran():
+                while len(self.tasks) < 2:
+                    await asyncio.sleep(0.01)
+                await asyncio.gather(*self.tasks)
+
+            await asyncio.wait_for(both_ran(), timeout=3)
             # Nothing else is stuck: a further pass fails nothing and starts nothing.
             self.assertEqual(await job_watchdog.sweep(), [])
 
