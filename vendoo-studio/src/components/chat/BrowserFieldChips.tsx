@@ -1,6 +1,7 @@
 import { XIcon } from "lucide-react";
 import type { BrowserField } from "../../api/client";
 import { cn } from "../../lib/utils";
+import { useVendooEnabled } from "../../vendooMode";
 import { Button } from "../ui/button";
 
 const MARKET_LABELS: Record<string, string> = {
@@ -20,9 +21,11 @@ export function BrowserFieldChips({
   fields: BrowserField[] | undefined;
   onChange: ((fields: BrowserField[]) => void) | undefined;
 }) {
+  const vendooOn = useVendooEnabled();
   if (!fields?.length) return null;
+  const labels = vendooOn ? MARKET_LABELS : { ...MARKET_LABELS, general: "General" };
   return (
-    <div className="mb-3 flex flex-col gap-1.5" aria-label="Fields pointed at in the Vendoo browser">
+    <div className="mb-3 flex flex-col gap-1.5" aria-label={vendooOn ? "Fields pointed at in the Vendoo browser" : "Fields pointed at in the browser"}>
       <div className="flex items-center justify-between gap-2 text-muted-foreground text-xs">
         <span>
           {fields.length} field{fields.length === 1 ? "" : "s"} from the browser go with your message
@@ -42,7 +45,7 @@ export function BrowserFieldChips({
             title={field.value || "empty"}
           >
             <span className="truncate">
-              {MARKET_LABELS[field.marketplace] || field.marketplace} / {field.label}
+              {labels[field.marketplace] || field.marketplace} / {field.label}
             </span>
             {!field.filled ? <span className="text-muted-foreground text-2xs">empty</span> : null}
             <Button

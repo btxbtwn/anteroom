@@ -29,6 +29,7 @@ import { workspaceCrumbs, type WorkspaceView } from "../components/workspaceCrum
 import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
+import { useVendooEnabled } from "../vendooMode";
 import { toastManager } from "../components/ui/toast";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
@@ -114,6 +115,7 @@ function useMobileLayout() {
 
 export function App() {
   const queryClient = useQueryClient();
+  const vendooOn = useVendooEnabled();
   const isMobile = useMobileLayout();
   const [listingTabs, dispatchListingTab] = useReducer(
     listingTabsReducer,
@@ -218,19 +220,21 @@ export function App() {
       if (job.status === "completed" || job.status === "failed") {
         toastManager.add({
           type: job.status === "failed" ? "error" : "success",
-          title: job.status === "failed" ? "Vendoo send failed" : "Vendoo draft saved",
+          title: job.status === "failed"
+            ? (vendooOn ? "Vendoo send failed" : "Send failed")
+            : (vendooOn ? "Vendoo draft saved" : "Listing saved"),
           description: job.last_error || job.listing_title,
         });
       }
     }
-  }, [queue.data, queryClient]);
+  }, [queue.data, queryClient, vendooOn]);
 
   // Bound listings can change tab in Vendoo while the sidebar is open. A quiet
   // inventory pass refreshes draft/active/sold without importing photos — on
   // focus and whenever Chrome reconnects. Server debounce stops focus spam.
   const extensionConnected = Boolean(status?.extension_connected);
   useEffect(() => {
-    if (!extensionConnected) return undefined;
+    if (!extensionConnected || !vendooOn) return undefined;
     const kick = () => {
       void api.imports.syncLabels().catch(() => {
         /* Chrome may still be pairing; next focus retries. */
@@ -247,7 +251,7 @@ export function App() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [extensionConnected]);
+  }, [extensionConnected, vendooOn]);
 
   const providerConfigured = Boolean(status?.provider_configured);
   const needsSetup = !status || !status.provider_configured || !status.extension_connected;
@@ -255,7 +259,7 @@ export function App() {
   const listingJob = jobs?.find((job) => job.conversation_id === selectedConvId && job.status !== "cancelled");
   const automationRunning = ACTIVE_JOB_STATUSES.has(String(listingJob?.status));
   // Sends run in the background; the seller opens the browser explicitly.
-  const browserOpen = Boolean(browserJobId && listingJob?.id === browserJobId);
+  const browserOpen = vendooOn && Boolean(browserJobId && listingJob?.id === browserJobId);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -416,7 +420,11 @@ export function App() {
     },
     onError: (err: Error, jobId: string) => {
       setBrowserJobId((current) => (current === jobId ? null : current));
-      toastManager.add({ type: "error", title: "Could not open the Vendoo draft", description: err.message });
+      toastManager.add({
+        type: "error",
+        title: vendooOn ? "Could not open the Vendoo draft" : "Could not open the draft",
+        description: err.message,
+      });
     },
   });
 

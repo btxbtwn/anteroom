@@ -9,8 +9,10 @@ import { ActionForm } from "./ActionForm";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 import { useFormDraft } from "./FormDrafts";
 import { InventoryImport } from "../InventoryImport";
+import { useVendooEnabled } from "../../vendooMode";
 
 export function ListingsPanel({ accountKey, onOpenListing }: { accountKey: string; onOpenListing: (id: string) => void }) {
+  const vendooOn = useVendooEnabled();
   const [task, setTask] = useFormDraft("listings:task", () => "Import from eBay");
   const [id, setId] = useFormDraft("listings:lookup", () => "");
   const [sku, setSku] = useFormDraft("listings:sku", () => "");
@@ -30,7 +32,9 @@ export function ListingsPanel({ accountKey, onOpenListing }: { accountKey: strin
     </PageSection>
     : null}
     {task === "Edit live listing" ?
-    <PageSection title="Edit an existing eBay listing" description="For fixed-price listings created through Vendoo or eBay's Trading listing system. Changes affect the live eBay listing; sync Vendoo afterward to reconcile its copy.">
+    <PageSection title="Edit an existing eBay listing" description={vendooOn
+      ? "For fixed-price listings created through Vendoo or eBay's Trading listing system. Changes affect the live eBay listing; sync Vendoo afterward to reconcile its copy."
+      : "For fixed-price listings created on eBay. Changes affect the live eBay listing."}>
       <form className="ebay-search-form" onSubmit={(event) => { event.preventDefault(); lookup.mutate(id); }}>
         <label className="min-w-48 flex-1 space-y-1 text-xs">eBay item ID<Input required value={id} onChange={(event) => { setId(event.target.value); lookup.reset(); }} /></label>
         <Button size="sm" variant="outline" disabled={lookup.isPending} type="submit">Read live listing</Button>

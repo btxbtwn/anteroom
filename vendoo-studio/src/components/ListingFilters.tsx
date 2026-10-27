@@ -1,5 +1,6 @@
 /** Vendoo Inventory's filter bar, sized for Studio's sidebar. */
 import { labelColor, labelDotClass, type LabelColor } from "../labelColors";
+import { useVendooEnabled } from "../vendooMode";
 
 import type { ReactNode } from "react";
 import { ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
@@ -120,6 +121,7 @@ export function ListingFilters({
   onChange: (next: Filters) => void;
 }) {
   const chosen = activeFilterCount(filters);
+  const vendooOn = useVendooEnabled();
   // Vendoo hides the tab it has nothing for; "failed" is Studio's own state.
   const tabs: ListingStatusFilter[] = [
     "all",
@@ -212,18 +214,22 @@ export function ListingFilters({
                 )
               }
             />
-            <FilterRow
-              checked={filters.needsRelist}
-              count={needsRelistCount}
-              title="Live listings still showing the copy from before Anteroom's last update — delist and relist them in Vendoo"
-              glyph={<Dot tone="warning" />}
-              label="Needs relist"
-              onSelect={() => onChange({ ...filters, needsRelist: !filters.needsRelist })}
-            />
+            {vendooOn ? (
+              <FilterRow
+                checked={filters.needsRelist}
+                count={needsRelistCount}
+                title="Live listings still showing the copy from before Anteroom's last update — delist and relist them in Vendoo"
+                glyph={<Dot tone="warning" />}
+                label="Needs relist"
+                onSelect={() => onChange({ ...filters, needsRelist: !filters.needsRelist })}
+              />
+            ) : null}
             <FilterRow
               checked={filters.unsent}
               count={unsentCount}
-              title="Edited in Anteroom since Vendoo last had this listing — press Update Vendoo"
+              title={vendooOn
+                ? "Edited in Anteroom since Vendoo last had this listing — press Update Vendoo"
+                : "Edited in Anteroom since this listing was last saved"}
               glyph={<Dot tone="info" />}
               label="Unsent edits"
               onSelect={() => onChange({ ...filters, unsent: !filters.unsent })}
@@ -249,7 +255,7 @@ export function ListingFilters({
               <>
                 <MenuSeparator />
                 <MenuGroup>
-                  <MenuGroupLabel>Vendoo labels</MenuGroupLabel>
+                  <MenuGroupLabel>{vendooOn ? "Vendoo labels" : "Labels"}</MenuGroupLabel>
                   {labels.map((label) => (
                     <FilterRow
                       key={label}

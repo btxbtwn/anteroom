@@ -877,6 +877,11 @@
 .pr-field-row {
   display: grid;
   grid-template-columns: 12px minmax(88px, 1.1fr) minmax(72px, 1fr) minmax(72px, 1fr) minmax(88px, auto);
+}
+
+.pr-field-table-head.is-direct,
+.pr-field-row.is-direct {
+  grid-template-columns: 12px minmax(88px, 1.1fr) minmax(72px, 1fr) minmax(88px, auto);
   column-gap: 8px;
   align-items: start;
   padding: 6px 8px;

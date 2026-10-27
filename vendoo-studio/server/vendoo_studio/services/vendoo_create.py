@@ -82,6 +82,11 @@ async def run_ops(
     job, ops: list[dict[str, Any]], *, timeout: float = REQUEST_TIMEOUT_SEC
 ) -> dict[str, Any]:
     """Send one ``job.vendoo_api`` message and return its reply."""
+    from vendoo_studio.services.user_settings import vendoo_enabled
+    from vendoo_studio.services.vendoo_gate import VENDOO_OFF_DETAIL
+
+    if not vendoo_enabled():
+        raise VendooCreateError(VENDOO_OFF_DETAIL)
     stage = "+".join(dict.fromkeys(op["op"] for op in ops))
     with measure_stage(job, stage):
         reply = await browser_bridge.request(job, "job.vendoo_api", {"ops": ops}, timeout=timeout)

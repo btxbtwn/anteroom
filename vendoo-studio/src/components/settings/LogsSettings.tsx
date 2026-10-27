@@ -7,6 +7,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+import { useVendooEnabled } from "../../vendooMode";
 
 // Phones get one scroll for the page and each log row as a card: time, level and
 // source on a line, the message (the tap target) under them.
@@ -299,10 +300,11 @@ function VendooApiLogSection() {
 }
 
 export function LogsSettings() {
+  const vendooOn = useVendooEnabled();
   return (
     <>
       <ErrorLogSection />
-      <VendooApiLogSection />
+      {vendooOn ? <VendooApiLogSection /> : null}
     </>
   );
 }

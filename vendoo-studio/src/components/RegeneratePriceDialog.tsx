@@ -6,6 +6,7 @@ import { toastManager } from "./ui/toast";
 import { SoldCompsCard } from "./SoldCompsCard";
 import { SearchIcon } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useVendooEnabled } from "../vendooMode";
 import { money, PriceChip, PriceDialog, PriceSection, PriceStatus } from "./PriceDropParts";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -104,6 +105,7 @@ export function RegeneratePriceDialog({
   onDropped?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const vendooOn = useVendooEnabled();
 
   // History and sell-through answer at once; sold comps are a web search by
   // the listing model that can take minutes, so they run only when the seller
@@ -220,7 +222,9 @@ export function RegeneratePriceDialog({
   return (
     <PriceDialog
       title="Regenerate"
-      description="Confirm drops the price and rewrites the listing from scratch at the new price. Chat and generated fields are discarded; measurements, flaws, COG, labels and notes are kept. Nothing changes on Vendoo until you Send."
+      description={vendooOn
+        ? "Confirm drops the price and rewrites the listing from scratch at the new price. Chat and generated fields are discarded; measurements, flaws, COG, labels and notes are kept. Nothing changes on Vendoo until you Send."
+        : "Confirm drops the price and rewrites the listing from scratch at the new price. Chat and generated fields are discarded; measurements, flaws, COG, labels and notes are kept."}
       onClose={onClose}
       busy={apply.isPending}
       footer={

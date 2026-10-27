@@ -433,6 +433,10 @@ async def sync_conversation(db: Session, conv_id: str) -> dict[str, Any]:
     sides moved; Studio's listing is kept), ``label`` (status/dates only),
     ``none``, or ``unavailable``.
     """
+    from vendoo_studio.services.user_settings import vendoo_enabled
+
+    if not vendoo_enabled():
+        return {"action": "none", "reason": "vendoo off"}
     from vendoo_studio.services.browser_bridge import BrowserBridgeError
     from vendoo_studio.services.vendoo_create import ITEM_READ_TIMEOUT_SEC, VendooCreateError, run_ops
     from vendoo_studio.services.vendoo_import import parse_notes, vendoo_binding

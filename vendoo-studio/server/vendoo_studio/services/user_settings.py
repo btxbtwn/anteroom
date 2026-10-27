@@ -677,6 +677,11 @@ def normalize_theme(value: object) -> ThemeChoice:
     return DEFAULT_THEME
 
 
+def vendoo_enabled() -> bool:
+    """Settings → Listings → Send to Vendoo. Missing means on."""
+    return bool(get_ui_prefs()[VENDOO_ENABLED_KEY])
+
+
 def get_ui_prefs() -> dict:
     ui = _ui_prefs()
     settled = ui.get(SETTLED_SHELF_KEY)
