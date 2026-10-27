@@ -16,6 +16,11 @@ describe("promotion tasks", () => {
     expect(promotionTasks(rows, new Set(["c"]), { e: "none" }).map((task) => [task.id, task.shippingDiscountId])).toEqual([["a", undefined], ["e", "none"]]);
   });
 
+  it("does not ask for a shipping discount on Mercari or Depop offers", () => {
+    const rows = [row("m", { action: "offer", marketplace: "mercari" }), row("d", { action: "offer", marketplace: "depop" })];
+    expect(promotionTasks(rows, new Set(), {}).map((task) => [task.id, task.shippingDiscountId])).toEqual([["m", undefined], ["d", undefined]]);
+  });
+
   it("sends each once and stops the rest on a rate limit", async () => {
     const perform = vi.fn(async (id: string) => (id === "b" ? reply(id, { state: "failed", stop: true, note: "Poshmark is limiting requests" }) : reply(id)));
     const tasks = promotionTasks([row("a"), row("b"), row("c")], new Set(), {});

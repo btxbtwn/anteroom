@@ -8,13 +8,20 @@ export interface PromotionTask {
   note?: string;
 }
 
-/** The reviewed rows the seller left checked. An offer needs its shipping choice. */
+/** Marketplaces whose offers carry a shipping discount the seller chooses. */
+export const SHIPPING_DISCOUNT_MARKETPLACES: readonly string[] = ["poshmark"];
+
+export function needsShippingChoice(row: Pick<Promotion, "action" | "marketplace">): boolean {
+  return row.action === "offer" && SHIPPING_DISCOUNT_MARKETPLACES.includes(row.marketplace);
+}
+
+/** The reviewed rows the seller left checked. A Poshmark offer needs its shipping choice. */
 export function promotionTasks(rows: readonly Promotion[], unchecked: ReadonlySet<string>, shipping: Readonly<Record<string, string>>): PromotionTask[] {
   return rows.flatMap((row) => {
     if (row.state !== "preview" || unchecked.has(row.id)) return [];
-    if (row.action === "offer" && !shipping[row.id]) return [];
+    if (needsShippingChoice(row) && !shipping[row.id]) return [];
     return [{ id: row.id, title: row.title || "Untitled item", state: "pending" as const,
-      ...(row.action === "offer" ? { shippingDiscountId: shipping[row.id] } : {}) }];
+      ...(needsShippingChoice(row) ? { shippingDiscountId: shipping[row.id] } : {}) }];
   });
 }
 
