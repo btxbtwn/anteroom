@@ -52,8 +52,13 @@ def stock_after_sale(db: Session, conv_id: str, marketplace: str, listing_id: st
     listing = ListingRepo(db).get_current(conv_id)
     revision = db.get(ListingRevision, listing.current_revision_id) if listing and listing.current_revision_id else None
     published = db.get(ListingRevision, record["revision_id"]) if record.get("revision_id") else None
+    from vendoo_studio.services.ebay_variations import total_quantity
+
+    # A listing with variations holds stock per variation: its total counts, not the single quantity field.
     quantities = [revision.listing_json.get("quantity") if revision else None,
                   published.listing_json.get("quantity") if published else None,
+                  *[total_quantity(source.listing_json) for source in (revision, published)
+                    if source and marketplace == "ebay" and isinstance(source.listing_json, dict)],
                   observed.get("quantity"), *[line.quantity for line in paid]]
     if any(type(quantity) is int and quantity > 1 for quantity in quantities):
         return unknown

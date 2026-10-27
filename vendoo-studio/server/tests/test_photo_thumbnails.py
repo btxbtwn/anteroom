@@ -101,9 +101,7 @@ class PhotoThumbnailTest(unittest.TestCase):
 
     def test_deleting_a_photo_removes_its_thumbnail(self):
         photo_id = self.photos[0].id
-        with patch("vendoo_studio.services.photos.PHOTOS_DIR", str(self.photos_dir)), patch(
-            "vendoo_studio.routes.conversations.PHOTOS_DIR", str(self.photos_dir)
-        ):
+        with patch("vendoo_studio.services.photos.PHOTOS_DIR", str(self.photos_dir)):
             self.client.get(f"/api/photos/{photo_id}/thumb?size=96")
             self.assertTrue(list((self.photos_dir / "thumbs").glob("*.jpg")))
 

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import (
     BUSY_LISTING_STATUSES,
@@ -18,7 +16,7 @@ from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.services import boxes
 from vendoo_studio.services.listing_copy import CopyRequest
 from vendoo_studio.services.listing_delete import ListingBusy, delete_listing, wipe_contents
-from vendoo_studio.services.photos import cover_thumb_url, delete_thumbnails, photo_url
+from vendoo_studio.services.photos import cover_thumb_url, delete_photo_files, photo_url
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -115,6 +113,7 @@ class PhotoResponse(BaseModel):
     height: int | None
     created_at: str
     url: str
+    edits: dict | None = None
 
 
 @router.post("", response_model=ConversationResponse)
@@ -481,19 +480,13 @@ def get_photos(conv_id: str, db: Session = Depends(get_db)):
 
 @router.delete("/{conv_id}/photos/{photo_id}")
 def delete_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
-    import os
-
     repo = ConversationRepo(db)
     photos = repo.get_photos(conv_id)
     target = next((p for p in photos if p.id == photo_id), None)
     if not target:
         raise HTTPException(404, "Photo not found")
 
-    filepath = Path(PHOTOS_DIR) / target.stored_filename
-    if filepath.exists():
-        os.remove(filepath)
-    delete_thumbnails(target.stored_filename)
-
+    delete_photo_files(target)
     repo.delete_photo(conv_id, photo_id)
     return {"ok": True}
 
@@ -832,4 +825,5 @@ def _photo_response(photo) -> PhotoResponse:
         height=photo.height,
         created_at=photo.created_at.isoformat() if photo.created_at else "",
         url=photo_url(photo.id, photo.checksum),
+        edits=photo.edits,
     )
