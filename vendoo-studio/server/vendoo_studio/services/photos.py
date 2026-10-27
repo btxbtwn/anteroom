@@ -114,55 +114,6 @@ def cover_thumb_url(photo_id: str, checksum: str | None) -> str:
     return url + (f"&v={checksum[:12]}" if checksum else "")
 
 
-ROTATIONS = {
-    90: Image.Transpose.ROTATE_270,
-    -90: Image.Transpose.ROTATE_90,
-    180: Image.Transpose.ROTATE_180,
-}
-SAVE_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
-
-
-def rotate_file(stored_filename: str, mime_type: str, degrees: int) -> dict:
-    """Write a rotated copy of a stored photo under a new name; ``degrees`` is clockwise.
-
-    The pixels are rewritten rather than flagged with an EXIF orientation, so
-    every consumer — Vendoo uploads, model vision, thumbnails — sees the same
-    picture. The caller swaps the record over and deletes the old file.
-    """
-    if degrees not in ROTATIONS:
-        raise ValueError("Rotate by 90, -90 or 180 degrees")
-    fmt = SAVE_FORMATS.get(mime_type)
-    if not fmt:
-        raise ValueError("This photo format cannot be rotated")
-    source = Path(PHOTOS_DIR) / stored_filename
-    if not source.exists():
-        raise FileNotFoundError(stored_filename)
-
-    with Image.open(source) as img:
-        icc_profile = img.info.get("icc_profile")
-        rotated = ImageOps.exif_transpose(img).transpose(ROTATIONS[degrees])
-    options: dict = {"icc_profile": icc_profile} if icc_profile else {}
-    if fmt == "JPEG":
-        if rotated.mode not in ("RGB", "L"):
-            rotated = rotated.convert("RGB")
-        options.update(quality=95, subsampling=0)
-    elif fmt == "WEBP":
-        options.update(quality=95)
-
-    stored_name = f"{uuid.uuid4().hex}{source.suffix}"
-    buffer = BytesIO()
-    rotated.save(buffer, fmt, **options)
-    contents = buffer.getvalue()
-    (Path(PHOTOS_DIR) / stored_name).write_bytes(contents)
-    return {
-        "stored_filename": stored_name,
-        "size_bytes": len(contents),
-        "checksum": hashlib.sha256(contents).hexdigest(),
-        "width": rotated.width,
-        "height": rotated.height,
-    }
-
-
 def thumbnail_path(stored_filename: str, size: int) -> Path:
     stem = Path(stored_filename).stem
     return Path(PHOTOS_DIR) / "thumbs" / f"{stem}_{size}.jpg"
@@ -198,3 +149,14 @@ def delete_thumbnails(stored_filename: str) -> None:
                 os.remove(path)
             except OSError:
                 pass
+
+
+def delete_photo_files(photo) -> None:
+    """Remove a photo's served file, its kept upload, and what was derived from them."""
+    from vendoo_studio.services.photo_edits import mask_path
+
+    names = [name for name in (photo.stored_filename, photo.source_filename) if name]
+    for name in names:
+        (Path(PHOTOS_DIR) / name).unlink(missing_ok=True)
+        delete_thumbnails(name)
+    mask_path(photo.source_filename or photo.stored_filename).unlink(missing_ok=True)

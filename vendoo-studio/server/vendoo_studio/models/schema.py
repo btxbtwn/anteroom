@@ -125,7 +125,8 @@ class EbaySpecifics(BaseModel):
             return {}
         if not isinstance(data, dict):
             raise ValueError("must be an object")
-        return _coerce_string_map(data, frozenset({"features", "accents"}))
+        # eBay variations are rows of their own, never one aspect's text.
+        return _coerce_string_map(data, frozenset({"features", "accents"}), frozenset({"variations"}))
 
     type: str | None = None
     department: str | None = None

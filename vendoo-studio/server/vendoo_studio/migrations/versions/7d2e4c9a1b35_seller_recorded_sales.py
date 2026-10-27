@@ -1,7 +1,7 @@
 """Seller-recorded sales on the order-line ledger
 
 Revision ID: 7d2e4c9a1b35
-Revises: 151f7674a7c7
+Revises: a7e3c1f09b42
 Create Date: 2026-10-26 20:00:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = '7d2e4c9a1b35'
-down_revision = '151f7674a7c7'
+down_revision = 'a7e3c1f09b42'
 branch_labels = None
 depends_on = None
 

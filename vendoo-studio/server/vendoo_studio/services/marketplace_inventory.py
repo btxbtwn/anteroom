@@ -43,15 +43,36 @@ async def _ebay(listing_id: str) -> dict:
     result = {"state": states[info["status"]], "price": None, "quantity": None, "warning": None}
     if info["status"] != "Active":
         return result
-    if info.get("variations") or info.get("site") != "US":
-        result["warning"] = "Price and quantity checks support US listings without variations."
+    if info.get("site") != "US":
+        result["warning"] = "Price and quantity checks support US listings."
         return result
+    if info.get("variations"):
+        return _ebay_variations(info, result)
     try:
         snapshot = ebay_import.listing_snapshot(info)
     except EbayFailure:
         result["warning"] = "The listing status was checked, but its fixed price and quantity could not be verified in USD."
     else:
         result.update(price=snapshot["price"], quantity=snapshot["quantity"])
+    return result
+
+
+def _ebay_variations(info: dict, result: dict) -> dict:
+    """Stock left on each variation (eBay's quantity minus sold). The listing is sold out only when every one is."""
+    rows = []
+    for row in info.get("variation_rows") or []:
+        total, sold = ebay_import._number(row.get("quantity")), ebay_import._number(row.get("soldQuantity"))
+        if total is None or sold is None or sold > total:
+            result["warning"] = "eBay did not return a reliable quantity for every variation."
+            return result
+        rows.append({"sku": row.get("sku") or "", "values": row.get("values") or {}, "quantity": total - sold,
+                     "price": _number(row.get("price"))})
+    if not rows:
+        result["warning"] = "eBay did not return this listing's variations."
+        return result
+    prices = {row["price"] for row in rows}
+    result.update(quantity=sum(row["quantity"] for row in rows), variations=rows,
+                  price=prices.pop() if len(prices) == 1 else None)
     return result
 
 
@@ -97,13 +118,22 @@ async def observe(db: Session, conv_id: str, marketplace: str, listing_id: str) 
     listing = ListingRepo(db).get_current(conv_id)
     revision = db.get(ListingRevision, listing.current_revision_id) if listing and listing.current_revision_id else None
     snapshot = revision.listing_json if revision else {}
+    from vendoo_studio.services.ebay_variations import total_quantity
+
     differences = []
+    varied = total_quantity(snapshot) if marketplace == "ebay" else None
     for field in ("price", "quantity"):
         remote, local = result[field], _number(snapshot.get(field))
+        if field == "quantity" and varied is not None:
+            local = float(varied)
+        if field == "price" and result.get("variations"):
+            continue
         if remote is not None and remote != local:
             differences.append({"field": field, "local": local, "remote": remote})
-    MarketplaceListingRepo(db).save(conv_id, marketplace, {"inventory_observation": {
-        "listing_id": listing_id, "checked_at": started, "state": result["state"],
-        "quantity": result["quantity"], "price": result["price"],
-    }})
+    observation = {"listing_id": listing_id, "checked_at": started, "state": result["state"],
+                   "quantity": result["quantity"], "price": result["price"]}
+    if result.get("variations"):
+        # Per-SKU stock, so a sale of one size is not read as the whole item selling out.
+        observation["variations"] = [{"sku": row["sku"], "quantity": row["quantity"]} for row in result["variations"]]
+    MarketplaceListingRepo(db).save(conv_id, marketplace, {"inventory_observation": observation})
     return {"listing_id": listing_id, **result, "differences": differences}

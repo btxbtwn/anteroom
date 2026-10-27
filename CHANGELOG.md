@@ -6,10 +6,19 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.420 — 2026-10-26
+## 0.1.422 — 2026-10-26
 
 - A sale Anteroom detects now turns the item Sold in Inventory and counts in Analytics, without waiting for Vendoo. An item with more than one unit stays Active and shows how many have sold, such as "1 of 3 sold". A sale Vendoo already recorded is counted once.
 - Mark as sold now asks where it sold, when, and for how much, including shipping and fees, and saves it under Sales records. For a sale in person or anywhere else, choose **Other / in person**, or use **Record a sale** in the Marketplaces panel. Afterwards Anteroom offers to delist the item from your other marketplaces; nothing is delisted unless you confirm.
+
+## 0.1.421 — 2026-10-26
+
+- Photos can now be edited in the listing editor: open a photo and press **Edit**. Crop to a square or another marketplace shape, rotate and straighten, adjust exposure, brightness and contrast, or remove the background and put white or any colour behind the item. Background removal runs on your Mac; the photo is not uploaded anywhere. Your original photo is always kept, and **Reset to original** brings it back. Marketplaces, Vendoo sends and Etsy drafts get the edited photo, and editing a photo means a pending automation approval or reviewed Vendoo send has to be reviewed again.
+
+## 0.1.420 — 2026-10-26
+
+- List one eBay item in several sizes or colors. Under Marketplaces → eBay, choose what the variations differ by (eBay offers the choices it allows for the category), then give each variation its own quantity, and optionally its own SKU, price and photos. Save draft keeps it private on eBay and checks what eBay saved; List publishes it as one listing. eBay sells variations at a fixed price without offers.
+- Update changes the quantities, prices and photos of a live listing with variations, and Delist ends the whole listing. Selling one size no longer counts the item as sold out: Sync reads what is left of each variation.
 
 ## 0.1.419 — 2026-10-26
 
