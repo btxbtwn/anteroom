@@ -107,6 +107,37 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(fields["sellwild_specifics.description"]["value"], "Details")
         self.bridge.assert_not_called()
 
+    def test_sellwild_form_follows_the_sell_page_sections_and_order(self):
+        answer = self.client.get(f"{self.url}/sellwild/form")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        rows = answer.json()["fields"]
+        self.assertEqual([(row.get("section"), row["label"]) for row in rows], [
+            ("Add a Title", "What are you selling?"), ("Name Your Price (USD)", "Price"),
+            ("Add Details", "Describe your item (Optional)"), ("Add Details", "Category"), ("Add Details", "Condition"),
+            ("Item Shipping", "Package"), ("Item Shipping", "Weight (lbs)"), ("Item Shipping", "Height (in)"),
+            ("Item Shipping", "Width (in)"), ("Item Shipping", "Depth (in)"),
+        ])
+        fields = {row["label"]: row for row in rows}
+        self.assertEqual(fields["Price"]["min_value"], 5)
+        category = fields["Category"]
+        # The picker's order: groups and their categories by Sellwild's sort order. Pets > Adoption is hidden.
+        self.assertEqual(category["options"][:3], ["Vehicles | Cars", "Vehicles | Electric Cars", "Vehicles | SUVs"])
+        self.assertNotIn("206", category["option_values"].values())
+        self.assertEqual(fields["Package"]["options"][:6], [
+            "Custom Package Dimensions", "Small Flat Rate Box", "Medium Flat Rate Box 1", "Medium Flat Rate Box 2",
+            "Large Flat Rate Box", "Flat Rate Envelope (12.5 × 9.5 × 0.75 in)"])
+        self.assertEqual(fields["Package"]["options"][-2:], ["Soft Pack (poly mailer)", "Irregular Parcel (4 × 4 × 4 in)"])
+        self.assertEqual({fields[label].get("width") for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")},
+                         {"half"})
+
+    def test_sellwild_vehicle_form_has_vehicle_information_and_no_package(self):
+        submitted = {**self.listing, "sellwild_specifics": {"nativeCategoryId": "43", "vin": "1HGCM82633A004352"}}
+        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted}).status_code, 200)
+        rows = self.client.get(f"{self.url}/sellwild/form").json()["fields"]
+        self.assertEqual([(row.get("section"), row["label"]) for row in rows][-2:], [
+            ("Vehicle Information", "Vehicle Identification Number"), ("Vehicle Information", "Mileage")])
+        self.assertNotIn("Package", [row["label"] for row in rows])
+
     def test_direct_depop_attribute_edits_survive_generated_style_padding(self):
         self.bridge.return_value = {"ok": True, "form": {"marketplace": "depop", "native": True, "fields": []}}
         submitted = {**self.listing, "depop_specifics": {

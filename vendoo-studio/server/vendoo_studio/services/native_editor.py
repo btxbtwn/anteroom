@@ -233,32 +233,64 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
 
 
 def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
+    """Sellwild's sell page (sellwild.com/sell, read 2026-10-27), section by section and in its order."""
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
-    from vendoo_studio.services.sellwild_listing import VEHICLE_CATEGORIES, chosen, package_sides, sellwild_catalog
+    from vendoo_studio.services.sellwild_listing import MAX_PRICE, VEHICLE_CATEGORIES, chosen, package_pounds, package_sides, sellwild_catalog
 
     catalog = sellwild_catalog()
     picks = chosen(snapshot, MarketplaceListingRepo(db).get(conv_id, "sellwild"))
-    fields = base(snapshot, 255, "sellwild")
-    next(row for row in fields if row["path"] == "sellwild_specifics.description")["required"] = False
-    for key in ("category", "condition"):
-        options = catalog["categories" if key == "category" else "conditions"]
-        fields.append(field(f"sellwild_specifics.native{key.title()}Id", key.title(), picks[f"{key}_id"], required=True,
-                            selection_only=True, options=[row["label"] for row in options],
-                            option_values={row["label"]: str(row["id"]) for row in options}, options_source="marketplace"))
-    if picks["category_id"] in VEHICLE_CATEGORIES:
-        details = snapshot.get("sellwild_specifics") or {}
-        fields.extend(field(f"sellwild_specifics.{key}", label, details.get(key), required=True, category_specific=True)
-                      for key, label in (("vin", "VIN"), ("mileage", "Mileage")))
-    else:
-        template = str((snapshot.get("sellwild_specifics") or {}).get("parcelTemplate") or "")
-        options = [{"id": "", "label": "Custom package dimensions"}, *catalog["parcel_templates"]]
-        fields.append(field("sellwild_specifics.parcelTemplate", "Packaging", template, selection_only=True,
-                            category_specific=True,
-                            options=[row["label"] for row in options], option_values={row["label"]: row["id"] for row in options},
-                            options_source="marketplace"))
-        fields.extend(package(snapshot))
-        if template and package_sides(snapshot):
-            row = next(row for row in fields if row["path"] == "package_dimensions_in")
-            row.update(value=" × ".join(str(side) for side in package_sides(snapshot)), help="Dimensions for the selected Sellwild packaging.")
+    details = snapshot.get("sellwild_specifics") or {}
+    vehicle = picks["category_id"] in VEHICLE_CATEGORIES
+
+    def choice(path: str, label: str, value, options: list[dict], section: str, **extra) -> dict:
+        return field(path, label, value, selection_only=True, options=[row["label"] for row in options],
+                     option_values={row["label"]: str(row["id"]) for row in options}, options_source="marketplace",
+                     section=section, **extra)
+
+    # The category picker shows "Group | Category" once a category is picked.
+    categories = [{"id": row["id"], "label": row["label"].replace(" > ", " | ", 1)} for row in catalog["categories"]]
+    fields = [
+        field("sellwild_specifics.title", "What are you selling?", _shared(snapshot, "sellwild", "title"), required=True,
+              max_length=255, section="Add a Title"),
+        field("price", "Price", snapshot.get("price"), required=True, input_type="number", min_value=5, max_value=MAX_PRICE,
+              section="Name Your Price (USD)"),
+        field("sellwild_specifics.description", "Describe your item (Optional)", _shared(snapshot, "sellwild", "description"),
+              input_type="textarea", section="Add Details"),
+        choice("sellwild_specifics.nativeCategoryId", "Category", picks["category_id"], categories, "Add Details", required=True),
+        choice("sellwild_specifics.nativeConditionId", "Condition", picks["condition_id"], catalog["conditions"], "Add Details",
+               required=True),
+    ]
+    if vehicle:
+        # Vehicles add these two fields; their shipping section has only the ship-from address.
+        fields.extend(field(f"sellwild_specifics.{key}", label, details.get(key), required=True, category_specific=True,
+                            section="Vehicle Information", **extra)
+                      for key, label, extra in (("vin", "Vehicle Identification Number", {}),
+                                                ("mileage", "Mileage", {"input_type": "number", "min_value": 1})))
+        return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
+                "fields": fields}
+    # The package list: Custom Package Dimensions, the four flat-rate boxes, then "Add other packaging".
+    template = str(details.get("parcelTemplate") or "")
+
+    def package_label(row: dict) -> str:
+        sides = [row[side] for side in ("length", "width", "height")]
+        if row.get("featured") or not all(side > 0 for side in sides):
+            return row["label"]
+        return f"{row['label']} ({' × '.join(f'{side:g}' for side in sides)} in)"
+
+    packages = [{"id": "", "label": "Custom Package Dimensions"},
+                *({"id": row["id"], "label": package_label(row)} for row in catalog["parcel_templates"])]
+    fields.append(choice("sellwild_specifics.parcelTemplate", "Package", template, packages, "Item Shipping",
+                         category_specific=True))
+    # Weight shows for every package that is not flat rate; the sides only for custom dimensions.
+    # They come from the package in Item Details.
+    pounds = package_pounds(snapshot)
+    sides = package_sides(snapshot) or []
+    measured = (("weight", "Weight (lbs)", round(pounds, 2) if pounds else ""),
+                *((key, f"{key.title()} (in)", sides[index] if sides else "")
+                  for key, index in (("height", 2), ("width", 1), ("depth", 0))))
+    fields.extend(field(f"sellwild_specifics.package.{key}", label, value, input_type="number", locked=True,
+                        help="Change the package in Item Details.", category_specific=True, section="Item Shipping",
+                        width="half")
+                  for key, label, value in measured)
     return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
             "fields": fields}
