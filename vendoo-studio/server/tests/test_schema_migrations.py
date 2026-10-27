@@ -493,3 +493,19 @@ def test_photo_edit_upgrade_keeps_every_photo_unedited(engine, snapshots):
         assert connection.execute("SELECT stored_filename,checksum,source_filename,edits FROM photos").fetchone() == ("saved.jpg","checksum",None,None)
         assert connection.execute("SELECT etsy_image_ids,etsy_image_checksums FROM marketplace_listings").fetchone() == ('{"photo": "100"}',None)
     assert inspect_database(engine.url.database).clean
+
+
+def test_seller_sales_upgrade_marks_every_existing_line_as_marketplace_reported(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "a7e3c1f09b42")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status) VALUES ('sold-coat', 'Sold coat', 'sold')")
+        connection.execute("INSERT INTO marketplace_sales (id, marketplace, order_id, line_id, listing_id, state, quantity, order_status, conversation_id, received_at, financials, financial_revision) "
+                           "VALUES ('keep-line', 'depop', 'order', 'line', 'abc', 'new', 1, 'paid', 'sold-coat', '2026-10-26', '{\"currency\":\"USD\",\"fees\":\"3\"}', 2)")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        row = connection.execute("SELECT order_id, state, conversation_id, financials, financial_revision, source FROM marketplace_sales WHERE id='keep-line'").fetchone()
+    assert row == ("order", "new", "sold-coat", '{"currency":"USD","fees":"3"}', 2, "marketplace")
+    assert inspect_database(engine.url.database).clean

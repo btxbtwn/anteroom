@@ -9,6 +9,10 @@ from vendoo_studio.models.conversation import new_id, utcnow
 SALE_STATES = ("new", "dismissed")
 ORDER_STATUSES = ("paid", "partially_refunded", "cancelled", "refunded", "cancellation_pending")
 PAID_STATUSES = ("paid", "partially_refunded")
+# Who reported the sale: a marketplace (webhook, order read, Chrome) or the
+# seller through Mark as sold. "other" is a sale off every marketplace.
+SALE_SOURCES = ("marketplace", "seller")
+OTHER_MARKETPLACE = "other"
 
 
 class MarketplaceSale(Base):
@@ -38,3 +42,4 @@ class MarketplaceSale(Base):
     sold_at = Column(DateTime, nullable=True)
     received_at = Column(DateTime, nullable=False, default=utcnow)
     resolved_at = Column(DateTime, nullable=True)
+    source = Column(String, nullable=False, default="marketplace", server_default="marketplace")

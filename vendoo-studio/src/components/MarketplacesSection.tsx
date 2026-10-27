@@ -2,12 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, XCircleIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark } from "../api/marketplaceListings";
+import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
 import { MarketplaceLogo } from "./MarketplaceLogo";
+import { MarkSoldForm } from "./MarkSoldForm";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -160,6 +161,8 @@ export function MarketplacesLayout({
   const listings: MarketplaceListings = live.data ?? {};
   const [draftLinks, setDraftLinks] = useState<Partial<Record<NativeMarketplace, string>>>({});
   const [linking, setLinking] = useState<{ marketplace: Marketplace; url: string } | null>(null);
+  // Mark as sold opens a sale form; the number remounts it with a fresh request id.
+  const [selling, setSelling] = useState<{ marketplace: SaleMarketplace; key: number } | null>(null);
 
   const etsyCreating = !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
   const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
@@ -219,6 +222,28 @@ export function MarketplacesLayout({
     },
   });
 
+  const recordSale = useMutation({
+    mutationFn: (sale: SellerSale) => api.marketplaceListings.recordSale(convId, sale),
+    retry: false,
+    onSuccess: (data) => {
+      queryClient.setQueryData(liveKey, data.listings);
+      setSelling(null);
+      // Offered, never done here: the seller confirms the delist in its own dialog.
+      if (data.delist_offer.length) void runDelist(data.delist_offer, "Sale recorded. Delist it from the other marketplaces too?");
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      void queryClient.invalidateQueries({ queryKey: nativeKey });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["sales-ledger"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    },
+  });
+  function startSale(marketplace: SaleMarketplace) {
+    recordSale.reset();
+    setSelling((current) => ({ marketplace, key: (current?.key ?? 0) + 1 }));
+  }
+
   const UPDATABLE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "depop"]);
 
   async function updateNow(marketplace: NativeMarketplace) {
@@ -235,10 +260,11 @@ export function MarketplacesLayout({
     if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.${extra}`,
       { confirmLabel: `List on ${name}` })) action.mutate({ marketplace, kind: "list" });
   }
-  async function runDelist(marketplaces: Marketplace[]) {
+  async function runDelist(marketplaces: Marketplace[], lead?: string) {
     const names = marketplaces.map(marketplaceName);
     const lines = marketplaces.map((marketplace) => `• ${marketplaceName(marketplace)}: ${REMOVED[marketplace].toLowerCase()}`).join("\n");
-    const approved = await confirmDialog(`Delist “${title}” from ${names.length === 1 ? names[0] : `${names.length} marketplaces`}?\n${lines}\nA deleted listing can't be restored; listing again creates a new one.`,
+    const question = `Delist “${title}” from ${names.length === 1 ? names[0] : `${names.length} marketplaces`}?`;
+    const approved = await confirmDialog(`${lead ? `${lead}\n` : ""}${question}\n${lines}\nA deleted listing can't be restored; listing again creates a new one.`,
       { variant: "destructive", confirmLabel: names.length === 1 ? `Delist from ${names[0]}` : `Delist from ${names.length}` });
     if (approved) delist.mutate(marketplaces);
   }
@@ -249,7 +275,7 @@ export function MarketplacesLayout({
       { confirmLabel: "I checked it myself" })) action.mutate({ marketplace, kind: "reset" });
   }
 
-  const busy = disabled || action.isPending || delist.isPending || mark.isPending || native.isPending || native.isError;
+  const busy = disabled || action.isPending || delist.isPending || mark.isPending || recordSale.isPending || native.isPending || native.isError;
   const statuses = ORDER.map((marketplace) => rowStatus(marketplace, listings[marketplace],
     NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined, revisionId, etsyEligible));
   const removable = ORDER.filter((marketplace) => deletable(listings[marketplace]));
@@ -336,7 +362,7 @@ export function MarketplacesLayout({
           {(canList || canUpdate || canDelist) && <MenuSeparator />}
           <MenuItem disabled={running(marketplace)}
             onClick={() => setLinking({ marketplace, url: entry?.source === "seller" ? entry.url ?? "" : "" })}>Mark as listed…</MenuItem>
-          {!entry?.sold_here && <MenuItem disabled={running(marketplace)} onClick={() => mark.mutate({ marketplace, state: "sold" })}>Mark as sold</MenuItem>}
+          {!entry?.sold_here && <MenuItem disabled={running(marketplace)} onClick={() => startSale(marketplace)}>Mark as sold…</MenuItem>}
           {(entry || status.tone === "live" || unconfirmed(marketplace)) && (
             <MenuItem disabled={running(marketplace)} onClick={() => mark.mutate({ marketplace, state: "not_listed" })}>Mark as not listed</MenuItem>
           )}
@@ -485,11 +511,15 @@ export function MarketplacesLayout({
             {delist.isPending ? "Delisting…" : "Delist everywhere…"}
           </Button>
         )}
+        <Button size="xs" variant="ghost" className="mt-1" disabled={busy} title="A sale in person or anywhere off these marketplaces"
+          onClick={() => startSale("other")}>Record a sale…</Button>
       </nav>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
         {(native.error || live.error || action.error || delist.error || mark.error) && (
           <p role="alert" className="text-destructive-foreground text-xs">{(mark.error || action.error || delist.error || native.error || live.error)?.message}</p>
         )}
+        {selling && <MarkSoldForm key={selling.key} initial={selling.marketplace} pending={recordSale.isPending}
+          error={recordSale.error?.message} onSubmit={(sale) => recordSale.mutate(sale)} onCancel={() => setSelling(null)} />}
         {selectedMarketplace && selectedStatus && (
           <section data-marketplace-pane={selectedMarketplace} className="flex flex-col gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">

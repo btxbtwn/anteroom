@@ -5,9 +5,9 @@ export { liveStatusClass };
 
 // Vendoo's Inventory labels, plus the states that are Studio's own doing.
 const STATUS_HINTS: Record<string, string> = {
-  draft: "Draft in Vendoo",
-  active: "Listed on a marketplace, per Vendoo",
-  sold: "Sold, per Vendoo",
+  draft: "Not listed on any marketplace",
+  active: "Listed on a marketplace",
+  sold: "Sold",
   failed: "The last send to Vendoo failed",
   in_progress: "Anteroom is working on this listing",
   listing: "Anteroom is sending this listing to Vendoo",
@@ -30,7 +30,7 @@ const MARKETPLACE_STATUS_ORDER = [
 // Vendoo keys Vestiaire's API integration separately; Settings treats it as one marketplace.
 const MARKETPLACE_ID_ALIASES: Record<string, string> = { vestiaireApi: "vestiaire" };
 
-/** Why a listing reads the way it does. Status follows Vendoo, except a direct publish. */
+/** Why a listing reads the way it does. Anteroom's own listings and sales outrank Vendoo's label. */
 export function statusHint(status: string): string {
   const hint = STATUS_HINTS[status];
   if (hint) return hint;
@@ -186,4 +186,11 @@ export function listedFromImport(
 function statusOrderIndex(id: string): number {
   const index = MARKETPLACE_STATUS_ORDER.indexOf(id);
   return index === -1 ? MARKETPLACE_STATUS_ORDER.length : index;
+}
+
+/** "1 of 3 sold" for an Active item with some units sold; null otherwise. */
+export function partialSale(listing: { units_sold?: number; quantity?: number | null }, status: string): string | null {
+  const sold = listing.units_sold ?? 0;
+  const quantity = listing.quantity ?? 0;
+  return status === "active" && sold > 0 && quantity > sold ? `${sold} of ${quantity} sold` : null;
 }

@@ -23,9 +23,9 @@ optional auto-delist, templates, bulk edit, bulk copy, labels, multi-quantity,
 CSV exports, eBay offers and AI listing generation, which goes further than
 Vendoo's. The losses on cancelling today are:
 
-1. **Inventory status and Analytics still read Vendoo's data.** A sale made
-   after cancelling never turns the item **Sold** in Inventory, and never
-   reaches the Analytics totals.
+1. ~~**Inventory status and Analytics still read Vendoo's data.**~~ Fixed in
+   0.1.422: a sale Anteroom records turns the item Sold (or "1 of 3 sold") and
+   counts in Analytics.
 2. **23 items are still live on Facebook Marketplace through Vendoo.**
    Anteroom can neither detect a sale there nor delist them.
 3. **Poshmark sharing, Depop refresh and offers to likers** on Poshmark,
@@ -115,7 +115,7 @@ Vendoo: up to 240 items, from the inventory page
 
 | Vendoo feature | Source | Anteroom | Evidence |
 | --- | --- | --- | --- |
-| Drafted / listed / sold columns | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Partial** | Sidebar filters exist, but **Sold** and **Active** come from Vendoo's status: `repositories/queries.py:345-379` copies `notes.vendooStatus` into `Conversation.status`, and only `vendoo_watch.py`, `vendoo_import.py` and `vendoo_bulk_import.py` write it. A direct sale records a `MarketplaceSale` and marks that marketplace sold, but never sets the item to sold. See gap 1 |
+| Drafted / listed / sold columns | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Have** | `services/item_status.py` derives Active / Sold / partly sold from Anteroom's own listings and the sales ledger, over Vendoo's imported label; `reconcile_job_statuses` applies it (0.1.422) |
 | Search, sort, filter (title, SKU, price, platforms listed / not listed, dates, labels) | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Have** | Inventory search by title, SKU and label, status filters (README, **Inside Anteroom**) |
 | Custom labels, color-coded | [Labels](https://help.vendoo.co/en/articles/6260284-vendoo-custom-labels-for-inventory-management) | **Partial** | Local labels with bulk edit; no label colors. Migrated labels that are Vendoo IDs are shown through `services/vendoo_label_catalog.py` |
 | Stale listing warning (15–120 days, configurable) | [Stale inventory](https://help.vendoo.co/en/articles/6260291-vendoo-s-stale-inventory-system), [Custom settings](https://help.vendoo.co/en/articles/6260256-vendoo-custom-settings) | **Partial** | Fixed 60 days in Suggestions (`services/suggestions.py` `STALE_MIN_DAYS`) and Analytics (`inventory_analytics.STALE_DAYS`); Automations can act after any number of listed days (CHANGELOG 0.1.402). No configurable warning threshold. Listed dates also come from Vendoo notes for migrated items |
@@ -133,7 +133,7 @@ Vendoo: up to 240 items, from the inventory page
 | Sale detection (every ~10 min; computer on) | [Sale detection](https://help.vendoo.co/en/articles/8047348-sale-detection-auto-delist) | **Have** | eBay and Etsy push through the relay (`services/relay_sales.py`); Poshmark, Mercari, Depop, Sellwild and Vinted checked every 4–12 minutes (`services/chrome_sales.py`, `background/marketplace-sales.js`) |
 | Auto-delist on sale; skip while units remain | [Sale detection](https://help.vendoo.co/en/articles/8047348-sale-detection-auto-delist) | **Have** | Opt-in `sale_autodelist` (on for this seller): `marketplace_accounts.autodelist_for_sales` delists the other live marketplaces once, never the one that sold, and skips when stock remains |
 | Mark as sold, with sale details, delisting the others | [Mark as sold](https://help.vendoo.co/en/articles/6260270-how-to-mark-items-as-sold-on-vendoo) | **Partial** | **Mark as sold** per marketplace (`marketplace_delist.mark`). It creates no sale record, so there is nowhere to enter price, fees or shipping for it, and it does not delist the others |
-| Sales made elsewhere (in person, Instagram, other) | [Sold elsewhere](https://help.vendoo.co/en/articles/6762747-i-sold-an-item-on-a-different-marketplace-that-vendoo-doesn-t-have-how-do-i-handle-it-in-vendoo) | **Missing** | Marks and sales are limited to the seven marketplaces (`marketplace_delist.MARKETPLACES`) |
+| Sales made elsewhere (in person, Instagram, other) | [Sold elsewhere](https://help.vendoo.co/en/articles/6762747-i-sold-an-item-on-a-different-marketplace-that-vendoo-doesn-t-have-how-do-i-handle-it-in-vendoo) | **Have** | Mark as sold and **Record a sale** record a seller sale with amounts, including **Other / in person** (`sales_ledger.record_seller_sale`, 0.1.422) |
 | Edit or remove sale details | [Fix sales details](https://help.vendoo.co/en/articles/6763012-how-do-i-fix-sales-details-or-remove-a-sale-record-for-an-item) | **Have** for detected sales | **Record amounts** on order lines (`routes/sales_ledger.py` `PUT /{sale_id}/financials`), dismiss (`/api/marketplace-sales/{sale_id}/dismiss`) |
 | Bundles | [Bundles](https://help.vendoo.co/en/articles/6763426-how-do-i-handle-bundles-in-vendoo) | **Partial** | eBay and Etsy orders keep one line per item; Chrome marketplaces report listing IDs per sale |
 | Shipping labels | Not a Vendoo feature | **N/A** | — |
@@ -149,7 +149,7 @@ off integrated marketplaces
 
 | Vendoo feature | Anteroom | Evidence |
 | --- | --- | --- |
-| Revenue, profit, ASP, counts, previous period, any date range | **Partial** | Present (`routes/analytics.py` `AnalyticsResponse`, `AnalyticsPrevious`, custom `start`/`end`), but computed only from Vendoo data: `services/inventory_analytics.py:176-205` reads `notes.vendooSale` and `notes.vendooDates`. Sales recorded directly (`marketplace_sales`) are not counted. See gap 1 |
+| Revenue, profit, ASP, counts, previous period, any date range | **Have** | `routes/analytics.py` `AnalyticsResponse`; `services/inventory_analytics.py` reads the sales ledger (`marketplace_sales`, recorded amounts) with the imported Vendoo sale, one row per order (0.1.422). Ledger lines not linked to an item are not counted |
 | By marketplace, category, brand | **Partial** | `marketplaces`, `categories`, `brands` groups; same data source |
 | By custom label | **Missing** | No label grouping in `AnalyticsResponse` |
 | eBay earnings and fees | **Have** | `services/ebay_finances.py` (0.1.397) |
@@ -207,7 +207,7 @@ listing.
 
 Most important first.
 
-1. **New sales never mark items Sold or reach Analytics.** Inventory status
+1. ~~**New sales never mark items Sold or reach Analytics.**~~ Fixed in 0.1.422. Inventory status
    and every Analytics total read Vendoo's synced data. A sale Anteroom
    detects is recorded under Sales records and can trigger auto-delist, but
    the item stays Active and its revenue is not counted.
@@ -225,7 +225,7 @@ Most important first.
 5. **No background removal, crop or photo adjustments.** *Fix:* add crop
    and adjustments beside rotate, and background removal to white (a local
    model or a provider API).
-6. **No manual or off-platform sale record.** Mark as sold stores no
+6. ~~**No manual or off-platform sale record.**~~ Fixed in 0.1.422. Mark as sold stores no
    price, fees or shipping, and in-person sales have nowhere to go.
    *Fix:* let Mark as sold create a sale record with amounts, with an
    "Other / in person" marketplace, and offer to delist the others.

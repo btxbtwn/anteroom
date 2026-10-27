@@ -14,6 +14,7 @@ export const MARKETPLACE_NAMES: Record<string, string> = {
   sellwild: "Sellwild",
   grailed: "Grailed",
   vestiaire: "Vestiaire Collective",
+  other: "Other / in person",
 };
 
 /** A marketplace id as a person reads it; an unknown id is capitalised as-is. */
