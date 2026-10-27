@@ -32,6 +32,7 @@ import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
 import { applyBottomsFields, isBottomsListing } from "../bottomsSizes";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
+import { RegenerateListingButton } from "./ClearListingButton";
 import { MarketplacesLayout } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
@@ -53,7 +54,7 @@ import {
   withoutHiddenFields,
 } from "./fillLog/formFilters";
 import { sourceFormsForJob } from "./fillLog/sourceForms";
-import { ListingBrowserButton, ListingReviewActions } from "./ListingReviewActions";
+import { ListingActionsMenu, ListingBrowserButton, ListingReviewActions } from "./ListingReviewActions";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
@@ -391,12 +392,8 @@ export function ListingEditor({
         >
           {listingTitle}
         </h2>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
-          <Button variant="ghost-muted" size="xs" disabled={!data?.current_revision_id} onClick={() => { setFieldTarget(null); setHistoryOpen(true); }}>
-            <HistoryIcon />
-            History
-          </Button>
-          {vendooEnabled ? (
+        {/* Only Vendoo's controls earn a row of their own; sync and More sit at the rail's foot. */}
+        {vendooEnabled && <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
             <VendooLinkControl
               convId={convId}
               itemId={importedItemId}
@@ -410,7 +407,6 @@ export function ListingEditor({
                 ensureDraftMutation.mutate({ importDraft: true });
               }}
             />
-          ) : null}
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
           {conversation?.unsent_edits ? (
             <>
@@ -430,17 +426,14 @@ export function ListingEditor({
               ) : null}
             </>
           ) : null}
-          <ListingReviewActions
-            convId={convId}
-            onCleared={onCleared}
-          >
+          <ListingReviewActions convId={convId}>
             <ListingBrowserButton
               convId={convId}
               browserOpen={browserOpen}
               onOpenBrowser={onOpenBrowser}
             />
           </ListingReviewActions>
-        </div>
+        </div>}
       </div>
 
       <SoldElsewhereNotice
@@ -515,6 +508,10 @@ export function ListingEditor({
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || updateMutation.isPending} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
+        railActions={<RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} />}
+        railStatus={<>
+          <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>
+        </>}
         onSelect={(id) => {
           setFieldTarget(null);
           if (id === "general") onReviewTabChange("input");
@@ -540,6 +537,13 @@ export function ListingEditor({
             target={fieldTarget}
             onChange={(updated) => updateMutation.mutate(updated)}
           />
+          {/* Past versions are a look-back, so they close the form instead of crowding its header. */}
+          <div className="flex border-t pt-2">
+            <Button variant="ghost-muted" size="xs" disabled={!data?.current_revision_id} onClick={() => { setFieldTarget(null); setHistoryOpen(true); }}>
+              <HistoryIcon />
+              History
+            </Button>
+          </div>
         </>
       </MarketplacesLayout>
 

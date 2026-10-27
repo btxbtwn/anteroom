@@ -6,9 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.452 — 2026-10-27
+## 0.1.453 — 2026-10-27
 
 - The Sync button and the green Ready badge are gone from the listing toolbar. Nothing needs checking by hand: List and Delist report their own results, and a sale still delists the item everywhere else. When an eBay or Etsy sale is for an item with more than one in stock, Anteroom now reads what's left right away, so it knows whether to delist the rest. A List or Update that stalls is checked as soon as Anteroom gives up on it.
+
+## 0.1.452 — 2026-10-27
+
+- A listing's actions are easier to find. Regenerate, Record a sale and Delist everywhere sit together at the bottom of the marketplace list, with sync status and the More menu below them. History is at the end of the form, and the empty bar above the form is gone.
+- Marketplaces say Listed instead of Live. Each marketplace's bar shows its name with View listing beside it, and Update only appears once you've changed the listing since it was last sent there.
 
 ## 0.1.451 — 2026-10-27
 

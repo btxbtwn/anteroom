@@ -98,10 +98,12 @@ function listingHasPrice(listing: Record<string, unknown> | undefined): boolean 
 export function RegenerateListingButton({
   convId,
   className,
+  variant = "outline",
   onRegenerated,
 }: {
   convId: string;
   className?: string;
+  variant?: "outline" | "ghost-muted";
   onRegenerated?: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -169,7 +171,7 @@ export function RegenerateListingButton({
   return (
     <>
       <Button
-        variant="outline"
+        variant={variant}
         size="xs"
         className={className}
         disabled={regenerate.isPending || busy || !hasPhotos}
