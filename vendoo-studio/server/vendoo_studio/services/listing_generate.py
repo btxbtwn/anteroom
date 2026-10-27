@@ -502,6 +502,38 @@ def strip_uncertainty_from_description(listing: dict) -> bool:
     return _strip_description_sentences(listing, _UNCERTAINTY_TERMS_RE)
 
 
+def clear_not_applicable_values(listing: dict) -> bool:
+    """Empty every "Does Not Apply" a model wrote and remember the field as reviewed.
+
+    The listing never stores the phrase. An empty field is the answer for an
+    attribute that does not apply; ``reviewed_empty_fields`` keeps gap checks
+    from asking about it again.
+    """
+    from vendoo_studio.services.fill_log import remember_chat_clears
+    from vendoo_studio.services.vendoo_specifics import is_not_applicable
+
+    if not isinstance(listing, dict):
+        return False
+    cleared: list[dict] = []
+
+    def clear(record: dict, marketplace: str) -> None:
+        for key, value in list(record.items()):
+            if isinstance(value, dict) and key == "category_specifics":
+                clear(value, marketplace)
+            elif is_not_applicable(value):
+                record.pop(key)
+                cleared.append({"marketplace": marketplace, "field": key, "value": ""})
+
+    clear(listing, "general")
+    for key, block in listing.items():
+        if key.endswith("_specifics") and isinstance(block, dict):
+            clear(block, key.removesuffix("_specifics"))
+    if not cleared:
+        return False
+    listing.update(remember_chat_clears(listing, cleared))
+    return True
+
+
 def strip_empty_flaws_from_description(listing: dict) -> bool:
     """Drop a Flaws block that only says there are none; a flawless item has no Flaws line."""
     from vendoo_studio.services.listing_carryover import says_no_flaws
@@ -895,7 +927,9 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
 
     if not isinstance(listing, dict):
         return False
-    changed = normalize_listing_dropdowns(listing)
+    changed = clear_not_applicable_values(listing)
+    if normalize_listing_dropdowns(listing):
+        changed = True
     if sanitize_listing_sizes(listing):
         changed = True
     if align_size_fields(listing):

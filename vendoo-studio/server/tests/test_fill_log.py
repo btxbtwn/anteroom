@@ -16,6 +16,7 @@ from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.services.fill_log import (
     FillLogService,
     extract_missing_fields,
+    field_intentionally_empty,
     listing_value_for_field,
     preview_value,
     sanitize_entries,
@@ -67,13 +68,20 @@ class FillLogHelpersTest(unittest.TestCase):
             '{"missing_fields":[{"marketplace":"depop","field":"Material",'
             '"value":"","status":"not_applicable"}]}'
         )
+        self.assertEqual(fields, [{"marketplace": "depop", "field": "Material", "value": ""}])
         listing = write_values_into_listing({"depop_specifics": {"material": "Cotton"}}, fields)
-        self.assertEqual(listing["depop_specifics"]["material"], "Does Not Apply")
-        self.assertEqual(listing_value_for_field(listing, "depop", "Material"), "")
+        self.assertNotIn("material", listing["depop_specifics"])
         restored = write_values_into_listing(listing, [
             {"marketplace": "depop", "field": "Material", "value": "Silk"},
         ])
         self.assertEqual(listing_value_for_field(restored, "depop", "Material"), "Silk")
+
+    def test_does_not_apply_is_saved_as_a_reviewed_empty_field(self):
+        listing = write_values_into_listing({"ebay_specifics": {"mpn": "X1"}}, [
+            {"marketplace": "ebay", "field": "MPN", "value": "Does Not Apply"},
+        ])
+        self.assertNotIn("mpn", listing["ebay_specifics"])
+        self.assertTrue(field_intentionally_empty(listing, "ebay", "MPN"))
 
     def test_extract_missing_fields_ignores_json_patch(self):
         self.assertIsNone(extract_missing_fields('[{"op":"replace","path":"/sku","value":"ABC-1"}]'))

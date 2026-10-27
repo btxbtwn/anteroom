@@ -382,7 +382,7 @@ def extract_missing_fields(text: str) -> list[dict] | None:
             field = str(item.get("field") or "").strip()
             value = item.get("value")
             if item.get("status") == "not_applicable":
-                value = "Does Not Apply"
+                value = ""
             if not field or ("value" not in item and item.get("status") != "not_applicable"):
                 continue
             if value is None:
@@ -497,6 +497,13 @@ def _is_clear(value: Any) -> bool:
     return str(value).strip() == ""
 
 
+def _says_not_applicable(value: Any) -> bool:
+    """A model's "Does Not Apply": the listing stores an empty field instead."""
+    from vendoo_studio.services.vendoo_specifics import is_not_applicable
+
+    return is_not_applicable(value)
+
+
 def field_intentionally_empty(listing: dict, marketplace: str, field: str) -> bool:
     """A saved chat clear was reviewed; it is not an unanswered optional field."""
     key = (str(marketplace or "general").strip().lower(), field_lookup_key(field))
@@ -510,7 +517,7 @@ def field_intentionally_empty(listing: dict, marketplace: str, field: str) -> bo
 
 
 def remember_chat_clears(listing: dict, patches: list[dict]) -> dict:
-    """Remember explicit blank answers separately from Does Not Apply."""
+    """Remember explicit blank answers, "Does Not Apply" included, as reviewed."""
     updated = dict(listing)
     rows = [dict(row) for row in listing.get("reviewed_empty_fields", []) if isinstance(row, dict)]
     for patch in patches:
@@ -523,7 +530,7 @@ def remember_chat_clears(listing: dict, patches: list[dict]) -> dict:
             str(row.get("marketplace") or "general").strip().lower(),
             field_lookup_key(row.get("field") or ""),
         ) != (marketplace, field_lookup_key(field))]
-        if _is_clear(value):
+        if _is_clear(value) or _says_not_applicable(value):
             rows.append({"marketplace": marketplace, "field": field})
     if rows:
         updated["reviewed_empty_fields"] = rows
@@ -533,9 +540,13 @@ def remember_chat_clears(listing: dict, patches: list[dict]) -> dict:
 
 
 def write_values_into_listing(listing: dict, patches: list[dict]) -> dict:
+    """Write patches into the listing. "Does Not Apply" empties the field and
+    records it as reviewed, so the phrase never lands in the listing."""
     from vendoo_studio.services.registry import label_to_json_key
 
-    updated = dict(listing or {})
+    not_applicable = [patch for patch in patches if _says_not_applicable(patch.get("value"))]
+    patches = [{**patch, "value": ""} if patch in not_applicable else patch for patch in patches]
+    updated = remember_chat_clears(dict(listing or {}), not_applicable) if not_applicable else dict(listing or {})
     dimensions = re.split(r"\s*[x×]\s*", str(updated.get("package_dimensions_in") or ""), flags=re.I)
     if len(dimensions) != 3:
         dimensions = [updated.get(key) for key in ("length", "width", "height")]

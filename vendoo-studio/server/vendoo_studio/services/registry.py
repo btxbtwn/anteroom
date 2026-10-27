@@ -804,8 +804,8 @@ class RegistryService:
     def generation_context(self, category_path: str | None = None) -> str:
         lines = [
             "Learned marketplace fields from previous fills. Include a value for every "
-            "field that applies to this item's category. Use a real value, or Does Not Apply "
-            "when the field is on the form but does not apply to this item.",
+            "field that applies to this item's category. Leave out a field that does not "
+            "apply to this item; never write \"Does Not Apply\".",
             "When a field lists allowed values, copy one of them exactly — Vendoo rejects "
             "anything that is not on the list.",
             "",
