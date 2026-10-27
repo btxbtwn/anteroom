@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.430 — 2026-10-27
+
+- **Update…** now works on live Mercari, Vinted and Sellwild listings, both on an item and in the bulk **Update** action. Anteroom edits the listing that is already up instead of making you delist and relist, so it keeps its likes, views, listing age and photos. It changes only what you edited, never lists a draft or creates a second listing, and reads the listing back afterwards to make sure the change stuck. Sellwild may hold an edited listing for review.
+
 ## 0.1.429 — 2026-10-27
 
 - Your Facebook Marketplace listings now show under Marketplaces, including the ones Vendoo listed there. Press **Check on Facebook** to see whether one is still live, pending or sold; Anteroom only looks, and nothing on Facebook changes.

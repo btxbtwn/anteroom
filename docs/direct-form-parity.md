@@ -30,6 +30,41 @@ Photo selection/order and the marketplace's media limits also need to be checked
 per marketplace. A shared General field or account setting must be identified
 as such; it must not silently override an explicit marketplace selection.
 
+## Live Update on Mercari, Vinted and Sellwild
+
+Added in 0.1.430. Each site's own edit request was read from its public web
+bundle on 2026-10-26, so Update edits the live listing in place and keeps its
+likes, views and listing age. Each one checks that the listing belongs to the
+signed-in account and is live, writes once, and reads the listing back. A lost
+reply is answered by reading the listing, never by writing again. All three have
+request-level tests with fakes (`vendoo-extension/tests/live-update.test.js`)
+only; none has run against a real listing yet.
+
+- **Mercari.** The sell page's edit route (`/sell/edit/[itemId]`, build
+  `r-v3.104.70`) sends the persisted mutation `editListing`
+  (`53785e33b5b6ddeaedd8a31b9cfdccc0b00cd6e571810e369c87e5c74ddf591d`) with a
+  flat `EditListingInput`. It is a full replace, so the extension reads the item
+  with `sellFetchItemsDetails`, starts from its live values and its own
+  `photoIds` (the item's image URLs), and changes only the fields the revision
+  differs on. If Mercari has rotated the hash, the request fails before anything
+  is written and is reported as a changed site.
+- **Vinted.** The item-upload module in Vinted's item-page bundle saves an edit
+  with `PUT /api/v2/item_upload/items/{id}` and the body
+  `{item, push_up, parcel, upload_session_id}`. The extension reads
+  `GET /api/v2/item_upload/items/{id}` for the item's photos and current values,
+  keeps brand, colour and package size unless the revision names them in
+  `vinted_specifics`, and never sends `push_up`.
+- **Sellwild.** The listing page (`/account/my-listings/[id]`, build
+  `TfctsWXpff2fKS`) sends `PUT /api/listings/{id}/edit`. The schema requires
+  `title`, `price` and `categoryId`. The extension sends those plus only the
+  changed fields, and never `photo`, so the photos stay. When Sellwild answers
+  `underReview`, the listing is recorded as in review.
+
+Still to check on a real listing the seller picks: that Mercari accepts the
+`editListing` hash, that Vinted keeps brand, colour and package size and Sellwild
+reads weight and dimensions back under the names used, and that likes and views
+survive on all three.
+
 ## Listing videos
 
 Researched 2026-10-26 from each marketplace's API documentation or current web
