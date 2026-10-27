@@ -5,7 +5,7 @@ import { api } from "../api/client";
 import { jobsPollMs } from "../api/polling";
 import { useListingSessionActive } from "./listingSession";
 import { cn } from "../lib/utils";
-import { RegenerateListingButton, useClearListing } from "./ClearListingButton";
+import { useClearListing } from "./ClearListingButton";
 import { useVendooEnabled } from "../vendooMode";
 import { OpenListingButton } from "./OpenListingButton";
 import { Button } from "./ui/button";
@@ -97,7 +97,7 @@ export function ListingBrowserButton({
 
 /** Everything rare enough not to earn a place in the header. Clearing is the
     only item today, and it stays out of reach of the tabs next door. */
-function ListingActionsMenu({ convId, onCleared }: { convId: string; onCleared?: () => void }) {
+export function ListingActionsMenu({ convId, onCleared }: { convId: string; onCleared?: () => void }) {
   const { clear, isPending } = useClearListing(convId, onCleared);
 
   return (
@@ -116,17 +116,15 @@ function ListingActionsMenu({ convId, onCleared }: { convId: string; onCleared?:
   );
 }
 
-/** Open listing / Regenerate, then the icon controls (browser, More) — header
-    actions for a listing. */
+/** Open listing and the browser toggle — Vendoo's header actions for a listing.
+    Regenerate and the More menu live at the foot of the marketplace rail. */
 export function ListingReviewActions({
   convId,
-  onCleared,
   className,
   onMouseDown,
   children,
 }: {
   convId: string;
-  onCleared?: () => void;
   className?: string;
   onMouseDown?: (event: MouseEvent<HTMLElement>) => void;
   /** The browser toggle, which sits with this listing's actions. */
@@ -144,9 +142,7 @@ export function ListingReviewActions({
           vendooUrl={listingJob.vendoo_url || importedUrl}
         />
       ) : null}
-      <RegenerateListingButton convId={convId} onRegenerated={onCleared} />
       {children}
-      <ListingActionsMenu convId={convId} onCleared={onCleared} />
     </div>
   );
 }

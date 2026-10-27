@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, FacebookCheck, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
@@ -27,7 +27,7 @@ const REMOVED: Record<Marketplace, string> = {
   facebook: "Deleted",
 };
 const FACEBOOK_STATE: Record<NonNullable<FacebookCheck["state"]>, string> = {
-  live: "Live on Facebook.", pending: "Marked pending on Facebook.", sold: "Marked sold on Facebook.",
+  live: "Listed on Facebook.", pending: "Marked pending on Facebook.", sold: "Marked sold on Facebook.",
   hidden: "Hidden on Facebook.", draft: "Only a draft on Facebook.", not_live: "Not live on Facebook.",
 };
 
@@ -107,11 +107,15 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
       said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
   }
+  // Anteroom records the revision it last sent, so it knows when the listing has
+  // moved on. Without that record (listed elsewhere, or marked by hand) it can't tell.
+  const behind = draft?.state === "published" && Boolean(draft.revision_id) && draft.revision_id !== _revisionId
+    ? `Your latest edits aren't on ${marketplaceName(marketplace)} yet.` : null;
   if (live?.listing_id) {
-    return { tone: "live", label: "Live", href: live.url ?? undefined, hrefLabel: "View", detail: draft?.state === "published" ? draft.error : null, said };
+    return { tone: "live", label: "Listed", href: live.url ?? undefined, hrefLabel: "View listing", detail: draft?.state === "published" ? draft.error || behind : null, said };
   }
   if (draft && draft.state !== "draft") {
-    if (draft.state === "published") return { tone: "live", label: "Live", href: draft.listing_url, hrefLabel: "View", detail: draft.error };
+    if (draft.state === "published") return { tone: "live", label: "Listed", href: draft.listing_url, hrefLabel: "View listing", detail: draft.error || behind };
     if (draft.state === "pending_review") return { tone: "attention", label: "In review", href: draft.listing_url, hrefLabel: "View" };
     if (draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
   }
@@ -142,9 +146,13 @@ type MarketplaceProps = {
 };
 
 export function MarketplacesLayout({
-  convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField, ids, selected, onSelect, children,
+  convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField, ids, selected, onSelect, railActions, railStatus, children,
 }: MarketplaceProps & {
   ids: readonly string[];
+  /** Listing-wide actions pinned above the rail's own, e.g. Regenerate. */
+  railActions?: ReactNode;
+  /** The listing's sync state and overflow menu, the rail's last line. */
+  railStatus?: ReactNode;
   selected: string;
   onSelect: (id: string) => void;
   children?: ReactNode;
@@ -348,8 +356,14 @@ export function MarketplacesLayout({
     return false;
   }
 
+  /** The marketplace holds an older revision than the one being edited. */
+  function outdated(marketplace: Marketplace): boolean {
+    const draft = NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined;
+    return draft?.state === "published" && Boolean(draft.revision_id) && draft.revision_id !== revisionId;
+  }
+
   function updatable(marketplace: Marketplace, status: Status): boolean {
-    return NATIVE.has(marketplace) && status.tone === "live" && status.label === "Live" && !unconfirmed(marketplace);
+    return NATIVE.has(marketplace) && status.tone === "live" && status.label === "Listed" && !unconfirmed(marketplace);
   }
 
   function actions(marketplace: Marketplace, status: Status): ReactNode {
@@ -366,6 +380,8 @@ export function MarketplacesLayout({
       );
     }
     if (updatable(marketplace, status)) {
+      // Nothing to send until the listing changes; Update stays in the row's menu.
+      if (!outdated(marketplace)) return null;
       const pending = starting[m] === "update";
       return <Button size="xs" variant="outline" disabled={busy || startingOn(m)} onClick={() => void updateNow(m)}>{pending ? "Updating…" : "Update…"}</Button>;
     }
@@ -569,13 +585,19 @@ export function MarketplacesLayout({
             );
           })}
         </ul>
-        {removable.length > 1 && (
-          <Button size="xs" variant="destructive-outline" className="mt-1" disabled={busy} onClick={() => void runDelist(removable)}>
-            {delist.isPending ? "Delisting…" : "Delist everywhere…"}
-          </Button>
-        )}
-        <Button size="xs" variant="ghost" className="mt-1" disabled={busy} title="A sale in person or anywhere off these marketplaces"
-          onClick={() => startSale("other")}>Record a sale…</Button>
+        {/* Listing-wide actions sit apart from the marketplaces, pinned to the
+            rail's foot: quiet rows that match it, the destructive one last. */}
+        <div className="mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&>[data-slot=button]]:w-full [&>[data-slot=button]]:justify-start">
+          {railActions}
+          <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
+            onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>
+          {removable.length > 1 && (
+            <Button size="xs" variant="ghost-destructive" disabled={busy} onClick={() => void runDelist(removable)}>
+              <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
+            </Button>
+          )}
+          {railStatus && <div className="mt-1 flex min-h-6 items-center gap-1.5 border-t ps-2 pt-1">{railStatus}</div>}
+        </div>
       </nav>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
         {(native.error || live.error || actionError || delist.error || mark.error) && (
@@ -585,16 +607,28 @@ export function MarketplacesLayout({
           error={recordSale.error?.message} onSubmit={(sale) => recordSale.mutate(sale)} onCancel={() => setSelling(null)} />}
         {selectedMarketplace && selectedStatus && (
           <section data-marketplace-pane={selectedMarketplace} className="flex flex-col gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs">
-            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
-                {selectedStatus.tone !== "idle" && TONE_ICON[selectedStatus.tone]}
-                <span className={cn("truncate", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground")}>
-                  {selectedStatus.tone === "idle" ? `Not on ${railLabel(selectedMarketplace)} yet` : selectedStatus.label}
-                </span>
-                {selectedStatus.href && <a className="inline-flex items-center gap-0.5 text-foreground/80 hover:text-foreground hover:underline" href={selectedStatus.href}
-                  target="_blank" rel="noopener noreferrer" aria-label={`${selectedStatus.hrefLabel} on ${railLabel(selectedMarketplace)}`}>{selectedStatus.hrefLabel}<ExternalLinkIcon aria-hidden className="size-3" /></a>}
+            {/* Name on the left, every action on the right. A listed item's state is
+                already on its rail row, so the bar only spells out the others. */}
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <MarketplaceLogo id={selectedMarketplace} label={railLabel(selectedMarketplace)} size={16} />
+                <span className="truncate font-medium text-foreground text-sm">{railLabel(selectedMarketplace)}</span>
+                {selectedStatus.tone !== "live" && (
+                  <span className={cn("flex min-w-0 items-center gap-1 text-muted-foreground", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground")}>
+                    {selectedStatus.tone !== "idle" && TONE_ICON[selectedStatus.tone]}
+                    <span className="truncate">{selectedStatus.tone === "idle" ? "Not listed yet" : selectedStatus.label}</span>
+                  </span>
+                )}
               </span>
-              <span className="ms-auto flex shrink-0 items-center gap-1.5">{actions(selectedMarketplace, selectedStatus)}</span>
+              <span className="ms-auto flex shrink-0 items-center gap-1.5">
+                {selectedStatus.href && (
+                  <Button size="xs" variant="ghost" aria-label={`${selectedStatus.hrefLabel} on ${railLabel(selectedMarketplace)}`}
+                    render={<a href={selectedStatus.href} target="_blank" rel="noopener noreferrer" />}>
+                    {selectedStatus.hrefLabel}<ExternalLinkIcon aria-hidden />
+                  </Button>
+                )}
+                {actions(selectedMarketplace, selectedStatus)}
+              </span>
             </div>
             {selectedStatus.detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
               role={selectedStatus.tone === "failed" ? "alert" : undefined}>{selectedStatus.detail}</p>}
