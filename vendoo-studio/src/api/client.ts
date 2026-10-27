@@ -77,7 +77,7 @@ import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, A
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
-import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SellerSale, SellerSaleResult } from "./marketplaceListings";
+import type { DelistMarketplace, FacebookCheck, MarketplaceListings, MarketplaceMark, SellerSale, SellerSaleResult } from "./marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
@@ -520,6 +520,8 @@ export const api = {
       request<SellerSaleResult>(`/conversations/${convId}/marketplace-listings/sold`, {
         method: "POST", body: JSON.stringify(sale),
       }),
+    checkFacebook: (convId: string) =>
+      request<FacebookCheck>(`/conversations/${convId}/marketplace-listings/facebook/check`, { method: "POST" }),
   },
   nativeMarketplaces: {
     form: (convId: string, marketplace: string, revisionId?: string | null) =>

@@ -14,6 +14,8 @@
 //             read on its own, sold when listing.status is 5 (1 while live).
 //   Vinted    the seller's wardrobe; a known listing missing from the live rows
 //             is read on its own, sold when it is closed and not hidden or reserved.
+//   Facebook  each listing's own item page, a few per pass several seconds apart,
+//             sold when the listing record says is_sold (facebook-native.js).
 
 const SALE_LISTING_ID = {
   poshmark: /^[a-f0-9]{24}$/,
@@ -21,6 +23,7 @@ const SALE_LISTING_ID = {
   depop: /^[a-z0-9][a-z0-9-]{0,200}$/,
   sellwild: /^\d{1,15}$/,
   vinted: /^\d{1,15}$/,
+  facebook: FACEBOOK_LISTING_ID,
 };
 const SALE_MAX_LISTINGS = 5000;
 const SALE_MAX_PAGES = 40;
@@ -214,7 +217,8 @@ async function vintedSales(ids) {
   });
 }
 
-const SALE_READERS = { depop: depopSales, mercari: mercariSales, poshmark: poshmarkSales, sellwild: sellwildSales, vinted: vintedSales };
+const SALE_READERS = { depop: depopSales, mercari: mercariSales, poshmark: poshmarkSales, sellwild: sellwildSales, vinted: vintedSales,
+  facebook: facebookSales };
 
 async function readMarketplaceSales(marketplace, listingIds) {
   if (activeNativeOperation) return { ok: true, sales: [], skipped: true };

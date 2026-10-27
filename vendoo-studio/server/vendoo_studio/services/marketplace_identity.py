@@ -16,6 +16,7 @@ _HOSTS = {
     "depop": {"depop.com"},
     "sellwild": {"sellwild.com"},
     "vinted": {"vinted.com"},
+    "facebook": {"facebook.com", "m.facebook.com", "web.facebook.com"},
 }
 _PATHS = {
     "ebay": r"/itm/(?:[^/]+/)?(?P<id>\d{9,15})",
@@ -25,6 +26,7 @@ _PATHS = {
     "depop": r"/products/(?P<id>[a-z0-9][a-z0-9-]{0,200})",
     "sellwild": r"/product/(?P<id>\d+)(?:/[^/]+)?",
     "vinted": r"/items/(?P<id>\d+)(?:-[^/]+)?",
+    "facebook": r"/marketplace/item/(?P<id>\d{6,20})",
 }
 
 
@@ -47,6 +49,8 @@ def listing_reference(marketplace: str, url: str | None) -> tuple[str, str] | No
     if not match:
         return None
     item_id = match["id"].lower() if marketplace == "poshmark" else match["id"]
+    if marketplace == "facebook":
+        return item_id, public_listing_url(marketplace, item_id)
     public_host = host if marketplace in {"poshmark", "sellwild"} else f"www.{host}"
     return item_id, urlunsplit(("https", public_host, parsed.path, "", ""))
 
@@ -64,6 +68,7 @@ _PUBLIC = {
     "depop": "https://www.depop.com/products/{}/",
     "sellwild": "https://sellwild.com/product/{}",
     "vinted": "https://www.vinted.com/items/{}",
+    "facebook": "https://www.facebook.com/marketplace/item/{}/",
 }
 
 
