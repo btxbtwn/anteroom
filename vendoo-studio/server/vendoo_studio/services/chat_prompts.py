@@ -225,7 +225,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             "- NEVER put pricing details in the description: no prices, dollar amounts, comps, sold-listing counts, market/resale value, MSRP, discounts, offers, or pricing uncertainty. Pricing lives in the price field only.\n"
             "- NEVER put uncertainties in the description: no notes about what you could not verify or read, no \"approximate\", \"estimated\", \"photo estimates\", \"uncertain\" or \"unclear\" hedges. The description is buyer-facing; uncertainties are internal and belong in your reply only.\n"
             "- Do not invent catchy titles or prose that break those formulas.\n"
-            "- Resolve every applicable discovered field with a real value or Does Not Apply when the field truly does not apply.\n"
+            "- Resolve every applicable discovered field with a real value. Leave a field out when it does not apply to the item; never write \"Does Not Apply\".\n"
             "- Fill every discovered category/marketplace field in the JSON. Do not leave applicable fields empty.\n"
             "- Never tell the seller the listing is complete, ready, or done while any discovered field is still empty.\n"
             "- Estimate packaged shipping weight and mailer dimensions from the item type; do not ask the seller for those.\n"
@@ -279,7 +279,7 @@ LISTING_INSTRUCTIONS = (
     "Do not modify, estimate, or replace seller-provided measurements.\n"
     "If the seller lists known flaws, repeat every one of them in the Flaws: block, "
     "in the seller's own words. Never drop a flaw or soften it to \"none noted\".\n"
-    "Use the discovered category fields below. Fill every applicable field with a real value or Does Not Apply. "
+    "Use the discovered category fields below. Fill every applicable field with a real value, and leave out any that does not apply — never write \"Does Not Apply\". "
     "Only leave a field empty when you must ask the seller a precise question in prose — and never claim the listing is complete while any applicable discovered field is still empty. "
     "Always infer and include packaged shipping weight_lb and weight_oz from the item type, size, materials, "
     "photos, seller notes, and research evidence. Pounds may be 0, but both fields must be present and their "
@@ -357,7 +357,7 @@ def _empty_discovered_fields_prompt(db: Session, conv_id: str, evidence: str = "
     return (
         "\n\n--- Discovered fields still empty ---\n"
         "Fill each of these in the listing JSON (root fields or the marketplace *_specifics) using exact "
-        "allowed options from the category fields above, or Does Not Apply when the field truly does not apply:\n"
+        "allowed options from the category fields above. Leave out a field that does not apply to the item; never write \"Does Not Apply\":\n"
         + "\n".join(lines)
     )
 

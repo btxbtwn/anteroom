@@ -13,7 +13,6 @@ from vendoo_studio.models.ebay_fields import (
     ebay_season_haystack,
 )
 from vendoo_studio.models.listing_values import (
-    DNA_VALUE,
     as_mapping,
     canonical_option,
     dropdown_field_options,
@@ -604,7 +603,7 @@ def _etsy_neckline_from_ebay(value: str) -> str:
 
 
 def ensure_etsy_category_optionals(listing: dict) -> bool:
-    """Fill Etsy Show-Optional-Fields rows: defaults, DNA only when N/A, infer sleeve/pattern."""
+    """Fill Etsy Show-Optional-Fields rows: defaults, inferred sleeve/pattern; the rest stay empty."""
     if not isinstance(listing, dict):
         return False
     raw = listing.get("etsy_specifics")
@@ -709,34 +708,24 @@ def ensure_etsy_category_optionals(listing: dict) -> bool:
             etsy["clothingStyle"] = "Streetwear"
             changed = True
 
-    for key in ETSY_OPTIONAL_DNA_KEYS:
-        if key == "graphic":
-            if re.search(r"\b(?:graphic|logo|print|slogan|saying|brand\s*logo)\b", hay):
-                if ebay_optional_blank(ebay_optional_raw(etsy, "graphic")):
-                    set_key("graphic", "Brand & logo")
-                continue
-        if key == "sustainability":
-            if re.search(r"\b(?:organic|hemp|linen|recycled)\b", hay):
-                if re.search(r"\borganic\b", hay):
-                    set_key("sustainability", "Organic cotton")
-                elif re.search(r"\bhemp\b", hay):
-                    set_key("sustainability", "Hemp")
-                elif re.search(r"\blinen\b", hay):
-                    set_key("sustainability", "Linen")
-                elif re.search(r"\brecycled\b", hay):
-                    set_key("sustainability", "Recycled polyester")
-                continue
-        if key in {"holiday", "occasion"}:
-            if ebay_optional_blank(ebay_optional_raw(etsy, key)):
-                options = dropdown_field_options("etsy", key)
-                hit = infer_known_option(hay, options, cues=ETSY_APPAREL_CUES.get(key))
-                if hit:
-                    set_key(key, hit)
-                    continue
-            else:
-                continue
+    # Graphic, Sustainability, Holiday and Occasion get a value only when the
+    # item shows one. Otherwise they stay empty: they do not apply.
+    if re.search(r"\b(?:graphic|logo|print|slogan|saying|brand\s*logo)\b", hay):
+        if ebay_optional_blank(ebay_optional_raw(etsy, "graphic")):
+            set_key("graphic", "Brand & logo")
+    if ebay_optional_blank(ebay_optional_raw(etsy, "sustainability")):
+        for pattern, value in (
+            (r"\borganic\b", "Organic cotton"), (r"\bhemp\b", "Hemp"),
+            (r"\blinen\b", "Linen"), (r"\brecycled\b", "Recycled polyester"),
+        ):
+            if re.search(pattern, hay):
+                set_key("sustainability", value)
+                break
+    for key in ("holiday", "occasion"):
         if ebay_optional_blank(ebay_optional_raw(etsy, key)):
-            set_key(key, DNA_VALUE)
+            hit = infer_known_option(hay, dropdown_field_options("etsy", key), cues=ETSY_APPAREL_CUES.get(key))
+            if hit:
+                set_key(key, hit)
 
     if changed:
         listing["etsy_specifics"] = etsy

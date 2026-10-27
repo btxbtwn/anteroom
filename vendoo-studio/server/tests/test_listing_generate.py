@@ -669,6 +669,23 @@ class PersistListingTest(unittest.TestCase):
         apply_send_readiness_fixes(listing)
         self.assertEqual(listing["description"], flawed)
 
+    def test_clear_not_applicable_values_empties_the_phrase(self):
+        from vendoo_studio.services.fill_log import field_intentionally_empty
+        from vendoo_studio.services.listing_generate import clear_not_applicable_values
+
+        listing = {
+            "title": "Tee",
+            "ebay_specifics": {"mpn": "Does Not Apply", "type": "T-Shirt",
+                               "category_specifics": {"Theme": "N/A"}},
+            "etsy_specifics": {"holiday": "does not apply", "graphic": ["Does Not Apply"]},
+        }
+        self.assertTrue(clear_not_applicable_values(listing))
+        self.assertEqual(listing["ebay_specifics"], {"type": "T-Shirt", "category_specifics": {}})
+        self.assertEqual(listing["etsy_specifics"], {})
+        for marketplace, field in (("ebay", "MPN"), ("ebay", "Theme"), ("etsy", "Holiday"), ("etsy", "Graphic")):
+            self.assertTrue(field_intentionally_empty(listing, marketplace, field), field)
+        self.assertFalse(clear_not_applicable_values(listing))
+
     def test_strip_uncertainty_keeps_descriptions_without_hedges(self):
         from vendoo_studio.services.listing_generate import strip_uncertainty_from_description
 
@@ -1097,8 +1114,13 @@ class PersistListingTest(unittest.TestCase):
         self.assertTrue(saved)
         saved_listing = listing_repo.get_revisions(self.conv.id)[0].listing_json
         etsy = saved_listing["etsy_specifics"]
-        self.assertEqual(etsy.get("Holiday") or etsy.get("holiday"), "Does Not Apply")
-        self.assertEqual(etsy.get("Occasion") or etsy.get("occasion"), "Does Not Apply")
+        from vendoo_studio.services.fill_log import field_intentionally_empty
+
+        # "Does Not Apply" is saved as an empty field the seller does not get asked about again.
+        self.assertFalse(etsy.get("Holiday") or etsy.get("holiday"))
+        self.assertFalse(etsy.get("Occasion") or etsy.get("occasion"))
+        self.assertTrue(field_intentionally_empty(saved_listing, "etsy", "Holiday"))
+        self.assertTrue(field_intentionally_empty(saved_listing, "etsy", "Occasion"))
         self.assertEqual(etsy.get("Pattern") or etsy.get("pattern"), "Solid")
         messages = ConversationRepo(self.db).get_messages(self.conv.id)
         self.assertTrue(any("Saved to the listing JSON" in (m.text or "") for m in messages))

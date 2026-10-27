@@ -659,7 +659,7 @@ def validate_listing(
                         "eBay Fabric Weight must be left blank unless a numeric value "
                         "(greater than 0, up to 1 decimal) is evidenced — never Does Not Apply"
                         if key == "fabricWeight"
-                        else f"eBay '{key}' applies to this item — use a real value, not Does Not Apply"
+                        else f"eBay '{key}' applies to this item — use a real value"
                     ),
                 )
                 continue
@@ -823,11 +823,9 @@ def validate_listing(
                         continue
                 value = ebay_optional_raw(etsy, key)
                 if ebay_optional_blank(value):
-                    add_issue(
-                        result,
-                        f"etsy_specifics.{key}",
-                        f"Etsy optional '{key}' must be filled (or Does Not Apply only when it truly does not apply)",
-                    )
+                    # Empty is the answer for a row that does not apply to the item.
+                    if key not in ETSY_OPTIONAL_DNA_KEYS:
+                        add_issue(result, f"etsy_specifics.{key}", f"Etsy optional '{key}' must be filled")
                     continue
                 text = text_value(value) if not isinstance(value, (list, tuple)) else ",".join(str(v) for v in value)
                 is_dna = text.casefold() in {
@@ -837,7 +835,7 @@ def validate_listing(
                     add_issue(
                         result,
                         f"etsy_specifics.{key}",
-                        f"Etsy '{key}' applies to this item — use a real value, not Does Not Apply",
+                        f"Etsy '{key}' applies to this item — use a real value",
                     )
 
     return result
