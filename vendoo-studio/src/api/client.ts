@@ -75,7 +75,7 @@ import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, Nat
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
-import type { MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
+import type { ChromeImportMarketplace, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -245,6 +245,14 @@ export const api = {
   },
   suggestions: {
     list: () => request<SuggestionsResponse>("/suggestions"),
+  },
+  chromeImport: {
+    importCandidates: (marketplace: ChromeImportMarketplace, cursor: string | null) =>
+      request<MarketplaceImportPage>(`/chrome-import/${marketplace}/active${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
+    importListing: (marketplace: ChromeImportMarketplace, listing: string, linkConversationId?: string) =>
+      request<MarketplaceImportResult>(`/chrome-import/${marketplace}`, {
+        method: "POST", body: JSON.stringify({ listing, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
+      }),
   },
   etsy: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/etsy/import/active?page=${page}`),

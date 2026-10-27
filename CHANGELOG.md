@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.420 — 2026-10-26
+
+- You can now import your active Poshmark, Mercari, Depop, Sellwild and Vinted listings into Anteroom from each marketplace's page, using your sign-in in Chrome. Anteroom shows what it found first, opens items you already have instead of copying them, and asks before linking a listing to an item that looks the same. Importing only reads the marketplace; nothing there is changed, published or delisted.
+
 ## 0.1.419 — 2026-10-26
 
 - Anteroom now refuses an update whose signature is missing or damaged, so an update can no longer lose access to your saved sign-ins. Releases are ready to be signed with an Apple Developer ID certificate; once that is set up, updates stop asking for your Mac password.

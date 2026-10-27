@@ -121,7 +121,7 @@ Vendoo: up to 240 items, from the inventory page
 | Stale listing warning (15–120 days, configurable) | [Stale inventory](https://help.vendoo.co/en/articles/6260291-vendoo-s-stale-inventory-system), [Custom settings](https://help.vendoo.co/en/articles/6260256-vendoo-custom-settings) | **Partial** | Fixed 60 days in Suggestions (`services/suggestions.py` `STALE_MIN_DAYS`) and Analytics (`inventory_analytics.STALE_DAYS`); Automations can act after any number of listed days (CHANGELOG 0.1.402). No configurable warning threshold. Listed dates also come from Vendoo notes for migrated items |
 | Duplicate Finder | [What changed 2026](https://help.vendoo.co/en/articles/16091202-what-changed-in-vendoo-2026) | **Partial** | Duplicate Vendoo links (`routes/conversations.py` `/vendoo-link-duplicates`); linking a marketplace URL already on another item is rejected (`marketplace_delist.mark`). No finder for similar items |
 | CSV inventory and sales export | [CSV export](https://help.vendoo.co/en/articles/6260286-how-to-download-a-csv-inventory-spreadsheet-and-sales-report) | **Have** | `routes/sales_ledger.py` `/export/sales.csv`, `/export/inventory.csv`. Columns are fixed, not customizable |
-| Import active listings from each marketplace | [Import](https://help.vendoo.co/en/articles/6260276-how-to-import-your-items-in-vendoo) | **Partial** | eBay and Etsy import whole listings (`routes/ebay.py`, `routes/etsy.py` `/import`). Poshmark, Mercari, Depop, Vinted and Sellwild can only be linked to an existing item by pasting the URL (`marketplace_listings` `/{marketplace}/mark`). Vendoo import (`routes/imports.py`) is the migration path |
+| Import active listings from each marketplace | [Import](https://help.vendoo.co/en/articles/6260276-how-to-import-your-items-in-vendoo) | **Have** | eBay and Etsy import whole listings (`routes/ebay.py`, `routes/etsy.py` `/import`). Poshmark, Mercari, Depop, Vinted and Sellwild import active listings through the Chrome bridge (`routes/chrome_import.py`, `services/chrome_import.py`, `background/marketplace-import.js`), with exact link matching first and a suggested match the seller reviews. Multi-size Poshmark and Depop listings are not imported yet. Vendoo import (`routes/imports.py`) is the migration path |
 | Import sold items | [Import sold](https://help.vendoo.co/en/articles/6760021-can-i-import-sold-items) | **Partial** | eBay and Etsy order recovery (`services/order_recovery.py`); Vendoo's sold history came in with the Vendoo import |
 | Multiple accounts per marketplace | [Multiple accounts](https://help.vendoo.co/en/articles/6260283-how-do-i-connect-vendoo-to-multiple-accounts-on-the-same-marketplace) | **N/A** | Vendoo supports one account per marketplace too |
 | Team members / sub-accounts | No Vendoo documentation found | **N/A** | Vendoo does not advertise seats |
@@ -231,9 +231,9 @@ Most important first.
    "Other / in person" marketplace, and offer to delist the others.
 7. **Final Vendoo import and label conversion.** *Fix:* run one full Vendoo
    import, convert Vendoo label IDs to names, and only then cancel.
-8. **Poshmark, Mercari, Depop, Vinted and Sellwild listings made outside
-   Anteroom cannot be imported**, only linked by URL. *Fix:* add an import
-   for active listings through the Chrome bridge, like eBay and Etsy.
+8. ~~**Poshmark, Mercari, Depop, Vinted and Sellwild listings made outside
+   Anteroom cannot be imported.**~~ Done: import through the Chrome bridge
+   (unit-tested; real-account verification pending). Multi-size listings remain.
 9. **No eBay listing video.** *Fix:* add eBay video upload through the
    Media API next to the Poshmark video.
 10. **Bulk edit lacks condition, color, tags and category, and there is no
