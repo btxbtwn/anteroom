@@ -57,6 +57,9 @@ class MarketplaceListing(Base):
     ebay_inventory_written = Column(Boolean, nullable=True)
     # [{"photo_id", "checksum", "url"}] in listing order.
     ebay_images = Column(JSON, nullable=True)
+    # A listing with variations: its inventory item group, and {variation SKU: offer ID}.
+    ebay_group_key = Column(String, nullable=True)
+    ebay_variant_offers = Column(JSON, nullable=True)
 
     etsy_shop_id = Column(String, nullable=True)
     etsy_pending_write = Column(String, nullable=True)

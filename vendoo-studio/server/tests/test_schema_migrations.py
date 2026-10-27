@@ -462,11 +462,30 @@ def test_marketplace_review_upgrade_preserves_tasks_but_expires_unpinned_pending
     assert inspect_database(engine.url.database).clean
 
 
-def test_promotions_upgrade_keeps_previous_release_data_and_starts_empty(engine, snapshots):
+def test_ebay_variation_groups_upgrade_keeps_existing_ebay_listing_identity(engine, snapshots):
     from alembic import command
 
     config = schema_migrations.alembic_config(str(engine.url))
     command.upgrade(config, "151f7674a7c7")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title) VALUES ('ebay-item', 'Existing tee')")
+        connection.execute("INSERT INTO marketplace_listings (id, conversation_id, marketplace, state, ebay_sku, ebay_offer_id, ebay_listing_id, "
+                           "ebay_inventory_written, created_at, updated_at) VALUES ('binding', 'ebay-item', 'ebay', 'draft', 'TEE-1', 'offer-9', NULL, 1, "
+                           "'2026-10-26', '2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        row = connection.execute("SELECT state, ebay_sku, ebay_offer_id, ebay_inventory_written, ebay_group_key, ebay_variant_offers "
+                                 "FROM marketplace_listings WHERE id='binding'").fetchone()
+    assert row == ("draft", "TEE-1", "offer-9", 1, None, None)
+    assert recorded_revision(engine) == head_revision()
+    assert inspect_database(engine.url.database).clean
+
+
+def test_promotions_upgrade_keeps_previous_release_data_and_starts_empty(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "a7c3e91f5d20")
     with sqlite3.connect(engine.url.database) as connection:
         connection.execute("INSERT INTO conversations (id, title, status) VALUES ('posh-item', 'Existing coat', 'active')")
         connection.execute("INSERT INTO listing_templates (id, name, fields, revision, created_at, updated_at) "
