@@ -533,6 +533,18 @@ async def _finish_generation_background(
                     conv_id, prepared, source="vendoo_prepare", parent_revision_id=revision_id,
                 )
                 current = prepared
+
+        async def fill_native():
+            from vendoo_studio.services.native_field_fill import fill_native_fields
+
+            async with live_trace.agent("native-fields", "Marketplace category fields") as agent, model_slots.slot():
+                filled = await fill_native_fields(db, conv_id, provider, evidence=evidence)
+                agent.result("Filled category fields" if filled else "No category fields to fill")
+                return filled
+
+        native = await timed("native_fields", fill_native())
+        if native is not None:
+            current = native
         # Posted only now: said before the fill, it reported fields as empty
         # and "Send when ready" while chat was still filling them.
         repo.add_message(
