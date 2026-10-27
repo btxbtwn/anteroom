@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { DuplicateVendooLinksButton } from "../DuplicateVendooLinksButton";
+import { SimilarItemsButton } from "../SimilarItemsButton";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { EyeIcon, RotateCcwIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -450,6 +451,12 @@ export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string
       <HiddenFieldsSection />
       <ListingFormulasSection />
       <SettingsSection id="duplicate-vendoo-links" title="Duplicate check">
+        <SettingsRow
+          id="similar-items"
+          title="Similar items"
+          description="Find items that look like the same thing listed twice, then keep one and merge the other into it, or mark them as different. Nothing is deleted or delisted."
+          control={<SimilarItemsButton onSelect={onOpenListing} />}
+        />
         <SettingsRow
           title="Duplicate Vendoo links"
           description="Find Anteroom listings that share the same Vendoo item and open each listing to review its link."

@@ -277,6 +277,27 @@ class SummarizeAnalyticsTest(unittest.TestCase):
         markets = {row["id"]: row["revenue"] for row in payload["marketplaces"]}
         self.assertEqual(markets, {"depop": 30, "ebay": 10})
 
+    def test_groups_sales_under_each_label_with_its_color(self):
+        from vendoo_studio.services import user_settings
+
+        user_settings.set_ui_prefs(label_colors={"a19": "teal"})
+        self.addCleanup(user_settings.set_ui_prefs, label_colors={})
+        payload = summarize(
+            [
+                _item(conversation_id="c1", sold_price=30, labels=("A19", "Closet", "closet")),
+                _item(conversation_id="c2", sold_price=10, labels=("a19",)),
+                _item(conversation_id="c3", sold_price=50),
+                _item(conversation_id="c4", status="active", labels=("Closet",)),
+            ],
+            range_id="all",
+            now=NOW,
+        )
+        labels = {row["id"]: row for row in payload["labels"]}
+        self.assertEqual(list(labels), ["a19", "closet"])
+        self.assertEqual((labels["a19"]["label"], labels["a19"]["count"], labels["a19"]["revenue"]), ("A19", 2, 40))
+        self.assertEqual(labels["a19"]["color"], "teal")
+        self.assertEqual((labels["closet"]["count"], labels["closet"]["color"]), (1, None))
+
     def test_sales_fall_into_price_tiers_low_to_high(self):
         payload = summarize(
             [
@@ -489,6 +510,17 @@ class LoadAnalyticsTest(unittest.TestCase):
         self.assertEqual(sold.marketplace, "depop")
         self.assertEqual(sold.days_listed, 31)
         self.assertEqual(rows[self.busy.id].status, "listing")
+
+    def test_loader_reads_item_labels_and_drops_stock_merged_into_another_item(self):
+        notes = json.loads(self.sold.notes)
+        notes["vendooLabels"] = "A19, Closet"
+        self.sold.notes = json.dumps(notes)
+        merged = ConversationRepo(self.db).create(title="Duplicate tee")
+        merged.notes = json.dumps({"mergedInto": self.sold.id, "vendooLabels": "A19"})
+        self.db.commit()
+        rows = {row.conversation_id: row for row in load_rows(self.db)}
+        self.assertEqual(rows[self.sold.id].labels, ("A19", "Closet"))
+        self.assertNotIn(merged.id, rows)
 
     def test_loader_preserves_zero_sale_cost_and_unknown_sale_price(self):
         notes = json.loads(self.sold.notes)
