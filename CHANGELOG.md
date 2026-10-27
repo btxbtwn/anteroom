@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.439 — 2026-10-27
+
+- When Anteroom watches you send an offer by hand on Mercari or Depop, it now keeps only that site's own requests and skips its analytics, so a long session no longer fills up before the offer is sent.
+
 ## 0.1.438 — 2026-10-27
 
 - General fills every marketplace form. A title, description, brand, size, or department you change on one marketplace stays on that marketplace, and eBay's Size and Department can be edited on the eBay form.
