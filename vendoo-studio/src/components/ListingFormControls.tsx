@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { catalogLeafChoices, categoryChoiceAt, categoryPathKey, categorySegments, categorySteps, type CategoryChoice } from "./categoryTree";
 import { cn } from "../lib/utils";
-import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup, ComboboxTrigger } from "./ui/combobox";
+import { Combobox, ComboboxCollection, ComboboxEmpty, ComboboxGroup, ComboboxGroupLabel, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup, ComboboxTrigger } from "./ui/combobox";
 import { toggleVariants } from "./ui/toggle";
 
 /** A tab strip in T3's segmented-control look; keeps tablist/tab roles. */
@@ -130,6 +130,20 @@ export function NativeSelect({
 }
 
 /** Keep an unavailable saved value visible without offering it as a valid choice. */
+type ChoiceGroup = { key: string; value: string; items: string[] };
+
+/** Consecutive choices under the same heading, in the marketplace's order. */
+export function groupedChoices(options: string[], headings: Record<string, string>): ChoiceGroup[] {
+  const groups: ChoiceGroup[] = [];
+  for (const option of options) {
+    const heading = headings[option] ?? "";
+    const last = groups[groups.length - 1];
+    if (last && last.value === heading) last.items.push(option);
+    else groups.push({ key: `${groups.length}-${heading}`, value: heading, items: [option] });
+  }
+  return groups;
+}
+
 export function SearchableSelect({
   id,
   fieldKey,
@@ -141,6 +155,7 @@ export function SearchableSelect({
   maxLength,
   choicesVerified = true,
   onSearch,
+  optionGroups,
 }: {
   id: string;
   fieldKey: string;
@@ -152,17 +167,20 @@ export function SearchableSelect({
   maxLength?: number;
   choicesVerified?: boolean;
   onSearch?: (query: string) => void;
+  /** Choice label → the heading the marketplace lists it under, in option order. */
+  optionGroups?: Record<string, string>;
 }) {
   const [query, setQuery] = React.useState(value);
   React.useEffect(() => setQuery(value), [value]);
   const custom = !selectionOnly && query.trim() && !options.includes(query.trim()) ? query.trim() : "";
   const matches = options.length > 200 ? options.filter((item) => item.toLowerCase().includes(query.toLowerCase())).slice(0, 100) : options;
   const items = custom ? [custom, ...matches] : matches;
+  const groups = optionGroups && !custom ? groupedChoices(items, optionGroups) : null;
   const unavailable = Boolean(selectionOnly && options.length && value && !options.includes(value));
   return (
     <div className="min-w-0">
       <Combobox<string>
-        items={items}
+        items={(groups ?? items) as string[]}
         filter={onSearch ? null : undefined}
         value={value || null}
         inputValue={query}
@@ -188,7 +206,16 @@ export function SearchableSelect({
         <ComboboxPopup>
           <ComboboxEmpty>No matches.</ComboboxEmpty>
           <ComboboxList>
-            {(item: string) => <ComboboxItem key={item} value={item}>{item === custom ? `Use “${item}”` : item}</ComboboxItem>}
+            {groups
+              ? (group: ChoiceGroup) => (
+                <ComboboxGroup key={group.key} items={group.items}>
+                  {group.value && <ComboboxGroupLabel>{group.value}</ComboboxGroupLabel>}
+                  <ComboboxCollection>
+                    {(item: string) => <ComboboxItem key={item} value={item}>{item}</ComboboxItem>}
+                  </ComboboxCollection>
+                </ComboboxGroup>
+              )
+              : (item: string) => <ComboboxItem key={item} value={item}>{item === custom ? `Use “${item}”` : item}</ComboboxItem>}
           </ComboboxList>
         </ComboboxPopup>
       </Combobox>

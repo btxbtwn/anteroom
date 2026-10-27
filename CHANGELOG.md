@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.459 — 2026-10-27
+
+- Mercari’s Size list is grouped under Mercari’s own headings (Standard, Petite, Inch and so on), as on Mercari.
+- On the Sellwild tab you can type the package weight and box size, as on Sellwild’s page. They start from Item Details, and List sends what you set there.
+
 ## 0.1.458 — 2026-10-27
 
 - The Mercari tab now matches Mercari’s own sell page: the same sections (Product info, Shipping, Pricing, Smart pricing), fields and wording in the same order, every category Mercari offers in its order — including a category’s “All …” choice — and sizes under Mercari’s size groups. Brand has “No brand / Not sure” as a choice, and you can set the ZIP an item ships from. Size type, the separate No brand switch and the package weight rows are gone from this tab.

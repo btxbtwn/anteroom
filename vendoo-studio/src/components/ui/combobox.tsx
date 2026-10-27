@@ -278,6 +278,22 @@ function ComboboxStatus({ className, ...props }: ComboboxPrimitive.Status.Props)
   );
 }
 
+function ComboboxGroup({ className, ...props }: ComboboxPrimitive.Group.Props) {
+  return <ComboboxPrimitive.Group className={className} data-slot="combobox-group" {...props} />;
+}
+
+function ComboboxGroupLabel({ className, ...props }: ComboboxPrimitive.GroupLabel.Props) {
+  return (
+    <ComboboxPrimitive.GroupLabel
+      className={cn("px-2 pt-2 pb-1 font-medium text-muted-foreground text-xs", className)}
+      data-slot="combobox-group-label"
+      {...props}
+    />
+  );
+}
+
+const ComboboxCollection = ComboboxPrimitive.Collection;
+
 const useComboboxFilter = ComboboxPrimitive.useFilter;
 
 export {
@@ -292,5 +308,8 @@ export {
   ComboboxListVirtualized,
   ComboboxClear,
   ComboboxStatus,
+  ComboboxGroup,
+  ComboboxGroupLabel,
+  ComboboxCollection,
   useComboboxFilter,
 };

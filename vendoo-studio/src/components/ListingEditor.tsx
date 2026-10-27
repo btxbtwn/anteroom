@@ -111,6 +111,7 @@ interface EditorField {
   categorySpecific?: boolean;
   /** The marketplace form's heading for this field. */
   section?: string;
+  optionGroups?: Record<string, string>;
   width?: "half";
 }
 
@@ -817,6 +818,7 @@ export function StructuredEditor({
           selectionOnly={f.selectionOnly}
           choicesVerified={f.optionsSource === "marketplace"}
           maxLength={f.maxLength ?? undefined}
+          optionGroups={f.optionGroups}
           onChange={(value) => commitField(f.key, value)}
         />
       );
@@ -1267,6 +1269,7 @@ function schemaFieldsForTab(
     // The marketplace's own controls, such as title and price, stay.
     ...(field.category_specific || (!form.native && !coreFieldLabel(tab, field.label)) ? { categorySpecific: true } : {}),
     ...(field.section ? { section: field.section } : {}),
+    ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),
   }));
