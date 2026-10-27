@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts } from "../api/nativeMarketplaces";
-import { MarketplacesSection, askChatPrompt, deletable, rowStatus } from "./MarketplacesSection";
+import { MarketplacesSection, askChatPrompt, deletable, facebookCheckText, rowStatus } from "./MarketplacesSection";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -39,7 +39,7 @@ describe("marketplaces section", () => {
   it("shows one row per marketplace in a fixed order with a status", () => {
     const html = render({});
     const names = [...html.matchAll(/<li aria-label="([^"]+)"/g)].map((match) => match[1]);
-    expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]);
+    expect(names).toEqual(["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted", "Facebook"]);
     expect(row(html, "eBay")).toContain("Not listed");
     // Ordinary "not listed" stays in the row for assistive tech, not as a second line on every marketplace.
     expect(row(html, "eBay")).not.toContain('role="status"');
@@ -254,5 +254,28 @@ describe("marketplaces section", () => {
     expect(render({}, { mercari: live, vinted })).toContain("Delist everywhere…");
     expect(deletable({ ...live, state: "failed" })).toBe(true);
     expect(deletable({ ...live, sold_here: true })).toBe(false);
+  });
+
+  it("shows a linked Facebook listing as live, offers a check, and leaves deleting to Facebook", () => {
+    const facebook = { ...live, url: "https://www.facebook.com/marketplace/item/1234567890123456", listing_id: "1234567890123456", can_delist: false };
+    const html = render({}, { facebook, mercari: live }, { selected: "facebook" });
+    expect(row(html, "Facebook")).toContain("Live");
+    expect(enabledButton(html, "Check on Facebook")).toBe(true);
+    expect(html).toContain("Anteroom can&#x27;t delete Facebook listings yet");
+    expect(html).not.toContain("List…");
+    expect(html).not.toContain("Delist everywhere…");
+    expect(deletable(facebook)).toBe(false);
+    const unlinked = render({}, {}, { selected: "facebook" });
+    expect(unlinked).not.toContain("Check on Facebook");
+    expect(unlinked).toContain("Mark as listed");
+  });
+
+  it("describes a Facebook check in the seller's words", () => {
+    expect(facebookCheckText({ ok: true, state: "sold", owner: "you", sale_recorded: true, listings: {} }))
+      .toBe("Marked sold on Facebook. Anteroom recorded the sale.");
+    expect(facebookCheckText({ ok: true, state: "live", owner: "other", sale_recorded: false, listings: {} }))
+      .toBe("Live on Facebook. It is on a different Facebook account than the one signed in to Chrome.");
+    expect(facebookCheckText({ ok: false, error: "Facebook asked to sign in again.", sale_recorded: false, listings: {} }))
+      .toBe("Facebook asked to sign in again.");
   });
 });

@@ -6,11 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.428 — 2026-10-26
+## 0.1.430 — 2026-10-26
 
 - Labels are yours now, not Vendoo's. Items imported from Vendoo sometimes showed a code like `g8MHWF7K…` instead of the label's name. Settings → Listings → Inventory → **Vendoo label IDs** → **Convert to names** saves every label as its name, and each Vendoo import does the same for the items it brings in. A code Vendoo has no name for stays on the item and is listed there, so no label is lost.
 - Analytics shows sales by label, with your label colors.
 - Find items listed twice: Settings → Listings → **Similar items** lists pairs that share a photo or SKU, or have matching titles with the same brand and size. Open both to compare, keep one and merge the other into it (its marketplace links, sales and labels move over and it goes to Finished), or mark them as different. Nothing is deleted or delisted.
+=======
+
+## 0.1.429 — 2026-10-27
+
+- Your Facebook Marketplace listings now show under Marketplaces, including the ones Vendoo listed there. Press **Check on Facebook** to see whether one is still live, pending or sold; Anteroom only looks, and nothing on Facebook changes.
+- Turn on **Detect sales** for Facebook in Settings → Connections to have Anteroom notice when a Facebook listing is marked sold. It is off until you turn it on, and it reads a few listings at a time every 20 to 40 minutes, because Facebook watches closely for automated visits.
+- Anteroom can't delete Facebook listings yet. Delete them on Facebook, then choose **Mark as not listed**. Delisting the other marketplaces after a sale leaves Facebook for you and says so.
+
+## 0.1.428 — 2026-10-27
+
+- Multiple-choice fields, such as Occasion, Theme, Season, and Features, show the selected values inside the field. Extra values wrap onto another line in that same field.
 
 ## 0.1.427 — 2026-10-26
 

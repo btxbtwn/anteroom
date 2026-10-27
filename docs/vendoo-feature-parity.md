@@ -27,7 +27,9 @@ Vendoo's. The losses on cancelling today are:
    0.1.422: a sale Anteroom records turns the item Sold (or "1 of 3 sold") and
    counts in Analytics.
 2. **23 items are still live on Facebook Marketplace through Vendoo.**
-   Anteroom can neither detect a sale there nor delist them.
+   Anteroom now links them, shows them, reads their state and can detect a
+   sale (opt-in; not yet verified on a real listing), but cannot delete them:
+   the seller deletes each one on Facebook.
 3. **Scheduled sharing, and offers to likers on Mercari and Depop.**
    Poshmark sharing and offers to likers are seller-started only (no
    schedule yet); Depop has no free refresh to copy.
@@ -72,7 +74,7 @@ and Vinted only on UK and US Enterprise accounts
 | Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. No offers. Depop has no free refresh (paid Boost only); see `docs/direct-form-parity.md` |
 | Vinted | UK/Enterprise only | **Have** | `background/vinted-native.js`, `services/vinted_listing.py`; Anteroom covers more than the seller's Vendoo plan does |
 | Sellwild | Logo only | **Have** | `background/sellwild-native.js`, `services/sellwild_listing.py` |
-| Facebook Marketplace | List, delist, sale detection | **Missing** | Not in `marketplace_delist.MARKETPLACES`. Not in the seller's current list, but **23 active items** are recorded as live on Facebook through Vendoo (`notes.vendooMarketplaces`, live database, read-only check). See gap 2 |
+| Facebook Marketplace | List, delist, sale detection | **Partial** | Linked from Vendoo's links or the seller's, shown in the Marketplaces panel, state read on request (**Check on Facebook**) and sale detection, opt-in, through the signed-in Chrome session: `background/facebook-native.js`, `services/facebook_listing.py`, `services/chrome_sales.py`. Unit-tested; not yet verified on a real listing. All **23 active items** Vendoo listed there read as live Facebook listings (checked on a copy of the live database). **Missing**: delist, import and List, which need Facebook's GraphQL requests recorded from the signed-in client; see [direct-form-parity.md](direct-form-parity.md#facebook-marketplace) and gap 2 |
 | Grailed, Shopify, Whatnot, Vestiaire, Kidizen | Supported | **N/A** | Not in the seller's list, and no item in the database was ever listed there through Vendoo |
 
 ## Listing and crosslisting
@@ -83,7 +85,7 @@ and Vinted only on UK and US Enterprise accounts
 | Native category and field coverage per marketplace | [Vendoo form](https://help.vendoo.co/en/articles/6260272-how-to-list-the-vendoo-form) | **Partial** | Native catalogs: `services/marketplace_schemas.py` (eBay/Etsy APIs), `services/chrome_catalog.py` (Poshmark/Depop). Remaining work per marketplace is in [direct-form-parity.md](direct-form-parity.md) |
 | Drafts | [Vendoo form](https://help.vendoo.co/en/articles/6260272-how-to-list-the-vendoo-form) | **Have** | Local drafts, plus private marketplace drafts on eBay, Mercari, Depop, Etsy and Poshmark: `routes/native_marketplaces.py` (`/{marketplace}/draft`) |
 | Edit a live listing | [Edit a listing](https://help.vendoo.co/en/articles/9299456-how-do-i-edit-a-listing-in-vendoo) | **Partial** | `/{marketplace}/update` for eBay, Etsy, Poshmark and Depop. Mercari, Vinted and Sellwild need delist and relist |
-| Delist / relist one item | [Delist & Relist](https://help.vendoo.co/en/articles/6260258-vendoo-s-bulk-delist-relist-feature) | **Have** | `routes/marketplace_listings.py` (`/delist`), List from `routes/native_marketplaces.py`; covers items Vendoo listed through `vendooListingUrls` |
+| Delist / relist one item | [Delist & Relist](https://help.vendoo.co/en/articles/6260258-vendoo-s-bulk-delist-relist-feature) | **Have** | `routes/marketplace_listings.py` (`/delist`), List from `routes/native_marketplaces.py`; covers items Vendoo listed through `vendooListingUrls`. Not Facebook (`marketplace_delist.MANUAL_DELIST`), which the seller deletes on Facebook |
 | Multi-quantity | [Multi-quantity sales](https://help.vendoo.co/en/articles/6626694-how-to-handle-sold-multi-quantity-items) | **Have** | Quantity on every form, Poshmark per-size quantities and SKUs (0.1.408), partial-sale handling `services/sale_inventory.py` |
 | Multi-variation | [Variations](https://help.vendoo.co/en/articles/6260275-how-do-i-handle-multi-variation-listings-in-vendoo) | **N/A** | Vendoo does not support it either. Anteroom has Poshmark size inventory; eBay variations are open in direct-form-parity.md |
 | Different photos per marketplace (Photo Manager) | [Photos per marketplace](https://help.vendoo.co/en/articles/6619124-can-i-use-different-photos-on-different-marketplaces) | **Missing** | Direct List sends every item photo: `native_marketplaces.py` sets `photo_ids` from all of the item's photos |
@@ -131,7 +133,7 @@ Vendoo: up to 240 items, from the inventory page
 
 | Vendoo feature | Source | Anteroom | Evidence |
 | --- | --- | --- | --- |
-| Sale detection (every ~10 min; computer on) | [Sale detection](https://help.vendoo.co/en/articles/8047348-sale-detection-auto-delist) | **Have** | eBay and Etsy push through the relay (`services/relay_sales.py`); Poshmark, Mercari, Depop, Sellwild and Vinted checked every 4–12 minutes (`services/chrome_sales.py`, `background/marketplace-sales.js`) |
+| Sale detection (every ~10 min; computer on) | [Sale detection](https://help.vendoo.co/en/articles/8047348-sale-detection-auto-delist) | **Have** | eBay and Etsy push through the relay (`services/relay_sales.py`); Poshmark, Mercari, Depop, Sellwild and Vinted checked every 4–12 minutes (`services/chrome_sales.py`, `background/marketplace-sales.js`). Facebook, off until the seller turns it on: six listings' pages per check, 20–40 minutes apart, so each listing is read about every two hours (not yet verified) |
 | Auto-delist on sale; skip while units remain | [Sale detection](https://help.vendoo.co/en/articles/8047348-sale-detection-auto-delist) | **Have** | Opt-in `sale_autodelist` (on for this seller): `marketplace_accounts.autodelist_for_sales` delists the other live marketplaces once, never the one that sold, and skips when stock remains |
 | Mark as sold, with sale details, delisting the others | [Mark as sold](https://help.vendoo.co/en/articles/6260270-how-to-mark-items-as-sold-on-vendoo) | **Partial** | **Mark as sold** per marketplace (`marketplace_delist.mark`). It creates no sale record, so there is nowhere to enter price, fees or shipping for it, and it does not delist the others |
 | Sales made elsewhere (in person, Instagram, other) | [Sold elsewhere](https://help.vendoo.co/en/articles/6762747-i-sold-an-item-on-a-different-marketplace-that-vendoo-doesn-t-have-how-do-i-handle-it-in-vendoo) | **Have** | Mark as sold and **Record a sale** record a seller sale with amounts, including **Other / in person** (`sales_ledger.record_seller_sale`, 0.1.422) |
@@ -194,7 +196,7 @@ listing.
 | `services/vendoo_watch.py`, `services/vendoo_label_sync.py` | Pull Vendoo's draft / active / sold status, dates and sale into `notes.vendooStatus`, `vendooDates`, `vendooSale` | **Still needed** until the inventory status (`repositories/queries.py:345-379`) and Analytics (`services/inventory_analytics.py`) read Anteroom's own listings and sales |
 | `services/vendoo_label_catalog.py` | Vendoo label ID → name, used by the Vendoo import, Send to Vendoo and the one-time conversion | **Remove** with the Vendoo import and Send path. Nothing reads it to show a label: stored labels are names. `vendoo_import.split_vendoo_labels` only splits the stored label string (**Naming**) |
 | `services/vendoo_import.py`, `services/vendoo_bulk_import.py`, `routes/imports.py` (`/vendoo`, `/vendoo/bulk`, `/vendoo/labels`) | Migration from Vendoo | **Still needed** for one final full import before cancelling; then **Remove** |
-| Facebook Marketplace listings (23 active items) | Only Vendoo can delist them or see their sales | **Still needed** until those items are delisted on Facebook |
+| Facebook Marketplace listings (23 active items) | Only Vendoo can delist them | **Still needed** until those items are deleted on Facebook; Anteroom now sees them and their sales |
 | `services/category_tree.py` (trees "used by Vendoo's forms") read by `direct_preflight.seeded_leaf` / `seeded_subcategories` | Stored category trees used by direct List checks | **Still needed** as stored data; refreshing them needs Vendoo. Replace with the native catalogs before removing |
 | `services/category_fields.py`, `services/category_learn.py` (fetch `/api/category/specifics` through Vendoo) | Vendoo field schemas | **Remove** the Vendoo fetch with Send; direct forms use `marketplace_schemas.py` and `chrome_catalog.py` |
 | `routes/vendoo_api.py`, `services/vendoo_create.py`, `vendoo_item_update.py`, `vendoo_send.py`, `vendoo_encodings.py`, `vendoo_api_log.py`, `send_queue.py`, `send_review.py`, `browser_fill.py`, `routes/jobs.py` (`run_ops`) | Send to Vendoo / Update Vendoo, and its troubleshooting log | **Remove** (direct List / Update replaces them) |
@@ -215,9 +217,16 @@ Most important first.
    *Fix:* derive item status from Anteroom's own marketplace listings and
    sales, and have Analytics read `marketplace_sales` (with recorded amounts)
    alongside the imported Vendoo history.
-2. **23 Facebook Marketplace listings stay up with nobody watching them.**
-   *Fix:* delist them in Vendoo (or on Facebook) before cancelling, or add
-   Facebook to the direct marketplaces.
+2. **23 Facebook Marketplace listings can't be delisted from Anteroom.**
+   Anteroom now links all 23 from Vendoo's links, shows them in the
+   Marketplaces panel, reads their state with **Check on Facebook**, and
+   detects their sales once the seller turns Facebook on under Sale detection
+   (unit-tested, not yet verified on a real listing). Auto-delist leaves
+   Facebook out and says so. Delist, import and List on Facebook are not built:
+   Facebook's own requests for them must first be recorded from the signed-in
+   client ([direct-form-parity.md](direct-form-parity.md#facebook-marketplace)).
+   *Fix:* record those requests and add delist; until then, delete each one on
+   Facebook and choose Mark as not listed.
 3. **Poshmark sharing is seller-started only.** *Fix:* add a scheduled
    share task through the automations approval system, off by default, with
    Vendoo's controls (count, order, speed, daily cap, activity log).
@@ -233,7 +242,7 @@ Most important first.
    "Other / in person" marketplace, and offer to delist the others.
 7. **Final Vendoo import.** *Fix:* run one full Vendoo import, then cancel.
    Label IDs are converted to names by the import and by Settings → Listings →
-   Inventory → **Vendoo label IDs** (0.1.428); IDs Vendoo never names stay visible there.
+   Inventory → **Vendoo label IDs** (0.1.430); IDs Vendoo never names stay visible there.
 8. ~~**Poshmark, Mercari, Depop, Vinted and Sellwild listings made outside
    Anteroom cannot be imported.**~~ Done: import through the Chrome bridge
    (unit-tested; real-account verification pending). Multi-size listings remain.

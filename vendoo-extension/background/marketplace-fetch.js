@@ -2,7 +2,7 @@
 // timeouts bounded by the operation deadline, cancellation, retries of safe
 // requests, and turning a marketplace's answer into the result contract's
 // error codes. Creates and publishes are sent once and never retried here.
-const MARKETPLACE_LABELS = { poshmark: 'Poshmark', mercari: 'Mercari', depop: 'Depop', sellwild: 'Sellwild', vinted: 'Vinted' };
+const MARKETPLACE_LABELS = { poshmark: 'Poshmark', mercari: 'Mercari', depop: 'Depop', sellwild: 'Sellwild', vinted: 'Vinted', facebook: 'Facebook' };
 const MARKETPLACE_RETRY_DELAYS_MS = [400, 1200, 3000];
 const MARKETPLACE_MAX_RETRY_AFTER_S = 20;
 // Cloudflare, PerimeterX, DataDome and similar bot checks.

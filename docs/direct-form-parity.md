@@ -196,6 +196,57 @@ extension's journal. Nothing here is scheduled, and nothing lists or delists.
 | Sellwild | Share, bump, offers to likers | None found | Sellwild's seller guides list [discounts](https://sellwild.com/guides/seller/my-discounts) (timed price drops with a floor), [coupons](https://sellwild.com/guides/seller/coupons) and BOGO, not sharing or bumping. |
 | eBay | Offers to interested buyers | Implemented earlier (Offers tab) | `services/ebay_offers.py`, eBay Negotiation API. |
 
+## Facebook Marketplace
+
+Added 2026-10-26 for the listings Vendoo put on Facebook. Each layer is
+implemented and unit-tested with fakes; **none is verified on a real Facebook
+listing yet**.
+
+| Layer | Status | Where |
+| --- | --- | --- |
+| Recognise and link listings, including Vendoo's (`notes.vendooListingUrls.facebook`) | Implemented, unit-tested | `services/marketplace_identity.py` (`/marketplace/item/<id>`, `www`, `m` and `web` hosts), `services/marketplace_delist.py`. Checked against a copy of the seller's database: all 23 Vendoo-made Facebook listings read as live, linked from Vendoo. |
+| Marketplaces panel, Mark as listed / sold / not listed | Implemented, unit-tested | `components/MarketplacesSection.tsx`. The editor shows Facebook for any item with a Facebook listing. |
+| Sign-in | Implemented, unit-tested | `background/facebook-native.js` `readFacebookSession`: the `c_user` and `xs` cookies only, with no request to Facebook. |
+| Live state (**Check on Facebook**) | Implemented, unit-tested, not yet verified | `background/facebook-native.js` reads the listing's own item page (`GET /marketplace/item/<id>/`, never retried) and finds the embedded record with that ID and `is_sold`, `is_pending`, `is_live`, `is_hidden`, `is_draft` and `marketplace_listing_seller.id`. Only the state and whether the seller matches leave Chrome. A page without that record is reported, never guessed. `services/facebook_listing.py`, `POST …/marketplace-listings/facebook/check`. |
+| Sale detection | Implemented, unit-tested, not yet verified; **off until the seller turns it on** | `services/chrome_sales.py`: six listings per check, in turn, 20–40 minutes apart; 3–7 seconds between pages; a sign-in page, checkpoint or rate limit stops the check. A listing reads sold when its record says `is_sold`. Recorded through the same `record_sale` path, so it reaches the sales ledger, item status and the opt-in auto-delist. |
+| Delist | **Not built** | Needs a capture (below). Until then Delist refuses Facebook by name, auto-delist leaves it out and says so, and the panel tells the seller to delete it on Facebook, then Mark as not listed. |
+| Import active listings | **Not built** | Needs the seller's selling-list query (below). |
+| Native form, Save Draft, List, Update | **Not built** | Needs the composer requests (below). |
+
+**Why no GraphQL yet.** Facebook's web client reads and writes Marketplace
+listings through `POST /api/graphql/`, a form body carrying
+`fb_api_req_friendly_name`, a persisted `doc_id`, JSON `variables`, and session
+fields (`fb_dtsg`, `lsd`, `jazoest`, `__user`, `av`). The doc_ids change with
+Facebook's releases, and the operations behind the seller's selling list, mark
+as sold, delete and the composer are only loaded for a signed-in seller. Their
+names and variables could not be read from public bundles without a signed-in
+session, and guessing a write is not safe.
+
+**Account risk.** Facebook restricts accounts it thinks are automated, and
+Marketplace access can be removed without much explanation. Anteroom keeps to
+reads from the seller's own Chrome session, no tab, one page at a time, never
+retried, and stops at the first sign-in, checkpoint or rate limit. Sale
+detection is off by default for this reason. Writes, once captured, must be sent
+once and never retried, as for every other marketplace.
+
+**What to capture next (signed-in Chrome, with the extension from this
+release).** `POST /api/marketplaces/facebook/record` opens the seller's
+Facebook selling page and records request shapes until the tab is closed (five
+minutes at most): for each GraphQL call, the operation name, its `doc_id`, the
+shape of its variables and of its answer, and the names of the form fields. It
+keeps no values, cookies or tokens. In that tab:
+
+1. Let the selling list load and scroll once (the import and sale list query).
+2. On a throwaway listing: **Mark as sold**, then **Mark as available**.
+3. Delete that throwaway listing.
+4. Start **Create new listing → Item**, fill it in, and **Save draft** if
+   Facebook offers it (do not publish), then close the tab.
+
+The recording then gives the delete, mark-sold and composer operations to add
+to `background/facebook-native.js` and to `MARKETPLACE_DELETE` in
+`background/marketplace-delete.js`, after which Facebook leaves
+`marketplace_delist.MANUAL_DELIST`.
+
 ## Completion checks
 
 1. Compare visible native controls and conditional states with Anteroom.
