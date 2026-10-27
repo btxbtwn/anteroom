@@ -8,6 +8,8 @@ import { BulkUploadDialog } from "./BulkUploadDialog";
 import { InspectorSection } from "./ListingFormControls";
 import { PhotoEditor } from "./PhotoEditor";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
+import { useListingSessionActive } from "./listingSession";
+import { photoThumbUrl } from "../photoThumb";
 import { Button } from "./ui/button";
 import { FolderPlusIcon, ImagePlusIcon } from "lucide-react";
 import {
@@ -117,6 +119,10 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
       setPreviewId(null);
     }
   }, [photos, previewId]);
+
+  // A hidden listing tab stays mounted. Its photo tiles must not: each one
+  // would keep a full-size decoded bitmap.
+  const sessionActive = useListingSessionActive();
 
   const canReorder = (photos?.length || 0) > 1;
   // A phone cannot drag thumbnails or drop files; it reorders from the photo viewer.
@@ -237,6 +243,8 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     }
   };
 
+  if (!sessionActive) return null;
+
   return (
     <InspectorSection
       data-photo-tray=""
@@ -282,7 +290,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           {photos.map((p, i) => (
             <PhotoThumb
               key={p.id}
-              url={p.url}
+              url={photoThumbUrl(p)}
               index={i}
               reorderable={canReorder}
               dragging={dragId === p.id}

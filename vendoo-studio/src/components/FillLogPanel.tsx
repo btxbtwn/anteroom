@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { FillLogReport } from "../api/types";
 import { EXTENSION_STATUS_POLL_MS, fillLogPollMs, pollMs } from "../api/polling";
+import { useListingSessionActive } from "./listingSession";
 import {
   VENDOO_ITEM_STALE_MS,
   vendooItemQueryKey,
@@ -109,11 +110,12 @@ export function FillLogPanel({
   onFilled?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const sessionActive = useListingSessionActive();
   const report = useFillLog(jobId, jobStatus);
   const { data: extStatus } = useQuery({
     queryKey: ["extension-status"],
     queryFn: api.extension.status,
-    refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
+    refetchInterval: () => (sessionActive ? pollMs(EXTENSION_STATUS_POLL_MS) : false),
   });
   const { data: marketplaceSettings } = useQuery({
     queryKey: ["settings-marketplaces"],
@@ -616,11 +618,12 @@ export function FillLogPanel({
 }
 
 function useFillLog(jobId: string, jobStatus: string | undefined): FillLogReport | undefined {
+  const sessionActive = useListingSessionActive();
   const { data } = useQuery({
     queryKey: ["fill-log", jobId],
     queryFn: () => api.jobs.fillLog(jobId),
     enabled: Boolean(jobId),
-    refetchInterval: () => fillLogPollMs(jobStatus),
+    refetchInterval: () => (sessionActive ? fillLogPollMs(jobStatus) : false),
   });
   return data;
 }

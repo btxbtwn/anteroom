@@ -12,6 +12,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
+import { STRIP_THUMB_SIZE } from "../../photoThumb";
 import { CHAT_PROSE_CLASS, ChatMarkdown } from "../ChatMarkdown";
 import { WorkingDuration } from "../WorkingDuration";
 import { Button } from "../ui/button";
@@ -27,8 +28,9 @@ export interface MessageAttachment {
   height?: number | null;
 }
 
-export function attachmentUrl(id: string): string {
-  return `/api/chat-attachments/${encodeURIComponent(id)}`;
+export function attachmentUrl(id: string, size?: number): string {
+  const path = `/api/chat-attachments/${encodeURIComponent(id)}`;
+  return size ? `${path}?size=${size}` : path;
 }
 
 // ── Timestamps ──────────────────────────────────────────────────────────
@@ -181,7 +183,7 @@ function UserImages({ attachments }: { attachments: readonly MessageAttachment[]
               aria-label={`Preview ${image.name}`}
               onClick={() => setOpen(image)}
             >
-              <img src={attachmentUrl(image.id)} alt={image.name} decoding="async" className="block size-full object-cover" />
+              <img src={attachmentUrl(image.id, STRIP_THUMB_SIZE)} alt={image.name} loading="lazy" decoding="async" className="block size-full object-cover" />
             </button>
           </div>
         ))}

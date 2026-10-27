@@ -19,6 +19,8 @@ import { InspectorSection } from "./ListingFormControls";
 import { marketplaceName } from "./marketplaceNames";
 import { PhotoEditor } from "./PhotoEditor";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
+import { useListingSessionActive } from "./listingSession";
+import { photoThumbUrl } from "../photoThumb";
 import { Button } from "./ui/button";
 
 const DRAG_TYPE = "application/x-vendoo-form-photo-id";
@@ -49,6 +51,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const { data: library } = useQuery({
     queryKey: ["listing-videos", convId], queryFn: () => api.listingVideos.list(convId), enabled: Boolean(videoRules),
   });
+  const sessionActive = useListingSessionActive();
   const { picked, unticked, custom } = formPhotos(listing, item, own, marketplace);
   const ids = picked.map((photo) => photo.id);
   const limit = rules?.photo_limits?.[marketplace];
@@ -171,7 +174,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     const overLimit = limit !== undefined && index >= limit;
     return <PhotoThumb
       key={photo.id}
-      url={photo.url}
+      url={photoThumbUrl(photo)}
       index={index}
       reorderable={!locked && picked.length > 1}
       draggable={!locked && picked.length > 1}
@@ -209,6 +212,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       controlsInViewerOnTouch
     />;
   });
+
+  if (!sessionActive) return null;
 
   return (
     <InspectorSection
@@ -259,7 +264,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
             })}
             {unticked.map((photo) => <PhotoThumb
               key={photo.id}
-              url={photo.url}
+              url={photoThumbUrl(photo)}
               index={all.indexOf(photo)}
               numbered={false}
               className="opacity-60"

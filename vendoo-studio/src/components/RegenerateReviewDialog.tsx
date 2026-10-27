@@ -7,6 +7,7 @@ import { moveItem } from "../photoDrop";
 import { applyReading, READ_CONCURRENCY, readEach } from "../measurementReading";
 import { toastManager } from "./ui/toast";
 import { PhotoZoom } from "./BulkUploadDialog";
+import { photoThumbUrl } from "../photoThumb";
 import {
   GARMENTS,
   garmentFields,
@@ -454,7 +455,7 @@ function ReviewPhotos({ convId, onZoom }: { convId: string; onZoom: (index: numb
           }}
           onDragEnd={resetDrag}
         >
-          <img src={photo.url} alt="" draggable={false} />
+          <img src={photoThumbUrl(photo)} alt="" draggable={false} loading="lazy" decoding="async" />
           <div className="photo-thumb-num">{String(index + 1).padStart(2, "0")}</div>
           <button
             type="button"

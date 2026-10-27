@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { NativeDrafts, NativeSync } from "../api/nativeMarketplaces";
 import { pollMs } from "../api/polling";
+import { useListingSessionActive } from "./listingSession";
 
 import { DirectSyncDetails, directSyncDiffers, directSyncIncomplete } from "./DirectSyncDetails";
 
@@ -56,6 +57,7 @@ export function directSyncErrors(result: NativeSync | undefined): string[] {
  */
 export function ListingSyncStatus({ convId, bound }: { convId: string; bound: boolean }) {
   const queryClient = useQueryClient();
+  const sessionActive = useListingSessionActive();
   const [now, setNow] = React.useState(() => Date.now());
 
   // Reads SQLite only, so it can poll: a pull started by a save in Vendoo
@@ -64,7 +66,7 @@ export function ListingSyncStatus({ convId, bound }: { convId: string; bound: bo
     queryKey: ["vendoo-sync", convId],
     queryFn: () => api.vendooApi.syncStatus(convId),
     enabled: bound,
-    refetchInterval: () => pollMs(5000),
+    refetchInterval: () => (sessionActive ? pollMs(5000) : false),
   });
   // Same keys as the Marketplaces section, so they share its cache.
   const { data: drafts } = useQuery({

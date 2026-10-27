@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.435 — 2026-10-27
+
+- Photos in a listing, pictures in chat, and covers in the sidebar are shown small, so Anteroom uses far less memory and the Mac spends less time catching up.
+- A listing you are not looking at stops checking for updates until you come back to it.
+
 ## 0.1.434 — 2026-10-27
 
 - Anteroom can now watch while you send one offer to likers by hand on Mercari or Depop, so it can learn how each site sends offers. It keeps only the shape of the requests, never prices, items or your account details. This is the step that lets Mercari and Depop offer rules turn on.
@@ -15,10 +20,6 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 - Labels are yours now, not Vendoo's. Items imported from Vendoo sometimes showed a code like `g8MHWF7K…` instead of the label's name. Settings → Listings → Inventory → **Vendoo label IDs** → **Convert to names** saves every label as its name, and each Vendoo import does the same for the items it brings in. A code Vendoo has no name for stays on the item and is listed there, so no label is lost.
 - Analytics shows sales by label, with your label colors.
 - Find items listed twice: Settings → Listings → **Similar items** lists pairs that share a photo or SKU, or have matching titles with the same brand and size. Open both to compare, keep one and merge the other into it (its marketplace links, sales and labels move over and it goes to Finished), or mark them as different. Nothing is deleted or delisted.
-=======
-
-
-
 
 ## 0.1.432 — 2026-10-27
 

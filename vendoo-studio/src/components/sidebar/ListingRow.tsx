@@ -11,6 +11,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
+import { displayCoverUrl } from "./coverSrc";
 import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
 import { inventoryStatus, listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
@@ -56,7 +57,7 @@ export function ListingRow({
   // Named by SKU, a listing without one still shows its title.
   const name = (nameBySku && listing.sku?.trim()) || title;
   // A bulk-imported listing has no local photos yet; Vendoo's own image stands in.
-  const coverUrl = listing.cover_photo_url || listing.vendoo_cover_url || null;
+  const coverUrl = displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url);
   const status = inventoryStatus(listing);
   const partial = partialSale(listing, status);
   const statusTitle = partial ? `Active · ${partial}`
