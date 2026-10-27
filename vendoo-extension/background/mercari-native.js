@@ -523,8 +523,9 @@ function mercariFailure(operationName, errors, write) {
 // One GraphQL request. A rejected session ("Unauthorized", HTTP 401/403) is
 // read again from /v1/initialize after a short wait and the request sent again,
 // at most twice: Mercari refused it before doing anything. A safe request is
-// also sent again when Mercari could not reach its own API.
-async function mercariRequest(body, { multipart = null, deadline, operationName = body?.operationName, retry = false }) {
+// also sent again when Mercari could not reach its own API. ``resend: false``
+// sends exactly once.
+async function mercariRequest(body, { multipart = null, deadline, operationName = body?.operationName, retry = false, resend = true }) {
   const write = !/Query$/.test(operationName) && !/^\s*query\b/.test(body?.query || '');
   for (let attempt = 0; ; attempt += 1) {
     const headers = mercariHeaders(await mercariCurrentSession(deadline));
@@ -540,7 +541,7 @@ async function mercariRequest(body, { multipart = null, deadline, operationName 
     }
     const sessionRefused = failure.code === 'signed_out';
     const unreachable = retry && failure.code === 'network' && failure.marketplace_message === 'Unable to contact API';
-    if (attempt >= 2 || !(sessionRefused || unreachable) || Date.now() + MERCARI_SESSION_RETRY_MS + 1000 >= deadline) throw failure;
+    if (!resend || attempt >= 2 || !(sessionRefused || unreachable) || Date.now() + MERCARI_SESSION_RETRY_MS + 1000 >= deadline) throw failure;
     marketplaceLog('mercari', operationName, { retry: attempt + 1, error_code: failure.code });
     await marketplaceSleep(MERCARI_SESSION_RETRY_MS);
     await mercariCurrentSession(deadline, true);
