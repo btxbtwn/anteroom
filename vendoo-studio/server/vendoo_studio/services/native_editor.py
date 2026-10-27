@@ -120,6 +120,8 @@ async def ebay_form(snapshot: dict) -> dict:
                    quantity,
                    field("sku", "SKU", seller_sku(snapshot), locked=True, help="SKU comes from Item Details."),
                    field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}), input_type="textarea", max_length=1000),
+                   field("ebay_specifics.videoId", "Listing video", details.get("videoId"), input_type="video",
+                         help="eBay takes one MP4 or MOV video up to 150 MB. Listing waits until eBay has processed it."),
                    *offers,
                    *[field(f"ebay_specifics.{key}", key.upper(), details.get(key)) for key in ("upc", "ean", "isbn")],
                    *[field(f"ebay_specifics.{key}", label, details.get(key)) for key, label in
