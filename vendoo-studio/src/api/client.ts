@@ -7,7 +7,10 @@ import type { LabelColor } from "../labelColors";
 import type { BulkMarketplaceAction, BulkMarketplacePerform, BulkMarketplacePreview, BulkMarketplaceResult } from "./bulkMarketplace";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
-import type { Promotion, PromotionFloor, PromotionHistory, PromotionMarketplace, PromotionPreview, PromotionPreviewRequest, PromotionResult } from "./promotions";
+import type {
+  Promotion, PromotionActivity, PromotionAutomation, PromotionAutomationBody, PromotionAutomations, PromotionCoverage, PromotionFloor,
+  PromotionHistory, PromotionMarketplace, PromotionPreview, PromotionPreviewRequest, PromotionResult,
+} from "./promotions";
 import type {
   SendPreview,
   BackupSnapshot,
@@ -592,6 +595,22 @@ export const api = {
     check: (id: string) => request<Promotion>(`/promotions/${encodeURIComponent(id)}/check`, { method: "POST" }),
     markChecked: (id: string) =>
       request<Promotion>(`/promotions/${encodeURIComponent(id)}/checked`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+    saveFloors: (marketplace: PromotionMarketplace, floors: Record<string, string>) =>
+      request<Record<string, PromotionFloor>>("/promotions/floors", { method: "PUT", body: JSON.stringify({ marketplace, floors }) }),
+  },
+  promotionAutomations: {
+    list: () => request<PromotionAutomations>("/promotion-automations"),
+    create: (body: PromotionAutomationBody) =>
+      request<PromotionAutomation>("/promotion-automations", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: PromotionAutomationBody) =>
+      request<PromotionAutomation>(`/promotion-automations/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/promotion-automations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    enable: (id: string) =>
+      request<PromotionAutomation>(`/promotion-automations/${encodeURIComponent(id)}/enable`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+    pause: (id: string) => request<{ ok: boolean }>(`/promotion-automations/${encodeURIComponent(id)}/pause`, { method: "POST" }),
+    pauseAll: () => request<{ paused: number }>("/promotion-automations/pause", { method: "POST" }),
+    coverage: (id: string) => request<PromotionCoverage>(`/promotion-automations/${encodeURIComponent(id)}/coverage`),
+    activity: (id: string) => request<PromotionActivity>(`/promotion-automations/${encodeURIComponent(id)}/activity`),
   },
   bulkDelete: {
     preview: (conversationIds: string[]) =>

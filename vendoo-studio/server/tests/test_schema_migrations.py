@@ -535,11 +535,32 @@ def test_promotions_upgrade_keeps_previous_release_data_and_starts_empty(engine,
     assert inspect_database(engine.url.database).clean
 
 
-def test_similar_items_upgrade_keeps_previous_release_items_and_photos(engine, snapshots):
+def test_promotion_automations_upgrade_keeps_seller_sends_and_starts_with_nothing_enabled(engine, snapshots):
     from alembic import command
 
     config = schema_migrations.alembic_config(str(engine.url))
     command.upgrade(config, "3ece513f8e0d")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status) VALUES ('posh-item', 'Existing coat', 'active')")
+        connection.execute("INSERT INTO listing_promotions (id, batch_id, conversation_id, marketplace, action, listing_id, state, note, created_at, expires_at, sent_at) "
+                           "VALUES ('p1', 'b1', 'posh-item', 'poshmark', 'offer', 'abc', 'unknown', 'Check it', '2026-10-26', '2026-10-26', '2026-10-26')")
+        connection.execute("INSERT INTO marketplace_offer_floors (id, marketplace, listing_id, conversation_id, floor_cents, updated_at) "
+                           "VALUES ('f1', 'poshmark', 'abc', 'posh-item', 2500, '2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT state, note, automation_id FROM listing_promotions WHERE id='p1'").fetchone() == ("unknown", "Check it", None)
+        assert connection.execute("SELECT floor_cents FROM marketplace_offer_floors WHERE id='f1'").fetchone() == (2500,)
+        assert connection.execute("SELECT count(*) FROM promotion_automations").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM promotion_runs").fetchone() == (0,)
+    assert recorded_revision(engine) == head_revision()
+    assert inspect_database(engine.url.database).clean
+
+
+def test_similar_items_upgrade_keeps_previous_release_items_and_photos(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "ea3c87866204")
     with sqlite3.connect(engine.url.database) as connection:
         connection.execute("INSERT INTO conversations (id, title, status, notes) VALUES ('coat', 'Wool coat', 'active', '{\"vendooLabels\": \"A19\"}')")
         connection.execute("INSERT INTO photos (id,conversation_id,original_filename,stored_filename,mime_type,size_bytes,display_order,checksum) "

@@ -34,6 +34,8 @@ class ListingPromotion(Base):
     note = Column(String, nullable=True)
     marketplace_message = Column(String, nullable=True)
     job_id = Column(String, nullable=True)
+    # Set when a seller-enabled automation made this send; empty for one the seller started.
+    automation_id = Column(String, ForeignKey("promotion_automations.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=utcnow)
     expires_at = Column(DateTime, nullable=False)
     sent_at = Column(DateTime, nullable=True)

@@ -13,6 +13,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
 import { Textarea } from "./ui/textarea";
+import { MarketplaceAutomations } from "./MarketplaceAutomations";
 import { PageHeader, WorkspacePage } from "./WorkspacePage";
 import {
   AUTOMATION_MARKETPLACES,
@@ -445,6 +446,8 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
           ))}
         </ul>
       )}
+
+      <MarketplaceAutomations />
     </WorkspacePage>
   );
 }

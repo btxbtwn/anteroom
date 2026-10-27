@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { PromotionAction, PromotionFloor, PromotionMarketplace, PromotionPreview } from "../api/promotions";
-import { promotionTasks, runPromotionTasks, type PromotionTask } from "../promotions";
+import type { PromotionAction, PromotionFloor, PromotionMarketplace, PromotionPreview, PromotionSupport } from "../api/promotions";
+import { needsShippingChoice, promotionTasks, runPromotionTasks, type PromotionTask } from "../promotions";
 import { marketplaceName } from "./marketplaceNames";
 import { PriceDialog } from "./PriceDropParts";
 import { PageError, PageNote } from "./WorkspacePage";
@@ -10,16 +10,27 @@ import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 
 const FIELD = "h-8 rounded-md border border-border bg-background px-2 text-sm";
-export const PROMOTION_MARKETPLACES: { id: PromotionMarketplace | "mercari" | "depop"; available: boolean; note: string }[] = [
-  { id: "poshmark", available: true, note: "Share to followers, or send an offer to everyone who liked a listing." },
-  { id: "mercari", available: false, note: "Promote and offers to likers are not available in Anteroom yet." },
-  { id: "depop", available: false, note: "Depop has no free refresh. Send offer is not available in Anteroom yet." },
+const NOTES: Record<PromotionMarketplace, string> = {
+  poshmark: "Share to followers, or send an offer to everyone who liked a listing.",
+  mercari: "Offer to likers: up to 50 recent likers, at least 10% below the lowest price the item has had.",
+  depop: "Send offer to likers in your country. Depop has no free refresh.",
+};
+const WAITING = "Offers to likers are built but not turned on: Anteroom still needs one capture of this marketplace's offer request from your signed-in browser.";
+const DEFAULT_SUPPORT: PromotionSupport = { poshmark: ["offer", "share"] };
+const ORDER: PromotionMarketplace[] = ["poshmark", "mercari", "depop"];
+
+/** What Anteroom can do on each marketplace now, and why the rest is not offered. */
+export function promotionMarketplaces(supported: PromotionSupport = DEFAULT_SUPPORT, waiting: PromotionSupport = {}) {
+  return ORDER.map((id) => {
+    const actions = (supported[id] || []).filter((action) => !(waiting[id] || []).includes(action));
+    return { id, actions, available: actions.length > 0, note: actions.length ? NOTES[id] : (supported[id] || []).length ? WAITING : NOTES[id] };
+  });
+}
+const ACTIONS: { value: PromotionAction; label: string; note: (name: string) => string }[] = [
+  { value: "share", label: "Share to followers", note: (name) => `Shares each listing to your ${name} followers, a few seconds apart.` },
+  { value: "offer", label: "Offer to likers", note: (name) => `Sends a private offer to everyone who liked each listing. ${name} sets the minimum discount; your floor is never crossed.` },
 ];
-const ACTIONS: { value: PromotionAction; label: string; note: string }[] = [
-  { value: "share", label: "Share to followers", note: "Shares each listing to your Poshmark followers, a few seconds apart." },
-  { value: "offer", label: "Offer to likers", note: "Sends a private offer to everyone who liked each listing. Poshmark sets the minimum discount; your floor is never crossed." },
-];
-const RISK = "This uses your signed-in Poshmark session in Chrome. Marketplaces can limit or review accounts that act too quickly, so Anteroom spaces actions out and stops at the first limit Poshmark reports.";
+const risk = (name: string) => `This uses your signed-in ${name} session in Chrome. Marketplaces can limit or review accounts that act too quickly, so Anteroom spaces actions out and stops at the first limit ${name} reports.`;
 
 function doneLabel(action: PromotionAction, count: number): string {
   return action === "share" ? `Share ${count} ${count === 1 ? "listing" : "listings"}` : `Send ${count} ${count === 1 ? "offer" : "offers"}`;
@@ -73,6 +84,9 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
   const missingFloor = action === "offer" && floorRows.some(([id, row]) => row.listing_id && !row.floor && !floorEdits[id]?.trim());
   const ready = marketplace !== null && action !== null && (action === "share" || (discountValid && floors.isSuccess && !missingFloor));
   const attention = (history.data?.history || []).filter((row) => row.state === "unknown");
+  const marketplaces = promotionMarketplaces(history.data?.supported, history.data?.awaiting_capture);
+  const actions = ACTIONS.filter((entry) => marketplaces.find((row) => row.id === marketplace)?.actions.includes(entry.value));
+  const name = marketplaceName(review?.marketplace || marketplace || "poshmark");
   const reviewedAction = review?.action || action || "share";
   const start = () => {
     stop.current = false;
@@ -103,7 +117,7 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
         <p className="text-xs">{activeId === task.id ? (reviewedAction === "share" ? "Sharing…" : "Sending offer…") : task.state === "pending" ? "Not started" : task.note}</p>
       </div>)}
     </div> : review ? <div className="space-y-3">
-      <PageNote>{RISK}</PageNote>
+      <PageNote>{risk(name)}</PageNote>
       <ul className="space-y-2">{review.rows.map((row) => <li key={row.id} className="min-w-0 space-y-1 rounded-lg border p-3">
         <label className="flex items-center gap-2 font-medium">
           <Checkbox aria-label={`Include ${row.title || "item"}`} disabled={row.state !== "preview" || busy}
@@ -115,17 +129,17 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
           : row.action === "share" ? <p className="text-xs">Share to followers · ${row.price}</p>
           : <div className="space-y-1 text-xs">
             <p>Offer ${row.offer_price} to {row.like_count} {row.like_count === 1 ? "liker" : "likers"} · price ${row.price} · your floor ${row.floor}</p>
-            <label className="flex flex-wrap items-center gap-2">Shipping discount
+            {needsShippingChoice(row) ? <label className="flex flex-wrap items-center gap-2">Shipping discount
               <select className={FIELD} aria-label={`Shipping discount for ${row.title || "item"}`} value={shipping[row.id] || ""} disabled={busy}
                 onChange={(event) => { setConfirmed(false); setShipping((previous) => ({ ...previous, [row.id]: event.target.value })); }}>
                 <option value="">Choose…</option>
                 <option value="none">No shipping discount</option>
                 {row.shipping_options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
-            </label>
+            </label> : null}
           </div>}
       </li>)}</ul>
-      {review.action === "offer" ? <PageNote>Choose a shipping discount for each offer. Poshmark may require one; if it refuses, nothing is sent for that item.</PageNote> : null}
+      {review.action === "offer" && review.marketplace === "poshmark" ? <PageNote>Choose a shipping discount for each offer. Poshmark may require one; if it refuses, nothing is sent for that item.</PageNote> : null}
       <label className="flex items-start gap-2 rounded-lg border p-3 font-medium">
         <Checkbox checked={confirmed} disabled={busy || !approved.length} onCheckedChange={(checked) => setConfirmed(checked === true)} />
         <span>I reviewed these {approved.length} items and want to {review.action === "share" ? "share them to my followers" : "send these offers to likers"} on {marketplaceName(review.marketplace)}.</span>
@@ -143,16 +157,16 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
         </div>)}
       </div> : null}
       <fieldset className="space-y-2"><legend className="mb-1 font-medium">Marketplace</legend>
-        {PROMOTION_MARKETPLACES.map((entry) => <label key={entry.id} className="flex items-start gap-2">
+        {marketplaces.map((entry) => <label key={entry.id} className="flex items-start gap-2">
           <input type="radio" name="promotion-marketplace" className="mt-1" checked={marketplace === entry.id} disabled={busy || !entry.available}
-            onChange={() => setMarketplace(entry.id as PromotionMarketplace)} />
+            onChange={() => { setMarketplace(entry.id); setAction(null); }} />
           <span><span className="font-medium">{marketplaceName(entry.id)}</span><span className="block text-xs text-muted-foreground">{entry.note}</span></span>
         </label>)}
       </fieldset>
       {marketplace ? <fieldset className="space-y-2"><legend className="mb-1 font-medium">Action</legend>
-        {ACTIONS.map((entry) => <label key={entry.value} className="flex items-start gap-2">
+        {actions.map((entry) => <label key={entry.value} className="flex items-start gap-2">
           <input type="radio" name="promotion-action" className="mt-1" checked={action === entry.value} disabled={busy} onChange={() => setAction(entry.value)} />
-          <span><span className="font-medium">{entry.label}</span><span className="block text-xs text-muted-foreground">{entry.note}</span></span>
+          <span><span className="font-medium">{entry.label}</span><span className="block text-xs text-muted-foreground">{entry.note(name)}</span></span>
         </label>)}
       </fieldset> : null}
       {marketplace && action === "offer" ? <div className="space-y-3">
@@ -172,7 +186,7 @@ export function PromotionDialog({ conversationIds, onClose }: { conversationIds:
           </label>)}
         </div>
       </div> : null}
-      {marketplace ? <PageNote>{RISK}</PageNote> : null}
+      {marketplace ? <PageNote>{risk(name)}</PageNote> : null}
     </div>}
   </PriceDialog>;
 }

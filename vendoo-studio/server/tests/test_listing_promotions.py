@@ -80,10 +80,45 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual((job.current_step, job.status), ("native_promote", "completed"))
 
     def test_only_named_supported_marketplaces_and_actions(self):
-        for body in ({"marketplace": "mercari", "action": "share"}, {"marketplace": "poshmark", "action": "refresh"}, {"action": "share"}):
+        for body in ({"marketplace": "vinted", "action": "share"}, {"marketplace": "poshmark", "action": "refresh"}, {"action": "share"}):
             response = self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], **body})
             self.assertEqual(response.status_code, 422, body)
+        self.assertEqual(self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], "marketplace": "mercari",
+                                                                           "action": "share"}).status_code, 400)
+        # Mercari and Depop offers wait for a capture of their signed-in request.
+        for marketplace in ("mercari", "depop"):
+            response = self.client.post("/api/promotions/preview", json={"conversation_ids": [self.conv.id], "marketplace": marketplace,
+                                                                         "action": "offer", "discount_percent": 10})
+            self.assertEqual(response.status_code, 409, marketplace)
+            self.assertIn("signed-in site", response.json()["detail"])
         self.bridge.assert_not_called()
+
+    def test_mercari_offer_once_captured_has_no_shipping_choice(self):
+        item = "m12345678901"
+        conv = ConversationRepo(self.db).create(title="Mercari jacket")
+        conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"mercari": f"https://www.mercari.com/us/item/{item}/"}})
+        self.db.commit()
+        self.enterContext(patch.dict(listing_promotions.AWAITING_CAPTURE, {"mercari": frozenset()}))
+        self.check = {"ok": True, "price_cents": 5000, "like_count": 4, "minimum_discount_percent": 10,
+                      "maximum_discount_percent": 99, "offer_price_cents": 4000, "shipping_discounts": []}
+        response = self.client.post("/api/promotions/preview", json={"conversation_ids": [conv.id], "marketplace": "mercari",
+                                                                     "action": "offer", "discount_percent": 20, "floors": {conv.id: "30"}})
+        row = response.json()["rows"][0]
+        self.assertEqual((row["state"], row["listing_id"], row["offer_price"]), ("preview", item, "40.00"))
+        self.assertEqual(self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True, "shipping_discount_id": DISCOUNT}).status_code, 400)
+        done = self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True}).json()
+        self.assertEqual(done["state"], "done")
+        payload = self.calls("marketplace.promote")[0].args[2]
+        self.assertEqual((payload["marketplace"], payload["offer_price_cents"], payload["shipping_discount_id"]), ("mercari", 4000, None))
+
+    def test_an_unconfirmed_share_blocks_sharing_that_listing(self):
+        row = self.preview(action="share")
+        self.sent = browser_bridge.BrowserBridgeError("Chrome did not answer in time.")
+        self.assertEqual(self.client.post(f"/api/promotions/{row['id']}/perform", json={"confirm": True}).json()["state"], "unknown")
+        again = self.preview(action="share")
+        self.assertEqual(again["state"], "skipped")
+        self.assertIn("unconfirmed", again["note"])
+        self.assertEqual(len(self.calls("marketplace.promote")), 1)
 
     def test_offer_needs_a_floor_and_never_goes_below_it(self):
         row = self.preview(action="offer", discount_percent=20)
@@ -174,5 +209,6 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual(listing_promotions.mark_interrupted(self.db, "job-1"), 1)
         self.assertEqual(self.db.get(ListingPromotion, row["id"]).state, "unknown")
         history = self.client.get("/api/promotions").json()
-        self.assertEqual(history["supported"], {"poshmark": ["offer", "share"]})
+        self.assertEqual(history["supported"], {"poshmark": ["offer", "share"], "mercari": ["offer"], "depop": ["offer"]})
+        self.assertEqual(history["awaiting_capture"], {"mercari": ["offer"], "depop": ["offer"]})
         self.assertEqual(history["history"][0]["state"], "unknown")
