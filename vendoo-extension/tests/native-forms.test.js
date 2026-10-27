@@ -245,3 +245,29 @@ test('form reader makes no marketplace writes and reports catalog failures', asy
   await c.handleNativeMarketplaceForm({ payload: { marketplace: 'mercari', listing: {} } });
   assert.equal(sent[1].form.marketplace, 'mercari');
 });
+
+test('form reader answers a stalled catalog once and ignores its late completion', async () => {
+  const c = loadWorker();
+  const sent = [];
+  let timeout;
+  let finish;
+  c.sendBrowserResult = (_msg, result) => sent.push(clean(result));
+  c.setTimeout = (callback, delay) => {
+    assert.equal(delay, 20000);
+    timeout = callback;
+    return 42;
+  };
+  const cleared = [];
+  c.clearTimeout = timer => cleared.push(timer);
+  c.mercariCatalogData = () => new Promise(resolve => { finish = resolve; });
+  c.mercariShippingClasses = async () => [];
+  const pending = c.handleNativeMarketplaceForm({ payload: { marketplace: 'mercari' } });
+  timeout();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].ok, false);
+  assert.match(sent[0].error, /did not answer in time/);
+  finish(MERCARI);
+  await pending;
+  assert.equal(sent.length, 1);
+  assert.deepEqual(cleared, [42]);
+});

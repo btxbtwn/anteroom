@@ -222,11 +222,20 @@ function mercariEditorForm(listing, master) {
 
 async function handleNativeMarketplaceForm(msg) {
   const { marketplace, listing = {} } = msg.payload || {};
-  const deadline = Date.now() + 30000;
+  const deadline = Date.now() + 20000;
+  let answered = false;
+  const reply = result => {
+    if (answered) return;
+    answered = true;
+    sendBrowserResult(msg, result);
+  };
+  // A catalog read that never settles used to leave the form on "Loading…"
+  // until Anteroom gave up and reported that Chrome had not answered.
+  const timer = setTimeout(() => reply({ ok: false, error: 'The marketplace catalog did not answer in time. Refresh choices.' }), 20000);
   try {
     if (marketplace === 'poshmark') {
       const [catalog, tags, discounts] = await Promise.all([poshmarkCatalogData(deadline), poshmarkStyleTags(deadline), poshmarkShippingDiscounts(deadline)]);
-      sendBrowserResult(msg, { ok: true, form: poshmarkEditorForm(listing, catalog, tags, discounts) });
+      reply({ ok: true, form: poshmarkEditorForm(listing, catalog, tags, discounts) });
     } else if (marketplace === 'depop') {
       const attributes = await depopAttributes(deadline);
       let parcels = [];
@@ -234,14 +243,16 @@ async function handleNativeMarketplaceForm(msg) {
         const providers = await depopAccountRead(`/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD&itemCost=${encodeURIComponent(String(listing.price || 1))}`, 'parcel sizes', deadline);
         parcels = (Array.isArray(providers) ? providers : providers?.objects || []).flatMap(row => row.parcelSizes || row.parcel_sizes || []);
       } catch { /* Catalog fields remain usable without an account shipping read. */ }
-      sendBrowserResult(msg, { ok: true, form: depopEditorForm(listing, attributes, parcels) });
+      reply({ ok: true, form: depopEditorForm(listing, attributes, parcels) });
     } else if (marketplace === 'mercari') {
       const master = await mercariCatalogData(deadline);
       const prepared = mercariShippingListing(listing, await mercariShippingClasses(listing, deadline));
-      sendBrowserResult(msg, { ok: true, form: mercariEditorForm(prepared, master) });
+      reply({ ok: true, form: mercariEditorForm(prepared, master) });
     }
-    else sendBrowserResult(msg, { ok: false, error: 'This marketplace has no Chrome form reader.' });
+    else reply({ ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {
-    sendBrowserResult(msg, { ok: false, error: error.message || 'The marketplace catalog could not be read.' });
+    reply({ ok: false, error: error.message || 'The marketplace catalog could not be read.' });
+  } finally {
+    clearTimeout(timer);
   }
 }
