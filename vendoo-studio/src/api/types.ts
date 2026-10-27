@@ -28,6 +28,9 @@ export interface ConversationSummary {
   direct_marketplaces?: string[];
   /** Marketplaces Anteroom delisted directly. Vendoo may still call the item listed there. */
   removed_marketplaces?: string[];
+  /** Units sold on Anteroom's sales ledger, and the most the item was offered with. */
+  units_sold?: number;
+  quantity?: number | null;
   /** Each marketplace listing's own page, where Vendoo recorded one. */
   vendoo_listing_urls?: Record<string, string>;
   /** Vendoo's own time tracking: when the item was created, last modified,
@@ -102,6 +105,33 @@ export interface Photo {
   height: number | null;
   created_at: string;
   url: string;
+  /** The edits served in place of the kept original; null when unedited. */
+  edits?: PhotoEdits | null;
+}
+
+/** A crop as fractions of the turned and straightened photo. */
+export interface CropBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Non-destructive edits, rendered by the server from the original upload. */
+export interface PhotoEdits {
+  /** Quarter turns, clockwise. */
+  rotate: 0 | 90 | 180 | 270;
+  /** Degrees clockwise, -45 to 45. */
+  straighten: number;
+  crop: CropBox | null;
+  /** Stops, -2 to 2. */
+  exposure: number;
+  /** -100 to 100. */
+  brightness: number;
+  /** -100 to 100. */
+  contrast: number;
+  /** Colour behind the cut-out item, as #rrggbb; null keeps the photo's own background. */
+  background: string | null;
 }
 
 export interface PhotoUploadResult {
@@ -675,7 +705,7 @@ export interface AnalyticsAging {
   listings: AnalyticsActiveListing[];
 }
 
-/** An active listing past 60 days, with how deep it can go and still cover its cost. */
+/** An active listing past the seller's stale threshold, with how deep it can go and still cover its cost. */
 export interface AnalyticsStaleListing {
   conversation_id: string;
   title: string;
@@ -719,6 +749,8 @@ export interface InventoryAnalytics {
   price_tiers: AnalyticsGroup[];
   aging: AnalyticsAging[];
   stale: AnalyticsStaleListing[];
+  /** Days before a listing counts as stale (Settings → Listings → Inventory). */
+  stale_days?: number;
   recent: AnalyticsSale[];
   oldest: { conversation_id: string; title: string; price: number; days_listed: number }[];
   ads: AnalyticsAds;

@@ -22,6 +22,12 @@ THEME_KEY = "theme"
 LISTING_NAMES_KEY = "listing_names"
 MODEL_FAVORITES_KEY = "model_favorites"
 VENDOO_ENABLED_KEY = "vendoo_enabled"
+STALE_DAYS_KEY = "stale_listing_days"
+LABEL_COLORS_KEY = "label_colors"
+# Vendoo lets sellers pick 15 to 120 days; 60 was Anteroom's fixed threshold.
+STALE_DAYS_MIN, STALE_DAYS_MAX, DEFAULT_STALE_DAYS = 15, 120, 60
+LABEL_COLORS = ("gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
+MAX_LABEL_COLORS = 200
 MAX_MODEL_FAVORITES = 100
 MAX_MODEL_SLUG_LENGTH = 200
 LISTING_NAME_CHOICES = frozenset({"title", "sku"})
@@ -629,6 +635,40 @@ def _clean_model_favorites(value: object, *, strict: bool = False) -> list[dict[
     return favorites[:MAX_MODEL_FAVORITES]
 
 
+def _clean_stale_days(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not STALE_DAYS_MIN <= value <= STALE_DAYS_MAX:
+        return DEFAULT_STALE_DAYS
+    return value
+
+
+def _clean_label_colors(value: object, *, strict: bool = False) -> dict[str, str]:
+    """Label → color name. A label is matched without regard to case."""
+    if not isinstance(value, dict):
+        if strict:
+            raise ValueError("label_colors must map labels to colors")
+        return {}
+    colors: dict[str, str] = {}
+    seen: set[str] = set()
+    for raw, color in value.items():
+        label = " ".join(str(raw).split()).strip()
+        if not label or len(label) > 120 or color not in LABEL_COLORS:
+            if strict:
+                raise ValueError(f"Label colors must be one of: {', '.join(LABEL_COLORS)}")
+            continue
+        if label.casefold() in seen:
+            continue
+        seen.add(label.casefold())
+        colors[label] = color
+    if strict and len(colors) > MAX_LABEL_COLORS:
+        raise ValueError(f"At most {MAX_LABEL_COLORS} labels can have a color")
+    return dict(list(colors.items())[:MAX_LABEL_COLORS])
+
+
+def get_stale_listing_days() -> int:
+    """Days a listing can stay up unsold before Suggestions and Analytics call it stale."""
+    return _clean_stale_days(_ui_prefs().get(STALE_DAYS_KEY))
+
+
 def normalize_theme(value: object) -> ThemeChoice:
     if isinstance(value, str):
         choice = value.strip().lower()
@@ -652,6 +692,8 @@ def get_ui_prefs() -> dict:
         MODEL_FAVORITES_KEY: _clean_model_favorites(ui.get(MODEL_FAVORITES_KEY)),
         # Off hides Send to Vendoo for sellers who list without Vendoo.
         VENDOO_ENABLED_KEY: vendoo_enabled if isinstance(vendoo_enabled, bool) else True,
+        STALE_DAYS_KEY: _clean_stale_days(ui.get(STALE_DAYS_KEY)),
+        LABEL_COLORS_KEY: _clean_label_colors(ui.get(LABEL_COLORS_KEY)),
     }
 
 
@@ -663,6 +705,8 @@ def set_ui_prefs(
     listing_names: object | None = None,
     model_favorites: object | None = None,
     vendoo_enabled: object | None = None,
+    stale_listing_days: object | None = None,
+    label_colors: object | None = None,
 ) -> dict:
     if (
         recent_vendoo_labels is None
@@ -671,9 +715,14 @@ def set_ui_prefs(
         and listing_names is None
         and model_favorites is None
         and vendoo_enabled is None
+        and stale_listing_days is None
+        and label_colors is None
     ):
         return get_ui_prefs()
     favorites = _clean_model_favorites(model_favorites, strict=True) if model_favorites is not None else None
+    colors = _clean_label_colors(label_colors, strict=True) if label_colors is not None else None
+    if stale_listing_days is not None and _clean_stale_days(stale_listing_days) != stale_listing_days:
+        raise ValueError(f"stale_listing_days must be a whole number from {STALE_DAYS_MIN} to {STALE_DAYS_MAX}")
 
     def mutator(payload: dict) -> None:
         ui = dict(_ui_prefs(payload))
@@ -697,6 +746,10 @@ def set_ui_prefs(
             if not isinstance(vendoo_enabled, bool):
                 raise ValueError("vendoo_enabled must be a boolean")
             ui[VENDOO_ENABLED_KEY] = vendoo_enabled
+        if stale_listing_days is not None:
+            ui[STALE_DAYS_KEY] = stale_listing_days
+        if colors is not None:
+            ui[LABEL_COLORS_KEY] = colors
         payload[UI_PREFS_KEY] = ui
 
     update_settings(mutator)

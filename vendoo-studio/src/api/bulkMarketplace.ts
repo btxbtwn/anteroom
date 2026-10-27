@@ -1,6 +1,6 @@
 import type { DelistMarketplace } from "./marketplaceListings";
 
-export type BulkMarketplaceAction = "list" | "delist" | "relist";
+export type BulkMarketplaceAction = "list" | "delist" | "relist" | "update" | "not_listed";
 export interface BulkMarketplaceRow {
   conversation_id: string;
   title: string | null;

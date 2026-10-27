@@ -746,14 +746,28 @@ test('a locked Depop price wins and nine photos stay within eight', () => {
 // A live product read and edit by slug, with the seller's account reads a draft save also makes.
 const LIVE = { ...FULL, tags: [], description: 'Fleece', price: 29.99 };
 const NOLA = [200, [{ id: 41, postal_code: '70115', city: 'New Orleans', state: 'LA' }]];
-function liveDepop({ product, put = () => reply(200, { slug: product.slug, price_amount: '29.99' }), attributes = ATTRIBUTES } = {}) {
+// Depop's stored product after a PUT: by default it keeps what was sent.
+const keepAll = (product, body) => ({ ...product, price_amount: body.price_amount, variant_set_id: body.variant_set,
+  attributes: { ...product.attributes, product_type: body.product_type },
+  variants_all: Object.keys(body.variants || {}).map(id => ({ id: Number(id), quantity: 1 })) });
+function liveDepop({ product, put = () => reply(200, { slug: product.slug, price_amount: '29.99' }), attributes = ATTRIBUTES,
+  stored = keepAll, read } = {}) {
   const c = loadWorker();
   c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  c.marketplaceSleep = async () => {};
   const requests = [];
+  let current = product;
   c.fetch = async (url, options = {}) => {
     const { pathname } = new URL(url);
     requests.push({ url: String(url), pathname, method: options.method, body: options.body });
-    if (pathname.startsWith('/presentation/api/v1/products/by-slug/')) return options.method === 'PUT' ? put(JSON.parse(options.body)) : reply(200, product);
+    if (pathname.startsWith('/presentation/api/v1/products/by-slug/')) {
+      if (options.method === 'PUT') {
+        const body = JSON.parse(options.body);
+        current = stored(current, body);
+        return put(body);
+      }
+      return read ? read(pathname, current) : reply(200, current);
+    }
     if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 5, country: 'US' });
     if (pathname.endsWith('/countries.json')) return reply(200, [{ country: 'United States', countryCode: 'US', address: 'United States', geoLat: 39.3, geoLng: -97.9 }]);
     return reply(200, {});
@@ -864,11 +878,96 @@ test('a live Depop update stops before writing when Depop names no photo ids or 
   assert.match(none.error, /photo ids/);
   assert.deepEqual(bare.puts(), []);
   const kept = liveDepop({ product: { id: 99, slug: 'studio-works-fleece', price_amount: '23.00', pictures: [{ id: 7 }] },
-    put: () => reply(200, { slug: 'studio-works-fleece', price_amount: '29.99', attributes: { product_type: 'jeans' } }) });
+    stored: (product, body) => ({ ...keepAll(product, body), attributes: { product_type: 'jeans' } }) });
   const wrong = await kept.update(LIVE);
   assert.equal(wrong.ok, false);
   assert.equal(wrong.safe_to_retry, false);
-  assert.match(wrong.error, /did not keep the new category/);
+  assert.match(wrong.error, /did not keep this listing's category/);
+});
+
+// The reply Depop sent job e457c63a3fce for the Vassarette move: the product
+// as it stood before the edit, with no price field at all.
+const VASSARETTE = { active_status: 'active', id: 971839814, slug: 'betwixtandbetweenco-vassarette-tube-top',
+  attributes: { condition: 'used_good', colour: ['tan'], brand: 'vassarette', gender: 'female', is_kids: false, group: 'tops',
+    product_type: 'vests-tanks-camis', additional_attributes: { material: ['nylon'] } },
+  brand_id: 20239, brand_name: 'Vassarette', country: 'US', created_at: '2026-10-26T04:31:12.677151Z', description: 'Tube top',
+  listed_quantity: 1, pictures: [{ id: 5049896356 }, { id: 5049895777 }], status: 'STATUS_ONSALE',
+  updated_at: '2026-10-26T04:31:12.801757Z', user_id: 439456208, variant_set_id: 4,
+  variants_all: [{ id: 17, quantity: 1, status: 'STATUS_ONSALE', variant: 'M' }] };
+const CROP_ATTRIBUTES = { ...ATTRIBUTES,
+  group: ATTRIBUTES.group.map(group => group.id !== 'tops' ? group : { ...group, product_types: [...group.product_types,
+    { id: 'vests-tanks-camis', attribute_ids: ['material'] }, { id: 'crop-top', attribute_ids: ['material'] }] }),
+  category_size_mapping: [...ATTRIBUTES.category_size_mapping,
+    { department: 'womenswear', group: 'tops', product_type: 'vests-tanks-camis', size_set_by_region: { US: 4 } },
+    { department: 'womenswear', group: 'tops', product_type: 'crop-top', size_set_by_region: { US: 4 } }],
+  size_sets: [...ATTRIBUTES.size_sets, { id: 4, sizes: [{ id: 17, name_i18n: { 'en-US': 'M' } }] }],
+  brand: [...ATTRIBUTES.brand, { id: 'vassarette', name: 'Vassarette' }] };
+const CROP_MOVE = { ...LIVE, description: 'Tube top', price: 6, brand: 'Vassarette', size: 'M', department: 'Women',
+  direct_category_ids: { depop: 'womenswear_crop-top' }, depop_specifics: { parcelSize: 'Extra small', material: ['Cotton'] },
+  form: { ...LIVE.form, overrides: { condition: 'used_good', brand: 'Vassarette' } } };
+// The owner's edit document carries the price; the public by-slug one does not.
+const editListing = state => ({ ...state, price_amount: state.price_amount, product_type: state.attributes.product_type });
+const publicRead = state => { const { price_amount: _price, ...rest } = state; return rest; };
+
+test('a Depop price the document does not carry is unknown, not zero', () => {
+  const c = loadWorker();
+  assert.equal(call(c, 'depopProductPrice', VASSARETTE), null);
+  assert.equal(call(c, 'depopProductPrice', { price: '' }), null);
+  assert.equal(call(c, 'depopProductPrice', { price_amount: '6.00' }), 6);
+  assert.equal(call(c, 'depopProductPrice', { price: { price_amount: '6.00' } }), 6);
+  assert.equal(call(c, 'depopProductPrice', { pricing: { current_price: 0 } }), 0);
+});
+
+test('a live Depop update answered with the pre-edit product and no price checks a fresh read instead', async () => {
+  const live = liveDepop({ product: { ...VASSARETTE, price_amount: undefined }, attributes: CROP_ATTRIBUTES,
+    put: () => reply(200, VASSARETTE),
+    read: (pathname, state) => reply(200, pathname.endsWith('/edit-listing/') ? editListing(state) : publicRead(state)) });
+  const result = await live.update(CROP_MOVE);
+  assert.equal(result.ok, true, `${result.error} ${result.marketplace_message || ''}`);
+  assert.equal(result.price, 6);
+  assert.equal(result.warning, undefined);
+  const [body] = live.puts();
+  assert.equal(body.product_type, 'crop-top');
+  assert.equal(body.variant_set, 4);
+  assert.deepEqual(body.variants, { 17: 1 });
+  const reads = live.requests.filter(item => item.method === 'GET' && item.pathname.includes('/products/by-slug/'));
+  assert.ok(reads.some(item => item.pathname.endsWith(`/by-slug/${VASSARETTE.slug}/edit-listing/`)));
+});
+
+test('a live Depop update waits out read-after-write lag before calling a field not kept', async () => {
+  let reads = 0;
+  const lagging = liveDepop({ product: VASSARETTE, attributes: CROP_ATTRIBUTES, put: () => reply(200, VASSARETTE),
+    read: (pathname, state) => {
+      if (pathname.endsWith('/edit-listing/')) return reply(404, { message: 'Not found' });
+      reads += 1;
+      // The read before the edit, then two stale reads after it.
+      return reply(200, reads <= 3 ? publicRead(VASSARETTE) : publicRead(state));
+    } });
+  const result = await lagging.update(CROP_MOVE);
+  assert.equal(result.ok, true, `${result.error} ${result.marketplace_message || ''}`);
+  assert.equal(reads, 4);
+  // The public read never names a price: the result says so instead of failing.
+  assert.equal(result.price, null);
+  assert.match(result.warning, /did not show the price/);
+});
+
+test('a live Depop update that Depop never applies names the category after every retry', async () => {
+  const ignored = liveDepop({ product: VASSARETTE, attributes: CROP_ATTRIBUTES, put: () => reply(200, VASSARETTE),
+    stored: product => product, read: (pathname, state) => reply(200, publicRead(state)) });
+  const result = await ignored.update(CROP_MOVE);
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.match(result.error, /did not keep this listing's category/);
+  assert.doesNotMatch(result.error, /price/);
+  assert.match(result.marketplace_message, /read back: price=\? product_type=vests-tanks-camis/);
+  assert.match(result.marketplace_message, /wanted: price=6 product_type=crop-top/);
+  const gets = ignored.requests.filter(item => item.method === 'GET' && item.pathname.includes('/products/by-slug/'));
+  assert.equal(gets.length, 1 + 4 * 2);
+  // A price a read does show and that differs still fails.
+  const cheaper = liveDepop({ product: VASSARETTE, attributes: CROP_ATTRIBUTES, put: () => reply(200, VASSARETTE),
+    stored: (product, body) => ({ ...keepAll(product, body), price_amount: '5.00' }) });
+  const priced = await cheaper.update(CROP_MOVE);
+  assert.match(priced.error, /did not keep this listing's price/);
 });
 
 test('Depop treats object quantities and attribute lists as the fields it kept', () => {

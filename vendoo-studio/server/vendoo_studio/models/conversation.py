@@ -69,6 +69,10 @@ class Photo(Base):
     checksum = Column(String, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
+    # An edited photo keeps its upload here and serves the rendered edit from
+    # stored_filename, so every send uses the edit and Reset restores the upload.
+    source_filename = Column(String, nullable=True)
+    edits = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
     conversation = relationship("Conversation", back_populates="photos")

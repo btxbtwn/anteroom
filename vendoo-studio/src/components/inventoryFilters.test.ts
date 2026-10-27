@@ -276,6 +276,7 @@ describe("filter options", () => {
     // 2026-09-20: the tee went live 92 days back, the sold boots 258.
     const now = Date.parse("2026-09-20T00:00:00Z");
     expect(staleCounts(inventory, now)).toEqual({ 30: 1, 60: 1, 90: 1 });
+    expect(Object.keys(staleCounts(inventory, now, 45))).toEqual(["30", "45", "60", "90"]);
     expect(staleCounts([{ ...tee, status: "active", vendoo_listed_at: "2026-09-01T00:00:00Z" }], now)).toEqual({
       30: 0,
       60: 0,

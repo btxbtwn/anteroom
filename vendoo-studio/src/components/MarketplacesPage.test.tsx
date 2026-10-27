@@ -58,8 +58,8 @@ describe("MarketplacesPage", () => {
     const html = renderToStaticMarkup(<MarketplacesPage marketplace="ebay" onMarketplaceChange={vi.fn()} onOpenListing={vi.fn()} />);
     expect(html).toContain(">Marketplaces</h1>");
     expect(html).toContain('aria-label="Marketplaces"');
-    expect(html.match(/role="tab"/g)).toHaveLength(5);
-    for (const name of ["eBay", "Etsy", "Poshmark", "Depop", "Sellwild"]) {
+    expect(html.match(/role="tab"/g)).toHaveLength(7);
+    for (const name of ["eBay", "Etsy", "Poshmark", "Mercari", "Depop", "Sellwild", "Vinted"]) {
       expect(html).toContain(`${name}</button>`);
     }
     expect(html).not.toContain(">Marketing</h1>");

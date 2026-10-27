@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { labelColor, labelDotClass } from "../labelColors";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { addLabel, removeLabel, splitLabels } from "./itemLabels";
@@ -393,6 +394,7 @@ export function ItemDetails({ convId }: Props) {
           >
             {currentLabels.map((label) => (
               <Badge key={label} variant="outline" size="lg" className="max-w-full gap-0.5 pe-0.5">
+                {labelColor(uiPrefs?.label_colors, label) ? <span aria-hidden className={`me-1 size-2 shrink-0 rounded-full ${labelDotClass(labelColor(uiPrefs?.label_colors, label)!)}`} /> : null}
                 <span className="truncate">{label}</span>
                 <button
                   type="button"

@@ -15,6 +15,18 @@ describe("bulk edit review", () => {
     }
     expect(() => bulkEditsFromInputs({}, "add", "")).toThrow();
   });
+  it("adds condition, colors, tags and categories only when chosen", () => {
+    expect(bulkEditsFromInputs({ condition: "Pre-Owned - Good", primaryColor: "Blue", secondaryColor: "" }, "keep", "",
+      { tagsMode: "add", tagsText: "wool, wool, winter", category: { depop: "womenswear_coats", general: "" } })).toEqual({
+      values: { condition: "Pre-Owned - Good", primaryColor: "Blue", secondaryColor: "" }, labels_mode: "keep", labels: [],
+      tags_mode: "add", tags: ["wool", "winter"], category: { depop: "womenswear_coats" },
+    });
+    expect(bulkEditsFromInputs({}, "keep", "", { tagsMode: "keep", tagsText: "", category: { ebay: { id: "1", path: "Coats" } } }).category)
+      .toEqual({ ebay: { id: "1", path: "Coats" } });
+    expect(() => bulkEditsFromInputs({ condition: "" }, "keep", "")).toThrow();
+    expect(() => bulkEditsFromInputs({}, "keep", "", { tagsMode: "remove", tagsText: " ", category: {} })).toThrow();
+    expect(() => bulkEditsFromInputs({}, "keep", "", { tagsMode: "keep", tagsText: "", category: {} })).toThrow();
+  });
   it("submits only reviewed actionable rows with their concurrency tokens", () => {
     const row: BulkReviewRow = { conversation_id: "coat", expected_revision_id: "rev", expected_basis: "a".repeat(64), expected_result: "b".repeat(64), title: "Coat", skip_reason: null, changes: [{field:"sku",old:"old",new:"new"}] };
     expect(bulkReviewTokens([row, {...row,conversation_id:"busy",skip_reason:"Busy"}, {...row,conversation_id:"same",changes:[]}])).toEqual([

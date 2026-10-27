@@ -3,9 +3,9 @@ import { inventoryStatus, listedFromImport, marketplaceStatusesFromDraft, status
 
 describe("statusHint", () => {
   it("says where each Vendoo label comes from", () => {
-    expect(statusHint("draft")).toBe("Draft in Vendoo");
-    expect(statusHint("active")).toBe("Listed on a marketplace, per Vendoo");
-    expect(statusHint("sold")).toBe("Sold, per Vendoo");
+    expect(statusHint("draft")).toBe("Not listed on any marketplace");
+    expect(statusHint("active")).toBe("Listed on a marketplace");
+    expect(statusHint("sold")).toBe("Sold");
   });
 
   it("explains the states Studio itself causes", () => {

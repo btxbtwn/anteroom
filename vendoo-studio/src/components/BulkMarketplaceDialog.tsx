@@ -15,8 +15,11 @@ const ACTIONS: { value: BulkMarketplaceAction; label: string; note: string }[] =
   { value: "list", label: "List", note: "Publishes each item’s saved listing. An item already live on a marketplace is skipped there; choose Relist for that." },
   { value: "delist", label: "Delist", note: "Removes each live listing from the marketplace; eBay ends it. A marketplace where the item sold is never touched." },
   { value: "relist", label: "Relist", note: "Takes each live listing down, then lists the saved listing again. If listing again fails, the item stays down and is reported." },
+  { value: "update", label: "Update", note: "Writes each item’s saved listing onto the listing already live on eBay, Etsy, Poshmark or Depop. Nothing is listed or taken down; a failed update leaves the live listing as it was." },
+  { value: "not_listed", label: "Mark as not listed", note: "Anteroom forgets the marketplace listing for each item. The marketplace is not contacted: a listing still up there stays up." },
 ];
-const DONE: Record<BulkMarketplaceAction, string> = { list: "Listed", delist: "Delisted", relist: "Relisted" };
+const DONE: Record<BulkMarketplaceAction, string> = { list: "Listed", delist: "Delisted", relist: "Relisted", update: "Updated", not_listed: "Marked not listed" };
+const ACTIVE: Record<BulkMarketplaceAction, string> = { list: "Listing", delist: "Delisting", relist: "Relisting", update: "Updating", not_listed: "Marking not listed" };
 
 function names(values: readonly string[]): string {
   return values.map(marketplaceName).join(", ");
@@ -75,7 +78,7 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
     <Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>
     <Button disabled={busy || !chosen.length} onClick={() => preview.mutate(conversationIds)}>{preview.isPending ? "Checking…" : "Review items"}</Button>
   </>;
-  return <PriceDialog title={tasks ? `${verb.label} results` : review ? `Review ${verb.label.toLowerCase()}` : `List, delist or relist ${conversationIds.length} items`}
+  return <PriceDialog title={tasks ? `${verb.label} results` : review ? `Review ${verb.label.toLowerCase()}` : `Marketplace actions for ${conversationIds.length} items`}
     className="max-w-3xl" busy={busy} onClose={onClose} footer={footer}
     description="Nothing is sent until you review each item and confirm. Items run one at a time, each marketplace once; a failed item is not retried.">
     {preview.error || run.error ? <PageError message={preview.error?.message || run.error?.message || "Could not review these items"} /> : null}
@@ -83,7 +86,7 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
       <PageNote>{tasks.filter((task) => task.state === "done").length} done · {tasks.filter((task) => task.state === "failed" || task.state === "unconfirmed").length} need attention · {tasks.filter((task) => task.state === "pending").length} not started</PageNote>
       {tasks.map((task) => <div key={task.id} className="min-w-0 break-words rounded-lg border p-3">
         <p className="font-medium">{task.title}</p>
-        <p className="text-xs">{activeId === task.id ? `${verb.label}ing on ${names(task.request.marketplaces)}…`
+        <p className="text-xs">{activeId === task.id ? `${ACTIVE[task.request.action]} on ${names(task.request.marketplaces)}…`
           : task.state === "done" ? `${DONE[task.request.action]} on ${names(task.request.marketplaces)}`
           : task.state === "pending" ? "Not started" : task.error}</p>
       </div>)}
@@ -103,7 +106,9 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
       </li>)}</ul>
       <label className="flex items-start gap-2 rounded-lg border p-3 font-medium">
         <Checkbox checked={confirmed} disabled={busy || !approved.length} onCheckedChange={(checked) => setConfirmed(checked === true)} />
-        <span>I reviewed these {approved.length} items and want to {verb.label.toLowerCase()} them on the marketplaces shown.</span>
+        <span>{review.action === "not_listed"
+          ? `I reviewed these ${approved.length} items and want Anteroom to mark them not listed on the marketplaces shown.`
+          : `I reviewed these ${approved.length} items and want to ${verb.label.toLowerCase()} them on the marketplaces shown.`}</span>
       </label>
     </div> : <div className="space-y-4">
       <fieldset className="space-y-2"><legend className="mb-1 font-medium">Action</legend>

@@ -1,4 +1,5 @@
 import { ListingTemplatesSettings } from "./ListingTemplatesSettings";
+import { InventorySettings } from "./InventorySettings";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
@@ -444,6 +445,7 @@ export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string
       <ListingTemplatesSettings onOpenListing={onOpenListing} />
       <VendooSection />
       <MarketplacesSection />
+      <InventorySettings />
       <PackageDimensionsSection />
       <HiddenFieldsSection />
       <ListingFormulasSection />

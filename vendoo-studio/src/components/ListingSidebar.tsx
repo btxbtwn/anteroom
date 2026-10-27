@@ -207,7 +207,8 @@ export function ListingSidebar({
   );
   const filterLabelCounts = useMemo(() => labelCounts(facetSource), [facetSource]);
   const filterNotListedCount = useMemo(() => notListedCount(facetSource), [facetSource]);
-  const filterStaleCounts = useMemo(() => staleCounts(facetSource), [facetSource]);
+  const staleThreshold = uiPrefs?.stale_listing_days;
+  const filterStaleCounts = useMemo(() => staleCounts(facetSource, undefined, staleThreshold), [facetSource, staleThreshold]);
   const filterRelistCount = useMemo(() => needsRelistCount(facetSource), [facetSource]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
   const labels = useMemo(() => labelOptions(conversations || []), [conversations]);
@@ -381,6 +382,7 @@ export function ListingSidebar({
             counts={counts}
             labels={labels}
             labelCounts={filterLabelCounts}
+            labelColors={uiPrefs?.label_colors}
             marketplaces={filterMarketplaces}
             marketplaceCounts={filterMarketplaceCounts}
             notListedCount={filterNotListedCount}

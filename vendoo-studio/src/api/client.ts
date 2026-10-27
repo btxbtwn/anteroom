@@ -2,6 +2,8 @@ import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, Temp
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
 import type { ListingVideo, ListingVideoLibrary } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
+import type { BulkDeleteResult, BulkDeleteRow } from "./bulkDelete";
+import type { LabelColor } from "../labelColors";
 import type { BulkMarketplaceAction, BulkMarketplacePerform, BulkMarketplacePreview, BulkMarketplaceResult } from "./bulkMarketplace";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
@@ -36,6 +38,7 @@ import type {
   Message,
   OkResponse,
   Photo,
+  PhotoEdits,
   PhotoUploadResult,
   PriceDropApplyResult,
   PriceDropCompsSource,
@@ -71,12 +74,12 @@ import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, A
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
-import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
+import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SellerSale, SellerSaleResult } from "./marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
-import type { MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
+import type { ChromeImportMarketplace, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -243,9 +246,20 @@ export const api = {
     sync: () => request<{started: boolean}>("/catalog/sync", {method: "POST"}),
     dropdownOptions: () =>
       request<{ forms: Record<string, Record<string, string[]>> }>("/catalog/dropdown-options"),
+    searchCategories: (q: string, marketplace: string) =>
+      request<{ results: { kind: string; marketplace: string; id: string; path: string; label: string }[] }>(
+        `/catalog/search?${new URLSearchParams({ q, marketplace, kind: "category", top_k: "15" })}`),
   },
   suggestions: {
     list: () => request<SuggestionsResponse>("/suggestions"),
+  },
+  chromeImport: {
+    importCandidates: (marketplace: ChromeImportMarketplace, cursor: string | null) =>
+      request<MarketplaceImportPage>(`/chrome-import/${marketplace}/active${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
+    importListing: (marketplace: ChromeImportMarketplace, listing: string, linkConversationId?: string) =>
+      request<MarketplaceImportResult>(`/chrome-import/${marketplace}`, {
+        method: "POST", body: JSON.stringify({ listing, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
+      }),
   },
   etsy: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/etsy/import/active?page=${page}`),
@@ -499,6 +513,10 @@ export const api = {
       request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/${marketplace}/mark`, {
         method: "POST", body: JSON.stringify({ state, ...(url ? { url } : {}) }),
       }),
+    recordSale: (convId: string, sale: SellerSale) =>
+      request<SellerSaleResult>(`/conversations/${convId}/marketplace-listings/sold`, {
+        method: "POST", body: JSON.stringify(sale),
+      }),
   },
   nativeMarketplaces: {
     form: (convId: string, marketplace: string, revisionId?: string | null) =>
@@ -569,6 +587,12 @@ export const api = {
     check: (id: string) => request<Promotion>(`/promotions/${encodeURIComponent(id)}/check`, { method: "POST" }),
     markChecked: (id: string) =>
       request<Promotion>(`/promotions/${encodeURIComponent(id)}/checked`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+  },
+  bulkDelete: {
+    preview: (conversationIds: string[]) =>
+      request<{ rows: BulkDeleteRow[] }>("/listings/bulk-delete/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds }) }),
+    delete: (rows: { conversation_id: string; review_token: string }[]) =>
+      request<BulkDeleteResult>("/listings/bulk-delete/delete", { method: "POST", body: JSON.stringify({ rows, confirm: true }) }),
   },
   salesLedger: {
     list: (filters: SalesLedgerFilters, page = 1) => request<SalesLedgerPage>(`/sales-ledger?${salesLedgerParams(filters, page)}`),
@@ -689,6 +713,28 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ degrees }),
       }),
+    /** Replace a photo's edits; the server renders them from the kept original. */
+    editPhoto: (convId: string, photoId: string, edits: PhotoEdits) =>
+      request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, {
+        method: "PUT",
+        body: JSON.stringify(edits),
+      }),
+    resetPhoto: (convId: string, photoId: string) =>
+      request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
+    /** A smaller JPEG of unsaved edits; `crop: false` keeps the whole frame to draw the crop on. */
+    previewPhotoEdits: async (convId: string, photoId: string, edits: PhotoEdits, crop: boolean, signal?: AbortSignal) => {
+      const res = await fetch(`${BASE}/conversations/${convId}/photos/${photoId}/edits/preview?crop=${crop}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(edits),
+        signal,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(errorMessage(body, "Preview failed"));
+      }
+      return res.blob();
+    },
     delete: (id: string) =>
       request<DeleteConversationResult>(`/conversations/${id}`, { method: "DELETE" }),
     reset: (id: string, opts?: { keepInputs?: boolean }) =>
@@ -1127,6 +1173,8 @@ export const api = {
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
         vendoo_enabled: boolean;
+        stale_listing_days: number;
+        label_colors: Record<string, LabelColor>;
       }>("/settings/ui"),
     setUi: (body: {
       recent_vendoo_labels?: string[];
@@ -1138,6 +1186,8 @@ export const api = {
       forget_label?: string;
       model_favorites?: ModelFavorite[];
       vendoo_enabled?: boolean;
+      stale_listing_days?: number;
+      label_colors?: Record<string, LabelColor>;
     }) =>
       request<{
         ok: boolean;
@@ -1148,6 +1198,8 @@ export const api = {
         listing_names: ListingNames;
         model_favorites: ModelFavorite[];
         vendoo_enabled: boolean;
+        stale_listing_days: number;
+        label_colors: Record<string, LabelColor>;
       }>("/settings/ui", { method: "PUT", body: JSON.stringify(body) }),
     formulas: () =>
       request<{

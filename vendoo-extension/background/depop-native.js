@@ -918,6 +918,56 @@ function depopProductType(product) {
   return value == null || typeof value === 'object' ? '' : String(value);
 }
 
+// Waits before each read after a live edit: one read at once, then a few
+// spaced retries while Depop's reads catch up with the write.
+const DEPOP_LIVE_READ_WAITS_MS = [0, 1000, 2000, 4000];
+
+// What a live edit sets, in the terms a read reports.
+function depopLiveWanted(listing, fields) {
+  const price = depopPrice(listing);
+  const set = fields.variant_set;
+  return { price: price == null || price === '' || !Number.isFinite(Number(price)) ? null : Number(price),
+    product_type: fields.product_type ? String(fields.product_type) : '',
+    variant_set: set == null || set === '' ? '' : String(set),
+    sizes: depopVariantIds(fields.variants || {}) };
+}
+
+// What fresh reads of a live product say, taking each field from the first
+// read that has it. A field no read names stays unknown: never a mismatch.
+function depopLiveState(docs) {
+  const state = { price: null, product_type: '', variant_set: '', sizes: null };
+  for (const doc of docs) {
+    const source = depopDraftDocument(doc);
+    if (state.price == null) state.price = depopProductPrice(source);
+    if (!state.product_type) state.product_type = depopProductType(source) || depopDraftView(doc).product_type;
+    if (!state.variant_set) {
+      const set = source.variant_set_id ?? source.variantSetId ?? source.variant_set;
+      if (set != null && set !== '') state.variant_set = String(typeof set === 'object' ? depopFieldId(set) : set);
+    }
+    if (state.sizes == null) {
+      const variants = Array.isArray(source.variants_all) ? source.variants_all : source.variants;
+      const ids = variants == null ? [] : depopVariantIds(variants);
+      if (ids.length) state.sizes = ids;
+    }
+  }
+  return state;
+}
+
+// The fields a fresh read shows with a different value than the edit sent.
+function depopLiveMismatch(state, wanted) {
+  const parts = [];
+  if (wanted.price != null && state.price != null && state.price !== wanted.price) parts.push('price');
+  if (wanted.product_type && state.product_type && state.product_type !== wanted.product_type) parts.push('category');
+  const setWrong = wanted.variant_set && state.variant_set && state.variant_set !== wanted.variant_set;
+  const sizeWrong = wanted.sizes.length && state.sizes?.length && state.sizes.join(',') !== wanted.sizes.join(',');
+  if (setWrong || sizeWrong) parts.push('size');
+  return parts;
+}
+
+function depopLiveDigest(state) {
+  return `price=${state.price ?? '?'} product_type=${state.product_type || '?'} variant_set=${state.variant_set || '?'} sizes=${state.sizes?.join('/') || '?'}`;
+}
+
 const DEPOP_PICTURE_CHECK = '/presentation/api/v1/pictures/validate/';
 
 // Depop's listing site uploads a photo, then asks this endpoint until every id
@@ -987,8 +1037,9 @@ async function depopApiAction(action, payload) {
       const publishWrite = action === 'publish' && payload.action === 'publish' && payload.confirm === true
         && method === 'POST' && path === '/presentation/api/v1/drafts/products/';
       // Live edit: read and PUT the product by the slug the seller opened.
-      // PUT on the numeric presentation id answers 404. The by-slug body still needs one live check.
-      const updateRead = action === 'update' && method === 'GET' && /^\/presentation\/api\/v1\/products\/(?:by-slug\/[a-z0-9][a-z0-9-]{0,200}\/|[0-9]+\/)$/i.test(path);
+      // PUT on the numeric presentation id answers 404.
+      // The edit page itself reads by-slug/<slug>/edit-listing/, the owner's document with the price.
+      const updateRead = action === 'update' && method === 'GET' && /^\/presentation\/api\/v1\/products\/(?:by-slug\/[a-z0-9][a-z0-9-]{0,200}\/(?:edit-listing\/)?|[0-9]+\/)$/i.test(path);
       const updateWrite = action === 'update' && payload.confirm === true && method === 'PUT'
         && /^\/presentation\/api\/v1\/products\/by-slug\/[a-z0-9][a-z0-9-]{0,200}\/$/i.test(path);
       if (!allowedRead && !draftWrite && !publishWrite && !updateRead && !updateWrite) throw marketplaceError('Unsupported Depop action.');
@@ -1177,22 +1228,43 @@ async function depopApiAction(action, payload) {
           { code: 'schema_drift', marketplace_message: depopReadDigest(product) });
       }
       const updated = await request('PUT', `/presentation/api/v1/products/by-slug/${slug}/`, body);
-      const echoed = updated && typeof updated === 'object' ? updated : {};
-      const saved = echoed.price_amount != null || echoed.priceAmount != null || echoed.price != null || echoed.slug ? echoed
-        : await request('GET', `/presentation/api/v1/products/by-slug/${slug}/`);
-      const price = depopProductPrice(saved);
-      if (price != null && depopPrice(payload.listing) != null && price !== Number(depopPrice(payload.listing))) {
-        throw marketplaceError('Depop did not keep the updated price. Check the live listing.', { code: 'schema_drift', rejected: false,
-          marketplace_message: depopSanitizedBody(saved) });
-      }
-      const kept = depopProductType(saved);
-      if (kept && fields.product_type && kept !== String(fields.product_type)) {
-        throw marketplaceError('Depop did not keep the new category. Check the live listing.', { code: 'schema_drift', rejected: false,
-          marketplace_message: `product type: ${kept}` });
-      }
-      const returned = String(saved?.slug || saved?.product_slug || '').trim().toLowerCase();
+      // The PUT answer can be the product as it was before the edit, without a
+      // price, so it never decides the outcome. Fresh reads do, with a short
+      // wait for Depop's read-after-write lag.
+      const returned = String(updated?.slug || updated?.product_slug || '').trim().toLowerCase();
       const next = /^[a-z0-9][a-z0-9-]{0,200}$/.test(returned) ? returned : slug;
-      return { ok: true, state: 'published', listing_url: `https://www.depop.com/products/${next}/`, previous_slug: slug, price };
+      const wanted = depopLiveWanted(payload.listing, fields);
+      let state = {};
+      let wrong = [];
+      let read = null;
+      for (const wait of DEPOP_LIVE_READ_WAITS_MS) {
+        if (wait) {
+          if (payload.deadline && Date.now() + wait > payload.deadline - 2000) break;
+          await marketplaceSleep(wait);
+        }
+        const docs = [];
+        for (const candidate of [...new Set([next, slug])]) {
+          for (const suffix of ['edit-listing/', '']) {
+            try { docs.push(await request('GET', `/presentation/api/v1/products/by-slug/${candidate}/${suffix}`)); } catch { /* Try the other read. */ }
+          }
+          if (docs.length) break;
+        }
+        if (!docs.length) continue;
+        read = docs[0];
+        state = depopLiveState(docs);
+        wrong = depopLiveMismatch(state, wanted);
+        if (!wrong.length) break;
+      }
+      if (!read) {
+        throw marketplaceError('Depop saved the edit but the listing could not be read back. Check the live listing.', { code: 'schema_drift', rejected: false });
+      }
+      if (wrong.length) {
+        throw marketplaceError(`Depop did not keep this listing's ${wrong.join(', ')}. Check the live listing.`, { code: 'schema_drift', rejected: false,
+          marketplace_message: `read back: ${depopLiveDigest(state)} | wanted: ${depopLiveDigest(wanted)} | ${depopSanitizedBody(read)}` });
+      }
+      const unconfirmed = ['price', 'product_type'].filter(key => wanted[key] != null && wanted[key] !== '' && (state[key] == null || state[key] === ''));
+      return { ok: true, state: 'published', listing_url: `https://www.depop.com/products/${next}/`, previous_slug: slug, price: state.price ?? null,
+        ...(unconfirmed.length ? { warning: `Depop's read did not show the ${unconfirmed.map(key => key === 'product_type' ? 'category' : key).join(' or ')}. Check the live listing.` } : {}) };
     }
     if (action === 'publish_status') {
       if (!/^[A-Za-z0-9_-]+$/.test(String(payload.publish_job_id))) throw marketplaceError('A Depop publish receipt is required.');
@@ -1252,8 +1324,11 @@ function depopProductPrice(product) {
   const pricing = product?.pricing && typeof product.pricing === 'object' ? product.pricing : {};
   const raw = product?.price_amount ?? product?.price?.price_amount ?? pricing.price_amount
     ?? pricing.current_price ?? pricing.original_price?.price_amount ?? pricing.original_price
-    ?? (typeof product?.price === 'string' || typeof product?.price === 'number' ? product.price : '');
-  const price = Number(typeof raw === 'object' ? raw?.price_amount ?? raw?.price : raw);
+    ?? (typeof product?.price === 'string' || typeof product?.price === 'number' ? product.price : null);
+  // No price on the document means the price is unknown, not zero.
+  const value = raw && typeof raw === 'object' ? raw.price_amount ?? raw.price : raw;
+  if (value == null || String(value).trim() === '') return null;
+  const price = Number(value);
   return Number.isFinite(price) ? price : null;
 }
 
@@ -1387,7 +1462,8 @@ async function runDepopNative(msg, recovery = false) {
   try {
     if (payload.action === 'update') {
       const updated = await depopAction('update', payload);
-      return { ...updated, ...(payload.photo_warning ? { warning: payload.photo_warning } : {}) };
+      const warning = [updated.warning, payload.photo_warning].filter(Boolean).join(' ');
+      return { ...updated, ...(warning ? { warning } : {}) };
     }
     if (payload.action === 'save_draft') {
       if (!recovery) payload.depop_fields = await depopResolvedFields(payload);

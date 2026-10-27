@@ -54,7 +54,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     id: "help-price-drops",
     title: "Drop prices on stale listings",
     steps: [
-      "Find what is sitting: open **Filters** in the sidebar and choose a **Stale since listed** age, or sort by **Stalest**. **Suggestions** also lists listings up for 60 days or more as **Refresh or consider price drop**.",
+      "Find what is sitting: open **Filters** in the sidebar and choose a **Stale since listed** age, or sort by **Stalest**. **Suggestions** also lists listings up past your stale threshold (60 days unless you change it in Settings → Listings → Inventory) as **Refresh or consider price drop**.",
       "One listing: press **Regenerate**. The dialog suggests a new price from live comps and your past drops. Pick one and press **Confirm**.",
       "Many at once: press **Select**, tick them, press **Regenerate**, choose −10%, −15% or −20% each, or **Each listing's suggestion**, then **Drop and rewrite**.",
       "Press **Update Vendoo** on each listing to carry the new price to its draft.",

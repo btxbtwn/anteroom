@@ -33,7 +33,6 @@ from vendoo_studio.services.sell_through import _parse_moment
 from vendoo_studio.services.vendoo_import import oldest_live_listed_at, parse_notes
 
 MAX_SUGGESTIONS = 20
-STALE_MIN_DAYS = 60
 # Sales this recent say what buyers want right now.
 SELLING_WINDOW_DAYS = 60
 # Points per recent sale like this item: a shared brand says more than a shared category.
@@ -111,6 +110,9 @@ def list_suggestions(
     conversations = repo.list_all()
     selling = _recent_sales(conversations, listings, when)
     in_demand = SEASONS_IN_DEMAND[when.month]
+    from vendoo_studio.services.user_settings import get_stale_listing_days
+
+    stale_days = get_stale_listing_days()
 
     cards: list[dict[str, Any]] = []
     for conv in conversations:
@@ -128,6 +130,7 @@ def list_suggestions(
             now=when,
             selling=selling,
             in_demand=in_demand,
+            stale_days=stale_days,
         )
         if card:
             cards.append(card)
@@ -279,6 +282,7 @@ def _card_for(
     now: datetime,
     selling: list[dict[str, str]] | None = None,
     in_demand: tuple[str, ...] = (),
+    stale_days: int = 60,
 ) -> dict[str, Any] | None:
     notes = parse_notes(conv.notes)
     marketplaces = _marketplaces(notes)
@@ -304,7 +308,7 @@ def _card_for(
         score = KIND_BASE_SCORE[KIND_FIX_VALIDATION]
     elif status == "active":
         days = _listed_days_ago(notes, now)
-        if days is not None and days >= STALE_MIN_DAYS:
+        if days is not None and days >= stale_days:
             kind = KIND_STALE_ACTIVE
             similar_sold, selling_points = _selling_like(listing, selling or [])
             season_fit = _season_fit(listing, in_demand)

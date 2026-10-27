@@ -318,11 +318,12 @@ class ConversationRepo:
         return latest
 
     def reconcile_job_statuses(self) -> None:
-        """Keep each listing's label in step with its job and its Vendoo item.
+        """Keep each listing's label in step with its job, its listings and its sales.
 
-        A listing bound to Vendoo wears Vendoo's own label (draft / active /
-        sold); a send in flight reads ``listing`` and a send that broke reads
-        ``failed``.
+        A listing wears its own inventory label (draft / active / sold, see
+        ``services/item_status.py``): Vendoo's, unless Anteroom's own listings
+        or sales say otherwise. A send in flight reads ``listing`` and a send
+        that broke reads ``failed``.
         """
         from vendoo_studio.services import activity
         from vendoo_studio.services.streaming import active_generation
@@ -333,18 +334,21 @@ class ConversationRepo:
             "awaiting_extension": "listing",
             "dispatched": "listing",
         }
+        from vendoo_studio.services.item_status import statuses
+
         latest_jobs = self._latest_jobs()
         changed = False
-        for conv in self.db.query(Conversation).all():
+        conversations = self.db.query(Conversation).all()
+        # Vendoo's label, overruled by Anteroom's own listings and sales.
+        own = statuses(self.db, [(conv.id, parse_notes(conv.notes)) for conv in conversations])
+        for conv in conversations:
             if conv.status == "in_progress" and (
                 active_generation(conv.id) is not None or activity.running(conv.id)
             ):
                 if _sync_settlement(conv, conv.status):
                     changed = True
                 continue
-            vendoo_status = str(parse_notes(conv.notes).get("vendooStatus") or "")
-            if vendoo_status not in VENDOO_LISTING_STATUSES:
-                vendoo_status = "draft"
+            vendoo_status = own[conv.id].status
             if conv.status == "in_progress":
                 # Nothing is generating: a stopped chat, a dropped stream or a
                 # quit mid-run left the label behind, and it blocks Send.
@@ -373,6 +377,10 @@ class ConversationRepo:
                         changed = True
             elif conv.status == "listing":
                 # No job left to own the busy label — wear Vendoo's inventory tab.
+                conv.status = vendoo_status
+                changed = True
+            elif own[conv.id].own and conv.status in VENDOO_LISTING_STATUSES and conv.status != vendoo_status:
+                # A sale or listing Anteroom recorded itself, which Vendoo never hears about.
                 conv.status = vendoo_status
                 changed = True
             if conv.status not in LISTING_STATUSES + BUSY_LISTING_STATUSES:
@@ -442,8 +450,10 @@ class ConversationRepo:
         self.db.commit()
         return True
 
-    def replace_photo_file(self, photo: Photo, meta: dict) -> Photo:
-        """Point a photo at a rewritten file, e.g. after a rotation."""
+    def replace_photo_file(self, photo: Photo, meta: dict, *, source_filename: str | None, edits: dict | None) -> Photo:
+        """Point a photo at a rendered edit of its source, or back at the source."""
+        photo.source_filename = source_filename
+        photo.edits = edits
         photo.stored_filename = meta["stored_filename"]
         photo.size_bytes = meta["size_bytes"]
         photo.checksum = meta["checksum"]

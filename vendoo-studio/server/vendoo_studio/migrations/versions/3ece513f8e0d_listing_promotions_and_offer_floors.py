@@ -1,7 +1,7 @@
 """Listing promotions and offer floors
 
 Revision ID: 3ece513f8e0d
-Revises: a7c3e91f5d20
+Revises: 7d2e4c9a1b35
 Create Date: 2026-10-26 19:16:06.696082
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = '3ece513f8e0d'
-down_revision = 'a7c3e91f5d20'
+down_revision = '7d2e4c9a1b35'
 branch_labels = None
 depends_on = None
 
