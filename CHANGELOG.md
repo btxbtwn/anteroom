@@ -6,9 +6,21 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.430 — 2026-10-27
+## 0.1.432 — 2026-10-27
 
 - **Update…** now works on live Mercari, Vinted and Sellwild listings, both on an item and in the bulk **Update** action. Anteroom edits the listing that is already up instead of making you delist and relist, so it keeps its likes, views, listing age and photos. It changes only what you edited, never lists a draft or creates a second listing, and reads the listing back afterwards to make sure the change stuck. Sellwild may hold an edited listing for review.
+
+## 0.1.431 — 2026-10-27
+
+- Every marketplace form now shows its photos at the top: the photos that marketplace gets, in order, and how many it takes. Untick a photo, drag to reorder, or add photos for that marketplace only (a stock photo for eBay, a collage for Depop); **Reset to item photos** goes back. List, Save Draft and Update send that form's photos. Items you have not changed still send all their photos.
+- Video is no longer a separate button at the bottom of the form. On eBay, Etsy and Poshmark, add a video in the same photos, by dropping or choosing the file the same way as a photo; each form says what that marketplace accepts. Depop, Mercari, Vinted and Sellwild take no video from their websites, so their forms offer none.
+
+## 0.1.430 — 2026-10-26
+
+- Automations has a new **Sharing and offers to likers** section. Set up a Poshmark sharing schedule: which listings, the order, how fast, the times of day and a daily cap of up to 6,000 shares. Every share and every skipped listing shows in the activity log.
+- Make an offer rule for Poshmark likers: the discount, which listings it covers, a floor you set for each listing, listings to leave out, and how long or how many likes a listing needs first. Each round only offers to people who liked a listing since the last offer, and never below your floor.
+- Nothing runs until you turn a schedule or rule on, and **Pause all** stops them. If Poshmark starts limiting you, or Anteroom cannot tell whether an offer or share went through, the rule pauses and that listing waits for you to check it; Anteroom never sends it again on its own.
+- Mercari and Depop offer rules can be set up, but stay off until Anteroom has learned how those sites send offers.
 
 ## 0.1.429 — 2026-10-27
 

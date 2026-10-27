@@ -73,6 +73,8 @@ class Photo(Base):
     # stored_filename, so every send uses the edit and Reset restores the upload.
     source_filename = Column(String, nullable=True)
     edits = Column(JSON, nullable=True)
+    # Set for a photo added on one marketplace's form: only that marketplace can send it.
+    marketplace = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
     conversation = relationship("Conversation", back_populates="photos")

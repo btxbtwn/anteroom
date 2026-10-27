@@ -33,17 +33,11 @@ function depopPrice(listing) {
   return listing?.price;
 }
 
-function depopChosenPhotos(photos, listing) {
+// Anteroom sends the Depop form's own photos in order; Depop keeps eight.
+function depopChosenPhotos(photos) {
   const list = Array.isArray(photos) ? photos : [];
-  const picked = listing?.marketplace_photos?.depop;
-  let chosen = list;
-  if (Array.isArray(picked) && picked.length) {
-    const ids = new Set(picked.map(id => String(id)));
-    const matched = list.filter(photo => ids.has(String(photo?.id)));
-    if (matched.length) chosen = matched;
-  }
-  const capped = chosen.slice(0, 8);
-  return { photos: capped, omitted: Math.max(0, chosen.length - capped.length) };
+  const capped = list.slice(0, 8);
+  return { photos: capped, omitted: Math.max(0, list.length - capped.length) };
 }
 
 function depopFormFields(listing, attributes) {
@@ -1452,7 +1446,7 @@ async function runDepopNative(msg, recovery = false) {
       await storeReceipt({ receipt_url: payload.draft_url, expected_photo_count: payload.expected_photo_count });
     };
   const photosChosen = () => {
-    const chosen = depopChosenPhotos(payload.photos, payload.listing);
+    const chosen = depopChosenPhotos(payload.photos);
     payload.photos = chosen.photos;
     if (!payload.photos?.length) {
       throw marketplaceMissing('depop', [{ field: 'photos', needs: 'between one and eight photos' }]);

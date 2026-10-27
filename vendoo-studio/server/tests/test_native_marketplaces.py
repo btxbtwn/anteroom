@@ -132,6 +132,25 @@ class NativeMarketplacesTest(unittest.TestCase):
                 self.assertEqual(self.actions(), ["save_draft", "save_draft"])
                 self.assertEqual(self.bridge.call_args.args[2]["draft_url"], URLS[platform])
 
+    def test_a_form_with_its_own_photos_sends_them_and_every_other_form_keeps_the_item_photos(self):
+        repo = ConversationRepo(self.db)
+        [front] = repo.get_photos(self.conv.id)
+        back = repo.add_photo(self.conv.id, "back.jpg", "back.jpg", "image/jpeg", 1)
+        collage = repo.add_photo(self.conv.id, "collage.jpg", "collage.jpg", "image/jpeg", 1, marketplace="mercari")
+        repo.add_photo(self.conv.id, "stock.jpg", "stock.jpg", "image/jpeg", 1, marketplace="depop")
+        self.rev = ListingRepo(self.db).save_revision(
+            self.conv.id, {**LISTING, "marketplace_photos": {"mercari": [collage.id, back.id]}}, "user_form")
+        sent = {}
+        for platform in URLS:
+            self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": URLS[platform]}
+            response = self.client.post(f"{self.base}/{platform}/draft", json={"revision_id": self.rev.id})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.run_jobs()
+            sent[platform] = [photo["id"] for photo in self.bridge.call_args.args[2]["photos"]]
+            self.assertEqual(self.record(platform)["photo_ids"], sent[platform])
+        # Mercari's pick, in its order; Depop's own photo is not ticked, so Depop gets the item's.
+        self.assertEqual(sent, {"mercari": [collage.id, back.id], "depop": [front.id, back.id]})
+
     def test_draft_route_refuses_publish_parameters_unsupported_markets_and_live_items(self):
         response = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id, "confirm": True})
         self.assertEqual(response.status_code, 422)

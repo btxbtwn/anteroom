@@ -68,6 +68,7 @@ def load_models() -> None:
     from vendoo_studio.models.ebay_offer import EbayOfferAttempt, EbayOfferRule  # noqa: F401
     from vendoo_studio.models.ebay_action import EbayAction  # noqa: F401
     from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor  # noqa: F401
+    from vendoo_studio.models.promotion_automation import PromotionAutomation, PromotionRun  # noqa: F401
     from vendoo_studio.models.ad_spend import AdSpend  # noqa: F401
     from vendoo_studio.models.assistant import AssistantMemory, AssistantMessage, AssistantThread  # noqa: F401
     from vendoo_studio.models.automation import (  # noqa: F401

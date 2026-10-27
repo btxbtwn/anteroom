@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 
 from vendoo_studio.database import SessionLocal
-from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.send_review import photo_versions
 
 log = logging.getLogger(__name__)
@@ -34,7 +34,9 @@ async def run_send(job_id: str) -> None:
         snapshot = dict(job.listing_snapshot)
         review = repo.latest_event(job.id, "vendoo_review")
         photos = conv_repo.get_photos(conv.id)
-        if review and photo_versions(photos) != review.payload.get("photo_versions"):
+        current = ListingRepo(db).get_revisions(conv.id)
+        if review and photo_versions(conv_repo.get_all_photos(conv.id),
+                                     current[0].listing_json if current else None) != review.payload.get("photo_versions"):
             raise ValueError("Photos changed after approval. Review the listing again before sending.")
         provider = get_listing_provider() if provider_is_configured() else None
         evidence = latest_photo_analysis(conv_repo.get_messages(conv.id)) or str(conv.notes or "")

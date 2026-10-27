@@ -32,7 +32,7 @@ as such; it must not silently override an explicit marketplace selection.
 
 ## Live Update on Mercari, Vinted and Sellwild
 
-Added in 0.1.430. Each site's own edit request was read from its public web
+Added in 0.1.432. Each site's own edit request was read from its public web
 bundle on 2026-10-26, so Update edits the live listing in place and keeps its
 likes, views and listing age. Each one checks that the listing belongs to the
 signed-in account and is live, writes once, and reads the listing back. A lost
@@ -68,9 +68,11 @@ survive on all three.
 ## Listing videos
 
 Researched 2026-10-26 from each marketplace's API documentation or current web
-client. Anteroom keeps one video per marketplace: the seller selects it on that
-marketplace's form (`<marketplace>_specifics.videoId`), and limits come from
-`VIDEO_RULES` in `services/listing_videos.py`.
+client. Anteroom keeps one video per marketplace: the seller adds it in the
+photos at the top of that marketplace's form, the same way as a photo
+(`<marketplace>_specifics.videoId`), and limits come from `VIDEO_RULES` in
+`services/listing_videos.py`. Forms of marketplaces without video offer none.
+Each form's own photos are described in `services/marketplace_media.py`.
 
 | Marketplace | Video | Limits Anteroom applies | How it attaches |
 | --- | --- | --- | --- |

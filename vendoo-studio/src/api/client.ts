@@ -1,13 +1,16 @@
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
-import type { ListingVideo, ListingVideoLibrary } from "./listingVideos";
+import type { ListingVideo, ListingVideoLibrary, MarketplaceMediaRules } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
 import type { BulkDeleteResult, BulkDeleteRow } from "./bulkDelete";
 import type { LabelColor } from "../labelColors";
 import type { BulkMarketplaceAction, BulkMarketplacePerform, BulkMarketplacePreview, BulkMarketplaceResult } from "./bulkMarketplace";
 import { salesLedgerParams, type FinancialSave, type SalesLedgerFilters, type SalesLedgerPage, type SalesLedgerRow } from "./salesLedger";
 import type { OrderRecoveryRequest, OrderRecoveryResult } from "./orderRecovery";
-import type { Promotion, PromotionFloor, PromotionHistory, PromotionMarketplace, PromotionPreview, PromotionPreviewRequest, PromotionResult } from "./promotions";
+import type {
+  Promotion, PromotionActivity, PromotionAutomation, PromotionAutomationBody, PromotionAutomations, PromotionCoverage, PromotionFloor,
+  PromotionHistory, PromotionMarketplace, PromotionPreview, PromotionPreviewRequest, PromotionResult,
+} from "./promotions";
 import type {
   SendPreview,
   BackupSnapshot,
@@ -218,6 +221,9 @@ async function followAssistant(
 }
 
 export const api = {
+  marketplaceMedia: {
+    rules: () => request<MarketplaceMediaRules>("/marketplace-media"),
+  },
   listingVideos: {
     list: (convId: string) => request<ListingVideoLibrary>(`/conversations/${convId}/videos`),
     delete: (convId: string, videoId: string) => request<OkResponse>(`/conversations/${convId}/videos/${videoId}`, { method: "DELETE" }),
@@ -589,6 +595,22 @@ export const api = {
     check: (id: string) => request<Promotion>(`/promotions/${encodeURIComponent(id)}/check`, { method: "POST" }),
     markChecked: (id: string) =>
       request<Promotion>(`/promotions/${encodeURIComponent(id)}/checked`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+    saveFloors: (marketplace: PromotionMarketplace, floors: Record<string, string>) =>
+      request<Record<string, PromotionFloor>>("/promotions/floors", { method: "PUT", body: JSON.stringify({ marketplace, floors }) }),
+  },
+  promotionAutomations: {
+    list: () => request<PromotionAutomations>("/promotion-automations"),
+    create: (body: PromotionAutomationBody) =>
+      request<PromotionAutomation>("/promotion-automations", { method: "POST", body: JSON.stringify(body) }),
+    update: (id: string, body: PromotionAutomationBody) =>
+      request<PromotionAutomation>(`/promotion-automations/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }),
+    remove: (id: string) => request<{ ok: boolean }>(`/promotion-automations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    enable: (id: string) =>
+      request<PromotionAutomation>(`/promotion-automations/${encodeURIComponent(id)}/enable`, { method: "POST", body: JSON.stringify({ confirm: true }) }),
+    pause: (id: string) => request<{ ok: boolean }>(`/promotion-automations/${encodeURIComponent(id)}/pause`, { method: "POST" }),
+    pauseAll: () => request<{ paused: number }>("/promotion-automations/pause", { method: "POST" }),
+    coverage: (id: string) => request<PromotionCoverage>(`/promotion-automations/${encodeURIComponent(id)}/coverage`),
+    activity: (id: string) => request<PromotionActivity>(`/promotion-automations/${encodeURIComponent(id)}/activity`),
   },
   bulkDelete: {
     preview: (conversationIds: string[]) =>
@@ -706,7 +728,9 @@ export const api = {
       request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
     activity: (id: string) => request<ConversationActivity>(`/conversations/${id}/activity`),
     messages: (id: string) => request<Message[]>(`/conversations/${id}/messages`),
-    photos: (id: string) => request<Photo[]>(`/conversations/${id}/photos`),
+    /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
+    photos: (id: string, marketplace?: string) =>
+      request<Photo[]>(`/conversations/${id}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`),
     deletePhoto: (convId: string, photoId: string) =>
       request<OkResponse>(`/conversations/${convId}/photos/${photoId}`, { method: "DELETE" }),
     /** Rotate the stored image clockwise by `degrees` (90, -90 or 180). */
@@ -749,9 +773,10 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(orderedIds),
       }),
-    uploadPhotos: (convId: string, files: File[]): Promise<PhotoUploadResult> => {
+    uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => {
       const form = new FormData();
       files.forEach((f) => form.append("files", f));
+      if (marketplace) form.append("marketplace", marketplace);
       return fetch(`${BASE}/conversations/${convId}/photos`, { method: "POST", body: form }).then(
         async (r) => {
           const data = await r.json();

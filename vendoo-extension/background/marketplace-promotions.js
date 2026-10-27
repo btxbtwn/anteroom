@@ -13,6 +13,7 @@
 // that exists is answered from, never sent again.
 const PROMOTION_DEADLINE_MS = 60000;
 const POSHMARK_SHARE_GAP_MS = 4000;
+const POSHMARK_SHARE_GAP_MAX_MS = 30000;
 const POSHMARK_SHARE_JITTER_MS = 3000;
 const POSHMARK_LAST_SHARE_KEY = 'poshmark_last_share_at';
 
@@ -92,10 +93,12 @@ async function sharePoshmark(payload, deadline) {
   const account = await poshmarkAccount();
   const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
   await poshmarkOwnPost(client, account, payload.listing_id);
-  // Space shares the way a person would, across batches and restarts.
+  // Space shares the way a person would, across batches and restarts. A
+  // scheduled round may ask for a slower pace, never a faster one.
+  const gap = Math.min(POSHMARK_SHARE_GAP_MAX_MS, Math.max(POSHMARK_SHARE_GAP_MS, Number(payload.gap_ms) || 0));
   const last = Number((await chrome.storage.local.get(POSHMARK_LAST_SHARE_KEY))[POSHMARK_LAST_SHARE_KEY]) || 0;
-  const wait = last + POSHMARK_SHARE_GAP_MS + Math.floor(Math.random() * POSHMARK_SHARE_JITTER_MS) - Date.now();
-  if (wait > 0) await marketplaceSleep(Math.min(wait, POSHMARK_SHARE_GAP_MS + POSHMARK_SHARE_JITTER_MS));
+  const wait = last + gap + Math.floor(Math.random() * POSHMARK_SHARE_JITTER_MS) - Date.now();
+  if (wait > 0) await marketplaceSleep(Math.min(wait, gap + POSHMARK_SHARE_JITTER_MS));
   await chrome.storage.local.set({ [POSHMARK_LAST_SHARE_KEY]: Date.now() });
   await client.call('PUT', `/vm-rest/users/self/shared_posts/${payload.listing_id}`, {}, { step: 'share', what: 'the share' });
   return { ok: true, state: 'done' };
@@ -127,8 +130,151 @@ async function offerPoshmark(payload, deadline) {
   return { ok: true, state: 'done', recipient_count: Number(post.like_count) || 0 };
 }
 
+// Mercari's and Depop's offers to likers. Their rules come from their help
+// pages; the signed-in web client's requests could not be read without a
+// capture (both sites refuse a plain fetch), so every entry below is null and
+// checks and offers refuse before any request is made. Fill each one from a
+// single capture of the seller's own browser (docs/vendoo-feature-parity.md,
+// gap 4):
+// - likers: the read behind the offer screen, giving the like count (and, on
+//   Mercari, the lowest price the item has had).
+// - offer: the request the "Offer to likers" / "Send offer" button sends.
+// Mercari (help article 347): at least 10% below the item's lowest price so
+// far, whole dollars, at least $1, to up to 50 recent likers, for 24 hours.
+// Depop (Send Offer help): to likers in the seller's country, one active offer
+// per buyer, not on listings with several sizes, shipping not included. Its
+// partner Selling API requires at least 5% off; the web client is assumed to
+// be no looser.
+const PENDING_OFFER_REQUESTS = {
+  // likers: { operationName, sha256Hash, variables: id => ({}), read: data => ({ like_count, lowest_price_cents }) }
+  // offer:  { operationName, sha256Hash, variables: (id, offerCents) => ({}), confirmed: data => boolean }
+  mercari: { likers: null, offer: null },
+  // likers: { path: product => string, read: body => ({ like_count }) }
+  // offer:  { method, path: product => string, body: (product, offerCents) => ({}), confirmed: body => boolean }
+  depop: { likers: null, offer: null },
+};
+const MERCARI_OFFER_MIN_PERCENT = 10;
+const MERCARI_OFFER_MAX_LIKERS = 50;
+const DEPOP_OFFER_MIN_PERCENT = 5;
+
+function pendingOfferRequests(marketplace) {
+  const requests = PENDING_OFFER_REQUESTS[marketplace];
+  if (!requests?.likers || !requests?.offer) {
+    throw marketplaceError(`Anteroom cannot send ${marketplaceLabel(marketplace)} offers yet: its offer request still needs to be read from the signed-in site.`,
+      { code: 'not_captured' });
+  }
+  return requests;
+}
+
+// At or below the discounted price: whole dollars on Mercari, cents on Depop.
+function wholeDollarOffer(priceCents, percent) {
+  return Math.floor(priceCents * (100 - percent) / 10000) * 100;
+}
+
+function centOffer(priceCents, percent) {
+  return Math.floor(priceCents * (100 - percent) / 100);
+}
+
+function offerFacts(state, percent, round) {
+  const minimum = Math.max(1, Math.ceil(100 - state.highest * 100 / state.price));
+  const offer = Number.isInteger(percent) ? round(state.price, percent) : 0;
+  return { ok: true, price_cents: state.price, like_count: state.likes, minimum_discount_percent: minimum, maximum_discount_percent: 99,
+    shipping_discounts: [], offer_price_cents: percent >= minimum && percent <= 99 && offer >= 100 && offer <= state.highest ? offer : null };
+}
+
+function checkedOffer(payload, wholeDollars) {
+  const offer = Number(payload.offer_price_cents);
+  const floor = Number(payload.floor_cents);
+  if (!Number.isInteger(offer) || offer < 100 || (wholeDollars && offer % 100) || !Number.isInteger(floor) || floor <= 0 || offer < floor) {
+    throw marketplaceError('This offer is below your floor or not a price the marketplace accepts. Review it again.');
+  }
+  return offer;
+}
+
+async function mercariOfferState(requests, id, deadline) {
+  const session = await mercariCurrentSession(deadline, true);
+  const data = await mercariRequest({ operationName: 'sellFetchItemsDetails', variables: { itemId: id }, query: MERCARI_ITEM_DETAILS_QUERY },
+    { deadline, retry: true });
+  const item = data?.item;
+  if (String(item?.itemId ?? '') !== id) throw marketplaceError('Mercari did not return this listing.', { code: 'schema_drift' });
+  if (String(item.seller?.id) !== String(session.user.userId)) throw marketplaceError('This Mercari listing belongs to another account.');
+  if (item.status !== 'on_sale') throw marketplaceError('This Mercari listing has sold or is not on sale.');
+  const price = Number(item.price);
+  const likers = requests.likers.read(await mercariRequest({ operationName: requests.likers.operationName,
+    variables: requests.likers.variables(id), extensions: { persistedQuery: { version: 1, sha256Hash: requests.likers.sha256Hash } } },
+  { deadline, retry: true }));
+  const lowest = Number(likers?.lowest_price_cents) || price;
+  if (!(price > 0) || !(lowest > 0)) throw marketplaceError('Mercari did not return this listing’s price.', { code: 'schema_drift' });
+  return { price, likes: Number(likers?.like_count) || 0, highest: wholeDollarOffer(Math.min(price, lowest), MERCARI_OFFER_MIN_PERCENT) };
+}
+
+async function checkMercariPromotion(payload, deadline) {
+  const requests = pendingOfferRequests('mercari');
+  const state = await mercariOfferState(requests, payload.listing_id, deadline);
+  return offerFacts(state, Number(payload.discount_percent), wholeDollarOffer);
+}
+
+async function offerMercari(payload, deadline) {
+  const offer = checkedOffer(payload, true);
+  const requests = pendingOfferRequests('mercari');
+  const state = await mercariOfferState(requests, payload.listing_id, deadline);
+  if (state.price !== Number(payload.price_cents)) throw marketplaceError('The Mercari price changed since your review. Review the offer again.');
+  if (!(state.likes > 0)) throw marketplaceError('This Mercari listing has no likers to send an offer to.');
+  if (offer > state.highest) throw marketplaceError('Mercari needs offers to likers at least 10% below the lowest price this item has had. Review the offer again.');
+  const data = await mercariRequest({ operationName: requests.offer.operationName, variables: requests.offer.variables(payload.listing_id, offer),
+    extensions: { persistedQuery: { version: 1, sha256Hash: requests.offer.sha256Hash } } }, { deadline });
+  if (!requests.offer.confirmed(data)) {
+    throw marketplaceError('Mercari did not confirm the offer.', { code: 'uncertain', rejected: false });
+  }
+  return { ok: true, state: 'done', recipient_count: Math.min(state.likes, MERCARI_OFFER_MAX_LIKERS) };
+}
+
+async function depopOfferCall(method, url, deadline, step, body) {
+  const { data } = await marketplaceFetch(url.startsWith('https://') ? url : `${DEPOP_WEBAPI}${url}`, { marketplace: 'depop', step, method,
+    credentials: 'omit', deadline, headers: { Accept: 'application/json', Authorization: await depopBearer(),
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  return data;
+}
+
+async function depopOfferState(requests, slug, deadline) {
+  const me = await depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account');
+  const product = await depopOfferCall('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, deadline, 'read');
+  if (String(product?.slug ?? '') !== slug) throw marketplaceError('Depop did not return this listing.', { code: 'schema_drift' });
+  const owner = product.user_id ?? product.seller?.id ?? product.user?.id;
+  if (owner == null || String(owner) !== String(me?.id)) throw marketplaceError('This Depop listing belongs to another account.');
+  if (product.status !== 'STATUS_ONSALE' || product.sold === true) throw marketplaceError('This Depop listing has sold or is not on sale.');
+  if (depopImportVariants(product).length > 1) throw marketplaceError('Depop does not send offers on listings with several sizes.');
+  const currency = String(product.price_currency ?? product.pricing?.currency_name ?? product.currency ?? '').toUpperCase();
+  const price = Math.round((depopProductPrice(product) || 0) * 100);
+  if (currency !== 'USD' || !(price > 0)) throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.', { code: 'schema_drift' });
+  const likers = requests.likers.read(await depopOfferCall('GET', requests.likers.path(product), deadline, 'likers'));
+  return { product, price, likes: Number(likers?.like_count) || 0, highest: centOffer(price, DEPOP_OFFER_MIN_PERCENT) };
+}
+
+async function checkDepopPromotion(payload, deadline) {
+  const requests = pendingOfferRequests('depop');
+  const state = await depopOfferState(requests, payload.listing_id, deadline);
+  return offerFacts(state, Number(payload.discount_percent), centOffer);
+}
+
+async function offerDepop(payload, deadline) {
+  const offer = checkedOffer(payload, false);
+  const requests = pendingOfferRequests('depop');
+  const state = await depopOfferState(requests, payload.listing_id, deadline);
+  if (state.price !== Number(payload.price_cents)) throw marketplaceError('The Depop price changed since your review. Review the offer again.');
+  if (!(state.likes > 0)) throw marketplaceError('This Depop listing has no likers to send an offer to.');
+  if (offer > state.highest) throw marketplaceError('Depop needs offers at least 5% below the price. Review the offer again.');
+  const body = await depopOfferCall(requests.offer.method, requests.offer.path(state.product), deadline, 'offer',
+    requests.offer.body(state.product, offer));
+  if (!requests.offer.confirmed(body)) throw marketplaceError('Depop did not confirm the offer.', { code: 'uncertain', rejected: false });
+  return { ok: true, state: 'done', recipient_count: state.likes };
+}
+
 const MARKETPLACE_PROMOTIONS = {
   poshmark: { id: /^[a-f0-9]{24}$/, check: checkPoshmarkPromotion, share: sharePoshmark, offer: offerPoshmark },
+  mercari: { id: /^m\d{6,20}$/, actions: ['offer'], check: checkMercariPromotion, offer: offerMercari },
+  depop: { id: /^[a-z0-9][a-z0-9-]{2,120}$/, actions: ['offer'], check: checkDepopPromotion, offer: offerDepop },
 };
 
 function promotionRefusal(error) {
@@ -143,7 +289,7 @@ function promotionRefusal(error) {
 
 async function checkMarketplacePromotion(payload) {
   const entry = MARKETPLACE_PROMOTIONS[payload?.marketplace];
-  if (!entry || !['share', 'offer'].includes(payload.action) || !entry.id.test(String(payload.listing_id || ''))) {
+  if (!entry || !(entry.actions || ['share', 'offer']).includes(payload.action) || !entry.id.test(String(payload.listing_id || ''))) {
     return marketplaceFailure(marketplaceError('Name a marketplace listing and an action to check.'), true);
   }
   try { return await entry.check(payload, Date.now() + PROMOTION_DEADLINE_MS); }
@@ -152,7 +298,7 @@ async function checkMarketplacePromotion(payload) {
 
 async function runMarketplacePromotion(payload) {
   const entry = MARKETPLACE_PROMOTIONS[payload?.marketplace];
-  if (!entry || !['share', 'offer'].includes(payload.action) || payload.confirm !== true
+  if (!entry || !(entry.actions || ['share', 'offer']).includes(payload.action) || payload.confirm !== true
       || !entry.id.test(String(payload.listing_id || '')) || !/^[a-z0-9-]{6,64}$/i.test(String(payload.action_id || ''))) {
     return marketplaceFailure(marketplaceError('Confirm a share or offer on a named marketplace listing.'), true);
   }

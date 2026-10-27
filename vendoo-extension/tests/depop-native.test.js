@@ -737,7 +737,7 @@ test('a locked Depop price wins and nine photos stay within eight', () => {
   }), 23);
   assert.equal(call(c, 'depopPrice', { price: 29.99, depop_specifics: { price: 23 } }), 29.99);
   const photos = Array.from({ length: 9 }, (_, index) => ({ id: String(index + 1) }));
-  const chosen = call(c, 'depopChosenPhotos', photos, {});
+  const chosen = call(c, 'depopChosenPhotos', photos);
   assert.equal(chosen.photos.length, 8);
   assert.equal(chosen.omitted, 1);
   assert.deepEqual(call(c, 'depopPictureIds', Array.from({ length: 9 }, (_, index) => index + 1)), [1, 2, 3, 4, 5, 6, 7, 8]);

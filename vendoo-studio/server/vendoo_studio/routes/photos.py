@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -11,33 +11,47 @@ from vendoo_studio.database import get_db
 from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.routes.conversations import _photo_response
-from vendoo_studio.services import photo_edits
+from vendoo_studio.services import marketplace_media, photo_edits
 from vendoo_studio.services.photo_edits import BackgroundRemovalError, PhotoEdits
 from vendoo_studio.services.photos import (
     THUMBNAIL_MIME,
     THUMBNAIL_SIZES,
     get_or_create_thumbnail,
-    photo_url,
     process_upload,
 )
 
 router = APIRouter(tags=["photos"])
 
 
+@router.get("/api/marketplace-media")
+def marketplace_media_rules():
+    """Each marketplace's photo limit and video rules, for its form's photos."""
+    return marketplace_media.rules()
+
+
 @router.post("/api/conversations/{conv_id}/photos")
 async def upload_photos(
     conv_id: str,
     files: list[UploadFile] = File(...),
+    marketplace: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
+    """Add item photos, or with ``marketplace`` photos only that marketplace's form sends."""
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
 
-    existing = repo.get_photos(conv_id)
-    if len(existing) + len(files) > 20:
-        raise HTTPException(400, "Maximum 20 photos per listing")
+    if marketplace is None:
+        if len(repo.get_photos(conv_id)) + len(files) > 20:
+            raise HTTPException(400, "Maximum 20 photos per listing")
+    elif marketplace not in marketplace_media.PHOTO_LIMITS:
+        raise HTTPException(400, "Unknown marketplace")
+    else:
+        limit = marketplace_media.PHOTO_LIMITS[marketplace]
+        own = [photo for photo in repo.get_all_photos(conv_id) if photo.marketplace == marketplace]
+        if len(own) + len(files) > limit:
+            raise HTTPException(400, f"Add at most {limit} photos on this form")
 
     results = []
     failures: list[str] = []
@@ -58,6 +72,7 @@ async def upload_photos(
                 checksum=meta["checksum"],
                 width=meta["width"],
                 height=meta["height"],
+                marketplace=marketplace,
             )
         except Exception:
             filepath = Path(PHOTOS_DIR) / meta["stored_filename"]
@@ -66,18 +81,7 @@ async def upload_photos(
             failures.append(f"{f.filename or 'file'}: Failed to persist photo record")
             continue
 
-        results.append({
-            "id": photo.id,
-            "conversation_id": photo.conversation_id,
-            "original_filename": photo.original_filename,
-            "mime_type": photo.mime_type,
-            "size_bytes": photo.size_bytes,
-            "display_order": photo.display_order,
-            "width": photo.width,
-            "height": photo.height,
-            "created_at": photo.created_at.isoformat() if photo.created_at else "",
-            "url": photo_url(photo.id, photo.checksum),
-        })
+        results.append(_photo_response(photo))
 
     if failures and not results:
         raise HTTPException(400, failures[0] if len(failures) == 1 else "Some photos could not be uploaded: " + "; ".join(failures))
@@ -106,7 +110,7 @@ class RotateRequest(BaseModel):
 
 
 def _photo(repo: ConversationRepo, conv_id: str, photo_id: str):
-    photo = next((p for p in repo.get_photos(conv_id) if p.id == photo_id), None)
+    photo = next((p for p in repo.get_all_photos(conv_id) if p.id == photo_id), None)
     if not photo:
         raise HTTPException(404, "Photo not found")
     return photo
