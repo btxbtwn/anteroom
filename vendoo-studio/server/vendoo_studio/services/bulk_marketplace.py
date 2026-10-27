@@ -7,8 +7,8 @@ token, and must still match the item as it is now. Nothing is stored to run
 later: closing the review stops the batch, and a failed item is never retried
 on its own. List never takes a live listing down; that needs Relist.
 
-Update writes the saved listing onto listings already live, on the marketplaces
-that support it, through the same path as the item's own Update. It never lists
+Update writes the saved listing onto listings already live, on the named
+marketplaces, through the same path as the item's own Update. It never lists
 or delists anything. Mark as not listed only changes what Anteroom records: the
 marketplace is not contacted and a listing still up there stays up.
 """
@@ -33,10 +33,6 @@ Action = Literal["list", "delist", "relist", "update", "not_listed"]
 Name = Literal["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop",
          "sellwild": "Sellwild", "vinted": "Vinted"}
-
-# Live listings Anteroom can update in place (``native_marketplaces._start``).
-UPDATABLE = ("ebay", "etsy", "poshmark", "depop")
-
 _running = False
 
 
@@ -70,8 +66,6 @@ def _target_reason(action: str, marketplace: str, entry: dict, record: dict) -> 
         return f"Check the last {name} action first; Anteroom has not confirmed it."
     live = bool(entry.get("listing_id")) and entry.get("state") != "deleted"
     if action == "update":
-        if marketplace not in UPDATABLE:
-            return f"Anteroom cannot update a live {name} listing yet."
         if not live or entry.get("state") != "live":
             return f"Not listed on {name}."
         return None

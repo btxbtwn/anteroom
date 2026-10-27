@@ -17,6 +17,9 @@ const MERCARI_OPERATIONS = {
   editDraftItemMutation: 'ffa6c1877d5e39fdc8a6dbc0b875cf3612c3733282ace58d2cb08430a7bd6506',
   draftItemQuery: 'b3ba0939427d2b9bdc1d81375ac69db21f9366ee42142bd70e209ca3c65950c7',
   listDraftItemMutation: '4278f248431b9448e423c8466457e2d4b819158cce67c38084d060b211e225a3',
+  // The live-item edit of /sell/edit/[itemId] (build r-v3.104.70), hashed the
+  // way the client hashes the drafts' operations above.
+  editListing: '53785e33b5b6ddeaedd8a31b9cfdccc0b00cd6e571810e369c87e5c74ddf591d',
 };
 const MERCARI_MAX_PHOTOS = 12;
 const MERCARI_PHOTO_EDGE = 1200;
@@ -511,6 +514,7 @@ function mercariFailure(operationName, errors, write) {
     return marketplaceError('Mercari could not reach its own service.', { code: write ? 'uncertain' : 'network', rejected: !write, marketplace_message: own });
   }
   const label = { addDraftItemMutation: 'the draft', editDraftItemMutation: 'the draft update', listDraftItemMutation: 'the listing',
+    editListing: 'the update',
     uploadDraftItemImageMutation: 'a photo', UpdateItemStatusMutation: 'the delete' }[operationName] || 'the request';
   return marketplaceError(`Mercari refused ${label}.`, { code: 'rejected', marketplace_message: own || 'Mercari returned no data.' });
 }
@@ -661,6 +665,7 @@ async function runMercariNative(msg, recovery = false) {
   let stage = 'prepare';
   try {
     if (payload.action === 'publish') return await publishMercariDraft(payload, storeReceipt, recovery);
+    if (payload.action === 'update') return await updateMercariItem(payload, recovery);
     if (payload.action !== 'save_draft') return null;
     let id = mercariDraftId(payload.draft_url);
     if (recovery) {
@@ -753,5 +758,211 @@ async function publishMercariDraft(payload, storeReceipt, recovery) {
   } catch (error) {
     const safe = stage === 'prepare' || (stage === 'publishing' && error.rejected === true);
     return marketplaceFailure(error, safe, { draft_url: payload.draft_url });
+  }
+}
+
+// Editing a listed item the way Mercari's /sell/edit/[itemId] page does
+// (build r-v3.104.70): it reads the item with sellFetchItemsDetails and sends
+// the whole form as one editListing. The form drops empty values, so a field
+// left out is cleared: every value starts from the live item and only what
+// this revision changes replaces it. photoIds are the item's own image URLs,
+// which keeps the photos already on the listing.
+const MERCARI_LIVE_ITEM_QUERY = `query sellFetchItemsDetails($itemId: String) {
+  item(id: $itemId) {
+    itemId: id
+    name
+    description
+    photos { imageUrl }
+    status
+    itemCondition { id }
+    shippingPayer { id }
+    price
+    itemSize { id }
+    brand { id }
+    itemCategory { id }
+    shippingClasses { id }
+    shippingPackageWeight { weight unit }
+    shippingPackageDimension { length width height unit }
+    seller { id zipCode }
+    isAutoPriceDrop
+    minPriceForAutoPriceDrop
+  }
+}`;
+const MERCARI_LIVE_READ_WAITS_MS = [0, 1500, 3000];
+const MERCARI_LIVE_LABELS = { name: 'title', description: 'description', price: 'price', categoryId: 'category',
+  conditionId: 'condition', sizeId: 'size', brandId: 'brand', isAutoPriceDrop: 'Smart Pricing', minPriceForAutoPriceDrop: 'Smart Pricing',
+  shippingPayerId: 'shipping', shippingClassIds: 'shipping', zipCode: 'ships-from ZIP', shippingPackageLength: 'package size',
+  shippingPackageWidth: 'package size', shippingPackageHeight: 'package size', shippingDimensionUnit: 'package size',
+  shippingPackageWeight: 'package weight', shippingWeightUnit: 'package weight' };
+
+async function readMercariItem(id, deadline) {
+  const data = await mercariRequest({ operationName: 'sellFetchItemsDetails', variables: { itemId: id }, query: MERCARI_LIVE_ITEM_QUERY },
+    { deadline, retry: true });
+  const item = data?.item;
+  if (String(item?.itemId ?? '') !== id) throw marketplaceError('Mercari did not return this listing.', { code: 'schema_drift' });
+  return item;
+}
+
+// The edit form's values for the item as Mercari has it now.
+function mercariLiveForm(item) {
+  const dimension = item.shippingPackageDimension || {};
+  const weight = item.shippingPackageWeight || {};
+  const brandId = Number(item.brand?.id);
+  return {
+    id: String(item.itemId),
+    photoIds: (item.photos || []).map(photo => String(photo?.imageUrl || '')).filter(Boolean),
+    name: item.name ?? '', description: item.description ?? '', price: Number(item.price) || 0,
+    categoryId: Number(item.itemCategory?.id) || 0, conditionId: Number(item.itemCondition?.id) || 0,
+    brandId: brandId > 0 ? brandId : null, sizeId: Number(item.itemSize?.id) || null,
+    zipCode: item.seller?.zipCode || null, shippingPayerId: Number(item.shippingPayer?.id) || null,
+    shippingClassIds: (item.shippingClasses || []).map(entry => Number(entry?.id)).filter(Number.isInteger),
+    shippingPackageLength: Number(dimension.length) || null, shippingPackageWidth: Number(dimension.width) || null,
+    shippingPackageHeight: Number(dimension.height) || null, shippingDimensionUnit: dimension.unit || null,
+    shippingPackageWeight: Number(weight.weight) || null, shippingWeightUnit: weight.unit || null,
+    isAutoPriceDrop: item.isAutoPriceDrop === true, minPriceForAutoPriceDrop: Number(item.minPriceForAutoPriceDrop) || 0,
+  };
+}
+
+// What this revision sets, in the same fields. Undefined leaves the live value;
+// a null brand clears it.
+function mercariRevisionForm(common) {
+  const shipping = common.shipping || {};
+  const dimensions = shipping.dimensions || {};
+  return {
+    name: common.name, description: common.description, price: common.price, categoryId: common.categoryId,
+    conditionId: common.conditionId, sizeId: common.sizeId,
+    brandId: Object.hasOwn(common, 'brandId') ? (mercariBrandPresent(common.brandId) ? Number(common.brandId) : null) : undefined,
+    isAutoPriceDrop: common.isAutoPriceDrop, minPriceForAutoPriceDrop: common.isAutoPriceDrop ? common.minPriceForAutoPriceDrop : undefined,
+    shippingPayerId: shipping.payerId, shippingClassIds: shipping.classIds ?? undefined, zipCode: shipping.zipCode,
+    ...(dimensions.length ? { shippingPackageLength: dimensions.length, shippingPackageWidth: dimensions.width,
+      shippingPackageHeight: dimensions.height, shippingDimensionUnit: 'INCH' } : {}),
+    ...(shipping.weight?.weight ? { shippingPackageWeight: shipping.weight.weight, shippingWeightUnit: 'OUNCE' } : {}),
+  };
+}
+
+function mercariSame(key, a, b) {
+  const empty = value => value == null || value === '' || value === 0 || value === false || (Array.isArray(value) && !value.length);
+  if (empty(a) && empty(b)) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    const left = (a || []).map(Number).sort(), right = (b || []).map(Number).sort();
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+  if (key === 'name' || key === 'description') return marketplaceText(a) === marketplaceText(b);
+  return String(a) === String(b) || (a !== '' && b !== '' && Number(a) === Number(b));
+}
+
+// The fields of ``wanted`` that differ from ``form``, by field.
+function mercariLiveChanges(form, wanted, skip = []) {
+  const changed = {};
+  for (const [key, value] of Object.entries(wanted)) {
+    if (value === undefined || skip.includes(key)) continue;
+    if (!mercariSame(key, form[key], value)) changed[key] = value;
+  }
+  return changed;
+}
+
+// What Mercari holds differently from ``wanted``, as the seller names it.
+// Photos are counted: their URLs are Mercari's own and may change.
+function mercariLiveDifferences(form, wanted, photoCount = null) {
+  const skip = ['id', 'photoIds', 'shippingDimensionUnit', 'shippingWeightUnit', ...(wanted.isAutoPriceDrop ? [] : ['minPriceForAutoPriceDrop'])];
+  const labels = Object.keys(mercariLiveChanges(form, wanted, skip)).map(key => MERCARI_LIVE_LABELS[key] || key);
+  if (photoCount != null && form.photoIds.length !== photoCount) labels.push('photos');
+  return [...new Set(labels)];
+}
+
+// The edit form's own submit: empty values dropped (a zero category or
+// condition kept), and ship-on-your-own sent as class 0 with no units.
+function mercariEditInput(form, changed) {
+  const merged = { ...form, ...changed };
+  const soyo = merged.shippingClassIds?.[0] === 0;
+  const input = {};
+  for (const [key, value] of Object.entries({ ...merged, isShippingSoyo: soyo || !merged.shippingClassIds?.length })) {
+    if ((key === 'categoryId' || key === 'conditionId') && value === 0) input[key] = 0;
+    else if (value && !(Array.isArray(value) && !value.length)) input[key] = value;
+  }
+  if (soyo) {
+    input.shippingClassIds = [0];
+    delete input.shippingDimensionUnit;
+    delete input.shippingWeightUnit;
+  }
+  return input;
+}
+
+function mercariLiveMissing(listing, input, changed) {
+  const missing = [];
+  if (!input.name) missing.push({ field: 'name', needs: 'a title' });
+  else if (input.name.length > 80) missing.push({ field: 'name', needs: 'a title of 80 characters or fewer' });
+  if (!input.description) missing.push({ field: 'description', needs: 'a description' });
+  else if (input.description.length > 1000) missing.push({ field: 'description', needs: 'a description of 1000 characters or fewer' });
+  if (!(input.price >= 100 && input.price <= 200000)) missing.push({ field: 'price', needs: 'a price from $1 to $2,000' });
+  if (input.isAutoPriceDrop && !(input.minPriceForAutoPriceDrop > 0 && input.minPriceForAutoPriceDrop < input.price)) {
+    missing.push({ field: 'minPriceForAutoPriceDrop', needs: 'a whole-dollar Smart Pricing floor below the listing price' });
+  }
+  if (Object.hasOwn(changed, 'categoryId')) {
+    const category = mercariCategory(listing);
+    if (category?.parent) missing.push({ field: 'categoryId', needs: 'a more specific Mercari category' });
+    const size = mercariSize(listing, input.categoryId);
+    if (size.problem) missing.push({ field: 'sizeId', needs: size.problem });
+  }
+  return missing;
+}
+
+// Seller-confirmed only, sent at most once. A lost reply is answered by
+// reading the item, never by sending the edit again.
+async function updateMercariItem(payload, recovery) {
+  const id = String(payload.listing_id || '');
+  if (!/^m\d{6,}$/.test(id)) return marketplaceFailure(marketplaceError('A Mercari listing link is required before updating.'), true);
+  const listingUrl = `https://www.mercari.com/us/item/${id}/`;
+  let stage = 'prepare';
+  try {
+    if (!recovery && payload.confirm !== true) throw marketplaceError('Confirm updating the live Mercari listing.');
+    const listing = await mercariPreparedListing(payload.listing, payload.deadline);
+    const common = mercariCommon(listing);
+    applyMercariBrand(common, await mercariBrandSelection(payload.listing, payload.deadline));
+    const wanted = mercariRevisionForm(common);
+    const session = await mercariCurrentSession(payload.deadline);
+    const item = await readMercariItem(id, payload.deadline);
+    if (String(item.seller?.id ?? '') !== String(session.user.userId)) {
+      throw marketplaceError('This Mercari listing belongs to another account. Nothing was changed.');
+    }
+    const form = mercariLiveForm(item);
+    if (recovery) {
+      const left = mercariLiveDifferences(form, wanted);
+      if (!left.length) return { ok: true, state: 'published', listing_url: listingUrl };
+      return marketplaceFailure(marketplaceError(`Mercari has not confirmed the update (${left.join(', ')} still differ). Check the live listing.`,
+        { code: 'uncertain', rejected: false }), false);
+    }
+    if (item.status !== 'on_sale') {
+      throw marketplaceError(`This Mercari listing is not on sale${item.status ? ` (${item.status})` : ''}. Nothing was changed.`);
+    }
+    if (!form.photoIds.length) {
+      throw marketplaceError('Mercari did not return this listing\'s photos, so nothing was changed. Check the listing on Mercari.', { code: 'schema_drift' });
+    }
+    const changed = mercariLiveChanges(form, wanted);
+    if (!Object.keys(changed).length) return { ok: true, state: 'published', listing_url: listingUrl };
+    const input = mercariEditInput(form, changed);
+    const missing = mercariLiveMissing(listing, input, changed);
+    if (missing.length) throw marketplaceMissing('mercari', missing);
+    stage = 'writing';
+    await mercariRequest(mercariOperation('editListing', { input }), { deadline: payload.deadline });
+    stage = 'written';
+    // The reply only names the item. Fresh reads decide the outcome.
+    let differ = ['listing'];
+    for (const wait of MERCARI_LIVE_READ_WAITS_MS) {
+      if (wait) {
+        if (Date.now() + wait > payload.deadline - 2000) break;
+        await marketplaceSleep(wait);
+      }
+      differ = mercariLiveDifferences(mercariLiveForm(await readMercariItem(id, payload.deadline)), { ...form, ...changed }, form.photoIds.length);
+      if (!differ.length) break;
+    }
+    if (differ.length) {
+      throw marketplaceError(`Mercari did not keep this listing's ${differ.join(', ')}. Check the live listing.`,
+        { code: 'uncertain', rejected: false, marketplace_message: `read back differs: ${differ.join(', ')}` });
+    }
+    return { ok: true, state: 'published', listing_url: listingUrl };
+  } catch (error) {
+    const safe = !recovery && (stage === 'prepare' || (stage === 'writing' && error.rejected === true));
+    return marketplaceFailure(error, safe);
   }
 }

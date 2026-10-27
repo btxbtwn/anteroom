@@ -86,7 +86,7 @@ and Vinted only on UK and US Enterprise accounts
 | Main form plus per-marketplace forms, values carried over, **Update All** / **Reset** | [Vendoo form](https://help.vendoo.co/en/articles/6260272-how-to-list-the-vendoo-form), [Update All](https://help.vendoo.co/en/articles/9128864-how-do-the-update-all-and-reset-buttons-work) | **Have** | General form plus native marketplace sections: `services/native_form.py`, `services/form_schema.py`; per-marketplace prices follow the item price unless overridden (CHANGELOG 0.1.403) |
 | Native category and field coverage per marketplace | [Vendoo form](https://help.vendoo.co/en/articles/6260272-how-to-list-the-vendoo-form) | **Partial** | Native catalogs: `services/marketplace_schemas.py` (eBay/Etsy APIs), `services/chrome_catalog.py` (Poshmark/Depop). Remaining work per marketplace is in [direct-form-parity.md](direct-form-parity.md) |
 | Drafts | [Vendoo form](https://help.vendoo.co/en/articles/6260272-how-to-list-the-vendoo-form) | **Have** | Local drafts, plus private marketplace drafts on eBay, Mercari, Depop, Etsy and Poshmark: `routes/native_marketplaces.py` (`/{marketplace}/draft`) |
-| Edit a live listing | [Edit a listing](https://help.vendoo.co/en/articles/9299456-how-do-i-edit-a-listing-in-vendoo) | **Partial** | `/{marketplace}/update` for eBay, Etsy, Poshmark and Depop. Mercari, Vinted and Sellwild need delist and relist |
+| Edit a live listing | [Edit a listing](https://help.vendoo.co/en/articles/9299456-how-do-i-edit-a-listing-in-vendoo) | **Have** | `/{marketplace}/update` on all seven direct marketplaces, in place, keeping likes, views and listing age. Mercari (`editListing`), Vinted (item upload `PUT`) and Sellwild (`PUT /api/listings/{id}/edit`) since 0.1.432 keep the photos already on the listing and read it back (unit-tested; real-account verification pending); see `docs/direct-form-parity.md` |
 | Delist / relist one item | [Delist & Relist](https://help.vendoo.co/en/articles/6260258-vendoo-s-bulk-delist-relist-feature) | **Have** | `routes/marketplace_listings.py` (`/delist`), List from `routes/native_marketplaces.py`; covers items Vendoo listed through `vendooListingUrls`. Not Facebook (`marketplace_delist.MANUAL_DELIST`), which the seller deletes on Facebook |
 | Multi-quantity | [Multi-quantity sales](https://help.vendoo.co/en/articles/6626694-how-to-handle-sold-multi-quantity-items) | **Have** | Quantity on every form, Poshmark per-size quantities and SKUs (0.1.408), partial-sale handling `services/sale_inventory.py` |
 | Multi-variation | [Variations](https://help.vendoo.co/en/articles/6260275-how-do-i-handle-multi-variation-listings-in-vendoo) | **N/A** | Vendoo does not support it either. Anteroom has Poshmark size inventory; eBay variations are open in direct-form-parity.md |
@@ -108,10 +108,10 @@ Vendoo: up to 240 items, from the inventory page
 
 | Vendoo bulk action | Anteroom | Evidence |
 | --- | --- | --- |
-| Bulk Edit: title, description, SKU, price, brand, condition, color, tags, category, size; **Save and relist** ([Bulk edit](https://help.vendoo.co/en/articles/10438710-bulk-edit-edit-your-listings-in-bulk)) | **Have** | `routes/bulk_edit.py`, `services/bulk_edit.py`: title, description, brand, size, SKU, price, cost, quantity, condition, colors, tags, labels and the shared, eBay and Depop categories (verified leaves) for up to 300 items. Save and relist is two reviewed steps: bulk edit, then **Update** in the bulk marketplace dialog (`services/bulk_marketplace.py`, eBay, Etsy, Poshmark and Depop) |
+| Bulk Edit: title, description, SKU, price, brand, condition, color, tags, category, size; **Save and relist** ([Bulk edit](https://help.vendoo.co/en/articles/10438710-bulk-edit-edit-your-listings-in-bulk)) | **Have** | `routes/bulk_edit.py`, `services/bulk_edit.py`: title, description, brand, size, SKU, price, cost, quantity, condition, colors, tags, labels and the shared, eBay and Depop categories (verified leaves) for up to 300 items. Save and relist is two reviewed steps: bulk edit, then **Update** in the bulk marketplace dialog (`services/bulk_marketplace.py`, all seven direct marketplaces) |
 | Bulk Edit Labels | **Have** | `services/bulk_edit.py` `labels_mode` add / remove / replace |
 | Bulk Copy | **Have** | **Select → Copy items**, up to 300 (`components/sidebar/BulkSelection.tsx`) |
-| Bulk List, Bulk Delist, Bulk Delist & Relist, Bulk Update | **Have** | `routes/bulk_marketplace.py` (`/preview`, `/perform`), up to 100 items, one confirmation, named marketplaces. Update covers eBay, Etsy, Poshmark and Depop |
+| Bulk List, Bulk Delist, Bulk Delist & Relist, Bulk Update | **Have** | `routes/bulk_marketplace.py` (`/preview`, `/perform`), up to 100 items, one confirmation, named marketplaces. Update covers all seven direct marketplaces (Mercari, Vinted and Sellwild since 0.1.432) |
 | Bulk Delete (from Vendoo only) | **Have** | `routes/bulk_delete.py`, up to 300 items, reviewed and confirmed; refuses items still live on a marketplace and never delists |
 | Bulk Mark as Not Listed | **Have** | `not_listed` action in `services/bulk_marketplace.py`, local record only (`marketplace_delist.mark`) |
 | Completion sound | **N/A** | Anteroom shows per-item results in the dialog |
@@ -259,8 +259,7 @@ Most important first.
 10. *(Closed in 0.1.421: bulk condition, color, tags and category, and bulk
     Update on eBay, Etsy, Poshmark and Depop.)*
 11. **Smaller gaps:** label analytics, a
-    finder for similar items, live Update on Mercari, Vinted and Sellwild, and
-    bulk category for Etsy, Poshmark and Mercari (the item editor does not
+    finder for similar items, and bulk category for Etsy, Poshmark and Mercari (the item editor does not
     change those either).
 
 Before deleting the Send path, move the shared section builders out of the

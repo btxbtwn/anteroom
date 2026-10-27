@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.432 — 2026-10-27
+
+- **Update…** now works on live Mercari, Vinted and Sellwild listings, both on an item and in the bulk **Update** action. Anteroom edits the listing that is already up instead of making you delist and relist, so it keeps its likes, views, listing age and photos. It changes only what you edited, never lists a draft or creates a second listing, and reads the listing back afterwards to make sure the change stuck. Sellwild may hold an edited listing for review.
+
 ## 0.1.431 — 2026-10-27
 
 - Every marketplace form now shows its photos at the top: the photos that marketplace gets, in order, and how many it takes. Untick a photo, drag to reorder, or add photos for that marketplace only (a stock photo for eBay, a collage for Depop); **Reset to item photos** goes back. List, Save Draft and Update send that form's photos. Items you have not changed still send all their photos.

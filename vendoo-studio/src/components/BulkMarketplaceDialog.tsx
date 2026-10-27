@@ -15,7 +15,7 @@ const ACTIONS: { value: BulkMarketplaceAction; label: string; note: string }[] =
   { value: "list", label: "List", note: "Publishes each item’s saved listing. An item already live on a marketplace is skipped there; choose Relist for that." },
   { value: "delist", label: "Delist", note: "Removes each live listing from the marketplace; eBay ends it. A marketplace where the item sold is never touched." },
   { value: "relist", label: "Relist", note: "Takes each live listing down, then lists the saved listing again. If listing again fails, the item stays down and is reported." },
-  { value: "update", label: "Update", note: "Writes each item’s saved listing onto the listing already live on eBay, Etsy, Poshmark or Depop. Nothing is listed or taken down; a failed update leaves the live listing as it was." },
+  { value: "update", label: "Update", note: "Writes each item’s saved listing onto the listing already live, in place, so likes, views and listing age stay. Nothing is listed or taken down; a failed update leaves the live listing as it was." },
   { value: "not_listed", label: "Mark as not listed", note: "Anteroom forgets the marketplace listing for each item. The marketplace is not contacted: a listing still up there stays up." },
 ];
 const DONE: Record<BulkMarketplaceAction, string> = { list: "Listed", delist: "Delisted", relist: "Relisted", update: "Updated", not_listed: "Marked not listed" };
