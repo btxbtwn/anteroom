@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.417 — 2026-10-26
+
+- Anteroom now refuses an update whose signature is missing or damaged, so an update can no longer lose access to your saved sign-ins. Releases are ready to be signed with an Apple Developer ID certificate; once that is set up, updates stop asking for your Mac password.
+
 ## 0.1.416 — 2026-10-26
 
 - Items you listed directly on a marketplace no longer show **Unsent edits** just because Vendoo still has an older copy. The chip now means the live marketplace listings are behind: press **Update** under Marketplaces to clear it. Discard is hidden on those items, so it can no longer roll a regenerated listing back to Vendoo's version.

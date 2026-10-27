@@ -293,24 +293,49 @@ class PackagedUpdateTest(unittest.TestCase):
         packaged_updates._prepare_app_bundle(app)
         self.assertTrue(os.access(launcher, os.X_OK))
 
-    def test_verify_app_signature_accepts_adhoc_display(self):
-        app = Path(self.tmp.name) / "Anteroom.app"
-        app.mkdir()
+    def _fake_codesign(self, display: str, verify_code: int = 0, verify_err: str = ""):
+        calls = []
 
         def fake_run(args, capture_output=True, text=True):
-            self.assertEqual(args[:2], ["/usr/bin/codesign", "-dv"])
+            calls.append(args)
+            if args[:2] == ["/usr/bin/codesign", "-dv"]:
+                return type("Result", (), {"returncode": 0, "stdout": "", "stderr": display})()
+            self.assertEqual(args[:4], ["/usr/bin/codesign", "--verify", "--deep", "--strict"])
             return type(
-                "Result",
-                (),
-                {
-                    "returncode": 0,
-                    "stdout": "",
-                    "stderr": "Signature=adhoc\nIdentifier=local.listthis.studio\n",
-                },
+                "Result", (), {"returncode": verify_code, "stdout": "", "stderr": verify_err}
             )()
 
+        return fake_run, calls
+
+    def test_verify_app_signature_accepts_certificate_signature(self):
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+        fake_run, calls = self._fake_codesign(
+            "Identifier=local.listthis.studio\nAuthority=List This Studio Signing\n"
+        )
         with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
             packaged_updates._verify_app_signature(app)
+        self.assertEqual(len(calls), 2)
+
+    def test_verify_app_signature_rejects_adhoc(self):
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+        fake_run, _ = self._fake_codesign("Signature=adhoc\nIdentifier=local.listthis.studio\n")
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "certificate"):
+                packaged_updates._verify_app_signature(app)
+
+    def test_verify_app_signature_rejects_broken_seal(self):
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+        fake_run, _ = self._fake_codesign(
+            "Authority=List This Studio Signing\n",
+            verify_code=1,
+            verify_err=f"{app}: a sealed resource is missing or invalid",
+        )
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "damaged"):
+                packaged_updates._verify_app_signature(app)
 
     def test_verify_app_signature_rejects_unsigned(self):
         app = Path(self.tmp.name) / "Anteroom.app"
