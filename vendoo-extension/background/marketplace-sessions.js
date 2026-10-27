@@ -245,10 +245,28 @@ function recordedQuery(url) {
 
 // Writes are always kept. Reads are kept only in an offers recording and only
 // when the page fetched them, not documents, scripts or images.
-function recordedRequest(event, goal) {
+function recordedRequest(event, goal, marketplace) {
   if (['HEAD', 'OPTIONS'].includes(event.request.method)) return false;
+  if (goal === 'offers' && !offerApiRequest(event.request.url, marketplace)) return false;
   if (event.request.method !== 'GET') return true;
   return goal === 'offers' && ['XHR', 'Fetch'].includes(event.type);
+}
+
+// An offers recording keeps only the marketplace's own API. Its pages send
+// hundreds of analytics and experiment calls that would fill the recording
+// before the offer is sent.
+const OFFER_API = {
+  mercari: { hosts: ['www.mercari.com'], prefix: '/v1/api' },
+  depop: { hosts: ['webapi.depop.com'], prefix: '/' },
+};
+const OFFER_API_NOISE = /\/(events|features\/experiments|performance|users\/me\/checkin|consent)\//;
+
+function offerApiRequest(rawUrl, marketplace) {
+  const api = OFFER_API[marketplace];
+  let url;
+  try { url = new URL(rawUrl); } catch { return false; }
+  return Boolean(api) && api.hosts.includes(url.hostname) && url.pathname.startsWith(api.prefix)
+    && !OFFER_API_NOISE.test(url.pathname);
 }
 
 function valueShape(value, depth = 0) {
@@ -348,7 +366,7 @@ async function handleMarketplaceRecord(msg) {
     const finished = new Promise(resolve => { finish = resolve; });
     listener = (source, method, event) => {
       if (source.tabId !== tab.id) return;
-      if (method === 'Network.requestWillBeSent' && entries.size < RECORD_MAX_REQUESTS && recordedRequest(event, goal)) {
+      if (method === 'Network.requestWillBeSent' && entries.size < RECORD_MAX_REQUESTS && recordedRequest(event, goal, marketplace)) {
         let target;
         try { target = new URL(event.request.url); } catch { return; }
         const entry = { method: event.request.method, url: recordedPath(target),

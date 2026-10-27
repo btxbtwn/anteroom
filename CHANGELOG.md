@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.439 — 2026-10-27
+## 0.1.440 — 2026-10-27
 
 - Offers to likers now work on Mercari, sent by you or by a rule you turn on. Anteroom asks Mercari whether the listing can take an offer and what range it allows, sends whole-dollar offers inside that range and never below your floor, sends each one once, and pauses the rule if Mercari's answer is lost, it limits requests, or you are signed out.
+
+## 0.1.439 — 2026-10-27
+
+- When Anteroom watches you send an offer by hand on Mercari or Depop, it now keeps only that site's own requests and skips its analytics, so a long session no longer fills up before the offer is sent.
 
 ## 0.1.438 — 2026-10-27
 
