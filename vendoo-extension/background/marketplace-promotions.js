@@ -148,7 +148,7 @@ async function offerPoshmark(payload, deadline) {
 // Depop (Send Offer help): to likers in the seller's country, one active offer
 // per buyer, not on listings with several sizes, shipping not included. Its
 // partner Selling API requires at least 5% off; the web client is assumed to
-// be no looser. Depop's Selling Hub (read 2026-10-26):
+// be no looser. Depop's Selling Hub (read 2026-10-27):
 // The /offers/me/products/ list counts active offers, not eligible likers.
 // Read eligibility from the send-all preview for this product instead.
 // - preview: GET /presentation/api/v1/offers/products/{id}/offers/send-all/
@@ -156,7 +156,7 @@ async function offerPoshmark(payload, deadline) {
 //   others, and sellers_lowest_offer_value, the lowest offer Depop allows.
 // - bulk offer: POST /presentation/api/v1/offers/products/{id}/offers/send-all/jobs/
 //   with { offer_currency, offer_value }, then GET jobs/{job_id}/ until
-//   SUCCESS or FAILURE. Verified in public client modules 846394 and 19dd43ms3it4l.
+//   SUCCESS or FAILURE. Verified in public client module 846394 and chunk 19dd43ms3it4l.
 //   The captured /products/{id}/offers/ POST was a single-buyer offer, as the
 //   seller confirmed. Never use it for bulk sends or count preview recipients
 //   as delivered offers. Do not enable Depop's own auto-send setting.
@@ -276,10 +276,10 @@ async function offerMercari(payload, deadline) {
 }
 
 // All bulk-offer replies are JSON, including the job ID and status.
-async function depopOfferCall(method, path, deadline, step, { body, expect } = {}) {
+async function depopOfferCall(method, path, deadline, step, { body } = {}) {
   return await marketplaceFetch(`${DEPOP_WEBAPI}${path}`, { marketplace: 'depop', step, method, credentials: 'omit', deadline,
     headers: { Accept: 'application/json', Authorization: await depopBearer(), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(expect ? { expect } : {}) });
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 
 // Depop's money strings, such as "42.50".

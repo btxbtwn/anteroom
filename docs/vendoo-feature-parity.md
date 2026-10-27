@@ -32,7 +32,7 @@ Vendoo's. The losses on cancelling today are:
    the seller deletes each one on Facebook.
 3. **Offers to likers are unverified.** Poshmark sharing and offers to
    likers run on schedules and rules since 0.1.430, Mercari offers since
-   0.1.440 and Depop offers since 0.1.442, all on one engine. None is
+   0.1.440 and Depop offers since 0.1.443, all on one engine. None is
    verified on a real account yet. Depop has no free refresh to copy.
 4. **Photo editing beyond rotate**: background removal, crop and adjustments.
 
@@ -163,7 +163,7 @@ off integrated marketplaces
 
 | Vendoo feature | Source | Anteroom | Evidence |
 | --- | --- | --- | --- |
-| Offers to likers/watchers, manual bulk and automatic rules (price bands, exclusions, activity log) | [Send offers](https://help.vendoo.co/en/articles/10043166-send-offers-to-likers-automatically-or-manually-in-bulk) | **Partial** | eBay: `routes/ebay_offers.py` (preview, send, rules, pause, attempts), `services/ebay_offers.py`. Poshmark, manual bulk and automatic rules (listings covered, discount, required floor per listing, exclusions, minimum days listed and likes, new likers only, shipping discount, activity log, pause): `services/listing_promotions.py`, `services/promotion_automations.py`, `routes/promotion_automations.py`, Automations → Sharing and offers to likers (0.1.430). Mercari (0.1.440): same engine, from its recorded offer requests. Depop (0.1.442): same engine, on the Selling Hub's own requests. Nothing is verified on a real account yet. Grailed and Vestiaire are N/A |
+| Offers to likers/watchers, manual bulk and automatic rules (price bands, exclusions, activity log) | [Send offers](https://help.vendoo.co/en/articles/10043166-send-offers-to-likers-automatically-or-manually-in-bulk) | **Partial** | eBay: `routes/ebay_offers.py` (preview, send, rules, pause, attempts), `services/ebay_offers.py`. Poshmark, manual bulk and automatic rules (listings covered, discount, required floor per listing, exclusions, minimum days listed and likes, new likers only, shipping discount, activity log, pause): `services/listing_promotions.py`, `services/promotion_automations.py`, `routes/promotion_automations.py`, Automations → Sharing and offers to likers (0.1.430). Mercari (0.1.440): same engine, from its recorded offer requests. Depop (0.1.443): same engine, using the Selling Hub's bulk jobs. Nothing is verified on a real account yet. Grailed and Vestiaire are N/A |
 | Poshmark sharing (scheduled rounds, order, speed, up to 6,000/day, log) | [Marketplace Sharing](https://help.vendoo.co/en/articles/11003940-marketplace-sharing-tool-for-poshmark-depop-and-grailed) | **Partial** | Share one or selected listings to followers, spaced 4–30 seconds apart, stopping at Poshmark's first limit: `services/listing_promotions.py`, `background/marketplace-promotions.js`. Scheduled rounds (up to 6 times a day, all or chosen listings, exclusions, minimum days listed, newest/oldest/random order, slow/normal/fast, daily cap up to 6,000 counted across all shares, activity log, pause), off by default: `services/promotion_automations.py` (0.1.430). Not yet verified on a real account |
 | Depop refresh | same | **Missing** | Depop itself has no free refresh or bump (Boost is paid); see `docs/direct-form-parity.md` |
 | Grailed bump | same | **N/A** | Not a seller marketplace |

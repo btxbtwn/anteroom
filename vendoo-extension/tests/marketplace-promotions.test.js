@@ -381,6 +381,34 @@ test('a Depop bulk job with a failed, lost, malformed or timed out status remain
   assert.equal(timed.requests.filter(r => r.key === DEPOP_SEND).length, 1);
 });
 
+test('the Depop worker completes the bulk job over HTTP and answers duplicates from its journal', async t => {
+  const { createServer } = require('node:http');
+  const run = offerWorker('depop', {});
+  const answers = depopAnswers();
+  const seen = [];
+  const statuses = ['QUEUED', 'PROCESSING', 'SUCCESS'];
+  const server = createServer(async (req, res) => {
+    let text = '';
+    for await (const part of req) text += part;
+    const key = `${req.method} webapi.depop.com${req.url}`;
+    seen.push({ key, body: text ? JSON.parse(text) : null });
+    const [status, body] = key === DEPOP_JOB ? [200, { status: statuses.shift() }] : answers[key] || [404, {}];
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  run.c.fetch = (url, options) => fetch(`${origin}${new URL(url).pathname}`, options);
+  await depopOffer(run);
+  const count = seen.length;
+  await depopOffer(run);
+  assert.deepEqual(run.results, [{ ok: true, state: 'done' }, { ok: true, state: 'done' }]);
+  assert.equal(seen.length, count);
+  assert.deepEqual(seen.filter(r => r.key.startsWith('POST')), [{ key: DEPOP_SEND, body: { offer_currency: 'USD', offer_value: '42.50' } }]);
+  assert.equal(seen.filter(r => r.key === DEPOP_JOB).length, 3);
+});
+
 test('Depop never offers below the floor or its lowest offer, above 5% off, on a changed price, several sizes or someone else’s item', async () => {
   const cases = [
     [{}, { offer_price_cents: 4250, floor_cents: 4500 }],
