@@ -384,28 +384,13 @@ export function ListingEditor({
   return (
     <div className="listing-editor" ref={editorRef}>
       <div className="flex shrink-0 flex-col gap-2 px-3 pt-2.5">
-        {/* The tabs, actions and browser toggle belong to this listing, so they
-            sit together in its own header. Desktop: the tab and the titlebar
-            breadcrumb already name the listing, so only mobile, which has no
-            titlebar, shows the title here. */}
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <h2
-            className="pywebview-drag-region hidden min-w-0 flex-1 basis-full truncate font-semibold text-[15px] text-foreground max-[900px]:block"
-            title={listingTitle}
-          >
-            {listingTitle}
-          </h2>
-          <ListingReviewActions
-            convId={convId}
-            onCleared={onCleared}
-          >
-            <ListingBrowserButton
-              convId={convId}
-              browserOpen={browserOpen}
-              onOpenBrowser={onOpenBrowser}
-            />
-          </ListingReviewActions>
-        </div>
+        {/* Desktop's tab and titlebar already name the listing. */}
+        <h2
+          className="pywebview-drag-region hidden min-w-0 truncate font-semibold text-[15px] text-foreground max-[900px]:block"
+          title={listingTitle}
+        >
+          {listingTitle}
+        </h2>
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
           <Button variant="ghost-muted" size="xs" disabled={!data?.current_revision_id} onClick={() => { setFieldTarget(null); setHistoryOpen(true); }}>
             <HistoryIcon />
@@ -448,6 +433,16 @@ export function ListingEditor({
             </>
           ) : null}
           {data?.can_send && !generating && <Badge variant="success">Ready</Badge>}
+          <ListingReviewActions
+            convId={convId}
+            onCleared={onCleared}
+          >
+            <ListingBrowserButton
+              convId={convId}
+              browserOpen={browserOpen}
+              onOpenBrowser={onOpenBrowser}
+            />
+          </ListingReviewActions>
         </div>
       </div>
 

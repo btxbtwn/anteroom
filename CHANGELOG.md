@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.444 — 2026-10-27
+
+- Regenerate and the three-dot menu now sit beside History, Sync, and Ready in a single, tidier listing header.
+- Listing forms and the left sidebar open wider by default, with a narrower chat panel. You can still drag the dividers to suit your screen.
+
 ## 0.1.443 — 2026-10-27
 
 - Removed the “Unsent edits” tag from the listing header and the “unsent” tag from sidebar listings.
