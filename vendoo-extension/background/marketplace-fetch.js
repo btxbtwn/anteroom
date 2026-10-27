@@ -103,6 +103,19 @@ function marketplaceText(value) {
   return String(value ?? '').replace(/\r\n?/g, '\n').replace(/[ \t ]+/g, ' ').replace(/ *\n */g, '\n').trim();
 }
 
+// The marketplace's own title, description, or brand when the seller set one.
+// A stored empty string stays empty. A missing key still uses General.
+function marketplaceCopy(listing, marketplace, field) {
+  const block = listing?.[`${marketplace}_specifics`];
+  if (block && typeof block === 'object' && !Array.isArray(block)) {
+    if (Object.hasOwn(block, field)) return block[field];
+    const want = field.toLowerCase();
+    const key = Object.keys(block).find(name => name.toLowerCase() === want);
+    if (key) return block[key];
+  }
+  return listing?.[field];
+}
+
 function marketplaceRetryAfter(response) {
   const raw = response.headers?.get?.('retry-after');
   if (!raw) return null;

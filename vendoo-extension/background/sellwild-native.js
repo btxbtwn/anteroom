@@ -67,7 +67,7 @@ function sellwildCreateBody(listing, choice, address, photoCount) {
   const vehicle = SELLWILD_VEHICLES.has(Number(choice.category_id));
   const specifics = listing.sellwild_specifics || {};
   // Sellwild's own client sends 0 for both outside vehicle categories.
-  return { title: String(listing.title || '').trim(), text: String(listing.description || ''),
+  return { title: String(marketplaceCopy(listing, 'sellwild', 'title') || '').trim(), text: String(marketplaceCopy(listing, 'sellwild', 'description') || ''),
     price: Number(listing.price), categoryId: Number(choice.category_id), itemCondition: Number(choice.condition_id),
     ...address, shippable: true, parcelTemplate: vehicle ? '' : choice.parcel_template || '',
     ...(vehicle ? {} : { ...(sellwildWeightLb(listing) ? { weight: sellwildWeightLb(listing) } : {}),
@@ -80,7 +80,7 @@ function sellwildCreateBody(listing, choice, address, photoCount) {
 function sellwildMissing(listing, choice, box) {
   const vehicle = SELLWILD_VEHICLES.has(Number(choice.category_id));
   const specifics = listing.sellwild_specifics || {};
-  const title = String(listing.title || '').trim();
+  const title = String(marketplaceCopy(listing, 'sellwild', 'title') || '').trim();
   return [(title.length < 3 || title.length > 255) && { field: 'title', needs: 'a title of 3 to 255 characters' },
     !(Number(listing.price) >= 5 && Number(listing.price) <= SELLWILD_MAX_PRICE) && { field: 'price', needs: 'a price from $5 to $999,999' },
     !(Number.isInteger(Number(choice.category_id)) && Number(choice.category_id) > 0) && { field: 'sellwild_specifics.nativeCategoryId', needs: 'a Sellwild category' },

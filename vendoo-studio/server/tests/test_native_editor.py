@@ -102,7 +102,9 @@ class NativeEditorTest(unittest.TestCase):
         self.assertNotIn("locked", fields["sellwild_specifics.nativeCategoryId"])
         self.assertTrue(fields["sellwild_specifics.nativeCategoryId"]["selection_only"])
         self.assertIn("246", fields["sellwild_specifics.nativeCategoryId"]["option_values"].values())
-        self.assertFalse(fields["description"]["required"])
+        self.assertFalse(fields["sellwild_specifics.description"]["required"])
+        self.assertEqual(fields["sellwild_specifics.title"]["value"], "Nike L Tee")
+        self.assertEqual(fields["sellwild_specifics.description"]["value"], "Details")
         self.bridge.assert_not_called()
 
     def test_direct_depop_attribute_edits_survive_generated_style_padding(self):
@@ -216,6 +218,32 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         typed_sku = next(row for row in typed["fields"] if row["path"] == "sku")
         self.assertEqual(generated_sku["value"], "")
         self.assertEqual(typed_sku["value"], "HAT-1")
+
+    async def test_ebay_size_and_department_are_editable_and_filled_from_general(self):
+        rows = [
+            {"id": "Size", "name": "Size", "required": True, "multi": False, "mode": "selection",
+             "values": [{"id": "M", "label": "M"}, {"id": "L", "label": "L"}]},
+            {"id": "Department", "name": "Department", "required": False, "multi": False, "mode": "free",
+             "values": []},
+        ]
+        listing = {
+            "direct_category_ids": {"ebay": "15687"},
+            "title": "General title",
+            "description": "General description",
+            "condition": "Good",
+            "ebay_specifics": {"title": "eBay title"},
+        }
+        with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)):
+            form = await native_editor.ebay_form(listing)
+        fields = {row["path"]: row for row in form["fields"]}
+        for path in ("ebay_specifics.Size", "ebay_specifics.Department"):
+            row = fields[path]
+            self.assertFalse(row.get("locked"))
+            self.assertIn("stays on eBay", row["help"])
+            self.assertNotIn("Change it there", row["help"])
+        self.assertEqual(fields["ebay_specifics.title"]["value"], "eBay title")
+        self.assertEqual(fields["ebay_specifics.description"]["value"], "General description")
+        self.assertFalse(fields["ebay_specifics.title"].get("locked"))
 
     def test_ebay_size_follows_size_type_from_taxonomys_parent_constraints(self):
         size = {

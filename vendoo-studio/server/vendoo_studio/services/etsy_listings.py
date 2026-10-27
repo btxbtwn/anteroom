@@ -106,8 +106,10 @@ def _remote_price(remote: dict) -> Decimal:
 
 def _matches(remote: dict, snapshot: dict) -> bool:
     try:
+        from vendoo_studio.services.seller_overrides import marketplace_text
+
         return (html.unescape(str(remote.get("title") or "")) == etsy_title(snapshot)
-                and html.unescape(str(remote.get("description") or "")) == str(snapshot.get("description") or "")
+                and html.unescape(str(remote.get("description") or "")) == marketplace_text(snapshot, "etsy", "description")
                 and _remote_price(remote) == _price(snapshot.get("price")))
     except (KeyError, InvalidOperation, ValueError, ZeroDivisionError):
         return False
@@ -134,7 +136,9 @@ def etsy_title(snapshot: dict) -> str:
 
     A longer title is cut at the last whole word; the pre-flight says so.
     """
-    text = "".join(_title_char(ch) for ch in unicodedata.normalize("NFC", str(snapshot.get("title") or "")))
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    text = "".join(_title_char(ch) for ch in unicodedata.normalize("NFC", marketplace_text(snapshot, "etsy", "title")))
     for symbol in _ETSY_TITLE_ONCE:
         first = text.find(symbol)
         if first >= 0:
@@ -201,7 +205,9 @@ def etsy_quantity(snapshot: dict) -> int:
 
 
 def draft_fields(snapshot: dict, *, creating: bool) -> dict:
-    title, description = etsy_title(snapshot), str(snapshot.get("description") or "")
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    title, description = etsy_title(snapshot), marketplace_text(snapshot, "etsy", "description")
     if not title.strip() or not description.strip():
         raise missing("Add an Etsy title and description before listing.",
                       *[name for name, value in (("title", title), ("description", description)) if not value.strip()])
@@ -261,8 +267,11 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
         return [gap(item["field"], item["message"]) for item in exc.fields or []] or [gap("listing", str(exc))]
     except ValueError as exc:
         return [gap("listing", str(exc))]
-    if fields["title"] != str(snapshot.get("title") or "").strip():
-        reason = (f"Etsy titles are at most {_ETSY_TITLE_MAX} characters" if len(str(snapshot.get("title") or "")) > _ETSY_TITLE_MAX
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    source_title = marketplace_text(snapshot, "etsy", "title").strip()
+    if fields["title"] != source_title:
+        reason = (f"Etsy titles are at most {_ETSY_TITLE_MAX} characters" if len(source_title) > _ETSY_TITLE_MAX
                   else "Etsy allows %, :, & and + once each and no emoji or special symbols")
         found.append(gap("title", f"{reason}, so Etsy gets: {fields['title']}", blocking=False))
     if seeded_leaf(context.db, "etsy", fields["taxonomy_id"]) is False:

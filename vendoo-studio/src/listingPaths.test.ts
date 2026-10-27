@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   cloneListing,
   expandJoinedChoices,
+  followedGeneralValue,
+  marketplaceDisplayValue,
   formFieldText,
   formFieldValues,
   getListingEditorValue,
   nextFieldDraft,
   getNestedValue,
   labelToJsonKey,
+  ownedSpecificsValue,
   resolveSpecificsKey,
   setListingEditorValue,
   setNestedValue,
@@ -57,6 +60,42 @@ describe("multi-value form fields", () => {
     );
     expect(echoed.local["depop_specifics.style"]).toEqual([]);
     expect(echoed.dirty).toEqual({});
+  });
+});
+
+describe("marketplace copies of general fields", () => {
+  it("reads a blank marketplace title as that form's own value", () => {
+    const listing = { title: "General title", size: "L", ebay_specifics: { title: "" } };
+    expect(ownedSpecificsValue(listing, "ebay_specifics.title")).toEqual({ owned: true, value: "" });
+    expect(ownedSpecificsValue(listing, "depop_specifics.title")).toEqual({ owned: false, value: undefined });
+    expect(followedGeneralValue(listing, "depop_specifics.title")).toBe("General title");
+    expect(followedGeneralValue(listing, "ebay_specifics.Size")).toBe("L");
+    expect(followedGeneralValue(listing, "ebay_specifics.conditionDescription")).toBeUndefined();
+  });
+
+  it("shows the live General title, and a marketplace's own size spelling", () => {
+    const listing = { title: "New title", size: "M", ebay_specifics: { title: "" } };
+    expect(marketplaceDisplayValue(listing, "ebay_specifics.title", {
+      tab: "ebay", native: true, defaultValue: "Old title",
+    })).toBe("");
+    expect(marketplaceDisplayValue({ title: "New title", size: "M" }, "ebay_specifics.title", {
+      tab: "ebay", native: true, defaultValue: "Old title",
+    })).toBe("New title");
+    expect(marketplaceDisplayValue(listing, "ebay_specifics.Size", {
+      tab: "ebay", native: true, defaultValue: "Medium",
+    })).toBe("Medium");
+    expect(marketplaceDisplayValue({ title: "New title", quantity: 1 }, "ebay_specifics.quantity", {
+      tab: "ebay", locked: true, defaultValue: 4,
+    })).toBe(4);
+    expect(marketplaceDisplayValue({ brand: "Nike", department: "Women" }, "ebay_specifics.brand", {
+      tab: "ebay", native: true, defaultValue: "Old brand",
+    })).toBe("Nike");
+    expect(marketplaceDisplayValue({ brand: "Nike", department: "Women", ebay_specifics: { brand: "eBay brand" } }, "ebay_specifics.brand", {
+      tab: "ebay", native: true, defaultValue: "Old brand",
+    })).toBe("eBay brand");
+    expect(marketplaceDisplayValue({ brand: "Nike", department: "Women" }, "ebay_specifics.department", {
+      tab: "ebay", native: true, defaultValue: "Old department",
+    })).toBe("Women");
   });
 });
 

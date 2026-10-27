@@ -37,6 +37,10 @@ from vendoo_studio.services.vendoo_specifics import is_not_applicable
 
 _SKIP = {
     "categoryid", "categorypath", "category_specifics", "categoryspecifics",
+    # A marketplace form's own title, description, quantity and colors. They are
+    # not eBay aspects; Color still comes from the general color when this form
+    # has not set its own.
+    "title", "description", "quantity", "primarycolor", "secondarycolor",
     "pricingformat", "pricingformatdetails", "conditiondescription",
     "shippingpolicyid", "paymentpolicyid", "returnspolicyid", "returnpolicyid",
     "shippingservice", "paymentmethod", "paypalemail", "acceptreturns",
@@ -229,7 +233,9 @@ def product_ids(listing: dict) -> dict[str, list[str]]:
 
 def ebay_title(listing: dict) -> str:
     """eBay's 80 characters, cut at a whole word. The pre-flight says when it is cut."""
-    text = " ".join(str(listing.get("title") or "").split())
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    text = " ".join(marketplace_text(listing, "ebay", "title").split())
     if len(text) <= TITLE_MAX:
         return text
     cut = text[:TITLE_MAX + 1]
@@ -919,8 +925,10 @@ def condition_description(snapshot: dict, form: dict) -> str:
 
 
 def _listing_fields(snapshot: dict, form: dict) -> dict:
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
     title = ebay_title(snapshot)
-    description = str(snapshot.get("description") or "").strip()
+    description = marketplace_text(snapshot, "ebay", "description").strip()
     if not title or not description:
         raise missing("Add an eBay title and description before listing.", *[name for name, value in (("title", title), ("description", description)) if not value])
     if len(description_html(description)) > LISTING_DESCRIPTION_MAX:
@@ -991,7 +999,9 @@ def requirements(snapshot: dict, context: Context) -> list[dict]:
             found += [gap(item["field"], item["message"]) for item in exc.fields or []]
         except ValueError as exc:
             found.append(gap("listing", str(exc)))
-    title = " ".join(str(snapshot.get("title") or "").split())
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    title = " ".join(marketplace_text(snapshot, "ebay", "title").split())
     if len(title) > TITLE_MAX:
         found.append(gap("title", f"eBay titles are at most {TITLE_MAX} characters, so eBay gets: {ebay_title(snapshot)}", blocking=False))
     category = str((snapshot.get("marketplace_category_ids") or {}).get("ebay") or "")

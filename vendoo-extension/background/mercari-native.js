@@ -345,10 +345,11 @@ function mercariDimensions(listing) {
 function mercariCommon(listing) {
   const specifics = listing.form?.specifics || {};
   const smart = listing.mercari_specifics?.smartPricing;
-  const common = { name: String(listing.title || '').trim(), isAutoPriceDrop: smart?.enabled === true };
+  const common = { name: String(marketplaceCopy(listing, 'mercari', 'title') || '').trim(), isAutoPriceDrop: smart?.enabled === true };
   if (common.isAutoPriceDrop) common.minPriceForAutoPriceDrop = mercariPriceCents(smart.minimumPrice);
   if (listing.mercari_specifics?.noBrand === true || Object.hasOwn(listing, 'brand') && !String(listing.brand || '').trim()) common.brandId = MERCARI_EMPTY_BRAND;
-  if (listing.description) common.description = String(listing.description).trim();
+  const description = marketplaceCopy(listing, 'mercari', 'description');
+  if (description) common.description = String(description).trim();
   const price = mercariPriceCents(listing.mercari_specifics?.price ?? listing.price);
   if (price != null) common.price = price;
   const categoryId = mercariCategoryId(listing);

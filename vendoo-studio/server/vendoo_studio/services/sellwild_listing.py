@@ -155,7 +155,9 @@ def contact_details(text: str) -> list[str]:
 @requirement("sellwild")
 def requirements(listing: dict, context: Context) -> list[dict]:
     found = []
-    title = str(listing.get("title") or "").strip()
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    title = marketplace_text(listing, "sellwild", "title").strip()
     if not 3 <= len(title) <= 255:
         found.append(gap("title", "Sellwild titles need 3 to 255 characters."))
     try:
