@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.428 — 2026-10-26
+
+- Every marketplace form now shows its photos at the top: the photos that marketplace gets, in order, and how many it takes. Untick a photo, drag to reorder, or add photos for that marketplace only (a stock photo for eBay, a collage for Depop); **Reset to item photos** goes back. List, Save Draft and Update send that form's photos. Items you have not changed still send all their photos.
+- Video is no longer a separate button at the bottom of the form. On eBay, Etsy and Poshmark, add a video in the same photos, by dropping or choosing the file the same way as a photo; each form says what that marketplace accepts. Depop, Mercari, Vinted and Sellwild take no video from their websites, so their forms offer none.
+
 ## 0.1.427 — 2026-10-26
 
 - Share Poshmark listings to your followers, one or many at a time: select items in the sidebar and choose **Share / offers**. You review each item and confirm once; shares go out a few seconds apart and stop at the first limit Poshmark reports.
