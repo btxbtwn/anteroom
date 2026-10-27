@@ -47,6 +47,8 @@ _SKIP = {
     "autoaccept", "autoacceptprice", "autodeclineprice", "minimumoffer", "minimumofferprice",
     "storecategoryname", "storecategory2name",
     "listingformat", "listingduration", "auctionstartprice", "auctionreserveprice", "auctionbuyitnow",
+    # Rows of their own (``ebay_variations``), never an aspect.
+    "variations",
 }
 # Identifiers eBay asks branded items to answer, Does Not Apply included.
 _IDENTIFIER_ASPECTS = {"mpn"}
@@ -833,16 +835,30 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
         raise missing("Add an eBay title and description before listing.", *[name for name, value in (("title", title), ("description", description)) if not value])
     if len(description_html(description)) > LISTING_DESCRIPTION_MAX:
         raise missing("eBay descriptions are at most 500,000 characters. Shorten it.", "description")
+    from vendoo_studio.services import ebay_variations
+    from vendoo_studio.services.seller_overrides import price_for
+    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_enabled
+
+    varied = ebay_variations.has_variations(snapshot)
     try:
         quantity = int(str(snapshot.get("quantity") or 1).strip())
     except ValueError:
         quantity = 0
-    if not 1 <= quantity <= 10000:
+    if varied:
+        # Each variation has its own stock; the listing's quantity is their sum.
+        quantity = ebay_variations.total_quantity(snapshot) or 0
+    elif not 1 <= quantity <= 10000:
         raise missing("Enter an eBay quantity from 1 to 10000.", "quantity")
-    from vendoo_studio.services.seller_overrides import price_for
-    from vendoo_studio.services.vendoo_marketplace_fields import best_offer_enabled
-
     chosen = listing_format(snapshot)
+    if varied:
+        # eBay: a listing with variations is fixed price, Good 'Til Cancelled, without Best Offer.
+        if chosen["format"] != FIXED_PRICE:
+            raise missing("An eBay listing with variations is fixed price. Choose Fixed price, or remove the variations.",
+                          "ebay_specifics.listingFormat")
+        offer = (snapshot.get("ebay_specifics") or {}).get("bestOffer")
+        if isinstance(offer, dict) and "enabled" in offer and best_offer_enabled(offer):
+            raise missing("eBay does not take offers on a listing with variations. Turn off Allow offers.",
+                          "ebay_specifics.bestOffer.enabled")
     if chosen["format"] == AUCTION:
         if quantity != 1:
             raise missing("An eBay auction sells one item. Set quantity to 1.", "quantity")
@@ -862,9 +878,12 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
     condition_note = condition_description(snapshot, form)
     if len(condition_note) > 1000:
         raise missing("eBay condition descriptions are at most 1,000 characters.", "ebay_specifics.conditionDescription")
-    return {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
-            "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
-            "condition_description": condition_note, "format": chosen}
+    fields = {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
+              "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
+              "condition_description": condition_note, "format": chosen}
+    if varied:
+        fields["variations"] = ebay_variations.plan(snapshot, price)
+    return fields
 
 
 @requirement("ebay")
@@ -983,8 +1002,10 @@ def _usd(value: str) -> dict:
 
 
 def offer_terms(form: dict, fields: dict, snapshot: dict) -> dict | None:
-    """Best Offer terms for a fixed-price offer. An auction carries none."""
-    return None if fields["format"]["format"] == AUCTION else best_offer_terms(form, fields["price"], snapshot)
+    """Best Offer terms for a fixed-price offer. An auction or a listing with variations carries none."""
+    if fields["format"]["format"] == AUCTION or fields.get("variations"):
+        return None
+    return best_offer_terms(form, fields["price"], snapshot)
 
 
 def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) -> dict:
@@ -1012,7 +1033,7 @@ def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) ->
 
 
 async def _update_live(snapshot: dict, photos: list, binding: dict, record: Callable[[dict], None],
-                       active: Callable[[], bool]) -> dict:
+                       active: Callable[[], bool], conversation_id: str = "") -> dict:
     """Replace fields on the listing that is already live. Never publishes a second one.
 
     Every write here is a replace, so a lost reply is safe to send again.
@@ -1034,6 +1055,19 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         offer_id = str(binding.get("ebay_offer_id") or "")
         if not re.fullmatch(r"\d{6,20}", listing_id):
             raise ValueError("eBay has not confirmed which live listing to update.")
+        if fields.get("variations") or binding.get("ebay_group_key"):
+            from vendoo_studio.services import ebay_variations
+
+            if not fields.get("variations"):
+                raise ValueError("This eBay listing has variations. Keep at least two, or end it on eBay and list it again.")
+            base = str(binding.get("ebay_sku") or ebay_sku(snapshot, binding, conversation_id))
+            chosen = ebay_variations.assign_skus(fields["variations"], base)
+            chosen = await ebay_variations.check_category(client, fields["category_id"], chosen)
+            fields = {**fields, "variations": chosen}
+            aspects = await _complete_aspects(client, fields["category_id"],
+                                              ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen))
+            await _check_condition(client, fields["category_id"], fields["condition"])
+            return await ebay_variations.update_live(client, snapshot, form, fields, photos, binding, record, active, aspects)
         if not offer_id:
             return await _revise_by_item_id(client, listing_id, fields, best_offer_terms(form, fields["price"], snapshot))
         offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
@@ -1071,7 +1105,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
     if action == "update":
         if confirm is not True:
             return failure("Confirm updating the live eBay listing.", "rejected", safe=True)
-        return await _update_live(snapshot, photos, binding, record, active)
+        return await _update_live(snapshot, photos, binding, record, active, conversation_id)
     pending: str | None = None
     try:
         if action not in {"list", "save_draft"} or (action == "list" and confirm is not True):
@@ -1088,6 +1122,21 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         problem = best_offer_error(snapshot)
         if problem:
             raise ValueError(problem)
+        if fields.get("variations"):
+            from vendoo_studio.services import ebay_variations
+
+            chosen = ebay_variations.assign_skus(fields["variations"], ebay_sku(snapshot, binding, conversation_id))
+            chosen = await ebay_variations.check_category(client, fields["category_id"], chosen)
+            fields = {**fields, "variations": chosen}
+            aspects = await _complete_aspects(client, fields["category_id"],
+                                              ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen))
+            await _check_condition(client, fields["category_id"], fields["condition"])
+            in_flight: dict = {"write": None}
+            try:
+                return await ebay_variations.execute(action, client, snapshot, form, fields, photos, binding, record, active,
+                                                     conversation_id, in_flight, aspects)
+            finally:
+                pending = in_flight["write"]
         aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
         await _check_condition(client, fields["category_id"], fields["condition"])
         await _check_format(client, fields["category_id"], fields["format"])
@@ -1153,6 +1202,10 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
             # The SKU is saved before anything is written.
             return resumable("Nothing reached eBay. List again.")
         client = await EbayClient.connect()
+        from vendoo_studio.services import ebay_variations
+
+        if binding.get("ebay_group_key") and (snapshot is None or ebay_variations.has_variations(snapshot)):
+            return await ebay_variations.check(client, binding, snapshot, record)
         if binding.get("action") == "update" and snapshot:
             return await _check_update(client, binding, snapshot)
         offer = await _offer_for(client, sku, binding, str(binding.get("ebay_format") or FIXED_PRICE))

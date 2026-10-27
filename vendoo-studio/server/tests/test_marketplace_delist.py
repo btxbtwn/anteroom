@@ -78,7 +78,10 @@ class MarketplaceDelistTest(unittest.TestCase):
         args = self.bridge.call_args.args
         self.assertEqual(args[1], "marketplace.delete")
         self.assertEqual(args[2], {"marketplace": "poshmark", "listing_id": "6aae234280cb08338a8cb591", "confirm": True})
-        self.ebay.assert_awaited_once_with("377507697747")
+        self.ebay.assert_awaited_once()
+        # The listing ID, and the eBay record that says whether it is a group with variations.
+        self.assertEqual(self.ebay.await_args.args[0], "377507697747")
+        self.assertIsInstance(self.ebay.await_args.args[1], dict)
         self.etsy.assert_not_called()
 
     def test_the_marketplace_it_sold_on_is_never_deleted(self):
