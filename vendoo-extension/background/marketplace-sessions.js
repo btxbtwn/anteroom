@@ -5,8 +5,9 @@ const MARKETPLACE_SIGN_IN = {
   sellwild: 'https://sellwild.com/',
   // Unsigned visitors are sent to Vinted's sign-in and returned to orders.
   vinted: 'https://www.vinted.com/my_orders',
+  facebook: 'https://www.facebook.com/marketplace/you/selling',
 };
-const EXTENSION_SESSION_MARKETS = ['depop', 'poshmark', 'mercari', 'sellwild', 'vinted'];
+const EXTENSION_SESSION_MARKETS = ['depop', 'poshmark', 'mercari', 'sellwild', 'vinted', 'facebook'];
 const SESSION_EXPIRING_MS = 24 * 60 * 60 * 1000;
 
 // Cookie and token values stay in Chrome. Callers receive only this summary.
@@ -144,6 +145,7 @@ async function readExtensionSession(marketplace, now = Date.now()) {
     if (marketplace === 'mercari') return await readMercariSession(now);
     if (marketplace === 'sellwild') return await readSellwildSession(now);
     if (marketplace === 'vinted') return await readVintedSession(now);
+    if (marketplace === 'facebook') return await readFacebookSession(now);
   } catch { /* one marketplace failing must not blank the others */ }
   return unknownExtensionSession();
 }
@@ -208,12 +210,64 @@ async function handleMarketplaceConnect(msg) {
 // marketplace's own save request can be rebuilt to run without a tab. Keeps
 // only request shapes: operation names, GraphQL query text, method and path,
 // header names, and value types. Never header values, cookies, listing text,
-// photos, or response values.
+// photos, or response values. Facebook's recording runs until the seller
+// closes the tab, so one session can cover its selling list, mark as sold,
+// delete and composer requests. An offers recording starts on the seller's
+// listings, also runs until the tab closes, and keeps the page's reads too,
+// because the likers list is fetched rather than posted.
 const MARKETPLACE_RECORD_START = {
   mercari: 'https://www.mercari.com/sell/',
   sellwild: 'https://sellwild.com/sell',
+  facebook: 'https://www.facebook.com/marketplace/you/selling',
+};
+const MARKETPLACE_OFFER_RECORD_START = {
+  mercari: 'https://www.mercari.com/mypage/listings/active/',
+  depop: 'https://www.depop.com/',
 };
 const RECORD_LIMIT_MS = 5 * 60 * 1000;
+const RECORD_MAX_REQUESTS = 400;
+
+// Path segments holding item ids or numbers become :id, so a recorded path
+// names the endpoint without naming the listing.
+function recordedPath(url) {
+  return url.origin + url.pathname.split('/')
+    .map(part => (part.length >= 6 && /\d/.test(part) ? ':id' : part)).join('/');
+}
+
+// A GET GraphQL request carries its operation in the query string.
+function recordedQuery(url) {
+  const params = url.searchParams;
+  if (!params.has('operationName')) return { kind: 'query', names: [...new Set(params.keys())].sort() };
+  const parsed = name => { try { return JSON.parse(params.get(name) || '{}'); } catch { return {}; } };
+  return recordedBody(JSON.stringify({ operationName: params.get('operationName'),
+    variables: parsed('variables'), extensions: parsed('extensions') }));
+}
+
+// Writes are always kept. Reads are kept only in an offers recording and only
+// when the page fetched them, not documents, scripts or images.
+function recordedRequest(event, goal, marketplace) {
+  if (['HEAD', 'OPTIONS'].includes(event.request.method)) return false;
+  if (goal === 'offers' && !offerApiRequest(event.request.url, marketplace)) return false;
+  if (event.request.method !== 'GET') return true;
+  return goal === 'offers' && ['XHR', 'Fetch'].includes(event.type);
+}
+
+// An offers recording keeps only the marketplace's own API. Its pages send
+// hundreds of analytics and experiment calls that would fill the recording
+// before the offer is sent.
+const OFFER_API = {
+  mercari: { hosts: ['www.mercari.com'], prefix: '/v1/api' },
+  depop: { hosts: ['webapi.depop.com'], prefix: '/' },
+};
+const OFFER_API_NOISE = /\/(events|features\/experiments|performance|users\/me\/checkin|consent)\//;
+
+function offerApiRequest(rawUrl, marketplace) {
+  const api = OFFER_API[marketplace];
+  let url;
+  try { url = new URL(rawUrl); } catch { return false; }
+  return Boolean(api) && api.hosts.includes(url.hostname) && url.pathname.startsWith(api.prefix)
+    && !OFFER_API_NOISE.test(url.pathname);
+}
 
 function valueShape(value, depth = 0) {
   if (Array.isArray(value)) return value.length ? [valueShape(value[0], depth + 1)] : [];
@@ -242,8 +296,36 @@ function recordedMultipart(raw, contentType) {
   return out;
 }
 
+// Facebook posts GraphQL as a form: the operation's friendly name, its
+// persisted doc_id, and variables as JSON beside session fields (fb_dtsg, lsd,
+// jazoest, __user). Only the field names, the operation, its doc_id and the
+// shape of its variables are kept.
+function recordedForm(raw) {
+  const params = new URLSearchParams(raw);
+  const out = { kind: 'form', names: [...new Set(params.keys())].sort() };
+  if (!params.has('doc_id') && !params.has('fb_api_req_friendly_name')) return out;
+  let variables;
+  try { variables = valueShape(JSON.parse(params.get('variables') || '{}')); } catch { variables = 'non-json'; }
+  const docId = params.get('doc_id') || '';
+  const name = params.get('fb_api_req_friendly_name') || '';
+  return { ...out, kind: 'graphql-form', operations: [{
+    operation: /^[A-Za-z0-9_]{1,200}$/.test(name) ? name : null,
+    doc_id: /^\d{1,30}$/.test(docId) ? docId : null,
+    variables,
+  }] };
+}
+
+// Facebook can answer one request with several JSON documents, one per line,
+// and its older endpoints prefix the body with for (;;);.
+function recordedResponse(raw) {
+  const text = String(raw || '').replace(/^for \(;;\);/, '');
+  try { return valueShape(JSON.parse(text)); } catch { /* try the first document */ }
+  try { return valueShape(JSON.parse(text.split('\n', 1)[0])); } catch { return 'non-json'; }
+}
+
 function recordedBody(raw, contentType) {
   if (/multipart\/form-data/i.test(contentType || '')) return recordedMultipart(raw, contentType);
+  if (/application\/x-www-form-urlencoded/i.test(contentType || '')) return recordedForm(raw);
   let parsed;
   try { parsed = JSON.parse(raw); } catch { return { kind: 'non-json' }; }
   const bodies = Array.isArray(parsed) ? parsed : [parsed];
@@ -265,7 +347,8 @@ function draftSaved(entry) {
 
 async function handleMarketplaceRecord(msg) {
   const marketplace = msg.payload?.marketplace;
-  const url = MARKETPLACE_RECORD_START[marketplace];
+  const goal = msg.payload?.goal === 'offers' ? 'offers' : 'draft';
+  const url = (goal === 'offers' ? MARKETPLACE_OFFER_RECORD_START : MARKETPLACE_RECORD_START)[marketplace];
   if (!url || activeNativeOperation || activeJob || activePatch) {
     sendBrowserResult(msg, { ok: false, error: url ? 'Wait for the current listing action to finish.' : 'Recording is not set up for this marketplace.' });
     return;
@@ -283,13 +366,14 @@ async function handleMarketplaceRecord(msg) {
     const finished = new Promise(resolve => { finish = resolve; });
     listener = (source, method, event) => {
       if (source.tabId !== tab.id) return;
-      if (method === 'Network.requestWillBeSent' && !['GET', 'HEAD', 'OPTIONS'].includes(event.request.method)) {
+      if (method === 'Network.requestWillBeSent' && entries.size < RECORD_MAX_REQUESTS && recordedRequest(event, goal, marketplace)) {
         let target;
         try { target = new URL(event.request.url); } catch { return; }
-        const entry = { method: event.request.method, url: target.origin + target.pathname,
+        const entry = { method: event.request.method, url: recordedPath(target),
           header_names: Object.keys(event.request.headers || {}).map(name => name.toLowerCase()).sort(),
           content_type: Object.entries(event.request.headers || {}).find(([name]) => name.toLowerCase() === 'content-type')?.[1] || null };
         entries.set(event.requestId, entry);
+        if (event.request.method === 'GET') entry.query = recordedQuery(target);
         const record = raw => { if (raw) entry.body = recordedBody(raw, entry.content_type); };
         // File uploads arrive as base64 postDataEntries rather than postData.
         const entriesText = (event.request.postDataEntries || []).map(part => part.bytes ? atob(part.bytes) : '').join('');
@@ -307,8 +391,10 @@ async function handleMarketplaceRecord(msg) {
       if (method === 'Network.loadingFinished' && entries.has(event.requestId)) {
         const entry = entries.get(event.requestId);
         chrome.debugger.sendCommand({ tabId: tab.id }, 'Network.getResponseBody', { requestId: event.requestId }).then(result => {
-          try { entry.response = valueShape(JSON.parse(result.base64Encoded ? atob(result.body) : result.body)); } catch { entry.response = 'non-json'; }
-        }).catch(() => {}).finally(() => { if (draftSaved(entry)) setTimeout(finish, 1500); });
+          entry.response = recordedResponse(result.base64Encoded ? atob(result.body) : result.body);
+        }).catch(() => {}).finally(() => {
+          if (marketplace !== 'facebook' && goal === 'draft' && draftSaved(entry)) setTimeout(finish, 1500);
+        });
       }
     };
     chrome.debugger.onEvent.addListener(listener);
@@ -319,7 +405,7 @@ async function handleMarketplaceRecord(msg) {
     });
     await Promise.race([finished, closed, new Promise(resolve => setTimeout(resolve, RECORD_LIMIT_MS))]);
     const requests = [...entries.values()];
-    sendBrowserResult(msg, { ok: true, marketplace, draft_saved: requests.some(draftSaved), requests });
+    sendBrowserResult(msg, { ok: true, marketplace, goal, draft_saved: requests.some(draftSaved), requests });
   } catch (error) {
     sendBrowserResult(msg, { ok: false, error: `Recording stopped: ${String(error.message || error)}`, requests: [...entries.values()] });
   } finally {

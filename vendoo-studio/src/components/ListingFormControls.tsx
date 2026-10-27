@@ -3,13 +3,13 @@
  * styles (MIT, (c) 2026 T3 Tools Inc.): its segmented toggle for tab strips,
  * its input chrome for native selects, its muted field labels.
  */
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronsUpDownIcon } from "lucide-react";
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { catalogLeafChoices, categoryChoiceAt, categoryPathKey, categorySegments, categorySteps, type CategoryChoice } from "./categoryTree";
 import { cn } from "../lib/utils";
-import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "./ui/combobox";
+import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup, ComboboxTrigger } from "./ui/combobox";
 import { toggleVariants } from "./ui/toggle";
 
 /** A tab strip in T3's segmented-control look; keeps tablist/tab roles. */
@@ -362,7 +362,7 @@ export function SearchableMultiSelect({
   const overLimit = maxValues != null && value.length > maxValues;
   const invalid = (choicesVerified && unavailable.length > 0) || overLimit;
   return (
-    <div ref={anchor} className="min-w-0">
+    <div className="min-w-0">
       <Combobox<string, true>
         multiple items={items} value={value} disabled={disabled}
         onInputValueChange={setQuery}
@@ -371,17 +371,48 @@ export function SearchableMultiSelect({
           onChange(next);
         }}
       >
-        {value.length > 0 && <ul aria-label="Selected values" className="mb-2 flex flex-wrap gap-1.5">
-          {value.map((item) => <li key={item} className="flex max-w-full items-center gap-1 rounded-md border border-border bg-secondary px-2 py-1 text-xs">
-            <span className="break-words">{item}</span>
-            <button type="button" disabled={disabled} aria-label={`Remove ${item}`}
-              className="shrink-0 rounded px-1 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-              onClick={() => onChange(value.filter((entry) => entry !== item))}>×</button>
-          </li>)}
-        </ul>}
-        <ComboboxInput id={id} data-listing-field={fieldKey} placeholder={selectionOnly ? "Search choices" : "Search or add values"}
-          disabled={disabled} maxLength={maxLength} aria-invalid={invalid || undefined}
-          aria-describedby={unavailable.length > 0 || overLimit ? `${id}-unavailable` : undefined} />
+        <div
+          ref={anchor}
+          data-slot="multi-select"
+          className={cn(
+            "relative flex min-h-8.5 w-full cursor-text flex-wrap items-center gap-1 rounded-lg border border-input bg-background py-1 ps-1.5 pe-8 text-base text-foreground shadow-xs/5 ring-ring/24 transition-shadow not-dark:bg-clip-padding",
+            "has-focus-visible:border-ring has-focus-visible:ring-[3px] has-focus-visible:ring-inset",
+            "has-aria-invalid:border-destructive/36 has-focus-visible:has-aria-invalid:border-destructive/64 has-focus-visible:has-aria-invalid:ring-destructive/16",
+            "has-disabled:opacity-64 sm:min-h-7.5 sm:text-sm dark:bg-input/32 dark:has-aria-invalid:ring-destructive/24",
+          )}
+          onMouseDown={(event) => {
+            if (disabled || (event.target as HTMLElement).closest("button, input")) return;
+            event.preventDefault();
+            anchor.current?.querySelector("input")?.focus();
+          }}
+        >
+          {value.length > 0 && <ul aria-label="Selected values" className="contents">
+            {value.map((item) => <li key={item} className="flex max-w-full items-center gap-0.5 rounded-md border border-border bg-secondary px-1.5 py-0.5 text-xs leading-4">
+              <span className="min-w-0 break-words">{item}</span>
+              <button type="button" disabled={disabled} aria-label={`Remove ${item}`}
+                className="shrink-0 rounded px-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={() => onChange(value.filter((entry) => entry !== item))}>×</button>
+            </li>)}
+          </ul>}
+          <ComboboxInput
+            embedded
+            showTrigger={false}
+            rootClassName={query.trim() ? "min-w-16" : "min-w-0"}
+            id={id}
+            data-listing-field={fieldKey}
+            placeholder={value.length > 0 ? "" : (selectionOnly ? "Search choices" : "Search or add values")}
+            disabled={disabled}
+            maxLength={maxLength}
+            aria-invalid={invalid || undefined}
+            aria-describedby={unavailable.length > 0 || overLimit ? `${id}-unavailable` : undefined}
+          />
+          <ComboboxTrigger
+            className="absolute end-0.5 top-1/2 inline-flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-icon-muted opacity-80 outline-none hover:opacity-100 focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-4"
+          >
+            <ChevronsUpDownIcon />
+          </ComboboxTrigger>
+        </div>
         <ComboboxPopup anchor={anchor}>
           <ComboboxEmpty>No matches.</ComboboxEmpty>
           <ComboboxList>{(item: string) => <ComboboxItem key={item} value={item}

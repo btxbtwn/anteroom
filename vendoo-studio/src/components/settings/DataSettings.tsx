@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { backupSummary, formatBytes } from "../backupSummary";
 import { VendooImportButton } from "../VendooImportButton";
+import { useVendooEnabled } from "../../vendooMode";
 import { CheckIcon, CopyIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -228,15 +229,18 @@ function DataFolderRow() {
 }
 
 export function DataSettings() {
+  const vendooOn = useVendooEnabled();
   return (
     <>
-      <SettingsSection id="vendoo-sync" title="Vendoo">
-        <SettingsRow
-          title="Sync from Vendoo"
-          description="Bring in every Vendoo item with its photos. Changed items are refreshed, and listings whose Vendoo item was deleted are removed."
-          control={<VendooImportButton variant="settings" />}
-        />
-      </SettingsSection>
+      {vendooOn ? (
+        <SettingsSection id="vendoo-sync" title="Vendoo">
+          <SettingsRow
+            title="Sync from Vendoo"
+            description="Bring in every Vendoo item with its photos. Changed items are refreshed, and listings whose Vendoo item was deleted are removed."
+            control={<VendooImportButton variant="settings" />}
+          />
+        </SettingsSection>
+      ) : null}
       <BackupsSection />
       <SettingsSection id="storage" title="Storage">
         <DataFolderRow />

@@ -30,12 +30,49 @@ Photo selection/order and the marketplace's media limits also need to be checked
 per marketplace. A shared General field or account setting must be identified
 as such; it must not silently override an explicit marketplace selection.
 
+## Live Update on Mercari, Vinted and Sellwild
+
+Added in 0.1.432. Each site's own edit request was read from its public web
+bundle on 2026-10-26, so Update edits the live listing in place and keeps its
+likes, views and listing age. Each one checks that the listing belongs to the
+signed-in account and is live, writes once, and reads the listing back. A lost
+reply is answered by reading the listing, never by writing again. All three have
+request-level tests with fakes (`vendoo-extension/tests/live-update.test.js`)
+only; none has run against a real listing yet.
+
+- **Mercari.** The sell page's edit route (`/sell/edit/[itemId]`, build
+  `r-v3.104.70`) sends the persisted mutation `editListing`
+  (`53785e33b5b6ddeaedd8a31b9cfdccc0b00cd6e571810e369c87e5c74ddf591d`) with a
+  flat `EditListingInput`. It is a full replace, so the extension reads the item
+  with `sellFetchItemsDetails`, starts from its live values and its own
+  `photoIds` (the item's image URLs), and changes only the fields the revision
+  differs on. If Mercari has rotated the hash, the request fails before anything
+  is written and is reported as a changed site.
+- **Vinted.** The item-upload module in Vinted's item-page bundle saves an edit
+  with `PUT /api/v2/item_upload/items/{id}` and the body
+  `{item, push_up, parcel, upload_session_id}`. The extension reads
+  `GET /api/v2/item_upload/items/{id}` for the item's photos and current values,
+  keeps brand, colour and package size unless the revision names them in
+  `vinted_specifics`, and never sends `push_up`.
+- **Sellwild.** The listing page (`/account/my-listings/[id]`, build
+  `TfctsWXpff2fKS`) sends `PUT /api/listings/{id}/edit`. The schema requires
+  `title`, `price` and `categoryId`. The extension sends those plus only the
+  changed fields, and never `photo`, so the photos stay. When Sellwild answers
+  `underReview`, the listing is recorded as in review.
+
+Still to check on a real listing the seller picks: that Mercari accepts the
+`editListing` hash, that Vinted keeps brand, colour and package size and Sellwild
+reads weight and dimensions back under the names used, and that likes and views
+survive on all three.
+
 ## Listing videos
 
 Researched 2026-10-26 from each marketplace's API documentation or current web
-client. Anteroom keeps one video per marketplace: the seller selects it on that
-marketplace's form (`<marketplace>_specifics.videoId`), and limits come from
-`VIDEO_RULES` in `services/listing_videos.py`.
+client. Anteroom keeps one video per marketplace: the seller adds it in the
+photos at the top of that marketplace's form, the same way as a photo
+(`<marketplace>_specifics.videoId`), and limits come from `VIDEO_RULES` in
+`services/listing_videos.py`. Forms of marketplaces without video offer none.
+Each form's own photos are described in `services/marketplace_media.py`.
 
 | Marketplace | Video | Limits Anteroom applies | How it attaches |
 | --- | --- | --- | --- |
@@ -173,6 +210,80 @@ Sources:
 
 Private listing identifiers, photos, account responses and diagnostic captures
 stay outside the repository. The audit must not publish or delist test items.
+
+## Sharing, offers and refreshing
+
+Seller tools on live listings, checked 2026-10-26. Each action is started by the
+seller from a selection (sidebar → **Share / offers**), names the marketplace
+and the action, is reviewed per item and confirmed once. Items then run one at
+a time holding the automation slot. Every send is journaled in Anteroom
+(`listing_promotions`) and in the extension before it is made; a lost reply is
+**unknown** and is never repeated, and **Check result** only reads the
+extension's journal. Nothing here is scheduled, and nothing lists or delists.
+
+| Marketplace | Tool | Status | Source |
+| --- | --- | --- | --- |
+| Poshmark | Share to followers (one or selected listings) | Implemented, unit-tested, not yet verified on a real listing | Web client `app.e95611750f89b1732f92.js`: `sharePost` sends `PUT /vm-rest/users/self/shared_posts/{post}` and handles `SharePostRequestLimitExceededError`, `ValidationError` and a `share_post` captcha. Anteroom spaces shares 4–7 seconds apart and stops the batch at the first limit or check. |
+| Poshmark | Offer to likers, with a required floor per listing | Implemented, unit-tested, not yet verified on a real listing | Same client and chunk `53.2a6596cdc30f9542d899.js` (offer modal): `makeSellerOffer` sends `POST /vm-rest/posts/{post}/likes/users/offers` with `offer_amount {val, currency_code}`, `seller_shipping_discount {id}` and `offer_api_version: 3`. Maximum offer is `floor(price × (100 − minimum_seller_offer_discount_percent) / 100)` in whole dollars; the public `/vm-rest/meta/feature_settings?client_app=web_feature_settings` `offer_to_likers__us` reads 10% minimum, 79% maximum (Anteroom takes the strictest enabled variant). Shipping discounts come from `/vm-rest/users/{id}/seller_shipping_discounts/offer?price_amount=…&object_id={post}`; the seller chooses one or none per offer. Anteroom also refuses an offer on a listing with no likers and allows one offer per listing per 24 hours. |
+| Mercari | Promote (price drop of at least 5% that notifies likers, once per 24 hours) and Offer to likers (at least 10% off, up to 50 recent likers, 24 hours) | Exists on Mercari; not implemented | [How does the Promote button work?](https://www.mercari.com/us/help_center/article/347/). The web client's persisted GraphQL operations for these could not be read: mercari.com answers a plain fetch with a Cloudflare check, and this work had no browser session. Capture the operation names and hashes from the signed-in web client before adding them. No separate refresh exists. |
+| Depop | Refresh / bump | Not supported by Depop | Depop's help centre has no free bump; it recommends refreshing photos, description and price, and sells [Boosted Listings](https://depophelp.zendesk.com/hc/en-gb/articles/10110299060753-Boosted-Listings) (paid, fee on the sale). [Repop](https://depophelp.zendesk.com/hc/en-gb/articles/12803766422289-Repop) relists a sold item. Re-saving a listing to fake a bump is not added. |
+| Depop | Send offer to likers | Exists on Depop; not implemented | [Send Offer](https://depophelp.zendesk.com/hc/en-gb/articles/15495796917777-Send-Offer): from notifications or My Depop, to one or all likers in the seller's country, one active offer per buyer, not for multi-size listings, 14 days to respond, shipping not included. depop.com answered 403 to a plain fetch, so the web request could not be read here. |
+| Etsy | Offers to favoriters | Not available through Etsy's API | Set in Shop Manager → Marketing → Sales and discounts ([help](https://help.etsy.com/hc/en-us/articles/115014260108-How-to-Set-Up-Sales-and-Discounts-for-Your-Shop)); Etsy sends them automatically. The Open API v3 spec (`/openapi/generated/oas/3.0.0.json`, read 2026-10-26) has no offer, coupon or manual renew endpoint, only `should_auto_renew` on a listing. |
+| Vinted | Bump | Paid, not added | [What is an item Bump?](https://www.vinted.com/help/340-what-is-item-bump) and [Buying a Bump](https://www.vinted.com/help/450-buying-a-bump): a paid 3 or 7 day boost bought at checkout. Anteroom does not make purchases. |
+| Sellwild | Share, bump, offers to likers | None found | Sellwild's seller guides list [discounts](https://sellwild.com/guides/seller/my-discounts) (timed price drops with a floor), [coupons](https://sellwild.com/guides/seller/coupons) and BOGO, not sharing or bumping. |
+| eBay | Offers to interested buyers | Implemented earlier (Offers tab) | `services/ebay_offers.py`, eBay Negotiation API. |
+
+## Facebook Marketplace
+
+Added 2026-10-26 for the listings Vendoo put on Facebook. Each layer is
+implemented and unit-tested with fakes; **none is verified on a real Facebook
+listing yet**.
+
+| Layer | Status | Where |
+| --- | --- | --- |
+| Recognise and link listings, including Vendoo's (`notes.vendooListingUrls.facebook`) | Implemented, unit-tested | `services/marketplace_identity.py` (`/marketplace/item/<id>`, `www`, `m` and `web` hosts), `services/marketplace_delist.py`. Checked against a copy of the seller's database: all 23 Vendoo-made Facebook listings read as live, linked from Vendoo. |
+| Marketplaces panel, Mark as listed / sold / not listed | Implemented, unit-tested | `components/MarketplacesSection.tsx`. The editor shows Facebook for any item with a Facebook listing. |
+| Sign-in | Implemented, unit-tested | `background/facebook-native.js` `readFacebookSession`: the `c_user` and `xs` cookies only, with no request to Facebook. |
+| Live state (**Check on Facebook**) | Implemented, unit-tested, not yet verified | `background/facebook-native.js` reads the listing's own item page (`GET /marketplace/item/<id>/`, never retried) and finds the embedded record with that ID and `is_sold`, `is_pending`, `is_live`, `is_hidden`, `is_draft` and `marketplace_listing_seller.id`. Only the state and whether the seller matches leave Chrome. A page without that record is reported, never guessed. `services/facebook_listing.py`, `POST …/marketplace-listings/facebook/check`. |
+| Sale detection | Implemented, unit-tested, not yet verified; **off until the seller turns it on** | `services/chrome_sales.py`: six listings per check, in turn, 20–40 minutes apart; 3–7 seconds between pages; a sign-in page, checkpoint or rate limit stops the check. A listing reads sold when its record says `is_sold`. Recorded through the same `record_sale` path, so it reaches the sales ledger, item status and the opt-in auto-delist. |
+| Delist | **Not built** | Needs a capture (below). Until then Delist refuses Facebook by name, auto-delist leaves it out and says so, and the panel tells the seller to delete it on Facebook, then Mark as not listed. |
+| Import active listings | **Not built** | Needs the seller's selling-list query (below). |
+| Native form, Save Draft, List, Update | **Not built** | Needs the composer requests (below). |
+
+**Why no GraphQL yet.** Facebook's web client reads and writes Marketplace
+listings through `POST /api/graphql/`, a form body carrying
+`fb_api_req_friendly_name`, a persisted `doc_id`, JSON `variables`, and session
+fields (`fb_dtsg`, `lsd`, `jazoest`, `__user`, `av`). The doc_ids change with
+Facebook's releases, and the operations behind the seller's selling list, mark
+as sold, delete and the composer are only loaded for a signed-in seller. Their
+names and variables could not be read from public bundles without a signed-in
+session, and guessing a write is not safe.
+
+**Account risk.** Facebook restricts accounts it thinks are automated, and
+Marketplace access can be removed without much explanation. Anteroom keeps to
+reads from the seller's own Chrome session, no tab, one page at a time, never
+retried, and stops at the first sign-in, checkpoint or rate limit. Sale
+detection is off by default for this reason. Writes, once captured, must be sent
+once and never retried, as for every other marketplace.
+
+**What to capture next (signed-in Chrome, with the extension from this
+release).** `POST /api/marketplaces/facebook/record` opens the seller's
+Facebook selling page and records request shapes until the tab is closed (five
+minutes at most), then saves them to `recordings/` in the data folder, where
+`GET /api/marketplaces/facebook/record` reads them: for each GraphQL call, the operation name, its `doc_id`, the
+shape of its variables and of its answer, and the names of the form fields. It
+keeps no values, cookies or tokens. In that tab:
+
+1. Let the selling list load and scroll once (the import and sale list query).
+2. On a throwaway listing: **Mark as sold**, then **Mark as available**.
+3. Delete that throwaway listing.
+4. Start **Create new listing → Item**, fill it in, and **Save draft** if
+   Facebook offers it (do not publish), then close the tab.
+
+The recording then gives the delete, mark-sold and composer operations to add
+to `background/facebook-native.js` and to `MARKETPLACE_DELETE` in
+`background/marketplace-delete.js`, after which Facebook leaves
+`marketplace_delist.MANUAL_DELIST`.
 
 ## Completion checks
 

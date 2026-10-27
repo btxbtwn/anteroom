@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BadgeDollarSignIcon, ExternalLinkIcon } from "lucide-react";
 import { api } from "../api/client";
+import { useListingSessionActive } from "./listingSession";
 import type { MarketplaceSale } from "../api/directConnections";
 import { marketplaceName } from "./marketplaceNames";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
@@ -78,10 +79,11 @@ export function SaleNotice({ sale, openInVendoo }: { sale: MarketplaceSale; open
 
 /** Sales eBay or Etsy reported for this listing, until the seller marks them done. */
 export function SoldElsewhereNotice({ convId, openInVendoo }: { convId: string; openInVendoo?: ReactNode }) {
+  const sessionActive = useListingSessionActive();
   const { data } = useQuery({
     queryKey: ["marketplace-sales", convId],
     queryFn: () => api.marketplaceSales.list({ conversationId: convId }),
-    refetchInterval: SALES_POLL_MS,
+    refetchInterval: sessionActive ? SALES_POLL_MS : false,
   });
   const sales = data?.sales ?? [];
   if (!sales.length) return null;

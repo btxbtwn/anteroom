@@ -143,6 +143,10 @@ def maybe_start_schema_probe(
 
     Never raises — generation/chat callers treat this as best-effort.
     """
+    from vendoo_studio.services.user_settings import vendoo_enabled
+
+    if not vendoo_enabled():
+        return {"started": False, "reason": "vendoo off"}
     conv_repo = ConversationRepo(db)
     conv = conv_repo.get(conv_id)
     if not conv:

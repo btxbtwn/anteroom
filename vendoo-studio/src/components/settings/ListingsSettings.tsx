@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { DuplicateVendooLinksButton } from "../DuplicateVendooLinksButton";
+import { SimilarItemsButton } from "../SimilarItemsButton";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { EyeIcon, RotateCcwIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
@@ -14,6 +15,7 @@ import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+import { useVendooEnabled } from "../../vendooMode";
 
 function LoadingNote({ children }: { children: string }) {
   return (
@@ -46,7 +48,7 @@ function VendooSection() {
     <SettingsSection id="vendoo" title="Vendoo">
       <SettingsRow
         title="Send to Vendoo"
-        description="Shows the Send to Vendoo button under each listing. Turn off to list without Vendoo."
+        description="Shows Send to Vendoo and the other Vendoo tools. Turn off to list on the marketplaces directly. Anteroom stops calling Vendoo."
         control={
           <Switch
             checked={data?.vendoo_enabled ?? true}
@@ -61,6 +63,7 @@ function VendooSection() {
 }
 
 function MarketplacesSection() {
+  const vendooOn = useVendooEnabled();
   const queryClient = useQueryClient();
   const { data, isPending, isError, error } = useQuery({
     queryKey: ["settings-marketplaces"],
@@ -81,7 +84,9 @@ function MarketplacesSection() {
     <SettingsSection id="where-you-list" title="Where you list">
       <SettingsRow
         title="List to"
-        description="Every marketplace Vendoo lists to. The thread status popup and sidebar logos show only the ones you check; empty-field prompts and Send to Vendoo fill the checked ones Anteroom supports."
+        description={vendooOn
+          ? "Every marketplace Vendoo lists to. The thread status popup and sidebar logos show only the ones you check; empty-field prompts and Send to Vendoo fill the checked ones Anteroom supports."
+          : "The marketplaces you list on. The thread status popup and sidebar logos show only the ones you check. Anteroom lists on the ones it supports when you confirm it."}
         control={
           <>
             <Button
@@ -127,7 +132,7 @@ function MarketplacesSection() {
                     </Badge>
                   ) : !item.fillable ? (
                     <Badge variant="outline" size="sm" className="shrink-0 text-muted-foreground">
-                      Crosslist only
+                      {vendooOn ? "Crosslist only" : "Not listed from here"}
                     </Badge>
                   ) : null}
                   <Switch
@@ -147,8 +152,9 @@ function MarketplacesSection() {
             </div>
             {available.some((item) => !item.fillable) ? (
               <SettingsNote>
-                Direct means Anteroom lists there when you confirm it. Crosslist only means Send skips that
-                form and you crosslist from Vendoo. Live status still shows on the thread.
+                {vendooOn
+                  ? "Direct means Anteroom lists there when you confirm it. Crosslist only means Send skips that form and you crosslist from Vendoo. Live status still shows on the thread."
+                  : "Direct means Anteroom lists there when you confirm it. The others are not sent from here. Live status still shows on the thread."}
               </SettingsNote>
             ) : null}
           </>
@@ -287,6 +293,7 @@ function ShipsFromZipRow() {
 }
 
 function HiddenFieldsSection() {
+  const vendooOn = useVendooEnabled();
   const queryClient = useQueryClient();
   const { data, isPending, isError, error } = useQuery({
     queryKey: ["settings-hidden-fields"],
@@ -320,7 +327,7 @@ function HiddenFieldsSection() {
               <li key={`${item.marketplace}:${item.field}`} className="flex min-w-0 items-center gap-3 py-1.5 pr-1.5 pl-3">
                 <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.label || item.field}</span>
                 <span className="shrink-0 text-xs capitalize text-muted-foreground">
-                  {item.marketplace === "general" ? "Vendoo" : item.marketplace}
+                  {item.marketplace === "general" ? (vendooOn ? "Vendoo" : "General") : item.marketplace}
                 </span>
                 <Button
                   size="xs"
@@ -440,6 +447,7 @@ function ListingFormulasSection() {
 }
 
 export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string) => void }) {
+  const vendooOn = useVendooEnabled();
   return (
     <>
       <ListingTemplatesSettings onOpenListing={onOpenListing} />
@@ -451,10 +459,18 @@ export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string
       <ListingFormulasSection />
       <SettingsSection id="duplicate-vendoo-links" title="Duplicate check">
         <SettingsRow
-          title="Duplicate Vendoo links"
-          description="Find Anteroom listings that share the same Vendoo item and open each listing to review its link."
-          control={<DuplicateVendooLinksButton onSelect={onOpenListing} />}
+          id="similar-items"
+          title="Similar items"
+          description="Find items that look like the same thing listed twice, then keep one and merge the other into it, or mark them as different. Nothing is deleted or delisted."
+          control={<SimilarItemsButton onSelect={onOpenListing} />}
         />
+        {vendooOn ? (
+          <SettingsRow
+            title="Duplicate Vendoo links"
+            description="Find Anteroom listings that share the same Vendoo item and open each listing to review its link."
+            control={<DuplicateVendooLinksButton onSelect={onOpenListing} />}
+          />
+        ) : null}
       </SettingsSection>
     </>
   );

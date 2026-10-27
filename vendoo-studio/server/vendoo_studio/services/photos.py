@@ -114,6 +114,25 @@ def cover_thumb_url(photo_id: str, checksum: str | None) -> str:
     return url + (f"&v={checksum[:12]}" if checksum else "")
 
 
+def save_jpeg_thumbnail(contents: bytes, dest: Path, size: int) -> None:
+    """Write a JPEG at most ``size`` px on a side. Readers never see a half-written file."""
+    with Image.open(BytesIO(contents)) as img:
+        img = ImageOps.exif_transpose(img)
+        img.thumbnail((size, size), Image.Resampling.LANCZOS)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        payload = BytesIO()
+        img.save(payload, "JPEG", quality=82, optimize=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.partial")
+    try:
+        partial.write_bytes(payload.getvalue())
+        os.replace(partial, dest)
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
+
+
 def thumbnail_path(stored_filename: str, size: int) -> Path:
     stem = Path(stored_filename).stem
     return Path(PHOTOS_DIR) / "thumbs" / f"{stem}_{size}.jpg"

@@ -303,7 +303,8 @@ def check_photo_ids(chosen: dict, photos: list) -> None:
     known = {photo.id for photo in photos}
     for value, ids in chosen["photos"].items():
         if any(photo_id not in known for photo_id in ids):
-            raise missing(f"A photo chosen for {value} is no longer on this item. Choose its photos again.", f"{FIELD}.photos")
+            raise missing(f"A photo chosen for {value} is not among the eBay form's photos. Tick it there or choose its photos again.",
+                          f"{FIELD}.photos")
 
 
 async def _offers(client: EbayClient, chosen: dict, binding: dict) -> dict[str, dict]:

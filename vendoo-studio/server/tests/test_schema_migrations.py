@@ -495,6 +495,33 @@ def test_photo_edit_upgrade_keeps_every_photo_unedited(engine, snapshots):
     assert inspect_database(engine.url.database).clean
 
 
+def test_form_photos_upgrade_keeps_every_existing_photo_on_every_form(engine, snapshots):
+    from alembic import command
+
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services.marketplace_media import photos_for
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "3ece513f8e0d")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id,title,status) VALUES ('item','Denim jacket','draft')")
+        for order, photo_id in enumerate(("front", "back")):
+            connection.execute("INSERT INTO photos (id,conversation_id,original_filename,stored_filename,mime_type,size_bytes,display_order,checksum) "
+                               f"VALUES ('{photo_id}','item','{photo_id}.jpg','{photo_id}.jpg','image/jpeg',10,{order},'c')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT id, marketplace FROM photos ORDER BY display_order").fetchall() == [("front", None), ("back", None)]
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as db:
+        repo = ConversationRepo(db)
+        assert [photo.id for photo in repo.get_photos("item")] == ["front", "back"]
+        for marketplace in ("ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"):
+            assert [photo.id for photo in photos_for({}, repo.get_all_photos("item"), marketplace)[0]] == ["front", "back"]
+    assert recorded_revision(engine) == head_revision()
+    assert inspect_database(engine.url.database).clean
+
+
 def test_seller_sales_upgrade_marks_every_existing_line_as_marketplace_reported(engine, snapshots):
     from alembic import command
 
@@ -508,4 +535,75 @@ def test_seller_sales_upgrade_marks_every_existing_line_as_marketplace_reported(
     with sqlite3.connect(engine.url.database) as connection:
         row = connection.execute("SELECT order_id, state, conversation_id, financials, financial_revision, source FROM marketplace_sales WHERE id='keep-line'").fetchone()
     assert row == ("order", "new", "sold-coat", '{"currency":"USD","fees":"3"}', 2, "marketplace")
+    assert inspect_database(engine.url.database).clean
+
+
+def test_promotions_upgrade_keeps_previous_release_data_and_starts_empty(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "7d2e4c9a1b35")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status) VALUES ('posh-item', 'Existing coat', 'active')")
+        connection.execute("INSERT INTO listing_templates (id, name, fields, revision, created_at, updated_at) "
+                           "VALUES ('tpl', 'Coats', '{}', 1, '2026-10-26', '2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT title, status FROM conversations WHERE id='posh-item'").fetchone() == ("Existing coat", "active")
+        assert connection.execute("SELECT name FROM listing_templates WHERE id='tpl'").fetchone() == ("Coats",)
+        assert connection.execute("SELECT count(*) FROM listing_promotions").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM marketplace_offer_floors").fetchone() == (0,)
+        connection.execute("INSERT INTO marketplace_offer_floors (id, marketplace, listing_id, conversation_id, floor_cents, updated_at) "
+                           "VALUES ('f1', 'poshmark', 'abc', 'posh-item', 2500, '2026-10-26')")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO marketplace_offer_floors (id, marketplace, listing_id, floor_cents, updated_at) "
+                               "VALUES ('f2', 'poshmark', 'abc', 3000, '2026-10-26')")
+    assert recorded_revision(engine) == head_revision()
+    assert inspect_database(engine.url.database).clean
+
+
+def test_promotion_automations_upgrade_keeps_seller_sends_and_starts_with_nothing_enabled(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "3ece513f8e0d")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status) VALUES ('posh-item', 'Existing coat', 'active')")
+        connection.execute("INSERT INTO listing_promotions (id, batch_id, conversation_id, marketplace, action, listing_id, state, note, created_at, expires_at, sent_at) "
+                           "VALUES ('p1', 'b1', 'posh-item', 'poshmark', 'offer', 'abc', 'unknown', 'Check it', '2026-10-26', '2026-10-26', '2026-10-26')")
+        connection.execute("INSERT INTO marketplace_offer_floors (id, marketplace, listing_id, conversation_id, floor_cents, updated_at) "
+                           "VALUES ('f1', 'poshmark', 'abc', 'posh-item', 2500, '2026-10-26')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT state, note, automation_id FROM listing_promotions WHERE id='p1'").fetchone() == ("unknown", "Check it", None)
+        assert connection.execute("SELECT floor_cents FROM marketplace_offer_floors WHERE id='f1'").fetchone() == (2500,)
+        assert connection.execute("SELECT count(*) FROM promotion_automations").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM promotion_runs").fetchone() == (0,)
+    assert recorded_revision(engine) == head_revision()
+    assert inspect_database(engine.url.database).clean
+
+
+def test_similar_items_upgrade_keeps_previous_release_items_and_photos(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "c5a8d3e17f42")
+    with sqlite3.connect(engine.url.database) as connection:
+        connection.execute("INSERT INTO conversations (id, title, status, notes) VALUES ('coat', 'Wool coat', 'active', '{\"vendooLabels\": \"A19\"}')")
+        connection.execute("INSERT INTO photos (id,conversation_id,original_filename,stored_filename,mime_type,size_bytes,display_order,checksum) "
+                           "VALUES ('front','coat','front.jpg','saved.jpg','image/jpeg',10,0,'abc')")
+    ensure_schema(engine)
+    with sqlite3.connect(engine.url.database) as connection:
+        assert connection.execute("SELECT title, notes FROM conversations").fetchone() == ("Wool coat", '{"vendooLabels": "A19"}')
+        assert connection.execute("SELECT checksum FROM photos").fetchone() == ("abc",)
+        assert connection.execute("SELECT count(*) FROM photo_fingerprints").fetchone() == (0,)
+        assert connection.execute("SELECT count(*) FROM similar_item_reviews").fetchone() == (0,)
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("INSERT INTO conversations (id, title) VALUES ('copy', 'Wool coat')")
+        connection.execute("INSERT INTO similar_item_reviews (id, first_id, second_id, decision) VALUES ('r1', 'coat', 'copy', 'dismissed')")
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO similar_item_reviews (id, first_id, second_id, decision) VALUES ('r2', 'coat', 'copy', 'merged')")
+        connection.execute("DELETE FROM conversations WHERE id='copy'")
+        assert connection.execute("SELECT count(*) FROM similar_item_reviews").fetchone() == (0,)
+    assert recorded_revision(engine) == head_revision()
     assert inspect_database(engine.url.database).clean

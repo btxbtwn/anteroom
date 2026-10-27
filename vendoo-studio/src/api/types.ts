@@ -1,5 +1,6 @@
 /** Response shapes for the Studio FastAPI backend. Keep in sync with server/vendoo_studio/routes. */
 import type { AnalyticsAds } from "./adSpend";
+import type { LabelColor } from "../labelColors";
 
 export type ListingData = Record<string, unknown>;
 
@@ -107,6 +108,8 @@ export interface Photo {
   url: string;
   /** The edits served in place of the kept original; null when unedited. */
   edits?: PhotoEdits | null;
+  /** Set for a photo added on one marketplace's form; only that marketplace can send it. */
+  marketplace?: string | null;
 }
 
 /** A crop as fractions of the turned and straightened photo. */
@@ -542,7 +545,7 @@ export interface MarketplaceFormField {
   label: string;
   value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "video" | "variations";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations";
   inventory_groups?: NativeInventoryGroup[];
   variation_aspects?: EbayVariationAspect[];
   min_value?: number;
@@ -611,6 +614,48 @@ export interface VendooLabelSync {
   started_at: string;
   finished_at: string;
   error: string;
+}
+
+/** Stored labels that are Vendoo IDs: how many were (or can be) renamed, and the IDs with no known name. */
+export interface VendooLabelConversion {
+  items: number;
+  converted: number;
+  unknown: string[];
+}
+
+export interface SimilarItem {
+  id: string;
+  title: string;
+  status: string;
+  brand: string | null;
+  size: string | null;
+  price: number | null;
+  sku: string | null;
+  cover_url: string | null;
+}
+
+export type SimilarReason = "same_photo" | "same_sku" | "similar_title" | "similar_photo";
+
+export interface SimilarPair {
+  first: SimilarItem;
+  second: SimilarItem;
+  reasons: SimilarReason[];
+  score: number;
+  photo_distance: number | null;
+  title_score: number | null;
+}
+
+export interface SimilarItems {
+  total: number;
+  pairs: SimilarPair[];
+}
+
+export interface SimilarMerge {
+  kept_id: string;
+  merged_id: string;
+  marketplaces: string[];
+  sales: number;
+  labels: string[];
 }
 
 export interface Suggestion {
@@ -693,6 +738,10 @@ export interface AnalyticsGroup extends AnalyticsSales {
   label: string;
 }
 
+export interface AnalyticsLabelGroup extends AnalyticsGroup {
+  color: LabelColor | null;
+}
+
 export interface AnalyticsActiveListing {
   conversation_id: string;
   title: string;
@@ -747,6 +796,7 @@ export interface InventoryAnalytics {
   marketplaces: AnalyticsGroup[];
   categories: AnalyticsGroup[];
   brands: AnalyticsGroup[];
+  labels: AnalyticsLabelGroup[];
   /** Every sale-price band, low to high: budget, standard, premium, high. */
   price_tiers: AnalyticsGroup[];
   aging: AnalyticsAging[];

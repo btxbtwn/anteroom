@@ -92,3 +92,28 @@ def label_sync_status():
     from vendoo_studio.services import vendoo_label_sync
 
     return vendoo_label_sync.status()
+
+
+class LabelConversion(BaseModel):
+    items: int
+    converted: int
+    unknown: list[str]
+
+
+@router.get("/vendoo/label-names", response_model=LabelConversion)
+def pending_label_names(db: Session = Depends(get_db)):
+    """How many stored labels are still Vendoo ids. Changes nothing."""
+    from vendoo_studio.services import vendoo_label_catalog
+
+    return vendoo_label_catalog.convert_stored_labels(db, dry_run=True)
+
+
+@router.post("/vendoo/label-names", response_model=LabelConversion)
+async def convert_label_names(db: Session = Depends(get_db)):
+    """Store every Vendoo label id as its name. Safe to run again."""
+    from vendoo_studio.services import vendoo_label_catalog
+    from vendoo_studio.services.vendoo_create import LOOKUP_TIMEOUT_SEC, label_display_map
+
+    # Vendoo's own list names ids the saved catalog has not seen; without Chrome the catalog alone is used.
+    names = await label_display_map(None, timeout=LOOKUP_TIMEOUT_SEC)
+    return vendoo_label_catalog.convert_stored_labels(db, names)

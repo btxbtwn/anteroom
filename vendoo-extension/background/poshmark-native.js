@@ -47,8 +47,10 @@ async function poshmarkShippingDiscounts(deadline) {
 // is a free string on a post, so a brand Poshmark does not know, or a failed
 // search, keeps the seller's spelling.
 async function poshmarkBrand(listing, deadline) {
-  const wanted = String(Object.hasOwn(listing, 'brand') ? listing.brand ?? ''
-    : listing.poshmark_specifics?.poshmarkBrand ?? listing.form?.overrides?.brand ?? '').trim();
+  const specifics = listing?.poshmark_specifics || {};
+  const wanted = String(Object.hasOwn(specifics, 'brand') ? specifics.brand ?? ''
+    : Object.hasOwn(listing, 'brand') ? listing.brand ?? ''
+    : specifics.poshmarkBrand ?? listing.form?.overrides?.brand ?? '').trim();
   if (!wanted || /^(?:unbranded|no brand|none|other|n\/a)$/i.test(wanted)) return '';
   try {
     const brands = await marketplaceCatalog(`poshmark:brand:${marketplaceNameKey(wanted)}`, async () => {
@@ -456,10 +458,10 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
       && listing.poshmark_specifics?.smartSell?.enabled === true && !poshmarkSmartMinimum(listing, price)) {
     missing.push({ field: 'poshmark_specifics.smartSell.minimumPrice', needs: 'a Smart Pricing minimum above $0 and below the listing price' });
   }
-  const title = String(listing.title || '').trim();
+  const title = String(marketplaceCopy(listing, 'poshmark', 'title') || '').trim();
   if (!title) missing.push({ field: 'title', needs: 'a title' });
   if (title.length > 80) missing.push({ field: 'title', needs: 'a title of 80 characters or fewer' });
-  const description = String(listing.description || '').trim();
+  const description = String(marketplaceCopy(listing, 'poshmark', 'description') || '').trim();
   if (!description) missing.push({ field: 'description', needs: 'a description' });
   if (description.length > 1500) missing.push({ field: 'description', needs: 'a description of 1500 characters or fewer' });
   const quantity = sizes.reduce((total, row) => total + row.quantity_available, 0);

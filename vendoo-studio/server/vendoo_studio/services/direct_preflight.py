@@ -71,7 +71,8 @@ _GAP_FIXES = {
     "package_dimensions_in": "anteroom conversations fields --conv-id CONV --path package_dimensions_in --value 13x10x3",
     "sku": "anteroom conversations fields --conv-id CONV --path sku --value NEW-SKU",
     "etsy_specifics.when_made": 'anteroom conversations fields --conv-id CONV --path etsy_specifics.when_made --value "Before 2007 (Vintage)"',
-    "marketplace_photos.depop": 'anteroom conversations fields --conv-id CONV --path marketplace_photos.depop --value ["PHOTO_ID"]',
+    **{f"marketplace_photos.{marketplace}": f'anteroom conversations fields --conv-id CONV --path marketplace_photos.{marketplace} --value ["PHOTO_ID"]'
+       for marketplace in ("ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild")},
     "price": "anteroom set-price --conversation CONV --price 29.99 --all-marketplaces",
 }
 
@@ -94,7 +95,11 @@ def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
     from vendoo_studio.services.native_form import attach_form
 
-    snapshot = attach_form(prepare_listing_snapshot(db, conv, copy.deepcopy(listing_json)), marketplace)
+    snapshot = prepare_listing_snapshot(db, conv, copy.deepcopy(listing_json))
+    from vendoo_studio.services.seller_overrides import apply_marketplace_overrides
+
+    apply_marketplace_overrides(snapshot, marketplace)
+    snapshot = attach_form(snapshot, marketplace)
     if marketplace == "vinted":
         from vendoo_studio.services.vinted_listing import apply_vinted_listing
 

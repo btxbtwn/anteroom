@@ -5,7 +5,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
-export const SALE_MARKETPLACES: SaleMarketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "other"];
+export const SALE_MARKETPLACES: SaleMarketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "facebook", "other"];
 const MONEY = /^\d{1,12}(\.\d{1,4})?$/;
 
 function today(): string {

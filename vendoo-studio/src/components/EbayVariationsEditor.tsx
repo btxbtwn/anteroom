@@ -1,7 +1,9 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { EbayVariationAspect, EbayVariationRow, EbayVariations } from "../api/types";
+import type { EbayVariationAspect, EbayVariationRow, EbayVariations, ListingData } from "../api/types";
+import { formPhotos } from "../marketplaceMedia";
+import { photoThumbUrl } from "../photoThumb";
 import { SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -46,8 +48,9 @@ export function withAspects(value: EbayVariations, aspects: string[]): EbayVaria
   return { aspects, rows, photos: same ? value.photos : {}, ...(photosBy ? { photosBy } : {}) };
 }
 
-export function EbayVariationsEditor({ convId, value, aspects, disabled, onChange }: {
+export function EbayVariationsEditor({ convId, listing, value, aspects, disabled, onChange }: {
   convId: string;
+  listing: ListingData;
   value: EbayVariations;
   aspects: EbayVariationAspect[];
   disabled?: boolean;
@@ -56,7 +59,10 @@ export function EbayVariationsEditor({ convId, value, aspects, disabled, onChang
   const [draft, setDraft] = React.useState(value);
   const [source, setSource] = React.useState(value);
   if (source !== value) { setSource(value); setDraft(value); }
-  const { data: photos } = useQuery({ queryKey: ["photos", convId], queryFn: () => api.conversations.photos(convId) });
+  // A variation's photos come from the ones the eBay form sends.
+  const { data: item = [] } = useQuery({ queryKey: ["photos", convId], queryFn: () => api.conversations.photos(convId) });
+  const { data: own = [] } = useQuery({ queryKey: ["photos", convId, "ebay"], queryFn: () => api.conversations.photos(convId, "ebay") });
+  const photos = formPhotos(listing, item, own, "ebay").picked;
   const commit = (next: EbayVariations) => { setDraft(next); onChange(next); };
   const updateRow = (index: number, patch: Partial<EbayVariationRow>, save = false) => {
     const next = { ...draft, rows: draft.rows.map((row, at) => at === index ? { ...row, ...patch } : row) };
@@ -127,13 +133,13 @@ export function EbayVariationsEditor({ convId, value, aspects, disabled, onChang
         return <div key={text} className="space-y-1" role="group" aria-label={`Photos for ${text}`}>
           <div className="text-xs text-muted-foreground">{text} · {chosen.length}/{MAX_VARIATION_PHOTOS}</div>
           <div className="flex flex-wrap gap-1.5">
-            {(photos || []).map(photo => {
+            {photos.map(photo => {
               const on = chosen.includes(photo.id);
               return <button key={photo.id} type="button" aria-pressed={on} aria-label={`${on ? "Remove" : "Use"} ${photo.original_filename} for ${text}`}
                 disabled={disabled || (!on && chosen.length >= MAX_VARIATION_PHOTOS)}
                 className={`size-12 overflow-hidden rounded-md border-2 ${on ? "border-primary" : "border-transparent opacity-60"}`}
                 onClick={() => commit({ ...draft, photos: { ...draft.photos, [text]: on ? chosen.filter(id => id !== photo.id) : [...chosen, photo.id] } })}>
-                <img src={photo.url} alt="" className="size-full object-cover" />
+                <img src={photoThumbUrl(photo)} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
               </button>;
             })}
           </div>

@@ -26,6 +26,7 @@ const data: InventoryAnalytics = {
     sales: { ...sales, revenue: 40, profit: 25, count: 1, revenue_known: 1, profit_known: 1, fees_known: 1 },
   },
   periods: [{ ...sales, label: "Sep" }], marketplaces: [], categories: [], brands: [{ ...sales, id: "nike", label: "Nike" }],
+  labels: [{ ...sales, id: "a19", label: "A19", color: "teal" }, { ...sales, id: "closet", label: "closet", count: 1, color: null }],
   price_tiers: [
     { ...sales, id: "budget", label: "Under $20", count: 0, revenue: 0, profit: null, median_days: null },
     { ...sales, id: "standard", label: "$20–$34", count: 1, revenue: 24, profit: 12 },
@@ -58,10 +59,12 @@ function render(
   payload: InventoryAnalytics,
   run: Partial<VendooBulkImport> = { running: false },
   starting = false,
+  vendooOn = true,
 ) {
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: starting });
   useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) =>
     queryKey[0] === "vendoo-bulk-import" ? { data: run }
+      : queryKey[0] === "settings-ui" ? { data: { vendoo_enabled: vendooOn } }
       : { data: payload, isLoading: false, isError: false, isFetching: false },
   );
   return renderToStaticMarkup(<InventoryAnalyticsView onOpenListing={vi.fn()} />);
@@ -96,6 +99,11 @@ describe("InventoryAnalyticsView", () => {
     expect(html).toContain("2 sales need sales data");
     expect(html).toContain("Across all time");
     expect(html).toContain("Add the missing details in Vendoo, then resync");
+    expect(render({ ...data, incomplete_sales: [
+      { conversation_id: "undated", title: "Undated jacket", missing: ["sale date"] },
+    ] }, { running: false }, false, false)).toContain("Add the missing details on the listing");
+    expect(render(data, { running: false }, false, false)).not.toContain("Resync Vendoo data");
+    expect(render(data, { running: false }, false, false)).toContain("Sales and inventory from your listings.");
     expect(html).toContain("Undated jacket");
     expect(html).toContain("Missing sale date, sale price, fees");
     expect(html).toContain("Old boots");
@@ -151,6 +159,15 @@ describe("InventoryAnalyticsView", () => {
     expect(html).toContain("Depop fall sale");
     expect(html).not.toContain("Sale calendar");
     expect(html).not.toContain("Add ad spend");
+  });
+
+  it("ranks sales by label with the seller's label colors", () => {
+    const html = render(data);
+    expect(html).toContain('aria-label="Rank labels by"');
+    expect(html).toContain("A19");
+    expect(html).toContain("bg-teal-500");
+    expect(html).toContain("closet");
+    expect(render({ ...data, labels: [] })).toContain("No labels recorded on sales in this period.");
   });
 
   it("splits the period's sales into price bands", () => {

@@ -195,12 +195,13 @@ export function bulkRegenerateToast(result: BulkRegenerateResult, mode: BulkRunM
   };
 }
 
-export function bulkRegenerateWarning(count: number): string {
+export function bulkRegenerateWarning(count: number, vendooOn = true): string {
   const noun = count === 1 ? "this listing" : `${count} listings`;
   const each = count === 1 ? "the listing is" : "each listing is";
+  const vendoo = vendooOn ? " Vendoo stays as it is until you send again." : "";
   return [
     `Rewrite ${noun} from scratch?`,
-    `Chat and every generated field are discarded, then ${each} written again from its photos and item details. Measurements, flaws, COG, labels and notes are kept. Vendoo stays as it is until you send again. Anteroom rewrites one listing at a time.`,
+    `Chat and every generated field are discarded, then ${each} written again from its photos and item details. Measurements, flaws, COG, labels and notes are kept.${vendoo} Anteroom rewrites one listing at a time.`,
   ].join("\n");
 }
 

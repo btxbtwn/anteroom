@@ -120,3 +120,33 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
 export function helpTopicMarkdown(topic: HelpTopic): string {
   return topic.steps.map((step, index) => `${index + 1}. ${step}`).join("\n");
 }
+
+/** Steps that name Vendoo, rewritten for sellers who list without it. Indexes match HELP_TOPICS. */
+const VENDOO_STEP_REWRITES: Record<string, Record<number, string>> = {
+  "help-regenerate": {
+    4: "The new copy stays in Anteroom until you update it on the marketplace. To go back, press **History** in the listing header and **Restore this version**.",
+  },
+  "help-price-drops": {
+    3: "Open each listing and update it on the marketplace to carry the new price live.",
+  },
+  "help-analytics": {
+    4: "Missing a recent sale? Open the listing and record it, or wait for sale detection on a connected marketplace.",
+  },
+  "help-connect-chrome": {
+    0: "Go to Settings → Connections and press **Connect Chrome**. Your everyday Chrome opens.",
+    2: "Sign in to the marketplaces you list on in that Chrome window.",
+  },
+  "help-backups": {
+    2: "To undo changes on one listing, press **History** in its header, then **Restore this version** and **Confirm restore**. This changes Anteroom only.",
+  },
+};
+
+/** Help as Settings shows it. The send guide stays in HELP_TOPICS so tests can find it, and is omitted here when Vendoo is off. */
+export function helpTopicsForMode(vendooOn: boolean): readonly HelpTopic[] {
+  if (vendooOn) return HELP_TOPICS;
+  return HELP_TOPICS.filter((topic) => topic.id !== "help-send-to-vendoo").map((topic) => {
+    const rewrites = VENDOO_STEP_REWRITES[topic.id];
+    if (!rewrites) return topic;
+    return { ...topic, steps: topic.steps.map((step, index) => rewrites[index] ?? step) };
+  });
+}

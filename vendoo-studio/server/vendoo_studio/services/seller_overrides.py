@@ -16,6 +16,15 @@ from typing import Any
 SELLER_FIELDS = "seller_fields"
 
 MARKETPLACES = ("ebay", "poshmark", "mercari", "depop", "etsy", "vinted", "sellwild")
+FORM_MARKETPLACES = (*MARKETPLACES, "facebook", "grailed")
+
+# Shared General fields a marketplace form shows until that form edits them.
+# Size is handled beside these: equality is the size propagation would write
+# (eBay petite PL, Depop kids age), not the raw general size.
+FOLLOWED_FIELDS = ("title", "description", "brand", "department")
+# Copies of General that are not themselves item specifics. Brand, condition,
+# size and department stay on the form as that marketplace's own fields.
+FOLLOWED_NOT_ASPECTS = frozenset({"title", "description", "quantity", "primarycolor", "secondarycolor"})
 
 # The form row labeled "{Marketplace} price", and the key each payload prefers.
 CANONICAL_PRICE = {
@@ -100,6 +109,18 @@ def locked_paths(listing: dict | None) -> set[str]:
 
 def is_locked(listing: dict | None, path: str) -> bool:
     return path in locked_paths(listing)
+
+
+def field_locked(listing: dict | None, marketplace: str, field: str) -> bool:
+    """True when any seller lock names this marketplace field, whatever its capitalization."""
+    want = fold_key(field)
+    prefix = f"{marketplace}_specifics."
+    for path in locked_paths(listing):
+        if not path.startswith(prefix):
+            continue
+        if fold_key(path.split(".")[-1]) == want:
+            return True
+    return False
 
 
 def _write_locks(listing: dict, paths: set[str]) -> None:
@@ -376,6 +397,198 @@ def lock_seller_edits(previous: dict, submitted: dict) -> None:
     _write_locks(submitted, locks)
 
 
+def _specifics_block(listing: dict | None, marketplace: str) -> dict | None:
+    raw = listing.get(f"{marketplace}_specifics") if isinstance(listing, dict) else None
+    return raw if isinstance(raw, dict) else None
+
+
+def _field_key(block: dict, field: str) -> str | None:
+    want = fold_key(field)
+    for key in block:
+        if fold_key(key) == want:
+            return key
+    return None
+
+
+def followed_entry(listing: dict | None, marketplace: str, field: str) -> tuple[str, Any] | None:
+    """The key and value this form stores, including a cleared value.
+
+    ``None`` means the form has no copy and still shows General.
+    """
+    block = _specifics_block(listing, marketplace)
+    if block is None:
+        return None
+    key = _field_key(block, field)
+    if key is None:
+        return None
+    return key, block[key]
+
+
+def _same_followed(left: Any, right: Any) -> bool:
+    if left == right:
+        return True
+    if left is None or right is None:
+        return False
+    return str(left).strip() == str(right).strip()
+
+
+def marketplace_text(listing: dict | None, marketplace: str, field: str) -> str:
+    """The marketplace override when the seller set one, otherwise the general value.
+
+    A stored empty string is an override. A missing key still follows General.
+    """
+    if not isinstance(listing, dict):
+        return ""
+    entry = followed_entry(listing, marketplace, field)
+    value = entry[1] if entry is not None else listing.get(field)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _unlock_field(locks: set[str], marketplace: str, field: str) -> set[str]:
+    prefix = f"{marketplace}_specifics."
+    want = fold_key(field)
+    return {
+        item for item in locks
+        if not (item.startswith(prefix) and fold_key(item.split(".")[-1]) == want)
+    }
+
+
+def propagated_size(listing: dict | None, marketplace: str) -> str:
+    """The size string propagation would write for this marketplace."""
+    if not isinstance(listing, dict) or marketplace not in MARKETPLACES:
+        return ""
+    from vendoo_studio.services.listing_generate import ebay_size, sanitize_size_value
+
+    size = sanitize_size_value(listing.get("size"))
+    if not size:
+        return ""
+    block = _specifics_block(listing, marketplace) or {}
+    if marketplace == "ebay":
+        return ebay_size(listing, block, size)
+    if marketplace == "depop":
+        from vendoo_studio.models.depop_fields import depop_size_for
+
+        return depop_size_for(size, listing)
+    return size
+
+
+def overlay_followed_fields(listing: dict, marketplace: str) -> dict:
+    """A shallow copy whose shared fields are this form's own, when it has them."""
+    if not isinstance(listing, dict):
+        return listing
+    overlaid = None
+    for field in FOLLOWED_FIELDS:
+        entry = followed_entry(listing, marketplace, field)
+        if entry is None:
+            continue
+        if overlaid is None:
+            overlaid = dict(listing)
+        overlaid[field] = copy.deepcopy(entry[1])
+    return overlaid if overlaid is not None else listing
+
+
+def apply_marketplace_overrides(snapshot: dict, marketplace: str) -> None:
+    """Point one marketplace's send at the shared values that form edited."""
+    if not isinstance(snapshot, dict):
+        return
+    for field in FOLLOWED_FIELDS:
+        entry = followed_entry(snapshot, marketplace, field)
+        if entry is None:
+            continue
+        snapshot[field] = copy.deepcopy(entry[1])
+
+
+def reconcile_followed_fields(previous: dict | None, submitted: dict) -> None:
+    """Drop marketplace copies that still match General so the next edit fills them.
+
+    A copy equal to the current General value is not an independent edit. A copy
+    still equal to the previous General value is the old fill, so this General
+    edit replaces it. A different copy stays on that marketplace and is locked.
+    """
+    if not isinstance(submitted, dict):
+        return
+    previous = previous if isinstance(previous, dict) else {}
+    locks = locked_paths(submitted)
+    changed = _changed_paths(previous, submitted)
+    prior = locked_paths(previous)
+    for marketplace in FORM_MARKETPLACES:
+        block = _specifics_block(submitted, marketplace)
+        if block is None:
+            continue
+        for field in FOLLOWED_FIELDS:
+            entry = followed_entry(submitted, marketplace, field)
+            if entry is None:
+                continue
+            key, value = entry
+            path = f"{marketplace}_specifics.{key}"
+            general_changed = not _same_followed(previous.get(field), submitted.get(field))
+            owned_lock = path in prior or any(
+                item.startswith(f"{marketplace}_specifics.") and fold_key(item.split(".")[-1]) == fold_key(field)
+                for item in prior
+            )
+            follows = (
+                _same_followed(value, submitted.get(field))
+                or (general_changed and _same_followed(value, previous.get(field)))
+                or (general_changed and not owned_lock and path not in changed)
+            )
+            if follows:
+                # Still the general value, the previous fill, or an unlocked
+                # difference. Drop it so the next general edit fills this form.
+                block.pop(key, None)
+                locks = _unlock_field(locks, marketplace, field)
+            elif path in changed or owned_lock:
+                locks.add(path)
+    _write_locks(submitted, locks)
+
+
+def reconcile_size_fields(previous: dict | None, submitted: dict) -> None:
+    """A marketplace size follows General until the seller types a different one.
+
+    Matching the general size, or the spelling propagation would write for the
+    current or previous general size, unlocks the field and drops the copy.
+    A seller edit that differs stays locked. An unlocked difference is left
+    alone: eBay propagation still overwrites it, and Depop keeps a size that
+    already differs.
+    """
+    if not isinstance(submitted, dict):
+        return
+    previous = previous if isinstance(previous, dict) else {}
+    locks = locked_paths(submitted)
+    changed = _changed_paths(previous, submitted)
+    prior = locked_paths(previous)
+    from vendoo_studio.services.listing_generate import sanitize_size_value
+
+    for marketplace in MARKETPLACES:
+        block = _specifics_block(submitted, marketplace)
+        if block is None:
+            continue
+        entry = followed_entry(submitted, marketplace, "size")
+        if entry is None:
+            continue
+        key, value = entry
+        path = f"{marketplace}_specifics.{key}"
+        current_size = sanitize_size_value(submitted.get("size"))
+        previous_size = sanitize_size_value(previous.get("size")) if str(previous.get("size") or "").strip() else ""
+        matches = (
+            propagated_size(submitted, marketplace),
+            current_size,
+            propagated_size(previous, marketplace) if previous_size else "",
+            previous_size,
+        )
+        owned_lock = any(
+            item.startswith(f"{marketplace}_specifics.") and fold_key(item.split(".")[-1]) == "size"
+            for item in prior
+        )
+        if any(_same_followed(value, item) for item in matches if item):
+            block.pop(key, None)
+            locks = _unlock_field(locks, marketplace, "size")
+        elif path in changed or owned_lock:
+            locks.add(path)
+    _write_locks(submitted, locks)
+
+
 def prepare_user_listing(previous: dict | None, submitted: dict, *, notes: dict | None = None) -> dict:
     """Apply one seller save: locks, followed prices, Depop style chips, measurements."""
     from vendoo_studio.services.depop_measurements import sync_depop_measurements
@@ -387,6 +600,8 @@ def prepare_user_listing(previous: dict | None, submitted: dict, *, notes: dict 
     expand_depop_multi(submitted)
     lock_seller_edits(previous, submitted)
     apply_price_policy(previous, submitted)
+    reconcile_followed_fields(previous, submitted)
+    reconcile_size_fields(previous, submitted)
     if not is_locked(submitted, "depop_specifics.measurements"):
         sync_depop_measurements(submitted, notes)
     return submitted

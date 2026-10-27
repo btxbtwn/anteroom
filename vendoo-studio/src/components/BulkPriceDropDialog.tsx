@@ -13,6 +13,7 @@ import {
   type MarkdownDraft,
   type MarkdownOutcome,
 } from "../bulkPriceDrop";
+import { useVendooEnabled } from "../vendooMode";
 import { cn } from "../lib/utils";
 import { LazyImage } from "./PhotoThumbs";
 import { money, PriceDialog, PriceRow, PriceRows, PriceStatus } from "./PriceDropParts";
@@ -34,6 +35,7 @@ export function BulkPriceDropDialog({
   conversationIds: string[];
   onClose: () => void;
 }) {
+  const vendooOn = useVendooEnabled();
   const queryClient = useQueryClient();
   // The seller's edits over the loaded suggestions, so a row keeps them across refetches.
   const [edits, setEdits] = useState<ReadonlyMap<string, Partial<MarkdownDraft>>>(new Map());
@@ -79,7 +81,9 @@ export function BulkPriceDropDialog({
       className="max-w-2xl"
       title={outcomes ? markdownSummary(outcomes) : "Mark down listings"}
       description={outcomes
-        ? "Nothing was sent to Vendoo. Each listing now has unsent edits: open it and press Update Vendoo to send the new price to the marketplaces."
+        ? (vendooOn
+          ? "Nothing was sent to Vendoo. Each listing now has unsent edits: open it and press Update Vendoo to send the new price to the marketplaces."
+          : "Each listing now has unsent edits. Open it and update the live listing when you want the new price on the marketplace.")
         : "Each price starts on the listing's suggestion from your own sales and prior drops. Edit any price or skip a listing. Applying saves the prices in Anteroom only."}
       busy={apply.isPending}
       onClose={onClose}
@@ -105,7 +109,9 @@ export function BulkPriceDropDialog({
                   {money(outcome.from)} → {money(outcome.to)}
                   <Badge
                     variant="info"
-                    title="Edited in Anteroom since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
+                    title={vendooOn
+                      ? "Edited in Anteroom since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
+                      : "Edited in Anteroom since this listing was last saved."}
                   >
                     unsent
                   </Badge>

@@ -1,7 +1,9 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
+import { useVendooEnabled } from "../../vendooMode";
 import { LABEL_COLORS, labelColor, labelDotClass, type LabelColor } from "../../labelColors";
+import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { SettingsNote, SettingsRow, SettingsSection, SettingsSelect } from "./SettingsLayout";
 
@@ -67,6 +69,52 @@ export function InventorySettings() {
           </div>;
         })}</div> : <SettingsNote>Labels you add to items appear here.</SettingsNote>}
       </SettingsRow>
+      <VendooLabelIdsRow />
     </SettingsSection>
+  );
+}
+
+/** Items imported from Vendoo can carry its label IDs; converting stores each as its name. Shown only while any remain. */
+function VendooLabelIdsRow() {
+  const vendooOn = useVendooEnabled();
+  const queryClient = useQueryClient();
+  const { data: pending } = useQuery({
+    queryKey: ["vendoo-label-names"],
+    queryFn: api.imports.labelNames,
+    enabled: vendooOn,
+  });
+  const convert = useMutation({
+    mutationFn: api.imports.convertLabelNames,
+    onSuccess: (result) => {
+      queryClient.setQueryData(["vendoo-label-names"], { items: 0, converted: 0, unknown: result.unknown });
+      for (const key of ["conversations", "conversation", "listing", "settings-ui", "analytics"]) void queryClient.invalidateQueries({ queryKey: [key] });
+    },
+  });
+  const result = convert.data;
+  if (!vendooOn || !pending || (!pending.converted && !pending.unknown.length && !result)) return null;
+  const waiting = pending.converted + pending.unknown.length;
+  return (
+    <SettingsRow
+      id="vendoo-label-ids"
+      title="Vendoo label IDs"
+      description="Items imported from Vendoo can carry its label IDs instead of names. Convert stores each label as its name, on every item, so labels no longer depend on Vendoo. Running it again is safe."
+      control={<Button size="xs" variant="outline" disabled={convert.isPending || !waiting} onClick={() => convert.mutate()}>
+        {convert.isPending ? "Converting…" : "Convert to names"}
+      </Button>}
+    >
+      {result ? (
+        <SettingsNote>
+          {result.converted ? `Converted ${result.converted} ${result.converted === 1 ? "label" : "labels"} on ${result.items} ${result.items === 1 ? "item" : "items"}.` : "No labels needed converting."}
+        </SettingsNote>
+      ) : pending.converted ? (
+        <SettingsNote>{pending.converted} {pending.converted === 1 ? "label" : "labels"} on {pending.items} {pending.items === 1 ? "item is" : "items are"} still Vendoo IDs.</SettingsNote>
+      ) : null}
+      {(result ?? pending).unknown.length ? (
+        <SettingsNote>
+          Vendoo has no name for {(result ?? pending).unknown.join(", ")}. {(result ?? pending).unknown.length === 1 ? "It stays" : "They stay"} on the items as they are; with Chrome connected, Convert asks Vendoo again.
+        </SettingsNote>
+      ) : null}
+      {convert.isError ? <SettingsNote tone="error">{(convert.error as Error).message}</SettingsNote> : null}
+    </SettingsRow>
   );
 }

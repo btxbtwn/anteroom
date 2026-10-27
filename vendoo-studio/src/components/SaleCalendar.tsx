@@ -8,6 +8,7 @@ import { marketplaceName } from "./marketplaceNames";
 import { DISCOUNT_CEILING, calendarDate, dateOnly, monthDays, saleProfit, shiftMonth, suggestDiscount } from "./saleCalendarDates";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useVendooEnabled } from "../vendooMode";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -67,6 +68,7 @@ function patternDiscount(pattern: SalePattern | undefined, items: SaleCalendarIt
 }
 
 export function SaleCalendar({ marketplace: market, onOpenListing }: { marketplace: SaleMarketplace; onOpenListing: (id: string) => void }) {
+  const vendooOn = useVendooEnabled();
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const [today, setToday] = useState(() => calendarDate(new Date()));
   useEffect(() => {
@@ -216,7 +218,7 @@ export function SaleCalendar({ marketplace: market, onOpenListing }: { marketpla
           </Panel>)}
         </div>
         {form ? <SalePlanForm key={`${form.event?.id ?? "new"}-${form.marketplace}-${form.start}`} seed={form} items={query.data.items} patterns={query.data.patterns} timezone={timezone} onOpenListing={onOpenListing}
-          onClose={() => setForm(null)} onSaved={start => { setMonth(start.slice(0, 7)); setSelectedDay(null); setForm(null); setNotice(form.record ? "Sale record saved. Results will update as you resync Vendoo." : "Plan saved. Set up the sale on the marketplace when you’re ready."); }} /> : null}
+          onClose={() => setForm(null)} onSaved={start => { setMonth(start.slice(0, 7)); setSelectedDay(null); setForm(null); setNotice(form.record ? (vendooOn ? "Sale record saved. Results will update as you resync Vendoo." : "Sale record saved. Results update as marketplace sales come in.") : "Plan saved. Set up the sale on the marketplace when you’re ready."); }} /> : null}
       </> : null}
     </PageSection>
   );

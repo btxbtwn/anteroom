@@ -54,6 +54,10 @@ class AnalyticsGroup(AnalyticsSales):
     label: str
 
 
+class AnalyticsLabelGroup(AnalyticsGroup):
+    color: str | None
+
+
 class AnalyticsActiveListing(BaseModel):
     conversation_id: str
     title: str
@@ -139,6 +143,7 @@ class AnalyticsResponse(BaseModel):
     marketplaces: list[AnalyticsGroup]
     categories: list[AnalyticsGroup]
     brands: list[AnalyticsGroup]
+    labels: list[AnalyticsLabelGroup]
     price_tiers: list[AnalyticsGroup]
     aging: list[AnalyticsAging]
     stale: list[AnalyticsStaleListing]

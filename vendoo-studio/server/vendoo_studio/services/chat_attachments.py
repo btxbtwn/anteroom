@@ -19,7 +19,13 @@ from typing import Any
 from PIL import Image
 
 from vendoo_studio.config import user_data_root
-from vendoo_studio.services.photos import HEIC_MIME, _heic_to_jpeg, _normalize_mime
+from vendoo_studio.services.photos import (
+    HEIC_MIME,
+    THUMBNAIL_SIZES,
+    _heic_to_jpeg,
+    _normalize_mime,
+    save_jpeg_thumbnail,
+)
 
 MAX_ATTACHMENTS = 6
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -93,11 +99,25 @@ def save_attachments(items: list[tuple[str, str]]) -> list[dict[str, Any]]:
     return saved
 
 
+def attachment_thumbnail(path: Path, size: int) -> Path:
+    """A JPEG at most ``size`` px on a side, cached beside the original."""
+    if size not in THUMBNAIL_SIZES:
+        raise ValueError(f"Unsupported thumbnail size: {size}")
+    thumb = path.with_name(f"{path.stem}_{size}.jpg")
+    if thumb.is_file() and thumb.stat().st_size > 0 and thumb.stat().st_mtime >= path.stat().st_mtime:
+        return thumb
+    save_jpeg_thumbnail(path.read_bytes(), thumb, size)
+    return thumb
+
+
 def delete_attachments(attachments: list[dict[str, Any]] | None) -> None:
     for attachment in attachments or []:
         path = attachment_path(str(attachment.get("id") or ""))
-        if path is not None:
-            path.unlink(missing_ok=True)
+        if path is None:
+            continue
+        path.unlink(missing_ok=True)
+        for size in THUMBNAIL_SIZES:
+            path.with_name(f"{path.stem}_{size}.jpg").unlink(missing_ok=True)
 
 
 def attachment_path(attachment_id: str) -> Path | None:

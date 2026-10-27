@@ -47,8 +47,10 @@ def poshmark_color_name(value: str) -> str | None:
 def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
     del context
     found: list[dict] = []
-    title = str(snapshot.get("title") or "").strip()
-    description = str(snapshot.get("description") or "").strip()
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    title = marketplace_text(snapshot, "poshmark", "title").strip()
+    description = marketplace_text(snapshot, "poshmark", "description").strip()
     if not title:
         found.append(gap("title", "Poshmark needs a title."))
     elif len(title) > 80:
@@ -112,7 +114,9 @@ def _mercari_parent(snapshot: dict, context: Context, chosen: str, category: dic
 @requirement("mercari")
 def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
     found: list[dict] = []
-    description = str(snapshot.get("description") or "").strip()
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    description = marketplace_text(snapshot, "mercari", "description").strip()
     if not description:
         found.append(gap("description", "Mercari needs a description."))
     elif len(description) > 1000:

@@ -6,12 +6,14 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { AnalyticsGroup, AnalyticsRange, AnalyticsSales, InventoryAnalytics } from "../api/types";
+import { labelDotClass, type LabelColor } from "../labelColors";
 import { cn } from "../lib/utils";
 import { ANALYTICS_RANGES, formatChange, formatDays, formatMoney } from "./analyticsFormat";
 import { marketplaceName } from "./marketplaceNames";
 import { Stat, StatGrid } from "./AnalyticsStat";
 import { DiscountSuggestions } from "./DiscountSuggestions";
 import { EtsyNotAllowed } from "./EtsyNotAllowed";
+import { useVendooEnabled } from "../vendooMode";
 import { VendooImportButton } from "./VendooImportButton";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -47,6 +49,7 @@ export function AnalyticsPage({ onOpenListing }: Props) {
 }
 
 export function InventoryAnalyticsView({ onOpenListing }: Props) {
+  const vendooOn = useVendooEnabled();
   const [range, setRange] = useState<AnalyticsRange>("12m");
   const [customStart, setCustomStart] = useState(() => isoDay(addDays(new Date(), -29)));
   const [customEnd, setCustomEnd] = useState(() => isoDay(new Date()));
@@ -67,8 +70,8 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
     <>
       <PageHeader
         title="Analytics"
-        description="Sales and inventory from the listings imported from Vendoo."
-        actions={<VendooImportButton variant="analytics" />}
+        description={vendooOn ? "Sales and inventory from the listings imported from Vendoo." : "Sales and inventory from your listings."}
+        actions={vendooOn ? <VendooImportButton variant="analytics" /> : undefined}
       >
         {data ? (
           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -76,8 +79,10 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
               {data.last_updated_at ? <>
                 {"Last updated on "}
                 <time dateTime={data.last_updated_at}>{new Date(data.last_updated_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>
-                {" from Vendoo."}
-              </> : "Last updated on: not recorded yet. Resync Vendoo data to record an update."}
+                {vendooOn ? " from Vendoo." : "."}
+              </> : vendooOn
+                ? "Last updated on: not recorded yet. Resync Vendoo data to record an update."
+                : "Last updated on: not recorded yet."}
             </p>
             <InventoryStrip inventory={data.inventory} />
           </div>
@@ -145,7 +150,9 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
               className="rounded-xl border border-warning/32 bg-warning-surface p-4"
               title={`${data.incomplete_sales.length} ${data.incomplete_sales.length === 1 ? "sale needs" : "sales need"} sales data`}
               description={<>
-                Across all time. Add the missing details in Vendoo, then resync to update your analytics.
+                {vendooOn
+                  ? "Across all time. Add the missing details in Vendoo, then resync to update your analytics."
+                  : "Across all time. Add the missing details on the listing to update your analytics."}
                 Missing prices, costs, or fees leave revenue and profit incomplete.
               </>}
             >
@@ -190,10 +197,11 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
             <SalesChart periods={data.periods} />
           </PageSection>
 
-          <div className="grid gap-8 @3xl/page:grid-cols-3 @3xl/page:gap-6">
+          <div className="grid gap-8 @3xl/page:grid-cols-2 @3xl/page:gap-6">
             <PerformanceList title="Marketplaces" rows={data.marketplaces} marketplace />
             <PerformanceList title="Categories" rows={data.categories} />
             <PerformanceList title="Brands" rows={data.brands} />
+            <PerformanceList title="Labels" rows={data.labels} />
           </div>
 
           <PriceTiers tiers={data.price_tiers} />
@@ -454,7 +462,7 @@ const RANK_METRICS: { value: RankMetric; label: string }[] = [
 
 function PerformanceList({ title, rows, marketplace = false }: {
   title: string;
-  rows: AnalyticsGroup[];
+  rows: (AnalyticsGroup & { color?: LabelColor | null })[];
   marketplace?: boolean;
 }) {
   const [metric, setMetric] = useState<RankMetric>("revenue");
@@ -485,7 +493,12 @@ function PerformanceList({ title, rows, marketplace = false }: {
           {ranked.map((row) => (
             <ListRow
               key={row.id}
-              title={marketplace ? marketplaceName(row.id) : row.label}
+              title={marketplace ? marketplaceName(row.id) : row.color ? (
+                <span className="flex items-center gap-1.5">
+                  <span aria-hidden className={cn("size-2 shrink-0 rounded-full", labelDotClass(row.color))} />
+                  {row.label}
+                </span>
+              ) : row.label}
               meta={`${saleCount(row.count)}${row.median_days != null ? ` · ${formatDays(row.median_days)} median` : ""}`}
               value={metric === "count" ? row.count : row[metric] == null ? "—" : formatMoney(row[metric])}
               valueHint={metric === "profit" ? (row.profit_known === 0 ? "Cost missing" : `Cost on ${row.profit_known}/${row.count} · fees on ${row.fees_known}/${row.profit_known}`) : undefined}

@@ -27,9 +27,14 @@ Vendoo's. The losses on cancelling today are:
    0.1.422: a sale Anteroom records turns the item Sold (or "1 of 3 sold") and
    counts in Analytics.
 2. **23 items are still live on Facebook Marketplace through Vendoo.**
-   Anteroom can neither detect a sale there nor delist them.
-3. **Poshmark sharing, Depop refresh and offers to likers** on Poshmark,
-   Mercari and Depop.
+   Anteroom now links them, shows them, reads their state and can detect a
+   sale (opt-in; not yet verified on a real listing), but cannot delete them:
+   the seller deletes each one on Facebook.
+3. **Offers to likers on Mercari and Depop.** Poshmark sharing and
+   offers to likers run on schedules and rules since 0.1.430 (not yet
+   verified on a real account). Mercari and Depop offer rules are built but
+   stay off until their web requests are read from the signed-in sites;
+   Depop has no free refresh to copy.
 4. **Photo editing beyond rotate**: background removal, crop and adjustments.
 
 The full prioritized list is in [Gaps if Vendoo is cancelled today](#gaps-if-vendoo-is-cancelled-today).
@@ -66,12 +71,12 @@ and Vinted only on UK and US Enterprise accounts
 | --- | --- | --- | --- |
 | eBay | List, import, delist, relist, sale detection, offers | **Have** | Official API: `services/ebay_listings.py`, `routes/ebay.py` (`/import`), `services/marketplace_delist.py` (Trading `EndFixedPriceItem`), relay sale push `services/relay_sales.py` |
 | Etsy | List, import, delist, sale detection | **Have** | Official API: `services/etsy_listings.py`, `routes/etsy.py` (`/import`), relay `order.paid` |
-| Poshmark | List, delist, relist, sale detection, sharing, offers | **Partial** | List, draft, update, delist, sale detection: `background/poshmark-native.js`, `services/chrome_sales.py`. No sharing or offers (see [Automations](#automations-offers-sharing-refresh)) |
-| Mercari | List, delist, relist, sale detection, offers | **Partial** | Same as Poshmark, `background/mercari-native.js`. No offers |
-| Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. No refresh or offers |
+| Poshmark | List, delist, relist, sale detection, sharing, offers | **Partial** | List, draft, update, delist, sale detection: `background/poshmark-native.js`, `services/chrome_sales.py`. Share to followers and offers to likers, seller-started or on a schedule or rule: `services/listing_promotions.py`, `services/promotion_automations.py`, `background/marketplace-promotions.js`. Not yet verified on a real listing (see [Automations](#automations-offers-sharing-refresh)) |
+| Mercari | List, delist, relist, sale detection, offers | **Partial** | Same as Poshmark, `background/mercari-native.js`. No Promote. Offers to likers are built (`checkMercariPromotion`/`offerMercari`, manual and automatic) but refuse to run until the likers read and offer mutation are captured from the signed-in client (`PENDING_OFFER_REQUESTS`, `AWAITING_CAPTURE`) |
+| Depop | List, delist, relist, sale detection, refresh, offers | **Partial** | `background/depop-native.js`. Offers to likers are built (`checkDepopPromotion`/`offerDepop`, manual and automatic) but refuse to run until the signed-in web requests are captured; Depop's documented offer endpoint is the partner Selling API, not the seller's web session. Depop has no free refresh (paid Boost only); see `docs/direct-form-parity.md` |
 | Vinted | UK/Enterprise only | **Have** | `background/vinted-native.js`, `services/vinted_listing.py`; Anteroom covers more than the seller's Vendoo plan does |
 | Sellwild | Logo only | **Have** | `background/sellwild-native.js`, `services/sellwild_listing.py` |
-| Facebook Marketplace | List, delist, sale detection | **Missing** | Not in `marketplace_delist.MARKETPLACES`. Not in the seller's current list, but **23 active items** are recorded as live on Facebook through Vendoo (`notes.vendooMarketplaces`, live database, read-only check). See gap 2 |
+| Facebook Marketplace | List, delist, sale detection | **Partial** | Linked from Vendoo's links or the seller's, shown in the Marketplaces panel, state read on request (**Check on Facebook**) and sale detection, opt-in, through the signed-in Chrome session: `background/facebook-native.js`, `services/facebook_listing.py`, `services/chrome_sales.py`. Unit-tested; not yet verified on a real listing. All **23 active items** Vendoo listed there read as live Facebook listings (checked on a copy of the live database). **Missing**: delist, import and List, which need Facebook's GraphQL requests recorded from the signed-in client; see [direct-form-parity.md](direct-form-parity.md#facebook-marketplace) and gap 2 |
 | Grailed, Shopify, Whatnot, Vestiaire, Kidizen | Supported | **N/A** | Not in the seller's list, and no item in the database was ever listed there through Vendoo |
 
 ## Listing and crosslisting
@@ -81,12 +86,12 @@ and Vinted only on UK and US Enterprise accounts
 | Main form plus per-marketplace forms, values carried over, **Update All** / **Reset** | [Vendoo form](https://help.vendoo.co/en/articles/6260272-how-to-list-the-vendoo-form), [Update All](https://help.vendoo.co/en/articles/9128864-how-do-the-update-all-and-reset-buttons-work) | **Have** | General form plus native marketplace sections: `services/native_form.py`, `services/form_schema.py`; per-marketplace prices follow the item price unless overridden (CHANGELOG 0.1.403) |
 | Native category and field coverage per marketplace | [Vendoo form](https://help.vendoo.co/en/articles/6260272-how-to-list-the-vendoo-form) | **Partial** | Native catalogs: `services/marketplace_schemas.py` (eBay/Etsy APIs), `services/chrome_catalog.py` (Poshmark/Depop). Remaining work per marketplace is in [direct-form-parity.md](direct-form-parity.md) |
 | Drafts | [Vendoo form](https://help.vendoo.co/en/articles/6260272-how-to-list-the-vendoo-form) | **Have** | Local drafts, plus private marketplace drafts on eBay, Mercari, Depop, Etsy and Poshmark: `routes/native_marketplaces.py` (`/{marketplace}/draft`) |
-| Edit a live listing | [Edit a listing](https://help.vendoo.co/en/articles/9299456-how-do-i-edit-a-listing-in-vendoo) | **Partial** | `/{marketplace}/update` for eBay, Etsy, Poshmark and Depop. Mercari, Vinted and Sellwild need delist and relist |
-| Delist / relist one item | [Delist & Relist](https://help.vendoo.co/en/articles/6260258-vendoo-s-bulk-delist-relist-feature) | **Have** | `routes/marketplace_listings.py` (`/delist`), List from `routes/native_marketplaces.py`; covers items Vendoo listed through `vendooListingUrls` |
+| Edit a live listing | [Edit a listing](https://help.vendoo.co/en/articles/9299456-how-do-i-edit-a-listing-in-vendoo) | **Have** | `/{marketplace}/update` on all seven direct marketplaces, in place, keeping likes, views and listing age. Mercari (`editListing`), Vinted (item upload `PUT`) and Sellwild (`PUT /api/listings/{id}/edit`) since 0.1.432 keep the photos already on the listing and read it back (unit-tested; real-account verification pending); see `docs/direct-form-parity.md` |
+| Delist / relist one item | [Delist & Relist](https://help.vendoo.co/en/articles/6260258-vendoo-s-bulk-delist-relist-feature) | **Have** | `routes/marketplace_listings.py` (`/delist`), List from `routes/native_marketplaces.py`; covers items Vendoo listed through `vendooListingUrls`. Not Facebook (`marketplace_delist.MANUAL_DELIST`), which the seller deletes on Facebook |
 | Multi-quantity | [Multi-quantity sales](https://help.vendoo.co/en/articles/6626694-how-to-handle-sold-multi-quantity-items) | **Have** | Quantity on every form, Poshmark per-size quantities and SKUs (0.1.408), partial-sale handling `services/sale_inventory.py` |
 | Multi-variation | [Variations](https://help.vendoo.co/en/articles/6260275-how-do-i-handle-multi-variation-listings-in-vendoo) | **N/A** | Vendoo does not support it either. Anteroom has Poshmark size inventory; eBay variations are open in direct-form-parity.md |
-| Different photos per marketplace (Photo Manager) | [Photos per marketplace](https://help.vendoo.co/en/articles/6619124-can-i-use-different-photos-on-different-marketplaces) | **Missing** | Direct List sends every item photo: `native_marketplaces.py` sets `photo_ids` from all of the item's photos |
-| Listing videos (Poshmark, eBay; 5–15 s) | [Crosslisting app](https://www.vendoo.co/cross-listing-app) | **Partial** | Poshmark only: `services/listing_videos.py`, `native_marketplaces.py:579` (`if marketplace == "poshmark"`). No eBay video |
+| Different photos per marketplace (Photo Manager) | [Photos per marketplace](https://help.vendoo.co/en/articles/6619124-can-i-use-different-photos-on-different-marketplaces) | **Have** (0.1.431) | Each marketplace form (eBay, Etsy, Poshmark, Mercari, Depop, Vinted, Sellwild) shows its photos at the top, in send order, with its limit (24, 20, 16, 12, 8, 20, 20). It uses the item's photos until the seller unticks, reorders or adds photos on that form only; Reset to item photos goes back. The pick is `marketplace_photos.<marketplace>` on the listing and form-only photos are `photos.marketplace`; `services/marketplace_media.py` resolves it and Direct List, Save Draft and Update send it (`native_marketplaces._photos`). A change re-requires a Vendoo review. Request-level tests only; the Vendoo send keeps the item's photos |
+| Listing videos (Poshmark, eBay; 5–15 s) | [Crosslisting app](https://www.vendoo.co/cross-listing-app) | **Have** | Poshmark, eBay and Etsy (`services/listing_videos.py`, `VIDEO_RULES`). Since 0.1.431 the video is a tile in the form's photos, added like a photo, only on those three; eBay and Etsy have request-level tests only |
 | eBay business policies; Etsy shipping and return profiles | [eBay policies](https://help.vendoo.co/en/articles/6260282-how-to-use-ebay-s-business-policies-in-vendoo), [Etsy profiles](https://help.vendoo.co/en/articles/6260281-how-to-use-etsy-shipping-profiles-and-return-policies-in-vendoo) | **Have** | Policy access on connect (0.1.392); Etsy shop shipping and processing profiles in `services/etsy_listings.py` |
 | eBay promotions, international shipping | [eBay promotions](https://help.vendoo.co/en/articles/6812458-how-do-i-opt-into-ebay-promotions), [Global shipping](https://help.vendoo.co/en/articles/6812485-how-do-i-opt-into-global-shipping-on-ebay) | **Have** | eBay marketing controls under Marketplaces → eBay (`services/ebay_workspace.py`); shipping comes from the eBay policy |
 | Listing templates | [Templates](https://help.vendoo.co/en/articles/6260273-how-to-create-listing-templates-in-vendoo) | **Have** | `routes/listing_templates.py` (create, apply with review, new draft from a template) |
@@ -103,10 +108,10 @@ Vendoo: up to 240 items, from the inventory page
 
 | Vendoo bulk action | Anteroom | Evidence |
 | --- | --- | --- |
-| Bulk Edit: title, description, SKU, price, brand, condition, color, tags, category, size; **Save and relist** ([Bulk edit](https://help.vendoo.co/en/articles/10438710-bulk-edit-edit-your-listings-in-bulk)) | **Have** | `routes/bulk_edit.py`, `services/bulk_edit.py`: title, description, brand, size, SKU, price, cost, quantity, condition, colors, tags, labels and the shared, eBay and Depop categories (verified leaves) for up to 300 items. Save and relist is two reviewed steps: bulk edit, then **Update** in the bulk marketplace dialog (`services/bulk_marketplace.py`, eBay, Etsy, Poshmark and Depop) |
+| Bulk Edit: title, description, SKU, price, brand, condition, color, tags, category, size; **Save and relist** ([Bulk edit](https://help.vendoo.co/en/articles/10438710-bulk-edit-edit-your-listings-in-bulk)) | **Have** | `routes/bulk_edit.py`, `services/bulk_edit.py`: title, description, brand, size, SKU, price, cost, quantity, condition, colors, tags, labels and the shared, eBay and Depop categories (verified leaves) for up to 300 items. Save and relist is two reviewed steps: bulk edit, then **Update** in the bulk marketplace dialog (`services/bulk_marketplace.py`, all seven direct marketplaces) |
 | Bulk Edit Labels | **Have** | `services/bulk_edit.py` `labels_mode` add / remove / replace |
 | Bulk Copy | **Have** | **Select → Copy items**, up to 300 (`components/sidebar/BulkSelection.tsx`) |
-| Bulk List, Bulk Delist, Bulk Delist & Relist, Bulk Update | **Have** | `routes/bulk_marketplace.py` (`/preview`, `/perform`), up to 100 items, one confirmation, named marketplaces. Update covers eBay, Etsy, Poshmark and Depop |
+| Bulk List, Bulk Delist, Bulk Delist & Relist, Bulk Update | **Have** | `routes/bulk_marketplace.py` (`/preview`, `/perform`), up to 100 items, one confirmation, named marketplaces. Update covers all seven direct marketplaces (Mercari, Vinted and Sellwild since 0.1.432) |
 | Bulk Delete (from Vendoo only) | **Have** | `routes/bulk_delete.py`, up to 300 items, reviewed and confirmed; refuses items still live on a marketplace and never delists |
 | Bulk Mark as Not Listed | **Have** | `not_listed` action in `services/bulk_marketplace.py`, local record only (`marketplace_delist.mark`) |
 | Completion sound | **N/A** | Anteroom shows per-item results in the dialog |
@@ -117,9 +122,9 @@ Vendoo: up to 240 items, from the inventory page
 | --- | --- | --- | --- |
 | Drafted / listed / sold columns | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Have** | `services/item_status.py` derives Active / Sold / partly sold from Anteroom's own listings and the sales ledger, over Vendoo's imported label; `reconcile_job_statuses` applies it (0.1.422) |
 | Search, sort, filter (title, SKU, price, platforms listed / not listed, dates, labels) | [Inventory tools](https://help.vendoo.co/en/articles/6260262-vendoo-inventory-management-tools) | **Have** | Inventory search by title, SKU and label, status filters (README, **Inside Anteroom**) |
-| Custom labels, color-coded | [Labels](https://help.vendoo.co/en/articles/6260284-vendoo-custom-labels-for-inventory-management) | **Have** | Local labels with bulk edit; label colors in Settings → Listings → Inventory (`user_settings.LABEL_COLORS`). Migrated labels that are Vendoo IDs are shown through `services/vendoo_label_catalog.py` |
+| Custom labels, color-coded | [Labels](https://help.vendoo.co/en/articles/6260284-vendoo-custom-labels-for-inventory-management) | **Have** | Local labels with bulk edit; label colors in Settings → Listings → Inventory (`user_settings.LABEL_COLORS`). Labels are stored as names: Settings → Listings → Inventory → **Vendoo label IDs** converts the IDs migrated items carried, and each Vendoo import converts the ones it brings in (`vendoo_label_catalog.convert_stored_labels`) |
 | Stale listing warning (15–120 days, configurable) | [Stale inventory](https://help.vendoo.co/en/articles/6260291-vendoo-s-stale-inventory-system), [Custom settings](https://help.vendoo.co/en/articles/6260256-vendoo-custom-settings) | **Have** | 15–120 days, default 60, in Settings → Listings → Inventory (`user_settings.get_stale_listing_days`), used by Suggestions, Analytics and the sidebar stale filter; Automations can act after any number of listed days (CHANGELOG 0.1.402). Listed dates also come from Vendoo notes for migrated items |
-| Duplicate Finder | [What changed 2026](https://help.vendoo.co/en/articles/16091202-what-changed-in-vendoo-2026) | **Partial** | Duplicate Vendoo links (`routes/conversations.py` `/vendoo-link-duplicates`); linking a marketplace URL already on another item is rejected (`marketplace_delist.mark`). No finder for similar items |
+| Duplicate Finder | [What changed 2026](https://help.vendoo.co/en/articles/16091202-what-changed-in-vendoo-2026) | **Have** | Settings → Listings → **Similar items** (`routes/similar_items.py`, `services/similar_items.py`): pairs that share a photo file or SKU, or whose titles match (the Chrome import's matcher) with brand and size agreeing; alike cover photos rank a pair higher. The seller opens, merges (marketplace links, sales and labels move; the other item goes to Finished) or dismisses. Never deletes or delists. Duplicate Vendoo links stay (`/vendoo-link-duplicates`) |
 | CSV inventory and sales export | [CSV export](https://help.vendoo.co/en/articles/6260286-how-to-download-a-csv-inventory-spreadsheet-and-sales-report) | **Have** | `routes/sales_ledger.py` `/export/sales.csv`, `/export/inventory.csv`. Columns are fixed, not customizable |
 | Import active listings from each marketplace | [Import](https://help.vendoo.co/en/articles/6260276-how-to-import-your-items-in-vendoo) | **Have** | eBay and Etsy import whole listings (`routes/ebay.py`, `routes/etsy.py` `/import`). Poshmark, Mercari, Depop, Vinted and Sellwild import active listings through the Chrome bridge (`routes/chrome_import.py`, `services/chrome_import.py`, `background/marketplace-import.js`), with exact link matching first and a suggested match the seller reviews. Multi-size Poshmark and Depop listings are not imported yet. Vendoo import (`routes/imports.py`) is the migration path |
 | Import sold items | [Import sold](https://help.vendoo.co/en/articles/6760021-can-i-import-sold-items) | **Partial** | eBay and Etsy order recovery (`services/order_recovery.py`); Vendoo's sold history came in with the Vendoo import |
@@ -130,7 +135,7 @@ Vendoo: up to 240 items, from the inventory page
 
 | Vendoo feature | Source | Anteroom | Evidence |
 | --- | --- | --- | --- |
-| Sale detection (every ~10 min; computer on) | [Sale detection](https://help.vendoo.co/en/articles/8047348-sale-detection-auto-delist) | **Have** | eBay and Etsy push through the relay (`services/relay_sales.py`); Poshmark, Mercari, Depop, Sellwild and Vinted checked every 4–12 minutes (`services/chrome_sales.py`, `background/marketplace-sales.js`) |
+| Sale detection (every ~10 min; computer on) | [Sale detection](https://help.vendoo.co/en/articles/8047348-sale-detection-auto-delist) | **Have** | eBay and Etsy push through the relay (`services/relay_sales.py`); Poshmark, Mercari, Depop, Sellwild and Vinted checked every 4–12 minutes (`services/chrome_sales.py`, `background/marketplace-sales.js`). Facebook, off until the seller turns it on: six listings' pages per check, 20–40 minutes apart, so each listing is read about every two hours (not yet verified) |
 | Auto-delist on sale; skip while units remain | [Sale detection](https://help.vendoo.co/en/articles/8047348-sale-detection-auto-delist) | **Have** | Opt-in `sale_autodelist` (on for this seller): `marketplace_accounts.autodelist_for_sales` delists the other live marketplaces once, never the one that sold, and skips when stock remains |
 | Mark as sold, with sale details, delisting the others | [Mark as sold](https://help.vendoo.co/en/articles/6260270-how-to-mark-items-as-sold-on-vendoo) | **Partial** | **Mark as sold** per marketplace (`marketplace_delist.mark`). It creates no sale record, so there is nowhere to enter price, fees or shipping for it, and it does not delist the others |
 | Sales made elsewhere (in person, Instagram, other) | [Sold elsewhere](https://help.vendoo.co/en/articles/6762747-i-sold-an-item-on-a-different-marketplace-that-vendoo-doesn-t-have-how-do-i-handle-it-in-vendoo) | **Have** | Mark as sold and **Record a sale** record a seller sale with amounts, including **Other / in person** (`sales_ledger.record_seller_sale`, 0.1.422) |
@@ -151,7 +156,7 @@ off integrated marketplaces
 | --- | --- | --- |
 | Revenue, profit, ASP, counts, previous period, any date range | **Have** | `routes/analytics.py` `AnalyticsResponse`; `services/inventory_analytics.py` reads the sales ledger (`marketplace_sales`, recorded amounts) with the imported Vendoo sale, one row per order (0.1.422). Ledger lines not linked to an item are not counted |
 | By marketplace, category, brand | **Partial** | `marketplaces`, `categories`, `brands` groups; same data source |
-| By custom label | **Missing** | No label grouping in `AnalyticsResponse` |
+| By custom label | **Have** | `labels` group in `AnalyticsResponse` with each label's color; a sale counts under each of its item's labels; same data source |
 | eBay earnings and fees | **Have** | `services/ebay_finances.py` (0.1.397) |
 | Expenses / ad spend | **Have** (beyond Vendoo) | `routes/ad_spend.py`, sourcing-box cost allocation |
 
@@ -159,9 +164,9 @@ off integrated marketplaces
 
 | Vendoo feature | Source | Anteroom | Evidence |
 | --- | --- | --- | --- |
-| Offers to likers/watchers, manual bulk and automatic rules (price bands, exclusions, activity log) | [Send offers](https://help.vendoo.co/en/articles/10043166-send-offers-to-likers-automatically-or-manually-in-bulk) | **Partial** | eBay only: `routes/ebay_offers.py` (preview, send, rules, pause, attempts), `services/ebay_offers.py`. **Missing** for Poshmark, Mercari and Depop. Grailed and Vestiaire are N/A |
-| Poshmark sharing (scheduled rounds, order, speed, up to 6,000/day, log) | [Marketplace Sharing](https://help.vendoo.co/en/articles/11003940-marketplace-sharing-tool-for-poshmark-depop-and-grailed) | **Missing** | No share code in the server or extension |
-| Depop refresh | same | **Missing** | — |
+| Offers to likers/watchers, manual bulk and automatic rules (price bands, exclusions, activity log) | [Send offers](https://help.vendoo.co/en/articles/10043166-send-offers-to-likers-automatically-or-manually-in-bulk) | **Partial** | eBay: `routes/ebay_offers.py` (preview, send, rules, pause, attempts), `services/ebay_offers.py`. Poshmark, manual bulk and automatic rules (listings covered, discount, required floor per listing, exclusions, minimum days listed and likes, new likers only, shipping discount, activity log, pause): `services/listing_promotions.py`, `services/promotion_automations.py`, `routes/promotion_automations.py`, Automations → Sharing and offers to likers (0.1.430). Mercari and Depop: same engine and extension handlers, unit-tested against fakes, off until their requests are captured. Nothing is verified on a real account yet. Grailed and Vestiaire are N/A |
+| Poshmark sharing (scheduled rounds, order, speed, up to 6,000/day, log) | [Marketplace Sharing](https://help.vendoo.co/en/articles/11003940-marketplace-sharing-tool-for-poshmark-depop-and-grailed) | **Partial** | Share one or selected listings to followers, spaced 4–30 seconds apart, stopping at Poshmark's first limit: `services/listing_promotions.py`, `background/marketplace-promotions.js`. Scheduled rounds (up to 6 times a day, all or chosen listings, exclusions, minimum days listed, newest/oldest/random order, slow/normal/fast, daily cap up to 6,000 counted across all shares, activity log, pause), off by default: `services/promotion_automations.py` (0.1.430). Not yet verified on a real account |
+| Depop refresh | same | **Missing** | Depop itself has no free refresh or bump (Boost is paid); see `docs/direct-form-parity.md` |
 | Grailed bump | same | **N/A** | Not a seller marketplace |
 | Scheduled delist / relist / price drops | Not in Vendoo (relist is started by hand) | **Have** (beyond Vendoo) | `routes/automations.py`, `services/automation_actions.py`; every run waits for the seller's review per item and marketplace |
 
@@ -191,9 +196,9 @@ listing.
 | Component | What it does | Class |
 | --- | --- | --- |
 | `services/vendoo_watch.py`, `services/vendoo_label_sync.py` | Pull Vendoo's draft / active / sold status, dates and sale into `notes.vendooStatus`, `vendooDates`, `vendooSale` | **Still needed** until the inventory status (`repositories/queries.py:345-379`) and Analytics (`services/inventory_analytics.py`) read Anteroom's own listings and sales |
-| `services/vendoo_label_catalog.py`, `vendoo_import.split_vendoo_labels` | Vendoo label ID → name | **Still needed** while migrated items carry Vendoo label IDs; convert them to names once, then remove |
+| `services/vendoo_label_catalog.py` | Vendoo label ID → name, used by the Vendoo import, Send to Vendoo and the one-time conversion | **Remove** with the Vendoo import and Send path. Nothing reads it to show a label: stored labels are names. `vendoo_import.split_vendoo_labels` only splits the stored label string (**Naming**) |
 | `services/vendoo_import.py`, `services/vendoo_bulk_import.py`, `routes/imports.py` (`/vendoo`, `/vendoo/bulk`, `/vendoo/labels`) | Migration from Vendoo | **Still needed** for one final full import before cancelling; then **Remove** |
-| Facebook Marketplace listings (23 active items) | Only Vendoo can delist them or see their sales | **Still needed** until those items are delisted on Facebook |
+| Facebook Marketplace listings (23 active items) | Only Vendoo can delist them | **Still needed** until those items are deleted on Facebook; Anteroom now sees them and their sales |
 | `services/category_tree.py` (trees "used by Vendoo's forms") read by `direct_preflight.seeded_leaf` / `seeded_subcategories` | Stored category trees used by direct List checks | **Still needed** as stored data; refreshing them needs Vendoo. Replace with the native catalogs before removing |
 | `services/category_fields.py`, `services/category_learn.py` (fetch `/api/category/specifics` through Vendoo) | Vendoo field schemas | **Remove** the Vendoo fetch with Send; direct forms use `marketplace_schemas.py` and `chrome_catalog.py` |
 | `routes/vendoo_api.py`, `services/vendoo_create.py`, `vendoo_item_update.py`, `vendoo_send.py`, `vendoo_encodings.py`, `vendoo_api_log.py`, `send_queue.py`, `send_review.py`, `browser_fill.py`, `routes/jobs.py` (`run_ops`) | Send to Vendoo / Update Vendoo, and its troubleshooting log | **Remove** (direct List / Update replaces them) |
@@ -214,14 +219,32 @@ Most important first.
    *Fix:* derive item status from Anteroom's own marketplace listings and
    sales, and have Analytics read `marketplace_sales` (with recorded amounts)
    alongside the imported Vendoo history.
-2. **23 Facebook Marketplace listings stay up with nobody watching them.**
-   *Fix:* delist them in Vendoo (or on Facebook) before cancelling, or add
-   Facebook to the direct marketplaces.
-3. **No Poshmark sharing or Depop refresh.** *Fix:* add a seller-scheduled
-   share/refresh job through the existing Chrome bridge, with Vendoo's
-   controls (count, order, speed, daily cap, activity log).
-4. **Offers to likers only on eBay.** *Fix:* extend the `ebay_offers` rules,
-   preview and attempt log to Poshmark, Mercari and Depop.
+2. **23 Facebook Marketplace listings can't be delisted from Anteroom.**
+   Anteroom now links all 23 from Vendoo's links, shows them in the
+   Marketplaces panel, reads their state with **Check on Facebook**, and
+   detects their sales once the seller turns Facebook on under Sale detection
+   (unit-tested, not yet verified on a real listing). Auto-delist leaves
+   Facebook out and says so. Delist, import and List on Facebook are not built:
+   Facebook's own requests for them must first be recorded from the signed-in
+   client ([direct-form-parity.md](direct-form-parity.md#facebook-marketplace)).
+   *Fix:* record those requests and add delist; until then, delete each one on
+   Facebook and choose Mark as not listed.
+3. ~~**Poshmark sharing is seller-started only.**~~ Built in 0.1.430:
+   scheduled rounds with Vendoo's controls, off by default. Still to do:
+   watch one scheduled round on a real account (spacing, daily cap, how
+   Poshmark's limit shows).
+4. **Offers to likers on Mercari and Depop are not live yet.** Automatic
+   rules are built for Poshmark, Mercari and Depop on one engine
+   (`services/promotion_automations.py`), with the Mercari and Depop
+   handlers in `background/marketplace-promotions.js`. *Fix:* capture from
+   the signed-in sites Mercari's likers read and offer-to-likers mutation
+   (operation name, persisted-query hash, variables, success shape) and
+   Depop's likers read and send-offer request (method, path, body, success
+   shape, any headers), fill `PENDING_OFFER_REQUESTS`, and remove them from
+   `AWAITING_CAPTURE` in `services/listing_promotions.py`.
+   `POST /api/marketplaces/{mercari|depop}/record?goal=offers` records
+   those shapes, reads included, while the seller sends one offer by hand;
+   `GET` on the same path reads the saved result.
 5. **No background removal, crop or photo adjustments.** *Fix:* add crop
    and adjustments beside rotate, and background removal to white (a local
    model or a provider API).
@@ -229,18 +252,17 @@ Most important first.
    price, fees or shipping, and in-person sales have nowhere to go.
    *Fix:* let Mark as sold create a sale record with amounts, with an
    "Other / in person" marketplace, and offer to delist the others.
-7. **Final Vendoo import and label conversion.** *Fix:* run one full Vendoo
-   import, convert Vendoo label IDs to names, and only then cancel.
+7. **Final Vendoo import.** *Fix:* run one full Vendoo import, then cancel.
+   Label IDs are converted to names by the import and by Settings → Listings →
+   Inventory → **Vendoo label IDs** (0.1.433); IDs Vendoo never names stay visible there.
 8. ~~**Poshmark, Mercari, Depop, Vinted and Sellwild listings made outside
    Anteroom cannot be imported.**~~ Done: import through the Chrome bridge
    (unit-tested; real-account verification pending). Multi-size listings remain.
-9. **No eBay listing video.** *Fix:* add eBay video upload through the
-   Media API next to the Poshmark video.
+9. ~~**No eBay listing video.**~~ Fixed in 0.1.422 (eBay and Etsy), in the
+   form's photos since 0.1.431.
 10. *(Closed in 0.1.421: bulk condition, color, tags and category, and bulk
     Update on eBay, Etsy, Poshmark and Depop.)*
-11. **Smaller gaps:** different photos per marketplace, label analytics, a
-    finder for similar items, live Update on Mercari, Vinted and Sellwild, and
-    bulk category for Etsy, Poshmark and Mercari (the item editor does not
+11. **Smaller gaps:** bulk category for Etsy, Poshmark and Mercari (the item editor does not
     change those either).
 
 Before deleting the Send path, move the shared section builders out of the

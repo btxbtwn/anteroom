@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.middleware.gzip import GZipMiddleware
 
 from vendoo_studio.config import HOST, PORT, CORS_ORIGINS, frontend_dist_dir
@@ -14,9 +15,9 @@ from vendoo_studio.routes import health, conversations, photos, listings, jobs, 
 from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, browser, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
-from vendoo_studio.routes import ebay_offers
+from vendoo_studio.routes import ebay_offers, listing_promotions, promotion_automations
 from vendoo_studio.routes import ebay
-from vendoo_studio.routes import chrome_import
+from vendoo_studio.routes import chrome_import, similar_items
 from vendoo_studio.routes import ai_keys, sales_ledger, bulk_delete, bulk_edit, bulk_marketplace, listing_copies, listing_templates
 from vendoo_studio.routes import automations as automations_route
 from vendoo_studio.routes import errors as errors_route
@@ -100,11 +101,18 @@ async def lifespan(app: FastAPI):
     from vendoo_studio.services.ebay_actions import recover as recover_ebay_actions
     with SessionLocal() as db:
         recover_ebay_actions(db)
+        from vendoo_studio.services.listing_promotions import mark_interrupted as recover_promotions
+
+        # A share or offer that was sending when Anteroom stopped is unknown, never resent.
+        recover_promotions(db)
+    from vendoo_studio.services import promotion_automations as promotion_automation_service
+    promotion_automation_service.start()
 
     claude_sessions.keep_warm_on_this_loop()
     chatgpt_codex.keep_connection_on_this_loop()
     yield
     await offer_service.stop()
+    await promotion_automation_service.stop()
     try:
         await claude_sessions.close_warm_processes()
         await chatgpt_codex.close_connection()
@@ -157,6 +165,30 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+class _VendooOffMiddleware:
+    """Answer Vendoo routes with 409 while the seller has Vendoo turned off.
+
+    Added before CORS so a browser still receives the CORS headers on that 409.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            from vendoo_studio.services.user_settings import vendoo_enabled
+            from vendoo_studio.services.vendoo_gate import VENDOO_OFF_DETAIL, vendoo_request_blocked
+
+            path = scope.get("path") or ""
+            method = scope.get("method") or "GET"
+            if vendoo_request_blocked(method, path) and not vendoo_enabled():
+                response = JSONResponse({"detail": VENDOO_OFF_DETAIL}, status_code=409)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_VendooOffMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -171,6 +203,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.include_router(health.router)
 app.include_router(marketplace_accounts.router)
 app.include_router(ebay_offers.router)
+app.include_router(listing_promotions.router)
+app.include_router(promotion_automations.router)
 app.include_router(ebay.router)
 app.include_router(native_marketplaces.router)
 app.include_router(marketplace_schemas.router)
@@ -198,6 +232,7 @@ app.include_router(listing_copies.router)
 app.include_router(listing_templates.router)
 app.include_router(etsy.router)
 app.include_router(chrome_import.router)
+app.include_router(similar_items.router)
 app.include_router(sourcing.router)
 app.include_router(boxes.router)
 app.include_router(sale_calendar.router)

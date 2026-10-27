@@ -26,6 +26,12 @@ export interface ListingVideoLibrary {
   rules?: Record<string, ListingVideoRules>;
 }
 
+/** Each marketplace's photo limit, and video rules for the ones that take a video. */
+export interface MarketplaceMediaRules {
+  photo_limits: Record<string, number>;
+  video_rules: Record<string, ListingVideoRules>;
+}
+
 /** Why the marketplace would refuse this video, or null when it fits. Mirrors the server's check. */
 export function videoProblem(video: ListingVideo, rules: ListingVideoRules | undefined): string | null {
   if (!rules) return null;

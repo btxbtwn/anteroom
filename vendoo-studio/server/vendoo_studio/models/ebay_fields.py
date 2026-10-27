@@ -531,7 +531,9 @@ def normalize_ebay_sizes(listing: dict) -> bool:
     size = ebay_optional_raw(ebay, "size") or listing.get("size")
     normalized = ebay_size_for_type(size, size_type)
     updated = dict(ebay)
-    if normalized and normalized != size:
+    from vendoo_studio.services.seller_overrides import field_locked
+
+    if normalized and normalized != size and not field_locked(listing, "ebay", "size"):
         updated["size"] = normalized
     if text_value(size_type).casefold() in {"petite", "petites"}:
         updated["sizeType"] = "Petites"

@@ -2,11 +2,13 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
-import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
+import { useListingSessionActive } from "./listingSession";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
 import { EbayVariationsEditor, normalizeVariations, variationTotal } from "./EbayVariationsEditor";
-import { ListingVideoPicker } from "./ListingVideoPicker";
+import { MarketplaceMedia } from "./MarketplaceMedia";
+import { MEDIA_MARKETPLACES } from "../marketplaceMedia";
 import { ItemDetails } from "./ItemDetails";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import { SendProgress, sendProgressLabel } from "./SendProgress";
@@ -125,10 +127,11 @@ export function ListingEditor({
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [fieldTarget, setFieldTarget] = React.useState<{ field: string; sequence: number } | null>(null);
   const editorRef = React.useRef<HTMLDivElement>(null);
+  const sessionActive = useListingSessionActive();
   const { data: jobs, isLoading: jobsLoading } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
+    refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
   const { data: photos, isLoading: photosLoading } = useQuery({
     queryKey: ["photos", convId],
@@ -232,7 +235,7 @@ export function ListingEditor({
   const { data } = useQuery({
     queryKey: ["listing", convId],
     queryFn: () => api.listings.get(convId),
-    refetchInterval: schemaProbeActive ? 3000 : false,
+    refetchInterval: sessionActive && schemaProbeActive ? 3000 : false,
   });
 
   const { data: uiPrefs } = useQuery({
@@ -277,13 +280,20 @@ export function ListingEditor({
     }
   }, [listingJob?.mode, listingJob?.status, listingJob?.id, convId, queryClient]);
 
+  // Shared with the Marketplaces rail. An item already on Facebook shows Facebook even when it is not a selected marketplace.
+  const { data: liveListings } = useQuery({
+    queryKey: ["marketplace-listings", convId],
+    queryFn: () => api.marketplaceListings.get(convId),
+  });
+  const onFacebook = Boolean(liveListings?.facebook);
   const tabs = React.useMemo(() => {
     const selected = new Set(marketplaceSettings?.selected ?? ["ebay", "etsy", "poshmark", "mercari", "depop"]);
+    if (onFacebook) selected.add("facebook");
     return [
       "general",
       ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => id === "vinted" || selected.has(id)),
     ];
-  }, [marketplaceSettings?.selected]);
+  }, [marketplaceSettings?.selected, onFacebook]);
 
   React.useEffect(() => {
     if (!tabs.includes(editTab)) setEditTab("general");
@@ -315,7 +325,7 @@ export function ListingEditor({
   const { data: activity } = useQuery({
     queryKey: ["activity", convId],
     queryFn: () => api.conversations.activity(convId),
-    refetchInterval: (query) => activityPollMs(Boolean(query.state.data?.busy)),
+    refetchInterval: (query) => (sessionActive ? activityPollMs(Boolean(query.state.data?.busy)) : false),
   });
   const generating = chatBusy || Boolean(activity?.busy) || schemaProbeActive;
   const askChat = generating ? undefined : onAskChat;
@@ -401,23 +411,25 @@ export function ListingEditor({
             <HistoryIcon />
             History
           </Button>
-          <VendooLinkControl
-            convId={convId}
-            itemId={importedItemId}
-            url={importedUrl}
-            onLinked={(linkedItemId) => {
-              // Claim the auto-attach key so the effect doesn't race this import.
-              ensureAttemptKey.current = `${convId}:${linkedItemId}`;
-              queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
-              queryClient.invalidateQueries({ queryKey: ["conversations"] });
-              queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
-              ensureDraftMutation.mutate({ importDraft: true });
-            }}
-          />
+          {vendooEnabled ? (
+            <VendooLinkControl
+              convId={convId}
+              itemId={importedItemId}
+              url={importedUrl}
+              onLinked={(linkedItemId) => {
+                // Claim the auto-attach key so the effect doesn't race this import.
+                ensureAttemptKey.current = `${convId}:${linkedItemId}`;
+                queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
+                queryClient.invalidateQueries({ queryKey: ["conversations"] });
+                queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
+                ensureDraftMutation.mutate({ importDraft: true });
+              }}
+            />
+          ) : null}
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
           <ListingSyncStatus
             convId={convId}
-            bound={Boolean(listingJob?.vendoo_item_id || importedItemId)}
+            bound={vendooEnabled && Boolean(listingJob?.vendoo_item_id || importedItemId)}
           />
           {conversation?.unsent_edits ? (
             <>
@@ -426,13 +438,15 @@ export function ListingEditor({
                 title={
                   directMarketplaces.length
                     ? `This listing has changed since it was listed on ${directMarketplaces.map(marketplaceName).join(", ")}. Update it there from Marketplaces.`
-                    : "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                    : vendooEnabled
+                      ? "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                      : "This listing has changed since it was last saved."
                 }
               >
                 Unsent edits
               </Badge>
               {/* Discard pulls Vendoo's copy, which a directly listed item no longer follows. */}
-              {!directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
+              {vendooEnabled && !directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
                 <InlineButton
                   tone="muted"
                   className="text-xs"
@@ -452,14 +466,14 @@ export function ListingEditor({
       <SoldElsewhereNotice
         convId={convId}
         openInVendoo={
-          listingJob ? (
+          vendooEnabled && listingJob ? (
             <OpenListingButton jobId={listingJob.id} vendooItemId={importedItemId} vendooUrl={importedUrl} />
           ) : null
         }
       />
 
 
-      {relistMarketplaces.length > 0 && (
+      {vendooEnabled && relistMarketplaces.length > 0 && (
         <Alert
           variant="warning"
           role="status"
@@ -509,7 +523,7 @@ export function ListingEditor({
         </Alert>
       )}
 
-      {schemaProbeActive && (
+      {vendooEnabled && schemaProbeActive && (
         <Alert variant="info" role="status" className="mx-3 mt-2.5 shrink-0">
           <Spinner />
           <AlertDescription>
@@ -533,6 +547,10 @@ export function ListingEditor({
               <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
               <ItemDetails convId={convId} />
             </>
+          )}
+          {reviewTab === "forms" && MEDIA_MARKETPLACES.has(editTab) && listing && (
+            <MarketplaceMedia key={editTab} convId={convId} marketplace={editTab} listing={listing}
+              disabled={generating || updateMutation.isPending} onChange={(updated) => updateMutation.mutate(updated)} />
           )}
           <StructuredEditor
             convId={convId}
@@ -671,12 +689,9 @@ export function StructuredEditor({
     const init: Record<string, string | string[]> = {};
     fields.forEach((f) => {
       if (f.type === "inventory" || f.type === "variations") return;
-      // The saved listing is the source of truth. The form payload only fills a
-      // choice the listing has not stored yet, so an edit does not wait for a reload.
-      const value = resolvedEditorValue(f, listing);
+      const value = editorFieldValue(listing, f, tab);
       const label = (v: string) => Object.entries(f.optionValues || {}).find(([, id]) => id === v)?.[0] ?? v;
-      const followed = f.label.endsWith(" price") && f.key.includes("_specifics.")
-        && !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(f.key));
+      const followed = marketplacePriceFollowsGeneral(listing, f, tab);
       const shown = followed && listing?.price != null
         ? formFieldText(listing.price)
         : f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
@@ -695,14 +710,12 @@ export function StructuredEditor({
     if (field?.locked) return;
     const text = formFieldText(local[key]);
     if (text.trim() === "[object Object]") return;
-    // Compare with what the control was showing. The form's original value stays
-    // in defaultValue and must not block a later edit that happens to match it.
+    // Compare with the labeled value the control was showing. The form's original
+    // value stays in defaultValue and must not block a later edit that matches it.
     const labelOf = (value: string) => Object.entries(field?.optionValues || {}).find(([, id]) => id === value)?.[0] ?? value;
-    const followed = Boolean(field && field.label.endsWith(" price") && field.key.includes("_specifics.")
-      && !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(field.key)));
-    const current = followed && listing?.price != null
-      ? formFieldText(listing.price)
-      : labelOf(formFieldText(field ? resolvedEditorValue(field, listing) : getListingEditorValue(listing, key)));
+    const followed = field ? marketplacePriceFollowsGeneral(listing, field, tab) : false;
+    const raw = field ? editorFieldValue(listing, field, tab) : getListingEditorValue(listing, key);
+    const current = followed && listing?.price != null ? formFieldText(listing.price) : labelOf(formFieldText(raw));
     if (text === current) return;
     const updated = cloneListing(listing);
     setListingEditorValue(updated, key, field?.type === "number" ? coerce(text) : text);
@@ -748,8 +761,6 @@ export function StructuredEditor({
       && ["ebay_specifics.listingDuration", "ebay_specifics.listingFormat", "mercari_specifics.shippingPayerId"].includes(f.key)
       ? (f.options.includes(fallbackLabel) ? fallbackLabel : f.options.includes(fallback) ? fallback : f.options[0] ?? typed)
       : typed;
-    if (f.type === "video") return <ListingVideoPicker convId={convId} marketplace={f.key.split("_specifics.")[0]} selectedId={text} disabled={f.locked}
-      onSelect={id => commitField(f.key, id)} />;
     if (f.type === "inventory") {
       const stored = resolvedEditorValue(f, listing);
       const rows = Array.isArray(stored) ? stored.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : [];
@@ -761,7 +772,7 @@ export function StructuredEditor({
           onChange(updated);
         }} />;
     }
-    if (f.type === "variations") return <EbayVariationsEditor convId={convId}
+    if (f.type === "variations") return <EbayVariationsEditor convId={convId} listing={listing}
       value={normalizeVariations(resolvedEditorValue(f, listing))} aspects={f.variationAspects || []} disabled={f.locked} onChange={value => {
         const updated = cloneListing(listing);
         setListingEditorValue(updated, f.key, value);
@@ -780,7 +791,7 @@ export function StructuredEditor({
       disabled={f.locked} onChange={(choice) => commitField(f.key, choice.label)} />;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
-    if (f.key === "description" || f.type === "textarea") {
+    if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
       return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (f.multi) return <SearchableMultiSelect id={id} fieldKey={f.key}
@@ -822,8 +833,13 @@ export function StructuredEditor({
       />
     );
   };
-  // Long text and the category path need the full row.
-  const fullWidth = (f: EditorField) => ["title", "description", "category_path"].includes(f.key) || f.label === "Category" || ["textarea", "inventory", "video", "variations"].includes(f.type || "");
+  // Long text and the category path need the full row. A marketplace title is
+  // stored under that form, so the leaf is what still makes it full width.
+  const fullWidth = (f: EditorField) => {
+    const leaf = fieldLeaf(f.key);
+    return leaf === "title" || leaf === "description" || f.key === "category_path" || leaf === "categorypath"
+      || f.label === "Category" || ["textarea", "inventory", "variations"].includes(f.type || "");
+  };
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
@@ -897,6 +913,78 @@ export function StructuredEditor({
       })}
     </div>
   );
+}
+
+function fieldLeaf(key: string): string {
+  return (key.split(".").pop() || "").toLowerCase();
+}
+
+const FOLLOWED_GENERAL = new Set([
+  "title", "description", "brand", "size", "department",
+]);
+
+/** General fills these. A marketplace edit is stored on that form alone. */
+function independentFieldKey(tab: string, key: string): string {
+  if (tab === "general" || key.includes(".")) return key;
+  if (key === "price") return MARKETPLACE_PRICE_KEYS[tab] ?? key;
+  if (FOLLOWED_GENERAL.has(key)) return `${tab}_specifics.${key}`;
+  return key;
+}
+
+function independentRows(rows: EditorField[], tab: string): EditorField[] {
+  if (tab === "general") return rows;
+  return mergeEditorFields(rows.flatMap((field) => {
+    // The marketplace price row is added separately and already follows General
+    // until this form sets its own price. The shared Price row would edit every form.
+    if (field.key === "price" && MARKETPLACE_PRICE_KEYS[tab]) return [];
+    const key = independentFieldKey(tab, field.key);
+    const inherited = Boolean(field.locked && /change it there/i.test(field.help || ""));
+    if (key === field.key && !inherited) return [field];
+    return [{
+      ...field,
+      key,
+      ...(fieldLeaf(key) === "description" && !field.type ? { type: "textarea" as const } : {}),
+      ...(inherited ? { locked: false, help: "Filled from General. A change here stays on this marketplace." } : {}),
+    }];
+  }));
+}
+
+function marketplacePriceFollowsGeneral(listing: ListingData | undefined, field: EditorField, tab: string): boolean {
+  const canonical = MARKETPLACE_PRICE_KEYS[tab];
+  const priceRow = field.key === canonical || (field.label.endsWith(" price") && field.key.includes("_specifics."));
+  if (!priceRow) return false;
+  return !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(field.key));
+}
+
+/** This form's own value, otherwise the native or General value it was filled with. */
+function sourceValue(listing: ListingData | undefined, field: EditorField, tab: string): unknown {
+  return marketplaceDisplayValue(listing, field.key, {
+    tab,
+    locked: field.locked,
+    native: field.native,
+    defaultValue: field.defaultValue,
+  });
+}
+
+/** What a control shows before it is mapped to a choice label. */
+function editorFieldValue(listing: ListingData | undefined, field: EditorField, tab: string): unknown {
+  // eBay's category control shows the breadcrumb. The id lives beside it.
+  if (field.key === "direct_category_ids.ebay") return resolvedEditorValue(field, listing);
+  // A locked row keeps the form's computed value, such as a generated SKU.
+  if (field.locked && field.defaultValue !== undefined) return field.defaultValue;
+  const displayed = sourceValue(listing, field, tab);
+  // A selection whose saved text is not one of the choices keeps the form's resolved id.
+  if (field.selectionOnly && field.defaultValue !== undefined && !selectionChoiceMatches(field, displayed)) {
+    return field.defaultValue;
+  }
+  return displayed;
+}
+
+function selectionChoiceMatches(field: EditorField, value: unknown): boolean {
+  const values = field.multi ? formFieldValues(value, field.options) : [formFieldText(value)].filter(Boolean);
+  if (!values.length) return false;
+  const ids = new Set(Object.values(field.optionValues || {}));
+  return values.every((item) => field.options?.includes(item) || ids.has(item));
 }
 
 const SHARED_FORM_FIELDS: EditorField[] = [
@@ -1076,7 +1164,22 @@ function limitToCategoryForm(
     const label = foldFieldName(field.label.replace(/\s*\*$/, ""));
     return core.has(label);
   };
-  if (!form?.known) return core.size ? rows.filter(listed) : rows;
+  // No category schema yet. A direct listing shows its standard rows. Another
+  // editor shows those rows plus the fields every listing has, such as brand.
+  // A saved attribute that belongs to a category stays off until that schema loads.
+  if (!form?.known) {
+    if (!DIRECT_FORM_MARKETS.has(tab)) {
+      const shared = new Set(
+        [...SHARED_FORM_FIELDS, ...(PACKAGE_MARKETPLACES.has(tab) ? PACKAGE_FORM_FIELDS : [])]
+          .map((field) => foldFieldName(field.label)),
+      );
+      return rows.filter((field) => {
+        const label = foldFieldName(field.label.replace(/\s*\*$/, ""));
+        return core.has(label) || shared.has(label) || field.key.includes(".measurements.");
+      });
+    }
+    return core.size ? rows.filter(listed) : rows;
+  }
   const allowed = new Set(
     form.fields
       .filter((field) => field.on_form !== false)
@@ -1105,7 +1208,7 @@ export function fieldsForMarketplaceForm(
   // does not fall back to a hand-kept form. A known category schema still merges.
   if (DIRECT_FORM_MARKETS.has(tab) && (catalog?.native || !catalog?.fields.length)) {
     const rows = catalog?.native ? schemaFieldsForTab(forms, tab) || [] : [];
-    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(rows, tab), listing, tab), forms, tab, revealAll);
+    return limitToCategoryForm(finishMarketplaceRows(withMarketplacePrice(independentRows(rows, tab), tab), listing, tab), forms, tab, revealAll);
   }
   const own = getFieldsForTab(listing, tab);
   const withoutObjects = (fields: EditorField[]) => fields.filter((field) => !isPlainObject(getListingEditorValue(listing, field.key)));
@@ -1134,7 +1237,7 @@ export function fieldsForMarketplaceForm(
       : field;
   });
   return limitToCategoryForm(
-    finishMarketplaceRows(withoutObjects(withMarketplacePrice(named, tab)), listing, tab),
+    finishMarketplaceRows(withoutObjects(withMarketplacePrice(independentRows(named, tab), tab)), listing, tab),
     forms,
     tab,
     revealAll,
@@ -1257,8 +1360,6 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         "etsy_specifics",
         [
           ...liveCategoryFields(listing, "etsy"),
-          { key: "etsy_specifics.videoId", label: "Listing video", type: "video",
-            help: "Etsy takes one video of 3 to 15 seconds and plays it without sound. Saving a draft does not publish it." },
           { key: "etsy_specifics.whoMade", label: "Who Made It?" },
           { key: "etsy_specifics.whatIsIt", label: "What Is It?" },
           { key: "etsy_specifics.whenMade", label: "When Was It Made?" },
@@ -1551,6 +1652,7 @@ function SendToVendooButton({
   onSelectBlocker: (field: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const sessionActive = useListingSessionActive();
   const [error, setError] = React.useState<string | null>(null);
   const sendLock = React.useRef(false);
   const bound = Boolean(vendooItemId);
@@ -1576,13 +1678,13 @@ function SendToVendooButton({
   const { data: extStatus } = useQuery({
     queryKey: ["extension-status"],
     queryFn: api.extension.status,
-    refetchInterval: () => pollMs(EXTENSION_STATUS_POLL_MS),
+    refetchInterval: () => (sessionActive ? pollMs(EXTENSION_STATUS_POLL_MS) : false),
   });
 
   const { data: jobs } = useQuery({
     queryKey: ["jobs", convId],
     queryFn: () => api.jobs.list(convId),
-    refetchInterval: (query) => jobsPollMs(query.state.data),
+    refetchInterval: (query) => (sessionActive ? jobsPollMs(query.state.data) : false),
   });
 
   const listingJob = jobs?.find((j) => j.conversation_id === convId && j.status !== "cancelled" && j.mode !== "native_marketplace");
@@ -1602,7 +1704,7 @@ function SendToVendooButton({
     queryKey: ["fill-log", listingJobId],
     queryFn: () => api.jobs.fillLog(listingJobId!),
     enabled: Boolean(listingJobId),
-    refetchInterval: () => fillLogPollMs(listingJob?.status),
+    refetchInterval: () => (sessionActive ? fillLogPollMs(listingJob?.status) : false),
   });
   const { data: hiddenData } = useQuery({
     queryKey: ["settings-hidden-fields", convId],

@@ -16,6 +16,11 @@ Vinted saves a draft and then publishes it, the same as Mercari and Depop.
 Both steps run in the extension background with no Vinted tab, and only after
 the seller confirms List. A lost reply is read back and never creates a second
 draft. Delist deletes the live listing through the signed-in Chrome session.
+
+Update writes the saved revision onto the listing already live, on every
+marketplace here, after one seller confirmation. It never publishes a draft,
+relists or creates a second listing; each marketplace's answer is checked by
+reading the listing back.
 """
 from __future__ import annotations
 
@@ -34,7 +39,7 @@ from sqlalchemy.orm import Session
 from vendoo_studio.models.marketplace_listing import BUSY_STATES, UNSETTLED_STATES
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings
+from vendoo_studio.services import browser_bridge, direct_preflight, etsy_listings, marketplace_media
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job, start_gate
 from vendoo_studio.services.chrome_bridge import expected_extension_build
 from vendoo_studio.services.listing_result import ERROR_CODES, failure, scrub
@@ -219,7 +224,7 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
                 raise NativeMarketplaceError(502, "Chrome answered for a different draft. Check the native listing.")
         expected = "draft" if action == "save_draft" else "published"
         state = result.get("state")
-        if not (state == expected or (marketplace == "sellwild" and action == "publish" and state == "pending_review")):
+        if not (state == expected or (marketplace == "sellwild" and action in {"publish", "update"} and state == "pending_review")):
             return {"state": "unknown", **_CLEARED_ERROR, "error": UNKNOWN, "error_code": "uncertain"}
         values = {"state": state, **_CLEARED_ERROR}
         # Listed, but a setting did not stick (Poshmark's Smart Pricing). Shown on the live row.
@@ -358,7 +363,12 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
             raise NativeMarketplaceError(409, "Connect Chrome first.")
         if getattr(extension_manager, "build", None) != expected_extension_build():
             raise NativeMarketplaceError(409, "Connect Chrome to load the current Anteroom Bridge before continuing.")
-    return snapshot, ConversationRepo(db).get_photos(conv_id)
+    return snapshot, _photos(db, conv_id, snapshot, marketplace)[0]
+
+
+def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tuple[list, str]:
+    """This marketplace's photos for the listing being sent, and a warning when its limit leaves some off."""
+    return marketplace_media.photos_for(snapshot, ConversationRepo(db).get_all_photos(conv_id), marketplace)
 
 
 async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, db: Session) -> dict:
@@ -367,8 +377,6 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         raise NativeMarketplaceError(400, f"Saving a private {name} draft is not supported.")
     if kind != "save_draft" and body.confirm is not True:
         raise NativeMarketplaceError(400, f"Confirm updating the live {name} listing." if kind == "update" else f"Confirm listing on {name}.")
-    if kind == "update" and marketplace not in {"ebay", "etsy", "poshmark", "depop"}:
-        raise NativeMarketplaceError(409, f"A live {name} listing cannot be updated from Anteroom yet.")
     if kind in {"list", "save_draft"}:
         from vendoo_studio.services.marketplace_delist import listings as live_listings
 
@@ -408,9 +416,9 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         if record.get("state") in UNSETTLED_STATES:
             raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
         extra: dict = {}
-        if marketplace in {"poshmark", "mercari", "depop"}:
-            sent = _depop_photos(snapshot, photos)[0] if marketplace == "depop" else photos
-            extra["photo_ids"] = [photo.id for photo in sent]
+        # A Mercari update keeps the photos already on the live item.
+        if marketplace in {"poshmark", "depop"} or (marketplace == "mercari" and kind != "update"):
+            extra["photo_ids"] = [photo.id for photo in photos]
         if kind == "update":
             from vendoo_studio.services.marketplace_delist import listings as live_listings
 
@@ -421,7 +429,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         elif record.get("state") in {"published", "pending_review"}:
             raise NativeMarketplaceError(409, f"This item is already listed on {name}.")
         if marketplace == "sellwild":
-            if record.get("photo_ids") != [p.id for p in photos]:
+            # An update keeps the photos already on the live listing.
+            if kind == "list" and record.get("photo_ids") != [p.id for p in photos]:
                 raise NativeMarketplaceError(409, "The photos changed. List on Sellwild again.")
             choice = chosen(snapshot, record)
             if not choice["category_id"] or not choice["condition_id"]:
@@ -499,16 +508,9 @@ async def preflight(conv_id: str, db: Session, sellwild_category_id: int | None 
                                   _context(db, conv_id, marketplace, body)),
             preview, marketplace,
         )
-        if marketplace == "depop":
-            photos = ConversationRepo(db).get_photos(conv_id)
-            picked = prepared.get("marketplace_photos") if isinstance(prepared.get("marketplace_photos"), dict) else {}
-            chosen = picked.get("depop") if isinstance(picked.get("depop"), list) else []
-            if len(photos) > 8 and not chosen:
-                found.append(direct_preflight.gap(
-                    "marketplace_photos.depop",
-                    f"Depop keeps 8 photos. This item has {len(photos)}; the first 8 are sent unless you pick which ones.",
-                    blocking=False,
-                ))
+        left_off = _photos(db, conv_id, prepared, marketplace)[1]
+        if left_off:
+            found.append(direct_preflight.gap(f"marketplace_photos.{marketplace}", left_off, blocking=False))
         found = [direct_preflight.with_fix(item) for item in found]
         out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found}
     return {"revision_id": revision.id, "marketplaces": out}
@@ -539,30 +541,10 @@ def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
             and _record(db, conv_id, marketplace).get("job_id") == job_id)
 
 
-def _depop_photos(snapshot: dict, photos: list) -> tuple[list, str]:
-    """Depop keeps eight photos. An ordered pick wins; otherwise the first eight, with a warning."""
-    ordered = snapshot.get("marketplace_photos") if isinstance(snapshot.get("marketplace_photos"), dict) else {}
-    chosen_ids = ordered.get("depop") if isinstance(ordered.get("depop"), list) else []
-    chosen_ids = [str(item).strip() for item in chosen_ids if str(item).strip()]
-    if chosen_ids:
-        by_id = {str(photo.id): photo for photo in photos}
-        picked = [by_id[item] for item in chosen_ids if item in by_id][:8]
-        omitted = max(0, len(chosen_ids) - 8)
-        warning = f"Depop kept the first 8 of the {len(chosen_ids)} photos selected for it." if omitted else ""
-        return picked or list(photos)[:8], warning
-    warning = ""
-    if len(photos) > 8:
-        warning = f"Depop keeps 8 photos. The first 8 of {len(photos)} were sent. Pick photos on the Depop form to choose which ones."
-    return list(photos)[:8], warning
-
-
-def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, photos: list, job_id: str) -> dict:
-    sent = photos
+def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, photos: list, warning: str) -> dict:
     extra: dict = {}
-    if marketplace == "depop":
-        sent, warning = _depop_photos(snapshot, photos)
-        if warning:
-            extra["photo_warning"] = warning
+    if marketplace == "depop" and warning:
+        extra["photo_warning"] = warning
     if marketplace == "sellwild":
         from vendoo_studio.services.sellwild_listing import package_sides, sellwild_catalog
 
@@ -577,7 +559,7 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
         "listing": snapshot, "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
         **({"video": snapshot.get("_native_video")} if marketplace == "poshmark" else {}),
-        "photos": [{"id": p.id, "mime_type": p.mime_type} for p in sent],
+        "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
         **extra,
     }
 
@@ -588,7 +570,7 @@ def _result_context(db: Session, conv_id: str, marketplace: str, record: dict, s
             "draft_url": candidate, "listing_id": record.get("listing_id"), "local_draft_id": record.get("local_draft_id"),
             "revision_id": record.get("revision_id"), "photo_ids": record.get("photo_ids"),
             "expected_photo_count": (len(record["photo_ids"]) if record.get("photo_ids") is not None
-                                     else len(ConversationRepo(db).get_photos(conv_id)) if first_save or marketplace == "poshmark" else None),
+                                     else len(_photos(db, conv_id, snapshot, marketplace)[0]) if first_save or marketplace == "poshmark" else None),
             "listing": snapshot}
 
 
@@ -626,7 +608,7 @@ async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, rec
 
 async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: str, options: dict) -> dict:
     snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
-    photos = ConversationRepo(db).get_photos(conv_id)
+    photos, warning = _photos(db, conv_id, snapshot, marketplace)
     binding = _record(db, conv_id, marketplace)
     if marketplace in API_MARKETPLACES:
         def record(values: dict) -> None:
@@ -653,7 +635,7 @@ async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: 
         return stored
     try:
         result = await browser_bridge.request(job, "marketplace.execute",
-                                              _execute_payload(marketplace, step, binding, snapshot, photos, job.id),
+                                              _execute_payload(marketplace, step, binding, snapshot, photos, warning),
                                               timeout=EXECUTE_TIMEOUT_S)
     except browser_bridge.BrowserBridgeError:
         result = await _wait_for_chrome(db, job, conv_id, marketplace, binding, snapshot)
@@ -1028,7 +1010,7 @@ def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> d
             raise NativeMarketplaceError(409, "Check the previous Sellwild action before listing again.")
         return _store(db, conv_id, "sellwild", {
             **_CLEARED_ERROR, "storage": "local", "state": "draft", "revision_id": body.revision_id,
-            "photo_ids": [p.id for p in ConversationRepo(db).get_photos(conv_id)],
+            "photo_ids": [p.id for p in _photos(db, conv_id, snapshot, "sellwild")[0]],
             "local_draft_id": previous.get("local_draft_id") or uuid.uuid4().hex,
             **picked,
         })

@@ -11,10 +11,12 @@ function nativeEditorChoice(path, label, value, choices, extra = {}) {
     options: rows.map(row => row.label), option_values: Object.fromEntries(rows.map(row => [row.label, String(row.value)])), ...extra });
 }
 
-function nativeEditorBase(listing, { title = true, maxTitle, maxDescription, minPrice, maxPrice, priceStep = 0.01 } = {}) {
+function nativeEditorBase(listing, { marketplace, title = true, maxTitle, maxDescription, minPrice, maxPrice, priceStep = 0.01 } = {}) {
+  const copy = field => marketplace ? marketplaceCopy(listing, marketplace, field) : listing?.[field];
+  const path = field => marketplace ? `${marketplace}_specifics.${field}` : field;
   return [
-    ...(title ? [nativeEditorField('title', 'Title', listing.title, { required: true, max_length: maxTitle })] : []),
-    nativeEditorField('description', 'Description', listing.description, { required: true, max_length: maxDescription }),
+    ...(title ? [nativeEditorField(path('title'), 'Title', copy('title'), { required: true, max_length: maxTitle })] : []),
+    nativeEditorField(path('description'), 'Description', copy('description'), { required: true, max_length: maxDescription }),
     nativeEditorField('price', 'Price', listing.price, { required: true, input_type: 'number', min_value: minPrice, max_value: maxPrice, step: priceStep }),
   ];
 }
@@ -50,13 +52,12 @@ function poshmarkEditorForm(listing, catalog, styleTags = [], shippingDiscounts 
     quantity: listing.quantity ?? 1, sku: '',
   }];
   const fields = [
-    ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1500, minPrice: 3, priceStep: 1 }),
+    ...nativeEditorBase(listing, { marketplace: 'poshmark', maxTitle: 80, maxDescription: 1500, minPrice: 3, priceStep: 1 }),
     nativeEditorChoice('direct_category_ids.poshmark', 'Category', poshmarkDirectId(resolved), categoryChoices,
       { required: true, clears: ['poshmark_specifics.subcategory', 'poshmark_specifics.sizeSetId', 'poshmark_specifics.nativeSizeId', 'poshmark_specifics.inventoryRows'],
         help: 'Pick a department, then a category. When that category has a narrower choice, pick one to finish. Changing category clears the size.' }),
-    nativeEditorField('brand', 'Brand', listing.brand ?? listing.form?.overrides?.brand),
-    nativeEditorField('poshmark_specifics.videoId', 'Listing video', specifics.videoId || '',
-      { input_type: 'video', help: 'Poshmark supports one video shorter than 15 seconds. Saving a draft does not publish it.' }),
+    nativeEditorField('poshmark_specifics.brand', 'Brand',
+      Object.hasOwn(specifics, 'brand') ? specifics.brand : (listing.brand ?? listing.form?.overrides?.brand)),
     nativeEditorChoice('poshmark_specifics.condition', 'Condition', poshmarkCondition(listing), [
       { label: 'New With Tags (NWT)', value: 'nwt' }, { label: 'Like New', value: 'uln' },
       { label: 'Good', value: 'ug' }, { label: 'Fair', value: 'uf' },
@@ -113,7 +114,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
   const extraValues = category ? depopAttributeValues(listing, category, attributes).values : {};
   const brands = attributes.brand || attributes.brands || [];
   const fields = [
-    ...nativeEditorBase(listing, { title: false, maxDescription: DEPOP_MAX_DESCRIPTION, minPrice: 1, maxPrice: 9999999999.99 }),
+    ...nativeEditorBase(listing, { marketplace: 'depop', title: false, maxDescription: DEPOP_MAX_DESCRIPTION, minPrice: 1, maxPrice: 9999999999.99 }),
     nativeEditorChoice('direct_category_ids.depop', 'Category', depopDirectId(category), choices,
       { required: true, clears: ['depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'],
         help: 'Changing category clears its size and category attributes.' }),
@@ -176,7 +177,7 @@ function mercariEditorForm(listing, master) {
   const sizeChoices = sizes.map(row => ({ value: row.id, label: sizes.filter(other => other.name === row.name).length > 1
     ? `${row.name} · ${row.group_name || row.id}` : row.name || row.title }));
   const fields = [
-    ...nativeEditorBase(listing, { maxTitle: 80, maxDescription: 1000, minPrice: 1, maxPrice: 2000, priceStep: 1 }),
+    ...nativeEditorBase(listing, { marketplace: 'mercari', maxTitle: 80, maxDescription: 1000, minPrice: 1, maxPrice: 2000, priceStep: 1 }),
     nativeEditorChoice('direct_category_ids.mercari', 'Category', category || '', categories,
       { required: true, clears: ['mercari_specifics.nativeSizeId'], help: 'Categories from Mercari. Choose a category with no subcategories.' }),
     nativeEditorChoice('mercari_specifics.brand', 'Brand', mercariBrandRequest(listing).omit

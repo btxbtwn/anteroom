@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
@@ -477,7 +478,9 @@ async def dispatch_queued_jobs():
     the slot free and start the same job.
     """
     from vendoo_studio.services.category_tree import syncing
-    if syncing():
+    from vendoo_studio.services.user_settings import vendoo_enabled
+
+    if not vendoo_enabled() or syncing():
         return
     async with _dispatch_lock():
         picked = await asyncio.to_thread(_next_dispatch)
@@ -752,7 +755,7 @@ async def reload_extension():
     return {"ok": True, "sent": await request_extension_reload(token) if token else False}
 
 
-_SESSION_MARKETS = ("depop", "poshmark", "mercari", "sellwild", "vinted")
+_SESSION_MARKETS = ("depop", "poshmark", "mercari", "sellwild", "vinted", "facebook")
 _SESSION_STATES = {"signed_in", "expired", "signed_out", "unknown"}
 
 
@@ -821,23 +824,31 @@ async def connect_marketplace(marketplace: str):
     return _public_connect(raw)
 
 
-@router.post("/api/marketplaces/{marketplace}/record")
-async def record_marketplace_draft(marketplace: str):
-    """Record the shape of a marketplace's own draft save while the seller saves one by hand.
+@router.post("/api/marketplaces/{marketplace}/record", status_code=202)
+async def record_marketplace_requests(marketplace: str, goal: Literal["draft", "offers"] = "draft"):
+    """Start recording the shape of a marketplace's own requests while the seller acts by hand.
 
-    Opens one tab for the seller and returns request shapes only (operation names,
-    GraphQL query text, paths, header names, value types), never values or session data.
+    ``draft`` records a draft save; ``offers`` records the likers list and an offer
+    sent to likers, reads included. Opens one tab for the seller; the result, request
+    shapes only (operation names, GraphQL query text, paths, header names, value
+    types), is saved when the tab closes and read with GET.
     """
-    from types import SimpleNamespace
+    from vendoo_studio.services import marketplace_recording
 
-    from vendoo_studio.services import browser_bridge
-
-    if marketplace not in {"mercari", "sellwild"}:
+    if marketplace not in marketplace_recording.RECORDABLE[goal]:
         raise HTTPException(404, "Recording is not set up for this marketplace.")
-    try:
-        return await browser_bridge.request(SimpleNamespace(id=None), "marketplace.record", {"marketplace": marketplace}, timeout=330)
-    except browser_bridge.BrowserBridgeError as exc:
-        raise HTTPException(502, str(exc)) from exc
+    if not marketplace_recording.start(marketplace, goal):
+        raise HTTPException(409, "A recording is already running. Close its tab first.")
+    return {"recording": True}
+
+
+@router.get("/api/marketplaces/{marketplace}/record")
+def recorded_marketplace_requests(marketplace: str, goal: Literal["draft", "offers"] = "draft"):
+    from vendoo_studio.services import marketplace_recording
+
+    if marketplace not in marketplace_recording.RECORDABLE[goal]:
+        raise HTTPException(404, "Recording is not set up for this marketplace.")
+    return marketplace_recording.status(marketplace, goal)
 
 
 @router.websocket("/api/extension/ws")

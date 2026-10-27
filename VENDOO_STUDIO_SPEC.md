@@ -1189,3 +1189,11 @@ reviewed marketplaces, revision and a review token that must still match the
 item, its photos and its marketplace links. Nothing is stored to run later, a
 failed item is not retried, List skips a marketplace where the item is already
 live, and a marketplace where it sold is never touched.
+
+Sharing and offers to likers follow the same rule. The seller selects items,
+names the marketplace and the action, and reviews each item; an offer needs the
+seller's floor for that listing and never goes below it. Each reviewed item is
+sent once, holding the automation slot, and journaled before Chrome is asked; a
+lost reply is unknown and is checked, never resent. Nothing runs on a timer.
+Which marketplaces support which tool, with sources, is recorded in
+`docs/direct-form-parity.md`.

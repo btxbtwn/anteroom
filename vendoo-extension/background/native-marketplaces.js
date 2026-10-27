@@ -72,19 +72,25 @@ async function recoverNativeMarketplace(context) {
   return nativeRefusal('Unsupported marketplace.');
 }
 
+// The live listing an Update writes onto, by each marketplace's own listing id.
+const NATIVE_UPDATE_LISTING = {
+  poshmark: ['Poshmark', /^[a-f0-9]{24}$/],
+  depop: ['Depop', /^[a-z0-9][a-z0-9-]{0,200}$/i],
+  mercari: ['Mercari', /^m\d{6,}$/],
+  vinted: ['Vinted', /^[1-9]\d{0,14}$/],
+  sellwild: ['Sellwild', /^[1-9]\d{0,14}$/],
+};
+
 async function runNativeMarketplace(msg) {
   const p = msg.payload || {};
-  const depopUpdate = p.marketplace === 'depop' && p.action === 'update';
   if (!['poshmark', 'mercari', 'depop', 'sellwild', 'vinted'].includes(p.marketplace)
-      || !(depopUpdate || ({ sellwild: ['publish'], poshmark: ['list', 'update', 'save_draft'] }[p.marketplace] || ['save_draft', 'publish']).includes(p.action))) {
+      || !({ sellwild: ['publish', 'update'], poshmark: ['list', 'update', 'save_draft'] }[p.marketplace] || ['save_draft', 'publish', 'update']).includes(p.action)) {
     return nativeRefusal('Unsupported marketplace action.');
   }
   if (p.action === 'list' && p.confirm !== true) return nativeRefusal('Confirm listing on this marketplace.');
-  if (depopUpdate && (p.confirm !== true || !/^[a-z0-9][a-z0-9-]{0,200}$/i.test(String(p.listing_id || '')))) {
-    return nativeRefusal('Confirm updating the live Depop listing.');
-  }
-  if (p.action === 'update' && p.marketplace !== 'depop' && (p.confirm !== true || !/^[a-f0-9]{24}$/.test(String(p.listing_id || '')))) {
-    return nativeRefusal('Confirm updating the live Poshmark listing.');
+  if (p.action === 'update') {
+    const [name, pattern] = NATIVE_UPDATE_LISTING[p.marketplace];
+    if (p.confirm !== true || !pattern.test(String(p.listing_id || ''))) return nativeRefusal(`Confirm updating the live ${name} listing.`);
   }
   if (p.action === 'publish' && (p.confirm !== true || (p.marketplace !== 'sellwild' && !nativeDraftUrl(p.marketplace, p.draft_url)))) {
     return nativeRefusal('Confirm publishing an existing native draft.');

@@ -204,7 +204,7 @@ def test_a_partial_sale_offers_no_delist_and_marks_nothing(env):
     assert body["listings"]["ebay"]["sold_here"] is False
 
 
-@pytest.mark.parametrize("change", [{"marketplace": "facebook"}, {"sold_on": "2999-01-01"}, {"quantity": 0},
+@pytest.mark.parametrize("change", [{"marketplace": "grailed"}, {"sold_on": "2999-01-01"}, {"quantity": 0},
                                     {"request_id": "short"}, {"item_revenue": "-4"}])
 def test_invalid_sales_are_refused(env, change):
     item(env.db, "coat")

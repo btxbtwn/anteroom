@@ -2,19 +2,24 @@ import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { activityPollMs, BUSY_POLL_MS, LIVE_POLL_MS, pollMs } from "../../api/polling";
+import { useListingSessionActive } from "../listingSession";
 import { getLive, refreshListingQueries } from "./liveChatStore";
 
 /** The server's view of the listing, polled faster while anything is running. */
 export function useChatServerState(convId: string, localBusy: boolean) {
   const queryClient = useQueryClient();
+  const sessionActive = useListingSessionActive();
 
   // The server's view of the listing: background field fills, saves, syncs and
   // Vendoo jobs keep running after a chat stream ends and can still post here.
+  // A listing that is not on screen keeps its cache and stops asking.
   const { data: activity } = useQuery({
     queryKey: ["activity", convId],
     queryFn: () => api.conversations.activity(convId),
     refetchInterval: (query) =>
-      activityPollMs(getLive(convId).streaming || getLive(convId).generating || Boolean(query.state.data?.busy)),
+      sessionActive
+        ? activityPollMs(getLive(convId).streaming || getLive(convId).generating || Boolean(query.state.data?.busy))
+        : false,
   });
   const serverBusy = Boolean(activity?.busy);
   const busy = localBusy || serverBusy;
@@ -22,7 +27,7 @@ export function useChatServerState(convId: string, localBusy: boolean) {
   const { data: messages, isLoading } = useQuery({
     queryKey: ["messages", convId],
     queryFn: () => api.conversations.messages(convId),
-    refetchInterval: busy ? () => pollMs(LIVE_POLL_MS) : false,
+    refetchInterval: busy && sessionActive ? () => pollMs(LIVE_POLL_MS) : false,
   });
 
   const { data: photos } = useQuery({
@@ -33,13 +38,13 @@ export function useChatServerState(convId: string, localBusy: boolean) {
   const { data: listing } = useQuery({
     queryKey: ["listing", convId],
     queryFn: () => api.listings.get(convId),
-    refetchInterval: busy ? () => pollMs(BUSY_POLL_MS) : false,
+    refetchInterval: busy && sessionActive ? () => pollMs(BUSY_POLL_MS) : false,
   });
 
   const { data: jobs } = useQuery({
     queryKey: ["jobs"],
     queryFn: () => api.jobs.list(),
-    refetchInterval: busy ? () => pollMs(BUSY_POLL_MS) : false,
+    refetchInterval: busy && sessionActive ? () => pollMs(BUSY_POLL_MS) : false,
   });
 
   // Anything posted in the background shows up as soon as activity notices it.

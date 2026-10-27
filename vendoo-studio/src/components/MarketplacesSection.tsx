@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, XCircleIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
+import type { DelistMarketplace, FacebookCheck, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
 import { EXTENSION_SESSION_MARKETS, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
@@ -16,13 +16,19 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu
 import { Spinner } from "./ui/spinner";
 
 type Marketplace = DelistMarketplace;
-const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
+const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "facebook"];
 const NATIVE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]);
 const REMOTE_DRAFT = new Set<Marketplace>(["ebay", "mercari", "depop", "etsy", "poshmark"]);
 // What Delist does on each marketplace: eBay has no delete; Sellwild offers only its own delist.
 // Vinted is deleted through the signed-in Chrome session, the same as Depop, Poshmark and Mercari.
+// Facebook listings are only linked and watched; the seller deletes them on Facebook.
 const REMOVED: Record<Marketplace, string> = {
   ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted", sellwild: "Delisted", vinted: "Deleted",
+  facebook: "Deleted",
+};
+const FACEBOOK_STATE: Record<NonNullable<FacebookCheck["state"]>, string> = {
+  live: "Live on Facebook.", pending: "Marked pending on Facebook.", sold: "Marked sold on Facebook.",
+  hidden: "Hidden on Facebook.", draft: "Only a draft on Facebook.", not_live: "Not live on Facebook.",
 };
 
 type Tone = "live" | "neutral" | "busy" | "attention" | "failed" | "idle";
@@ -71,7 +77,16 @@ const TONE_ICON: Record<Tone, ReactNode> = {
 };
 
 export function deletable(entry: MarketplaceListing | undefined): boolean {
-  return Boolean(entry?.listing_id && !entry.sold_here && entry.state !== "deleted" && entry.state !== "deleting");
+  return Boolean(entry?.listing_id && entry.can_delist !== false && !entry.sold_here && entry.state !== "deleted" && entry.state !== "deleting");
+}
+
+/** What a Facebook check found, in the seller's words. */
+export function facebookCheckText(check: FacebookCheck): string {
+  if (!check.ok) return check.error || "Chrome could not read the Facebook listing.";
+  const parts = [check.state ? FACEBOOK_STATE[check.state] : "Facebook did not say."];
+  if (check.owner === "other") parts.push("It is on a different Facebook account than the one signed in to Chrome.");
+  if (check.sale_recorded) parts.push("Anteroom recorded the sale.");
+  return parts.join(" ");
 }
 
 /** One status per marketplace. A live listing wins. Anything else is not listed; Anteroom holds the listing. */
@@ -222,6 +237,18 @@ export function MarketplacesLayout({
     },
   });
 
+  const checkFacebook = useMutation({
+    mutationFn: () => api.marketplaceListings.checkFacebook(convId),
+    retry: false,
+    onSuccess: (data) => {
+      queryClient.setQueryData(liveKey, data.listings);
+      if (data.sale_recorded) {
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["sales-ledger"] });
+      }
+    },
+  });
+
   const recordSale = useMutation({
     mutationFn: (sale: SellerSale) => api.marketplaceListings.recordSale(convId, sale),
     retry: false,
@@ -244,11 +271,10 @@ export function MarketplacesLayout({
     setSelling((current) => ({ marketplace, key: (current?.key ?? 0) + 1 }));
   }
 
-  const UPDATABLE = new Set<Marketplace>(["ebay", "etsy", "poshmark", "depop"]);
-
   async function updateNow(marketplace: NativeMarketplace) {
     const name = marketplaceName(marketplace);
-    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.`,
+    const extra = marketplace === "sellwild" ? " Sellwild may hold the edit for review." : "";
+    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.${extra}`,
       { confirmLabel: `Update on ${name}` })) action.mutate({ marketplace, kind: "update" });
   }
   async function listNow(marketplace: NativeMarketplace) {
@@ -310,7 +336,7 @@ export function MarketplacesLayout({
   }
 
   function updatable(marketplace: Marketplace, status: Status): boolean {
-    return UPDATABLE.has(marketplace) && status.tone === "live" && status.label === "Live" && !unconfirmed(marketplace);
+    return NATIVE.has(marketplace) && status.tone === "live" && status.label === "Live" && !unconfirmed(marketplace);
   }
 
   function actions(marketplace: Marketplace, status: Status): ReactNode {
@@ -457,7 +483,31 @@ export function MarketplacesLayout({
     if (marketplace === "etsy" && etsyCreating && etsyDefaults.isSuccess && !etsyReady) {
       return <p className="text-muted-foreground">Choose Etsy's default shipping, processing, and return profiles in Settings → Connections.</p>;
     }
+    if (marketplace === "facebook") return facebookPane();
     return null;
+  }
+
+  function facebookPane(): ReactNode {
+    const entry = listings.facebook;
+    if (!entry?.listing_id || entry.sold_here || entry.state !== "live") {
+      return <p className="text-muted-foreground">Anteroom can't list on Facebook yet. If this item is already on Facebook, use Mark as listed with its link.</p>;
+    }
+    const result = checkFacebook.data;
+    const blocked = result && !result.ok && (result.error_code === "signed_out" || result.error_code === "challenge");
+    return (
+      <>
+        <p className="text-muted-foreground">Anteroom can't delete Facebook listings yet. To take it down, delete it on Facebook, then choose Mark as not listed.</p>
+        {result && <p role={result.ok ? "status" : "alert"} className={cn(!result.ok && "text-destructive-foreground")}>{facebookCheckText(result)}</p>}
+        {result?.marketplace_message && <p className="whitespace-pre-wrap break-words text-muted-foreground">Facebook said: {result.marketplace_message}</p>}
+        {checkFacebook.error && <p role="alert" className="text-destructive-foreground">{checkFacebook.error.message}</p>}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button size="xs" variant="outline" disabled={busy || checkFacebook.isPending} title="Reads the listing's page in Chrome. Nothing on Facebook changes."
+            onClick={() => checkFacebook.mutate()}>{checkFacebook.isPending ? "Checking…" : "Check on Facebook"}</Button>
+          {blocked && <Button size="xs" variant="ghost" disabled={busy}
+            onClick={() => void api.marketplaceSessions.connect("facebook")}>Open Facebook</Button>}
+        </div>
+      </>
+    );
   }
 
   const statusById = new Map(ORDER.map((marketplace, index) => [marketplace, statuses[index]]));

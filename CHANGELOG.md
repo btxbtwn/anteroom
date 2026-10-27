@@ -13,6 +13,70 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 - The listing assistant can choose a category too. It picks the last category in that branch, the same way the category list does, and the form updates to the fields that category needs.
 - Each marketplace form has its own category list. The category on General fills the matching last category on those forms, and they then show the fields that category needs.
 
+## 0.1.439 — 2026-10-27
+
+- When Anteroom watches you send an offer by hand on Mercari or Depop, it now keeps only that site's own requests and skips its analytics, so a long session no longer fills up before the offer is sent.
+
+## 0.1.438 — 2026-10-27
+
+- General fills every marketplace form. A title, description, brand, size, or department you change on one marketplace stays on that marketplace, and eBay's Size and Department can be edited on the eBay form.
+
+## 0.1.437 — 2026-10-27
+
+- When Anteroom watches you send an offer or save a draft by hand to learn a marketplace's requests, it now keeps what it saw even if the request that started it is interrupted. Only one of these recordings runs at a time.
+
+## 0.1.436 — 2026-10-27
+
+- Settings → Listings → **Send to Vendoo** can be turned off. While it is off, Anteroom does not call Vendoo: nothing is sent, imported, opened in the draft browser, or synced. You list on each marketplace directly, and nothing publishes until you confirm it.
+- Vendoo-only controls hide while it is off: linking a draft, opening a listing in Vendoo, discard, relist, duplicate Vendoo links, Vendoo label IDs, sync from Vendoo, Vendoo API logs, and the send-to-Vendoo setup. Labels, photos, chat, listing forms, history, and marketplace accounts stay. Turn the switch back on when you want Vendoo again.
+
+## 0.1.435 — 2026-10-27
+
+- Photos in a listing, pictures in chat, and covers in the sidebar are shown small, so Anteroom uses far less memory and the Mac spends less time catching up.
+- A listing you are not looking at stops checking for updates until you come back to it.
+
+## 0.1.434 — 2026-10-27
+
+- Anteroom can now watch while you send one offer to likers by hand on Mercari or Depop, so it can learn how each site sends offers. It keeps only the shape of the requests, never prices, items or your account details. This is the step that lets Mercari and Depop offer rules turn on.
+
+## 0.1.433 — 2026-10-26
+
+- Labels are yours now, not Vendoo's. Items imported from Vendoo sometimes showed a code like `g8MHWF7K…` instead of the label's name. Settings → Listings → Inventory → **Vendoo label IDs** → **Convert to names** saves every label as its name, and each Vendoo import does the same for the items it brings in. A code Vendoo has no name for stays on the item and is listed there, so no label is lost.
+- Analytics shows sales by label, with your label colors.
+- Find items listed twice: Settings → Listings → **Similar items** lists pairs that share a photo or SKU, or have matching titles with the same brand and size. Open both to compare, keep one and merge the other into it (its marketplace links, sales and labels move over and it goes to Finished), or mark them as different. Nothing is deleted or delisted.
+
+## 0.1.432 — 2026-10-27
+
+- **Update…** now works on live Mercari, Vinted and Sellwild listings, both on an item and in the bulk **Update** action. Anteroom edits the listing that is already up instead of making you delist and relist, so it keeps its likes, views, listing age and photos. It changes only what you edited, never lists a draft or creates a second listing, and reads the listing back afterwards to make sure the change stuck. Sellwild may hold an edited listing for review.
+
+## 0.1.431 — 2026-10-27
+
+- Every marketplace form now shows its photos at the top: the photos that marketplace gets, in order, and how many it takes. Untick a photo, drag to reorder, or add photos for that marketplace only (a stock photo for eBay, a collage for Depop); **Reset to item photos** goes back. List, Save Draft and Update send that form's photos. Items you have not changed still send all their photos.
+- Video is no longer a separate button at the bottom of the form. On eBay, Etsy and Poshmark, add a video in the same photos, by dropping or choosing the file the same way as a photo; each form says what that marketplace accepts. Depop, Mercari, Vinted and Sellwild take no video from their websites, so their forms offer none.
+
+## 0.1.430 — 2026-10-26
+
+- Automations has a new **Sharing and offers to likers** section. Set up a Poshmark sharing schedule: which listings, the order, how fast, the times of day and a daily cap of up to 6,000 shares. Every share and every skipped listing shows in the activity log.
+- Make an offer rule for Poshmark likers: the discount, which listings it covers, a floor you set for each listing, listings to leave out, and how long or how many likes a listing needs first. Each round only offers to people who liked a listing since the last offer, and never below your floor.
+- Nothing runs until you turn a schedule or rule on, and **Pause all** stops them. If Poshmark starts limiting you, or Anteroom cannot tell whether an offer or share went through, the rule pauses and that listing waits for you to check it; Anteroom never sends it again on its own.
+- Mercari and Depop offer rules can be set up, but stay off until Anteroom has learned how those sites send offers.
+
+## 0.1.429 — 2026-10-27
+
+- Your Facebook Marketplace listings now show under Marketplaces, including the ones Vendoo listed there. Press **Check on Facebook** to see whether one is still live, pending or sold; Anteroom only looks, and nothing on Facebook changes.
+- Turn on **Detect sales** for Facebook in Settings → Connections to have Anteroom notice when a Facebook listing is marked sold. It is off until you turn it on, and it reads a few listings at a time every 20 to 40 minutes, because Facebook watches closely for automated visits.
+- Anteroom can't delete Facebook listings yet. Delete them on Facebook, then choose **Mark as not listed**. Delisting the other marketplaces after a sale leaves Facebook for you and says so.
+
+## 0.1.428 — 2026-10-27
+
+- Multiple-choice fields, such as Occasion, Theme, Season, and Features, show the selected values inside the field. Extra values wrap onto another line in that same field.
+
+## 0.1.427 — 2026-10-26
+
+- Share Poshmark listings to your followers, one or many at a time: select items in the sidebar and choose **Share / offers**. You review each item and confirm once; shares go out a few seconds apart and stop at the first limit Poshmark reports.
+- Send a Poshmark offer to everyone who liked a listing. Set the lowest price you accept for each listing first: an offer below it is never sent, and Poshmark's own minimum discount is shown in the review. Choose a shipping discount, or none, for each offer.
+- If Anteroom or Chrome stops before a share or offer is confirmed, it shows as needing a check and is never sent again on its own. Mercari, Depop, Etsy, Vinted and Sellwild tools are not added yet; what each marketplace offers is listed in the parity notes.
+
 ## 0.1.426 — 2026-10-26
 
 - Edit fields for selected items now also changes condition, primary and secondary color, tags, and the shared, eBay and Depop categories. Categories are picked from the same searches the item editor uses, and you review every change before it is saved.

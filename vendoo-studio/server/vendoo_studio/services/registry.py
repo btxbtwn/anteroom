@@ -263,7 +263,10 @@ def _apply_department(listing: dict, gender: str) -> None:
     listing["department"] = label
     ebay = listing.get("ebay_specifics")
     if isinstance(ebay, dict) and str(ebay.get("department") or "").strip():
-        ebay["department"] = label
+        from vendoo_studio.services.seller_overrides import field_locked
+
+        if not field_locked(listing, "ebay", "department"):
+            ebay["department"] = label
 
 
 def align_listing_gender(listing: dict, operations: list[dict] | None = None) -> dict:

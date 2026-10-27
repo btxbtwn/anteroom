@@ -285,8 +285,12 @@ def apply_vinted_listing(listing: dict) -> bool:
 
     fill("category", path)
     fill("condition", vinted_condition(specifics.get("condition") or listing.get("condition")))
-    fill("brand", str(listing.get("brand") or "").strip())
-    fill("size", str(listing.get("size") or "").strip())
+    from vendoo_studio.services.seller_overrides import field_locked, followed_entry, marketplace_text
+
+    if followed_entry(listing, "vinted", "brand") is None and not field_locked(listing, "vinted", "brand"):
+        fill("brand", marketplace_text(listing, "vinted", "brand").strip())
+    if followed_entry(listing, "vinted", "size") is None and not field_locked(listing, "vinted", "size"):
+        fill("size", str(listing.get("size") or "").strip())
     fill("color", str(listing.get("primaryColor") or "").strip())
     fill("packageSize", vinted_package_size(listing))
     materials = _materials(listing)
@@ -319,12 +323,14 @@ def vinted_requirements(snapshot: dict, context: Context) -> list[dict]:
     del context
     apply_vinted_listing(snapshot)
     found: list[dict] = []
-    title = str(snapshot.get("title") or "").strip()
+    from vendoo_studio.services.seller_overrides import marketplace_text
+
+    title = marketplace_text(snapshot, "vinted", "title").strip()
     if not title:
         found.append(gap("title", "Vinted needs a title."))
     elif len(title) > 100:
         found.append(gap("title", "Vinted titles are at most 100 characters."))
-    if not str(snapshot.get("description") or "").strip():
+    if not marketplace_text(snapshot, "vinted", "description").strip():
         found.append(gap("description", "Vinted needs a description."))
     amount = _price(snapshot)
     if amount is None or amount <= 0:

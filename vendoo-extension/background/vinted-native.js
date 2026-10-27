@@ -1,8 +1,9 @@
-// Vinted drafts and publishing from the extension worker, with no marketplace tab.
+// Vinted drafts, publishing and live edits from the extension worker, with no marketplace tab.
 // The calls are the ones Vinted's own sell form makes (read 2026-10-26):
 //   POST /api/v2/item_upload/drafts                         save a draft
 //   GET  /api/v2/item_upload/items/{id}                     read it back
 //   POST /api/v2/item_upload/drafts/{id}/completion         publish that draft
+//   PUT  /api/v2/item_upload/items/{id}                     save an edit of a live item
 //   GET  /api/v2/wardrobe/{user}/items                      the seller's closet
 // Cookies stay in Chrome. A lost reply is read back and never creates a second draft.
 
@@ -108,6 +109,7 @@ function vintedAllowed(method, url, action, confirm) {
   if (method === 'POST' && path === '/api/v2/item_upload/attributes') return true;
   if (action === 'save_draft' && method === 'POST' && (path === '/api/v2/photos' || path === '/api/v2/item_upload/drafts')) return true;
   if (action === 'save_draft' && method === 'PUT' && /^\/api\/v2\/item_upload\/drafts\/[1-9]\d{0,14}$/.test(path)) return true;
+  if (action === 'update') return confirm === true && method === 'PUT' && /^\/api\/v2\/item_upload\/items\/[1-9]\d{0,14}$/.test(path);
   return action === 'publish' && confirm === true && method === 'POST'
     && /^\/api\/v2\/item_upload\/drafts\/[1-9]\d{0,14}\/completion$/.test(path);
 }
@@ -207,8 +209,8 @@ function vintedSame(item, expected) {
 
 async function vintedFields(call, listing, currency) {
   const specifics = listing.vinted_specifics && typeof listing.vinted_specifics === 'object' ? listing.vinted_specifics : {};
-  const title = String(listing.title || '').trim();
-  const description = String(listing.description || '').trim();
+  const title = String(marketplaceCopy(listing, 'vinted', 'title') || '').trim();
+  const description = String(marketplaceCopy(listing, 'vinted', 'description') || '').trim();
   const price = vintedAmount(specifics.price ?? listing.price);
   const missing = [];
   if (!title) missing.push({ field: 'title', needs: 'a title' });
@@ -240,7 +242,7 @@ async function vintedFields(call, listing, currency) {
   if (!size && sizes.length) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.size', needs: 'a size' }]);
   let brandId = null;
   let brand = null;
-  const brandName = String(specifics.brand || '').trim();
+  const brandName = String(marketplaceCopy(listing, 'vinted', 'brand') || '').trim();
   if (brandName) {
     const found = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/brands?keyword=${encodeURIComponent(brandName)}&category_id=${catalogId}`, { step: 'brand' });
     const match = vintedMatch((found?.brands || []).map(row => ({ id: Number(row.id), title: row.title })), brandName);
@@ -306,6 +308,101 @@ async function vintedUploadPhotos(call, jobId, photos, sessionId, deadline) {
   return assigned;
 }
 
+const VINTED_LIVE_READ_WAITS_MS = [0, 700, 1500];
+
+function vintedColorIds(item) {
+  if (Array.isArray(item?.color_ids)) return item.color_ids.map(Number).filter(id => id > 0);
+  return [item?.color1_id, item?.color2_id].map(Number).filter(id => id > 0);
+}
+
+function vintedSameValue(a, b) {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    const left = (a || []).map(Number).sort(), right = (b || []).map(Number).sort();
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+  if (typeof a === 'string' || typeof b === 'string') return marketplaceText(a ?? '') === marketplaceText(b ?? '');
+  return (a ?? null) === (b ?? null);
+}
+
+// A live item is edited the way Vinted's own edit page saves it: one PUT of
+// the whole item, carrying the photos it already has. Brand, colour and
+// package size the revision leaves blank, and the attributes Anteroom does
+// not set, keep what the live item has. Nothing is sent when nothing differs.
+async function updateVintedItem(call, session, payload, listing, recovery, writing) {
+  const id = String(payload.listing_id || '');
+  if (!/^[1-9]\d{0,14}$/.test(id)) return marketplaceFailure(marketplaceError('A Vinted listing link is required before updating.'), true);
+  const listingUrl = vintedPublicUrl(id);
+  const specifics = listing.vinted_specifics && typeof listing.vinted_specifics === 'object' ? listing.vinted_specifics : {};
+  if (recovery) {
+    try {
+      const view = await vintedRead(call, id);
+      const expected = { title: marketplaceCopy(listing, 'vinted', 'title'), description: marketplaceCopy(listing, 'vinted', 'description'), price: vintedAmount(specifics.price ?? listing.price) };
+      const differ = view ? vintedDifferences(view, expected) : ['listing'];
+      if (vintedLive(view) && !differ.length) return { ok: true, state: 'published', listing_url: listingUrl };
+      return marketplaceFailure(marketplaceError(`Vinted has not confirmed the update${differ.length ? ` (${differ.join(', ')} still differ)` : ''}. Check the live listing.`,
+        { code: 'uncertain', rejected: false }), false);
+    } catch (error) {
+      return marketplaceFailure(error, false);
+    }
+  }
+  const shown = (await call('GET', `${VINTED_ORIGIN}/api/v2/items/${id}`, { step: 'read' }))?.item;
+  if (!shown || String(shown.id) !== id) throw marketplaceError('Vinted did not return this listing.', { code: 'schema_drift' });
+  if (vintedOwnerId(shown) !== session.userId) throw marketplaceError('This Vinted listing belongs to another account. Nothing was changed.');
+  if (!vintedLive(vintedView(shown))) throw marketplaceError('This Vinted listing is not live (sold, reserved or hidden). Nothing was changed.');
+  const edit = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/items/${id}`, { step: 'read' });
+  const raw = edit?.item || edit?.draft || edit;
+  const live = vintedView(raw);
+  if (!live || live.id !== id) throw marketplaceError('Vinted did not return this listing\'s edit form.', { code: 'schema_drift' });
+  const photos = (Array.isArray(raw.photos) && raw.photos.length ? raw.photos : raw.assigned_photos || [])
+    .map(photo => ({ id: Number(photo?.id), orientation: Number(photo?.orientation) || 0 }))
+    .filter(photo => Number.isInteger(photo.id) && photo.id > 0);
+  if (!photos.length) {
+    throw marketplaceError('Vinted did not return this listing\'s photos, so nothing was changed. Check the listing on Vinted.', { code: 'schema_drift' });
+  }
+  const fields = await vintedFields(call, listing, session.currency);
+  const named = key => Boolean(String(specifics[key] || '').trim());
+  const liveBrand = typeof raw.brand === 'string' ? raw.brand : raw.brand?.title ?? raw.brand_dto?.title ?? null;
+  const liveBrandId = Number(raw.brand_id ?? raw.brand_dto?.id) || null;
+  const chosen = {
+    ...fields,
+    brand_id: named('brand') ? fields.brand_id : liveBrandId,
+    brand: named('brand') ? fields.brand : liveBrand,
+    color_ids: named('color') ? fields.color_ids : vintedColorIds(raw),
+    package_size_id: named('packageSize') ? fields.package_size_id : Number(raw.package_size_id) || fields.package_size_id,
+    item_attributes: [...(Array.isArray(raw.item_attributes) ? raw.item_attributes : [])
+      .filter(attribute => attribute && !['condition', 'size'].includes(attribute.code)), ...fields.item_attributes],
+  };
+  const current = { title: live.title, description: live.description, price: live.price, catalog_id: live.catalog_id,
+    condition_id: live.condition_id, size_id: live.size_id, brand_id: liveBrandId, color_ids: vintedColorIds(raw),
+    package_size_id: Number(raw.package_size_id) || null };
+  const changed = Object.keys(current).filter(key => !vintedSameValue(current[key], chosen[key]));
+  if (!changed.length) return { ok: true, state: 'published', listing_url: listingUrl };
+  const sessionId = crypto.randomUUID();
+  const item = { ...vintedForm(chosen, photos, sessionId, Number(id)),
+    isbn: raw.isbn ?? null, is_unisex: raw.is_unisex === true,
+    manufacturer: raw.manufacturer ?? null, manufacturer_labelling: raw.manufacturer_labelling ?? null };
+  writing();
+  await call('PUT', `${VINTED_ORIGIN}/api/v2/item_upload/items/${id}`, {
+    step: 'update', retry: false, body: { item, push_up: false, parcel: null, upload_session_id: sessionId },
+  });
+  // Fresh reads decide the outcome, with a short wait for Vinted's read-after-write lag.
+  let differ = ['listing'];
+  for (const wait of VINTED_LIVE_READ_WAITS_MS) {
+    if (wait) {
+      if (Date.now() + wait > payload.deadline - 2000) break;
+      await marketplaceSleep(wait);
+    }
+    const view = await vintedRead(call, id);
+    differ = !view ? ['listing'] : !vintedLive(view) ? ['live status'] : vintedDifferences(view, vintedExpected(fields, photos.length));
+    if (!differ.length) break;
+  }
+  if (differ.length) {
+    throw marketplaceError(`Vinted did not keep this listing's ${differ.join(', ')}. Check the live listing.`,
+      { code: 'uncertain', rejected: false, marketplace_message: `read back differs: ${differ.join(', ')}` });
+  }
+  return { ok: true, state: 'published', listing_url: listingUrl };
+}
+
 async function runVintedNative(msg, recovery = false) {
   const payload = { ...(msg.payload || {}), deadline: Date.now() + 120000 };
   const listing = payload.listing && typeof payload.listing === 'object' ? payload.listing : {};
@@ -323,12 +420,18 @@ async function runVintedNative(msg, recovery = false) {
     ...extra,
   });
   try {
-    if (!['save_draft', 'publish'].includes(payload.action)) return marketplaceFailure(marketplaceError('Unsupported Vinted action.'), true);
+    if (!['save_draft', 'publish', 'update'].includes(payload.action)) return marketplaceFailure(marketplaceError('Unsupported Vinted action.'), true);
     if (payload.action === 'publish' && !recovery && payload.confirm !== true) {
       return marketplaceFailure(marketplaceError('Confirm listing on Vinted.'), true);
     }
+    if (payload.action === 'update' && !recovery && payload.confirm !== true) {
+      return marketplaceFailure(marketplaceError('Confirm updating the live Vinted listing.'), true);
+    }
     const session = await vintedSession(payload.deadline);
     const call = (method, url, options = {}) => session.call(method, url, { ...options, action: payload.action, confirm: payload.confirm });
+    if (payload.action === 'update') {
+      return await updateVintedItem(call, session, payload, listing, recovery, () => { wrote = true; });
+    }
     const id = vintedDraftId(payload.draft_url);
     if (payload.draft_url && !id) return marketplaceFailure(marketplaceError('Invalid native draft link.'), true);
     if (recovery && payload.action === 'publish') {
@@ -341,7 +444,7 @@ async function runVintedNative(msg, recovery = false) {
     if (recovery && payload.action === 'save_draft') {
       let view = id ? await vintedRead(call, id) : null;
       if (!view && !id) {
-        const expected = { title: listing.title, price: vintedAmount(listing.vinted_specifics?.price ?? listing.price) };
+        const expected = { title: marketplaceCopy(listing, 'vinted', 'title'), price: vintedAmount(listing.vinted_specifics?.price ?? listing.price) };
         const matches = (await vintedWardrobe(call, session.userId)).filter(item => item?.is_draft === true && vintedSame(item, expected));
         if (matches.length === 1) {
           payload.draft_url = vintedDraftUrl(matches[0].id);
@@ -350,7 +453,7 @@ async function runVintedNative(msg, recovery = false) {
       }
       if (!view) return fail(marketplaceError('Vinted did not confirm a draft. Check your Vinted drafts before trying again.', { code: 'uncertain', rejected: false }));
       const expected = {
-        title: listing.title, description: listing.description, price: vintedAmount(listing.vinted_specifics?.price ?? listing.price),
+        title: marketplaceCopy(listing, 'vinted', 'title'), description: marketplaceCopy(listing, 'vinted', 'description'), price: vintedAmount(listing.vinted_specifics?.price ?? listing.price),
         photo_count: payload.expected_photo_count ?? null,
       };
       const differ = vintedDifferences(view, expected);

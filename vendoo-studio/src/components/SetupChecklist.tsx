@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { CheckIcon } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useVendooEnabled } from "../vendooMode";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import { ExtensionLoadPath } from "./ExtensionLoadPath";
 import { Button } from "./ui/button";
@@ -63,6 +64,7 @@ export function SetupChecklist({
   onStartGuide,
   onCreate,
 }: SetupChecklistProps) {
+  const vendooOn = useVendooEnabled();
   return (
     <Empty className="flex-1 overflow-y-auto">
       <div className="flex w-full max-w-md flex-col gap-6">
@@ -90,7 +92,9 @@ export function SetupChecklist({
           <Step
             index={2}
             done={extensionConnected}
-            label="Connect Chrome, load the listing extension once, and sign in to Vendoo."
+            label={vendooOn
+              ? "Connect Chrome, load the listing extension once, and sign in to Vendoo."
+              : "Connect Chrome and load the listing extension once. Listing opens the marketplace in that Chrome."}
           >
             {!chromeAvailable ? (
               <Note>
