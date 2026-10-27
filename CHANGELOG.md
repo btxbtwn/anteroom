@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.447 — 2026-10-27
+
+- Changing a field on a marketplace form keeps you where you are. Saving no longer jumps back to a field you opened with an Edit button, and the box above the form no longer shrinks and grows back on each save, so the form stops moving under you.
+- Edit buttons for a missing category now open that marketplace's own form at its category, instead of General.
+
 ## 0.1.446 — 2026-10-27
 
 - Marketplace forms are cleaner: the “This category’s fields are showing” line, the notes about where each marketplace’s choices come from, and the Refresh choices and Show all fields buttons are gone. A line only appears while a form loads or when it could not be loaded.
