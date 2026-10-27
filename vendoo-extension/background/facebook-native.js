@@ -142,7 +142,7 @@ async function handleMarketplaceListingState(msg) {
     sendBrowserResult(msg, marketplaceFailure(marketplaceError('Name a Facebook listing to check.'), true));
     return;
   }
-  if (activeNativeOperation || activeJob || activePatch) {
+  if (nativeOperationsRunning() || activeJob || activePatch) {
     sendBrowserResult(msg, marketplaceFailure(marketplaceError('Another automation job is running.'), true));
     return;
   }

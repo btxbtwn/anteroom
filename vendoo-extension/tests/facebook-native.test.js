@@ -85,9 +85,9 @@ test('a listing check names one Facebook listing and waits for a running action'
   const { c, calls, results } = worker({ pages: { [LISTING]: itemPage(LISTING) } });
   await c.handleMarketplaceListingState({ payload: { marketplace: 'poshmark', listing_id: LISTING } });
   await c.handleMarketplaceListingState({ payload: { marketplace: 'facebook', listing_id: '12ab' } });
-  vm.runInContext('activeNativeOperation = { id: "busy" }', c);
+  vm.runInContext('claimNativeOperation("*", "busy")', c);
   await c.handleMarketplaceListingState({ payload: { marketplace: 'facebook', listing_id: LISTING } });
-  vm.runInContext('activeNativeOperation = null', c);
+  vm.runInContext('nativeOperations.clear()', c);
   assert.equal(calls.length, 0);
   assert.deepEqual(results.map(result => result.ok), [false, false, false]);
   await c.handleMarketplaceListingState({ payload: { marketplace: 'facebook', listing_id: LISTING } });

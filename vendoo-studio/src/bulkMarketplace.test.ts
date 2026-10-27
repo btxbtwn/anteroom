@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BulkMarketplaceResult, BulkMarketplaceRow } from "./api/bulkMarketplace";
-import { reviewedTasks, runMarketplaceTasks } from "./bulkMarketplace";
+import { ITEMS_AT_ONCE, reviewedTasks, runMarketplaceTasks } from "./bulkMarketplace";
 
 const row = (id: string, patch: Partial<BulkMarketplaceRow> = {}): BulkMarketplaceRow => ({
   conversation_id: id, title: `Item ${id}`, action: "relist", revision_id: `rev-${id}`, marketplaces: ["ebay"],
@@ -18,18 +18,35 @@ describe("bulk marketplace review", () => {
     } }]);
   });
 
-  it("runs one item at a time, never retries, and stops when asked", async () => {
+  it("runs delists one item at a time, never retries, and stops when asked", async () => {
     const order: string[] = [];
     const perform = vi.fn(async (body: { conversation_id: string }) => {
       order.push(body.conversation_id);
       return reply(body.conversation_id, body.conversation_id !== "a", { ebay: "eBay refused" });
     });
     let stop = false;
-    const result = await runMarketplaceTasks(reviewedTasks([row("a"), row("b"), row("c")], new Set()), perform, () => stop,
-      (_tasks, active) => { if (active === "b") stop = true; });
+    const rows = [row("a", { action: "delist" }), row("b", { action: "delist" }), row("c", { action: "delist" })];
+    const result = await runMarketplaceTasks(reviewedTasks(rows, new Set()), perform, () => stop,
+      (_tasks, active) => { if (active.has("b")) stop = true; });
     expect(order).toEqual(["a", "b"]);
     expect(result.map((task) => task.state)).toEqual(["failed", "done", "pending"]);
     expect(result[0].error).toBe("ebay: eBay refused");
+  });
+
+  it("lists a few items at once", async () => {
+    let running = 0;
+    let most = 0;
+    const perform = vi.fn(async (body: { conversation_id: string }) => {
+      most = Math.max(most, ++running);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      running -= 1;
+      return reply(body.conversation_id, true);
+    });
+    const rows = ["a", "b", "c", "d", "e"].map((id) => row(id, { action: "list" }));
+    const result = await runMarketplaceTasks(reviewedTasks(rows, new Set()), perform, () => false, () => {});
+    expect(most).toBe(ITEMS_AT_ONCE);
+    expect(perform).toHaveBeenCalledTimes(5);
+    expect(result.every((task) => task.state === "done")).toBe(true);
   });
 
   it("reports a lost reply as unconfirmed and an Anteroom refusal as failed", async () => {

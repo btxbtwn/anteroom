@@ -185,7 +185,7 @@ async function readMarketplaceSignIn(marketplace) {
 async function handleMarketplaceConnect(msg) {
   const marketplace = msg.payload?.marketplace;
   const url = MARKETPLACE_SIGN_IN[marketplace];
-  if (!url || activeNativeOperation || activeJob || activePatch) {
+  if (!url || nativeOperationsRunning() || activeJob || activePatch) {
     sendBrowserResult(msg, { ok: false, error: url ? 'Wait for the current listing action to finish.' : 'Unsupported marketplace.' });
     return;
   }
@@ -349,7 +349,7 @@ async function handleMarketplaceRecord(msg) {
   const marketplace = msg.payload?.marketplace;
   const goal = msg.payload?.goal === 'offers' ? 'offers' : 'draft';
   const url = (goal === 'offers' ? MARKETPLACE_OFFER_RECORD_START : MARKETPLACE_RECORD_START)[marketplace];
-  if (!url || activeNativeOperation || activeJob || activePatch) {
+  if (!url || nativeOperationsRunning() || activeJob || activePatch) {
     sendBrowserResult(msg, { ok: false, error: url ? 'Wait for the current listing action to finish.' : 'Recording is not set up for this marketplace.' });
     return;
   }

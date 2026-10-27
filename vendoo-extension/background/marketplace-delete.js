@@ -177,11 +177,11 @@ async function runMarketplaceDelete(payload) {
 }
 
 async function handleMarketplaceDelete(msg) {
-  if (activeNativeOperation || activeJob || activePatch) {
+  const operation = claimNativeOperation('*', `delete-${msg.payload?.request_id || ''}`);
+  if (!operation) {
     sendBrowserResult(msg, marketplaceFailure(marketplaceError('Another automation job is running.'), true));
     return;
   }
-  activeNativeOperation = { id: `delete-${msg.payload?.request_id || ''}`, tabId: null, cancelled: false, controller: new AbortController() };
   try { sendBrowserResult(msg, await runMarketplaceDelete(msg.payload)); }
-  finally { activeNativeOperation = null; }
+  finally { releaseNativeOperation(operation); }
 }
