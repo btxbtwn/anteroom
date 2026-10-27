@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.419 — 2026-10-26
+
+- Anteroom now refuses an update whose signature is missing or damaged, so an update can no longer lose access to your saved sign-ins. Releases are ready to be signed with an Apple Developer ID certificate; once that is set up, updates stop asking for your Mac password.
+
 ## 0.1.418 — 2026-10-26
 
 - Depop drafts now keep everything Anteroom sends: category, size, condition, brand, photos, location and shipping. Anteroom no longer sends a blank SKU, which made Depop quietly keep only the description and price, and it waits until Depop has finished processing new photos before adding them.
