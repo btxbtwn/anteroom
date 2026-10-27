@@ -752,7 +752,7 @@ async def reload_extension():
     return {"ok": True, "sent": await request_extension_reload(token) if token else False}
 
 
-_SESSION_MARKETS = ("depop", "poshmark", "mercari", "sellwild", "vinted")
+_SESSION_MARKETS = ("depop", "poshmark", "mercari", "sellwild", "vinted", "facebook")
 _SESSION_STATES = {"signed_in", "expired", "signed_out", "unknown"}
 
 
@@ -832,7 +832,7 @@ async def record_marketplace_draft(marketplace: str):
 
     from vendoo_studio.services import browser_bridge
 
-    if marketplace not in {"mercari", "sellwild"}:
+    if marketplace not in {"mercari", "sellwild", "facebook"}:
         raise HTTPException(404, "Recording is not set up for this marketplace.")
     try:
         return await browser_bridge.request(SimpleNamespace(id=None), "marketplace.record", {"marketplace": marketplace}, timeout=330)
