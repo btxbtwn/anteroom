@@ -46,6 +46,7 @@
   --color-depop: #FF6B6B;
   --color-etsy: #F08A5D;
   --color-sellwild: #9DBF3A;
+  --color-vinted: #09B1BA;
 
   --color-message-user: var(--message-surface);
   --color-message-user-text: var(--contrast-message-foreground);

@@ -139,7 +139,7 @@ class EbayClient:
 
     async def request(self, method: str, path: str, *, params: dict | None = None, body: dict | None = None,
                       app: bool = False, xml: str | None = None, call: str | None = None, upload: dict | None = None,
-                      raw: bool = False) -> dict:
+                      raw: bool = False, binary: bytes | None = None) -> dict:
         if not path.startswith(("/sell/", "/commerce/", "/buy/", "/ws/")) or ".." in path:
             raise EbayFailure("Invalid eBay operation.", 422)
         assert_identity(self.seller)
@@ -168,11 +168,15 @@ class EbayClient:
                 headers = {"X-EBAY-API-IAF-TOKEN": token, "X-EBAY-API-CALL-NAME": call,
                            "X-EBAY-API-SITEID": "0", "X-EBAY-API-COMPATIBILITY-LEVEL": "1487",
                            "Content-Type": "text/xml"}
-            async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            if binary is not None:
+                # The Media API's video upload takes the file itself as the body.
+                headers["Content-Type"] = "application/octet-stream"
+            async with httpx.AsyncClient(timeout=300 if binary is not None else 30, follow_redirects=False) as client:
                 files = {upload["field"]: ("image.jpg" if upload["mime"] == "image/jpeg" else "image.png",
                                           base64.b64decode(upload["data"], validate=True), upload["mime"])} if upload else None
                 return await client.request(method, host + path, headers=headers, params=params,
-                                            json=body if xml is None and not files else None, content=xml, files=files)
+                                            json=body if xml is None and not files and binary is None else None,
+                                            content=xml if binary is None else binary, files=files)
 
         if not app:
             response = await send(token)

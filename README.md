@@ -30,7 +30,7 @@ Open **Marketplaces** for each marketplace’s tools, sales planning, and ad his
 
 ### Copy an item into a new draft
 
-Choose the **Copy listing** action on an inventory row (the copy icon on desktop, or the row’s menu on a phone). Set the new inventory name, SKU and quantity. The SKU starts empty and quantity starts at one. You can copy the saved local photos and explicitly keep the recorded cost; cost starts unknown. The new item has its own draft, revision and photo files, with no sourcing-box assignment, marketplace links, jobs, chats or sales history. Deleting or rotating a copied photo leaves the original alone.
+Choose the **Copy listing** action on an inventory row (the copy icon on desktop, or the row’s menu on a phone). Set the new inventory name, SKU and quantity. The SKU starts empty and quantity starts at one. You can copy the saved local photos and explicitly keep the recorded cost; cost starts unknown. The new item has its own draft, revision and photo files, with no sourcing-box assignment, marketplace links, jobs, chats or sales history. Deleting, rotating or editing a copied photo leaves the original alone.
 
 Saved listing fields, categories, form answers and seller Item Details are the starting point; review the copy’s description, condition, measurements and shipping before listing it. Creating the copy never contacts a marketplace. If the source changes while the dialog is open, reload its review before copying. A missing local photo stops the copy and removes any partial files/rows; restore the source photo or copy without photos. An item without saved listing fields can still become a partial draft from its Item Details and photos.
 

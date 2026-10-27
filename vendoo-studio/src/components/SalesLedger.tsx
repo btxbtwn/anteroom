@@ -10,7 +10,7 @@ import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogPanel, Dia
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 
-const MARKETS = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"];
+const MARKETS = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "other"];
 const LABELS: Record<FinancialField, string> = { item_revenue: "Item revenue total", shipping_credit: "Shipping collected", refunds: "Revenue refunded", fees: "Net fees", shipping_cost: "Shipping cost total", item_cost: "Item cost total" };
 
 export function ledgerMoney(value: string | null | undefined, currency: string | undefined): string {

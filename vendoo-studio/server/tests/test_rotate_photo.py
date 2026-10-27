@@ -82,8 +82,12 @@ class RotatePhotoTest(unittest.TestCase):
 
         self.db.refresh(self.photo)
         self.assertNotEqual(self.photo.stored_filename, "front.jpg")
-        self.assertFalse((self.photos_dir / "front.jpg").exists())
-        self.assertEqual(list((self.photos_dir / "thumbs").glob("*.jpg")), [])
+        # The upload is kept so Reset can restore it.
+        self.assertEqual(self.photo.source_filename, "front.jpg")
+        self.assertTrue((self.photos_dir / "front.jpg").exists())
+        self.assertEqual(body["edits"]["rotate"], 90)
+        # Thumbnails are per file, so the edit gets its own.
+        self.assertEqual(list((self.photos_dir / "thumbs").glob(f"{Path(self.photo.stored_filename).stem}_*")), [])
         self.assertIn(f"?v={self.photo.checksum[:12]}", body["url"])
 
         with Image.open(self.photos_dir / self.photo.stored_filename) as img:
@@ -93,6 +97,14 @@ class RotatePhotoTest(unittest.TestCase):
             bottom = img.getpixel((100, 350))
         self.assertGreater(top[0], 200)
         self.assertGreater(bottom[2], 200)
+
+    def test_four_quarter_turns_restore_the_original(self):
+        for _ in range(4):
+            self.assertEqual(self._rotate(90).status_code, 200)
+        self.db.refresh(self.photo)
+        self.assertEqual(self.photo.stored_filename, "front.jpg")
+        self.assertIsNone(self.photo.source_filename)
+        self.assertEqual([p.name for p in self.photos_dir.glob("*.jpg")], ["front.jpg"])
 
     def test_rotating_left_puts_the_left_half_at_the_bottom(self):
         response = self._rotate(-90)

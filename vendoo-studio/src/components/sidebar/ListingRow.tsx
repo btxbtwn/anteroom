@@ -12,7 +12,7 @@ import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
-import { inventoryStatus, listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, statusHint, withDirectListings } from "./listingStatus";
+import { inventoryStatus, listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 
 const HOVER_STATUS_DELAY_MS = 280;
@@ -58,9 +58,11 @@ export function ListingRow({
   // A bulk-imported listing has no local photos yet; Vendoo's own image stands in.
   const coverUrl = listing.cover_photo_url || listing.vendoo_cover_url || null;
   const status = inventoryStatus(listing);
-  const statusTitle = status === "active" && String(listing.status || "draft") !== "active"
-    ? "Listed directly from Anteroom."
-    : statusHint(status);
+  const partial = partialSale(listing, status);
+  const statusTitle = partial ? `Active · ${partial}`
+    : status === "active" && String(listing.status || "draft") !== "active"
+      ? "Listed directly from Anteroom."
+      : statusHint(status);
   const settledAt = settled ? compactRelativeTime(listing.settled_at || listing.updated_at) : "";
   const queryClient = useQueryClient();
   const itemRef = useRef<HTMLDivElement>(null);
@@ -321,6 +323,7 @@ export function ListingRow({
           )}
           <div className="mt-0.5 flex items-center gap-2">
             <ListingStatusLabel status={status} title={statusTitle} />
+            {partial ? <span className="truncate text-2xs text-sidebar-muted-foreground">{partial}</span> : null}
             {listing.unsent_edits ? (
               <ListingTag
                 tone="info"

@@ -100,8 +100,6 @@ def test_copy_is_a_clean_draft_with_new_identity_and_only_reusable_fields(source
 
 
 def test_photos_are_independent_and_keep_their_order(source, monkeypatch):
-    from vendoo_studio.services import listing_delete
-    monkeypatch.setattr(listing_delete, "PHOTOS_DIR", source.directory)
     response = duplicate(source)
     assert response.status_code == 200, response.text
     key = response.json()["id"]
@@ -201,9 +199,7 @@ def test_repeating_an_approved_request_returns_the_same_copy_after_source_change
 
 
 def test_removed_copy_is_not_recreated_by_replaying_its_request(source, monkeypatch):
-    from vendoo_studio.services import listing_delete
 
-    monkeypatch.setattr(listing_delete, "PHOTOS_DIR", source.directory)
     request_id = uuid4().hex
     basis = preview(source)["expected_basis"]
     first = duplicate(source, request_id=request_id, expected_basis=basis)

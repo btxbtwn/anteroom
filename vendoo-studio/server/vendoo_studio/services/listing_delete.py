@@ -7,19 +7,16 @@ the route that happened to need it first.
 from __future__ import annotations
 
 import logging
-import os
-from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import PHOTOS_DIR
 from vendoo_studio.models.conversation import Message, Photo as PhotoModel
 from vendoo_studio.models.diagnostics import DiagnosticRun, FieldObservation
 from vendoo_studio.models.fill_log import FillLogEntry
 from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job, JobEvent, VendooDraftCache
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.repositories.queries import ConversationRepo
-from vendoo_studio.services.photos import delete_thumbnails
+from vendoo_studio.services.photos import delete_photo_files
 
 log = logging.getLogger("vendoo_studio.listing_delete")
 
@@ -52,10 +49,7 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
             video_path(video).unlink(missing_ok=True)
             db.delete(video)
     for photo in photos:
-        filepath = Path(PHOTOS_DIR) / photo.stored_filename
-        if filepath.exists():
-            os.remove(filepath)
-        delete_thumbnails(photo.stored_filename)
+        delete_photo_files(photo)
 
     job_ids = [row[0] for row in db.query(Job.id).filter(Job.conversation_id == conv_id).all() if row[0] not in kept_jobs]
     if job_ids:

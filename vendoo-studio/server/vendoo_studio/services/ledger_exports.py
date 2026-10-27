@@ -71,7 +71,10 @@ def sales_csv(query):
 def inventory_csv(db: Session):
     headers = ["conversation_id", "title", "description", "local_status", "sku", "price", "recorded_cost", "local_quantity", "brand", "category",
                *[f"saved_{marketplace}_url" for marketplace in sales_ledger.MARKETPLACES]]
-    costs = {row.conversation_id: row.cost for row in load_rows(db)}
+    # The item's own row comes first; a sale row after it carries that sale's cost.
+    costs = {}
+    for row in load_rows(db):
+        costs.setdefault(row.conversation_id, row.cost)
     links = MarketplaceListingRepo(db).listing_urls()
     query = db.query(Conversation, ListingRevision.listing_json).outerjoin(Listing, Listing.conversation_id == Conversation.id).outerjoin(
         ListingRevision, ListingRevision.id == Listing.current_revision_id,

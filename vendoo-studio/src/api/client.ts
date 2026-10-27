@@ -37,6 +37,7 @@ import type {
   Message,
   OkResponse,
   Photo,
+  PhotoEdits,
   PhotoUploadResult,
   PriceDropApplyResult,
   PriceDropCompsSource,
@@ -72,12 +73,12 @@ import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, A
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
-import type { DelistMarketplace, MarketplaceListings, MarketplaceMark } from "./marketplaceListings";
+import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SellerSale, SellerSaleResult } from "./marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight, NativeSync, SellwildChoice, SellwildOptions } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
-import type { MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
+import type { ChromeImportMarketplace, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -250,6 +251,14 @@ export const api = {
   },
   suggestions: {
     list: () => request<SuggestionsResponse>("/suggestions"),
+  },
+  chromeImport: {
+    importCandidates: (marketplace: ChromeImportMarketplace, cursor: string | null) =>
+      request<MarketplaceImportPage>(`/chrome-import/${marketplace}/active${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
+    importListing: (marketplace: ChromeImportMarketplace, listing: string, linkConversationId?: string) =>
+      request<MarketplaceImportResult>(`/chrome-import/${marketplace}`, {
+        method: "POST", body: JSON.stringify({ listing, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
+      }),
   },
   etsy: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/etsy/import/active?page=${page}`),
@@ -503,6 +512,10 @@ export const api = {
       request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/${marketplace}/mark`, {
         method: "POST", body: JSON.stringify({ state, ...(url ? { url } : {}) }),
       }),
+    recordSale: (convId: string, sale: SellerSale) =>
+      request<SellerSaleResult>(`/conversations/${convId}/marketplace-listings/sold`, {
+        method: "POST", body: JSON.stringify(sale),
+      }),
   },
   nativeMarketplaces: {
     form: (convId: string, marketplace: string, revisionId?: string | null) =>
@@ -686,6 +699,28 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ degrees }),
       }),
+    /** Replace a photo's edits; the server renders them from the kept original. */
+    editPhoto: (convId: string, photoId: string, edits: PhotoEdits) =>
+      request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, {
+        method: "PUT",
+        body: JSON.stringify(edits),
+      }),
+    resetPhoto: (convId: string, photoId: string) =>
+      request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
+    /** A smaller JPEG of unsaved edits; `crop: false` keeps the whole frame to draw the crop on. */
+    previewPhotoEdits: async (convId: string, photoId: string, edits: PhotoEdits, crop: boolean, signal?: AbortSignal) => {
+      const res = await fetch(`${BASE}/conversations/${convId}/photos/${photoId}/edits/preview?crop=${crop}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(edits),
+        signal,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(errorMessage(body, "Preview failed"));
+      }
+      return res.blob();
+    },
     delete: (id: string) =>
       request<DeleteConversationResult>(`/conversations/${id}`, { method: "DELETE" }),
     reset: (id: string, opts?: { keepInputs?: boolean }) =>
