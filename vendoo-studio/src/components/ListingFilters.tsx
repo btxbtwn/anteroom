@@ -1,4 +1,5 @@
 /** Vendoo Inventory's filter bar, sized for Studio's sidebar. */
+import { labelColor, labelDotClass, type LabelColor } from "../labelColors";
 
 import type { ReactNode } from "react";
 import { ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
@@ -22,7 +23,6 @@ import {
   DEFAULT_LISTING_FILTERS,
   LISTING_SORTS,
   LISTING_STATUS_TABS,
-  STALE_DAY_OPTIONS,
   activeFilterCount,
   compactCount,
   toggleValue,
@@ -91,6 +91,7 @@ export function ListingFilters({
   counts,
   labels,
   labelCounts,
+  labelColors,
   marketplaces,
   marketplaceCounts,
   notListedCount,
@@ -104,6 +105,8 @@ export function ListingFilters({
   labels: string[];
   /** Label counts, keyed lowercase the way `labelCounts` returns them. */
   labelCounts: Record<string, number>;
+  /** Colors the seller gave labels in Settings. */
+  labelColors?: Record<string, LabelColor>;
   marketplaces: string[];
   /** What each marketplace row would keep: listed there, or missing from there under Not listed. */
   marketplaceCounts: Record<string, number>;
@@ -229,7 +232,7 @@ export function ListingFilters({
             <MenuSeparator />
             <MenuGroup>
               <MenuGroupLabel>Stale since listed</MenuGroupLabel>
-              {STALE_DAY_OPTIONS.map((days) => (
+              {Object.keys(staleCounts).map(Number).sort((a, b) => a - b).map((days) => (
                 <FilterRow
                   key={days}
                   checked={filters.staleDays === days}
@@ -252,7 +255,7 @@ export function ListingFilters({
                       key={label}
                       checked={filters.labels.includes(label)}
                       count={labelCounts[label.toLowerCase()] || 0}
-                      glyph={<Dot />}
+                      glyph={labelColor(labelColors, label) ? <span aria-hidden="true" className={cn("mx-[3px] size-2 shrink-0 rounded-full", labelDotClass(labelColor(labelColors, label)!))} /> : <Dot />}
                       label={label}
                       onSelect={() => onChange({ ...filters, labels: toggleValue(filters.labels, label) })}
                     />

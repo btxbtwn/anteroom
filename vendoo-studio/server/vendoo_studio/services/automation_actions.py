@@ -158,23 +158,55 @@ async def _list_remaining(db: Session, conv_id: str, marketplaces: list[str], re
 
 
 async def _list_one(db: Session, conv_id: str, name: str, revision_id: str) -> dict:
-    from vendoo_studio.services.native_marketplaces import ListRequest, NativeMarketplaceError, list_now
+    return await _native_one(db, conv_id, name, revision_id, "list")
 
+
+async def _native_one(db: Session, conv_id: str, name: str, revision_id: str, kind: str) -> dict:
+    """One List or Update on one marketplace, waited on until the marketplace answers. Never retried."""
+    from vendoo_studio.services.native_marketplaces import ListRequest, NativeMarketplaceError, list_now, update_live
+
+    verb = "relist" if kind == "list" else "update"
+    start = list_now if kind == "list" else update_live
     if JobRepo(db).get_active() and not await _wait_until_idle(db):
-        return {"ok": False, "marketplace": name, "error": f"The {name} relist was still running when this automation stopped waiting."}
+        return {"ok": False, "marketplace": name, "error": f"The {name} {verb} was still running when this automation stopped waiting."}
     try:
         # This call follows the seller's consumed item-specific approval.
-        result = await list_now(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
+        result = await start(conv_id, name, ListRequest(revision_id=revision_id, confirm=True), db)
     except NativeMarketplaceError as exc:
         return {"ok": False, "marketplace": name, "error": str(exc)}
     if not await _wait_until_idle(db):
-        return {"ok": False, "marketplace": name, "error": f"The {name} relist was still running when this automation stopped waiting."}
+        return {"ok": False, "marketplace": name, "error": f"The {name} {verb} was still running when this automation stopped waiting."}
     db.expire_all()
     job = JobRepo(db).get(result["job_id"]) if result.get("job_id") else None
-    if (job is not None and job.status != "completed") or (job is None and result.get("state") not in {"published", "pending_review"}):
-        return {"marketplace": name, "ok": False,
-                "error": (job.last_error if job else result.get("error")) or "The marketplace did not confirm publication."}
+    # A refused start keeps the record's state (a live listing stays published), so its error decides.
+    refused = job is None and (result.get("error") or result.get("state") not in {"published", "pending_review"})
+    if (job is not None and job.status != "completed") or refused:
+        fallback = "The marketplace did not confirm publication." if kind == "list" else "The marketplace did not confirm the update."
+        return {"marketplace": name, "ok": False, "error": (job.last_error if job else result.get("error")) or fallback}
     return {"marketplace": name, "ok": True, "detail": _brief(result)}
+
+
+async def update_revision(db: Session, conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
+    """Write a saved revision onto listings already live, after explicit approval.
+
+    Each named marketplace is tried once, in order. A failed update leaves that
+    live listing as it was; nothing is listed, delisted or retried.
+    """
+    if not marketplaces:
+        return {"ok": False, "error": "Name the marketplaces. An update never goes everywhere by default."}
+    if not revision_id:
+        return {"ok": False, "error": "Update needs the listing that was reviewed."}
+    detail: list[dict] = []
+    errors: dict[str, str] = {}
+    for name in marketplaces:
+        outcome = await _native_one(db, conv_id, name, revision_id, "update")
+        if outcome.get("ok"):
+            detail.append(outcome)
+        else:
+            errors[name] = outcome.get("error") or "The marketplace did not confirm the update."
+    if errors:
+        return {"ok": False, "error": "; ".join(f"{name}: {error}" for name, error in errors.items()), "errors": errors, "detail": detail}
+    return {"ok": True, "detail": detail}
 
 
 def _down_message(names: list[str]) -> str:

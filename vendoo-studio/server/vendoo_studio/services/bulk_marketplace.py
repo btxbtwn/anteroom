@@ -1,4 +1,4 @@
-"""Seller-reviewed List, Delist and Relist for selected items.
+"""Seller-reviewed List, Delist, Relist, Update and Mark as not listed for selected items.
 
 The seller picks the items, the action and the marketplaces, reviews what each
 item would do, and confirms once. The browser then sends one request per item,
@@ -6,6 +6,11 @@ in order. Each request carries the reviewed marketplaces, revision and review
 token, and must still match the item as it is now. Nothing is stored to run
 later: closing the review stops the batch, and a failed item is never retried
 on its own. List never takes a live listing down; that needs Relist.
+
+Update writes the saved listing onto listings already live, on the marketplaces
+that support it, through the same path as the item's own Update. It never lists
+or delists anything. Mark as not listed only changes what Anteroom records: the
+marketplace is not contacted and a listing still up there stays up.
 """
 from __future__ import annotations
 
@@ -24,10 +29,13 @@ from vendoo_studio.repositories.queries import JobRepo, ListingRepo
 from vendoo_studio.services.api_job_lock import start_gate
 
 MAX_ITEMS = 100
-Action = Literal["list", "delist", "relist"]
+Action = Literal["list", "delist", "relist", "update", "not_listed"]
 Name = Literal["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted"]
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop",
          "sellwild": "Sellwild", "vinted": "Vinted"}
+
+# Live listings Anteroom can update in place (``native_marketplaces._start``).
+UPDATABLE = ("ebay", "etsy", "poshmark", "depop")
 
 _running = False
 
@@ -61,6 +69,16 @@ def _target_reason(action: str, marketplace: str, entry: dict, record: dict) -> 
     if record.get("state") in UNSETTLED_STATES or entry.get("state") == "deleting":
         return f"Check the last {name} action first; Anteroom has not confirmed it."
     live = bool(entry.get("listing_id")) and entry.get("state") != "deleted"
+    if action == "update":
+        if marketplace not in UPDATABLE:
+            return f"Anteroom cannot update a live {name} listing yet."
+        if not live or entry.get("state") != "live":
+            return f"Not listed on {name}."
+        return None
+    if action == "not_listed":
+        if not entry:
+            return f"Anteroom has no {name} listing recorded for this item."
+        return None
     if action == "list":
         if live or record.get("state") in LIVE_STATES:
             return f"Already listed on {name}. Choose Relist to take it down and list it again."
@@ -88,7 +106,7 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
     row["title"] = conv.title or "Untitled item"
     listing = ListingRepo(db).get_current(conv_id)
     row["revision_id"] = listing.current_revision_id if listing else None
-    if action != "delist":
+    if action not in ("delist", "not_listed"):
         if conv.status == "sold":
             row["skip_reason"] = "This item has sold. It cannot be listed again."
             return row
@@ -98,7 +116,11 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
     known = listings(db, conv_id)
     records = MarketplaceListingRepo(db).for_conversation(conv_id)
     for marketplace in dict.fromkeys(marketplaces):
-        reason = _target_reason(action, marketplace, known.get(marketplace) or {}, records.get(marketplace) or {})
+        record = records.get(marketplace) or {}
+        reason = _target_reason(action, marketplace, known.get(marketplace) or {}, record)
+        if (not reason and action == "update" and record.get("state") == "published"
+                and record.get("revision_id") and record.get("revision_id") == row["revision_id"]):
+            reason = f"Already up to date on {_name(marketplace)}."
         if reason:
             row["skipped"].append({"marketplace": marketplace, "reason": reason})
         else:
@@ -157,5 +179,25 @@ async def _dispatch(db: Session, body: PerformRequest) -> dict:
     marketplaces = list(body.marketplaces)
     if body.action == "list":
         return await automation_actions.publish_revision(db, body.conversation_id, marketplaces, body.revision_id)
+    if body.action == "update":
+        return await automation_actions.update_revision(db, body.conversation_id, marketplaces, body.revision_id)
+    if body.action == "not_listed":
+        return _mark_not_listed(db, body.conversation_id, marketplaces)
     item = {"conversation_id": body.conversation_id}
     return await automation_actions.perform(db, item, {"type": body.action}, marketplaces, body.revision_id, confirm=True)
+
+
+def _mark_not_listed(db: Session, conv_id: str, marketplaces: list[str]) -> dict:
+    """Record each named marketplace as not listed. Nothing is sent to the marketplace."""
+    from vendoo_studio.services.marketplace_delist import DelistError, mark
+
+    errors: dict[str, str] = {}
+    for name in marketplaces:
+        try:
+            mark(db, conv_id, name, "not_listed")
+        except DelistError as exc:
+            db.rollback()
+            errors[name] = str(exc)
+    if errors:
+        return {"ok": False, "error": "; ".join(f"{_name(name)}: {error}" for name, error in errors.items()), "errors": errors}
+    return {"ok": True, "state": "not_listed"}

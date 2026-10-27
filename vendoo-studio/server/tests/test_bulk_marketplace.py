@@ -209,3 +209,83 @@ def test_delist_still_applies_to_other_marketplaces_after_a_sale(db, client, cal
     assert row["marketplaces"] == ["ebay"]
     relist = _preview(client, [conv.id], "relist", ["ebay"])[0]
     assert relist["skip_reason"] and relist["review_token"] is None
+
+
+@pytest.fixture
+def updates(monkeypatch, calls):
+    async def fake_update(conv_id, name, body, db):
+        calls.append(("update", conv_id, name, body.confirm, body.revision_id))
+        MarketplaceListingRepo(db).save(conv_id, name, {"state": "published", "revision_id": body.revision_id})
+        return {"ok": True, "state": "published"}
+
+    monkeypatch.setattr("vendoo_studio.services.native_marketplaces.update_live", fake_update)
+    return calls
+
+
+def test_update_reviews_only_live_listings_on_marketplaces_that_support_it(db, client, updates):
+    live = _item(db, "Live", live_on_ebay=True)
+    fresh = _item(db, "Fresh")
+    MarketplaceListingRepo(db).save(live.id, "mercari", {"state": "published", "listing_id": "m1", "listing_url": "https://www.mercari.com/us/item/m1/"})
+
+    rows = {row["title"]: row for row in _preview(client, [live.id, fresh.id], "update", ["ebay", "poshmark", "mercari"])}
+
+    assert rows["Live"]["marketplaces"] == ["ebay"] and rows["Live"]["review_token"]
+    reasons = " ".join(entry["reason"] for entry in rows["Live"]["skipped"])
+    assert "Not listed on Poshmark" in reasons and "cannot update a live Mercari" in reasons
+    assert rows["Fresh"]["skip_reason"] and rows["Fresh"]["review_token"] is None
+    assert updates == []
+
+
+def test_update_writes_the_reviewed_revision_once_and_never_lists_or_delists(db, client, updates):
+    conv = _item(db, live_on_ebay=True)
+    row = _preview(client, [conv.id], "update", ["ebay"])[0]
+    assert _perform(client, _body(row, confirm=False)).status_code == 400
+    assert updates == []
+
+    result = _perform(client, _body(row))
+    assert result.status_code == 200, result.text
+    assert result.json()["ok"] is True
+    assert updates == [("update", conv.id, "ebay", True, row["revision_id"])]
+    # The live listing now has this revision: a replay or a new review finds nothing to send.
+    assert _perform(client, _body(row)).status_code == 409
+    again = _preview(client, [conv.id], "update", ["ebay"])[0]
+    assert again["review_token"] is None and "Already up to date on eBay" in again["skipped"][0]["reason"]
+    assert len(updates) == 1
+
+
+def test_update_after_an_edit_needs_a_new_review(db, client, updates):
+    conv = _item(db, live_on_ebay=True)
+    row = _preview(client, [conv.id], "update", ["ebay"])[0]
+    ListingRepo(db).save_revision(conv.id, {"title": "Edited", "price": 35}, "user_form")
+    assert _perform(client, _body(row)).status_code == 409
+    assert updates == []
+
+
+def test_a_failed_update_is_reported_and_not_retried(db, client, monkeypatch, calls):
+    seen = []
+
+    async def refuse(conv_id, name, body, db):
+        seen.append(name)
+        return {"ok": False, "state": "published", "error": "eBay refused"}
+
+    monkeypatch.setattr("vendoo_studio.services.native_marketplaces.update_live", refuse)
+    conv = _item(db, live_on_ebay=True)
+    row = _preview(client, [conv.id], "update", ["ebay"])[0]
+    result = _perform(client, _body(row)).json()
+    assert result["ok"] is False and result["errors"] == {"ebay": "eBay refused"} and result["down"] == []
+    assert seen == ["ebay"] and calls == []
+
+
+def test_mark_not_listed_changes_only_anteroom(db, client, calls):
+    from vendoo_studio.services.marketplace_delist import listings
+
+    conv = _item(db, live_on_ebay=True)
+    fresh = _item(db, "Fresh")
+    rows = {row["title"]: row for row in _preview(client, [conv.id, fresh.id], "not_listed", ["ebay"])}
+    assert rows["Coat"]["marketplaces"] == ["ebay"]
+    assert "no eBay listing recorded" in rows["Fresh"]["skipped"][0]["reason"]
+
+    result = _perform(client, _body(rows["Coat"]))
+    assert result.status_code == 200, result.text and result.json()["ok"] is True
+    assert "ebay" not in listings(db, conv.id)
+    assert calls == []

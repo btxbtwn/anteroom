@@ -705,7 +705,7 @@ export interface AnalyticsAging {
   listings: AnalyticsActiveListing[];
 }
 
-/** An active listing past 60 days, with how deep it can go and still cover its cost. */
+/** An active listing past the seller's stale threshold, with how deep it can go and still cover its cost. */
 export interface AnalyticsStaleListing {
   conversation_id: string;
   title: string;
@@ -749,6 +749,8 @@ export interface InventoryAnalytics {
   price_tiers: AnalyticsGroup[];
   aging: AnalyticsAging[];
   stale: AnalyticsStaleListing[];
+  /** Days before a listing counts as stale (Settings → Listings → Inventory). */
+  stale_days?: number;
   recent: AnalyticsSale[];
   oldest: { conversation_id: string; title: string; price: number; days_listed: number }[];
   ads: AnalyticsAds;

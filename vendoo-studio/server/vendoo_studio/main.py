@@ -17,7 +17,7 @@ from vendoo_studio.routes import marketplace_listings, marketplace_schemas, nati
 from vendoo_studio.routes import ebay_offers
 from vendoo_studio.routes import ebay
 from vendoo_studio.routes import chrome_import
-from vendoo_studio.routes import ai_keys, sales_ledger, bulk_edit, bulk_marketplace, listing_copies, listing_templates
+from vendoo_studio.routes import ai_keys, sales_ledger, bulk_delete, bulk_edit, bulk_marketplace, listing_copies, listing_templates
 from vendoo_studio.routes import automations as automations_route
 from vendoo_studio.routes import errors as errors_route
 from vendoo_studio.routes import listing_videos
@@ -193,6 +193,7 @@ app.include_router(analytics.router)
 app.include_router(sales_ledger.router)
 app.include_router(bulk_edit.router)
 app.include_router(bulk_marketplace.router)
+app.include_router(bulk_delete.router)
 app.include_router(listing_copies.router)
 app.include_router(listing_templates.router)
 app.include_router(etsy.router)

@@ -161,3 +161,60 @@ def test_saved_cost_and_labels_reach_item_details_and_direct_snapshots(inventory
     assert apply(inventory, cleared, preview(inventory, cleared)).json()["applied"]
     snapshot = prepare_listing_snapshot(inventory.db, conv, current(inventory).listing_json)
     assert snapshot["cost"] is None and snapshot["labels"] == []
+
+
+def _leaf(db, marketplace, category_id, path, *, leaf=True):
+    from vendoo_studio.models.catalog import CategoryTreeNode
+
+    db.add(CategoryTreeNode(marketplace=marketplace, category_id=category_id, parent_id="root", path=path,
+                            label=path.split(" > ")[-1], is_leaf=leaf, has_children=not leaf))
+    db.commit()
+
+
+def test_condition_colors_and_tags_save_like_the_editor(inventory):
+    edits = {"values": {"condition": "Pre-Owned - Excellent", "primaryColor": "Blue", "secondaryColor": ""},
+             "tags_mode": "add", "tags": ["wool", "winter"]}
+    rows = preview(inventory, edits)
+    assert {"condition", "primaryColor", "tags"} <= {change["field"] for change in rows[0]["changes"]}
+    assert len(apply(inventory, edits, rows).json()["applied"]) == 2
+    saved = current(inventory).listing_json
+    assert saved["condition"] == "Pre-Owned - Excellent" and saved["primaryColor"] == "Blue" and saved["secondaryColor"] == ""
+    assert saved["tags"] == ["wool", "winter"]
+    removed = {"tags_mode": "remove", "tags": ["wool"]}
+    assert apply(inventory, removed, preview(inventory, removed)).json()["applied"]
+    assert current(inventory).listing_json["tags"] == ["winter"]
+
+
+@pytest.mark.parametrize("edits", [{"values": {"condition": "Kind of used"}}, {"values": {"primaryColor": "Chartreuse"}},
+    {"values": {"secondaryColor": "Teal-ish"}}, {"tags_mode": "remove", "tags": []},
+    {"category": {}}, {"category": {"depop": "not-a-depop-id"}}, {"category": {"ebay": {"id": "abc", "path": "Coats"}}}])
+def test_invalid_new_fields_are_refused(inventory, edits):
+    assert inventory.client.post("/api/listings/bulk-edit/preview", json={"conversation_ids": ["coat"], "edits": edits}).status_code == 422
+
+
+def test_categories_are_verified_and_written_where_each_marketplace_reads_them(inventory):
+    _leaf(inventory.db, "general", "g-1", "Women > Clothing > Coats > Wool coats")
+    _leaf(inventory.db, "depop", "womenswear_coats", "Womenswear > Coats")
+    stale = {**current(inventory).listing_json, "marketplace_category_objects": {"general": {"id": "old"}},
+             "direct_category_ids": {"depop": "womenswear_jackets", "ebay": "1"}, "depop_specifics": {"nativeSizeId": "7"}}
+    ListingRepo(inventory.db).save_revision("coat", stale, "user_form")
+    edits = {"category": {"general": "g-1", "depop": "womenswear_coats", "ebay": {"id": "57988", "path": "Clothing › Coats"}}}
+    rows = preview(inventory, edits)
+    assert not rows[0]["skip_reason"], rows[0]
+    assert apply(inventory, edits, rows).json()["applied"]
+    saved = current(inventory).listing_json
+    assert saved["category_path"] == "Women > Clothing > Coats > Wool coats" and saved["category_id"] == "g-1"
+    assert "general" not in (saved.get("marketplace_category_objects") or {})
+    assert saved["direct_category_ids"]["ebay"] == "57988" and saved["direct_category_ids"]["ebay_path"] == "Clothing › Coats"
+    assert saved["direct_category_ids"]["depop"] == "womenswear_coats"
+    assert saved["depop_specifics"]["categoryId"] == "womenswear_coats"
+    assert "nativeSizeId" not in saved["depop_specifics"]
+
+
+@pytest.mark.parametrize("category", [{"general": "missing"}, {"general": "parent"}, {"depop": "womenswear_unknown"}])
+def test_unknown_or_parent_categories_are_refused_before_review(inventory, category):
+    _leaf(inventory.db, "general", "parent", "Women > Clothing", leaf=False)
+    before = inventory.db.query(ListingRevision).count()
+    response = inventory.client.post("/api/listings/bulk-edit/preview", json={"conversation_ids": ["coat"], "edits": {"category": category}})
+    assert response.status_code == 400 and "category" in response.json()["detail"]
+    assert inventory.db.query(ListingRevision).count() == before

@@ -19,7 +19,9 @@ describe("bulk marketplace dialog", () => {
     const perform = vi.spyOn(api.bulkMarketplace, "perform");
     const preview = vi.spyOn(api.bulkMarketplace, "preview");
     const html = renderToStaticMarkup(<BulkMarketplaceDialog conversationIds={["a", "b"]} onClose={vi.fn()} />);
-    expect(html).toContain("List, delist or relist 2 items");
+    expect(html).toContain("Marketplace actions for 2 items");
+    expect(html).toContain(">Update<");
+    expect(html).toContain("Mark as not listed");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Review items<\/button>/);
     expect(html).not.toContain('aria-checked="true"');
     expect(perform).not.toHaveBeenCalled();
