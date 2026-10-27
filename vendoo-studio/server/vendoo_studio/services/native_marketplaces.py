@@ -766,7 +766,7 @@ async def _read_result(db: Session, conv_id: str, marketplace: str, record: dict
         def remember(values: dict) -> None:
             _store(db, conv_id, marketplace, values)
 
-        return await ebay_listings.check(record, snapshot if record.get("action") in {"update", "save_draft"} else None, remember)
+        return await ebay_listings.check(record, snapshot, remember)
     try:
         reply = await browser_bridge.request(job, "marketplace.result", {
             "operation_id": record.get("operation_id"),

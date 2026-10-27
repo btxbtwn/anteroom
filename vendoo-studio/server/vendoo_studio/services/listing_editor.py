@@ -29,12 +29,14 @@ def reject_corrupt_listing(listing: dict) -> None:
 
 def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None) -> dict:
     from vendoo_studio.services.chrome_catalog import keep_direct_categories
+    from vendoo_studio.services.depop_category import align_depop_category
     from vendoo_studio.services.listing_generate import align_size_fields, sanitize_listing_sizes
     from vendoo_studio.services.seller_overrides import prepare_user_listing, preserving_locks
 
     updated = copy.deepcopy(listing)
     reject_corrupt_listing(updated)
     keep_direct_categories(previous, updated)
+    align_depop_category(updated, previous)
     prepare_user_listing(previous, updated, notes=notes)
     sanitize_listing_sizes(updated)
     previous_size = None if previous.get("size") is None else str(previous.get("size"))
