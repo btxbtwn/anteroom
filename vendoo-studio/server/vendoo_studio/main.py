@@ -14,7 +14,7 @@ from vendoo_studio.routes import health, conversations, photos, listings, jobs, 
 from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, browser, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
-from vendoo_studio.routes import ebay_offers, listing_promotions
+from vendoo_studio.routes import ebay_offers, listing_promotions, promotion_automations
 from vendoo_studio.routes import ebay
 from vendoo_studio.routes import chrome_import
 from vendoo_studio.routes import ai_keys, sales_ledger, bulk_delete, bulk_edit, bulk_marketplace, listing_copies, listing_templates
@@ -104,11 +104,14 @@ async def lifespan(app: FastAPI):
 
         # A share or offer that was sending when Anteroom stopped is unknown, never resent.
         recover_promotions(db)
+    from vendoo_studio.services import promotion_automations as promotion_automation_service
+    promotion_automation_service.start()
 
     claude_sessions.keep_warm_on_this_loop()
     chatgpt_codex.keep_connection_on_this_loop()
     yield
     await offer_service.stop()
+    await promotion_automation_service.stop()
     try:
         await claude_sessions.close_warm_processes()
         await chatgpt_codex.close_connection()
@@ -176,6 +179,7 @@ app.include_router(health.router)
 app.include_router(marketplace_accounts.router)
 app.include_router(ebay_offers.router)
 app.include_router(listing_promotions.router)
+app.include_router(promotion_automations.router)
 app.include_router(ebay.router)
 app.include_router(native_marketplaces.router)
 app.include_router(marketplace_schemas.router)

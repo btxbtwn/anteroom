@@ -42,4 +42,15 @@ describe("promotion dialog", () => {
     expect(html).toContain("Check result");
     expect(html).toContain("offer $40.00 on Poshmark");
   });
+
+  it("shows Mercari and Depop offers as built but waiting for a capture", () => {
+    useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) => (queryKey[0] === "promotions"
+      ? { data: { supported: { poshmark: ["offer", "share"], mercari: ["offer"], depop: ["offer"] },
+        awaiting_capture: { mercari: ["offer"], depop: ["offer"] }, history: [] }, isSuccess: true }
+      : { data: undefined, isPending: false, isSuccess: false }));
+    const html = renderToStaticMarkup(<PromotionDialog conversationIds={["a"]} onClose={vi.fn()} />);
+    const radios = html.match(/<input[^>]*name="promotion-marketplace"[^>]*>/g) || [];
+    expect(radios.map((radio) => radio.includes('disabled=""'))).toEqual([false, true, true]);
+    expect(html.match(/needs one capture/g)?.length).toBe(2);
+  });
 });
