@@ -168,8 +168,12 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
     if (!template) return true;
     return field.key === "sellwild_specifics.package.weight" && SELLWILD_WEIGHED_PACKAGES.has(template);
   }
-  if (context.tab === "mercari" && ["mercari_specifics.shippingClassId", "weight_oz", "package_dimensions_in"].includes(field.key)) {
+  // Mercari shows the label and free-shipping choice only with Prepaid label, and the minimum price only with Smart pricing on.
+  if (context.tab === "mercari" && ["mercari_specifics.shippingClassId", "mercari_specifics.shippingPayerId"].includes(field.key)) {
     return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.shippingMethod") !== "SOYO";
+  }
+  if (context.tab === "mercari" && field.key === "mercari_specifics.smartPricing.minimumPrice") {
+    return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.smartPricing.enabled") === "true";
   }
   if (context.tab === "ebay") {
     const auction = ebayFormat(context) === "AUCTION";
@@ -245,27 +249,6 @@ export function presentNativeField<T extends NativeFormRow>(field: T, context: N
       return { ...field, locked: false, help: "An eBay auction sells one item." };
     }
     return { ...field, locked: false, help: undefined };
-  }
-  if (context.tab === "mercari" && field.key === "mercari_specifics.shippingPayerId") {
-    if (shownChoice(context.fields, context.local, context.listing, "mercari_specifics.shippingMethod") === "SOYO") {
-      return {
-        ...field,
-        locked: true,
-        options: ["Seller"],
-        optionValues: { Seller: "2" },
-        defaultValue: "2",
-        help: "Ship on your own is paid by the seller.",
-      };
-    }
-    if (field.locked) {
-      return {
-        ...field,
-        locked: false,
-        options: (field.options || []).length > 1 ? field.options : ["Buyer", "Seller"],
-        optionValues: (field.options || []).length > 1 ? field.optionValues : { Buyer: "1", Seller: "2" },
-        help: undefined,
-      };
-    }
   }
   return field;
 }

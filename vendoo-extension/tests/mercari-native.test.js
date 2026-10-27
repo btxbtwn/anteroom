@@ -581,8 +581,11 @@ test('Mercari reads its own catalog over GraphQL without Vendoo or session expor
   assert.equal(c.mercariSize(prepared, 1911).id, 168);
   assert.equal(prepared.form.sizes[0].name, 'XL (14-16)');
   assert.throws(() => c.mercariCatalogListing({ direct_category_ids: { mercari: '999999' } }, master), /current list/);
+  // Mercari's picker offers a category with subcategories ("All Girls tops & t-shirts"), but not a top-level one.
   const parent = c.mercariCatalogListing({ direct_category_ids: { mercari: '1877' } }, master);
-  assert.ok(c.mercariMissing(parent, c.mercariCommon(parent)).some(row => row.field === 'categoryId' && /Girls \(4\+\)/.test(row.needs)));
+  assert.ok(!c.mercariMissing(parent, c.mercariCommon(parent)).some(row => row.field === 'categoryId'));
+  const top = c.mercariCatalogListing({ direct_category_ids: { mercari: '3' } }, master);
+  assert.ok(c.mercariMissing(top, c.mercariCommon(top)).some(row => row.field === 'categoryId' && /Girls tops/.test(row.needs)));
 });
 
 test('native Mercari preparation replaces stale sizes and labels before uploading and verifies its result', async () => {

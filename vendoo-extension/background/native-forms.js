@@ -201,7 +201,9 @@ function depopPageLayout(fields) {
 
 function mercariEditorForm(listing, master) {
   const allCategories = mercariCatalogCategories(master);
-  const categories = allCategories.filter(row => !row.parent);
+  // The sell page offers every category with no subcategories, and below the top
+  // level a category's "All ..." row picks the category itself.
+  const categories = allCategories.filter(row => !row.parent || row.label.includes(' > '));
   if (master.itemCategories.some(row => Number(row.id) === mercariCategoryId(listing))) {
     listing = mercariCatalogListing(listing, master);
   } else listing = { ...listing, form: { ...listing.form, sizes: [] } };
@@ -212,51 +214,67 @@ function mercariEditorForm(listing, master) {
   const sizes = listing.form?.sizes || [];
   const sizeChoices = sizes.map(row => ({ value: row.id, label: sizes.filter(other => other.name === row.name).length > 1
     ? `${row.name} · ${row.group_name || row.id}` : row.name || row.title }));
+  const brand = mercariBrandRequest(listing);
+  // Mercari's sell page, top to bottom (read 2026-10-27). Every field spans the row.
+  const [title, description, price] = nativeEditorBase(listing, { marketplace: 'mercari', maxTitle: 80, maxDescription: 1000, minPrice: 1, maxPrice: 2000, priceStep: 1 });
+  const product = section => row => ({ ...row, section });
   const fields = [
-    ...nativeEditorBase(listing, { marketplace: 'mercari', maxTitle: 80, maxDescription: 1000, minPrice: 1, maxPrice: 2000, priceStep: 1 }),
+    title,
+    description,
     nativeEditorChoice('direct_category_ids.mercari', 'Category', category || '', categories,
-      { required: true, clears: ['mercari_specifics.nativeSizeId'], help: 'Categories from Mercari. Choose a category with no subcategories.' }),
-    nativeEditorChoice('mercari_specifics.brand', 'Brand', mercariBrandRequest(listing).omit
+      { required: true, clears: ['mercari_specifics.nativeSizeId'] }),
+    nativeEditorChoice('mercari_specifics.brand', 'Brand', brand.omit
       ? MERCARI_NO_BRAND
-      : (master.itemBrands.find(row => marketplaceNameKey(row.name) === marketplaceNameKey(mercariBrandRequest(listing).name))?.name
-        || mercariBrandRequest(listing).name || ''),
-      [{ label: 'No brand', value: MERCARI_NO_BRAND }, ...master.itemBrands.map(row => ({ label: row.name, value: row.name }))],
-      { clears: ['mercari_specifics.noBrand'],
-        help: 'No brand lists this on Mercari without a brand. The brand on General stays as it is. A name Mercari does not list is left off.' }),
-    nativeEditorField('mercari_specifics.noBrand', 'No brand / Not sure', specifics.noBrand === true, { input_type: 'boolean',
-      help: 'Lists on Mercari with no brand. The brand on General stays as it is.' }),
+      : (master.itemBrands.find(row => marketplaceNameKey(row.name) === marketplaceNameKey(brand.name))?.name || brand.name || ''),
+      [...master.itemBrands.map(row => ({ label: row.name, value: row.name })), { label: 'No brand / Not sure', value: MERCARI_NO_BRAND }],
+      { clears: ['mercari_specifics.noBrand'] }),
     nativeEditorChoice('mercari_specifics.condition', 'Condition', mercariConditionId(specifics.condition || listing.condition),
-      ['New', 'Like New', 'Good', 'Fair', 'Poor'].map((label, index) => ({ label, value: index + 1 })), { required: true }),
-  ];
+      MERCARI_CONDITION_CHOICES.map(([label], index) => ({ label, value: index + 1 })),
+      { required: true, help: MERCARI_CONDITION_CHOICES.map(([label, hint]) => `${label}: ${hint}`).join(' ') }),
+  ].map(product('Product info'));
   const heldCategory = listing.form?.overrides?.categoryV2 || listing.marketplace_category_objects?.mercari;
   if (!categories.some(row => String(row.value) === String(category)) && String(heldCategory?.id) === String(category)) {
     const label = (heldCategory.displayPath || []).join(' > ');
     if (label) fields.find(row => row.path === 'direct_category_ids.mercari').option_values[label] = String(category);
   }
-  if (listing.form?.sizes?.length || size.none === 'unknown') fields.push(nativeEditorChoice('mercari_specifics.nativeSizeId', 'Size',
-    size.id ?? specifics.nativeSizeId ?? specifics.size ?? listing.size ?? '',
-    sizeChoices,
-    { required: true, category_specific: true, help: 'Sizes from Mercari for this category. The same name in two groups is labeled with its group.' }));
-  fields.push(nativeEditorChoice('mercari_specifics.sizeType', 'Size type', specifics.sizeType || specifics.sizeGroup || '',
-    ['Regular', 'Petite', 'Plus', 'Tall', 'Juniors', 'Maternity', 'Big & Tall'].map(label => ({ label, value: label })),
-    { help: 'Used when Mercari lists that size in more than one group. Blank uses the size type on General, then the regular or standard group.' }));
-  fields.push(nativeEditorChoice('mercari_specifics.shippingMethod', 'Shipping method', specifics.shippingMethod ?? 'MERCARI',
-    [{ label: 'Mercari shipping', value: 'MERCARI' }, { label: 'Ship on your own', value: 'SOYO' }], { required: true }),
-    nativeEditorField('weight_oz', 'Packed weight (oz)', mercariWeightOz(listing), { locked: true, help: 'Change the package in Item Details.' }),
-    nativeEditorField('package_dimensions_in', 'Package dimensions (in)', listing.package_dimensions_in, { locked: true }),
-    // Both payers, the label, and the package stay on the form. The editor locks
-    // the payer and hides the package while Ship on your own is selected.
-    nativeEditorChoice('mercari_specifics.shippingPayerId', 'Who pays shipping', ownShipping ? 2 : specifics.shippingPayerId ?? 1,
-      [{ label: 'Buyer', value: 1 }, { label: 'Seller', value: 2 }]),
+  // The size list sits under its group headings (Standard, Petite, Inch, Alpha); a group with no title has none.
+  const sizeGroups = Object.fromEntries(sizeChoices.map((row, index) => [row.label, sizes[index].group_name])
+    .filter(([, group]) => group));
+  if (sizes.length || size.none === 'unknown') fields.push(product('Product info')(nativeEditorChoice('mercari_specifics.nativeSizeId', 'Size',
+    size.id ?? specifics.nativeSizeId ?? specifics.size ?? listing.size ?? '', sizeChoices,
+    { required: true, category_specific: true, ...(Object.keys(sizeGroups).length ? { option_groups: sizeGroups } : {}) })));
+  fields.push(...[
+    nativeEditorField('mercari_specifics.shipsFrom', 'Ships from', mercariShipsFrom(listing), { required: true, max_length: 5,
+      help: 'The ZIP code this item ships from.' }),
+    nativeEditorChoice('mercari_specifics.shippingMethod', 'Shipping method', specifics.shippingMethod ?? 'MERCARI',
+      [{ label: 'Prepaid label', value: 'MERCARI' }, { label: 'Ship on your own', value: 'SOYO' }], { required: true,
+        help: 'Prepaid label: we\'ll email you a label and you\'ll ship the item. Includes delivery protection. Ship on your own: you provide your own label and ship the item. It\'s not covered by shipping protection.' }),
+    // Shown with Prepaid label. Mercari's picker asks the package weight; Anteroom uses the package in Item Details.
     nativeEditorChoice('mercari_specifics.shippingClassId', 'Shipping label', listing.form?.specifics?.shipping?.carrierId || '',
-      (listing.form?.shipping_classes || []).map(row => ({ label: `${row.carrierDisplayName} · ${row.name} · $${(row.fee / 100).toFixed(2)}`, value: row.id })),
-      { required: true, help: 'Live Mercari labels for this package. Change packed weight and dimensions in Item Details.' }),
-    nativeEditorField('mercari_specifics.smartPricing.enabled', 'Smart pricing', specifics.smartPricing?.enabled === true, { input_type: 'boolean' }),
-    nativeEditorField('mercari_specifics.smartPricing.minimumPrice', 'Floor price', specifics.smartPricing?.minimumPrice ?? '',
-      { input_type: 'number', required: specifics.smartPricing?.enabled === true, help: 'The lowest whole-dollar price Smart Pricing may use.' }));
+      (listing.form?.shipping_classes || []).map(row => ({ label: `${row.carrierDisplayName} | ${row.name} | $${(row.fee / 100).toFixed(2)}`, value: row.id })),
+      { required: true, help: 'Labels for the packed weight and size in Item Details.' }),
+    nativeEditorChoice('mercari_specifics.shippingPayerId', 'Offer buyers free shipping?', ownShipping ? 2 : specifics.shippingPayerId ?? 1,
+      [{ label: 'Yes (Recommended)', value: 2 }, { label: 'No', value: 1 }]),
+  ].map(product('Shipping')));
+  fields.push(product('Pricing')({ ...price, label: 'Item price' }), ...[
+    nativeEditorField('mercari_specifics.smartPricing.enabled', 'Adjusts price automatically', specifics.smartPricing?.enabled === true,
+      { input_type: 'boolean', help: 'It lowers your price over time, boosts search visibility with each price change.' }),
+    nativeEditorField('mercari_specifics.smartPricing.minimumPrice', 'Minimum price', specifics.smartPricing?.minimumPrice ?? '',
+      { input_type: 'number', required: specifics.smartPricing?.enabled === true,
+        help: 'The price will gradually move closer to your minimum price. Selling fee and shipping fee will be deducted from this price when the item is sold.' }),
+  ].map(product('Smart pricing')));
   return { marketplace: 'mercari', native: true, known: true, category_id: String(category || ''),
     fields };
 }
+
+// Mercari's conditions and the line under each, as its sell page shows them.
+const MERCARI_CONDITION_CHOICES = [
+  ['New', 'New with tags (NWT). Unopened packaging. Unused.'],
+  ['Like new', 'New without tags (NWOT). No signs of wear. Unused.'],
+  ['Good', 'Gently used. One / few minor flaws. Functional.'],
+  ['Fair', 'Used, functional, multiple flaws / defects.'],
+  ['Poor', 'Major flaws, may be damaged, for parts.'],
+];
 
 async function handleNativeMarketplaceForm(msg) {
   const { marketplace, listing = {} } = msg.payload || {};
