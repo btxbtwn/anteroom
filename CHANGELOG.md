@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.466 — 2026-10-28
+## 0.1.467 — 2026-10-28
 
 - Depop offer previews recognize the currency in Depop's current listing data, so a US dollar listing is no longer skipped because its currency could not be read.
+
+## 0.1.466 — 2026-10-28
+
+- The Sellwild tab now shows your Shipping From address at the top of Item Shipping (and under Vehicle Shipping for vehicles), the same address Sellwild’s page shows and List uses. Change it in Sellwild’s Address Book. Package weight and size sit side by side in one row, as on Sellwild, and Depop’s Size and Quantity are narrow side by side, as on Depop.
 
 ## 0.1.465 — 2026-10-28
 

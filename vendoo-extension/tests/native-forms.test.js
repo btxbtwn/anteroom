@@ -368,7 +368,7 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   const headings = [];
   for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
   assert.deepEqual(headings, ['Description', 'Info', 'Enhance your listing', 'Item price', 'Boost your listing', 'Shipping']);
-  assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label), ['Size', 'Quantity', 'SKU']);
+  assert.deepEqual(form.fields.filter(row => row.width).map(row => [row.label, row.width]), [['Size', 'quarter'], ['Quantity', 'quarter'], ['SKU', 'half']]);
   assert.equal(rows.Type.help, 'Select up to 3');
   assert.equal(rows.Color.help, 'Select up to two colors');
   assert.equal(rows.Age.help, 'Do you know when this item was made? Add up to 1');

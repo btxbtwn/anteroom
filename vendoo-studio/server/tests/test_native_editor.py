@@ -105,7 +105,8 @@ class NativeEditorTest(unittest.TestCase):
         self.assertFalse(fields["sellwild_specifics.description"]["required"])
         self.assertEqual(fields["sellwild_specifics.title"]["value"], "Nike L Tee")
         self.assertEqual(fields["sellwild_specifics.description"]["value"], "Details")
-        self.bridge.assert_not_called()
+        # Chrome is asked only for the Shipping From address.
+        self.assertEqual(self.bridge.await_args.args[2]["marketplace"], "sellwild")
 
     def test_sellwild_form_follows_the_sell_page_sections_and_order(self):
         answer = self.client.get(f"{self.url}/sellwild/form")
@@ -114,6 +115,7 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual([(row.get("section"), row["label"]) for row in rows], [
             ("Add a Title", "What are you selling?"), ("Name Your Price (USD)", "Price"),
             ("Add Details", "Describe your item (Optional)"), ("Add Details", "Category"), ("Add Details", "Condition"),
+            ("Item Shipping", "Shipping From"),
             ("Item Shipping", "Package"), ("Item Shipping", "Weight (lbs)"), ("Item Shipping", "Height (in)"),
             ("Item Shipping", "Width (in)"), ("Item Shipping", "Depth (in)"),
         ])
@@ -127,8 +129,21 @@ class NativeEditorTest(unittest.TestCase):
             "Custom Package Dimensions", "Small Flat Rate Box", "Medium Flat Rate Box 1", "Medium Flat Rate Box 2",
             "Large Flat Rate Box", "Flat Rate Envelope (12.5 × 9.5 × 0.75 in)"])
         self.assertEqual(fields["Package"]["options"][-2:], ["Soft Pack (poly mailer)", "Irregular Parcel (4 × 4 × 4 in)"])
+        # Weight and the three sides share one row on the page.
         self.assertEqual({fields[label].get("width") for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")},
-                         {"half"})
+                         {"quarter"})
+
+    def test_sellwild_shipping_from_shows_the_address_card_read_through_chrome(self):
+        card = "Pat Seller\n12 Example St\nSpringfield, IL, 62701\nUnited States of America"
+        self.bridge.return_value = {"ok": True, "ship_from": card}
+        row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
+        self.assertEqual((row["value"], row["locked"], row["section"], row.get("help")), (card, True, "Item Shipping", None))
+        self.bridge.return_value = {"ok": True, "ship_from": ""}
+        row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
+        self.assertEqual((row["value"], row["help"]), ("", "Add a Shipping From address in Sellwild's Address Book."))
+        with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
+            row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
+        self.assertEqual(row["help"], "Connect Chrome to show your Sellwild address.")
 
     def test_sellwild_weight_and_sides_are_typed_on_the_sellwild_tab(self):
         from vendoo_studio.services.sellwild_listing import package_pounds, package_sides
@@ -152,8 +167,9 @@ class NativeEditorTest(unittest.TestCase):
         submitted = {**self.listing, "sellwild_specifics": {"nativeCategoryId": "43", "vin": "1HGCM82633A004352"}}
         self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted}).status_code, 200)
         rows = self.client.get(f"{self.url}/sellwild/form").json()["fields"]
-        self.assertEqual([(row.get("section"), row["label"]) for row in rows][-2:], [
-            ("Vehicle Information", "Vehicle Identification Number"), ("Vehicle Information", "Mileage")])
+        self.assertEqual([(row.get("section"), row["label"]) for row in rows][-3:], [
+            ("Vehicle Information", "Vehicle Identification Number"), ("Vehicle Information", "Mileage"),
+            ("Vehicle Shipping", "Shipping From")])
         self.assertNotIn("Package", [row["label"] for row in rows])
 
     def test_direct_depop_attribute_edits_survive_generated_style_padding(self):
