@@ -14,7 +14,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.482 — 2026-10-28
 
-- Photos now go through one store that every part of Anteroom reads and writes, so a photo store can later live somewhere other than this Mac without changing the rest. Editing, rotating, thumbnails, copying a listing and the file cleanup on delete all use it; nothing looks in a fixed folder any more.
+- Items no longer show a marketplace as "Sold here" when nothing sold there. Vendoo records a sale date of 1970 for a marketplace listing that never sold, and Anteroom was reading it as a real sale: that marketplace could not be delisted, the item could not be listed again, and its relist warning never appeared. Those dates are now ignored, and a real sale date still counts the same as before.
 
 ## 0.1.481 — 2026-10-28
 
