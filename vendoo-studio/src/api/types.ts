@@ -576,6 +576,8 @@ export interface MarketplaceFormField {
   on_form?: boolean;
   /** Choice label → the heading the marketplace lists it under (Mercari's size groups). */
   option_groups?: Record<string, string>;
+  /** The button the marketplace's page hides this field behind ("Show more", "See title options"). */
+  reveal?: string;
   /** A photos row: the page's caption under each photo slot, in order (Depop: Cover photo, Front, …). */
   slot_labels?: string[];
   /** File-dialog filter for a photos row. Depop's page takes JPEG and PNG only. */

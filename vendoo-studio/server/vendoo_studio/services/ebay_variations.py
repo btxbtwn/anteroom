@@ -365,7 +365,7 @@ async def execute(action: str, client: EbayClient, snapshot: dict, form: dict, f
     check_photo_ids(chosen, photos)
     base = single.ebay_sku(snapshot, binding, conversation_id)
     group_key = str(binding.get("ebay_group_key") or base)
-    choices = await single.listing_choices(client)
+    choices = await single.listing_choices(client, snapshot)
     if not binding.get("ebay_inventory_written"):
         await _not_ours(client, chosen, group_key, base == single.item_key(conversation_id))
     previous = dict(binding.get("ebay_variant_offers") or {})
@@ -469,7 +469,9 @@ async def update_live(client: EbayClient, snapshot: dict, form: dict, fields: di
     for row in chosen["rows"]:
         offer = offers[row["sku"]]
         policies = offer.get("listingPolicies") if isinstance(offer.get("listingPolicies"), dict) else {}
-        body = offer_body(row, fields, offer.get("merchantLocationKey"), policies)
+        own = single.own_listing_choices(snapshot)
+        policies = {**policies, **{key: value for key, value in own.items() if key != "merchantLocationKey"}}
+        body = offer_body(row, fields, own.get("merchantLocationKey") or offer.get("merchantLocationKey"), policies)
         body.pop("includeCatalogProductDetails", None)
         await client.request("PUT", f"/sell/inventory/v1/offer/{segment(str(offer['offerId']))}", body=body)
     record({"ebay_variant_offers": {sku: str(offer["offerId"]) for sku, offer in offers.items()}})

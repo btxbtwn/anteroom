@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.473 — 2026-10-28
+## 0.1.474 — 2026-10-28
 
 - OpenRouter now has its own mark and keeps the model names OpenRouter gives them, in Settings and the model picker.
 - OpenRouter has a Reasoning setting with the levels the listing model supports. Default leaves the choice to OpenRouter.
+
+## 0.1.473 — 2026-10-28
+
+- The eBay tab follows eBay's Create listing page. Item specifics stay in eBay's order, with Show more for the rest. You get a subtitle and custom label under title options, a second category, scheduling, this listing's own policies and item location, charity, and one custom item specific. An auction shows its duration and bids instead of an item price.
 
 ## 0.1.472 — 2026-10-27
 

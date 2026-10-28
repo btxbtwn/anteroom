@@ -15,6 +15,7 @@ import hashlib
 import html
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 import time
@@ -54,6 +55,11 @@ _SKIP = {
     "storecategoryname", "storecategory2name",
     "listingformat", "listingduration", "auctionstartprice", "auctionreserveprice", "auctionbuyitnow",
     "videoid",
+    # The rest of eBay's listing form: title options, second category, scheduling, pricing options,
+    # irregular package, and the listing's own policies and item location.
+    "subtitle", "secondarycategoryid", "secondarycategorypath", "schedule", "lotsize", "privatelisting",
+    "irregularpackage", "fulfillmentpolicyid", "merchantlocationkey",
+    "boldtitle", "charityid", "donationpercent", "salestaxtable", "customaspectname", "customaspectvalue",
     # Rows of their own (``ebay_variations``), never an aspect.
     "variations",
 }
@@ -210,6 +216,11 @@ def ebay_aspects(listing: dict, form: dict) -> dict[str, list[str]]:
         if key.lower() in _SKIP or _aspect_key(str(key)) in _SKIP or isinstance(value, dict):
             continue
         add(_aspect_name(str(key)), value)
+    # "Add custom item specific" on eBay's page: one extra name and value.
+    custom_name = str(specifics.get("customAspectName") or "").strip()
+    custom_value = specifics.get("customAspectValue")
+    if custom_name and str(custom_value or "").strip():
+        add(custom_name, custom_value)
     explicit = {_aspect_key(_aspect_name(str(key))) for key in specifics}
     if "brand" not in explicit:
         add("Brand", (form.get("overrides") or {}).get("brand"))
@@ -261,7 +272,8 @@ def store_category_names(listing: dict) -> list[str]:
 
 FIXED_PRICE = "FIXED_PRICE"
 AUCTION = "AUCTION"
-FORMAT_LABELS = {FIXED_PRICE: "Fixed price", AUCTION: "Auction"}
+# eBay's own names on its listing form.
+FORMAT_LABELS = {FIXED_PRICE: "Buy It Now", AUCTION: "Auction"}
 DEFAULT_AUCTION_DURATION = "DAYS_7"
 
 
@@ -576,9 +588,20 @@ def _pick(options: list[dict], chosen: str | None, kind: str, setting: str) -> s
                   f"settings.ebay.{setting}")
 
 
-async def listing_choices(client: EbayClient) -> dict[str, str]:
+LISTING_CHOICE_KEYS = {"fulfillmentPolicyId": "fulfillment_policy_id", "paymentPolicyId": "payment_policy_id",
+                       "returnPolicyId": "return_policy_id", "merchantLocationKey": "merchant_location_key"}
+
+
+def own_listing_choices(snapshot: dict | None) -> dict[str, str]:
+    """The policies and item location chosen on this listing's eBay form, over the Settings defaults."""
+    details = (snapshot or {}).get("ebay_specifics") if isinstance((snapshot or {}).get("ebay_specifics"), dict) else {}
+    return {key: str(details[key]) for key in LISTING_CHOICE_KEYS if str(details.get(key) or "").strip()}
+
+
+async def listing_choices(client: EbayClient, snapshot: dict | None = None) -> dict[str, str]:
     profiles = await listing_profiles(client)
-    defaults = get_ebay_listing_defaults()
+    defaults = {**get_ebay_listing_defaults(),
+                **{LISTING_CHOICE_KEYS[key]: value for key, value in own_listing_choices(snapshot).items()}}
     chosen = {
         "fulfillmentPolicyId": _pick(profiles["fulfillment"], defaults.get("fulfillment_policy_id"), "shipping policy", "fulfillment_policy_id"),
         "paymentPolicyId": _pick(profiles["payment"], defaults.get("payment_policy_id"), "payment policy", "payment_policy_id"),
@@ -682,6 +705,14 @@ async def _complete_aspects(client: EbayClient, category_id: str, aspects: dict[
                           "marketplace_category_ids.ebay") from exc
         raise
     return _match_aspects(schema, aspects)
+
+
+def apply_custom_aspect(aspects: dict, fields: dict) -> dict:
+    """Keep the seller's custom item specific after matching, which only keeps eBay's own aspects."""
+    custom = fields.get("custom_aspect")
+    if isinstance(custom, dict) and str(custom.get("name") or "").strip() and str(custom.get("value") or "").strip():
+        return {**aspects, str(custom["name"]).strip(): [str(custom["value"]).strip()]}
+    return aspects
 
 
 def _match_aspects(schema: list[dict], aspects: dict[str, list[str]]) -> dict[str, list[str]]:
@@ -981,10 +1012,79 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
         raise missing("eBay condition descriptions are at most 1,000 characters.", "ebay_specifics.conditionDescription")
     fields = {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
               "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
-              "condition_description": condition_note, "format": chosen}
+              "condition_description": condition_note, "format": chosen, **listing_options(snapshot, category_id)}
     if varied:
         fields["variations"] = ebay_variations.plan(snapshot, price)
     return fields
+
+
+SUBTITLE_MAX = 55
+
+
+def listing_options(snapshot: dict, category_id: str) -> dict:
+    """The rest of eBay's listing form: subtitle, second category, start time, lot, private listing, irregular package."""
+    details = snapshot.get("ebay_specifics") if isinstance(snapshot.get("ebay_specifics"), dict) else {}
+    options: dict = {}
+    subtitle = str(details.get("subtitle") or "").strip()
+    if len(subtitle) > SUBTITLE_MAX:
+        raise missing(f"eBay subtitles are at most {SUBTITLE_MAX} characters.", "ebay_specifics.subtitle")
+    if subtitle:
+        options["subtitle"] = subtitle
+    second = str(details.get("secondaryCategoryId") or "").strip()
+    if second:
+        if not re.fullmatch(r"\d{1,12}", second) or second == category_id:
+            raise missing("Choose a second eBay category different from the first, or clear it.", "ebay_specifics.secondaryCategoryId")
+        options["secondary_category_id"] = second
+    schedule = details.get("schedule") if isinstance(details.get("schedule"), dict) else {}
+    if schedule.get("enabled") in (True, "true"):
+        try:
+            start = datetime.fromisoformat(str(schedule.get("startAt") or "").strip())
+        except ValueError as exc:
+            raise missing("Choose the date and time the eBay listing starts.", "ebay_specifics.schedule.startAt") from exc
+        start = (start if start.tzinfo else start.astimezone()).astimezone(UTC)
+        now = datetime.now(UTC)
+        # eBay schedules a listing up to three weeks ahead.
+        if not now < start <= now + timedelta(days=21):
+            raise missing("Choose an eBay start time within the next three weeks.", "ebay_specifics.schedule.startAt")
+        options["start_date"] = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    lot = str(details.get("lotSize") or "").strip()
+    if lot:
+        if not lot.isdigit() or not 2 <= int(lot) <= 100000:
+            raise missing("Enter how many items are in the lot, 2 or more, or clear it.", "ebay_specifics.lotSize")
+        options["lot_size"] = int(lot)
+    if details.get("privateListing") in (True, "true"):
+        options["private"] = True
+    if details.get("irregularPackage") in (True, "true"):
+        options["irregular"] = True
+    charity = _charity(details)
+    if charity:
+        options["charity"] = charity
+    custom_name = str(details.get("customAspectName") or "").strip()
+    custom_value = str(details.get("customAspectValue") or "").strip()
+    if custom_name or custom_value:
+        if not custom_name:
+            raise missing("Name the custom item specific.", "ebay_specifics.customAspectName")
+        if not custom_value:
+            raise missing("Enter the custom item specific.", "ebay_specifics.customAspectValue")
+        options["custom_aspect"] = {"name": custom_name, "value": custom_value}
+    return options
+
+
+# eBay's charity percentage menu: 100% down to 10%, by fives.
+CHARITY_PERCENTS = [str(percent) for percent in range(100, 9, -5)]
+
+
+def _charity(details: dict) -> dict | None:
+    """Charity and donation percentage, as eBay's offer spells them. Both, or neither."""
+    charity_id = str(details.get("charityId") or "").strip()
+    percent = str(details.get("donationPercent") or "").strip().rstrip("%")
+    if not charity_id and not percent:
+        return None
+    if not re.fullmatch(r"\d{1,12}", charity_id):
+        raise missing("Choose a charity.", "ebay_specifics.charityId")
+    if percent not in CHARITY_PERCENTS:
+        raise missing("Choose the percentage of the sale to donate, from 10% to 100%.", "ebay_specifics.donationPercent")
+    return {"charityId": charity_id, "donationPercentage": f"{int(percent)}.0"}
 
 
 @requirement("ebay")
@@ -1110,8 +1210,11 @@ def _inventory_body(fields: dict, aspects: dict, image_urls: list[str], snapshot
         "packageWeightAndSize": {
             "weight": {"value": weight, "unit": "OUNCE"},
             "dimensions": _dimensions(snapshot),
+            **({"shippingIrregular": True} if fields.get("irregular") else {}),
         },
     }
+    if fields.get("subtitle"):
+        body["product"]["subtitle"] = fields["subtitle"]
     if fields.get("condition_descriptors"):
         body["conditionDescriptors"] = fields["condition_descriptors"]
     if video_ids:
@@ -1152,6 +1255,14 @@ def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) ->
         body["availableQuantity"] = fields["quantity"]
     if fields.get("store_categories"):
         body["storeCategoryNames"] = fields["store_categories"]
+    for key, name in (("secondary_category_id", "secondaryCategoryId"), ("start_date", "listingStartDate"),
+                      ("lot_size", "lotSize")):
+        if fields.get(key):
+            body[name] = fields[key]
+    if fields.get("private"):
+        body["hideBuyerDetails"] = True
+    if fields.get("charity"):
+        body["charity"] = fields["charity"]
     return body
 
 
@@ -1187,8 +1298,8 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
             chosen = ebay_variations.assign_skus(fields["variations"], base)
             chosen = await ebay_variations.check_category(client, fields["category_id"], chosen)
             fields = {**fields, "variations": chosen}
-            aspects = await _complete_aspects(client, fields["category_id"],
-                                              ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen))
+            aspects = apply_custom_aspect(await _complete_aspects(
+                client, fields["category_id"], ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen)), fields)
             await _check_condition(client, fields["category_id"], fields["condition"])
             return await ebay_variations.update_live(client, snapshot, form, fields, photos, binding, record, active, aspects)
         if not offer_id:
@@ -1202,7 +1313,7 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
             raise ValueError("This eBay offer is not the live listing. Check eBay before updating it.")
         if offer.get("format", FIXED_PRICE) != fields["format"]["format"]:
             raise ValueError("eBay cannot change a live listing between fixed price and auction. End it on eBay and list it again.")
-        aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
+        aspects = apply_custom_aspect(await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form)), fields)
         await _check_condition(client, fields["category_id"], fields["condition"])
         sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
         if not sku:
@@ -1215,8 +1326,10 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
                              body=_inventory_body(fields, aspects, image_urls, snapshot, form, video_ids))
         await _confirm_video(client, sku, snapshot, video_ids)
         policies = offer.get("listingPolicies") if isinstance(offer.get("listingPolicies"), dict) else {}
-        policies = {**policies, "bestOfferTerms": offer_terms(form, fields, snapshot)}
-        body = _offer_body(sku, fields, offer.get("merchantLocationKey"), policies)
+        own = own_listing_choices(snapshot)
+        policies = {**policies, **{key: value for key, value in own.items() if key != "merchantLocationKey"},
+                    "bestOfferTerms": offer_terms(form, fields, snapshot)}
+        body = _offer_body(sku, fields, own.get("merchantLocationKey") or offer.get("merchantLocationKey"), policies)
         body.pop("includeCatalogProductDetails")
         await client.request("PUT", f"/sell/inventory/v1/offer/{segment(offer_id)}", body=body)
         confirmed = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
@@ -1257,8 +1370,8 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             chosen = ebay_variations.assign_skus(fields["variations"], ebay_sku(snapshot, binding, conversation_id))
             chosen = await ebay_variations.check_category(client, fields["category_id"], chosen)
             fields = {**fields, "variations": chosen}
-            aspects = await _complete_aspects(client, fields["category_id"],
-                                              ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen))
+            aspects = apply_custom_aspect(await _complete_aspects(
+                client, fields["category_id"], ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen)), fields)
             await _check_condition(client, fields["category_id"], fields["condition"])
             in_flight: dict = {"write": None}
             try:
@@ -1266,10 +1379,10 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                                                      conversation_id, in_flight, aspects)
             finally:
                 pending = in_flight["write"]
-        aspects = await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form))
+        aspects = apply_custom_aspect(await _complete_aspects(client, fields["category_id"], ebay_aspects(snapshot, form)), fields)
         await _check_condition(client, fields["category_id"], fields["condition"])
         await _check_format(client, fields["category_id"], fields["format"])
-        choices = await listing_choices(client)
+        choices = await listing_choices(client, snapshot)
         sku = ebay_sku(snapshot, binding, conversation_id)
         if not binding.get("ebay_inventory_written") and sku != item_key(conversation_id):
             # The seller's own SKU may already name another item on eBay. Never overwrite it.
