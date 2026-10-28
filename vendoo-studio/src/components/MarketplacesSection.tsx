@@ -616,7 +616,7 @@ export function MarketplacesLayout({
           {railStatus && <div className="mt-1 flex min-h-6 items-center gap-1.5 border-t ps-2 pt-1">{railStatus}</div>}
         </div>
       </nav>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+      <div className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
         {(native.error || live.error || actionError || delist.error || mark.error) && (
           <p role="alert" className="text-destructive-foreground text-xs">{mark.error?.message || actionError || (delist.error || native.error || live.error)?.message}</p>
         )}
