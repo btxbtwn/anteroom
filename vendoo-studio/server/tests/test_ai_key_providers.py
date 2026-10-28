@@ -292,3 +292,59 @@ def test_frontend_lists_the_same_key_providers():
     source = (Path(__file__).resolve().parents[2] / "src" / "components" / "keyProviders.ts").read_text(encoding="utf-8")
     listed = re.search(r"KEY_PROVIDER_IDS: readonly KeyProviderId\[\] = \[([^\]]*)\]", source).group(1)
     assert tuple(re.findall(r'"([a-z]+)"', listed)) == tuple(KEY_PROVIDERS)
+
+
+def test_openrouter_models_use_their_names_and_offer_reasoning(fake_http, clean_settings):
+    from vendoo_studio.main import app
+
+    keychain.set_ai_key("openrouter", "sk-or")
+    user_settings.set_key_provider_models("openrouter", listing_model="openai/gpt-5")
+    fake_http(lambda request: httpx.Response(200, json={"data": [
+        {
+            "id": "openrouter/auto",
+            "name": "Auto Router",
+            "supported_parameters": ["reasoning", "reasoning_effort"],
+            "reasoning": None,
+        },
+        {
+            "id": "openai/gpt-5",
+            "name": "OpenAI: GPT-5",
+            "supported_parameters": ["reasoning", "reasoning_effort"],
+            "reasoning": {"supported_efforts": ["high", "medium", "low", "minimal"], "default_effort": "medium"},
+        },
+    ]}))
+    client = TestClient(app)
+    payload = client.get("/api/settings/ai-keys/openrouter/models").json()
+    assert payload["labels"] == {"openrouter/auto": "Auto Router", "openai/gpt-5": "OpenAI: GPT-5"}
+    assert payload["reasoning"] == {
+        "options": [
+            {"value": "default", "label": "Default"},
+            {"value": "high", "label": "High"},
+            {"value": "medium", "label": "Medium"},
+            {"value": "low", "label": "Low"},
+            {"value": "minimal", "label": "Minimal"},
+        ],
+        "value": "default",
+    }
+
+    assert client.put("/api/settings/ai-keys/openrouter/models", json={"reasoning_effort": "high"}).status_code == 200
+    assert user_settings.resolved_key_provider_reasoning("openrouter") == "high"
+    payload = client.get("/api/settings/ai-keys/openrouter/models").json()
+    assert payload["reasoning"]["value"] == "high"
+
+    assert client.put("/api/settings/ai-keys/openrouter/models", json={"reasoning_effort": "default"}).status_code == 200
+    assert user_settings.resolved_key_provider_reasoning("openrouter") is None
+    assert client.put("/api/settings/ai-keys/openai/models", json={"reasoning_effort": "high"}).status_code == 400
+    keychain.delete_ai_key("openrouter")
+
+
+def test_openrouter_reasoning_is_sent_only_for_the_listing_model(fake_http):
+    calls = fake_http(lambda request: httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "listing-m", "high")
+    assert run(collect(provider.chat([{"role": "user", "content": "hi"}], stream=False))) == ["ok"]
+    assert json.loads(calls[0].content)["reasoning"] == {"effort": "high"}
+
+    calls.clear()
+    assert run(collect(provider.chat(IMAGE_TURN, stream=False))) == ["ok"]
+    body = json.loads(calls[0].content)
+    assert body["model"] == "vision-m" and "reasoning" not in body

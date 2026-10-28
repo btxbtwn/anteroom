@@ -12,6 +12,7 @@ from vendoo_studio.services.user_settings import (
     get_listing_provider_order,
     get_photo_provider_choice,
     resolved_key_provider_models,
+    resolved_key_provider_reasoning,
 )
 
 
@@ -53,9 +54,10 @@ def key_provider_instance(provider_id: str, api_key: str):
         return OpenAIAPIProvider(api_key, vision, listing)
     if spec.api == "anthropic":
         return AnthropicAPIProvider(api_key, vision, listing)
+    reasoning = resolved_key_provider_reasoning(provider_id) if spec.reasoning else None
     if spec.id == "openrouter":
-        return OpenRouterProvider(spec, api_key, vision, listing)
-    return ChatCompletionsProvider(spec, api_key, vision, listing)
+        return OpenRouterProvider(spec, api_key, vision, listing, reasoning)
+    return ChatCompletionsProvider(spec, api_key, vision, listing, reasoning)
 
 
 def _key_provider(provider_id: str):

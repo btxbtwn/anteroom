@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.473 — 2026-10-28
+
+- OpenRouter now has its own mark and keeps the model names OpenRouter gives them, in Settings and the model picker.
+- OpenRouter has a Reasoning setting with the levels the listing model supports. Default leaves the choice to OpenRouter.
+
 ## 0.1.472 — 2026-10-27
 
 - On the Mercari tab, package weight is one question, "How heavy will the package be?", with pounds and ounces side by side. Length, width and height stay hidden until you say the item will not fit in a shoebox, and you can skip them. Once the item has a price, Smart pricing shows as on, with a suggested lowest price.
