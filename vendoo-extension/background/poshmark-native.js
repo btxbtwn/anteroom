@@ -432,17 +432,29 @@ function poshmarkSmartWarning(post, saved) {
     : 'Poshmark left Smart Pricing on. Turn it off in the listing if you do not want it.';
 }
 
+function poshmarkMultiItem(listing, sizes) {
+  const flag = listing.poshmark_specifics?.multiItem;
+  if (flag === true || flag === 'true') return true;
+  if (flag === false || flag === 'false') return false;
+  const quantity = sizes.reduce((total, row) => total + Number(row.quantity_available) || 0, 0);
+  return sizes.length > 1 || quantity > 1;
+}
+
 function poshmarkInventory(category, listing) {
-  const rows = listing.poshmark_specifics?.inventoryRows;
+  let rows = listing.poshmark_specifics?.inventoryRows;
   if (Object.hasOwn(listing.poshmark_specifics || {}, 'inventoryRows') && !Array.isArray(rows)) {
     throw marketplaceMissing('poshmark', [{ field: 'poshmark_specifics.inventoryRows', needs: 'an inventory list of sizes and quantities' }]);
   }
+  const system = poshmarkSizeSystem(listing);
+  const single = listing.poshmark_specifics?.multiItem === false || listing.poshmark_specifics?.multiItem === 'false';
   if (!Array.isArray(rows)) {
     const picked = poshmarkSize(category.category, listing, { kids: category.department.display === 'Kids', leaf: category.leaf });
     if (!picked?.size) throw marketplaceMissing('poshmark', [{ field: 'size', needs: picked?.problem || 'a size Poshmark offers in this category' }]);
-    return [{ size_id: picked.size.id, size_obj: picked.size, size_system: 'us', quantity_available: Number(listing.quantity ?? 1),
+    const quantity = single ? 1 : Number(listing.quantity ?? 1);
+    return [{ size_id: picked.size.id, size_obj: picked.size, size_system: picked.size.size_system || 'us', quantity_available: quantity,
       quantity_sold: 0, size_set_tags: picked.set.tags || [], seller_inventory_private_info: {} }];
   }
+  if (single) rows = rows.slice(0, 1);
   const missing = [];
   if (!rows.length) missing.push({ field: 'poshmark_specifics.inventoryRows', needs: 'at least one size and quantity' });
   const seen = new Set();
@@ -451,16 +463,16 @@ function poshmarkInventory(category, listing) {
     const custom = row?.sizeSetId === 'custom';
     const set = category.category.size_sets?.find(set => set.id === row?.sizeSetId);
     const id = String(row?.sizeId ?? '').trim();
-    const size = custom && id ? { id, display: id, display_with_size_set: id, size_system: 'us' }
-      : set?.size_systems?.us?.sizes?.find(size => size.id === id);
+    const size = custom && id ? { id, display: id, display_with_size_set: id, size_system: system }
+      : set?.size_systems?.[system]?.sizes?.find(size => size.id === id);
     if (!size) missing.push({ field: `${field}.sizeId`, needs: 'a size from this category and group, or a nonblank custom size' });
     if (seen.has(id)) missing.push({ field: `${field}.sizeId`, needs: 'a size that is not already in this inventory' });
     seen.add(id);
-    const quantity = Number(row?.quantity);
-    if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: `${field}.quantity`, needs: 'a positive whole-number quantity' });
+    const quantity = single ? 1 : Number(row?.quantity);
     const sku = String(row?.sku ?? '').trim();
     if (sku.length > 50) missing.push({ field: `${field}.sku`, needs: 'a SKU of 50 characters or fewer' });
-    return { size_id: id, size_obj: size, size_system: 'us', quantity_available: quantity, quantity_sold: 0,
+    if (!Number.isSafeInteger(quantity) || quantity < 1) missing.push({ field: `${field}.quantity`, needs: 'a positive whole-number quantity' });
+    return { size_id: id, size_obj: size, size_system: system, quantity_available: quantity, quantity_sold: 0,
       size_set_tags: custom ? [] : set?.tags || [], seller_inventory_private_info: { sku } };
   });
   if (missing.length) throw marketplaceMissing('poshmark', missing);
@@ -492,6 +504,20 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   if (!Number.isSafeInteger(originalPrice) || originalPrice < 0) missing.push({ field: 'originalPrice', needs: 'an original price in whole dollars, or 0 if unknown' });
   const sku = String(listing.poshmark_specifics?.poshmarkSku ?? listing.sku ?? '').trim();
   if (sku.length > 50) missing.push({ field: 'poshmark_specifics.poshmarkSku', needs: 'a SKU of 50 characters or fewer' });
+  const notes = String(listing.poshmark_specifics?.sellerNotes ?? '');
+  if (notes.length > 500) missing.push({ field: 'poshmark_specifics.sellerNotes', needs: 'other info of 500 characters or fewer' });
+  const availability = listing.poshmark_specifics?.availability || 'available';
+  if (!['available', 'not_for_sale', 'coming_soon'].includes(availability)) {
+    missing.push({ field: 'poshmark_specifics.availability', needs: 'For Sale, Not For Sale, or Drops' });
+  }
+  let makeAvailableAt = '';
+  if (availability === 'coming_soon') {
+    const at = Date.parse(String(listing.poshmark_specifics?.makeAvailableAt || ''));
+    const now = Date.now();
+    if (!Number.isFinite(at) || at < now - 60 * 1000 || at > now + 7 * 24 * 60 * 60 * 1000) {
+      missing.push({ field: 'poshmark_specifics.makeAvailableAt', needs: 'a drop time within 7 days from today' });
+    } else makeAvailableAt = new Date(at).toISOString();
+  }
   const cost = Number(listing.cost);
   const hasCost = Object.hasOwn(listing, 'cost');
   const blankCost = listing.cost == null || listing.cost === '';
@@ -506,12 +532,10 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
     ...(Object.hasOwn(listing.poshmark_specifics || {}, 'sellerNotes')
       ? { other_info: String(listing.poshmark_specifics.sellerNotes ?? '') } : {}),
   };
-  const availability = listing.poshmark_specifics?.availability || 'available';
-  if (!['available', 'not_for_sale'].includes(availability)) throw marketplaceMissing('poshmark', [{ field: 'poshmark_specifics.availability', needs: 'For Sale or Not For Sale' }]);
   return {
     title, description,
     catalog: category.catalog,
-    inventory: { status: availability, multi_item: sizes.length > 1 || quantity > 1, size_quantity_revision: 0, size_quantities: sizes },
+    inventory: { status: availability, multi_item: poshmarkMultiItem(listing, sizes), size_quantity_revision: 0, size_quantities: sizes },
     price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
     original_price_amount: { val: String(originalPrice), currency_code: 'USD', currency_symbol: '$' },
     condition,
@@ -520,6 +544,7 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
     style_tags: styleTags,
     offer_auto_actions_v2_enabled: minimum > 0,
     offer_auto_actions_min_price_amount: minimum > 0 ? { val: String(minimum), currency_code: 'USD' } : null,
+    ...(makeAvailableAt ? { make_available_at: makeAvailableAt } : {}),
     ...(Object.keys(privateFields).length ? { seller_private_info: privateFields } : {}),
   };
 }
@@ -554,8 +579,13 @@ function poshmarkPostDifferences(actual, expected, photoCount) {
   const strings = values => (values || []).map(value => String(value?.name ?? value)).sort();
   const sizes = inventory => (inventory?.size_quantities || []).map(row => ({
     id: String(row.size_id ?? row.size_obj?.id ?? ''), quantity: Number(row.quantity_available),
+    system: String(row.size_system || 'us'),
     tags: strings(row.size_set_tags), sku: String(row.seller_inventory_private_info?.sku ?? ''),
   })).sort((a, b) => a.id.localeCompare(b.id));
+  const instant = value => {
+    const at = Date.parse(String(value || ''));
+    return Number.isFinite(at) ? Math.round(at / 60000) : null;
+  };
   const fields = {
     title: [text(actual.title), text(expected.title)],
     description: [text(actual.description), text(expected.description)],
@@ -565,6 +595,7 @@ function poshmarkPostDifferences(actual, expected, photoCount) {
     subcategory: [strings(actual.catalog?.category_features), strings(expected.catalog?.category_features)],
     sizes: [sizes(actual.inventory), sizes(expected.inventory)],
     availability: [actual.inventory?.status, expected.inventory?.status],
+    ...(expected.make_available_at ? { 'drop time': [instant(actual.make_available_at), instant(expected.make_available_at)] } : {}),
     colors: [strings(actual.colors), strings(expected.colors)],
     'style tags': [strings(actual.style_tags), strings(expected.style_tags)],
     price: [Number(actual.price_amount?.val), Number(expected.price_amount?.val)],

@@ -224,13 +224,22 @@ describe("native form values", () => {
     expect(nativeFieldVisible(fields[3], { ...context, local: { "mercari_specifics.smartPricing.enabled": "true" } })).toBe(true);
   });
 
-  it("hides Poshmark's Lowest Price until Automate Offers is on", () => {
+  it("hides Poshmark's Lowest Price until Smart Sell is on, and Drop Time until Drops", () => {
     const fields: NativeFormRow[] = [
       { key: "poshmark_specifics.smartSell.enabled", defaultValue: false },
       { key: "poshmark_specifics.smartSell.minimumPrice" },
+      { key: "poshmark_specifics.availability", options: ["For Sale", "Drops"], optionValues: { "For Sale": "available", Drops: "coming_soon" }, defaultValue: "available" },
+      { key: "poshmark_specifics.makeAvailableAt" },
+      { key: "poshmark_specifics.shippingDiscountId", optionValues: { "No Discount": "none", Free: "free" }, optionAmounts: { none: 0, free: 6.49 } },
+      { key: "poshmark_specifics.earnings" },
     ];
-    const context = { tab: "poshmark", listing: {}, local: {}, fields, categoryStale: false };
+    const context = { tab: "poshmark", listing: { price: 20 }, local: {}, fields, categoryStale: false };
     expect(nativeFieldVisible(fields[1], context)).toBe(false);
     expect(nativeFieldVisible(fields[1], { ...context, local: { "poshmark_specifics.smartSell.enabled": "true" } })).toBe(true);
+    expect(nativeFieldVisible(fields[3], context)).toBe(false);
+    expect(nativeFieldVisible(fields[3], { ...context, local: { "poshmark_specifics.availability": "Drops" } })).toBe(true);
+    expect(presentNativeField(fields[5], context).defaultValue).toBe("$16.00");
+    expect(presentNativeField(fields[5], { ...context, local: { price: "20", "poshmark_specifics.shippingDiscountId": "Free" } }).defaultValue).toBe("$9.51");
+    expect(presentNativeField(fields[5], { ...context, local: { price: "10" } }).defaultValue).toBe("$7.05");
   });
 });

@@ -13,6 +13,18 @@ export interface NativeFormRow {
   help?: string;
   /** True when this row exists only for the selected category. */
   categorySpecific?: boolean;
+  /** Discount id → dollars the seller pays. Your Earnings subtracts the selected one. */
+  optionAmounts?: Record<string, number>;
+}
+
+/** Poshmark's seller fee, read 2026-10-27: $2.95 under $15, 20% from $15, then the seller's shipping discount, floored at $0. */
+export function poshmarkEarnings(price: unknown, discount = 0): string {
+  const amount = Number(price);
+  if (!Number.isFinite(amount) || amount <= 0) return "";
+  const cents = Math.round(amount * 100);
+  const fee = amount < 15 ? 295 : Math.round(amount * 20);
+  const off = Math.round(Number(discount) * 100) || 0;
+  return `$${(Math.max(0, cents - fee - off) / 100).toFixed(2)}`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -185,9 +197,12 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
     }
     return true;
   }
-  // Poshmark asks for the lowest price only once Automate Offers is on.
+  // Poshmark asks for the lowest price only once Smart Sell is on, and for a drop time only for Drops.
   if (context.tab === "poshmark" && field.key === "poshmark_specifics.smartSell.minimumPrice") {
     return shownChoice(context.fields, context.local, context.listing, "poshmark_specifics.smartSell.enabled") === "true";
+  }
+  if (context.tab === "poshmark" && field.key === "poshmark_specifics.makeAvailableAt") {
+    return shownChoice(context.fields, context.local, context.listing, "poshmark_specifics.availability") === "coming_soon";
   }
   if (context.tab === "mercari" && field.key === "mercari_specifics.smartPricing.minimumPrice") {
     return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.smartPricing.enabled") === "true";
@@ -257,6 +272,15 @@ export function presentNativeField<T extends NativeFormRow>(field: T, context: N
   }
   if (context.tab === "ebay" && field.key === "ebay_specifics.listingFormat") {
     return presentFormat(field, ebayVaried(context.listing), ebayFormat(context));
+  }
+  if (context.tab === "poshmark" && field.key === "poshmark_specifics.earnings") {
+    const priceField = context.fields.find((row) => row.key === "poshmark_specifics.poshmarkPrice" || row.key === "price");
+    const typed = priceField && context.local[priceField.key] != null ? context.local[priceField.key] : context.local.price;
+    const price = typed != null ? formFieldText(typed) : formFieldText(getListingEditorValue(context.listing, priceField?.key || "price") ?? getListingEditorValue(context.listing, "price"));
+    const discountId = shownChoice(context.fields, context.local, context.listing, "poshmark_specifics.shippingDiscountId");
+    const shipping = context.fields.find((row) => row.key === "poshmark_specifics.shippingDiscountId");
+    const discount = Number(shipping?.optionAmounts?.[discountId] || 0);
+    return { ...field, locked: true, defaultValue: poshmarkEarnings(price, discount) };
   }
   if (context.tab === "ebay" && field.key === "quantity") {
     if (ebayVaried(context.listing)) {

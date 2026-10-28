@@ -17,6 +17,9 @@ describe("native size inventory", () => {
     expect(html).toContain('value="CUSTOM-1"');
     expect(html).toContain('aria-label="Quantity 2"');
     expect(html).toContain('aria-label="Remove size 2"');
-    expect(html).toContain("Add size");
+    expect(html).toContain("Add another size");
+    expect(html).toContain(">Size<");
+    expect(html).toContain(">Available<");
+    expect(html).toContain(">Sold<");
   });
 });

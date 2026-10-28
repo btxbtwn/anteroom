@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.470 — 2026-10-27
+
+- The Poshmark tab now matches the rest of Poshmark’s create-listing page. Quantity is Single Item or Multi Item, separate from Size. Category and Subcategory sit side by side: the category starts with Women, Men, Kids, Home, Pets, or Electronics, and a chosen category reads like “Women Jeans.” Sizes can be US, AU, EU, or UK. Availability includes Drops, with a drop time within 7 days. Listing Price shows the Smart Sell badge, Discounted Shipping, and Your Earnings.
+
 ## 0.1.469 — 2026-10-28
 
 - Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.

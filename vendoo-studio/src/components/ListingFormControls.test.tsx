@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CategoryTreeSelect, groupedChoices, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
+import { CategoryTreeSelect, DependentSelectPair, groupedChoices, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
 
 describe("marketplace choice controls", () => {
   it("identifies an unsupported saved choice without silently clearing it", () => {
@@ -118,6 +118,36 @@ describe("category tree dropdown", () => {
     expect(html).toContain("Choose a category group, then continue until the last one.");
     expect(html).toContain(">Kids</option>");
     expect(html.match(/<select/g)).toHaveLength(1);
+  });
+});
+
+describe("dependent category dropdowns", () => {
+  const departments = [{
+    id: "women",
+    label: "Women",
+    items: [
+      { type: "category" as const, label: "Jeans", value: "women/jeans", display: "Women Jeans", children: [
+        { label: "Skinny", value: "women/jeans/skinny" }, { label: "None", value: "women/jeans" },
+      ] },
+      { type: "group" as const, label: "Global & Traditional Wear", items: [
+        { type: "category" as const, label: "Kilts", value: "women/kilts", display: "Women Kilts", children: [] },
+      ] },
+    ],
+  }];
+
+  it("shows the department and category together, and the subcategory beside it", () => {
+    const html = renderToStaticMarkup(<DependentSelectPair id="category" value="women/jeans/skinny" departments={departments} onChange={() => {}} />);
+    expect(html).toContain("Women Jeans");
+    expect(html).toContain("Subcategory");
+    expect(html).toContain(">Skinny</option>");
+    expect(html).toContain(">None</option>");
+    expect(html).toContain("Select Subcategory (optional)");
+  });
+
+  it("leaves subcategory empty when the category has no narrower choices", () => {
+    const html = renderToStaticMarkup(<DependentSelectPair id="category" value="women/kilts" departments={departments} onChange={() => {}} />);
+    expect(html).toContain("Women Kilts");
+    expect(html).not.toContain("<select");
   });
 });
 

@@ -21,6 +21,52 @@ function nativeEditorBase(listing, { marketplace, title = true, maxTitle, maxDes
   ];
 }
 
+const POSHMARK_SIZE_SYSTEMS = ['us', 'au', 'eu', 'uk'];
+
+// Poshmark's seller fee, read from its earnings API on 2026-10-27: $2.95 under
+// $15, 20% from $15 up, then the seller's shipping discount, and never below $0.
+function poshmarkEarnings(price, discount = 0) {
+  const amount = Number(price);
+  if (!Number.isFinite(amount) || amount <= 0) return '';
+  const cents = Math.round(amount * 100);
+  const fee = amount < 15 ? 295 : Math.round(amount * 20);
+  const off = Math.round(Number(discount) * 100) || 0;
+  return `$${(Math.max(0, cents - fee - off) / 100).toFixed(2)}`;
+}
+
+function poshmarkSizeSystem(listing) {
+  const system = String(listing?.poshmark_specifics?.sizeSystem || 'us').toLowerCase();
+  return POSHMARK_SIZE_SYSTEMS.includes(system) ? system : 'us';
+}
+
+// Single Item until the seller chooses Multi Item, or an older listing already
+// has more than one unit. The page's toggle is what the post's multi_item follows.
+function poshmarkMultiDefault(listing) {
+  const flag = listing?.poshmark_specifics?.multiItem;
+  if (flag === true || flag === 'true') return 'true';
+  if (flag === false || flag === 'false') return 'false';
+  const rows = listing?.poshmark_specifics?.inventoryRows;
+  if (Array.isArray(rows)) return rows.length > 1 || rows.some(row => Number(row?.quantity) > 1) ? 'true' : 'false';
+  return Number(listing?.quantity) > 1 ? 'true' : 'false';
+}
+
+function poshmarkGroupSystems(set) {
+  const systems = {};
+  for (const key of POSHMARK_SIZE_SYSTEMS) {
+    const sizes = set?.size_systems?.[key]?.sizes || [];
+    if (!sizes.length) continue;
+    systems[key] = sizes.map(size => ({
+      id: size.id,
+      label: size.display || size.id,
+      equivalents: Object.fromEntries(Object.entries(size.equivalent_sizes || {}).flatMap(([sys, ids]) => {
+        const id = Array.isArray(ids) ? ids.find(Boolean) : ids;
+        return id ? [[sys, String(id)]] : [];
+      })),
+    }));
+  }
+  return systems;
+}
+
 // The category list as Poshmark's page shows it: departments, then categories in
 // the page's order, with a group such as Global & Traditional Wear as one more
 // step. A category with narrower choices ends in one of them or None.
@@ -49,6 +95,37 @@ function poshmarkCategoryChoices(catalog, display) {
   return choices;
 }
 
+// The same catalog as two dropdowns: departments, then categories (a group is
+// one more step). The closed category reads "Women Jeans". Subcategory is that
+// category's features, then None. A category with no features has no second list.
+function poshmarkCategoryCascade(catalog, display) {
+  const departments = new Map((catalog.catalog?.departments || []).map(row => [row.id, row]));
+  const out = [];
+  for (const node of display?.children || []) {
+    const department = departments.get(node.id);
+    if (!department) continue;
+    const categories = new Map((department.categories || []).map(row => [row.id, row]));
+    const itemFor = category => {
+      const id = `${department.id}/${category.id}`;
+      const features = category.category_features || [];
+      return {
+        type: 'category', label: category.display, value: id, display: `${department.display} ${category.display}`,
+        children: features.length ? [...features.map(feature => ({ label: feature.display, value: `${id}/${feature.id}` })),
+          { label: 'None', value: id }] : [],
+      };
+    };
+    const items = [];
+    for (const child of node.children || []) {
+      if (child.type === 'group') {
+        const nested = (child.children || []).flatMap(leaf => categories.has(leaf.id) ? [itemFor(categories.get(leaf.id))] : []);
+        if (nested.length) items.push({ type: 'group', label: child.display, items: nested });
+      } else if (categories.has(child.id)) items.push(itemFor(categories.get(child.id)));
+    }
+    if (items.length) out.push({ id: department.id, label: department.display, items });
+  }
+  return out;
+}
+
 const POSHMARK_CONDITION_CHOICES = [
   ['New With Tags (NWT)', 'nwt', 'Brand new with original tags or packaging'],
   ['Like New', 'uln', 'New without tags or like new'],
@@ -56,34 +133,54 @@ const POSHMARK_CONDITION_CHOICES = [
   ['Fair', 'uf', 'Clearly used with visible wear, to note in description or photos'],
 ];
 
-// Poshmark's create-listing page, read 2026-10-28: each heading with its hint, in
-// page order. The price fields are the ones its Listing Price panel shows.
+const POSHMARK_AVAILABILITY_HELP = [
+  'For Sale: Your listing will be immediately available for purchase.',
+  'Not For Sale: Your listing will be visible, but not available for purchase.',
+  'Drops: Your listing will be visible, but not available for purchase until the designated drop time. The drop time can be scheduled up to 7 days in advance. Likers will be notified when your item drops.',
+].join(' ');
+
+// Poshmark's create-listing page, read 2026-10-27: each heading with its hint, in
+// page order. Quantity is its own Single Item / Multi Item control. Category and
+// Subcategory sit side by side. Size carries the US/AU/EU/UK switch. Price is
+// Listing Price with the Smart Sell badge, Discounted Shipping, and Your Earnings.
 function poshmarkEditorForm(listing, catalog, display, styleTags = [], shippingDiscounts = []) {
   const resolved = poshmarkCategory(catalog, listing);
   const category = resolved?.category;
   const nativeSize = category ? poshmarkSize(category, listing, { kids: resolved.department.display === 'Kids', leaf: resolved.leaf }) : null;
   const sets = category?.size_sets || [];
   const specifics = listing.poshmark_specifics || {};
+  const multi = poshmarkMultiDefault(listing) === 'true';
   const inventoryRows = Array.isArray(specifics.inventoryRows) ? specifics.inventoryRows : [{
     sizeSetId: nativeSize?.set?.id || (nativeSize?.size ? 'custom' : ''), sizeId: nativeSize?.size?.id || '',
-    quantity: listing.quantity ?? 1, sku: '',
+    quantity: multi ? (listing.quantity ?? 1) : 1, sku: '',
   }];
   const at = (section, help) => row => ({ ...row, section, ...(help ? { help } : {}) });
+  const half = row => ({ ...row, control_width: 'half' });
   const [title, description, price] = nativeEditorBase(listing, { marketplace: 'poshmark', maxTitle: 80, maxDescription: 1500, minPrice: 3, priceStep: 1 });
+  const categoryChoices = poshmarkCategoryChoices(catalog, display);
+  const discountRows = shippingDiscounts.map(row => ({ label: row.label, value: row.id, amount: Number(row.discount_amount?.val) || 0 }));
+  const discountId = specifics.shippingDiscountId || discountRows.find(row => row.amount === 0)?.value || '';
+  const discountAmount = discountRows.find(row => row.value === discountId)?.amount || 0;
   const fields = [
     at('Title', 'Share key details like Brand, Size, and Color.')(title),
     at('Description', 'Tell shoppers about your listing by describing the Brand, Size, Color, Condition, Material, and any other noteworthy details.')(
       { ...description, input_type: 'textarea' }),
     at('Category', 'Add details to help your buyers find your item quickly.')(
-      nativeEditorChoice('direct_category_ids.poshmark', 'Category', poshmarkDirectId(resolved), poshmarkCategoryChoices(catalog, display),
-        { required: true, clears: ['poshmark_specifics.subcategory', 'poshmark_specifics.sizeSetId', 'poshmark_specifics.nativeSizeId', 'poshmark_specifics.inventoryRows'] })),
-    at('Size', 'Select a single or multi item. If you have more than one of the same item for sale, add each size with its quantity.')(
-      nativeEditorField('poshmark_specifics.inventoryRows', 'Size', inventoryRows,
-        { input_type: 'inventory', required: true, category_specific: true, inventory_groups: [
-          ...sets.map(set => ({ id: set.id, label: set.name || set.tags?.join(' / ') || set.id,
-            sizes: (set.size_systems?.us?.sizes || []).map(size => ({ id: size.id, label: size.display || size.id })) })),
-          { id: 'custom', label: 'Custom', sizes: [] },
-        ] })),
+      nativeEditorChoice('direct_category_ids.poshmark', 'Category', poshmarkDirectId(resolved), categoryChoices,
+        { required: true, input_type: 'cascade', cascade: poshmarkCategoryCascade(catalog, display),
+          clears: ['poshmark_specifics.subcategory', 'poshmark_specifics.sizeSetId', 'poshmark_specifics.nativeSizeId', 'poshmark_specifics.inventoryRows'] })),
+    at('Quantity')(nativeEditorChoice('poshmark_specifics.multiItem', 'Quantity', poshmarkMultiDefault(listing),
+      [{ label: 'Single Item', value: 'false' }, { label: 'Multi Item', value: 'true' }],
+      { input_type: 'segmented', help: 'Select a single or multi item. If you have more than one of the same item for sale, select Multi Item to specify the quantity.' })),
+    at('Size')(nativeEditorField('poshmark_specifics.inventoryRows', 'Size', inventoryRows,
+      { input_type: 'inventory', required: true, category_specific: true, inventory_groups: [
+        ...sets.map(set => {
+          const systems = poshmarkGroupSystems(set);
+          return { id: set.id, label: set.name || set.tags?.join(' / ') || set.id,
+            sizes: (systems.us || []).map(size => ({ id: size.id, label: size.label })), systems };
+        }),
+        { id: 'custom', label: 'Custom', sizes: [] },
+      ] })),
     at('Condition', ['Specify the condition of your item.', ...POSHMARK_CONDITION_CHOICES.map(([label, , hint]) => `${label}: ${hint}.`)].join(' '))(
       nativeEditorChoice('poshmark_specifics.condition', 'Condition', poshmarkCondition(listing),
         POSHMARK_CONDITION_CHOICES.map(([label, value]) => ({ label, value })), { required: true })),
@@ -97,25 +194,29 @@ function poshmarkEditorForm(listing, catalog, display, styleTags = [], shippingD
       nativeEditorField('poshmark_specifics.styleTags', 'Style Tags', poshmarkPostStyleTags(listing, styleTags),
         { multi: true, max_values: 3, max_length: 25, options: styleTags, options_source: 'marketplace' })),
     ...[
-      { ...price, label: 'Listing Price' },
-      nativeEditorField('poshmark_specifics.smartSell.enabled', 'Automate Offers',
+      half({ ...price, label: 'Listing Price' }),
+      nativeEditorField('poshmark_specifics.smartSell.enabled', 'Smart Sell',
         typeof specifics.smartSell?.enabled === 'boolean' ? specifics.smartSell.enabled : poshmarkSmartMinimum(listing, poshmarkPrice(listing)) > 0,
-        { input_type: 'boolean', help: 'Sell 50% faster by setting your lowest price.' }),
+        { input_type: 'badge', help: 'Sell 50% faster by setting your lowest price.' }),
       nativeEditorField('poshmark_specifics.smartSell.minimumPrice', 'Lowest Price',
         specifics.smartSell?.minimumPrice ?? specifics.smartSellMinimumPrice ?? specifics.minimumPrice ?? listing.form?.specifics?.smartSell?.minPrice ?? '',
-        { input_type: 'number', required: true, min_value: 0, step: 1 }),
-      nativeEditorField('poshmark_specifics.originalPrice', 'Original Price', poshmarkOriginalPrice(listing),
-        { input_type: 'number', min_value: 0, step: 1, help: 'Optional' }),
-      nativeEditorChoice('poshmark_specifics.shippingDiscountId', 'Shipping Discount',
-        specifics.shippingDiscountId || shippingDiscounts.find(row => Number(row.discount_amount?.val) === 0)?.id || '',
-        shippingDiscounts.map(row => ({ label: row.label, value: row.id })), { help: 'Optional' }),
+        { input_type: 'number', required: true, min_value: 0, step: 1, control_width: 'half', help: 'Sell 50% faster by setting your lowest price.' }),
+      { ...nativeEditorChoice('poshmark_specifics.shippingDiscountId', 'Discounted Shipping', discountId,
+        discountRows.map(row => ({ label: row.label, value: row.value })),
+        { help: 'Optional', option_amounts: Object.fromEntries(discountRows.map(row => [row.value, row.amount])) }), control_width: 'half' },
+      half(nativeEditorField('poshmark_specifics.earnings', 'Your Earnings', poshmarkEarnings(poshmarkPrice(listing), discountAmount),
+        { locked: true, input_type: 'text' })),
     ].map(at('Price')),
-    at('Availability')(nativeEditorChoice('poshmark_specifics.availability', 'Availability', specifics.availability || 'available',
-      [{ label: 'For Sale', value: 'available' }, { label: 'Not For Sale', value: 'not_for_sale' }], { required: true })),
+    at('Availability', POSHMARK_AVAILABILITY_HELP)(nativeEditorChoice('poshmark_specifics.availability', 'Availability', specifics.availability || 'available',
+      [{ label: 'For Sale', value: 'available' }, { label: 'Not For Sale', value: 'not_for_sale' }, { label: 'Drops', value: 'coming_soon' }],
+      { required: true })),
+    at('Availability', 'Your drop time must be within 7 days from today.')(
+      nativeEditorField('poshmark_specifics.makeAvailableAt', 'Drop Time', specifics.makeAvailableAt || '',
+        { input_type: 'datetime-local', required: true })),
     ...[
-      nativeEditorField('poshmark_specifics.poshmarkSku', 'Listing SKU', specifics.poshmarkSku ?? listing.sku ?? '', { max_length: 50 }),
-      nativeEditorField('cost', 'Cost Price', listing.cost, { input_type: 'number', min_value: 0, step: 0.01 }),
-      nativeEditorField('poshmark_specifics.sellerNotes', 'Other Info', specifics.sellerNotes || '', { input_type: 'textarea' }),
+      half(nativeEditorField('poshmark_specifics.poshmarkSku', 'Listing SKU', specifics.poshmarkSku ?? listing.sku ?? '', { max_length: 50 })),
+      half(nativeEditorField('cost', 'Cost Price', listing.cost, { input_type: 'number', min_value: 0, step: 0.01 })),
+      nativeEditorField('poshmark_specifics.sellerNotes', 'Other Info', specifics.sellerNotes || '', { input_type: 'textarea', max_length: 500 }),
     ].map(at('Additional Details (Private)')),
   ];
   return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields };

@@ -60,7 +60,7 @@ import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
-import { CategoryTreeSelect, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect } from "./ListingFormControls";
+import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
@@ -115,6 +115,10 @@ interface EditorField {
   section?: string;
   optionGroups?: Record<string, string>;
   width?: "half" | "quarter";
+  /** The control itself is half the row, stacked, as on Poshmark's price and private fields. */
+  controlWidth?: "half";
+  cascade?: CascadeDepartment[];
+  optionAmounts?: Record<string, number>;
 }
 
 export function ListingEditor({
@@ -781,14 +785,34 @@ export function StructuredEditor({
     if (f.type === "inventory") {
       const stored = resolvedEditorValue(f, listing);
       const rows = Array.isArray(stored) ? stored.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : [];
+      const multiField = viewFields.find(row => row.key === "poshmark_specifics.multiItem");
+      const multiShown = formFieldText(local["poshmark_specifics.multiItem"] ?? resolvedEditorValue(multiField || { key: "poshmark_specifics.multiItem" }, listing));
+      const multi = tab !== "poshmark" || (multiField?.optionValues?.[multiShown] ?? multiShown) === "true";
+      const sizeSystem = formFieldText(getListingEditorValue(listing, "poshmark_specifics.sizeSystem")) || "us";
       return <NativeInventoryEditor
         value={rows}
-        groups={f.inventoryGroups || []} disabled={f.locked} onChange={(next) => {
+        groups={f.inventoryGroups || []} disabled={f.locked} multi={multi} sizeSystem={sizeSystem}
+        onSizeSystem={(system, next) => {
+          const updated = cloneListing(listing);
+          setListingEditorValue(updated, "poshmark_specifics.sizeSystem", system);
+          setListingEditorValue(updated, f.key, next);
+          onChange(updated);
+        }}
+        onChange={(next) => {
           const updated = cloneListing(listing);
           setListingEditorValue(updated, f.key, next);
           onChange(updated);
         }} />;
     }
+    if (f.type === "cascade") {
+      // The draft stores the id. The control's text is that id's label until it is chosen again.
+      const stored = f.optionValues?.[text] ?? text;
+      return <DependentSelectPair id={id} value={stored} departments={f.cascade || []} disabled={f.locked}
+        onChange={next => commitField(f.key, next)} />;
+    }
+    if (f.type === "segmented") return <SegmentedTabs label={f.label} value={text}
+      tabs={(f.options || []).map(label => ({ id: label, label }))} onChange={next => commitField(f.key, next)} />;
+    if (f.type === "badge") return null;
     if (f.type === "variations") return <EbayVariationsEditor convId={convId} listing={listing}
       value={normalizeVariations(resolvedEditorValue(f, listing))} aspects={f.variationAspects || []} disabled={f.locked} onChange={value => {
         const updated = cloneListing(listing);
@@ -833,6 +857,13 @@ export function StructuredEditor({
         />
       );
     }
+    if (f.type === "datetime-local") {
+      return <Input nativeInput id={id} data-listing-field={f.key} type="datetime-local" readOnly={f.locked} disabled={f.locked}
+        value={text ? text.slice(0, 16) : ""} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+    }
+    if (f.key === "poshmark_specifics.earnings") {
+      return <Input nativeInput id={id} data-listing-field={f.key} readOnly value={formFieldText(f.defaultValue)} />;
+    }
     return (
       <Input
         nativeInput
@@ -865,7 +896,8 @@ export function StructuredEditor({
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
-        const filled = section.fields.filter((f) => {
+        const countable = section.fields.filter((f) => f.type !== "badge");
+        const filled = countable.filter((f) => {
           if (f.type === "inventory" || f.type === "variations") {
             const stored = resolvedEditorValue(f, listing);
             if (Array.isArray(stored)) return stored.length > 0;
@@ -879,15 +911,22 @@ export function StructuredEditor({
             key={section.id}
             title={section.title}
             titleId={`listing-section-${tab}-${section.id}`}
-            meta={section.id === "listing" ? null : `${filled} of ${section.fields.length} filled`}
+            meta={section.id === "listing" ? null : `${filled} of ${countable.length} filled`}
           >
             {/* A marketplace's own page layout uses its four-part rows; the general form spreads out when wide. */}
             <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-4" : "grid-cols-2 @4xl:grid-cols-3")}>
-              {section.fields.map((f) => (
+              {countable.map((f) => {
+                const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));
+                const badgeOn = badge ? formFieldText(local[badge.key] ?? badge.defaultValue) === "true" : false;
+                return (
                 <div key={f.key} className={cn("min-w-0", pageLayout
                   ? (f.width === "quarter" ? "col-span-1" : f.width === "half" ? "col-span-2" : "col-span-full")
-                  : fullWidth(f) && "col-span-full")}>
-                  <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
+                  : fullWidth(f) && "col-span-full", f.controlWidth === "half" && "sm:max-w-[50%]")}>
+                  {f.type !== "cascade" && <div className="mb-1.5 flex items-center gap-2">
+                    <FieldLabel htmlFor={`listing-field-${f.key}`} className="mb-0">{f.label}</FieldLabel>
+                    {badge && <button type="button" aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
+                      onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
+                  </div>}
                   {control(f)}
                   {f.help && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
@@ -897,7 +936,8 @@ export function StructuredEditor({
                     {f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"}
                   </p>}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </InspectorSection>
         );
@@ -1284,6 +1324,9 @@ function schemaFieldsForTab(
     ...(field.section ? { section: field.section } : {}),
     ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
+    ...(field.control_width ? { controlWidth: field.control_width } : {}),
+    ...(field.cascade ? { cascade: field.cascade as EditorField["cascade"] } : {}),
+    ...(field.option_amounts ? { optionAmounts: field.option_amounts } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),
   }));
 }
