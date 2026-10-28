@@ -114,26 +114,34 @@ function vintedLogin(user) {
   return account > 0 ? login : '';
 }
 
+// Vinted's access token is an hour and its refresh token a week. Renew the
+// hour before reporting, then show the week the sign-in really lasts.
 async function readVintedSession(now = Date.now()) {
-  let response;
-  try {
-    response = await fetch('https://www.vinted.com/api/v2/users/current', {
+  const currentUser = async () => {
+    const response = await fetch('https://www.vinted.com/api/v2/users/current', {
       credentials: 'include', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000),
     });
-  } catch {
-    return unknownExtensionSession();
+    if (response.status === 401 || response.status === 403) return { signedOut: true };
+    if (!response.ok) return { unknown: true };
+    try { return { body: await response.json() }; } catch { return { unknown: true }; }
+  };
+  let renewalTried = true;  // a refused renewal counts: it was already tried
+  try { renewalTried = await vintedKeepSignedIn(now + 15000); } catch { /* the current-user answer decides */ }
+  let answer;
+  try { answer = await currentUser(); } catch { return unknownExtensionSession(); }
+  if (answer.signedOut) {
+    if (renewalTried) return publicExtensionSession(false, null, null, now);
+    try { await vintedKeepSignedIn(now + 15000, { force: true }); } catch { return publicExtensionSession(false, null, null, now); }
+    try { answer = await currentUser(); } catch { return unknownExtensionSession(); }
+    if (answer.signedOut) return publicExtensionSession(false, null, null, now);
   }
-  if (response.status === 401 || response.status === 403) return publicExtensionSession(false, null, null, now);
-  if (!response.ok) return unknownExtensionSession();
-  let body = {};
-  try { body = await response.json(); } catch { return unknownExtensionSession(); }
-  const login = vintedLogin(body?.user);
+  if (answer.unknown || !answer.body) return unknownExtensionSession();
+  const login = vintedLogin(answer.body?.user);
   let expiresAt = null;
   if (login) {
-    try {
-      const cookie = await chrome.cookies.get({ url: 'https://www.vinted.com/', name: 'access_token_web' });
-      expiresAt = soonestExpiry(cookie, cookieToken(cookie));
-    } catch { /* expiry is optional; the current-user response decides signed-in */ }
+    const refresh = await vintedTokenCookie('refresh_token_web');
+    const until = Number(refresh.cookie?.expirationDate);
+    expiresAt = Number.isFinite(until) ? Math.floor(until) : null;
   }
   return publicExtensionSession(Boolean(login), expiresAt, login ? { username: login } : null, now);
 }

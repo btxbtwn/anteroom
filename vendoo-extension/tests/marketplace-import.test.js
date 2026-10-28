@@ -249,7 +249,7 @@ function vinted(item = VINTED_ITEM, wardrobe = { items: [], pagination: { total_
     'www.vinted.com/api/v2/wardrobe/7/items': [200, wardrobe],
     'www.vinted.com/api/v2/items/4401': [200, { item }],
     'www.vinted.com/api/v2/item_upload/catalogs': [200, VINTED_CATALOGS],
-  });
+  }, { cookies: { access_token_web: jwt({ exp: Math.floor(Date.now() / 1000) + 3600 }) } });
 }
 
 test('Vinted reads live wardrobe items and one item for the signed-in member', async () => {

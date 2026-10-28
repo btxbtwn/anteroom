@@ -137,6 +137,9 @@ const vintedListing = { title: 'Test jeans', description: 'Private description',
 function vinted({ item = vintedItem(), keep = true } = {}) {
   const c = loadWorker();
   journaled(c);
+  // Vinted's hour-long access token, with time left on it.
+  c.chrome.cookies = { get: async ({ name }) => (name === 'access_token_web'
+    ? { value: `x.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.y` } : null) };
   const requests = [];
   let live = item;
   c.fetch = async (url, options = {}) => {
