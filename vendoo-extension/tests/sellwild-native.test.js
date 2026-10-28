@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadWorker, reply } = require('./worker-context');
+const { loadWorker, call, reply } = require('./worker-context');
 
 const listing = { title: 'Test jacket', description: 'Private description', price: 24, weight_lb: 1, weight_oz: 4,
   package_dimensions_in: '13x10x3' };
@@ -138,4 +138,18 @@ test('weight and box helpers follow Sellwild units', () => {
   assert.equal(c.sellwildWeightLb({}), null);
   assert.deepEqual({ ...c.sellwildBox({ package_dimensions_in: '12 x 9 x 5' }) }, { depth: 12, width: 9, height: 5 });
   assert.equal(c.sellwildBox({ package_dimensions_in: '12x9' }), null);
+});
+
+test('Sellwild Shipping From is the address its sell page shows, printed as its card', () => {
+  const c = loadWorker();
+  const address = (id, isDefault, extra = {}) => ({ id, isDefault, fullName: 'Pat Seller', line1: `${id} Example St`, line2: '',
+    locality: 'Springfield', region: 'IL', zipCode: '62701', ...extra });
+  // The page reverses the list, then takes the default, otherwise the newest.
+  assert.equal(call(c, 'sellwildShipFrom', [address(1, 1), address(2, 0), address(3, 1)]).id, 3);
+  assert.equal(call(c, 'sellwildShipFrom', [address(1, 0), address(2, 0)]).id, 2);
+  assert.equal(call(c, 'sellwildShipFromText', [address(7, 1, { line2: 'Apt 4' })]),
+    'Pat Seller\n7 Example St\nApt 4\nSpringfield, IL, 62701\nUnited States of America');
+  assert.equal(call(c, 'sellwildShipFromText', []), '');
+  // Direct List sends the same address's city and state.
+  assert.equal(call(c, 'sellwildAddress', [address(1, 1, { locality: 'Peoria' }), address(2, 1)]).locationText, 'Springfield, IL');
 });

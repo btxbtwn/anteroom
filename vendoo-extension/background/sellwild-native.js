@@ -54,9 +54,23 @@ async function sellwildPhotoBlob(photo) {
   return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
 }
 
+// The address Sellwild's sell page shows under Shipping From: its own list reversed,
+// the default one, otherwise the newest. Changing it happens in Sellwild's Address Book.
+function sellwildShipFrom(addresses) {
+  const list = (Array.isArray(addresses) ? addresses : []).slice().reverse();
+  return list.find(entry => Number(entry.isDefault) === 1 || entry.isDefault === true) || list[0] || null;
+}
+
+// The Shipping From card as the sell page prints it.
+function sellwildShipFromText(addresses) {
+  const address = sellwildShipFrom(addresses);
+  if (!address?.line1) return '';
+  return [address.fullName, address.line1, address.line2, `${address.locality}, ${address.region}, ${address.zipCode}`,
+    'United States of America'].map(line => String(line || '').trim()).filter(Boolean).join('\n');
+}
+
 function sellwildAddress(addresses) {
-  const list = Array.isArray(addresses) ? addresses : [];
-  const address = list.find(entry => Number(entry.isDefault) === 1 || entry.isDefault === true) || list[list.length - 1];
+  const address = sellwildShipFrom(addresses);
   if (!address?.line1 || !address.locality || !address.region || !address.zipCode) return null;
   const latitude = Number(address.latitude);
   const longitude = Number(address.longitude);

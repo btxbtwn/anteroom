@@ -180,7 +180,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
 }
 
 // Depop's sell page, read 2026-10-27: its headings, the hint under each field,
-// and Size, Quantity and SKU at half width (Size and Quantity share a row).
+// Size and Quantity at a quarter of the row each, SKU at half.
 function depopPageLayout(fields) {
   const hints = {
     'depop_specifics.colour': 'Select up to two colors',
@@ -198,7 +198,8 @@ function depopPageLayout(fields) {
   return fields.map(field => {
     const hint = field.path.startsWith('depop_specifics.attributes.') ? `Select up to ${field.max_values}` : hints[field.path];
     return { ...field, section: section(field.path),
-      ...(['depop_specifics.nativeSizeId', 'quantity', 'depop_specifics.sku'].includes(field.path) ? { width: 'half' } : {}),
+      ...(['depop_specifics.nativeSizeId', 'quantity'].includes(field.path) ? { width: 'quarter' }
+        : field.path === 'depop_specifics.sku' ? { width: 'half' } : {}),
       ...(hint ? { help: [typeof hint === 'function' ? hint(field.max_values) : hint, field.help].filter(Boolean).join(' ') } : {}) };
   });
 }
@@ -329,6 +330,11 @@ async function handleNativeMarketplaceForm(msg) {
       const master = await mercariCatalogData(deadline);
       const prepared = mercariShippingListing(listing, await mercariShippingClasses(listing, deadline));
       reply({ ok: true, form: mercariEditorForm(prepared, master) });
+    }
+    else if (marketplace === 'sellwild') {
+      // Sellwild's form is built in Anteroom; only the Shipping From address needs the seller's session.
+      const addresses = await sellwildFetch('/api/addresses', { deadline, step: 'addresses' });
+      reply({ ok: true, ship_from: addresses?.success ? sellwildShipFromText(addresses.addresses) : '' });
     }
     else reply({ ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {
