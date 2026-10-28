@@ -9,6 +9,7 @@ Poshmark does not offer is added when Chrome has read Poshmark's catalog.
 """
 from __future__ import annotations
 
+import math
 import re
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -133,9 +134,69 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
                          f"That Mercari category has subcategories{listed}. Choose the most specific one."))
     elif not chosen:
         found.append(gap("direct_category_ids.mercari", "Mercari needs a category."))
+    specifics = snapshot.get("mercari_specifics") if isinstance(snapshot.get("mercari_specifics"), dict) else {}
+    package = specifics.get("package") if isinstance(specifics.get("package"), dict) else {}
+    overrides = form.get("overrides") if isinstance(form.get("overrides"), dict) else {}
+    # Mercari's form asks these on the page. Answering them here keeps List
+    # Everywhere from starting a job Chrome would refuse before its first write.
+    if not _mercari_ships_from(snapshot, specifics, form):
+        found.append(gap("mercari_specifics.shipsFrom", "Mercari needs the ZIP code the item ships from."))
+    if str(specifics.get("shippingMethod") or "MERCARI").upper() != "SOYO":
+        if str(package.get("fitsShoebox") or "").strip().lower() not in {"yes", "no"}:
+            found.append(gap("mercari_specifics.package.fitsShoebox",
+                             "Mercari needs an answer to “Will your item fit in a shoebox?”"))
+        if not _mercari_ounces(snapshot, package, overrides):
+            found.append(gap("mercari_specifics.package.pounds", "Mercari needs a package weight for its prepaid label."))
+        if not _mercari_shipping_label(specifics, form):
+            found.append(gap("mercari_specifics.shippingClassId", "Mercari needs a prepaid shipping label."))
     # Chrome checks the selected leaf and size against Mercari's own master
     # catalog before uploading. Vendoo's mirrored size table is not consulted.
     return found
+
+
+def _mercari_ships_from(snapshot: dict, specifics: dict, form: dict) -> str:
+    """The five-digit ZIP Mercari's form requires, from the listing or Item Details."""
+    form_specifics = form.get("specifics") if isinstance(form.get("specifics"), dict) else {}
+    shipping = form_specifics.get("shipping") if isinstance(form_specifics.get("shipping"), dict) else {}
+    for value in (specifics.get("shipsFrom"), form.get("ships_from_zip"), snapshot.get("zipCode"),
+                  shipping.get("location")):
+        text = str(value or "").strip()
+        if re.fullmatch(r"\d{5}", text):
+            return text
+    return ""
+
+
+def _mercari_ounces(snapshot: dict, package: dict, overrides: dict) -> int:
+    """The package weight in whole ounces, in the order Chrome reads it."""
+    def present(value) -> bool:
+        return str(value if value is not None else "").strip() != ""
+
+    if present(package.get("pounds")) or present(package.get("ounces")):
+        sources = [(package.get("pounds"), package.get("ounces"))]
+    else:
+        weight = overrides.get("weight") if isinstance(overrides.get("weight"), dict) else {}
+        sources = [(snapshot.get("weight_lb"), snapshot.get("weight_oz")),
+                   (weight.get("pounds"), weight.get("ounces"))]
+    for pounds, ounces in sources:
+        try:
+            total = math.ceil(float(pounds or 0) * 16 + float(ounces or 0))
+        except (TypeError, ValueError):
+            continue
+        if total > 0:
+            return total
+    return 0
+
+
+def _mercari_shipping_label(specifics: dict, form: dict) -> str:
+    """A listing's picked label id or the seller's saved carrier default."""
+    form_specifics = form.get("specifics") if isinstance(form.get("specifics"), dict) else {}
+    shipping = form_specifics.get("shipping") if isinstance(form_specifics.get("shipping"), dict) else {}
+    for value in (specifics.get("shippingClassId"), shipping.get("carrierId")):
+        text = str(value or "").strip()
+        if text and text != "0":
+            return text
+    saved = form.get("mercari_shipping_label")
+    return str(saved.get("label") or "").strip() if isinstance(saved, dict) else ""
 
 
 @requirement("depop")

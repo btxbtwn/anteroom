@@ -272,7 +272,17 @@ def extension_in_lockstep(reported_build: str | None, reported_version: str | No
     expected_build = expected_extension_build()
     if reported_build:
         return bool(expected_build) and reported_build == expected_build
-    return False
+    # An extension loaded from an unpacked checkout has no generated build
+    # stamp, and reloading it cannot add one. Its manifest version is then the
+    # only identity available; the same version means the same code.
+    expected_version = bundled_extension_version()
+    return bool(reported_version and expected_version and reported_version == expected_version)
+
+
+# Copies that already answered a reload with the same identity. Re-asking can
+# never change a checkout Chrome loads from somewhere else, and doing it on
+# every reconnect reloads the worker in a loop.
+_reload_requests: set[tuple[str, str, str]] = set()
 
 
 def extension_reload_token_if_needed(
@@ -284,10 +294,17 @@ def extension_reload_token_if_needed(
     pending = pending_extension_reload_token()
     if pending and pending == reported_generation:
         return None
+    identity = (expected_extension_build() or "", reported_build or "", reported_version or "")
+    if identity in _reload_requests:
+        # The copy came back unchanged after a reload. Asking again would only
+        # reload it again; its status still says it is behind.
+        return None
     if pending:
+        _reload_requests.add(identity)
         return pending
     if extension_in_lockstep(reported_build, reported_version):
         return None
+    _reload_requests.add(identity)
     return mark_extension_reload_pending()
 
 
@@ -309,7 +326,9 @@ def extension_build_status(
         "expected_build": expected_build,
         "version": reported_version,
         "build": reported_build,
-        "up_to_date": (not connected_copy) or in_lockstep,
+        # A connected copy with no build stamp can only be trusted while its
+        # version matches and this app's own copy is not waiting for an update.
+        "up_to_date": (not connected_copy) or (in_lockstep and files_in_sync),
         "reload_pending": reload_pending,
         "files_in_sync": files_in_sync,
         "version_mismatch": version_mismatch,

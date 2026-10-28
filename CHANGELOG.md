@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.491 — 2026-10-28
+
+- List everywhere now leaves a marketplace out when its form still needs an answer. Mercari's shoebox question, shipping label, package weight, and ship-from ZIP are checked before it is offered, so Anteroom no longer starts a Mercari listing that its own form would refuse.
+- Two copies of the Chrome extension used to take turns on the connection, closing each other every half second. That is what made a marketplace form fail to load with “Chrome could not read the marketplace form” and a listing check end as “Check did not finish.” Anteroom now keeps the copy that is running its own extension and tells the extra one to stand down, Settings → Connections says when more than one copy is loaded, and a form read that loses its reply is asked for once more before it fails. A connected extension also no longer reloads itself over and over after an Anteroom update, and the error names the Chrome call that failed.
+
 ## 0.1.490 — 2026-10-27
 
 Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.

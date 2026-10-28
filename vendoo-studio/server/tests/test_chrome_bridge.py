@@ -28,6 +28,7 @@ class ChromeBridgeTest(unittest.TestCase):
         self._ext = os.environ.get("VENDOO_STUDIO_EXTENSION_DIR")
         os.environ["VENDOO_STUDIO_DATA_DIR"] = str(self.data)
         os.environ["VENDOO_STUDIO_EXTENSION_DIR"] = str(self.extension)
+        chrome_bridge._reload_requests.clear()
 
     def tearDown(self) -> None:
         if self._data is None:
@@ -144,6 +145,28 @@ class ChromeBridgeTest(unittest.TestCase):
         pending = chrome_bridge.mark_extension_reload_pending()
         token = chrome_bridge.extension_reload_token_if_needed("0.2.6", None, build)
         self.assertEqual(token, pending)
+
+    def test_a_source_copy_without_a_build_stamp_is_accepted_when_its_version_matches(self):
+        (self.extension / "manifest.json").write_text('{"version": "0.2.6"}', encoding="utf-8")
+        chrome_bridge.install_bundled_extension()
+        # The repo's unpacked folder has no generated studio-build.js, so Chrome
+        # reports an empty build. Reloading it cannot add one.
+        self.assertTrue(chrome_bridge.extension_in_lockstep(None, "0.2.6"))
+        self.assertIsNone(chrome_bridge.extension_reload_token_if_needed("0.2.6", None, None))
+        status = chrome_bridge.extension_build_status("0.2.6", None)
+        self.assertTrue(status["up_to_date"])
+        self.assertFalse(status["version_mismatch"])
+
+    def test_an_unchanged_copy_is_not_reloaded_again_after_one_request(self):
+        (self.extension / "manifest.json").write_text('{"version": "0.2.6"}', encoding="utf-8")
+        chrome_bridge.install_bundled_extension()
+        self.assertTrue(chrome_bridge.extension_reload_token_if_needed("0.2.5", None, None))
+        chrome_bridge.clear_extension_reload_pending()
+        # The same old copy reconnected. A second reload would only loop it.
+        self.assertIsNone(chrome_bridge.extension_reload_token_if_needed("0.2.5", None, None))
+        status = chrome_bridge.extension_build_status("0.2.5", None)
+        self.assertFalse(status["up_to_date"])
+        self.assertTrue(status["version_mismatch"])
 
     def test_build_status_ignores_shadow_copy_and_reload_token(self):
         (self.extension / "manifest.json").write_text('{"version": "0.2.6"}', encoding="utf-8")

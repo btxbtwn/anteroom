@@ -37,7 +37,12 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
         answer = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form",
                                               {"marketplace": marketplace, "listing": snapshot}, timeout=35)
     except browser_bridge.BrowserBridgeError as exc:
-        raise NativeMarketplaceError(502, "Chrome could not read the marketplace form. Reopen the listing to try again.") from exc
+        # Keep Chrome's own reason: "did not answer in time" and "could not
+        # reach the extension" need different fixes, and the generic sentence
+        # alone made every form failure look the same.
+        raise NativeMarketplaceError(
+            502, f"Chrome could not read the marketplace form: {exc} Reopen the listing to try again.",
+        ) from exc
     form = answer.get("form") if isinstance(answer, dict) and answer.get("ok") else None
     if not isinstance(form, dict) or form.get("marketplace") != marketplace or form.get("native") is not True:
         message = answer.get("error") if isinstance(answer, dict) else None
