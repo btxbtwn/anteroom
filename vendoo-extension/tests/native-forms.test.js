@@ -216,7 +216,10 @@ test('Mercari form follows the sell page sections and order', () => {
   assert.deepEqual(form.fields.map(row => [row.section, row.label.replace(/ \*$/, '')]), [
     ['Product info', 'Title'], ['Product info', 'Description'], ['Product info', 'Category'], ['Product info', 'Brand'],
     ['Product info', 'Condition'], ['Product info', 'Size'],
-    ['Shipping', 'Ships from'], ['Shipping', 'Shipping method'], ['Shipping', 'Shipping label'], ['Shipping', 'Offer buyers free shipping?'],
+    ['Shipping', 'Ships from'], ['Shipping', 'Shipping method'],
+    ['Shipping', 'Weight (lb)'], ['Shipping', 'Weight (oz)'], ['Shipping', 'Will your item fit in a shoebox?'],
+    ['Shipping', 'Length (in)'], ['Shipping', 'Width (in)'], ['Shipping', 'Height (in)'],
+    ['Shipping', 'Shipping label'], ['Shipping', 'Offer buyers free shipping?'],
     ['Pricing', 'Item price'], ['Smart pricing', 'Adjusts price automatically'], ['Smart pricing', 'Minimum price'],
   ]);
   const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
@@ -224,7 +227,29 @@ test('Mercari form follows the sell page sections and order', () => {
   assert.deepEqual(rows['Shipping method'].options, ['Prepaid label', 'Ship on your own']);
   assert.deepEqual(rows.Size.options, ['XS (0-2) · Standard', 'XS (0-2) · Petite']);
   assert.deepEqual(rows.Size.option_groups, { 'XS (0-2) · Standard': 'Standard', 'XS (0-2) · Petite': 'Petite' });
-  assert.ok(form.fields.every(row => !row.width));
+  // Mercari's label picker puts the weight and the box sides side by side.
+  assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label),
+    ['Weight (lb)', 'Weight (oz)', 'Length (in)', 'Width (in)', 'Height (in)']);
+  assert.deepEqual(rows['Will your item fit in a shoebox?'].options, ['Yes', 'No']);
+});
+
+// Read from Mercari's label picker on 2026-10-27: Yes sends a 14 x 10 x 5 in box, No sends the typed
+// sides or none when they are skipped, and the weight goes in whole ounces.
+test('Mercari package typed on its tab sets the weight and box the labels are read for', () => {
+  const c = loadWorker();
+  const listing = { direct_category_ids: { mercari: 1 }, weight_lb: 0, weight_oz: 8, package_dimensions_in: '10x8x4' };
+  const rows = Object.fromEntries(clean(call(c, 'mercariEditorForm', listing, MERCARI)).fields.map(row => [row.path, row]));
+  // The rows start from Item Details.
+  assert.deepEqual(['pounds', 'ounces', 'fitsShoebox', 'length', 'width', 'height'].map(key => rows[`mercari_specifics.package.${key}`].value),
+    [0, 8, '', 10, 8, 4]);
+  assert.equal(c.mercariWeightOz(listing), 8);
+  assert.deepEqual(clean(c.mercariDimensions(listing)), { unit: 'INCH', length: 10, width: 8, height: 4 });
+  const typed = pack => ({ ...listing, mercari_specifics: { package: pack } });
+  assert.equal(c.mercariWeightOz(typed({ pounds: 1, ounces: 8 })), 24);
+  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'yes' }))), { unit: 'INCH', length: 14, width: 10, height: 5 });
+  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no', length: 16, width: 12, height: 6 }))),
+    { unit: 'INCH', length: 16, width: 12, height: 6 });
+  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no' }))), {});
 });
 
 test('Depop read-back catches cleared attributes, old sizes and general choices the draft failed to keep', () => {
@@ -343,7 +368,7 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   const headings = [];
   for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
   assert.deepEqual(headings, ['Description', 'Info', 'Enhance your listing', 'Item price', 'Boost your listing', 'Shipping']);
-  assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label), ['Size', 'Quantity', 'SKU']);
+  assert.deepEqual(form.fields.filter(row => row.width).map(row => [row.label, row.width]), [['Size', 'quarter'], ['Quantity', 'quarter'], ['SKU', 'half']]);
   assert.equal(rows.Type.help, 'Select up to 3');
   assert.equal(rows.Color.help, 'Select up to two colors');
   assert.equal(rows.Age.help, 'Do you know when this item was made? Add up to 1');

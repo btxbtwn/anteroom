@@ -198,7 +198,20 @@ function mercariOunces(pounds, ounces) {
   return total > 0 ? total : null;
 }
 
+// The package as Mercari's label picker takes it, typed on the Mercari tab.
+// Each part falls back to Item Details until it is set there.
+function mercariOwnPackage(listing) {
+  const own = listing?.mercari_specifics?.package;
+  return own && typeof own === 'object' && !Array.isArray(own) ? own : {};
+}
+
+const MERCARI_SHOEBOX = { length: 14, width: 10, height: 5 };
+
 function mercariWeightOz(listing) {
+  const own = mercariOwnPackage(listing);
+  if ((own.pounds ?? '') !== '' || (own.ounces ?? '') !== '') {
+    return mercariOunces(Number(own.pounds || 0), Number(own.ounces || 0));
+  }
   return mercariOunces(Number(listing.weight_lb || 0), Number(listing.weight_oz || 0))
     || mercariOunces(Number(listing.form?.overrides?.weight?.pounds || 0), Number(listing.form?.overrides?.weight?.ounces || 0));
 }
@@ -348,7 +361,19 @@ function mercariWantedSize(listing) {
 }
 
 // Package dimensions in whole inches, from the form or "13x10x3".
+// "Will your item fit in a shoebox?" Yes sends a 14 x 10 x 5 in box; No sends the
+// sides typed under "How big will the package be?", or none when they are skipped.
 function mercariDimensions(listing) {
+  const own = mercariOwnPackage(listing);
+  if (own.fitsShoebox === 'yes') return { unit: 'INCH', ...MERCARI_SHOEBOX };
+  if (own.fitsShoebox === 'no') {
+    const sides = [own.length, own.width, own.height].map(Number);
+    if (sides.every(side => Number.isFinite(side) && side > 0)) {
+      const [length, width, height] = sides;
+      return { unit: 'INCH', length, width, height };
+    }
+    return {};
+  }
   const form = listing.form?.overrides?.dimensions || {};
   let sides = [form.length, form.width, form.height];
   if (!sides.every(side => Number(side) > 0)) {
