@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.484 — 2026-10-28
+
+- The category picker now shows the whole path in the field instead of cutting it off at “Wo…”, and its panel stays on screen and scrolls rather than being clipped by the form. The panel shows where you are as a breadcrumb you can click, searches every category by any part of its path, and marks the saved category so you can see its siblings.
+
 ## 0.1.483 — 2026-10-27
 
 - A Depop draft now carries the package size it needs to be posted. Anteroom quoted Depop's shipping when it published but not when it saved the draft, so a draft could be saved without the one field Depop requires, and List left you with a draft Depop never published. Saving and publishing now use the same quote, and a draft that comes back without it is named instead of saved.

@@ -76,7 +76,8 @@ describe("category tree dropdown", () => {
         { label: "Women > Dresses > Mini", id: "womenswear_mini" },
       ]} onChange={ignore} />);
     expect(html).toContain("Men → Bottoms → Jeans");
-    expect(html).toContain('aria-haspopup="listbox"');
+    expect(html).toContain('aria-label="Category: Men → Bottoms → Jeans"');
+    expect(html).toContain('aria-haspopup="dialog"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('data-listing-field="direct_category_ids.depop"');
     expect(html).not.toContain("<select");
