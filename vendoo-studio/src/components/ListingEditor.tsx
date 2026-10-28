@@ -849,7 +849,7 @@ export function StructuredEditor({
     reachedTarget.current = target.sequence;
     input.scrollIntoView({ block: "center" });
     input.focus();
-  }, [target, fields]);
+  }, [target, fields, tab]);
 
   React.useEffect(() => {
     const init: Record<string, string | string[]> = {};
