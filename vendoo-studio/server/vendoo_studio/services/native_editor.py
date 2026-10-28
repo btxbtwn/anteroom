@@ -48,6 +48,20 @@ def field(path: str, label: str, value, **extra) -> dict:
             "required": False, "multi": False, "selection_only": False, "options": [], **extra}
 
 
+# Each sell page's photo area (read 2026-10-28): its heading, empty where the page
+# has none, and its hint. The photos, their order and the limit are the form's own
+# pick in marketplace_photos (services/marketplace_media.py).
+PAGE_PHOTOS = {
+    "ebay": ("Photos & Video", "You can add up to 24 photos and a 1-minute video. Buyers want to see all details and angles."),
+    "sellwild": ("", "Please add Photos of your Listing. Max 20."),
+}
+
+
+def photos_row(marketplace: str) -> dict:
+    section, hint = PAGE_PHOTOS[marketplace]
+    return field(f"marketplace_photos.{marketplace}", "", [], input_type="photos", help=hint, section=section)
+
+
 def _shared(snapshot: dict, marketplace: str, name: str):
     """The form's own title, description, or brand, or General when this form has not set one."""
     from vendoo_studio.services.seller_overrides import followed_entry
@@ -187,6 +201,7 @@ async def ebay_form(snapshot: dict) -> dict:
                       help="The quantity is the total of the variations.") if varied else
                 field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number"))
     fields = [
+        photos_row("ebay"),
         field("ebay_specifics.title", "Item title", _shared(snapshot, "ebay", "title"), required=True, max_length=80, section="Title",
               help="Provide a title for your item. Use words people would search for when looking for your item."),
         # eBay's "See title options" turns these on. Bold title is a $4 search upgrade the Inventory API does not take,
@@ -396,6 +411,7 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
     # The category picker shows "Group | Category" once a category is picked.
     categories = [{"id": row["id"], "label": row["label"].replace(" > ", " | ", 1)} for row in catalog["categories"]]
     fields = [
+        photos_row("sellwild"),
         field("sellwild_specifics.title", "What are you selling?", _shared(snapshot, "sellwild", "title"), required=True,
               max_length=255, section="Add a Title"),
         field("price", "Price", snapshot.get("price"), required=True, input_type="number", min_value=5, max_value=MAX_PRICE,

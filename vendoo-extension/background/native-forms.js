@@ -58,6 +58,24 @@ const POSHMARK_CONDITION_CHOICES = [
 
 // Poshmark's create-listing page, read 2026-10-28: each heading with its hint, in
 // page order. The price fields are the ones its Listing Price panel shows.
+// Each sell page's photo area (read 2026-10-28): its heading, empty where the page
+// has none, its hint, and the caption under each photo slot. The photos, their
+// order and the limit are the form's own pick in marketplace_photos.
+const PAGE_PHOTOS = {
+  depop: { section: 'Photos', help: 'Add up to 8 photos in JPEG or PNG format.',
+    accept: 'image/jpeg,image/png,.jpg,.jpeg,.png',
+    slots: ['Cover photo', 'Front', 'Back', 'Side', 'Label', 'Detail', 'Flaw'] },
+  // Mercari's sell page has no Photos heading. The two lines sit at the top.
+  mercari: { section: '', help: 'Add up to 12 photos\nOr drag and drop' },
+  poshmark: { section: 'Photos & Video', help: 'Add up to 16 photos and 1 video to show the angles and details of your item.' },
+};
+
+function nativePhotosRow(marketplace) {
+  const page = PAGE_PHOTOS[marketplace];
+  return { ...nativeEditorField(`marketplace_photos.${marketplace}`, '', [], { input_type: 'photos', help: page.help }),
+    section: page.section, ...(page.slots ? { slot_labels: page.slots } : {}), ...(page.accept ? { accept: page.accept } : {}) };
+}
+
 function poshmarkEditorForm(listing, catalog, display, styleTags = [], shippingDiscounts = []) {
   const resolved = poshmarkCategory(catalog, listing);
   const category = resolved?.category;
@@ -71,6 +89,7 @@ function poshmarkEditorForm(listing, catalog, display, styleTags = [], shippingD
   const at = (section, help) => row => ({ ...row, section, ...(help ? { help } : {}) });
   const [title, description, price] = nativeEditorBase(listing, { marketplace: 'poshmark', maxTitle: 80, maxDescription: 1500, minPrice: 3, priceStep: 1 });
   const fields = [
+    nativePhotosRow('poshmark'),
     at('Title', 'Share key details like Brand, Size, and Color.')(title),
     at('Description', 'Tell shoppers about your listing by describing the Brand, Size, Color, Condition, Material, and any other noteworthy details.')(
       { ...description, input_type: 'textarea' }),
@@ -152,6 +171,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
   // Depop's sell page, top to bottom. Hashtags go at the end of the description,
   // and the page names its field labels in plain English ("Body fit").
   const fields = [
+    nativePhotosRow('depop'),
     { ...nativeEditorBase(listing, { marketplace: 'depop', title: false, maxDescription: DEPOP_MAX_DESCRIPTION })[0],
       ...(hashtags ? { help: `List adds the hashtags ${hashtags} to the end.` } : {}) },
     nativeEditorChoice('direct_category_ids.depop', 'Category', depopDirectId(category), choices,
@@ -216,7 +236,8 @@ function depopPageLayout(fields) {
     'depop_specifics.style': max => `Pick relevant tags to describe this item's style. Add up to ${max}`,
     'depop_specifics.parcelSize': "Your selection sets your shipping label and the buyer's shipping cost.",
   };
-  const section = path => path === 'depop_specifics.description' ? 'Description'
+  const section = path => path.startsWith('marketplace_photos.') ? 'Photos'
+    : path === 'depop_specifics.description' ? 'Description'
     : ['depop_specifics.source', 'depop_specifics.age', 'depop_specifics.style'].includes(path) ? 'Enhance your listing'
       : path === 'price' ? 'Item price'
         : path === 'depop_specifics.boost' ? 'Boost your listing'
@@ -283,6 +304,7 @@ function mercariEditorForm(listing, master) {
       MERCARI_CONDITION_CHOICES.map(([label], index) => ({ label, value: index + 1 })),
       { required: true, help: MERCARI_CONDITION_CHOICES.map(([label, hint]) => `${label}: ${hint}`).join(' ') }),
   ].map(product('Product info'));
+  fields.unshift(nativePhotosRow('mercari'));
   const heldCategory = listing.form?.overrides?.categoryV2 || listing.marketplace_category_objects?.mercari;
   if (!categories.some(row => String(row.value) === String(category)) && String(heldCategory?.id) === String(category)) {
     const label = (heldCategory.displayPath || []).join(' > ');

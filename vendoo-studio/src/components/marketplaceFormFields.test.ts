@@ -145,6 +145,22 @@ describe("marketplace form fields", () => {
     expect(fields.filter((field) => field.width === "half").map((field) => field.label)).toEqual(["Size", "Quantity"]);
   });
 
+  it("keeps a marketplace's photo area where its page has it, with no heading where the page has none", () => {
+    const form: MarketplaceForm = { marketplace: "mercari", native: true, known: true, category_id: "1", fields: [
+      { key: "marketplace_photos.mercari", path: "marketplace_photos.mercari", label: "", value: [], required: false, multi: false,
+        selection_only: false, options: [], input_type: "photos", help: "Add up to 12 photos", section: "",
+        slot_labels: ["Cover photo"], accept: "image/jpeg,image/png,.jpg,.jpeg,.png" },
+      { key: "mercari_specifics.title", path: "mercari_specifics.title", label: "Title", value: "", required: true, multi: false,
+        selection_only: false, options: [], section: "Product info" },
+    ] };
+    const fields = fieldsForMarketplaceForm(listing, "mercari", [form]);
+    expect(fields[0]).toMatchObject({ key: "marketplace_photos.mercari", type: "photos", section: "", help: "Add up to 12 photos",
+      slotLabels: ["Cover photo"], accept: "image/jpeg,image/png,.jpg,.jpeg,.png" });
+    expect(nativeFormSections(fields).map((section) => [section.title, section.fields.map((field) => field.key)])).toEqual([
+      ["", ["marketplace_photos.mercari"]], ["Product info", ["mercari_specifics.title"]],
+    ]);
+  });
+
   it("never substitutes a Vendoo or reference form for a direct marketplace", () => {
     for (const tab of ["ebay", "poshmark", "mercari", "depop", "sellwild"]) {
       expect(fieldsForMarketplaceForm(listing, tab, undefined)).toEqual([]);

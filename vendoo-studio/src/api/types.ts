@@ -545,7 +545,7 @@ export interface MarketplaceFormField {
   label: string;
   value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations" | "photos";
   inventory_groups?: NativeInventoryGroup[];
   variation_aspects?: EbayVariationAspect[];
   min_value?: number;
@@ -574,6 +574,10 @@ export interface MarketplaceFormField {
   option_groups?: Record<string, string>;
   /** The button the marketplace's page hides this field behind ("Show more", "See title options"). */
   reveal?: string;
+  /** A photos row: the page's caption under each photo slot, in order (Depop: Cover photo, Front, …). */
+  slot_labels?: string[];
+  /** File-dialog filter for a photos row. Depop's page takes JPEG and PNG only. */
+  accept?: string;
   /** The heading this field sits under on the marketplace's own form. */
   section?: string;
   /** Half or quarter of a row, as the marketplace's form lays it out. Absent means a full row. */

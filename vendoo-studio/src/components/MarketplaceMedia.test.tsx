@@ -53,3 +53,41 @@ it("puts the video in the same strip on a marketplace that takes one, with its r
   expect(html).toContain("Not accepted");
   expect(html).not.toContain('aria-label="Use long.mp4"');
 });
+
+it("inside the marketplace's own form, shows its hint and slot captions instead of Anteroom's heading", () => {
+  serve([photo("front"), photo("back")]);
+  const slots = ["Cover photo", "Front", "Back", "Side", "Label", "Detail", "Flaw"];
+  const html = renderToStaticMarkup(<MarketplaceMedia convId="c1" marketplace="depop" listing={{}} onChange={vi.fn()}
+    page={{ hint: "Add up to 8 photos in JPEG or PNG format.", slots, accept: "image/jpeg,image/png,.jpg,.jpeg,.png" }} />);
+  expect(html).toContain("Add up to 8 photos in JPEG or PNG format.");
+  expect(html).toContain('accept="image/jpeg,image/png,.jpg,.jpeg,.png"');
+  expect(html).not.toContain("sent to Depop");
+  expect(html).not.toContain("Depop takes up to 8 photos.");
+  // Every slot keeps the page's caption, filled or empty, in the page's order.
+  const positions = slots.map((caption) => html.indexOf(`>${caption}</span>`));
+  expect(positions.every((at) => at >= 0)).toBe(true);
+  expect(positions).toEqual([...positions].sort((a, b) => a - b));
+  expect(html.indexOf("/api/photos/front")).toBeLessThan(html.indexOf(">Cover photo</span>"));
+});
+
+it("inside the form, keeps a video on a marketplace whose page has one", () => {
+  serve([photo("front")]);
+  const html = renderToStaticMarkup(<MarketplaceMedia convId="c1" marketplace="poshmark" listing={{ poshmark_specifics: { videoId: "short" } }}
+    onChange={vi.fn()} page={{ hint: "Add up to 16 photos and 1 video to show the angles and details of your item." }} />);
+  expect(html).toContain("Add up to 16 photos and 1 video to show the angles and details of your item.");
+  expect(html).toContain('aria-label="Poshmark video"');
+  expect(html).toContain('accept="image/*,video/*"');
+  expect(html).not.toContain("sent to Poshmark");
+});
+
+it("inside the form, still lets the seller send a different pick and warns past the limit", () => {
+  serve(Array.from({ length: 13 }, (_, index) => photo(`p${index + 1}`)));
+  const html = renderToStaticMarkup(<MarketplaceMedia convId="c1" marketplace="mercari"
+    listing={{ marketplace_photos: { mercari: Array.from({ length: 13 }, (_, index) => `p${13 - index}`) } }}
+    onChange={vi.fn()} page={{ hint: "Add up to 12 photos\nOr drag and drop" }} />);
+  expect(html).toContain("Add up to 12 photos");
+  expect(html).toContain("Or drag and drop");
+  expect(html).toContain('accept="image/*"');
+  expect(html).toContain("Reset to item photos");
+  expect(html).toContain("Mercari keeps 12 photos. The first 12 of 13 are sent.");
+});

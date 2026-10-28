@@ -6,9 +6,21 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.471 — 2026-10-28
+
+- The eBay tab follows eBay's Create listing page. Item specifics stay in eBay's order, with Show more for the rest. You get a subtitle and custom label under title options, a second category, scheduling, this listing's own policies and item location, charity, and one custom item specific. An auction shows its duration and bids instead of an item price.
+
+## 0.1.470 — 2026-10-28
+
+- Depop, Mercari, Poshmark, Sellwild, and eBay now show this item's photos where that marketplace's own page does. You can reorder them and pick which ones that marketplace gets, up to its limit. Depop stays JPEG and PNG.
+
+## 0.1.469 — 2026-10-28
+
+- Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
+
 ## 0.1.468 — 2026-10-28
 
-- The eBay tab is laid out like eBay’s Create listing page: Title, Item category, Variations, Item specifics (Required, then Additional), Condition, Description, Pricing and Shipping, with eBay’s names for each field. Item specifics come in eBay’s order, Size offers only eBay’s sizes, Format reads Auction or Buy It Now, and an auction shows its duration and bids instead of an item price.
+- Depop offer previews recognize the currency in Depop's current listing data, so a US dollar listing is no longer skipped because its currency could not be read.
 
 ## 0.1.467 — 2026-10-28
 
