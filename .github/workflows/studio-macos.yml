@@ -27,6 +27,10 @@ permissions:
 jobs:
   package:
     runs-on: macos-15
+    # A Dependabot pull request cannot read the signing certificate, so the job
+    # would fail on the import before it built anything. The build itself is
+    # covered by the push to main once the bump merges.
+    if: github.actor != 'dependabot[bot]'
     permissions:
       contents: write
     steps:
