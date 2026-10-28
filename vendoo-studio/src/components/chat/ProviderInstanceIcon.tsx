@@ -12,7 +12,7 @@ import { memo } from "react";
 import type { ListingProviderId } from "../../api/types";
 import { cn } from "../../lib/utils";
 import { isListingProviderId } from "../keyProviders";
-import { ClaudeAI, CursorIcon, MiMoIcon, OpenAI, type Icon } from "../providerIcons";
+import { ClaudeAI, CursorIcon, MiMoIcon, OpenAI, OpenRouterIcon, type Icon } from "../providerIcons";
 
 // Providers without a mark here show their initial.
 const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ListingProviderId, Icon>> = {
@@ -22,6 +22,7 @@ const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ListingProviderId, Icon>> = {
   anthropic: ClaudeAI,
   cursor: CursorIcon,
   mimo: MiMoIcon,
+  openrouter: OpenRouterIcon,
 };
 
 /** Settings ids, plus the names the provider status reports (`xiaomi-mimo`). */

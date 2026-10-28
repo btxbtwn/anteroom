@@ -518,17 +518,65 @@ def resolved_claude_models() -> tuple[str, str]:
     )
 
 
-def get_key_provider_models(provider_id: str) -> dict[str, str]:
-    """Saved models for one API-key provider: ``vision_model`` and ``listing_model``."""
+def _key_provider_entry(provider_id: str) -> dict:
     raw = read_settings().get(KEY_PROVIDER_MODELS_KEY)
     entry = raw.get(provider_id) if isinstance(raw, dict) else None
-    if not isinstance(entry, dict):
-        return {}
+    return entry if isinstance(entry, dict) else {}
+
+
+def get_key_provider_models(provider_id: str) -> dict[str, str]:
+    """Saved models for one API-key provider: ``vision_model`` and ``listing_model``."""
+    entry = _key_provider_entry(provider_id)
     return {
         key: value.strip()
         for key in ("vision_model", "listing_model")
         if isinstance((value := entry.get(key)), str) and value.strip()
     }
+
+
+def get_key_provider_reasoning(provider_id: str) -> dict[str, str] | None:
+    """The saved reasoning choice: ``{"model", "value"}``, kept with its model."""
+    reasoning = _key_provider_entry(provider_id).get("reasoning")
+    if not isinstance(reasoning, dict):
+        return None
+    cleaned = {key: reasoning.get(key) for key in ("model", "value")}
+    if not all(isinstance(item, str) and item.strip() for item in cleaned.values()):
+        return None
+    return {key: str(item).strip() for key, item in cleaned.items()}
+
+
+def set_key_provider_reasoning(provider_id: str, *, model: str, value: str) -> dict[str, str]:
+    key_provider(provider_id)
+    reasoning = {"model": model.strip(), "value": value.strip()}
+    if not all(reasoning.values()):
+        raise ValueError("Choose a reasoning level.")
+
+    def mutator(payload: dict) -> None:
+        models = payload.get(KEY_PROVIDER_MODELS_KEY)
+        models = models if isinstance(models, dict) else {}
+        entry = models.get(provider_id)
+        entry = dict(entry) if isinstance(entry, dict) else {}
+        entry["reasoning"] = reasoning
+        models[provider_id] = entry
+        payload[KEY_PROVIDER_MODELS_KEY] = models
+
+    update_settings(mutator)
+    return reasoning
+
+
+def clear_key_provider_reasoning(provider_id: str) -> None:
+    key_provider(provider_id)
+
+    def mutator(payload: dict) -> None:
+        models = payload.get(KEY_PROVIDER_MODELS_KEY)
+        if not isinstance(models, dict) or not isinstance(models.get(provider_id), dict):
+            return
+        entry = dict(models[provider_id])
+        entry.pop("reasoning", None)
+        models[provider_id] = entry
+        payload[KEY_PROVIDER_MODELS_KEY] = models
+
+    update_settings(mutator)
 
 
 def set_key_provider_models(
@@ -546,11 +594,12 @@ def set_key_provider_models(
         if len(value) > MAX_MODEL_SLUG_LENGTH:
             raise ValueError("Model name is too long.")
     current = {**get_key_provider_models(provider_id), **changes}
+    reasoning = _key_provider_entry(provider_id).get("reasoning")
 
     def mutator(payload: dict) -> None:
         models = payload.get(KEY_PROVIDER_MODELS_KEY)
         models = models if isinstance(models, dict) else {}
-        models[provider_id] = current
+        models[provider_id] = {**current, **({"reasoning": reasoning} if reasoning else {})}
         payload[KEY_PROVIDER_MODELS_KEY] = models
 
     update_settings(mutator)
@@ -564,6 +613,15 @@ def resolved_key_provider_models(provider_id: str) -> tuple[str, str]:
         prefs.get("vision_model") or spec.vision_model,
         prefs.get("listing_model") or spec.listing_model,
     )
+
+
+def resolved_key_provider_reasoning(provider_id: str) -> str | None:
+    """The saved effort for the current listing model, or None for its default."""
+    _, listing = resolved_key_provider_models(provider_id)
+    saved = get_key_provider_reasoning(provider_id)
+    if saved and saved["model"] == listing and saved["value"] != "default":
+        return saved["value"]
+    return None
 
 
 def _ui_prefs(settings: dict | None = None) -> dict:
