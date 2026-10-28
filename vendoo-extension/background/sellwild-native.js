@@ -176,6 +176,19 @@ async function runSellwildNative(msg, recovery = false) {
     }
     const receipt = { ok: true, state: activate.underReview === true ? 'pending_review' : 'published',
       listing_url: sellwildListingUrl(id, created.title) };
+    // The sell page applies a chosen coupon after the listing is live. No coupon
+    // means no request. A failed discount leaves the listing up.
+    const couponIds = [...new Set((Array.isArray(choice.coupon_ids) ? choice.coupon_ids : []).map(Number)
+      .filter(couponId => Number.isInteger(couponId) && couponId > 0))];
+    if (couponIds.length) {
+      try {
+        const applied = await sellwildFetch(`/api/listings/${id}/coupons`, { method: 'POST', deadline: p.deadline, step: 'coupons',
+          body: { couponIds } });
+        if (applied?.success === false) throw new Error('discount');
+      } catch {
+        receipt.warning = 'Your listing is live, but the discount was not added. Add it from Discounts.';
+      }
+    }
     await storeReceipt({ sellwild_activation: receipt });
     return receipt;
   } catch (error) {

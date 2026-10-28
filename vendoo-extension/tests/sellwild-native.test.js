@@ -58,6 +58,28 @@ test('a confirmed Sellwild publish creates, uploads photos and activates once, w
   assert.deepEqual(JSON.parse(JSON.stringify(journal['native_operation_op-1'].sellwild_activation)), result);
 });
 
+test('Sellwild applies a chosen discount after the listing is live', async () => {
+  const { c, requests } = worker({ routes: { 'POST /api/listings/4512/coupons': [200, { success: true }] } });
+  const result = await c.runSellwildNative(message({
+    sellwild: { category_id: 272, condition_id: 2, coupon_ids: [117, 'no'] },
+  }));
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.warning, undefined);
+  const post = requests.find(row => row.route === 'POST /api/listings/4512/coupons');
+  assert.equal(requests.findIndex(row => row.route === 'POST /api/listings/4512/confirm-photos') < requests.indexOf(post), true);
+  assert.deepEqual(post.body, { couponIds: [117] });
+});
+
+test('a discount Sellwild refuses leaves the listing live', async () => {
+  const { c } = worker({ routes: { 'POST /api/listings/4512/coupons': [500, { success: false }] } });
+  const result = await c.runSellwildNative(message({
+    sellwild: { category_id: 272, condition_id: 2, coupon_ids: [117] },
+  }));
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.state, 'published');
+  assert.match(result.warning, /discount was not added/);
+});
+
 test('Sellwild moderation is reported as pending review', async () => {
   const { c } = worker({ routes: { 'POST /api/listings/4512/confirm-photos': [200, { success: true, underReview: true }] } });
   assert.equal((await c.runSellwildNative(message())).state, 'pending_review');

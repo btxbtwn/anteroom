@@ -309,6 +309,7 @@ test('Mercari form follows the sell page sections and order', () => {
     ['Ships from:', 'lb', 'oz', 'Minimum price']);
   assert.deepEqual(form.fields.filter(row => row.width === 'third').map(row => row.label), ['Length', 'Width', 'Height']);
   assert.deepEqual(rows['Will your item fit in a shoebox?'].options, ['Yes', 'No']);
+  assert.equal(rows['Will your item fit in a shoebox?'].required, true);
   // No heading. The page's two lines are the hint, and any image type is accepted.
   assert.deepEqual([form.fields[0].path, form.fields[0].input_type, form.fields[0].help, form.fields[0].accept],
     ['marketplace_photos.mercari', 'photos', 'Add up to 12 photos\nOr drag and drop', undefined]);
@@ -436,9 +437,12 @@ test('Depop form lists the sell page fields in its order, as the page shows them
     primaryColor: 'Blue', secondaryColor: 'Black' };
   const form = clean(call(c, 'depopEditorForm', listing, attributes, [{ title: 'Medium' }]));
   assert.deepEqual(form.fields.map(row => row.label), [
-    '', 'Description', 'Category', 'Type', 'Fit', 'Body fit', 'Brand', 'Condition', 'Color', 'Size', 'Quantity', 'SKU',
-    'Source', 'Age', 'Style', 'Item price', 'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.', 'Package size', 'Offer worldwide shipping', 'Worldwide Shipping',
+    '', 'Description', 'Category', 'Type', 'Fit', 'Body fit', 'Brand', 'Condition', 'Color', 'Size', 'Quantity', 'Learn more about SKUs', 'SKU',
+    'Source', 'Age', 'Style', 'Item price', 'No selling fees.', 'Learn more about boosting',
+    'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.',
+    'Depop Shipping (via USPS)', 'Shipping from', 'Package size', 'Offer worldwide shipping', 'Worldwide Shipping',
   ]);
+  assert.equal(form.page_labels, true);
   const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
   // Boost costs a fee on the sale, so it is off until the seller turns it on.
   assert.deepEqual([rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].path, rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].input_type, rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].value], ['depop_specifics.boost', 'boolean', false]);
@@ -449,8 +453,12 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   assert.deepEqual(rows.Color.options, ['Blue', 'Black']);
   assert.deepEqual(rows.Color.value, ['blue', 'black']);
   assert.equal(rows.Color.max_values, 2);
-  assert.ok(rows.Description.appends.includes('#denim'));
+  assert.equal(rows.Description.placeholder, 'eg. small grey Nike t-shirt, only worn a few times');
+  assert.equal(rows.Description.counter, true);
+  assert.equal(rows.Description.hashtag_max, 5);
   assert.equal(rows.Description.help, undefined);
+  assert.equal(rows['Item price'].prefix, 'US$');
+  assert.equal(rows['Worldwide Shipping'].prefix, 'US$');
   assert.equal(rows['Item price'].path, 'price');
   // The page's headings and row layout.
   const headings = [];
@@ -461,10 +469,9 @@ test('Depop form lists the sell page fields in its order, as the page shows them
     ['marketplace_photos.depop', 'Add up to 8 photos in JPEG or PNG format.',
       ['Cover photo', 'Front', 'Back', 'Side', 'Label', 'Detail', 'Flaw'], 'image/jpeg,image/png,.jpg,.jpeg,.png']);
   assert.deepEqual(form.fields.filter(row => row.width).map(row => [row.label, row.width]), [['Size', 'quarter'], ['Quantity', 'quarter'], ['SKU', 'half']]);
-  // The picker shows the limit, so the hints leave it out.
-  assert.equal(rows.Type.help, undefined);
-  assert.equal(rows.Color.help, undefined);
-  assert.equal(rows.Age.help, 'Do you know when this item was made?');
+  assert.equal(rows.Type.help, 'Select up to 3');
+  assert.equal(rows.Color.help, 'Select up to two colors');
+  assert.equal(rows.Age.help, 'Do you know when this item was made? Add up to 1');
   const kids = clean(call(c, 'depopEditorForm', { ...listing, direct_category_ids: { depop: 'kidswear_jeans' } }, attributes, []));
   assert.ok(!kids.fields.some(row => row.label === 'Type'));
   // The form's Color picks are what direct List posts.

@@ -558,7 +558,8 @@ export interface MarketplaceFormField {
   label: string;
   value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations" | "photos" | "cascade" | "segmented" | "badge" | "datetime-local" | "text";
+  /** "note" is text the marketplace's page shows with no control: its label and help. */
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations" | "photos" | "note" | "cascade" | "segmented" | "badge" | "datetime-local" | "text";
   inventory_groups?: NativeInventoryGroup[];
   variation_aspects?: EbayVariationAspect[];
   min_value?: number;
@@ -568,8 +569,6 @@ export interface MarketplaceFormField {
   option_values?: Record<string, string>;
   clears?: string[];
   help?: string;
-  /** Text List adds after this field's value, such as Depop's hashtags. */
-  appends?: string[];
   value_constraints?: Record<string, {
     parentName?: string;
     parentValues?: string[];
@@ -622,12 +621,16 @@ export interface MarketplaceFormField {
   option_help?: Record<string, string>;
   /** True when choosing a different category adds or removes this row. */
   category_specific?: boolean;
+  /** Depop's "Hashtags: N" remaining count, beside the character counter. */
+  hashtag_max?: number;
 }
 
 /** A marketplace's form for one listing. ``known`` is false when no schema is cached. */
 export interface MarketplaceForm {
   marketplace: string;
   native?: boolean;
+  /** Labels are exactly the page's, required markers included, so none is added. */
+  page_labels?: boolean;
   notes?: string[];
   category_id: string;
   known: boolean;
