@@ -96,8 +96,10 @@ test('Poshmark form follows the create-listing page: headings, order, grouped ca
     'Men > Shirts > Tees', 'Men > Shirts > None', 'Men > Shoes']);
   const headings = [];
   for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
-  assert.deepEqual(headings, ['Title', 'Description', 'Category', 'Size', 'Condition', 'Brand', 'Color', 'Style Tags', 'Price',
+  assert.deepEqual(headings, ['Photos & Video', 'Title', 'Description', 'Category', 'Size', 'Condition', 'Brand', 'Color', 'Style Tags', 'Price',
     'Availability', 'Additional Details (Private)']);
+  assert.deepEqual([form.fields[0].path, form.fields[0].input_type, form.fields[0].help],
+    ['marketplace_photos.poshmark', 'photos', 'Add up to 16 photos and 1 video to show the angles and details of your item.']);
   assert.deepEqual(form.fields.filter(row => row.section === 'Price').map(row => row.label),
     ['Listing Price', 'Automate Offers', 'Lowest Price', 'Original Price', 'Shipping Discount']);
   assert.deepEqual(form.fields.filter(row => row.section === 'Additional Details (Private)').map(row => row.label),
@@ -252,23 +254,36 @@ test('Mercari form follows the sell page sections and order', () => {
     itemSizes: [{ id: 1, title: 'XS', subtitle: '(0-2)', itemSizeSubGroupId: 11 }, { id: 2, title: 'XS', subtitle: '(0-2)', itemSizeSubGroupId: 12 }] };
   const form = clean(call(c, 'mercariEditorForm', { direct_category_ids: { mercari: 1 }, title: 'A tee', price: 20 }, master));
   assert.deepEqual(form.fields.map(row => [row.section, row.label.replace(/ \*$/, '')]), [
+    ['', ''],
     ['Product info', 'Title'], ['Product info', 'Description'], ['Product info', 'Category'], ['Product info', 'Brand'],
     ['Product info', 'Condition'], ['Product info', 'Size'],
-    ['Shipping', 'Ships from'], ['Shipping', 'Shipping method'],
-    ['Shipping', 'Weight (lb)'], ['Shipping', 'Weight (oz)'], ['Shipping', 'Will your item fit in a shoebox?'],
-    ['Shipping', 'Length (in)'], ['Shipping', 'Width (in)'], ['Shipping', 'Height (in)'],
+    ['Shipping', 'Ships from:'], ['Shipping', 'Shipping method'],
+    ['Shipping', 'lb'], ['Shipping', 'oz'], ['Shipping', 'Will your item fit in a shoebox?'],
+    ['Shipping', 'Length'], ['Shipping', 'Width'], ['Shipping', 'Height'], ['Shipping', 'Skip dimension input'],
     ['Shipping', 'Shipping label'], ['Shipping', 'Offer buyers free shipping?'],
     ['Pricing', 'Item price'], ['Smart pricing', 'Adjusts price automatically'], ['Smart pricing', 'Minimum price'],
   ]);
   const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
   assert.deepEqual(rows.Condition.options, ['New', 'Like new', 'Good', 'Fair', 'Poor']);
+  assert.equal(rows.Condition.presentation, 'radio-row');
+  assert.equal(rows.Title.placeholder, 'What are you selling?');
+  assert.equal(rows.Title.counter, true);
   assert.deepEqual(rows['Shipping method'].options, ['Prepaid label', 'Ship on your own']);
   assert.deepEqual(rows.Size.options, ['XS (0-2) · Standard', 'XS (0-2) · Petite']);
   assert.deepEqual(rows.Size.option_groups, { 'XS (0-2) · Standard': 'Standard', 'XS (0-2) · Petite': 'Petite' });
-  // Mercari's label picker puts the weight and the box sides side by side.
-  assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label),
-    ['Weight (lb)', 'Weight (oz)', 'Length (in)', 'Width (in)', 'Height (in)']);
+  // One question over lb and oz, each a quarter of the row. The three sides share the next question.
+  assert.equal(rows.lb.group, 'How heavy will the package be?');
+  assert.equal(rows.oz.group, rows.lb.group);
+  assert.deepEqual(form.fields.filter(row => row.width === 'quarter').map(row => row.label),
+    ['Ships from:', 'lb', 'oz', 'Minimum price']);
+  assert.deepEqual(form.fields.filter(row => row.width === 'third').map(row => row.label), ['Length', 'Width', 'Height']);
   assert.deepEqual(rows['Will your item fit in a shoebox?'].options, ['Yes', 'No']);
+  // No heading. The page's two lines are the hint, and any image type is accepted.
+  assert.deepEqual([form.fields[0].path, form.fields[0].input_type, form.fields[0].help, form.fields[0].accept],
+    ['marketplace_photos.mercari', 'photos', 'Add up to 12 photos\nOr drag and drop', undefined]);
+  // A price turns Smart pricing on and fills the 85% floor, as the sell page does.
+  assert.equal(rows['Adjusts price automatically'].value, true);
+  assert.equal(rows['Minimum price'].value, 17);
 });
 
 // Read from Mercari's label picker on 2026-10-27: Yes sends a 14 x 10 x 5 in box, No sends the typed
@@ -277,17 +292,20 @@ test('Mercari package typed on its tab sets the weight and box the labels are re
   const c = loadWorker();
   const listing = { direct_category_ids: { mercari: 1 }, weight_lb: 0, weight_oz: 8, package_dimensions_in: '10x8x4' };
   const rows = Object.fromEntries(clean(call(c, 'mercariEditorForm', listing, MERCARI)).fields.map(row => [row.path, row]));
-  // The rows start from Item Details.
+  // The rows start from Item Details. The shoebox question stays unanswered, so nothing is sent for size.
   assert.deepEqual(['pounds', 'ounces', 'fitsShoebox', 'length', 'width', 'height'].map(key => rows[`mercari_specifics.package.${key}`].value),
     [0, 8, '', 10, 8, 4]);
   assert.equal(c.mercariWeightOz(listing), 8);
-  assert.deepEqual(clean(c.mercariDimensions(listing)), { unit: 'INCH', length: 10, width: 8, height: 4 });
+  assert.deepEqual(clean(c.mercariDimensions(listing)), {});
   const typed = pack => ({ ...listing, mercari_specifics: { package: pack } });
   assert.equal(c.mercariWeightOz(typed({ pounds: 1, ounces: 8 })), 24);
   assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'yes' }))), { unit: 'INCH', length: 14, width: 10, height: 5 });
   assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no', length: 16, width: 12, height: 6 }))),
     { unit: 'INCH', length: 16, width: 12, height: 6 });
-  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no' }))), {});
+  // No, with the inputs still showing Item Details, sends those sides. Skip sends 0 x 0 x 0.
+  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no' }))), { unit: 'INCH', length: 10, width: 8, height: 4 });
+  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no', skipDimensions: true }))),
+    { unit: 'INCH', length: 0, width: 0, height: 0 });
 });
 
 test('Depop read-back catches cleared attributes, old sizes and general choices the draft failed to keep', () => {
@@ -387,7 +405,7 @@ test('Depop form lists the sell page fields in its order, as the page shows them
     primaryColor: 'Blue', secondaryColor: 'Black' };
   const form = clean(call(c, 'depopEditorForm', listing, attributes, [{ title: 'Medium' }]));
   assert.deepEqual(form.fields.map(row => row.label), [
-    'Description', 'Category', 'Type', 'Fit', 'Body fit', 'Brand', 'Condition', 'Color', 'Size', 'Quantity', 'Learn more about SKUs', 'SKU',
+    '', 'Description', 'Category', 'Type', 'Fit', 'Body fit', 'Brand', 'Condition', 'Color', 'Size', 'Quantity', 'Learn more about SKUs', 'SKU',
     'Source', 'Age', 'Style', 'Item price', 'No selling fees.', 'Learn more about boosting',
     'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.',
     'Depop Shipping (via USPS)', 'Shipping from', 'Package size', 'Offer worldwide shipping', 'Worldwide Shipping',
@@ -413,7 +431,11 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   // The page's headings and row layout.
   const headings = [];
   for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
-  assert.deepEqual(headings, ['Description', 'Info', 'Enhance your listing', 'Item price', 'Boost your listing', 'Shipping']);
+  assert.deepEqual(headings, ['Photos', 'Description', 'Info', 'Enhance your listing', 'Item price', 'Boost your listing', 'Shipping']);
+  // Depop's photo area: its hint and the caption under each slot.
+  assert.deepEqual([form.fields[0].path, form.fields[0].help, form.fields[0].slot_labels, form.fields[0].accept],
+    ['marketplace_photos.depop', 'Add up to 8 photos in JPEG or PNG format.',
+      ['Cover photo', 'Front', 'Back', 'Side', 'Label', 'Detail', 'Flaw'], 'image/jpeg,image/png,.jpg,.jpeg,.png']);
   assert.deepEqual(form.fields.filter(row => row.width).map(row => [row.label, row.width]), [['Size', 'quarter'], ['Quantity', 'quarter'], ['SKU', 'half']]);
   assert.equal(rows.Type.help, 'Select up to 3');
   assert.equal(rows.Color.help, 'Select up to two colors');

@@ -112,8 +112,9 @@ class NativeEditorTest(unittest.TestCase):
         answer = self.client.get(f"{self.url}/sellwild/form")
         self.assertEqual(answer.status_code, 200, answer.text)
         rows = answer.json()["fields"]
+        self.assertEqual((rows[0]["input_type"], rows[0]["help"]), ("photos", "Please add Photos of your Listing. Max 20."))
         self.assertEqual([(row.get("section"), row["label"]) for row in rows], [
-            ("Add a Title", "What are you selling? (Required)"), ("Name Your Price (USD)", "Price"),
+            ("", ""), ("Add a Title", "What are you selling? (Required)"), ("Name Your Price (USD)", "Price"),
             ("Name Your Price (USD)", "Sellwild Fee"), ("Name Your Price (USD)", "You Earn"),
             ("Name Your Price (USD)", "Sell it faster with a discount"),
             ("Add Details", "Describe your item (Optional)"), ("Add Details", "Category"), ("Add Details", "Condition"),
@@ -241,6 +242,97 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["rows"][0]["subtitle"], "Clothing › Men › Men’s Shoes")
         self.assertEqual(result["rows"][0]["id"], "15709")
 
+    async def test_ebay_form_follows_the_create_listing_page(self):
+        """eBay's Create listing page for Men's Jeans (11483), read 2026-10-27, and its Taxonomy tiers on 9 clothing leaves."""
+        def aspect(name, required=False, usage="OPTIONAL", mode="free_text", values=()):
+            return {"id": name, "name": name, "required": required, "usage": usage, "mode": mode, "multi": False,
+                    "max_values": None, "max_length": None, "values": [{"id": v, "label": v} for v in values]}
+        rows = [
+            {"id": "condition", "name": "Condition", "required": True, "multi": False, "mode": "selection",
+             "values": [{"id": "3000", "label": "Pre-owned - Good"}]},
+            aspect("Brand", True, "RECOMMENDED"), aspect("Size", True, "RECOMMENDED", values=("30", "32")),
+            aspect("Type", usage="RECOMMENDED", mode="selection", values=("Jeans",)),
+            aspect("Rise"), aspect("Personalize", mode="selection", values=("Yes", "No")), aspect("Season"),
+            aspect("Personalization Instructions"), aspect("Department", True, "RECOMMENDED", "selection", ("Men",)),
+        ]
+        listing = {"direct_category_ids": {"ebay": "11483"}, "condition": "Good", "price": 30,
+                   "ebay_specifics": {"returnPolicyId": "r2"}}
+        from vendoo_studio.services import ebay_listings
+        profiles = {"payment": [{"id": "p1", "title": "eBay Payments"}],
+                    "fulfillment": [{"id": "f1", "title": "Ground"}, {"id": "f2", "title": "Free"}],
+                    "return": [{"id": "r1", "title": "No returns"}, {"id": "r2", "title": "30 days"}],
+                    "locations": [{"id": "home", "title": "Home"}]}
+        with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)), \
+                patch.object(ebay_listings, "listing_profiles", new=AsyncMock(return_value=profiles)), \
+                patch.object(native_editor, "_ebay_format_fields", new=AsyncMock(return_value=[
+                    native_editor.field("ebay_specifics.listingFormat", "Format", "FIXED_PRICE")])), \
+                patch.object(native_editor, "_ebay_variations_field", new=AsyncMock(return_value=[])):
+            form = await native_editor.ebay_form(listing)
+        sections = []
+        for row in form["fields"]:
+            if not sections or sections[-1][0] != row["section"]:
+                sections.append((row["section"], []))
+            sections[-1][1].append(row["label"])
+        self.assertEqual(sections, [
+            ("Photos & Video", [""]),
+            ("Title", ["Item title", "Subtitle", "Custom label (SKU)"]),
+            ("Item category", ["Category", "Second category"]),
+            ("Store category", ["First category", "Second category"]),
+            # Required, then recommended, then the rest, each in eBay's order; instructions follow Personalize.
+            ("Item specifics: Required", ["Brand", "Size", "Department"]),
+            ("Item specifics: Additional (optional)", ["Type", "Rise", "Personalize", "Personalization Instructions",
+                                                       "Season", "UPC", "Custom item specific", "Custom detail"]),
+            ("Condition", ["Item condition", "Condition description"]),
+            ("Description", ["Item description"]),
+            ("Pricing", ["Format", "Item price", "Quantity", "Payment policy", "Allow offers (optional)", "Minimum offer",
+                         "Auto accept", "Schedule your listing", "Listing start time", "Sales tax", "Your cost",
+                         "Quantity in lot", "Private listing"]),
+            ("Shipping", ["Shipping policy", "Package weight (lbs.)", "Package weight (oz.)", "Package dimensions (in.)",
+                          "Irregular package"]),
+            ("Preferences", ["Item location", "Return policy"]),
+            ("Charity", ["Charity", "Percentage"]),
+        ])
+        # What eBay's page keeps behind its buttons.
+        self.assertEqual({(row["label"], row["reveal"]) for row in form["fields"] if row.get("reveal")}, {
+            ("Subtitle", "See title options"), ("Custom label (SKU)", "See title options"), ("Rise", "Show more"),
+            ("Personalize", "Show more"), ("Personalization Instructions", "Show more"), ("Season", "Show more"),
+            ("UPC", "Show more"), ("Custom item specific", "Add custom item specific"),
+            ("Custom detail", "Add custom item specific"),
+            ("Your cost", "See pricing options"), ("Quantity in lot", "See pricing options"),
+            ("Private listing", "See pricing options")})
+        by_path = {row["path"]: row for row in form["fields"]}
+        # The listing's own choice, else the account's only one; several and no choice: none picked.
+        self.assertEqual(by_path["ebay_specifics.returnPolicyId"]["value"], "r2")
+        self.assertEqual(by_path["ebay_specifics.paymentPolicyId"]["value"], "p1")
+        self.assertEqual(by_path["ebay_specifics.fulfillmentPolicyId"]["value"], "")
+        self.assertEqual(by_path["ebay_specifics.merchantLocationKey"]["option_values"], {"Home": "home"})
+        fields = {row["label"]: row for row in form["fields"]}
+        # eBay's page offers only its listed sizes, though Taxonomy calls Size free text.
+        self.assertTrue(fields["Size"]["selection_only"])
+        self.assertFalse(fields["Rise"]["selection_only"])
+        self.assertEqual([row["label"] for row in form["fields"] if row.get("width") == "half"], [
+            "Category", "Second category", "First category", "Second category", "Custom item specific", "Custom detail",
+            "Minimum offer", "Auto accept", "Listing start time", "Your cost", "Quantity in lot", "Package dimensions (in.)",
+            "Charity", "Percentage"])
+        # Weight in lbs. and oz. and the dimensions share one row, as on eBay's page.
+        self.assertEqual([label for label, row in fields.items() if row.get("width") == "quarter"], [
+            "Package weight (lbs.)", "Package weight (oz.)"])
+        self.assertEqual(fields["Allow offers (optional)"]["help"],
+                         "Interested buyers can send an offer for this item. You can accept, counter, or decline.")
+
+    async def test_ebay_auction_rows_follow_the_page(self):
+        from vendoo_studio.services.ebay_client import EbayClient
+
+        auction = {"FIXED_PRICE": ["GTC"], "AUCTION": ["DAYS_7"]}
+        listing = {"direct_category_ids": {"ebay": "11483"}, "ebay_specifics": {"listingFormat": "AUCTION"}}
+        with patch.object(EbayClient, "connect", new=AsyncMock()), \
+                patch.object(marketplace_schemas, "ebay_listing_types", new=AsyncMock(return_value=auction)):
+            rows = await native_editor._ebay_format_fields(listing, "11483", listing["ebay_specifics"])
+        self.assertEqual([(row["label"], row.get("width")) for row in rows], [
+            ("Format", None), ("Auction duration", None), ("Starting bid", "half"), ("Buy It Now (optional)", "half"),
+            ("Reserve price (optional) — fees apply", "half")])
+        self.assertEqual(rows[3]["help"], "Minimum: 30% more than starting bid")
+
     async def test_ebay_form_keeps_native_ids_limits_and_multiselects(self):
         rows = [{"id": "condition", "name": "Condition", "required": True, "multi": False, "mode": "selection",
                  "values": [{"id": "1000", "label": "New"}, {"id": "3000", "label": "Pre-owned"}]},
@@ -267,6 +359,10 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["ebay_specifics.conditionDescription"]["max_length"], 1000)
         self.assertEqual(ebay_listings.ebay_condition({"ebay_specifics": {"condition": "1000"}}), "NEW")
         self.assertEqual(fields["sku"]["value"], "")
+        # eBay's photo area comes first, as on its listing page.
+        photos = form["fields"][0]
+        self.assertEqual((photos["path"], photos["input_type"], photos["section"]), ("marketplace_photos.ebay", "photos", "Photos & Video"))
+        self.assertTrue(photos["help"].startswith("You can add up to 24 photos and a 1-minute video."))
 
     async def test_ebay_format_choices_come_from_ebays_category_rules(self):
         from vendoo_studio.services.ebay_client import EbayClient
@@ -275,13 +371,17 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         auction = {"FIXED_PRICE": ["GTC"], "AUCTION": ["DAYS_3", "DAYS_7"]}
         listing = {"direct_category_ids": {"ebay": "15687"}, "condition": "Good",
                    "ebay_specifics": {"listingFormat": "AUCTION", "auctionStartPrice": "9.99"}}
+        from vendoo_studio.services import ebay_listings
+        profiles = AsyncMock(return_value={"payment": [], "fulfillment": [], "return": [], "locations": []})
         with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)), \
                 patch.object(EbayClient, "connect", new=AsyncMock()), \
+                patch.object(ebay_listings, "listing_profiles", new=profiles), \
                 patch.object(marketplace_schemas, "ebay_listing_types", new=AsyncMock(return_value=auction)):
             form = await native_editor.ebay_form(listing)
             fixed = await native_editor.ebay_form({**listing, "ebay_specifics": {}})
         fields = {row["path"]: row for row in form["fields"]}
-        self.assertEqual(fields["ebay_specifics.listingFormat"]["option_values"], {"Fixed price": "FIXED_PRICE", "Auction": "AUCTION"})
+        self.assertEqual(fields["ebay_specifics.listingFormat"]["options"], ["Auction", "Buy It Now"])
+        self.assertEqual(fields["ebay_specifics.listingFormat"]["option_values"], {"Buy It Now": "FIXED_PRICE", "Auction": "AUCTION"})
         self.assertEqual(fields["ebay_specifics.listingFormat"]["value"], "AUCTION")
         self.assertIn("ebay_specifics.auctionStartPrice", fields["ebay_specifics.listingFormat"]["clears"])
         self.assertEqual(fields["ebay_specifics.listingDuration"]["option_values"],
@@ -300,11 +400,14 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         # No auction in the category: Auction is not offered.
         with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=rows)), \
                 patch.object(EbayClient, "connect", new=AsyncMock()), \
+                patch.object(ebay_listings, "listing_profiles", new=profiles), \
                 patch.object(marketplace_schemas, "ebay_listing_types", new=AsyncMock(return_value={"FIXED_PRICE": ["GTC"]})):
             plain = await native_editor.ebay_form({**listing, "ebay_specifics": {}})
         choice = next(row for row in plain["fields"] if row["path"] == "ebay_specifics.listingFormat")
-        self.assertEqual(choice["options"], ["Fixed price"])
-        self.assertIn("does not offer auctions", choice["help"])
+        self.assertEqual(choice["options"], ["Buy It Now"])
+        self.assertNotIn("help", choice)
+        # eBay's page shows no duration for Buy It Now.
+        self.assertNotIn("ebay_specifics.listingDuration", {row["path"] for row in plain["fields"]})
 
     async def test_a_generated_ebay_inventory_key_is_not_shown_as_the_sku(self):
         rows = [{"id": "condition", "name": "Condition", "required": True, "multi": False, "mode": "selection", "values": []}]
@@ -336,8 +439,7 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         for path in ("ebay_specifics.Size", "ebay_specifics.Department"):
             row = fields[path]
             self.assertFalse(row.get("locked"))
-            self.assertIn("stays on eBay", row["help"])
-            self.assertNotIn("Change it there", row["help"])
+            self.assertNotIn("help", row)
         self.assertEqual(fields["ebay_specifics.title"]["value"], "eBay title")
         self.assertEqual(fields["ebay_specifics.description"]["value"], "General description")
         self.assertFalse(fields["ebay_specifics.title"].get("locked"))

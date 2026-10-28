@@ -176,12 +176,15 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
     if (!template) return true;
     return field.key === "sellwild_specifics.package.weight" && SELLWILD_WEIGHED_PACKAGES.has(template);
   }
-  // Mercari shows the label, its package questions and the free-shipping choice only with Prepaid label,
-  // the sides only when the package does not fit in a shoebox, and the minimum price only with Smart pricing on.
+  // Mercari shows the label, its package questions and the free-shipping choice only with Prepaid label.
+  // It asks for the sides, or lets you skip them, only once the item does not fit in a shoebox,
+  // and the minimum price only with Smart pricing on.
   if (context.tab === "mercari" && (MERCARI_LABEL_KEYS.has(field.key) || field.key.startsWith("mercari_specifics.package."))) {
     if (shownChoice(context.fields, context.local, context.listing, "mercari_specifics.shippingMethod") === "SOYO") return false;
+    const notShoebox = shownChoice(context.fields, context.local, context.listing, "mercari_specifics.package.fitsShoebox") === "no";
+    if (field.key === "mercari_specifics.package.skipDimensions") return notShoebox;
     if (MERCARI_SIDE_KEYS.has(field.key)) {
-      return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.package.fitsShoebox") !== "yes";
+      return notShoebox && shownChoice(context.fields, context.local, context.listing, "mercari_specifics.package.skipDimensions") !== "true";
     }
     return true;
   }
@@ -192,11 +195,21 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
   if (context.tab === "mercari" && field.key === "mercari_specifics.smartPricing.minimumPrice") {
     return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.smartPricing.enabled") === "true";
   }
+  if (context.tab === "ebay" && field.key === "ebay_specifics.schedule.startAt") {
+    return shownChoice(context.fields, context.local, context.listing, "ebay_specifics.schedule.enabled") === "true";
+  }
   if (context.tab === "ebay") {
     const auction = ebayFormat(context) === "AUCTION";
     const varied = ebayVaried(context.listing);
-    if (EBAY_AUCTION_PRICE_KEYS.has(field.key)) return auction;
-    if (EBAY_OFFER_KEYS.has(field.key)) return !auction && !varied;
+    // eBay's page: an auction has a duration and bids instead of an item price; Buy It Now runs until cancelled.
+    if (EBAY_AUCTION_PRICE_KEYS.has(field.key) || field.key === "ebay_specifics.listingDuration") return auction;
+    if (field.key === "ebay_specifics.price") return !auction;
+    if (EBAY_OFFER_KEYS.has(field.key)) {
+      if (auction || varied) return false;
+      // Minimum offer and Auto accept show only while Allow offers is on.
+      if (field.key === "ebay_specifics.bestOffer.enabled") return true;
+      return shownChoice(context.fields, context.local, context.listing, "ebay_specifics.bestOffer.enabled") === "true";
+    }
     if (field.key === "ebay_specifics.variations") return !(auction && !varied);
   }
   return true;
@@ -262,29 +275,15 @@ export function presentNativeField<T extends NativeFormRow>(field: T, context: N
     if (ebayVaried(context.listing)) {
       return { ...field, locked: true, help: "The quantity is the total of the variations." };
     }
-    if (ebayFormat(context) === "AUCTION") {
-      return { ...field, locked: false, help: "An eBay auction sells one item." };
-    }
     return { ...field, locked: false, help: undefined };
   }
   return field;
 }
 
-/** Sentences that follow the current format or shipping method, not the last form load. */
-export function nativeFormNotes(
-  tab: string,
-  listing: ListingData | undefined,
-  local: Record<string, string | string[] | undefined>,
-  fields: readonly NativeFormRow[],
-): string[] {
-  const context: NativeFieldContext = { tab, listing, local, fields, categoryStale: false };
-  if (tab === "ebay") {
-    const notes: string[] = [];
-    if (ebayFormat(context) === "AUCTION") notes.push("An auction uses Starting bid and Buy It Now, not Price.");
-    if (ebayVaried(listing)) {
-      notes.push("With variations, Price is the price of any variation left without its own. eBay takes no offers on a listing with variations.");
-    }
-    return notes;
+/** Sentences that follow the current variations, not the last form load. */
+export function nativeFormNotes(tab: string, listing: ListingData | undefined): string[] {
+  if (tab === "ebay" && ebayVaried(listing)) {
+    return ["With variations, Price is the price of any variation left without its own. eBay takes no offers on a listing with variations."];
   }
   return [];
 }

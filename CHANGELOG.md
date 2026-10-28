@@ -6,10 +6,26 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.470 — 2026-10-28
+## 0.1.474 — 2026-10-28
 
 - The Depop tab now follows Depop’s sell page: the description placeholder, the 1,000-character counter and the hashtag counter, US$ on the price, your shipping address, and suggested package sizes. List sends the same package size Depop’s page would. Worldwide shipping’s price appears, with US$, only when you turn that offer on.
 - The Sellwild tab shows the fee and what you earn, your discounts with none picked until you choose one, and packages grouped the way Sellwild groups them. A vehicle still shows Vehicle Shipping and no package. A discount you pick is applied after the listing is live.
+
+## 0.1.473 — 2026-10-28
+
+- The eBay tab follows eBay's Create listing page. Item specifics stay in eBay's order, with Show more for the rest. You get a subtitle and custom label under title options, a second category, scheduling, this listing's own policies and item location, charity, and one custom item specific. An auction shows its duration and bids instead of an item price.
+
+## 0.1.472 — 2026-10-27
+
+- On the Mercari tab, package weight is one question, "How heavy will the package be?", with pounds and ounces side by side. Length, width and height stay hidden until you say the item will not fit in a shoebox, and you can skip them. Once the item has a price, Smart pricing shows as on, with a suggested lowest price.
+
+## 0.1.471 — 2026-10-28
+
+- Each flaw in a description is on its own line, so a list of flaws is easy to scan. A description formula you wrote yourself stays as you wrote it.
+
+## 0.1.470 — 2026-10-28
+
+- Depop, Mercari, Poshmark, Sellwild, and eBay now show this item's photos where that marketplace's own page does. You can reorder them and pick which ones that marketplace gets, up to its limit. Depop stays JPEG and PNG.
 
 ## 0.1.469 — 2026-10-28
 

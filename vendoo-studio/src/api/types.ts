@@ -546,7 +546,7 @@ export interface MarketplaceFormField {
   value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
   /** "note" is text the marketplace's page shows with no control: its label and help. */
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations" | "note";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations" | "photos" | "note";
   inventory_groups?: NativeInventoryGroup[];
   variation_aspects?: EbayVariationAspect[];
   min_value?: number;
@@ -573,18 +573,35 @@ export interface MarketplaceFormField {
   on_form?: boolean;
   /** Choice label → the heading the marketplace lists it under (Mercari's size groups). */
   option_groups?: Record<string, string>;
+  /** The button the marketplace's page hides this field behind ("Show more", "See title options"). */
+  reveal?: string;
+  /** A photos row: the page's caption under each photo slot, in order (Depop: Cover photo, Front, …). */
+  slot_labels?: string[];
+  /** File-dialog filter for a photos row. Depop's page takes JPEG and PNG only. */
+  accept?: string;
   /** The heading this field sits under on the marketplace's own form. */
   section?: string;
-  /** Half or quarter of a row, as the marketplace's form lays it out. Absent means a full row. */
-  width?: "half" | "quarter";
+  /** Half, a third or a quarter of a row, as the marketplace's form lays it out. Absent means a full row. */
+  width?: "half" | "third" | "quarter";
+  /** A question the page asks over several consecutive inputs ("How heavy will the package be?"). */
+  group?: string;
+  group_help?: string;
+  /** The line the page shows under a section heading, carried on the section's first field. */
+  section_help?: string;
+  placeholder?: string;
+  /** Text inside the input before or after the value, such as "$" or "lb". */
+  prefix?: string;
+  suffix?: string;
+  /** The page shows no label above this input; the label stays for screen readers. */
+  label_hidden?: boolean;
+  /** Show the typed length beside the label, as "16/80". */
+  counter?: boolean;
+  /** Choices shown as radio buttons (stacked, or in one row), or a switch shown as a button. */
+  presentation?: "radio" | "radio-row" | "button";
+  /** Choice label → the line the page shows under that choice. */
+  option_help?: Record<string, string>;
   /** True when choosing a different category adds or removes this row. */
   category_specific?: boolean;
-  /** The marketplace's placeholder text inside the field. */
-  placeholder?: string;
-  /** Text before the value, such as "US$". */
-  prefix?: string;
-  /** Show the characters left, as the marketplace's page does. */
-  counter?: boolean;
   /** Depop's "Hashtags: N" remaining count, beside the character counter. */
   hashtag_max?: number;
 }

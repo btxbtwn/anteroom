@@ -114,7 +114,10 @@ Universal Description (paste-ready, include line breaks, under 150 characters)
 
 *line break*
 
-Flaws: {specific, only list flaws if you see them in the photos}.​ See photos for details. Leave this line and its line break out entirely when there are no flaws.
+Flaws:
+- {one flaw per line, only flaws you see in the photos}
+See photos for details.
+Leave this block and its line break out entirely when there are no flaws. One flaw per line, each starting with "- ".
 
 *line break*
 
@@ -159,7 +162,7 @@ Depop: No title field → use Universal Description only
 ```json
 {
   "title": "Fruit of the Loom XL 2012 NHRA Auto Club Finals T-Shirt White Drag Racing Pomona",
-  "description": "2010s NHRA Auto Club Finals Fruit of the Loom T-Shirt with Pomona Drag Racing graphic in White, standard fit.\n\nFlaws: Small stain on sleeve/shoulder area, small pinhole near bottom hem. See photos for details.\n\nMeasurements: See photos for measurements.",
+  "description": "2010s NHRA Auto Club Finals Fruit of the Loom T-Shirt with Pomona Drag Racing graphic in White, standard fit.\n\nFlaws:\n- Small stain on sleeve/shoulder area\n- Small pinhole near bottom hem\nSee photos for details.\n\nMeasurements: See photos for measurements.",
   "price": 15,
   "cost": 5.00,
   "quantity": 1,
