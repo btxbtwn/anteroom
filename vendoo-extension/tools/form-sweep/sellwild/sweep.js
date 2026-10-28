@@ -2,7 +2,7 @@
 // Read-only. Sellwild builds its sell form from tables in its own page code: category groups,
 // categories, vehicle categories, conditions and package templates. This reads those tables
 // from the page's script and downloads them as sellwild-page.json. Then:
-//   node vendoo-extension/tools/form-sweep/sellwild-compare.js <folder with the download>
+//   node vendoo-extension/tools/form-sweep/sellwild/compare.js <folder with the download>
 (async () => {
   const sources = [...new Set([...document.scripts].map(script => script.src)
     .concat(performance.getEntriesByType('resource').filter(entry => entry.initiatorType === 'script').map(entry => entry.name)))]

@@ -7,7 +7,7 @@
 // mercari-sweep-<start>.json; the first run also downloads mercari-catalog.json (the
 // catalog the page builds from, without brands). Reload the page and run it again until
 // it logs "done"; the position is kept in localStorage. Then:
-//   node vendoo-extension/tools/form-sweep/mercari-compare.js <folder with the downloads>
+//   node vendoo-extension/tools/form-sweep/mercari/compare.js <folder with the downloads>
 // Start over with localStorage.removeItem('anteroomFormSweep:mercari').
 (async () => {
   const BATCH = 40;

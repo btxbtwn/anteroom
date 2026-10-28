@@ -5,7 +5,7 @@
 // The first run also downloads depop-catalog.json (the catalog the page builds from) and
 // depop-fixed.json (choices that do not depend on category). Reload the page and run it
 // again until it logs "done"; the position is kept in localStorage. Then:
-//   node vendoo-extension/tools/form-sweep/depop-compare.js <folder with the downloads>
+//   node vendoo-extension/tools/form-sweep/depop/compare.js <folder with the downloads>
 // Start over with localStorage.removeItem('anteroomFormSweep:depop').
 (async () => {
   const BATCH = 40;

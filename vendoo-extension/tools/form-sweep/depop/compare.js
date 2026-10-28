@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Compares Anteroom's Depop form with what depop-sweep.js recorded on Depop's sell page.
-// Usage: node vendoo-extension/tools/form-sweep/depop-compare.js <folder with the downloads>
+// Usage: node vendoo-extension/tools/form-sweep/depop/compare.js <folder with the downloads>
 // Exits 1 when anything differs.
 const fs = require('node:fs');
 const path = require('node:path');
-const { loadWorker, call } = require('../../tests/worker-context');
+const { loadWorker, call } = require('../../../tests/worker-context');
 
 const folder = process.argv[2];
-if (!folder) { console.error('Usage: depop-compare.js <folder>'); process.exit(2); }
+if (!folder) { console.error('Usage: compare.js <folder>'); process.exit(2); }
 const load = name => JSON.parse(fs.readFileSync(path.join(folder, name), 'utf8'));
 const catalog = load('depop-catalog.json');
 const fixed = load('depop-fixed.json');

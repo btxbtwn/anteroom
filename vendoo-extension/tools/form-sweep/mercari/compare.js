@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Compares Anteroom's Mercari form with what mercari-sweep.js recorded on Mercari's sell page.
-// Usage: node vendoo-extension/tools/form-sweep/mercari-compare.js <folder with the downloads>
+// Usage: node vendoo-extension/tools/form-sweep/mercari/compare.js <folder with the downloads>
 // Exits 1 when anything differs.
 const fs = require('node:fs');
 const path = require('node:path');
-const { loadWorker, call } = require('../../tests/worker-context');
+const { loadWorker, call } = require('../../../tests/worker-context');
 
 const folder = process.argv[2];
-if (!folder) { console.error('Usage: mercari-compare.js <folder>'); process.exit(2); }
+if (!folder) { console.error('Usage: compare.js <folder>'); process.exit(2); }
 const load = name => JSON.parse(fs.readFileSync(path.join(folder, name), 'utf8'));
 const master = load('mercari-catalog.json');
 const sweep = fs.readdirSync(folder).filter(name => /^mercari-sweep-.*\.json$/.test(name)).flatMap(load);

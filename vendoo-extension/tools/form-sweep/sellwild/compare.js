@@ -3,14 +3,14 @@
 // sell page. Anteroom's Sellwild form is built from that catalog
 // (skills/list-this/references/sellwild-native-catalog.json) and the vehicle list in
 // vendoo-studio/server/vendoo_studio/services/sellwild_listing.py.
-// Usage: node vendoo-extension/tools/form-sweep/sellwild-compare.js <folder with sellwild-page.json>
+// Usage: node vendoo-extension/tools/form-sweep/sellwild/compare.js <folder with sellwild-page.json>
 // Exits 1 when anything differs.
 const fs = require('node:fs');
 const path = require('node:path');
 
 const folder = process.argv[2];
-if (!folder) { console.error('Usage: sellwild-compare.js <folder>'); process.exit(2); }
-const root = path.resolve(__dirname, '../../..');
+if (!folder) { console.error('Usage: compare.js <folder>'); process.exit(2); }
+const root = path.resolve(__dirname, '../../../..');
 const page = JSON.parse(fs.readFileSync(path.join(folder, 'sellwild-page.json'), 'utf8'));
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'skills/list-this/references/sellwild-native-catalog.json'), 'utf8'));
 const listingCode = fs.readFileSync(path.join(root, 'vendoo-studio/server/vendoo_studio/services/sellwild_listing.py'), 'utf8');
