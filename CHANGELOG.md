@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.470 — 2026-10-28
+## 0.1.471 — 2026-10-28
 
 - Each flaw in a description is on its own line, so a list of flaws is easy to scan. A description formula you wrote yourself stays as you wrote it.
+
+## 0.1.470 — 2026-10-28
+
+- Depop, Mercari, Poshmark, Sellwild, and eBay now show this item's photos where that marketplace's own page does. You can reorder them and pick which ones that marketplace gets, up to its limit. Depop stays JPEG and PNG.
 
 ## 0.1.469 — 2026-10-28
 
