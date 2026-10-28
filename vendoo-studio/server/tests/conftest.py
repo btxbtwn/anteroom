@@ -57,6 +57,21 @@ def _no_sourcing_timer():
         yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_category_fills():
+    """Keep app startup from arming the category field fill.
+
+    With it armed, a test that saves a new marketplace category through the app
+    would queue a model call after the test ended. Its own tests arm it themselves.
+    """
+    from unittest import mock
+
+    from vendoo_studio.services import native_field_fill
+
+    with mock.patch.object(native_field_fill, "start_category_fills", return_value=None):
+        yield
+
+
 @pytest.fixture(autouse=True)
 def _fresh_business_context():
     """Each test reads its own shop, never the assistant's copy from the test before."""
