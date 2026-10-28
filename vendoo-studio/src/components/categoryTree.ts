@@ -17,15 +17,9 @@ export interface CategoryMenu {
   items: CategoryItem[];
 }
 
-export interface CategoryStep {
-  menu: CategoryMenu;
-  /** The path key of the row selected at this step, or empty. */
-  value: string;
-}
+const SEPARATOR = /\s*(?:>|›|\|)\s*/;
 
-const SEPARATOR = /\s*(?:>|›)\s*/;
-
-/** Split a stored path on either separator the catalogs use. */
+/** Split a stored path on any separator the catalogs use (Sellwild writes "Group | Category"). */
 export function categorySegments(label: string): string[] {
   return label.split(SEPARATOR).map((part) => part.trim()).filter(Boolean);
 }
@@ -68,23 +62,6 @@ export function categoryMenu(choices: readonly CategoryChoice[], prefix: readonl
   return { items: [...items.values()].sort(byLabel) };
 }
 
-/** Each dropdown from the top of the tree through the current selection. */
-export function categorySteps(choices: readonly CategoryChoice[], selected: readonly string[]): CategoryStep[] {
-  const steps: CategoryStep[] = [];
-  let prefix: string[] = [];
-  for (let guard = 0; guard < 8; guard += 1) {
-    const menu = categoryMenu(choices, prefix);
-    if (!menu) break;
-    const match = menu.items
-      .filter((item) => item.path.every((segment, index) => selected[index] === segment))
-      .sort((a, b) => b.path.length - a.path.length)[0];
-    steps.push({ menu, value: match ? categoryPathKey(match.path) : "" });
-    if (!match || match.terminal) break;
-    prefix = match.path;
-  }
-  return steps;
-}
-
 /** The choice whose path is exactly these segments. */
 export function categoryChoiceAt(choices: readonly CategoryChoice[], path: readonly string[]): CategoryChoice | undefined {
   const key = categoryPathKey(path);
@@ -103,7 +80,7 @@ export function pathCategoryChoices(field: {
     || field.key.endsWith("nativeCategoryId")
     || field.key.startsWith("direct_category_ids.");
   const options = field.options ?? [];
-  if (!named || !options.some((option) => /[>›]/.test(option))) return null;
+  if (!named || !options.some((option) => SEPARATOR.test(option))) return null;
   return options.map((label) => ({ label, id: field.optionValues?.[label] ?? label }));
 }
 
