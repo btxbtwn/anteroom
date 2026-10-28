@@ -3,7 +3,7 @@
  * styles (MIT, (c) 2026 T3 Tools Inc.): its segmented toggle for tab strips,
  * its input chrome for native selects, its muted field labels.
  */
-import { ChevronDownIcon, ChevronsUpDownIcon } from "lucide-react";
+import { ChevronDownIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -219,8 +219,6 @@ export function SearchableSelect({
           </ComboboxList>
         </ComboboxPopup>
       </Combobox>
-      {value && !disabled && <button type="button" className="mt-1 text-xs text-muted-foreground underline" aria-label="Clear value"
-        onMouseDown={(event) => { event.preventDefault(); onChange(""); }}>Clear</button>}
       {unavailable && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">
         {choicesVerified
           ? `Saved value “${value}” is unavailable in these choices. Choose another value or clear it.`
@@ -368,9 +366,11 @@ export function TreeCategorySelect({ id, marketplace, name, value, onChange, dis
 
 /** A category's multiple values stay an array, including values awaiting correction. */
 export function SearchableMultiSelect({
-  id, fieldKey, value, options, onChange, disabled, selectionOnly = true, maxValues, maxLength, choicesVerified = true,
+  id, fieldKey, value, options, onChange, disabled, selectionOnly = true, maxValues, maxLength, choicesVerified = true, help,
 }: {
   id: string;
+  /** Hint shown under the field, on the same line as the count. */
+  help?: string;
   fieldKey: string;
   value: string[];
   options: string[];
@@ -388,6 +388,9 @@ export function SearchableMultiSelect({
   const unavailable = selectionOnly && options.length ? value.filter((item) => !options.includes(item)) : [];
   const overLimit = maxValues != null && value.length > maxValues;
   const invalid = (choicesVerified && unavailable.length > 0) || overLimit;
+  const clearable = value.length > 0 && !disabled;
+  const describedBy = [help ? `${id}-help` : "", unavailable.length > 0 || overLimit ? `${id}-unavailable` : ""]
+    .filter(Boolean).join(" ") || undefined;
   return (
     <div className="min-w-0">
       <Combobox<string, true>
@@ -402,10 +405,11 @@ export function SearchableMultiSelect({
           ref={anchor}
           data-slot="multi-select"
           className={cn(
-            "relative flex min-h-8.5 w-full cursor-text flex-wrap items-center gap-1 rounded-lg border border-input bg-background py-1 ps-1.5 pe-8 text-base text-foreground shadow-xs/5 ring-ring/24 transition-shadow not-dark:bg-clip-padding",
+            "relative flex min-h-8.5 w-full cursor-text flex-wrap items-center gap-1 rounded-lg border border-input bg-background py-1 ps-1.5 text-base text-foreground shadow-xs/5 ring-ring/24 transition-shadow not-dark:bg-clip-padding",
             "has-focus-visible:border-ring has-focus-visible:ring-[3px] has-focus-visible:ring-inset",
             "has-aria-invalid:border-destructive/36 has-focus-visible:has-aria-invalid:border-destructive/64 has-focus-visible:has-aria-invalid:ring-destructive/16",
             "has-disabled:opacity-64 sm:min-h-7.5 sm:text-sm dark:bg-input/32 dark:has-aria-invalid:ring-destructive/24",
+            clearable ? "pe-14" : "pe-8",
           )}
           onMouseDown={(event) => {
             if (disabled || (event.target as HTMLElement).closest("button, input")) return;
@@ -432,8 +436,14 @@ export function SearchableMultiSelect({
             disabled={disabled}
             maxLength={maxLength}
             aria-invalid={invalid || undefined}
-            aria-describedby={unavailable.length > 0 || overLimit ? `${id}-unavailable` : undefined}
+            aria-describedby={describedBy}
           />
+          {clearable && <button type="button" aria-label="Clear values" title="Clear"
+            className="absolute end-7.5 top-1/2 inline-flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-icon-muted opacity-80 outline-none hover:bg-accent hover:opacity-100 focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-3.5"
+            onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); onChange([]); }}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onChange([]); } }}>
+            <XIcon />
+          </button>}
           <ComboboxTrigger
             className="absolute end-0.5 top-1/2 inline-flex size-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-icon-muted opacity-80 outline-none hover:opacity-100 focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-4"
           >
@@ -449,15 +459,17 @@ export function SearchableMultiSelect({
           </ComboboxItem>}</ComboboxList>
         </ComboboxPopup>
       </Combobox>
-      {value.length > 0 && !disabled && <button type="button" className="mt-1 text-xs text-muted-foreground underline" aria-label="Clear values"
-        onMouseDown={(event) => { event.preventDefault(); onChange([]); }}>Clear</button>}
+      {(help || maxValues != null) && <div className="mt-1.5 flex items-start gap-3 text-xs text-muted-foreground">
+        {help && <p id={`${id}-help`} className="min-w-0 flex-1">{help}</p>}
+        {maxValues != null && <p className={cn("ms-auto shrink-0 tabular-nums", overLimit && "text-warning-foreground")}
+          aria-label={`${value.length} of ${maxValues} selected`}>{value.length}/{maxValues}</p>}
+      </div>}
       {(unavailable.length > 0 || overLimit) && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">
         {unavailable.length > 0 && (choicesVerified
           ? `Unavailable saved values: ${unavailable.join(", ")}. Remove or replace them. `
           : `Saved values outside these reference choices: ${unavailable.join(", ")}. Verify them on the marketplace. `)}
         {overLimit && `Choose at most ${maxValues} values.`}
       </p>}
-      {maxValues != null && <p className="mt-1 text-xs text-muted-foreground">{value.length} of {maxValues} selected</p>}
     </div>
   );
 }
