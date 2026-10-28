@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, FacebookCheck, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
@@ -137,6 +137,15 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
 }
 
 
+/**
+ * The answers this pane still says: every gap the open form does not read under a
+ * row of its own. One the form shows is read there, where the seller fixes it.
+ */
+export function saidBesideList(gaps: readonly PreflightGap[], shownOnForm: readonly string[]): PreflightGap[] {
+  const onForm = new Set(shownOnForm);
+  return gaps.filter((gap) => !onForm.has(gap.field));
+}
+
 function railLabel(id: string): string {
   if (id === "general") return "General";
   return marketplaceName(id);
@@ -156,8 +165,24 @@ type MarketplaceProps = {
   onEditField?: (field: string, marketplace?: string) => void;
 };
 
+/** Where the open form tells this pane which fields it draws a row for. */
+const FieldsShownContext = createContext<((marketplace: string, fields: ReadonlySet<string>) => void) | undefined>(undefined);
+
+/**
+ * Tell the marketplace pane which fields this form draws a row for, so an answer
+ * about one of them is read under that row rather than a second time beside List.
+ * Fields are compared by name, so the editor reports them unchanged across saves.
+ */
+export function useReportFieldsShown(marketplace: string, fields: readonly string[]): void {
+  const report = useContext(FieldsShownContext);
+  // Sorted and joined, so the same answers on the next render report once.
+  const signature = [...fields].sort().join("\n");
+  useEffect(() => { report?.(marketplace, new Set(signature ? signature.split("\n") : [])); }, [report, marketplace, signature]);
+}
+
 export function MarketplacesLayout({
-  convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField, ids, selected, onSelect, railActions, railStatus, children,
+  convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField,
+  ids, selected, onSelect, railActions, railStatus, children,
 }: MarketplaceProps & {
   ids: readonly string[];
   /** Listing-wide actions pinned above the rail's own, e.g. Regenerate. */
@@ -169,6 +194,17 @@ export function MarketplacesLayout({
   children?: ReactNode;
 }) {
   const queryClient = useQueryClient();
+  // Which fields the open form draws a row for, so an answer about one of them is
+  // read there and not twice.
+  const [fieldsShown, setFieldsShown] = useState<Partial<Record<string, ReadonlySet<string>>>>({});
+  const reportFields = useCallback((marketplace: string, fields: ReadonlySet<string>) => {
+    setFieldsShown((current) => {
+      const before = current[marketplace];
+      // The editor reports on every save; only a different set of rows redraws the pane.
+      if (before && before.size === fields.size && [...fields].every((field) => before.has(field))) return current;
+      return { ...current, [marketplace]: fields };
+    });
+  }, []);
   const nativeKey = ["native-marketplaces", convId];
   const liveKey = ["marketplace-listings", convId];
   // List runs in the background: poll while any marketplace action is running.
@@ -460,16 +496,20 @@ export function MarketplacesLayout({
   function preflightNotice(marketplace: Marketplace): ReactNode {
     const draft = NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined;
     if (draft?.error || isRunning(draft) || unconfirmed(marketplace)) return null;
-    const gaps = preflightGaps(marketplace);
-    if (!gaps.length) return null;
+    const all = preflightGaps(marketplace);
+    if (!all.length) return null;
     const name = marketplaceName(marketplace);
-    const blocking = gaps.some((gap) => gap.blocking);
+    // A gap is said once. One the editor draws a row for is said under that row,
+    // where the seller fixes it; the rest are said here, beside List.
+    const gaps = saidBesideList(all, [...(fieldsShown[marketplace] ?? [])]);
+    if (!gaps.length) return null;
+    const blocking = all.some((gap) => gap.blocking);
     const fields = [...new Set(gaps.map((gap) => gap.field))];
     const prompt = [
       blocking
         ? `${name} still needs details before this item can be listed.`
         : `${name} will leave these fields empty when this item is listed.`,
-      ...gaps.map((gap) => `${gap.field}: ${gap.message}`),
+      ...all.map((gap) => `${gap.field}: ${gap.message}`),
       blocking
         ? "Fill those fields in this listing. Do not list it; I will press List again."
         : `Set each one to the closest of ${name}'s choices in this listing. Do not list it; I will press List again.`,
@@ -702,7 +742,7 @@ export function MarketplacesLayout({
             })()}
           </section>
         )}
-        {children}
+        <FieldsShownContext.Provider value={reportFields}>{children}</FieldsShownContext.Provider>
       </div>
     </div>
   );

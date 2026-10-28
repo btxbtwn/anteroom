@@ -53,7 +53,15 @@ describe("direct List gaps on the form", () => {
     expect(rowForField("mercari", "conditionId", mercariRows)).toBe("mercari_specifics.condition");
     expect(rowForField("mercari", "brandId", mercariRows)).toBe("mercari_specifics.brand");
     expect(rowForField("mercari", "weight", mercariRows)).toBe("mercari_specifics.package.pounds");
+    // Mercari's photos answer is about its photo area, whether or not the form lists that row.
     expect(rowForField("mercari", "photos", mercariRows)).toBe("");
+  });
+
+  it("puts a marketplace's photos answer on its own photo area, not beside List", () => {
+    const message = "You can add up to 8 photos. Depop shows the first 7, so leave one off or drag the ones you want first.";
+    const rows = [{ key: "marketplace_photos.depop" }, { key: "depop_specifics.brand" }];
+    const found = [...gapsByField("depop", [{ field: "photos", message, blocking: false }], rows)];
+    expect(found).toEqual([["marketplace_photos.depop", [message]]]);
   });
 
   it("opens the row an Edit button is for, including the ones Poshmark names its own way", () => {

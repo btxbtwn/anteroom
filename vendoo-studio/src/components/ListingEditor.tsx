@@ -35,7 +35,7 @@ import { toastManager } from "./ui/toast";
 import { Radio, RadioGroup } from "./ui/radio-group";
 import { Toggle } from "./ui/toggle";
 import { RegenerateListingButton } from "./ClearListingButton";
-import { MarketplacesLayout } from "./MarketplacesSection";
+import { MarketplacesLayout, useReportFieldsShown } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
 import { fetchVendooItemLive, VENDOO_ITEM_STALE_MS, vendooItemQueryKey } from "../api/vendooItemQuery";
@@ -940,8 +940,14 @@ export function StructuredEditor({
   const viewContext = { tab, listing, local, fields, categoryStale };
   const viewFields = fields.map((field) => presentNativeField(field, viewContext));
   const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
-  const fieldWarnings = gapsByField(tab,
-    nativeTab ? preflight.data?.marketplaces?.[tab as NativeMarketplace]?.gaps ?? [] : [], renderedFields);
+  const gaps = nativeTab ? preflight.data?.marketplaces?.[tab as NativeMarketplace]?.gaps ?? [] : [];
+  const fieldWarnings = gapsByField(tab, gaps, renderedFields);
+  // List's photo answer belongs with the photos, on the control that sends them.
+  const photoWarnings = gapsByField(tab, gaps, [{ key: `marketplace_photos.${tab}` }]).get(`marketplace_photos.${tab}`) ?? [];
+  // The answers read here are not read again beside List. A gap counts when this
+  // form resolved it to a row, which is the same test that put it under that row.
+  useReportFieldsShown(tab, gaps.filter((gap) => fieldWarnings.has(rowForField(tab, String(gap.field || ""), renderedFields))
+    || (photoWarnings.length > 0 && String(gap.field || "") === "photos")).map((gap) => String(gap.field || "")));
   const formNotes = nativeTab
     ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing)]
     : [];
@@ -982,7 +988,7 @@ export function StructuredEditor({
     // The marketplace's own photo area, where its page has it: this form's pick, order and limit.
     if (f.type === "photos") {
       return <MarketplaceMedia convId={convId} marketplace={tab} listing={listing} disabled={disabled} onChange={onChange}
-        page={{ hint: f.help, slots: f.slotLabels, accept: f.accept }} />;
+        warnings={photoWarnings} page={{ hint: f.help, slots: f.slotLabels, accept: f.accept }} />;
     }
     if (f.type === "inventory") {
       const stored = resolvedEditorValue(f, listing);

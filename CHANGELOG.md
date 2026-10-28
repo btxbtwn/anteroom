@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.494 — 2026-10-28
+
+- Depop listings that showed shipping filled in still failed to publish with “national shipping”. Two causes, both fixed. When Depop's parcel list named no price, the draft was saved without a national shipping cost, so Depop counted that as unanswered even though the package size was there; it now writes a cost every time, and free shipping is written as 0.00 rather than dropped as if it were blank. And a draft saved before that fix kept telling Depop it was missing shipping long after the form showed it; publishing now writes the draft once more and lets Depop recount before declining, instead of refusing an item whose shipping you already chose.
+- Depop's photo warning now sits in its own Photos area, above the pictures, instead of under the description. List's line beside the button no longer repeats it, and the CLI command it carried is gone from both: it was a note to a terminal, not something to read on a phone. The same holds for any other field a marketplace's form shows: an answer about it is read under that field, and only the rest stay beside List.
+
 ## 0.1.493 — 2026-10-28
 
 - Repricing an item used to leave its Best Offer prices behind, so the form held an auto-accept price above the offer minimum and eBay refused the listing with “This Offer is not available”. Auto-accept and Minimum now follow the new price, on eBay and in Poshmark's Smart Sell floor, and they clear once an item is too cheap to carry them. A Best Offer price you typed yourself is kept as it is, and an item you turned Best Offer off for stays off.

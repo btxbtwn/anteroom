@@ -1379,3 +1379,79 @@ test('a Depop draft that did not stick reports the sanitized read-back', async (
   assert.ok(result.marketplace_message.length > 80);
 });
 
+
+test('a parcel row with no quoted price still gives the draft a national shipping cost', () => {
+  const c = loadWorker();
+  // Depop's three real shapes, plus the ones that name no price at all.
+  assert.equal(call(c, 'depopQuotedCost', { amount: '1.99' }), '1.99');
+  assert.equal(call(c, 'depopQuotedCost', { price: { amount: '1.99' } }), '1.99');
+  assert.equal(call(c, 'depopQuotedCost', 1.9), '1.90');
+  assert.equal(call(c, 'depopQuotedCost', { amount: '0' }), '0.00');
+  assert.equal(call(c, 'depopQuotedCost', 0), '0.00');
+  assert.equal(call(c, 'depopQuotedCost', undefined), null);
+  assert.equal(call(c, 'depopQuotedCost', null), null);
+  assert.equal(call(c, 'depopQuotedCost', {}), null);
+});
+
+test('free shipping is written, not dropped as an empty value', () => {
+  const c = loadWorker();
+  const fields = { product_type: 'tshirts', national_shipping_cost: '0.00',
+    shipping_methods: [{ payer: 'buyer', parcel_size: 'small', shipping_provider_id: 'USPS', ship_from_address_id: 2 }] };
+  const body = JSON.parse(JSON.stringify(call(c, 'depopDraftWriteBody', listing, fields, [], null)));
+  assert.equal(body.national_shipping_cost, '0.00');
+  assert.equal(body.shipping_methods.length, 1);
+  // A genuinely blank gender is still left out.
+  const blank = JSON.parse(JSON.stringify(call(c, 'depopDraftWriteBody', listing, { gender: '' }, [], null)));
+  assert.equal(Object.hasOwn(blank, 'gender'), false);
+});
+
+test('a draft whose only missing answer is shipping is written again before publish gives up', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  c.marketplaceSleep = async () => {};
+  withPictureCheck(c);
+  let draft = { id: '123456', description: 'Private draft', price_amount: '12', product_type: 'tshirts',
+    pictures: [{ id: 9 }], missing_fields: ['national_shipping'] };
+  const puts = [];
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    if (options.method === 'PUT') {
+      puts.push(JSON.parse(options.body));
+      // Depop recounts after the write: the cost is what it wanted.
+      draft = { ...draft, missing_fields: [], national_shipping_cost: '4.50' };
+      return reply(200, draft);
+    }
+    if (pathname === '/presentation/api/v1/drafts/products/') return reply(200, { id: 'job-1' });
+    if (pathname === '/api/v2/drafts/123456/') return reply(200, draft);
+    return reply(200, draft);
+  };
+  const result = await c.depopApiAction('publish', {
+    action: 'publish', confirm: true, draft_url: DRAFT, listing, deadline: Date.now() + 30000,
+    depop_fields: { product_type: 'tshirts', national_shipping_cost: '4.50',
+      shipping_methods: [{ payer: 'buyer', parcel_size: 'small', shipping_provider_id: 'USPS', ship_from_address_id: 2 }] },
+  });
+  assert.equal(result.publish_job_id, 'job-1');
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].national_shipping_cost, '4.50');
+  // The repair keeps the draft's own pictures.
+  assert.deepEqual(puts[0].pictures, [9]);
+});
+
+test('a draft missing a category is not repaired at publish; it names what the seller must fill', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  c.marketplaceSleep = async () => {};
+  let puts = 0;
+  const draft = { id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 9 }],
+    missing_fields: ['national_shipping', 'product_type'] };
+  c.fetch = async (url, options = {}) => {
+    if (options.method === 'PUT') puts += 1;
+    return reply(200, draft);
+  };
+  const result = await c.depopApiAction('publish', {
+    action: 'publish', confirm: true, draft_url: DRAFT, listing, deadline: Date.now() + 30000,
+    depop_fields: { national_shipping_cost: '4.50' },
+  });
+  assert.equal(puts, 0);
+  assert.match(result.error, /category/);
+});

@@ -13,7 +13,7 @@ import { videoProblem, type ListingVideo } from "../api/listingVideos";
 import type { ListingData, Photo } from "../api/types";
 import { cn } from "../lib/utils";
 import { cloneListing, formFieldText, getListingEditorValue, setListingEditorValue } from "../listingPaths";
-import { formPhotos, isVideoFile, videoRuleText, withPick } from "../marketplaceMedia";
+import { COVER_LIMIT, formPhotos, isVideoFile, pastSlots, pickedIds, videoRuleText, withPick, withoutPick } from "../marketplaceMedia";
 import { dragHasFiles, isImageFile, moveItem } from "../photoDrop";
 import { InspectorSection } from "./ListingFormControls";
 import { marketplaceName } from "./marketplaceNames";
@@ -25,12 +25,14 @@ import { Button } from "./ui/button";
 
 const DRAG_TYPE = "application/x-vendoo-form-photo-id";
 
-export function MarketplaceMedia({ convId, marketplace, listing, disabled, onChange, page }: {
+export function MarketplaceMedia({ convId, marketplace, listing, disabled, onChange, warnings = [], page }: {
   convId: string;
   marketplace: string;
   listing: ListingData;
   disabled?: boolean;
   onChange: (listing: ListingData) => void;
+  /** What List would say about these photos, e.g. "You can add up to 8 photos." */
+  warnings?: string[];
   /** Shown inside the marketplace's own form: its hint, slot captions, and file types. */
   page?: { hint?: string; slots?: string[]; accept?: string };
 }) {
@@ -57,6 +59,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const { picked, unticked, custom } = formPhotos(listing, item, own, marketplace);
   const ids = picked.map((photo) => photo.id);
   const limit = rules?.photo_limits?.[marketplace];
+  // The photos this form's page has no slot for, past the ones its captions draw.
+  const late = pastSlots(picked.length, page?.slots, limit);
   const videoKey = `${marketplace}_specifics.videoId`;
   const videoId = videoRules ? formFieldText(getListingEditorValue(listing, videoKey)) : "";
   const video = library?.videos.find((entry) => entry.id === videoId);
@@ -66,14 +70,28 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const previewIndex = all.findIndex((photo) => photo.id === previewId);
   const editing = all.find((photo) => photo.id === editingId) || null;
 
+  // The pick the last change saved, so the answer about the photo this form no
+  // longer sends can go away when the seller drags or adds that photo back.
+  const [savedPick, setSavedPick] = React.useState<string[]>([]);
+  const savePick = (next: ListingData) => {
+    setSavedPick(pickedIds(next, marketplace));
+    onChange(next);
+  };
   const setPick = (next: string[]) => {
     if (!next.length) {
       setError(`${name} needs at least one photo.`);
       return;
     }
     setError(null);
-    onChange(withPick(listing, marketplace, next, item));
+    savePick(withPick(listing, marketplace, next, item));
   };
+  const dropPick = (photoId: string) => savePick(withoutPick(listing, marketplace, photoId, item));
+  // "Your cover photo is photo 9" is about a photo this form sent, so it goes
+  // once the seller drags that photo back into the slots the page draws.
+  const shown = warnings.filter((message) => {
+    const cover = COVER_LIMIT.exec(message);
+    return !cover || !savedPick.length || (Number(cover[1]) <= picked.length && Number(cover[1]) >= picked.length - late.length + 1);
+  });
   const withVideo = (base: ListingData, id: string) => {
     const updated = cloneListing(base);
     setListingEditorValue(updated, videoKey, id);
@@ -102,6 +120,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
         await queryClient.invalidateQueries({ queryKey: ownKey });
         problems.push(...(result.errors || []));
         updated = withPick(updated, marketplace, [...ids, ...result.photos.map((photo) => photo.id)], item);
+        setSavedPick(pickedIds(updated, marketplace));
       }
       if (videos.length) {
         if (videos.length > 1) problems.push(`${name} takes one video. Only ${videos[0].name} was added.`);
@@ -125,7 +144,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     setBusy(true);
     try {
       await api.conversations.deletePhoto(convId, photo.id);
-      if (ids.includes(photo.id)) onChange(withPick(listing, marketplace, ids.filter((id) => id !== photo.id), item));
+      if (ids.includes(photo.id)) savePick(withPick(listing, marketplace, ids.filter((id) => id !== photo.id), item));
       await queryClient.invalidateQueries({ queryKey: ownKey });
     } catch (err) {
       setError(err instanceof Error ? err.message : "The photo could not be deleted.");
@@ -189,7 +208,11 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       dropTarget={dropId === photo.id}
       className={cn(overLimit && "opacity-50")}
       badge={overLimit ? "Not sent" : photo.marketplace ? name : undefined}
-      title={overLimit ? `${name} keeps ${limit} photos; this one is not sent.` : "Drag to set the order on this form"}
+      title={overLimit
+        ? `${name} keeps ${limit} photos; this one is not sent.`
+        : late.includes(index)
+          ? `Not on ${name}'s page anywhere: drag it into one of its slots.`
+          : "Drag to set the order on this form"}
       onDragStart={(event) => {
         dragRef.current = photo.id;
         setDragId(photo.id);
@@ -214,7 +237,9 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       }}
       onDragEnd={resetDrag}
       onOpen={() => setPreviewId(photo.id)}
-      onRemove={locked ? undefined : () => setPick(ids.filter((id) => id !== photo.id))}
+      // The pick only holds the photos the seller chose, so leaving one of the
+      // item's own photos off this form says so, for the photo or for the last slots.
+      onRemove={locked ? undefined : () => (custom || late.includes(index) ? dropPick(photo.id) : setPick(ids.filter((id) => id !== photo.id)))}
       removeLabel={`Leave photo ${index + 1} off ${name}`}
       controlsInViewerOnTouch
     />;
@@ -222,6 +247,9 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   });
   // The page's empty slots keep their captions after the photos, up to its limit.
   const emptySlots = (page?.slots ?? []).slice(picked.length);
+  const notes = shown.length > 0 && <>
+    {shown.map((message) => <p key={message} role="status" className="text-warning-foreground text-xs">{message}</p>)}
+  </>;
 
   if (!sessionActive) return null;
 
@@ -288,6 +316,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       <div data-marketplace-media={marketplace} onDragOver={onStripDragOver} onDragLeave={() => setDropping(false)} onDrop={onStripDrop}
         className={cn("min-w-0 space-y-2 rounded-lg", dropping && "ring-2 ring-ring")}>
         {page.hint && <p className="text-xs whitespace-pre-line text-muted-foreground">{page.hint}</p>}
+        {notes}
         <PhotoStrip>
           {video && <VideoTile video={video} label={`${name} video`} problem={videoProblem(video, videoRules)}
             onRemove={locked ? undefined : () => onChange(withVideo(listing, ""))} />}
@@ -306,6 +335,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
         {limit !== undefined && picked.length > limit && <p role="status" className="text-xs text-warning-foreground">
           {name} keeps {limit} photos. The first {limit} of {picked.length} are sent. Leave some off or drag the ones you want first.
         </p>}
+        {notes}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         {viewers}
       </div>
@@ -351,6 +381,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
         {limit !== undefined && picked.length > limit && <p role="status" className="text-xs text-warning-foreground">
           {name} keeps {limit} photos. The first {limit} of {picked.length} are sent. Leave some off or drag the ones you want first.
         </p>}
+        {notes}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
       {viewers}

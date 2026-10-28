@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts } from "../api/nativeMarketplaces";
-import { MarketplacesSection, askChatPrompt, deletable, facebookCheckText, reconnectText, rowStatus } from "./MarketplacesSection";
+import { MarketplacesSection, askChatPrompt, deletable, facebookCheckText, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -305,5 +305,28 @@ describe("marketplaces section", () => {
       .toBe("Listed on Facebook. It is on a different Facebook account than the one signed in to Chrome.");
     expect(facebookCheckText({ ok: false, error: "Facebook asked to sign in again.", sale_recorded: false, listings: {} }))
       .toBe("Facebook asked to sign in again.");
+  });
+});
+
+describe("an answer is said once", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("leaves a gap to the form row it is about, and says only the rest beside List", () => {
+    const gaps = [
+      { field: "photos", message: "Depop keeps 8 photos. The first 8 of 9 are sent.", blocking: false },
+      { field: "depop_specifics.parcelSize", message: "Depop needs a parcel size.", blocking: true },
+    ];
+    const html = render({}, {}, { selected: "depop", onAskChat: vi.fn(), onEditField: vi.fn(),
+      preflight: { marketplaces: { depop: { ready: false, gaps } } } });
+    // Nothing known about the form yet: both are said here, once each.
+    expect(html.match(/Depop keeps 8 photos/g)).toHaveLength(1);
+    expect(html.match(/Depop needs a parcel size/g)).toHaveLength(1);
+  });
+  it("leaves every gap out of this pane once the form says it draws those rows", () => {
+    const gaps = [{ field: "photos", message: "Depop keeps 8 photos. The first 8 of 9 are sent.", blocking: false },
+      { field: "depop_specifics.parcelSize", message: "Depop needs a parcel size.", blocking: true }];
+    expect(saidBesideList(gaps, []).map((gap) => gap.message)).toEqual(gaps.map((gap) => gap.message));
+    expect(saidBesideList(gaps, ["photos"]).map((gap) => gap.message)).toEqual(["Depop needs a parcel size."]);
+    expect(saidBesideList(gaps, ["photos", "depop_specifics.parcelSize"])).toEqual([]);
   });
 });
