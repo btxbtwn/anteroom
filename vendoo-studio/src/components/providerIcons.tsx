@@ -5,7 +5,9 @@
  * OpenAI, ClaudeAI and CursorIcon are copied from T3 Code (MIT, © 2026 T3 Tools
  * Inc.), apps/web/src/components/Icons.tsx. T3 Code has no Xiaomi MiMo mark, so
  * MiMoIcon is the M from the MIMO wordmark on mimo.mi.com (October 2026), drawn
- * in the current text colour like T3's OpenAI mark.
+ * in the current text colour like T3's OpenAI mark. OpenRouterIcon is the glyph
+ * from openrouter.ai/brand/v2 (October 2026), in OpenRouter's light and dark
+ * brand colours.
  */
 import type { FC, SVGProps } from "react";
 
@@ -46,6 +48,16 @@ export const CursorIcon: Icon = ({ className, ...props }) => (
     className={cn("fill-[#26251E] dark:fill-[#EDECEC]", className)}
   >
     <path d="M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z" />
+  </svg>
+);
+
+export const OpenRouterIcon: Icon = ({ className, ...props }) => (
+  <svg
+    {...props}
+    viewBox="0 0 401.4 293.7"
+    className={cn("fill-[#7624F4] dark:fill-[#C8FF00]", className)}
+  >
+    <path d="M303.9475,17.19926c42.79734,0,77.48933,34.69327,77.48933,77.48933s-34.69199,77.48933-77.48933,77.48933l76.86166,76.86244c9.76367,9.76313,2.84903,26.45667-10.95697,26.45667h-220.88335c-71.32686,0-129.14889-57.82202-129.14889-129.14889S77.64197,17.19926,148.96884,17.19926h154.97866ZM148.96884,68.85881c-42.79607,0-77.48933,34.69327-77.48933,77.48933s34.69327,77.48933,77.48933,77.48933,77.48933-34.69327,77.48933-77.48933-34.69327-77.48933-77.48933-77.48933Z" />
   </svg>
 );
 

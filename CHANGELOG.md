@@ -6,12 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.475 — 2026-10-28
+## 0.1.476 — 2026-10-28
 
 - Listing forms are easier to read: fields stop at a comfortable width instead of stretching across a wide window, section headings stand out from field labels, labels and marketplace statuses are larger, and the description box has more room between lines.
 - Fields that take several choices say how many they allow in the empty box ("Choose up to 3"), and the count appears once you pick something.
 - Depop's hashtags show as chips under the description instead of a sentence.
 - The inventory list shows three suggestions with "Show all" for the rest, the search box reads "Search listings" instead of cutting off, the status tabs no longer cut off "Active", and the marketplace logos under each listing are larger.
+
+## 0.1.475 — 2026-10-28
+
+- OpenRouter now has its own mark and keeps the model names OpenRouter gives them, in Settings and the model picker.
+- OpenRouter has a Reasoning setting with the levels the listing model supports. Default leaves the choice to OpenRouter.
 
 ## 0.1.474 — 2026-10-27
 

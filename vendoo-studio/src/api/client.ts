@@ -1044,7 +1044,10 @@ export const api = {
     testAIKey: (id: KeyProviderId) =>
       request<{ ok: boolean; error?: string | null }>(`/settings/ai-keys/${id}/test`, { method: "POST" }),
     aiKeyModels: (id: KeyProviderId) => request<AIKeyModels>(`/settings/ai-keys/${id}/models`),
-    setAIKeyModels: (id: KeyProviderId, models: { vision_model?: string; listing_model?: string }) =>
+    setAIKeyModels: (
+      id: KeyProviderId,
+      models: { vision_model?: string; listing_model?: string; reasoning_effort?: string },
+    ) =>
       request<{ ok: boolean; vision_model?: string; listing_model?: string }>(`/settings/ai-keys/${id}/models`, {
         method: "PUT",
         body: JSON.stringify(models),

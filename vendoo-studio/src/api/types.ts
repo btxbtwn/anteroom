@@ -388,8 +388,12 @@ export interface AIKeyProvider {
 
 export interface AIKeyModels {
   models: string[];
+  /** The provider's own display name for each model id (OpenRouter supplies these). */
+  labels?: Record<string, string>;
   vision_model: string;
   listing_model: string;
+  /** OpenRouter's reasoning levels for the listing model, when it takes one. */
+  reasoning: { options: { value: string; label: string }[]; value: string } | null;
   error: string | null;
 }
 
