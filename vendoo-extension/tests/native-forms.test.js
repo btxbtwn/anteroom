@@ -257,24 +257,33 @@ test('Mercari form follows the sell page sections and order', () => {
     ['', ''],
     ['Product info', 'Title'], ['Product info', 'Description'], ['Product info', 'Category'], ['Product info', 'Brand'],
     ['Product info', 'Condition'], ['Product info', 'Size'],
-    ['Shipping', 'Ships from'], ['Shipping', 'Shipping method'],
-    ['Shipping', 'Weight (lb)'], ['Shipping', 'Weight (oz)'], ['Shipping', 'Will your item fit in a shoebox?'],
-    ['Shipping', 'Length (in)'], ['Shipping', 'Width (in)'], ['Shipping', 'Height (in)'],
+    ['Shipping', 'Ships from:'], ['Shipping', 'Shipping method'],
+    ['Shipping', 'lb'], ['Shipping', 'oz'], ['Shipping', 'Will your item fit in a shoebox?'],
+    ['Shipping', 'Length'], ['Shipping', 'Width'], ['Shipping', 'Height'], ['Shipping', 'Skip dimension input'],
     ['Shipping', 'Shipping label'], ['Shipping', 'Offer buyers free shipping?'],
     ['Pricing', 'Item price'], ['Smart pricing', 'Adjusts price automatically'], ['Smart pricing', 'Minimum price'],
   ]);
   const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
   assert.deepEqual(rows.Condition.options, ['New', 'Like new', 'Good', 'Fair', 'Poor']);
+  assert.equal(rows.Condition.presentation, 'radio-row');
+  assert.equal(rows.Title.placeholder, 'What are you selling?');
+  assert.equal(rows.Title.counter, true);
   assert.deepEqual(rows['Shipping method'].options, ['Prepaid label', 'Ship on your own']);
   assert.deepEqual(rows.Size.options, ['XS (0-2) · Standard', 'XS (0-2) · Petite']);
   assert.deepEqual(rows.Size.option_groups, { 'XS (0-2) · Standard': 'Standard', 'XS (0-2) · Petite': 'Petite' });
-  // Mercari's label picker puts the weight and the box sides side by side.
-  assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label),
-    ['Weight (lb)', 'Weight (oz)', 'Length (in)', 'Width (in)', 'Height (in)']);
+  // One question over lb and oz, each a quarter of the row. The three sides share the next question.
+  assert.equal(rows.lb.group, 'How heavy will the package be?');
+  assert.equal(rows.oz.group, rows.lb.group);
+  assert.deepEqual(form.fields.filter(row => row.width === 'quarter').map(row => row.label),
+    ['Ships from:', 'lb', 'oz', 'Minimum price']);
+  assert.deepEqual(form.fields.filter(row => row.width === 'third').map(row => row.label), ['Length', 'Width', 'Height']);
   assert.deepEqual(rows['Will your item fit in a shoebox?'].options, ['Yes', 'No']);
   // No heading. The page's two lines are the hint, and any image type is accepted.
   assert.deepEqual([form.fields[0].path, form.fields[0].input_type, form.fields[0].help, form.fields[0].accept],
     ['marketplace_photos.mercari', 'photos', 'Add up to 12 photos\nOr drag and drop', undefined]);
+  // A price turns Smart pricing on and fills the 85% floor, as the sell page does.
+  assert.equal(rows['Adjusts price automatically'].value, true);
+  assert.equal(rows['Minimum price'].value, 17);
 });
 
 // Read from Mercari's label picker on 2026-10-27: Yes sends a 14 x 10 x 5 in box, No sends the typed
@@ -283,17 +292,20 @@ test('Mercari package typed on its tab sets the weight and box the labels are re
   const c = loadWorker();
   const listing = { direct_category_ids: { mercari: 1 }, weight_lb: 0, weight_oz: 8, package_dimensions_in: '10x8x4' };
   const rows = Object.fromEntries(clean(call(c, 'mercariEditorForm', listing, MERCARI)).fields.map(row => [row.path, row]));
-  // The rows start from Item Details.
+  // The rows start from Item Details. The shoebox question stays unanswered, so nothing is sent for size.
   assert.deepEqual(['pounds', 'ounces', 'fitsShoebox', 'length', 'width', 'height'].map(key => rows[`mercari_specifics.package.${key}`].value),
     [0, 8, '', 10, 8, 4]);
   assert.equal(c.mercariWeightOz(listing), 8);
-  assert.deepEqual(clean(c.mercariDimensions(listing)), { unit: 'INCH', length: 10, width: 8, height: 4 });
+  assert.deepEqual(clean(c.mercariDimensions(listing)), {});
   const typed = pack => ({ ...listing, mercari_specifics: { package: pack } });
   assert.equal(c.mercariWeightOz(typed({ pounds: 1, ounces: 8 })), 24);
   assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'yes' }))), { unit: 'INCH', length: 14, width: 10, height: 5 });
   assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no', length: 16, width: 12, height: 6 }))),
     { unit: 'INCH', length: 16, width: 12, height: 6 });
-  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no' }))), {});
+  // No, with the inputs still showing Item Details, sends those sides. Skip sends 0 x 0 x 0.
+  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no' }))), { unit: 'INCH', length: 10, width: 8, height: 4 });
+  assert.deepEqual(clean(c.mercariDimensions(typed({ fitsShoebox: 'no', skipDimensions: true }))),
+    { unit: 'INCH', length: 0, width: 0, height: 0 });
 });
 
 test('Depop read-back catches cleared attributes, old sizes and general choices the draft failed to keep', () => {

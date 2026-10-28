@@ -38,7 +38,7 @@ const MERCARI_MASTER_QUERY = `query masterQuery {
 }`;
 const MERCARI_SHIPPING_QUERY = `query availableShippingClassesV2($input: AvailableShippingClassesInput!) {
   availableShippingClassesV2(input: $input) {
-    shippingClasses { id name minWeight maxWeight fee carrier carrierDisplayName requiresDimensions packageSize handlingType rateType }
+    shippingClasses { id name minWeight maxWeight fee carrier carrierDisplayName requiresDimensions packageSize handlingType rateType etaForSeller standardFee nonPromotionalFee }
   }
 }`;
 
@@ -110,15 +110,18 @@ function mercariCatalogListing(listing, master) {
 async function mercariShippingClasses(listing, deadline) {
   if (listing.mercari_specifics?.shippingMethod === 'SOYO') return [];
   const weight = mercariWeightOz(listing), dimensions = mercariDimensions(listing);
-  if (!weight || !mercariCategoryId(listing)) return [];
-  const { length = 0, width = 0, height = 0 } = dimensions;
+  // The picker will not load labels until the shoebox question is answered.
+  // An unanswered package is not the same as Skip, which sends 0 x 0 x 0.
+  if (!weight || !mercariCategoryId(listing) || !dimensions.unit) return [];
+  const { length, width, height } = dimensions;
   const data = await mercariRequest({ operationName: 'availableShippingClassesV2', query: MERCARI_SHIPPING_QUERY,
     variables: { input: { categoryId: mercariCategoryId(listing), packageSize: length * width * height,
       dimension: { length, width, height }, packageWeight: weight } } }, { deadline, retry: true });
   const rows = data.availableShippingClassesV2?.shippingClasses;
   if (!Array.isArray(rows)) throw marketplaceError('Mercari did not return its shipping labels.', { code: 'schema_drift' });
+  const skipped = length === 0 && width === 0 && height === 0;
   return rows.filter(row => Number(row.id) > 0 && Number(row.maxWeight) >= weight
-    && (!row.requiresDimensions || length > 0 && width > 0 && height > 0));
+    && (skipped || !row.requiresDimensions || length > 0 && width > 0 && height > 0));
 }
 
 function mercariShippingListing(listing, classes) {
@@ -206,6 +209,21 @@ function mercariOwnPackage(listing) {
 }
 
 const MERCARI_SHOEBOX = { length: 14, width: 10, height: 5 };
+
+// The package sides from Item Details ("13x10x3" or the form's own), in inches.
+function mercariDetailSides(listing) {
+  const form = listing.form?.overrides?.dimensions || {};
+  let sides = [form.length, form.width, form.height];
+  if (!sides.every(side => Number(side) > 0)) sides = String(listing.package_dimensions_in || '').split(/\s*[x×*]\s*/i);
+  sides = sides.map(Number);
+  return sides.length === 3 && sides.every(side => Number.isFinite(side) && side > 0) ? sides : null;
+}
+
+// The seller's own answer. Item Details never answer it: the page shows no size until they do.
+function mercariShoeboxAnswer(listing) {
+  const own = mercariOwnPackage(listing).fitsShoebox;
+  return own === 'yes' || own === 'no' ? own : '';
+}
 
 function mercariWeightOz(listing) {
   const own = mercariOwnPackage(listing);
@@ -360,27 +378,19 @@ function mercariWantedSize(listing) {
   return String(listing.mercari_specifics?.size || listing.size || '').trim();
 }
 
-// Package dimensions in whole inches, from the form or "13x10x3".
-// "Will your item fit in a shoebox?" Yes sends a 14 x 10 x 5 in box; No sends the
-// sides typed under "How big will the package be?", or none when they are skipped.
+// What Mercari's label picker sends, in inches. Unanswered sends no size (Next stays
+// disabled). Yes sends a 14 x 10 x 5 in box. No sends the sides under "How big will
+// the package be?" (the typed ones, or Item Details when those inputs are still
+// prefilled), or 0 x 0 x 0 after "Skip dimension input".
 function mercariDimensions(listing) {
+  const answer = mercariShoeboxAnswer(listing);
+  if (answer === 'yes') return { unit: 'INCH', ...MERCARI_SHOEBOX };
+  if (answer !== 'no') return {};
   const own = mercariOwnPackage(listing);
-  if (own.fitsShoebox === 'yes') return { unit: 'INCH', ...MERCARI_SHOEBOX };
-  if (own.fitsShoebox === 'no') {
-    const sides = [own.length, own.width, own.height].map(Number);
-    if (sides.every(side => Number.isFinite(side) && side > 0)) {
-      const [length, width, height] = sides;
-      return { unit: 'INCH', length, width, height };
-    }
-    return {};
-  }
-  const form = listing.form?.overrides?.dimensions || {};
-  let sides = [form.length, form.width, form.height];
-  if (!sides.every(side => Number(side) > 0)) {
-    sides = String(listing.package_dimensions_in || '').split(/\s*[x×*]\s*/i);
-  }
-  sides = sides.map(Number);
-  if (sides.length !== 3 || !sides.every(side => Number.isFinite(side) && side > 0)) return {};
+  if (own.skipDimensions === true || own.skipDimensions === 'true') return { unit: 'INCH', length: 0, width: 0, height: 0 };
+  const details = mercariDetailSides(listing) || [];
+  const sides = ['length', 'width', 'height'].map((key, index) => Number((own[key] ?? '') !== '' ? own[key] : details[index]));
+  if (!sides.every(side => Number.isFinite(side) && side > 0)) return {};
   const [length, width, height] = sides;
   return { unit: 'INCH', length, width, height };
 }

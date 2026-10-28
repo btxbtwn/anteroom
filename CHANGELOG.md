@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.471 — 2026-10-27
+
+- On the Mercari tab, package weight is one question, "How heavy will the package be?", with pounds and ounces side by side. Length, width and height stay hidden until you say the item will not fit in a shoebox, and you can skip them. Once the item has a price, Smart pricing shows as on, with a suggested lowest price.
+
 ## 0.1.470 — 2026-10-28
 
 - Depop, Mercari, Poshmark, Sellwild, and eBay now show this item's photos where that marketplace's own page does. You can reorder them and pick which ones that marketplace gets, up to its limit. Depop stays JPEG and PNG.

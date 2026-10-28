@@ -176,12 +176,15 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
     if (!template) return true;
     return field.key === "sellwild_specifics.package.weight" && SELLWILD_WEIGHED_PACKAGES.has(template);
   }
-  // Mercari shows the label, its package questions and the free-shipping choice only with Prepaid label,
-  // the sides only when the package does not fit in a shoebox, and the minimum price only with Smart pricing on.
+  // Mercari shows the label, its package questions and the free-shipping choice only with Prepaid label.
+  // It asks for the sides, or lets you skip them, only once the item does not fit in a shoebox,
+  // and the minimum price only with Smart pricing on.
   if (context.tab === "mercari" && (MERCARI_LABEL_KEYS.has(field.key) || field.key.startsWith("mercari_specifics.package."))) {
     if (shownChoice(context.fields, context.local, context.listing, "mercari_specifics.shippingMethod") === "SOYO") return false;
+    const notShoebox = shownChoice(context.fields, context.local, context.listing, "mercari_specifics.package.fitsShoebox") === "no";
+    if (field.key === "mercari_specifics.package.skipDimensions") return notShoebox;
     if (MERCARI_SIDE_KEYS.has(field.key)) {
-      return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.package.fitsShoebox") !== "yes";
+      return notShoebox && shownChoice(context.fields, context.local, context.listing, "mercari_specifics.package.skipDimensions") !== "true";
     }
     return true;
   }
