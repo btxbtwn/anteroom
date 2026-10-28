@@ -9,6 +9,7 @@ from PIL import Image
 
 from vendoo_studio.routes import photos as photos_route
 from vendoo_studio.services import cover_thumb
+from vendoo_studio.services.photo_store import LocalPhotoStore
 
 
 def _jpeg(width: int, height: int) -> bytes:
@@ -38,7 +39,7 @@ def test_a_private_or_non_https_cover_is_refused():
 
 
 def test_a_public_cover_is_cached_as_a_small_jpeg(tmp_path, monkeypatch):
-    monkeypatch.setattr("vendoo_studio.config.PHOTOS_DIR", str(tmp_path))
+    monkeypatch.setattr("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
     source = _jpeg(1200, 800)
     calls = {"n": 0}
 

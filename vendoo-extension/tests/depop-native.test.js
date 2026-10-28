@@ -296,6 +296,64 @@ test('a completed Depop publish returns the one public product link', async () =
   assert.equal(call(c, 'depopStatusUrl', { products: [{ slug: 'one' }, { slug: 'two' }] }, '123456'), '');
 });
 
+test('a Depop publish that has not started yet is waited for, not called a refusal', async () => {
+  const { c, requests, payload } = page();
+  c.chrome.storage.local.get = async () => ({});
+  c.marketplaceSleep = async () => {};
+  const sent = { ...FULL, tags: [] };
+  const draft = {};
+  let polls = 0;
+  c.fetch = async (url, options = {}) => {
+    requests.push({ url, ...options });
+    const { pathname } = new URL(url);
+    if (pathname.endsWith('/status/')) {
+      polls += 1;
+      // Depop accepts the job first and fills its counts in a few moments later.
+      return reply(200, polls < 4 ? { count_by_status: {} }
+        : { count_by_status: { COMPLETE: 1, PENDING: 0 }, products: [{ slug: 'seller-columbia-xl', draft_id: '123456' }] });
+    }
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/products/') return reply(200, { id: 'job-1' });
+    return reply(200, draft);
+  };
+  withCatalog(c);
+  const fields = await c.depopResolvedFields({ listing: sent, deadline: Date.now() + 30000 });
+  Object.assign(draft, call(c, 'depopDraftWriteBody', sent, fields, [789]), { pictures: [{ id: 789 }], missing_fields: [] });
+  const result = await c.runDepopNative({ payload: { ...payload, listing: sent, action: 'publish', confirm: true, operation_id: 'abc123' } });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.state, 'published');
+  assert.equal(result.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
+  assert.equal(polls, 4);
+  assert.equal(requests.filter(request => request.method === 'POST'
+    && new URL(request.url).pathname === '/presentation/api/v1/drafts/products/').length, 1);
+});
+
+test('a Depop publish job that ended without posting names its reason and leaves the draft to retry', async () => {
+  const { c, requests, payload } = page();
+  c.chrome.storage.local.get = async () => ({});
+  c.marketplaceSleep = async () => {};
+  const sent = { ...FULL, tags: [] };
+  const draft = {};
+  c.fetch = async (url, options = {}) => {
+    requests.push({ url, ...options });
+    const { pathname } = new URL(url);
+    if (pathname.endsWith('/status/')) {
+      return reply(200, { count_by_status: { COMPLETE: 0, PENDING: 0, FAILED: 1 },
+        errors: [{ message: 'This listing needs a shipping method.' }] });
+    }
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/products/') return reply(200, { id: 'job-1' });
+    return reply(200, draft);
+  };
+  withCatalog(c);
+  const fields = await c.depopResolvedFields({ listing: sent, deadline: Date.now() + 30000 });
+  Object.assign(draft, call(c, 'depopDraftWriteBody', sent, fields, [789]), { pictures: [{ id: 789 }], missing_fields: [] });
+  const result = await c.runDepopNative({ payload: { ...payload, listing: sent, action: 'publish', confirm: true, operation_id: 'abc123' } });
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(result.error_code, 'rejected');
+  assert.match(result.error, /Depop could not publish this listing\. This listing needs a shipping method\./);
+  assert.equal(result.draft_url, DRAFT);
+});
+
 test('a completed Depop publish without a slug uses the one matching selling listing', async () => {
   const { c, requests, payload } = page();
   c.fetch = async (url) => {
@@ -640,12 +698,86 @@ test('Depop\'s own missing fields come back by name, safe to retry, with the dra
   assert.ok(requests.every(r => (r.method || 'GET') === 'GET'));
 });
 
+test('a Depop draft that drops its package size is refused, not left to fail at publish', async () => {
+  const { c, payload } = page();
+  c.chrome.storage.local.get = async () => ({});
+  c.marketplaceSleep = async () => {};
+  const sent = { ...FULL, tags: [], form: { ...FULL.form, ships_from_zip: '70115' } };
+  const saved = {};
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    if (pathname === '/api/v1/addresses/') return reply(200, [{ id: 2, postal_code: '70115', last_modified: '2024-01-01T00:00:00Z' }]);
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { country: 'US' });
+    if (pathname.endsWith('/countries.json')) {
+      return reply(200, [{ country: 'United States', countryCode: 'US', address: 'United States', geoLat: 39.3, geoLng: -97.9 }]);
+    }
+    if (pathname === '/presentation/api/v1/shipping/providers/depop/') {
+      return reply(200, [{ id: 'USPS', parcel_sizes: [{ id: 'under_1lb', title: 'Medium', cost: { amount: '1.99' } }] }]);
+    }
+    return reply(200, saved);
+  };
+  withCatalog(c);
+  const fields = await c.depopResolvedFields({ listing: sent, deadline: Date.now() + 30000 });
+  assert.equal(fields.shipping_methods.length, 1);
+  Object.assign(saved, call(c, 'depopDraftWriteBody', sent, fields, [789]),
+    // Depop saved the draft without the package size the revision sent.
+    { pictures: [{ id: 789 }], missing_fields: [], shipping_methods: [] });
+  const result = await c.runDepopNative({ payload: { ...payload, listing: sent, action: 'save_draft', operation_id: 'abc123' } });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /shipping/);
+});
+
+// A saved draft as Depop holds it, with the catalog and shipping reads a save makes.
+function skuDraft({ stored = {} } = {}) {
+  const c = loadWorker();
+  c.AbortSignal = AbortSignal;
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  c.chrome.storage.local.get = async () => ({});
+  c.marketplaceSleep = async () => {};
+  const sent = { ...FULL, tags: [], sku: 'TOPSHOP-6', form: { ...FULL.form, ships_from_zip: '70115' } };
+  const saved = { id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }], missing_fields: [], ...stored };
+  let writes = 0;
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    if (options.method === 'PUT') {
+      writes += 1;
+      const body = JSON.parse(options.body);
+      // Depop takes a SKU once: another listing already holds this one.
+      if (body.sku) return reply(400, { detail: 'SKU is invalid: SKU must be unique' });
+      Object.assign(saved, body, { pictures: (body.pictures || []).map(id => ({ id })) });
+      return reply(200, saved);
+    }
+    return reply(200, saved);
+  };
+  withCatalog(c);
+  const run = async () => c.runDepopNative({ payload: { action: 'save_draft', draft_url: DRAFT, listing: sent, operation_id: 'abc123' } });
+  return { c, run, writes: () => writes, sent };
+}
+
+test('a Depop draft a new SKU collides on is written again without it', async () => {
+  const { c, run, writes, sent } = skuDraft();
+  const result = await run();
+  assert.equal(result.ok, true, result.error);
+  assert.match(result.warning, /TOPSHOP-6/);
+  assert.equal(writes(), 2);
+  assert.equal(call(c, 'depopDraftWriteBody', sent, { sku: '' }, [789]).sku, undefined);
+});
+
+test('a Depop draft that already holds the SKU names what the seller has to clear', async () => {
+  const { c, run } = skuDraft({ stored: { sku: 'TOPSHOP-6' } });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, true);
+  assert.match(result.error, /Clear this draft's SKU/);
+});
+
 test('a boys jacket draft sends Depop\'s category, brand, location, and parcel', async () => {
   const { c, requests, payload } = page();
   payload.listing = {
     ...listing, brand: 'Columbia', department: 'Boys', price: 12,
     depop_specifics: { categoryId: 'kidswear_jackets', parcelSize: 'Medium' },
     marketplace_category_ids: { depop: 'kidswear_jackets' },
+    form: { ships_from_zip: '70115' },
   };
   const brands = [
     { id: 'columbia-sportswear', name: 'Columbia Sportswear', status: 'active' },
@@ -659,10 +791,10 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
     if (path === '/presentation/api/v1/users/me/') return reply(200, { country: 'US' });
     if (path.endsWith('/countries.json')) return reply(200, [{ country: 'United States', countryCode: 'US', address: 'United States', geoLat: 39.3, geoLng: -97.9 }]);
     if (path === '/presentation/api/v1/users/me/settings/shipping/') return reply(200, { shipping_providers: [{ id: 'USPS', active: true }, { id: 'MANUAL', active: false }] });
-    if (path === '/presentation/api/v1/addresses/') {
+    if (path === '/api/v1/addresses/' || path === '/presentation/api/v1/addresses/') {
       return reply(200, [
-        { id: 1, last_modified: '2020-01-01T00:00:00Z' },
-        { id: 2, last_modified: '2024-01-01T00:00:00Z' },
+        { id: 1, postal_code: '70115', last_modified: '2020-01-01T00:00:00Z' },
+        { id: 2, postal_code: '70115', last_modified: '2024-01-01T00:00:00Z' },
       ]);
     }
     if (path === '/presentation/api/v1/shipping/providers/depop/') {
@@ -687,7 +819,6 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
   assert.equal(new URL(quote.url).searchParams.get('item_cost'), '12.00');
   assert.equal(new URL(quote.url).searchParams.get('product_type'), 'jackets');
   assert.equal(new URL(quote.url).searchParams.get('gender'), null);
-  assert.equal(quote.headers['x-country-code'], 'US');
   assert.equal(call(c, 'depopBrandId', brands, 'Columbia'), 'columbia-sportswear');
   assert.equal(call(c, 'depopBrandId', brands, 'Columbia Sportswear'), 'columbia-sportswear');
   const split = [

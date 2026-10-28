@@ -24,6 +24,7 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vendoo_studio.services import photos
+from vendoo_studio.services.photo_store import photo_store
 
 SAVE_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
 PREVIEW_MAX_SIDE = 1600
@@ -136,7 +137,7 @@ def _hex(color: str) -> tuple[int, int, int]:
 
 
 def mask_path(source_filename: str) -> Path:
-    return Path(photos.PHOTOS_DIR) / "masks" / f"{Path(source_filename).stem}.png"
+    return photo_store().cache_dir("masks") / f"{Path(source_filename).stem}.png"
 
 
 def _vision_mask(img: Image.Image) -> Image.Image:
@@ -204,9 +205,10 @@ def foreground_mask(source_filename: str, img: Image.Image) -> Image.Image:
 
 
 def render(source_filename: str, edits: PhotoEdits, *, max_side: int | None = None, crop: bool = True) -> Image.Image:
-    source = Path(photos.PHOTOS_DIR) / source_filename
-    if not source.exists():
-        raise FileNotFoundError(source_filename)
+    try:
+        source = photo_store().local_path(source_filename)
+    except (FileNotFoundError, ValueError):
+        raise FileNotFoundError(source_filename) from None
     img = _source_image(source)
     mask = foreground_mask(source_filename, img) if edits.background else None
     if max_side and max(img.size) > max_side:
@@ -236,9 +238,10 @@ def write_edit(source_filename: str, mime_type: str, edits: PhotoEdits) -> dict:
     fmt = SAVE_FORMATS.get(mime_type)
     if not fmt:
         raise ValueError("This photo format cannot be edited")
-    source = Path(photos.PHOTOS_DIR) / source_filename
-    if not source.exists():
-        raise FileNotFoundError(source_filename)
+    try:
+        source = photo_store().local_path(source_filename)
+    except (FileNotFoundError, ValueError):
+        raise FileNotFoundError(source_filename) from None
     with Image.open(source) as original:
         icc_profile = original.info.get("icc_profile")
     img = render(source_filename, edits)
@@ -251,7 +254,7 @@ def write_edit(source_filename: str, mime_type: str, edits: PhotoEdits) -> dict:
     img.save(buffer, fmt, **options)
     contents = buffer.getvalue()
     stored_name = f"{uuid.uuid4().hex}{source.suffix}"
-    (Path(photos.PHOTOS_DIR) / stored_name).write_bytes(contents)
+    photo_store().put(stored_name, contents)
     return {
         "stored_filename": stored_name,
         "size_bytes": len(contents),
@@ -263,8 +266,7 @@ def write_edit(source_filename: str, mime_type: str, edits: PhotoEdits) -> dict:
 
 def source_meta(source_filename: str) -> dict:
     """Record fields for pointing a photo back at its untouched upload."""
-    path = Path(photos.PHOTOS_DIR) / source_filename
-    contents = path.read_bytes()
+    contents = photo_store().read(source_filename)
     with Image.open(BytesIO(contents)) as img:
         width, height = img.size
     return {
@@ -291,10 +293,10 @@ def save_edits(repo, photo, edits: PhotoEdits):
         try:
             photo = repo.replace_photo_file(photo, meta, source_filename=source, edits=edits.model_dump())
         except Exception:
-            (Path(photos.PHOTOS_DIR) / meta["stored_filename"]).unlink(missing_ok=True)
+            photo_store().delete(meta["stored_filename"])
             raise
         if previous:
-            (Path(photos.PHOTOS_DIR) / previous).unlink(missing_ok=True)
+            photo_store().delete(previous)
             photos.delete_thumbnails(previous)
     return photo
 
@@ -306,6 +308,6 @@ def reset_edits(repo, photo):
             return photo
         previous = photo.stored_filename
         photo = repo.replace_photo_file(photo, source_meta(photo.source_filename), source_filename=None, edits=None)
-        (Path(photos.PHOTOS_DIR) / previous).unlink(missing_ok=True)
+        photo_store().delete(previous)
         photos.delete_thumbnails(previous)
     return photo

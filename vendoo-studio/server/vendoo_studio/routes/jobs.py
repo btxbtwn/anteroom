@@ -8,11 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from pathlib import Path
 
 from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import JobRepo, ConversationRepo, ListingRepo
-from vendoo_studio.config import PHOTOS_DIR
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.models.conversation import Photo
 from vendoo_studio.services.job_snapshot import (
     blocker_fields_for_job,
@@ -833,8 +832,9 @@ def serve_job_photo(job_id: str, photo_id: str, db: Session = Depends(get_db)):
     if not photo:
         raise HTTPException(404, "Photo not found for this job")
 
-    filepath = Path(PHOTOS_DIR) / photo.stored_filename
-    if not filepath.exists():
-        raise HTTPException(404, "Photo file not found")
+    try:
+        filepath = photo_store().local_path(photo.stored_filename)
+    except FileNotFoundError:
+        raise HTTPException(404, "Photo file not found") from None
 
     return FileResponse(str(filepath), media_type=photo.mime_type)

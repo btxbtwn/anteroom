@@ -16,6 +16,7 @@ from vendoo_studio.models.schema import ListingSchema
 from vendoo_studio.models.validation import validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import photos
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.api_job_lock import start_gate
 from vendoo_studio.services.native_marketplaces import running_marketplace
 from vendoo_studio.services.price_markdown import listing_busy
@@ -132,10 +133,10 @@ def _copy_file(name: str, mime_type: str, created_files: list[Path]) -> dict:
     if Path(name).name != name:
         raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422)
     try:
-        meta = photos.process_bytes((Path(photos.PHOTOS_DIR) / name).read_bytes(), name, mime_type)
+        meta = photos.process_bytes(photo_store().read(name), name, mime_type)
+        created_files.append(photo_store().local_path(meta["stored_filename"]))
     except (OSError, ValueError) as exc:
         raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422) from exc
-    created_files.append(Path(photos.PHOTOS_DIR) / meta["stored_filename"])
     return meta
 
 

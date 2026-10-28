@@ -16,6 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
@@ -40,7 +41,7 @@ class EtsyListingsTest(unittest.TestCase):
         self.conv = ConversationRepo(self.db).create(title=LISTING["title"])
         self.rev = ListingRepo(self.db).save_revision(self.conv.id, copy.deepcopy(LISTING), "model")
         self.temp = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(patch.object(etsy_listings, "PHOTOS_DIR", self.temp))
+        self.enterContext(patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(self.temp)))
         for index in range(2):
             name = f"test-{index}.jpg"
             Path(self.temp, name).write_bytes(b"image")

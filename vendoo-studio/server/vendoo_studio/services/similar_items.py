@@ -23,6 +23,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from vendoo_studio.services.chrome_import import MATCH_THRESHOLD, title_similarity, title_tokens
+from vendoo_studio.services.photo_store import photo_store
 
 # Bits two cover hashes may differ by and still look like the same shot.
 PHOTO_DISTANCE = 6
@@ -75,7 +76,6 @@ def difference_hash(path: Path) -> str | None:
 
 def _fingerprints(db: Session, photos: dict[str, str]) -> dict[str, int]:
     """Cover hashes by checksum, computing and saving the ones not seen before."""
-    from vendoo_studio.config import PHOTOS_DIR
     from vendoo_studio.models.similar_item import PhotoFingerprint
 
     known = {
@@ -85,7 +85,10 @@ def _fingerprints(db: Session, photos: dict[str, str]) -> dict[str, int]:
     for checksum, stored in photos.items():
         if checksum in known:
             continue
-        known[checksum] = difference_hash(Path(PHOTOS_DIR) / stored)
+        try:
+            known[checksum] = difference_hash(photo_store().local_path(stored))
+        except (FileNotFoundError, ValueError):
+            continue
         db.add(PhotoFingerprint(checksum=checksum, dhash=known[checksum]))
     db.commit()
     return {checksum: int(value, 16) for checksum, value in known.items() if value}

@@ -27,7 +27,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
-from vendoo_studio.config import BACKUPS_DIR, DATABASE_PATH, PHOTOS_DIR
+from vendoo_studio.config import BACKUPS_DIR, DATABASE_PATH
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.user_settings import read_settings, update_settings
 
 log = logging.getLogger("vendoo_studio.backups")
@@ -240,7 +241,8 @@ def mirror_photos(folder: Path | None = None) -> int:
     if destination_root is None:
         return 0
 
-    source_root = Path(PHOTOS_DIR)
+    # Backups cover the Mac's own photo folder; hosted photos are backed up by Supabase.
+    source_root = photo_store().root
     if not source_root.is_dir():
         return 0
 

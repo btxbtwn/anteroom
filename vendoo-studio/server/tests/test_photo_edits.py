@@ -15,8 +15,9 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-from vendoo_studio.services import photo_edits, photos
+from vendoo_studio.services import photo_edits
 from vendoo_studio.services.photo_edits import CropBox, PhotoEdits
+from vendoo_studio.services.photo_store import LocalPhotoStore
 
 
 def _item_photo(width: int = 400, height: int = 300) -> bytes:
@@ -41,8 +42,7 @@ def env(tmp_path, monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
-    monkeypatch.setattr(photos, "PHOTOS_DIR", str(tmp_path))
-    monkeypatch.setattr("vendoo_studio.routes.photos.PHOTOS_DIR", str(tmp_path))
+    monkeypatch.setattr("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
     repo = ConversationRepo(db)
     conv = repo.create(title="Denim jacket")
     contents = _item_photo()

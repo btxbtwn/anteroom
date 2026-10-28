@@ -12,11 +12,10 @@ import re
 import unicodedata
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 
 import httpx
 
-from vendoo_studio.config import PHOTOS_DIR
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.models.etsy_fields import (
     sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_to_store, is_etsy_digital_listing,
 )
@@ -565,9 +564,10 @@ async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: 
     for rank, photo in enumerate(photos, start=1):
         if photo.id in images:
             continue
-        path = (Path(PHOTOS_DIR) / photo.stored_filename).resolve()
-        if not path.is_relative_to(Path(PHOTOS_DIR).resolve()) or not path.is_file():
-            raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos")
+        try:
+            path = photo_store().local_path(photo.stored_filename)
+        except (FileNotFoundError, ValueError):
+            raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos") from None
         with path.open("rb") as image:
             uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
                                    data={"rank": str(rank)}, files={"image": (path.name, image, photo.mime_type)}, timeout=60)

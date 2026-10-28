@@ -7,11 +7,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import MAX_PHOTO_SIZE_MB, PHOTOS_DIR
+from vendoo_studio.config import MAX_PHOTO_SIZE_MB
 from vendoo_studio.database import get_db
 from vendoo_studio.repositories.queries import ConversationRepo
 from vendoo_studio.services import measure_read
 from vendoo_studio.services.listing_provider import get_photo_provider
+from vendoo_studio.services.photo_store import photo_store
 
 router = APIRouter(tags=["measurements"])
 
@@ -63,5 +64,5 @@ async def read_saved_measurements(conv_id: str, body: ReadSavedRequest, db: Sess
     repo = ConversationRepo(db)
     if not repo.get(conv_id):
         raise HTTPException(404, "Conversation not found")
-    paths = [Path(PHOTOS_DIR) / photo.stored_filename for photo in repo.get_photos(conv_id)]
-    return await _read(provider, [path for path in paths if path.is_file()], body.garment)
+    paths = photo_store().local_paths([photo.stored_filename for photo in repo.get_photos(conv_id)])
+    return await _read(provider, paths, body.garment)

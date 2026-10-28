@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.diagnostics import DiagnosticRun, FieldObservation  # noqa: F401
@@ -35,7 +36,9 @@ JPEG_BYTES = bytes([
 @contextmanager
 def photos_dir(path: str):
     """Point both the photo routes and the wipe at a throwaway directory."""
-    with patch("vendoo_studio.services.photos.PHOTOS_DIR", path):
+    with (
+        patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(path)),
+    ):
         yield
 
 
@@ -222,7 +225,8 @@ class ConversationResetTest(unittest.TestCase):
     def test_reset_does_not_wait_out_a_silent_chrome_for_label_names(self):
         """A Chrome that never answers list_labels must not stall Regenerate.
 
-        Labels are stored as names, so reset never asks Chrome about them.
+        The label catalog only prettifies carried-over labels, so reset reads
+        the cached catalog and never asks Chrome.
         """
         from vendoo_studio.services import vendoo_label_catalog
 

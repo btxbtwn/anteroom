@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.483 — 2026-10-27
+
+- A Depop draft now carries the package size it needs to be posted. Anteroom quoted Depop's shipping when it published but not when it saved the draft, so a draft could be saved without the one field Depop requires, and List left you with a draft Depop never published. Saving and publishing now use the same quote, and a draft that comes back without it is named instead of saved.
+- A Depop publish job Depop ends without posting now says so, in Depop's own words, and leaves the row on Draft so you can List again. A job Depop has accepted but not started yet is waited for instead of being called a failure, so a queued listing no longer turns into Unconfirmed.
+- Depop takes a SKU once. A new draft whose SKU another listing already holds is saved again without it and says so; a draft that already stores that SKU asks you to clear it on Depop. Pasting your own Depop link works too: the address bar shows it ending in `/manage`, and Anteroom now accepts that and keeps the public address.
+
 ## 0.1.482 — 2026-10-28
 
 - Items no longer show a marketplace as "Sold here" when nothing sold there. Vendoo records a sale date of 1970 for a marketplace listing that never sold, and Anteroom was reading it as a real sale: that marketplace could not be delisted, the item could not be listed again, and its relist warning never appeared. Those dates are now ignored, and a real sale date still counts the same as before.

@@ -29,6 +29,7 @@ from vendoo_studio.services.automation_prompt import draft_from_prompt
 from vendoo_studio.services.automation_schedule import advance_after_run, first_due, next_after, normalize_schedule, parse_cron
 from vendoo_studio.services.automation_scheduler import tick
 from vendoo_studio.services.business_assistant import add_message
+from vendoo_studio.services.photo_store import LocalPhotoStore
 
 NOW = datetime(2026, 10, 26, 16, 0, tzinfo=UTC)
 PROMPT = (
@@ -824,13 +825,13 @@ def test_editing_a_photo_cannot_use_a_stale_marketplace_approval(db, client, mon
     from PIL import Image
 
     from vendoo_studio.repositories.queries import ConversationRepo
-    from vendoo_studio.services import photo_edits, photos
+    from vendoo_studio.services import photo_edits
     calls = []
     async def remove(*_args,**_kwargs):
         calls.append("removed")
         return {"ok":True}
     monkeypatch.setattr("vendoo_studio.services.marketplace_delist.delist",remove)
-    monkeypatch.setattr(photos,"PHOTOS_DIR",str(tmp_path))
+    monkeypatch.setattr("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
     buffer = BytesIO()
     Image.new("RGB",(40,30),"gray").save(buffer,"JPEG")
     (tmp_path/"coat.jpg").write_bytes(buffer.getvalue())

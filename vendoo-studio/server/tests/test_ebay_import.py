@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation, Photo
@@ -99,8 +100,7 @@ def imported(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ebay_import.EbayClient, "connect", connect)
     monkeypatch.setattr(ebay_import, "assert_identity", lambda seller: None)
-    monkeypatch.setattr(inventory_import, "PHOTOS_DIR", str(tmp_path))
-    monkeypatch.setattr(photos, "PHOTOS_DIR", str(tmp_path))
+    monkeypatch.setattr("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
     image = BytesIO()
     Image.new("RGB", (16, 12), "red").save(image, format="JPEG")
     downloads = []

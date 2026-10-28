@@ -9,6 +9,8 @@ from vendoo_studio.services.marketplace_identity import listing_id, listing_refe
     ("poshmark", "https://www.poshmark.com/listing/Coat-ABCDEF012345678901234567", "abcdef012345678901234567", "https://poshmark.com/listing/Coat-ABCDEF012345678901234567"),
     ("mercari", "https://mercari.com/us/item/m12345678901/", "m12345678901", "https://www.mercari.com/us/item/m12345678901/"),
     ("depop", "https://depop.com/products/seller-coat/?tracking=private", "seller-coat", "https://www.depop.com/products/seller-coat/"),
+    ("depop", "https://www.depop.com/products/betwixta2dbetweenco-topshop-cami-79f6/manage/",
+     "betwixta2dbetweenco-topshop-cami-79f6", "https://www.depop.com/products/betwixta2dbetweenco-topshop-cami-79f6/"),
     ("sellwild", "https://www.sellwild.com/product/123456/coat", "123456", "https://sellwild.com/product/123456/coat"),
     ("vinted", "https://vinted.com/items/1234567890-coat", "1234567890", "https://www.vinted.com/items/1234567890-coat"),
 ])

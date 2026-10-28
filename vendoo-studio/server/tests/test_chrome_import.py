@@ -16,8 +16,9 @@ from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, inventory_import, photos
+from vendoo_studio.services import browser_bridge, inventory_import
 from vendoo_studio.services.marketplace_delist import listings
+from vendoo_studio.services.photo_store import LocalPhotoStore
 
 POST = "b" * 24
 
@@ -57,8 +58,7 @@ def chrome(tmp_path, monkeypatch):
         return {"ok": True, "listing": copy.deepcopy(listing)} if listing["id"] == payload["listing_id"] else {"ok": False, "error": "missing"}
 
     monkeypatch.setattr(browser_bridge, "request", request)
-    monkeypatch.setattr(inventory_import, "PHOTOS_DIR", str(tmp_path))
-    monkeypatch.setattr(photos, "PHOTOS_DIR", str(tmp_path))
+    monkeypatch.setattr("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
     image = BytesIO()
     Image.new("RGB", (16, 12), "red").save(image, format="JPEG")
 

@@ -20,6 +20,7 @@ from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRe
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import listing_copy, photos
 from vendoo_studio.services.listing_delete import delete_listing
+from vendoo_studio.services.photo_store import LocalPhotoStore
 
 
 @pytest.fixture
@@ -28,7 +29,7 @@ def source(tmp_path, monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
-    monkeypatch.setattr(photos, "PHOTOS_DIR", tmp_path)
+    monkeypatch.setattr("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
     notes = {"sku": "OLD-SKU", "cog": "9", "sellerNotes": "Seller fact", "measurements": {"top": {"length": "25"}},
              "vendooItemId": "vendoo-old", "vendooUrl": "https://web.vendoo.co/app/item/vendoo-old", "vendooSale": {"price": 80},
              "marketplaceMarks": {"ebay": {"status": "SOLD", "url": "https://www.ebay.com/itm/123456789012"}},

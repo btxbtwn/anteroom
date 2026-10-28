@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo
@@ -37,8 +38,7 @@ class RotatePhotoTest(unittest.TestCase):
         self.photos_tmp = tempfile.TemporaryDirectory()
         self.photos_dir = Path(self.photos_tmp.name)
         self.patches = [
-            patch("vendoo_studio.services.photos.PHOTOS_DIR", str(self.photos_dir)),
-            patch("vendoo_studio.routes.photos.PHOTOS_DIR", str(self.photos_dir)),
+            patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(str(self.photos_dir))),
         ]
         for p in self.patches:
             p.start()

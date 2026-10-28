@@ -13,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
@@ -315,7 +316,7 @@ class FixAgentLoopTest(AgentTestBase):
             db = self.Session()
             ConversationRepo(db).add_photo(self.conv_id, "shirt.jpg", "shirt.jpg", "image/jpeg", 100)
             db.close()
-            with patch("vendoo_studio.config.PHOTOS_DIR", tmp):
+            with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(tmp)):
                 events = self.run_agent(VisionProvider([]), "fill these")
         self.assertEqual(events[-1][1], "Looked.")
         user = seen[0][1]["content"]

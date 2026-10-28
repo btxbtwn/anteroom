@@ -9,7 +9,8 @@ from pathlib import Path
 from fastapi import UploadFile
 from PIL import Image, ImageOps
 
-from vendoo_studio.config import PHOTOS_DIR, ALLOWED_PHOTO_MIME, MAX_PHOTO_SIZE_MB
+from vendoo_studio.config import ALLOWED_PHOTO_MIME, MAX_PHOTO_SIZE_MB
+from vendoo_studio.services.photo_store import photo_store
 
 MIME_EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -66,7 +67,6 @@ def process_bytes(contents: bytes, filename: str | None = None, content_type: st
         ext = MIME_EXTENSIONS.get(mime_type, ".jpg")
 
     stored_name = f"{uuid.uuid4().hex}{ext}"
-    filepath = Path(PHOTOS_DIR) / stored_name
 
     checksum = hashlib.sha256(contents).hexdigest()
 
@@ -80,8 +80,8 @@ def process_bytes(contents: bytes, filename: str | None = None, content_type: st
         if mime_type in {"image/jpeg", "image/png", "image/webp"}:
             raise ValueError("File is not a valid image") from exc
 
-    # Invalid downloads must not leave an untracked file on disk.
-    filepath.write_bytes(contents)
+    # Invalid downloads must not leave an untracked file behind.
+    photo_store().put(stored_name, contents)
 
     return {
         "original_filename": filename or stored_name,
@@ -133,22 +133,67 @@ def save_jpeg_thumbnail(contents: bytes, dest: Path, size: int) -> None:
         raise
 
 
+ROTATIONS = {
+    90: Image.Transpose.ROTATE_270,
+    -90: Image.Transpose.ROTATE_90,
+    180: Image.Transpose.ROTATE_180,
+}
+SAVE_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
+
+
+def rotate_file(stored_filename: str, mime_type: str, degrees: int) -> dict:
+    """Write a rotated copy of a stored photo under a new name; ``degrees`` is clockwise.
+
+    The pixels are rewritten rather than flagged with an EXIF orientation, so
+    every consumer — Vendoo uploads, model vision, thumbnails — sees the same
+    picture. The caller swaps the record over and deletes the old file.
+    """
+    if degrees not in ROTATIONS:
+        raise ValueError("Rotate by 90, -90 or 180 degrees")
+    fmt = SAVE_FORMATS.get(mime_type)
+    if not fmt:
+        raise ValueError("This photo format cannot be rotated")
+    store = photo_store()
+    source = store.local_path(stored_filename)
+
+    with Image.open(source) as img:
+        icc_profile = img.info.get("icc_profile")
+        rotated = ImageOps.exif_transpose(img).transpose(ROTATIONS[degrees])
+    options: dict = {"icc_profile": icc_profile} if icc_profile else {}
+    if fmt == "JPEG":
+        if rotated.mode not in ("RGB", "L"):
+            rotated = rotated.convert("RGB")
+        options.update(quality=95, subsampling=0)
+    elif fmt == "WEBP":
+        options.update(quality=95)
+
+    stored_name = f"{uuid.uuid4().hex}{source.suffix}"
+    buffer = BytesIO()
+    rotated.save(buffer, fmt, **options)
+    contents = buffer.getvalue()
+    store.put(stored_name, contents)
+    return {
+        "stored_filename": stored_name,
+        "size_bytes": len(contents),
+        "checksum": hashlib.sha256(contents).hexdigest(),
+        "width": rotated.width,
+        "height": rotated.height,
+    }
+
+
 def thumbnail_path(stored_filename: str, size: int) -> Path:
     stem = Path(stored_filename).stem
-    return Path(PHOTOS_DIR) / "thumbs" / f"{stem}_{size}.jpg"
+    return photo_store().cache_dir("thumbs") / f"{stem}_{size}.jpg"
 
 
 def get_or_create_thumbnail(stored_filename: str, size: int) -> Path:
     """Return a cached square-ish JPEG thumbnail, rendering it on first request."""
-    source = Path(PHOTOS_DIR) / stored_filename
-    if not source.exists():
-        raise FileNotFoundError(stored_filename)
+    source = photo_store().local_path(stored_filename)
 
     target = thumbnail_path(stored_filename, size)
     if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
         return target
 
-    target.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(source) as img:
         img = ImageOps.exif_transpose(img)
         img.thumbnail((size, size), Image.Resampling.LANCZOS)
@@ -176,6 +221,12 @@ def delete_photo_files(photo) -> None:
 
     names = [name for name in (photo.stored_filename, photo.source_filename) if name]
     for name in names:
-        (Path(PHOTOS_DIR) / name).unlink(missing_ok=True)
+        photo_store().delete(name)
         delete_thumbnails(name)
     mask_path(photo.source_filename or photo.stored_filename).unlink(missing_ok=True)
+
+
+def delete_photo_file(stored_filename: str) -> None:
+    """Remove a stored photo and the thumbnails made from it."""
+    photo_store().delete(stored_filename)
+    delete_thumbnails(stored_filename)

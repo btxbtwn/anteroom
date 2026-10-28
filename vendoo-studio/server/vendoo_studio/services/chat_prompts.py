@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import PHOTOS_DIR, skills_dir
+from vendoo_studio.config import skills_dir
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.chat_citations import (
     citations_to_plain_text,
     expand_citations_for_provider,
 )
 from vendoo_studio.services.comp_research import research_sold_comps
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.generation_history import seller_history_prompt
 from vendoo_studio.services.listing_evidence import generation_evidence_prompt
 from vendoo_studio.services.listing_generate import (
@@ -113,7 +113,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
     elif photos:
         provider = get_photo_provider()
         if provider:
-            paths = [str(Path(PHOTOS_DIR) / p.stored_filename) for p in photos]
+            paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]
             # End the read transaction so the session does not hold a pool
             # connection while the model reads photos and researches comps.
             db.commit()
