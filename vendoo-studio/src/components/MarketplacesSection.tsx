@@ -148,8 +148,12 @@ type MarketplaceProps = {
   convId: string; revisionId: string | null; title: string; disabled: boolean; etsyEligible: boolean;
   /** Send a prompt to the listing's chat; absent while chat is busy. */
   onAskChat?: (text: string) => void;
-  /** Open the editor at a listing field, e.g. "price" or "ebay_specifics.category_specifics.Color". */
-  onEditField?: (field: string) => void;
+  /**
+   * Open the editor at a listing field, e.g. "price" or "ebay_specifics.category_specifics.Color".
+   * A marketplace's own answer names the field its way, so the marketplace
+   * comes along: that form holds the field the answer is about.
+   */
+  onEditField?: (field: string, marketplace?: string) => void;
 };
 
 export function MarketplacesLayout({
@@ -475,7 +479,7 @@ export function MarketplacesLayout({
         {gaps.map((gap) => <p key={`${gap.field}:${gap.message}`} className="text-muted-foreground">{gap.message}</p>)}
         <div className="flex flex-wrap items-center gap-1.5">
           {onEditField && fields.map((field) => (
-            <Button key={field} size="xs" variant="ghost" onClick={() => onEditField(field)}>
+            <Button key={field} size="xs" variant="ghost" onClick={() => onEditField(field, marketplace)}>
               Edit {fieldLabel(field)}
             </Button>
           ))}
@@ -507,7 +511,7 @@ export function MarketplacesLayout({
     if (code === "missing_fields" && onEditField) {
       for (const item of draft.error_fields ?? []) {
         buttons.push(<Button key={`edit-${item.field}`} size="xs" variant="ghost" title={item.message}
-          onClick={() => onEditField(item.field)}>Edit {fieldLabel(item.field)}</Button>);
+          onClick={() => onEditField(item.field, marketplace)}>Edit {fieldLabel(item.field)}</Button>);
       }
     }
     if ((code === "missing_fields" || code === "rejected") && onAskChat) {

@@ -65,6 +65,8 @@ import { pathCategoryChoices } from "./categoryTree";
 import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
+import { gapsByField, rowForField } from "./nativeFieldWarnings";
+import type { NativeMarketplace } from "../api/nativeMarketplaces";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
@@ -333,12 +335,12 @@ export function ListingEditor({
     if (!tabs.includes(editTab)) setEditTab("general");
   }, [editTab, tabs]);
 
-  const openBlocker = (field: string) => {
+  const openBlocker = (field: string, marketplace?: string) => {
     if (isEbayInventoryLocationEdit(field)) {
       onEditInventoryLocation?.();
       return;
     }
-    const target = blockerTarget(field);
+    const target = blockerTarget(field, marketplace);
     onReviewTabChange(target.reviewTab);
     setEditTab(tabs.includes(target.tab) ? target.tab : "general");
     setFieldTarget({ field, sequence: Date.now() });
@@ -718,6 +720,15 @@ export function StructuredEditor({
       return previous;
     },
   });
+  // What List would say about a field is said under that field, where the seller
+  // is typing. The same gaps stay beside List, which is what a blocking one holds.
+  const preflight = useQuery({
+    queryKey: ["native-preflight", convId, revisionId],
+    queryFn: () => api.nativeMarketplaces.preflight(convId),
+    enabled: nativeTab && Boolean(revisionId),
+    staleTime: 15_000,
+    placeholderData: (previous) => previous,
+  });
   // The category schema is this form. It is read again when the category
   // changes, and a price or brand edit does not fetch it again.
   const formsQuery = useQuery({
@@ -830,14 +841,15 @@ export function StructuredEditor({
   const reachedTarget = React.useRef<number | null>(null);
   React.useEffect(() => {
     if (!target || reachedTarget.current === target.sequence) return;
-    const key = matchingEditorField(fields, target.field);
+    // A marketplace's answer can name the listing field its form row comes from.
+    const key = matchingEditorField(fields, target.field) ?? rowForField(tab, target.field, fields);
     if (!key) return;
     const input = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-field]") || [])].find((element) => element.dataset.listingField === key);
     if (!input) return;
     reachedTarget.current = target.sequence;
     input.scrollIntoView({ block: "center" });
     input.focus();
-  }, [target, fields]);
+  }, [target, fields, tab]);
 
   React.useEffect(() => {
     const init: Record<string, string | string[]> = {};
@@ -928,6 +940,8 @@ export function StructuredEditor({
   const viewContext = { tab, listing, local, fields, categoryStale };
   const viewFields = fields.map((field) => presentNativeField(field, viewContext));
   const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
+  const fieldWarnings = gapsByField(tab,
+    nativeTab ? preflight.data?.marketplaces?.[tab as NativeMarketplace]?.gaps ?? [] : [], renderedFields);
   const formNotes = nativeTab
     ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing)]
     : [];
@@ -1193,6 +1207,8 @@ export function StructuredEditor({
                   ))}
                   {control(f)}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
+                  {(fieldWarnings.get(f.key) ?? []).map((message) =>
+                    <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
                   {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}

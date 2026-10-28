@@ -46,10 +46,13 @@ function formCategoryMarket(field: string): string | undefined {
   return marketplace && FORM_CATEGORY_MARKETS.has(marketplace) ? marketplace : undefined;
 }
 
-export function blockerTarget(field: string): { reviewTab: "input" | "forms"; tab: string; field: string } {
+export function blockerTarget(field: string, marketplace?: string): { reviewTab: "input" | "forms"; tab: string; field: string } {
   if (field === "photos") return { reviewTab: "input", tab: "general", field };
-  const marketplace = field.match(/^([a-z]+)_specifics(?:\.|$)/)?.[1] ?? formCategoryMarket(field);
-  return { reviewTab: "forms", tab: marketplace || "general", field };
+  // One marketplace's own answer about a field opens that marketplace's form,
+  // where the answer and the field it is about both are.
+  if (marketplace) return { reviewTab: "forms", tab: marketplace, field };
+  const named = field.match(/^([a-z]+)_specifics(?:\.|$)/)?.[1] ?? formCategoryMarket(field);
+  return { reviewTab: "forms", tab: named || "general", field };
 }
 
 export function matchingEditorField(fields: { key: string }[], target: string): string | undefined {

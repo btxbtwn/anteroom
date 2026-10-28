@@ -382,7 +382,7 @@ Before outputting ANY listing, verify:
 - [ ] **Petite size normalized:** petite codes such as `PS` are mapped using exact platform-supported values instead of being flattened to plain small
 - [ ] **Depop specifics populated:** source, age, style, type, fit, material, occasion, and size_grouping when supportable
 - [ ] **Etsy specifics populated:** who_made, what_is, when_made, materials, tags
-- [ ] **Poshmark specifics populated:** originalPrice is 0
+- [ ] **Poshmark fields:** originalPrice is 0, and primaryColor/secondaryColor are colors on Poshmark's list (up to two)
 - [ ] **Depop specifics populated:** source, age, style (3 items)
 - [ ] **All marketplace fields:** Reference `vendoo_listing_template.md` for complete field list
 
@@ -409,6 +409,10 @@ Before outputting ANY listing, verify:
 - Original price is always 0
 - 3 Style Tags maximum
 - NWT toggle for new items
+- Color is one of Poshmark's own, at most two: Black, Blue, Brown, Cream, Gold, Gray, Green, Orange, Pink, Purple, Red, Silver, Yellow, Tan, White
+- A shade Poshmark does not list is left off the listing, so write the closest listed color: Navy and Teal are Blue, Grey and Charcoal are Gray, Beige is Tan, Ivory is Cream, Olive is Green, Burgundy and Maroon are Red, Mustard is Yellow
+- Listing price is whole dollars and at least $3; Poshmark lists cents rounded to the nearest dollar
+- Title is at most 80 characters, description at most 1,500, Listing SKU at most 50, Other Info at most 500
 
 **Depop:**
 - NO title field (uses description)
