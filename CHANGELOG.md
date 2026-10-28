@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.462 — 2026-10-27
+## 0.1.463 — 2026-10-28
 
 - Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
+
+## 0.1.462 — 2026-10-28
+
+- A List everywhere button at the bottom of the marketplace list lists the item on every marketplace that's ready, after one confirmation that names them. Marketplaces still missing details are left out and named so you can finish them.
 
 ## 0.1.461 — 2026-10-28
 
