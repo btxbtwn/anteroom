@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.470 — 2026-10-28
+
+- The Depop tab now follows Depop’s sell page: the description placeholder, the 1,000-character counter and the hashtag counter, US$ on the price, your shipping address, and suggested package sizes. List sends the same package size Depop’s page would. Worldwide shipping’s price appears, with US$, only when you turn that offer on.
+- The Sellwild tab shows the fee and what you earn, your discounts with none picked until you choose one, and packages grouped the way Sellwild groups them. A vehicle still shows Vehicle Shipping and no package. A discount you pick is applied after the listing is live.
+
 ## 0.1.469 — 2026-10-28
 
 - Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.

@@ -545,7 +545,8 @@ export interface MarketplaceFormField {
   label: string;
   value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations";
+  /** "note" is text the marketplace's page shows with no control: its label and help. */
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations" | "note";
   inventory_groups?: NativeInventoryGroup[];
   variation_aspects?: EbayVariationAspect[];
   min_value?: number;
@@ -578,12 +579,22 @@ export interface MarketplaceFormField {
   width?: "half" | "quarter";
   /** True when choosing a different category adds or removes this row. */
   category_specific?: boolean;
+  /** The marketplace's placeholder text inside the field. */
+  placeholder?: string;
+  /** Text before the value, such as "US$". */
+  prefix?: string;
+  /** Show the characters left, as the marketplace's page does. */
+  counter?: boolean;
+  /** Depop's "Hashtags: N" remaining count, beside the character counter. */
+  hashtag_max?: number;
 }
 
 /** A marketplace's form for one listing. ``known`` is false when no schema is cached. */
 export interface MarketplaceForm {
   marketplace: string;
   native?: boolean;
+  /** Labels are exactly the page's, required markers included, so none is added. */
+  page_labels?: boolean;
   notes?: string[];
   category_id: string;
   known: boolean;

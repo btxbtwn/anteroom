@@ -105,11 +105,62 @@ function depopBrandId(brands, name) {
   return depopOtherId(rows);
 }
 
-// Depop's parcel titles are the same words Anteroom stores (Small, Medium, …).
+// The sell page asks Depop for sizes with the category's group and product type.
+// Gender is only on men's and women's; kids' and everything else leave it off.
+function depopShippingParams(category) {
+  const params = new URLSearchParams({ ids: 'USPS' });
+  if (category?.group) params.set('group', category.group);
+  const productType = category?.productType || category?.product_type;
+  if (productType) params.set('product_type', productType);
+  if (category?.department === 'menswear') params.set('gender', 'male');
+  else if (category?.department === 'womenswear') params.set('gender', 'female');
+  return params;
+}
+
+// One parcel row as the sell page lists it: the id it posts, the title in the
+// menu, the weight line under that title, and whether Depop suggested it.
+function depopParcelRows(payload) {
+  const providers = Array.isArray(payload) ? payload : payload?.objects || (payload ? [payload] : []);
+  const listed = providers.some(row => row?.parcel_sizes || row?.parcelSizes)
+    ? providers
+    : [{ parcel_sizes: providers.filter(row => row?.title || row?.id) }];
+  const rows = [];
+  for (const provider of listed) {
+    const sizes = provider?.parcel_sizes || provider?.parcelSizes || [];
+    const suggestedId = String(provider?.suggested_parcel_size || provider?.recommended_parcel_size || provider?.suggestedParcelSize || '');
+    for (const size of sizes) {
+      const title = String(size?.title || size?.name || '').trim();
+      const id = String(size?.id ?? title).trim();
+      if (!title || !id) continue;
+      const subtitle = String(size?.subtitle || size?.sub_title || size?.description || size?.content || '').trim();
+      const suggested = size?.suggested === true || size?.recommended === true || size?.is_suggested === true
+        || (suggestedId !== '' && suggestedId === id);
+      rows.push({ id, title, subtitle, suggested, cost: size?.cost });
+    }
+  }
+  return rows;
+}
+
+// The parcel the draft posts. A saved title or id wins; otherwise Depop's suggestion.
 function depopParcelSize(sizes, listing) {
+  const rows = depopParcelRows(sizes);
   const wanted = String(listing?.depop_specifics?.parcelSize || listing?.depop_specifics?.parcel_size || '').trim().toLowerCase();
-  if (!wanted || !Array.isArray(sizes)) return null;
-  return sizes.find(size => String(size?.title || '').trim().toLowerCase() === wanted) || null;
+  if (wanted) return rows.find(size => size.title.toLowerCase() === wanted || size.id.toLowerCase() === wanted) || null;
+  return rows.find(size => size.suggested) || null;
+}
+
+// The ship-from line on the sell page: name, street, city, ST ZIP, country.
+function depopShipFromLine(row) {
+  if (!row || typeof row !== 'object') return '';
+  const text = value => String(value ?? '').trim();
+  const name = text(row.name || row.name_on_address || [row.first_name, row.last_name].filter(Boolean).join(' '));
+  const street = text(row.address || row.line_1 || row.line1 || row.address1 || row.street);
+  const city = text(row.city || row.town || row.locality);
+  const state = text(row.state || row.province || row.state_code || row.region);
+  const zip = text(row.postal_code || row.postalCode || row.zip_code || row.zip);
+  const country = text(row.country_code || row.country || row.countryCode);
+  const place = [city, [state, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  return [name, street, place, country].filter(Boolean).join(', ');
 }
 
 // The seller's country as Depop's listing site stores it: name, code, and
@@ -133,8 +184,9 @@ async function depopListingFields(request, listing, deadline) {
   const fields = {};
   const category = depopCategoryFields(listing);
   if (category) Object.assign(fields, category);
+  let attributes = null;
   try {
-    const attributes = await request('GET', '/presentation/api/v1/attributes/');
+    attributes = await request('GET', '/presentation/api/v1/attributes/');
     const brand = depopBrandId(attributes?.brand, depopBrandText(listing));
     if (brand) fields.brand = brand;
   } catch { /* The publish check names a missing brand. */ }
@@ -151,16 +203,19 @@ async function depopListingFields(request, listing, deadline) {
       .sort((a, b) => String(b.last_modified || '').localeCompare(String(a.last_modified || '')))[0];
     const price = Number(listing?.price);
     if (provider && from && fields.country_code && Number.isFinite(price)) {
-      const params = new URLSearchParams({
-        ids: String(provider.id), item_cost: price.toFixed(2), item_currency: 'USD',
+      const catalogCategory = attributes ? depopCategory(listing, attributes) : null;
+      const params = depopShippingParams(catalogCategory || {
+        product_type: category?.product_type,
+        department: category?.is_kids ? 'kidswear' : category?.gender === 'male' ? 'menswear' : category?.gender === 'female' ? 'womenswear' : '',
       });
-      if (category?.product_type) params.set('product_type', category.product_type);
-      if (category?.gender) params.set('gender', category.gender);
+      params.set('ids', String(provider.id));
+      params.set('item_cost', price.toFixed(2));
+      params.set('item_currency', 'USD');
       const quoted = await request('GET', `/presentation/api/v1/shipping/providers/depop/?${params}`, undefined, {
         'x-country-code': fields.country_code,
       });
       const quote = (Array.isArray(quoted) ? quoted : []).find(row => row?.id === provider.id);
-      const size = depopParcelSize(quote?.parcel_sizes, listing);
+      const size = depopParcelSize(quote?.parcel_sizes || quote?.parcelSizes, listing);
       if (size?.id) {
         fields.shipping_methods = [{
           payer: 'buyer', parcel_size: String(size.id), shipping_provider_id: String(provider.id),
@@ -472,13 +527,14 @@ async function depopResolvedFields(payload) {
   if (sku.length > 50) missing.push({ field: 'depop_specifics.sku', needs: 'a SKU of 50 characters or fewer' });
   fields.international_shipping_cost = worldwide?.enabled === true ? internationalPrice.toFixed(2) : null;
   const parcelLabel = String(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size || '').trim();
-  if (!parcelLabel) missing.push({ field: 'parcel_size', needs: 'a parcel size' });
   if (missing.length) throw marketplaceMissing('depop', missing);
   const from = depopAddress(listing, await depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', payload.deadline));
-  const providers = await depopAccountRead(`/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD&itemCost=${encodeURIComponent(String(price))}`,
-    'parcel sizes', payload.deadline);
-  const parcels = (Array.isArray(providers) ? providers : providers?.objects || []).flatMap(provider => provider?.parcelSizes || provider?.parcel_sizes || []);
-  const parcel = parcels.find(entry => marketplaceNameKey(entry?.title) === marketplaceNameKey(parcelLabel));
+  const params = depopShippingParams(category);
+  params.set('item_cost', Number(price).toFixed(2));
+  params.set('item_currency', 'USD');
+  const providers = await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', payload.deadline);
+  const parcels = depopParcelRows(providers);
+  const parcel = depopParcelSize(parcels, listing);
   if (!from) {
     const zip = String(listing.form?.ships_from_zip || '').replace(/\D/g, '').slice(0, 5);
     missing.push({ field: 'address', needs: zip

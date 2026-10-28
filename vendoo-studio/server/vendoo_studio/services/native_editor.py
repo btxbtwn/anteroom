@@ -27,7 +27,9 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     from vendoo_studio.routes.extension import extension_manager
 
     if marketplace == "sellwild":
-        return sellwild_form(snapshot, conv_id, db, ship_from=await _sellwild_ship_from(extension_manager.connected, snapshot))
+        session = await _sellwild_session(extension_manager.connected, snapshot)
+        return sellwild_form(snapshot, conv_id, db, ship_from=session["ship_from"], coupons=session["coupons"],
+                             default_parcel=session["default_parcel"])
 
     if not extension_manager.connected:
         raise NativeMarketplaceError(409, "Connect Chrome to load this marketplace’s current form.")
@@ -233,18 +235,21 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
     return rows
 
 
-async def _sellwild_ship_from(connected: bool, snapshot: dict) -> str | None:
-    """The Shipping From card Sellwild's sell page shows. None when Chrome cannot read it."""
+async def _sellwild_session(connected: bool, snapshot: dict) -> dict:
+    """The sell page's address card, coupons, and profile package. Address is None when Chrome cannot read it."""
+    empty = {"ship_from": None, "coupons": [], "default_parcel": ""}
     if not connected:
-        return None
+        return empty
     try:
         answer = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form",
                                               {"marketplace": "sellwild", "listing": snapshot}, timeout=15)
     except browser_bridge.BrowserBridgeError:
-        return None
+        return empty
     if not isinstance(answer, dict) or not answer.get("ok"):
-        return None
-    return str(answer.get("ship_from") or "")
+        return empty
+    coupons = answer.get("coupons") if isinstance(answer.get("coupons"), list) else []
+    return {"ship_from": str(answer.get("ship_from") or ""), "coupons": coupons,
+            "default_parcel": str(answer.get("default_parcel") or "")}
 
 
 def _ship_from_row(ship_from: str | None, section: str) -> dict:
@@ -255,7 +260,44 @@ def _ship_from_row(ship_from: str | None, section: str) -> dict:
                  section=section, **({"help": help_text} if help_text else {}))
 
 
-def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | None = None) -> dict:
+def _sellwild_money(amount: float) -> str:
+    return f"${amount:,.2f}"
+
+
+def _sellwild_discount(coupons: list, selected) -> dict:
+    """The pricing section's discount chips. None are selected until the seller picks one."""
+    chosen_ids = {str(item) for item in selected} if isinstance(selected, list) else set()
+    options = []
+    for row in coupons:
+        if not isinstance(row, dict) or row.get("id") is None:
+            continue
+        name = str(row.get("name") or "").strip()
+        kind = str(row.get("discountType") or row.get("discount_type") or "")
+        raw = row.get("discountValue") if row.get("discountValue") is not None else row.get("discount_value")
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            number = None
+        if kind == "percentage" and number is not None:
+            label = f"{number:g}%"
+        elif number is not None:
+            label = _sellwild_money(number)
+        else:
+            label = name or str(row["id"])
+        if name and name not in label:
+            label = f"{label} {name}"
+        options.append({"id": str(row["id"]), "label": label})
+    if not options:
+        return field("sellwild.note.discount", "Sell it faster with a discount", "", input_type="note",
+                     help="Manage Discounts", section="Name Your Price (USD)")
+    saved = [row["id"] for row in options if row["id"] in chosen_ids]
+    return field("sellwild_specifics.couponIds", "Sell it faster with a discount", saved, multi=True, selection_only=True,
+                 options=[row["label"] for row in options], option_values={row["label"]: row["id"] for row in options},
+                 options_source="marketplace", help="Manage Discounts", section="Name Your Price (USD)")
+
+
+def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | None = None,
+                  coupons: list | None = None, default_parcel: str = "") -> dict:
     """Sellwild's sell page (sellwild.com/sell, read 2026-10-27; signed in), section by section and in its order."""
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
     from vendoo_studio.services.sellwild_listing import MAX_PRICE, VEHICLE_CATEGORIES, chosen, package_pounds, package_sides, sellwild_catalog
@@ -272,11 +314,22 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
 
     # The category picker shows "Group | Category" once a category is picked.
     categories = [{"id": row["id"], "label": row["label"].replace(" > ", " | ", 1)} for row in catalog["categories"]]
+    try:
+        price_amount = float(snapshot.get("price"))
+    except (TypeError, ValueError):
+        price_amount = None
+    fee = round(price_amount * 0.10, 2) if price_amount is not None else None
     fields = [
-        field("sellwild_specifics.title", "What are you selling?", _shared(snapshot, "sellwild", "title"), required=True,
+        field("sellwild_specifics.title", "What are you selling? (Required)", _shared(snapshot, "sellwild", "title"), required=True,
               max_length=255, section="Add a Title"),
         field("price", "Price", snapshot.get("price"), required=True, input_type="number", min_value=5, max_value=MAX_PRICE,
-              section="Name Your Price (USD)"),
+              prefix="$", section="Name Your Price (USD)"),
+        field("sellwild.note.fee", "Sellwild Fee", "", input_type="note", section="Name Your Price (USD)",
+              help=(f"{_sellwild_money(fee)}. " if fee is not None else "") + "Sellwild fee is 10% of sold price."),
+        field("sellwild.note.earn", "You Earn", "", input_type="note", section="Name Your Price (USD)",
+              help=(f"{_sellwild_money(round(price_amount - fee, 2))}. " if fee is not None else "")
+              + "What reaches your Stripe account when you approve the order. Stripe then pays it out to your bank."),
+        _sellwild_discount(coupons or [], details.get("couponIds")),
         field("sellwild_specifics.description", "Describe your item (Optional)", _shared(snapshot, "sellwild", "description"),
               input_type="textarea", section="Add Details"),
         choice("sellwild_specifics.nativeCategoryId", "Category", picks["category_id"], categories, "Add Details", required=True),
@@ -290,11 +343,18 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
                       for key, label, extra in (("vin", "Vehicle Identification Number", {}),
                                                 ("mileage", "Mileage", {"input_type": "number", "min_value": 1})))
         fields.append(_ship_from_row(ship_from, "Vehicle Shipping"))
-        return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
-                "fields": fields}
+        return {"marketplace": "sellwild", "native": True, "known": True, "page_labels": True,
+                "category_id": str(picks["category_id"] or ""), "fields": fields}
     fields.append(_ship_from_row(ship_from, "Item Shipping"))
-    # The package list: Custom Package Dimensions, the four flat-rate boxes, then "Add other packaging".
-    template = str(details.get("parcelTemplate") or "")
+    # The package list: Custom Package Dimensions, the four featured boxes, then "Add other packaging".
+    # A profile default applies only when this listing has not chosen a package.
+    known = {row["id"] for row in catalog["parcel_templates"]}
+    if "parcelTemplate" in details:
+        template = str(details.get("parcelTemplate") or "")
+    elif default_parcel in known:
+        template = default_parcel
+    else:
+        template = ""
 
     def package_label(row: dict) -> str:
         sides = [row[side] for side in ("length", "width", "height")]
@@ -302,10 +362,12 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
             return row["label"]
         return f"{row['label']} ({' × '.join(f'{side:g}' for side in sides)} in)"
 
-    packages = [{"id": "", "label": "Custom Package Dimensions"},
-                *({"id": row["id"], "label": package_label(row)} for row in catalog["parcel_templates"])]
-    fields.append(choice("sellwild_specifics.parcelTemplate", "Package", template, packages, "Item Shipping",
-                         category_specific=True))
+    packages = [{"id": "", "label": "Custom Package Dimensions", "featured": True},
+                *({**row, "label": package_label(row)} for row in catalog["parcel_templates"])]
+    package_field = choice("sellwild_specifics.parcelTemplate", "Package", template, packages, "Item Shipping",
+                           category_specific=True)
+    package_field["option_groups"] = {row["label"]: "Add other packaging" for row in packages if not row.get("featured")}
+    fields.append(package_field)
     # Weight shows for every package that is not flat rate; the sides only for custom dimensions.
     # They start from the package in Item Details and are typed here, as on Sellwild's page.
     pounds = package_pounds(snapshot)
@@ -317,5 +379,5 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
     fields.extend(field(f"sellwild_specifics.package.{key}", label, value, input_type="number", min_value=0,
                         category_specific=True, section="Item Shipping", width="quarter")
                   for key, label, value in measured)
-    return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
-            "fields": fields}
+    return {"marketplace": "sellwild", "native": True, "known": True, "page_labels": True,
+            "category_id": str(picks["category_id"] or ""), "fields": fields}

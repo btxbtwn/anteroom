@@ -66,6 +66,7 @@ import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisib
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button, InlineButton } from "./ui/button";
 import { Input } from "./ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Spinner } from "./ui/spinner";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
@@ -113,6 +114,10 @@ interface EditorField {
   categorySpecific?: boolean;
   /** The marketplace form's heading for this field. */
   section?: string;
+  placeholder?: string;
+  prefix?: string;
+  counter?: boolean;
+  hashtagMax?: number;
   optionGroups?: Record<string, string>;
   width?: "half" | "quarter";
 }
@@ -808,8 +813,9 @@ export function StructuredEditor({
       disabled={f.locked} onChange={(choice) => commitField(f.key, choice.label)} />;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
+    if (f.type === "note") return null;
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
-      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} placeholder={f.placeholder} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (multiSelectControl(f)) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
@@ -833,23 +839,30 @@ export function StructuredEditor({
         />
       );
     }
-    return (
-      <Input
-        nativeInput
-        id={id}
-        data-listing-field={f.key}
-        type={f.type || "text"}
-        min={f.minValue}
-        max={f.maxValue}
-        step={f.type === "number" ? f.step ?? "any" : undefined}
-        readOnly={f.locked}
-        disabled={f.selectionOnly && !f.options?.length}
-        maxLength={f.maxLength ?? undefined}
-        value={text}
-        onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }}
-        onBlur={() => handleBlur(f.key)}
-      />
-    );
+    const inputProps = {
+      id,
+      "data-listing-field": f.key,
+      type: f.type || "text",
+      min: f.minValue,
+      max: f.maxValue,
+      step: f.type === "number" ? f.step ?? "any" : undefined,
+      readOnly: f.locked,
+      disabled: f.selectionOnly && !f.options?.length,
+      maxLength: f.maxLength ?? undefined,
+      placeholder: f.placeholder,
+      value: text,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); },
+      onBlur: () => handleBlur(f.key),
+    };
+    if (f.prefix) {
+      return (
+        <InputGroup>
+          <InputGroupAddon><span className="text-muted-foreground">{f.prefix}</span></InputGroupAddon>
+          <InputGroupInput nativeInput {...inputProps} />
+        </InputGroup>
+      );
+    }
+    return <Input nativeInput {...inputProps} />;
   };
   // Long text and the category path need the full row. A marketplace title is
   // stored under that form, so the leaf is what still makes it full width.
@@ -865,7 +878,9 @@ export function StructuredEditor({
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
-        const filled = section.fields.filter((f) => {
+        // Page text with no control (a note) is not something to fill.
+        const inputs = section.fields.filter((f) => f.type !== "note");
+        const filled = inputs.filter((f) => {
           if (f.type === "inventory" || f.type === "variations") {
             const stored = resolvedEditorValue(f, listing);
             if (Array.isArray(stored)) return stored.length > 0;
@@ -879,7 +894,7 @@ export function StructuredEditor({
             key={section.id}
             title={section.title}
             titleId={`listing-section-${tab}-${section.id}`}
-            meta={section.id === "listing" ? null : `${filled} of ${section.fields.length} filled`}
+            meta={section.id === "listing" || !inputs.length ? null : `${filled} of ${inputs.length} filled`}
           >
             {/* A marketplace's own page layout uses its four-part rows; the general form spreads out when wide. */}
             <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-4" : "grid-cols-2 @4xl:grid-cols-3")}>
@@ -889,6 +904,10 @@ export function StructuredEditor({
                   : fullWidth(f) && "col-span-full")}>
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
                   {control(f)}
+                  {((f.counter && f.maxLength != null) || f.hashtagMax != null) && <p className="mt-1 flex justify-end gap-3 text-xs text-muted-foreground tabular-nums">
+                    {f.hashtagMax != null && <span>Hashtags: {Math.max(0, f.hashtagMax - (formFieldText(local[f.key]).match(/#[^\s#]+/g) || []).length)}</span>}
+                    {f.counter && f.maxLength != null && <span>{Math.max(0, f.maxLength - formFieldText(local[f.key]).length)}</span>}
+                  </p>}
                   {f.help && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
@@ -1269,7 +1288,7 @@ function schemaFieldsForTab(
     clears: field.clears,
     help: field.help,
     valueConstraints: field.value_constraints,
-    label: field.required ? `${field.label} *` : field.label,
+    label: field.required && !form.page_labels ? `${field.label} *` : field.label,
     required: field.required,
     multi: field.multi,
     selectionOnly: form.native ? field.selection_only : field.selection_only || field.options_source === "reference"
@@ -1284,6 +1303,10 @@ function schemaFieldsForTab(
     ...(field.section ? { section: field.section } : {}),
     ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
+    ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+    ...(field.prefix ? { prefix: field.prefix } : {}),
+    ...(field.counter ? { counter: true } : {}),
+    ...(field.hashtag_max != null ? { hashtagMax: field.hashtag_max } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),
   }));
 }

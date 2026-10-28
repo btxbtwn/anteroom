@@ -121,7 +121,7 @@ function poshmarkEditorForm(listing, catalog, display, styleTags = [], shippingD
   return { marketplace: 'poshmark', native: true, known: true, category_id: poshmarkDirectId(resolved), fields };
 }
 
-function depopEditorForm(listing, attributes, parcels = []) {
+function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
   const category = depopCategory(listing, attributes);
   const choices = [];
   for (const group of attributes.group || []) {
@@ -146,14 +146,11 @@ function depopEditorForm(listing, attributes, parcels = []) {
   const pageChoices = (definition, known) => (definition?.attributes || [])
     .filter(row => live(row) && known.has(row.id) && depopPageName(row))
     .map(row => ({ label: depopPageName(row), value: row.id }));
-  const full = depopDescription(listing);
-  const base = depopBaseDescription(listing).slice(0, DEPOP_MAX_DESCRIPTION);
-  const hashtags = full.startsWith(base) ? full.slice(base.length).trim() : '';
-  // Depop's sell page, top to bottom. Hashtags go at the end of the description,
-  // and the page names its field labels in plain English ("Body fit").
+  // Depop's sell page, top to bottom. The page names its field labels in plain
+  // English ("Body fit") and does not mark them with an asterisk.
   const fields = [
     { ...nativeEditorBase(listing, { marketplace: 'depop', title: false, maxDescription: DEPOP_MAX_DESCRIPTION })[0],
-      ...(hashtags ? { help: `List adds the hashtags ${hashtags} to the end.` } : {}) },
+      placeholder: 'eg. small grey Nike t-shirt, only worn a few times', counter: true, hashtag_max: DEPOP_MAX_HASHTAGS },
     nativeEditorChoice('direct_category_ids.depop', 'Category', depopDirectId(category), choices,
       { required: true, clears: ['depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'] }),
   ];
@@ -180,6 +177,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
     (set.sizes || []).map(row => ({ label: depopName(row), value: row.id })), { required: true, category_specific: true }));
   fields.push(
     nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
+    nativeEditorField('depop.note.sku', 'Learn more about SKUs', '', { input_type: 'note' }),
     nativeEditorField('depop_specifics.sku', 'SKU', specifics.sku ?? listing.sku ?? '', { max_length: 50 }),
   );
   for (const key of ['source', 'age', 'style']) {
@@ -191,19 +189,32 @@ function depopEditorForm(listing, attributes, parcels = []) {
       { multi: true, max_values: Math.max(1, Number(attr?.max_selection) || 3) }));
   }
   const [price] = nativeEditorBase(listing, { title: false, minPrice: 1, maxPrice: 9999999999.99 }).filter(row => row.path === 'price');
-  fields.push({ ...price, label: 'Item price' },
+  const sizes = depopParcelRows(parcels);
+  const suggested = sizes.find(row => row.suggested);
+  const parcelValue = specifics.parcelSize || specifics.parcel_size || suggested?.title || '';
+  const parcelGroups = suggested ? Object.fromEntries(sizes.map(row => [row.title, row.suggested ? 'Suggested' : 'Change size'])) : {};
+  fields.push({ ...price, label: 'Item price', prefix: 'US$' },
+  nativeEditorField('depop.note.fees', 'No selling fees.', '', { input_type: 'note' }),
+  nativeEditorField('depop.note.boost', 'Learn more about boosting', '', { input_type: 'note' }),
   // Off unless the seller turns it on: Depop charges an extra fee on the sale.
   nativeEditorField('depop_specifics.boost', 'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.',
     specifics.boost === true, { input_type: 'boolean' }),
-  nativeEditorChoice('depop_specifics.parcelSize', 'Package size', specifics.parcelSize || '',
-    parcels.map(row => String(row.title)), { required: true }),
+  nativeEditorField('depop.note.carrier', 'Depop Shipping (via USPS)', '', { input_type: 'note',
+    help: 'You’ll receive a pre-paid shipping label and a QR code when you sell. Use either of these to ship at your nearest USPS Post Office.' }),
+  nativeEditorField('depop_specifics.shipFrom', 'Shipping from', shipFrom, { input_type: 'textarea', locked: true,
+    ...(shipFrom ? {} : { help: 'Sign in to Depop to show your shipping address.' }) }),
+  nativeEditorChoice('depop_specifics.parcelSize', 'Package size', parcelValue,
+    sizes.map(row => ({ label: row.title, value: row.id || row.title })),
+    { required: true, ...(Object.keys(parcelGroups).length ? { option_groups: parcelGroups } : {}),
+      ...(suggested ? { help: "Your selection sets your shipping label and the buyer's shipping cost. We've suggested a size based on your item — you can change it if needed." } : {}) }),
   nativeEditorField('depop_specifics.worldwideShipping.enabled', 'Offer worldwide shipping', specifics.worldwideShipping?.enabled === true,
     { input_type: 'boolean' }),
   // Always present so turning worldwide shipping on shows the fee without reloading the form.
   nativeEditorField('depop_specifics.worldwideShipping.price', 'Worldwide Shipping',
-    specifics.worldwideShipping?.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01 }));
-  return { marketplace: 'depop', native: true, known: true, category_id: depopDirectId(category), fields: depopPageLayout(fields),
-    notes: !parcels.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [] };
+    specifics.worldwideShipping?.price ?? '', { input_type: 'number', required: true, min_value: 0, max_value: 99.99, step: 0.01, prefix: 'US$' }));
+  return { marketplace: 'depop', native: true, known: true, page_labels: true, category_id: depopDirectId(category),
+    fields: depopPageLayout(fields),
+    notes: !sizes.length ? ['Sign in to Depop to load the seller’s parcel sizes.'] : [] };
 }
 
 // Depop's sell page, read 2026-10-27: its headings, the hint under each field,
@@ -214,14 +225,15 @@ function depopPageLayout(fields) {
     'depop_specifics.source': max => `What kind of item is this? Add up to ${max}`,
     'depop_specifics.age': max => `Do you know when this item was made? Add up to ${max}`,
     'depop_specifics.style': max => `Pick relevant tags to describe this item's style. Add up to ${max}`,
-    'depop_specifics.parcelSize': "Your selection sets your shipping label and the buyer's shipping cost.",
   };
   const section = path => path === 'depop_specifics.description' ? 'Description'
-    : ['depop_specifics.source', 'depop_specifics.age', 'depop_specifics.style'].includes(path) ? 'Enhance your listing'
-      : path === 'price' ? 'Item price'
-        : path === 'depop_specifics.boost' ? 'Boost your listing'
-          : path === 'depop_specifics.parcelSize' || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
-            : 'Info';
+    : path === 'depop.note.sku' ? 'Info'
+      : ['depop_specifics.source', 'depop_specifics.age', 'depop_specifics.style'].includes(path) ? 'Enhance your listing'
+        : path === 'price' || path === 'depop.note.fees' ? 'Item price'
+          : path === 'depop.note.boost' || path === 'depop_specifics.boost' ? 'Boost your listing'
+            : path === 'depop.note.carrier' || path === 'depop_specifics.shipFrom' || path === 'depop_specifics.parcelSize'
+              || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
+              : 'Info';
   return fields.map(field => {
     const hint = field.path.startsWith('depop_specifics.attributes.') ? `Select up to ${field.max_values}` : hints[field.path];
     return { ...field, section: section(field.path),
@@ -349,20 +361,38 @@ async function handleNativeMarketplaceForm(msg) {
     } else if (marketplace === 'depop') {
       const attributes = await depopAttributes(deadline);
       let parcels = [];
+      let shipFrom = '';
       try {
-        const providers = await depopAccountRead(`/api/v1/shipping-providers/?ids=USPS&itemCurrency=USD&itemCost=${encodeURIComponent(String(listing.price || 1))}`, 'parcel sizes', deadline);
-        parcels = (Array.isArray(providers) ? providers : providers?.objects || []).flatMap(row => row.parcelSizes || row.parcel_sizes || []);
+        const params = depopShippingParams(depopCategory(listing, attributes));
+        const price = Number(listing.price);
+        if (Number.isFinite(price) && price > 0) {
+          params.set('item_cost', price.toFixed(2));
+          params.set('item_currency', 'USD');
+        }
+        parcels = depopParcelRows(await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline));
       } catch { /* Catalog fields remain usable without an account shipping read. */ }
-      reply({ ok: true, form: depopEditorForm(listing, attributes, parcels) });
+      try {
+        shipFrom = depopShipFromLine(depopAddress(listing, await depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', deadline)));
+      } catch { /* The address card stays empty until Depop answers. */ }
+      reply({ ok: true, form: depopEditorForm(listing, attributes, parcels, shipFrom) });
     } else if (marketplace === 'mercari') {
       const master = await mercariCatalogData(deadline);
       const prepared = mercariShippingListing(listing, await mercariShippingClasses(listing, deadline));
       reply({ ok: true, form: mercariEditorForm(prepared, master) });
     }
     else if (marketplace === 'sellwild') {
-      // Sellwild's form is built in Anteroom; only the Shipping From address needs the seller's session.
-      const addresses = await sellwildFetch('/api/addresses', { deadline, step: 'addresses' });
-      reply({ ok: true, ship_from: addresses?.success ? sellwildShipFromText(addresses.addresses) : '' });
+      // Sellwild's form is built in Anteroom. The session supplies the address card,
+      // the seller's coupons, and a profile package when one is set.
+      const [addresses, profile, coupons] = await Promise.all([
+        sellwildFetch('/api/addresses', { deadline, step: 'addresses' }),
+        sellwildFetch('/api/user/profile', { deadline, step: 'profile' }).catch(() => null),
+        sellwildFetch('/api/seller/coupons?limit=50', { deadline, step: 'coupons' }).catch(() => null),
+      ]);
+      const rows = Array.isArray(coupons?.coupons) ? coupons.coupons : Array.isArray(coupons?.data) ? coupons.data : Array.isArray(coupons) ? coupons : [];
+      reply({ ok: true, ship_from: addresses?.success ? sellwildShipFromText(addresses.addresses) : '',
+        default_parcel: String(profile?.profile?.defaultParcelTemplate || profile?.defaultParcelTemplate || ''),
+        coupons: rows.filter(row => row?.id != null).map(row => ({ id: row.id, name: String(row.name || row.code || ''),
+          discountType: row.discountType || row.discount_type || '', discountValue: row.discountValue ?? row.discount_value })) });
     }
     else reply({ ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {

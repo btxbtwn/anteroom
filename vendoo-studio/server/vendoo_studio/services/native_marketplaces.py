@@ -574,10 +574,14 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
     if marketplace == "sellwild":
         from vendoo_studio.services.sellwild_listing import package_sides, sellwild_catalog
 
-        template = str((snapshot.get("sellwild_specifics") or {}).get("parcelTemplate") or "")
+        details = snapshot.get("sellwild_specifics") if isinstance(snapshot.get("sellwild_specifics"), dict) else {}
+        template = str(details.get("parcelTemplate") or "")
         preset = next((row for row in sellwild_catalog()["parcel_templates"] if row["id"] == template), None)
         sides = package_sides(snapshot)
-        extra["sellwild"] = {**chosen(snapshot, record), "parcel_template": template,
+        picked = details.get("couponIds")
+        coupon_ids = [int(coupon_id) for coupon_id in (picked if isinstance(picked, list) else [])
+                      if str(coupon_id).isdigit() and int(coupon_id) > 0]
+        extra["sellwild"] = {**chosen(snapshot, record), "parcel_template": template, "coupon_ids": coupon_ids,
                              # A flat-rate package has no Weight field on Sellwild's page; every other package asks for one.
                              "fixed_package": bool(preset and preset.get("flat_rate")),
                              "package_dimensions": dict(zip(("depth", "width", "height"), sides, strict=True)) if sides else None}

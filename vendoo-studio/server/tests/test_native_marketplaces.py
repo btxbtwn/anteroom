@@ -368,8 +368,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(record["state"], "pending_review")
         payload = self.bridge.call_args.args[2]
         self.assertEqual((payload["action"], payload["confirm"]), ("publish", True))
-        self.assertEqual(payload["sellwild"], {"category_id": 272, "condition_id": 2, "parcel_template": "", "fixed_package": False,
-                                               "package_dimensions": {"depth": 12.0, "width": 9.0, "height": 2.0}})
+        self.assertEqual(payload["sellwild"], {"category_id": 272, "condition_id": 2, "parcel_template": "", "coupon_ids": [],
+                                               "fixed_package": False, "package_dimensions": {"depth": 12.0, "width": 9.0, "height": 2.0}})
         self.assertTrue(payload["local_draft_id"])
         self.assertEqual(self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **SELLWILD}).status_code, 409)
         self.assertEqual(self.bridge.call_count, 1)

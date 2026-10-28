@@ -113,7 +113,9 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(answer.status_code, 200, answer.text)
         rows = answer.json()["fields"]
         self.assertEqual([(row.get("section"), row["label"]) for row in rows], [
-            ("Add a Title", "What are you selling?"), ("Name Your Price (USD)", "Price"),
+            ("Add a Title", "What are you selling? (Required)"), ("Name Your Price (USD)", "Price"),
+            ("Name Your Price (USD)", "Sellwild Fee"), ("Name Your Price (USD)", "You Earn"),
+            ("Name Your Price (USD)", "Sell it faster with a discount"),
             ("Add Details", "Describe your item (Optional)"), ("Add Details", "Category"), ("Add Details", "Condition"),
             ("Item Shipping", "Shipping From"),
             ("Item Shipping", "Package"), ("Item Shipping", "Weight (lbs)"), ("Item Shipping", "Height (in)"),
@@ -129,6 +131,26 @@ class NativeEditorTest(unittest.TestCase):
             "Custom Package Dimensions", "Small Flat Rate Box", "Medium Flat Rate Box 1", "Medium Flat Rate Box 2",
             "Large Flat Rate Box", "Flat Rate Envelope (12.5 × 9.5 × 0.75 in)"])
         self.assertEqual(fields["Package"]["options"][-2:], ["Soft Pack (poly mailer)", "Irregular Parcel (4 × 4 × 4 in)"])
+        self.assertEqual(fields["Package"]["option_groups"]["Flat Rate Envelope (12.5 × 9.5 × 0.75 in)"], "Add other packaging")
+        self.assertNotIn("Small Flat Rate Box", fields["Package"]["option_groups"])
+        self.assertEqual(fields["Sell it faster with a discount"]["input_type"], "note")
+        self.assertEqual(fields["Sellwild Fee"]["help"], "$2.00. Sellwild fee is 10% of sold price.")
+        self.assertTrue(answer.json()["page_labels"])
+
+    def test_sellwild_discount_and_profile_package_follow_the_sell_page(self):
+        self.bridge.return_value = {"ok": True, "ship_from": "Pat Seller", "default_parcel": "USPS_SoftPack",
+                                    "coupons": [{"id": 117, "name": "25OFF", "discountType": "percentage", "discountValue": 25}]}
+        fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
+        discount = fields["Sell it faster with a discount"]
+        self.assertEqual(discount["value"], [])
+        self.assertEqual(discount["options"], ["25% 25OFF"])
+        self.assertTrue(discount["multi"])
+        self.assertEqual(fields["Package"]["value"], "USPS_SoftPack")
+        saved = {**self.listing, "sellwild_specifics": {"parcelTemplate": "", "couponIds": ["117"]}}
+        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": saved}).status_code, 200)
+        fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
+        self.assertEqual(fields["Package"]["value"], "")
+        self.assertEqual(fields["Sell it faster with a discount"]["value"], ["117"])
         # Weight and the three sides share one row on the page.
         self.assertEqual({fields[label].get("width") for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")},
                          {"quarter"})

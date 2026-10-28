@@ -387,9 +387,12 @@ test('Depop form lists the sell page fields in its order, as the page shows them
     primaryColor: 'Blue', secondaryColor: 'Black' };
   const form = clean(call(c, 'depopEditorForm', listing, attributes, [{ title: 'Medium' }]));
   assert.deepEqual(form.fields.map(row => row.label), [
-    'Description', 'Category', 'Type', 'Fit', 'Body fit', 'Brand', 'Condition', 'Color', 'Size', 'Quantity', 'SKU',
-    'Source', 'Age', 'Style', 'Item price', 'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.', 'Package size', 'Offer worldwide shipping', 'Worldwide Shipping',
+    'Description', 'Category', 'Type', 'Fit', 'Body fit', 'Brand', 'Condition', 'Color', 'Size', 'Quantity', 'Learn more about SKUs', 'SKU',
+    'Source', 'Age', 'Style', 'Item price', 'No selling fees.', 'Learn more about boosting',
+    'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.',
+    'Depop Shipping (via USPS)', 'Shipping from', 'Package size', 'Offer worldwide shipping', 'Worldwide Shipping',
   ]);
+  assert.equal(form.page_labels, true);
   const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
   // Boost costs a fee on the sale, so it is off until the seller turns it on.
   assert.deepEqual([rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].path, rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].input_type, rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].value], ['depop_specifics.boost', 'boolean', false]);
@@ -400,7 +403,12 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   assert.deepEqual(rows.Color.options, ['Blue', 'Black']);
   assert.deepEqual(rows.Color.value, ['blue', 'black']);
   assert.equal(rows.Color.max_values, 2);
-  assert.match(rows.Description.help, /#denim/);
+  assert.equal(rows.Description.placeholder, 'eg. small grey Nike t-shirt, only worn a few times');
+  assert.equal(rows.Description.counter, true);
+  assert.equal(rows.Description.hashtag_max, 5);
+  assert.equal(rows.Description.help, undefined);
+  assert.equal(rows['Item price'].prefix, 'US$');
+  assert.equal(rows['Worldwide Shipping'].prefix, 'US$');
   assert.equal(rows['Item price'].path, 'price');
   // The page's headings and row layout.
   const headings = [];
