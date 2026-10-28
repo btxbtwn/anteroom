@@ -251,6 +251,7 @@ function ShipsFromZipRow() {
     mutationFn: (zip: string) => api.settings.setShipsFromZip(zip),
     onSuccess: (payload) => {
       queryClient.setQueryData(["settings-ships-from-zip"], { zip: payload.zip });
+      queryClient.invalidateQueries({ queryKey: ["settings-listing-defaults"] });
       setDraft(null);
     },
   });

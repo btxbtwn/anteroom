@@ -1141,6 +1141,18 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ zip }),
       }),
+    listingDefaults: () =>
+      request<{ defaults: Record<string, { value: string; label: string }> }>("/settings/listing-defaults"),
+    setListingDefault: (body: { path: string; value: string; label?: string }) =>
+      request<{ ok: boolean; defaults: Record<string, { value: string; label: string }> }>(
+        "/settings/listing-defaults",
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+    clearListingDefault: (path: string) =>
+      request<{ ok: boolean; defaults: Record<string, { value: string; label: string }> }>(
+        `/settings/listing-defaults?path=${encodeURIComponent(path)}`,
+        { method: "DELETE" },
+      ),
     ebayInventoryLocation: () => request<{ location: string }>("/settings/ebay-inventory-location"),
     setEbayInventoryLocation: (location: string) =>
       request<{ ok: boolean; location: string }>("/settings/ebay-inventory-location", {

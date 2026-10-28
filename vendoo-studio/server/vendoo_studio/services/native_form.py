@@ -86,7 +86,7 @@ def vendoo_form(listing: dict[str, Any], marketplace: str) -> dict[str, Any]:
 
 
 def attach_form(snapshot: dict[str, Any], marketplace: str) -> dict[str, Any]:
-    from vendoo_studio.services.user_settings import get_ships_from_zip
+    from vendoo_studio.services.user_settings import get_mercari_shipping_label, get_ships_from_zip
 
     resolve_category(snapshot, marketplace)
     form = ({"overrides": {"categoryV2": (snapshot.get("marketplace_category_objects") or {}).get("mercari") or {}},
@@ -94,9 +94,16 @@ def attach_form(snapshot: dict[str, Any], marketplace: str) -> dict[str, Any]:
     zip_code = get_ships_from_zip()
     if zip_code:
         form["ships_from_zip"] = zip_code
-        shipping = form["specifics"].get("shipping")
-        if marketplace == "mercari" and isinstance(shipping, dict) and not str(shipping.get("location") or "").strip():
-            # Vendoo's own field for Mercari's ships-from ZIP.
-            shipping["location"] = zip_code
+        if marketplace == "mercari":
+            specifics = snapshot.get("mercari_specifics")
+            specifics = specifics if isinstance(specifics, dict) else {}
+            if not str(specifics.get("shipsFrom") or "").strip():
+                specifics["shipsFrom"] = zip_code
+                snapshot["mercari_specifics"] = specifics
+    shipping_label = get_mercari_shipping_label()
+    if marketplace == "mercari" and shipping_label:
+        # The class id belongs to one weight tier, so the label is the preference;
+        # the extension matches it against the labels this package can use.
+        form["mercari_shipping_label"] = shipping_label
     snapshot["form"] = form
     return snapshot

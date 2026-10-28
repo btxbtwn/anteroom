@@ -623,6 +623,8 @@ export interface MarketplaceFormField {
   category_specific?: boolean;
   /** Depop's "Hashtags: N" remaining count, beside the character counter. */
   hashtag_max?: number;
+  /** The seller can keep this value as the default every new listing starts with. */
+  save_as_default?: boolean;
 }
 
 /** A marketplace's form for one listing. ``known`` is false when no schema is cached. */

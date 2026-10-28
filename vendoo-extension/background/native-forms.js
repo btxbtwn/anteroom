@@ -457,7 +457,8 @@ function mercariEditorForm(listing, master) {
     size.id ?? specifics.nativeSizeId ?? specifics.size ?? listing.size ?? '', sizeChoices,
     { required: true, category_specific: true, placeholder: 'Select size', ...(Object.keys(sizeGroups).length ? { option_groups: sizeGroups } : {}) })));
   fields.push(...[
-    nativeEditorField('mercari_specifics.shipsFrom', 'Ships from:', mercariShipsFrom(listing), { required: true, max_length: 5, width: 'quarter' }),
+    nativeEditorField('mercari_specifics.shipsFrom', 'Ships from:', mercariShipsFrom(listing),
+      { required: true, max_length: 5, width: 'quarter', save_as_default: true }),
     nativeEditorChoice('mercari_specifics.shippingMethod', 'Shipping method', specifics.shippingMethod ?? 'MERCARI',
       [{ label: 'Prepaid label', value: 'MERCARI' }, { label: 'Ship on your own', value: 'SOYO' }], { required: true, presentation: 'radio',
         option_help: {
@@ -467,7 +468,7 @@ function mercariEditorForm(listing, master) {
     ...mercariPackageRows(listing),
     nativeEditorChoice('mercari_specifics.shippingClassId', 'Shipping label', labelId || '',
       classes.map(row => ({ label: row.carrierDisplayName || row.name, value: row.id })),
-      { required: true, width: 'half',
+      { required: true, width: 'half', save_as_default: true,
         option_help: Object.fromEntries(classes.map(row => [row.carrierDisplayName || row.name, mercariLabelLine(row)])),
         help: mercariLabelSummary(classes.find(row => String(row.id) === String(labelId)), Number(payer) === 2) }),
     nativeEditorChoice('mercari_specifics.shippingPayerId', 'Offer buyers free shipping?', payer,
