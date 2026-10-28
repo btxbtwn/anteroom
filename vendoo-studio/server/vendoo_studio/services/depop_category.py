@@ -11,7 +11,6 @@ them, and a size id picked for the old leaf is dropped.
 from __future__ import annotations
 
 import re
-import sqlite3
 from typing import Any
 
 from vendoo_studio.services.vendoo_categories import category_from_hit, path_parts
@@ -45,18 +44,22 @@ def _breadcrumb(listing: dict) -> str:
 
 def depop_leaf(category_id: str = "", path: str = "") -> dict[str, Any] | None:
     """Depop's leaf from the seeded category tree, by id or by breadcrumb."""
-    from vendoo_studio.config import DATABASE_PATH
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.models.catalog import CategoryTreeNode
     from vendoo_studio.services.vendoo_create import tree_leaf
 
     wanted = " > ".join(path_parts(path))
     if category_id:
         try:
-            with sqlite3.connect(DATABASE_PATH) as db:
-                row = db.execute(
-                    "SELECT path FROM category_tree_nodes WHERE marketplace = 'depop' AND category_id = ? AND is_leaf = 1",
-                    (category_id,),
-                ).fetchone()
-        except sqlite3.Error:
+            with SessionLocal() as db:
+                row = (db.query(CategoryTreeNode.path)
+                       .filter(CategoryTreeNode.marketplace == "depop",
+                               CategoryTreeNode.category_id == category_id,
+                               CategoryTreeNode.is_leaf.is_(True))
+                       .first())
+        except SQLAlchemyError:
             row = None
         if not row:
             return None

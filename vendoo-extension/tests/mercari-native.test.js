@@ -424,6 +424,19 @@ test('Mercari sizes come from the category and never cross a fit the listing nam
   assert.match(size({ mercari_specifics: { size: 'M (8-10)', sizeGroup: 'Not a group' } }, women).problem, /Women's/);
   assert.match(size({ mercari_specifics: { size: 'M (8-10)', sizeGroup: 'Not a group' } }, women).problem, /Petite/);
   assert.deepEqual(size({ size: 'L/XL' }), { problem: 'a size Mercari offers in this category' });
+  // Mercari spells a letter size's numbers in its own label: a tag that reads 6 is its "S (4-6)".
+  const tops = [
+    { id: 2, name: 'XS (0-2)', group: 4, group_name: "Women's" },
+    { id: 3, name: 'S (4-6)', group: 4, group_name: "Women's" },
+    { id: 4, name: 'M (8-10)', group: 4, group_name: "Women's" },
+    { id: 353, name: 'S (5-6)', group: 15, group_name: 'Juniors' },
+  ];
+  assert.deepEqual(size({ size: '6' }, tops), { id: 3 });
+  assert.deepEqual(size({ size: '10' }, tops), { id: 4 });
+  assert.deepEqual(size({ size: '6', sizeType: 'Juniors' }, tops), { id: 353 });
+  assert.deepEqual(size({ size: '7' }, tops), { problem: 'a size Mercari offers in this category' });
+  // A category that lists a size called 6 keeps its own 6 rather than the S (4-6) around it.
+  assert.deepEqual(size({ size: '6' }, [{ id: 9, name: '6' }, { id: 3, name: 'S (4-6)' }]), { id: 9 });
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: { '1934_Size': '103' }, sizes: BOYS_SIZES } }, 1934))), { id: 103 });
   assert.deepEqual(size({ size: 'M' }, []), { none: 'none' });
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: {} } }, 1934))), { none: 'unknown' });

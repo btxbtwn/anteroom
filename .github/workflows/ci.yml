@@ -140,6 +140,39 @@ jobs:
         env:
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
 
+  studio-backend-postgres:
+    name: Studio backend (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: vendoo-studio
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
+      # Each xdist worker creates its own database on this server.
+      - run: python -m pytest -q -n auto
+        env:
+          VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
+          ANTEROOM_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
   studio-update-zip:
     name: Studio update zip
     runs-on: ubuntu-latest
@@ -226,6 +259,7 @@ jobs:
       - secrets
       - studio-frontend
       - studio-backend
+      - studio-backend-postgres
       - studio-update-zip
       - extension
       - skills

@@ -19,6 +19,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import json_value
 from vendoo_studio.models.conversation import Photo
 from vendoo_studio.models.ebay_fields import (
     DEFAULT_EBAY_SEASONS,
@@ -160,12 +161,12 @@ def _listing_state(db: Session) -> dict[str, dict[str, Any]]:
             Listing.conversation_id,
             Listing.current_revision_id,
             Listing.validation_status,
-            func.json_extract(doc, "$.brand"),
-            func.json_extract(doc, "$.category_path"),
-            func.json_extract(doc, "$.ebay_specifics.season"),
-            func.json_extract(doc, "$.title"),
-            func.json_extract(doc, "$.type"),
-            func.json_extract(doc, "$.ebay_specifics.material"),
+            json_value(doc, "brand"),
+            json_value(doc, "category_path"),
+            json_value(doc, "ebay_specifics.season"),
+            json_value(doc, "title"),
+            json_value(doc, "type"),
+            json_value(doc, "ebay_specifics.material"),
         )
         .outerjoin(ListingRevision, ListingRevision.id == Listing.current_revision_id)
         .all()
@@ -184,7 +185,7 @@ def _listing_state(db: Session) -> dict[str, dict[str, Any]]:
 
 
 def _json_list(value: Any) -> Any:
-    """SQLite's json_extract hands arrays back as JSON text."""
+    """Older rows stored arrays as JSON text; ``json_value`` hands back lists."""
     if isinstance(value, str) and value.strip().startswith("["):
         try:
             return json.loads(value)

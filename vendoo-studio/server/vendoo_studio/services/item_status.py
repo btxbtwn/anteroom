@@ -20,7 +20,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import Integer, func
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.listing import ListingRevision
@@ -76,12 +75,12 @@ def _quantities(db: Session, conv_ids: set[str] | None) -> dict[str, int]:
         if number > best.get(conv_id, 0):
             best[conv_id] = number
 
-    quantity = func.max(func.cast(func.json_extract(ListingRevision.listing_json, "$.quantity"), Integer))
-    every = db.query(ListingRevision.conversation_id, quantity)
+    every = db.query(ListingRevision.conversation_id, ListingRevision.listing_json)
     if conv_ids is not None:
         every = every.filter(ListingRevision.conversation_id.in_(conv_ids))
-    for conv_id, value in every.group_by(ListingRevision.conversation_id).all():
-        add(conv_id, value)
+    for conv_id, listing_json in every.all():
+        data = listing_json if isinstance(listing_json, dict) else {}
+        add(conv_id, data.get("quantity"))
     return best
 
 

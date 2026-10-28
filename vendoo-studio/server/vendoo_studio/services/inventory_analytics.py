@@ -14,6 +14,7 @@ import statistics
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from vendoo_studio.database import json_value
 
 if TYPE_CHECKING:
     from vendoo_studio.services.sale_events import EventWindow
@@ -151,8 +152,6 @@ def load_rows(db) -> list[AnalyticsItem]:
     same order, one row stands for it (see ``_item_sales``). An item with some
     units sold and some left is an active row plus a row per sale.
     """
-    from sqlalchemy import func
-
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.listing import Listing, ListingRevision
     from vendoo_studio.models.sourcing import SourceBox
@@ -165,10 +164,10 @@ def load_rows(db) -> list[AnalyticsItem]:
         for conv_id, price, cost, brand, category in (
             db.query(
                 Listing.conversation_id,
-                func.json_extract(ListingRevision.listing_json, "$.price"),
-                func.json_extract(ListingRevision.listing_json, "$.cost"),
-                func.json_extract(ListingRevision.listing_json, "$.brand"),
-                func.json_extract(ListingRevision.listing_json, "$.category_path"),
+                json_value(ListingRevision.listing_json, "price"),
+                json_value(ListingRevision.listing_json, "cost"),
+                json_value(ListingRevision.listing_json, "brand"),
+                json_value(ListingRevision.listing_json, "category_path"),
             )
             .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
             .all()
