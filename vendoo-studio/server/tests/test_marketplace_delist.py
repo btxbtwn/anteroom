@@ -232,6 +232,34 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.assertEqual(listed.json()["poshmark"]["listing_id"], "6aae234280cb08338a8cb591")
         self.assertEqual(records.get(self.conv.id, "poshmark")["state"], "published")
 
+    def test_marking_listed_revives_a_record_reset_to_draft(self):
+        """A publish Anteroom could not confirm is reset to draft; the seller's Looked mark still makes it live."""
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+        from vendoo_studio.services.native_marketplaces import reset
+
+        records = MarketplaceListingRepo(self.db)
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {}})
+        self.db.commit()
+        records.save(self.conv.id, "depop", {"state": "unknown", "job_id": "j3", "action": "publish",
+                                              "draft_url": "https://www.depop.com/sellinghub/drafts/edit/abc/"})
+        # What the seller's "I checked it myself" does: the draft is all that is left.
+        self.assertEqual(reset(self.conv.id, "depop", self.db)["state"], "draft")
+        body = self.client.post(f"{self.base}/depop/mark", json={"state": "listed", "url": URLS["depop"]}).json()
+        self.assertIn("depop", body)
+        self.assertEqual(records.get(self.conv.id, "depop")["state"], "published")
+        self.assertEqual(body["depop"]["listing_id"], "shop-classic-tee-136d")
+        self.assertIn("depop", self.client.get(f"{self.base}").json())
+
+    def test_marking_sold_does_not_revive_a_settled_draft(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        records = MarketplaceListingRepo(self.db)
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {}})
+        self.db.commit()
+        records.save(self.conv.id, "depop", {"state": "draft", "draft_url": "https://www.depop.com/sellinghub/drafts/edit/abc/"})
+        self.client.post(f"{self.base}/depop/mark", json={"state": "sold"})
+        self.assertEqual(records.get(self.conv.id, "depop")["state"], "draft")
+
     def test_delist_holds_the_automation_slot_and_keeps_the_marketplace_message(self):
         from vendoo_studio.repositories.queries import JobRepo
 

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.491 — 2026-10-27
+
+Marking an item as listed now puts it back on the marketplace list even when Anteroom had already given up on the publish. Before, if a Depop publish took too long to confirm, Anteroom set the item back to a draft, and telling it you had listed it yourself afterwards left that draft in place, so the marketplace never showed the item as listed anywhere.
+
 ## 0.1.490 — 2026-10-27
 
 Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.

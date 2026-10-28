@@ -226,9 +226,15 @@ def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | No
         # Not live: keep the marketplace IDs so a new List reuses them, drop the link.
         records.save(conv_id, marketplace, {**cleared, "state": _resting_state(marketplace, record), "listing_url": None,
                                             "listing_id": None, "revision_id": None})
+    elif state == "listed" and record.get("state") != "published":
+        # The seller looked and the listing is there. That is true whether the
+        # record was unconfirmed or had already been reset to a resting state
+        # after a publish Anteroom could not confirm: the mark is the evidence
+        # the machine record was missing, so it becomes live here.
+        records.save(conv_id, marketplace, {**cleared, "state": "published", "listing_url": value["url"],
+                                            "listing_id": value["listing_id"]})
     elif state != "not_listed" and record.get("state") in UNSETTLED_STATES:
-        records.save(conv_id, marketplace, {**cleared, "state": "published",
-                                            **({"listing_url": value["url"]} if state == "listed" else {})})
+        records.save(conv_id, marketplace, {**cleared, "state": "published"})
     if record.get("job_id") and record.get("state") in UNSETTLED_STATES and JobRepo(db).get(record["job_id"]):
         JobRepo(db).add_event(record["job_id"], "native_marked", None, {"marketplace": marketplace, "mark": state})
     _store(db, conv_id, "marketplaceMarks", marketplace, value)
