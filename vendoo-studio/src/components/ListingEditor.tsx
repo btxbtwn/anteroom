@@ -763,6 +763,10 @@ export function StructuredEditor({
               : categoryForm?.known === false
                 ? "The full category form is unavailable. Reference choices are shown where available."
                 : null;
+  // Renders its own hint beside the selected count.
+  const multiSelectControl = (f: EditorField) => Boolean(f.multi)
+    && !["inventory", "variations", "boolean", "textarea"].includes(String(f.type))
+    && fieldLeaf(f.key) !== "description";
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
     // A format or shipping change narrows the choices. Show the choice that fits
@@ -807,11 +811,11 @@ export function StructuredEditor({
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
       return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
-    if (f.multi) return <SearchableMultiSelect id={id} fieldKey={f.key}
+    if (multiSelectControl(f)) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
       selectionOnly={f.selectionOnly ?? Boolean(f.options?.length)} disabled={f.locked}
       choicesVerified={f.optionsSource === "marketplace"}
-      maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined}
+      maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined} help={f.help ?? undefined}
       onChange={(value) => commitField(f.key, value)} />;
     if (f.options?.length) {
       return (
@@ -883,7 +887,7 @@ export function StructuredEditor({
                 <div key={f.key} className={cn("min-w-0", (pageLayout ? f.width !== "half" : fullWidth(f)) && "col-span-full")}>
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
                   {control(f)}
-                  {f.help && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
+                  {f.help && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
                   {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
