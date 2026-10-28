@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.465 — 2026-10-28
+## 0.1.466 — 2026-10-28
 
 - Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
+
+## 0.1.465 — 2026-10-28
+
+- With Prepaid label, the Mercari tab now asks what Mercari’s label picker asks: the package weight in pounds and ounces, whether it fits in a shoebox, and its length, width and height when it doesn’t. They start from Item Details, the labels offered follow them, and List sends what you set there.
 
 ## 0.1.464 — 2026-10-28
 
