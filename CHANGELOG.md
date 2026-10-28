@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.469 — 2026-10-28
+
+- Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
+
+## 0.1.468 — 2026-10-28
+
+- Depop offer previews recognize the currency in Depop's current listing data, so a US dollar listing is no longer skipped because its currency could not be read.
+
 ## 0.1.467 — 2026-10-28
 
 - The Poshmark tab now matches Poshmark’s create-listing page for every category: the same headings and hints, categories in Poshmark’s order (with Global & Traditional Wear as its own group), the same size tabs and sizes, one Color field for up to two colors, and the price panel’s Listing Price, Automate Offers, Lowest Price, Original Price and Shipping Discount. Listing SKU, Cost Price and Other Info sit under Additional Details, and Cost Price can be changed here.
