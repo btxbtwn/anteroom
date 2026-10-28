@@ -207,4 +207,14 @@ describe("native form values", () => {
     expect(nativeFieldVisible(fields[3], context)).toBe(false);
     expect(nativeFieldVisible(fields[3], { ...context, local: { "mercari_specifics.smartPricing.enabled": "true" } })).toBe(true);
   });
+
+  it("hides Poshmark's Lowest Price until Automate Offers is on", () => {
+    const fields: NativeFormRow[] = [
+      { key: "poshmark_specifics.smartSell.enabled", defaultValue: false },
+      { key: "poshmark_specifics.smartSell.minimumPrice" },
+    ];
+    const context = { tab: "poshmark", listing: {}, local: {}, fields, categoryStale: false };
+    expect(nativeFieldVisible(fields[1], context)).toBe(false);
+    expect(nativeFieldVisible(fields[1], { ...context, local: { "poshmark_specifics.smartSell.enabled": "true" } })).toBe(true);
+  });
 });

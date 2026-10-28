@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.460 — 2026-10-28
+
+- The Poshmark tab now matches Poshmark’s create-listing page for every category: the same headings and hints, categories in Poshmark’s order (with Global & Traditional Wear as its own group), the same size tabs and sizes, one Color field for up to two colors, and the price panel’s Listing Price, Automate Offers, Lowest Price, Original Price and Shipping Discount. Listing SKU, Cost Price and Other Info sit under Additional Details, and Cost Price can be changed here.
+
 ## 0.1.459 — 2026-10-27
 
 - Mercari’s Size list is grouped under Mercari’s own headings (Standard, Petite, Inch and so on), as on Mercari.
