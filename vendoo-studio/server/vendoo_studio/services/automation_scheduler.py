@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.models.automation import Automation, AutomationRun
-from vendoo_studio.models.conversation import utcnow
 from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services.automation_schedule import as_utc
 from vendoo_studio.services.automations import (
@@ -224,7 +223,7 @@ async def _execute_items(db: Session, run: AutomationRun, automation: Automation
             run.summary = summary
             db.commit()
             raise AutomationBusy()
-        outcome = await _one_item(db, run, automation, item, executor, actions)
+        outcome = await _one_item(db, run, automation, item, executor, actions, now)
         if outcome.get("busy"):
             run.summary = summary
             db.commit()
@@ -237,7 +236,9 @@ async def _execute_items(db: Session, run: AutomationRun, automation: Automation
     finish_run(db, run, automation, now, status="completed")
 
 
-async def _one_item(db: Session, run: AutomationRun, automation: Automation, item: dict, executor, actions: list[dict]) -> dict:
+async def _one_item(
+    db: Session, run: AutomationRun, automation: Automation, item: dict, executor, actions: list[dict], now: datetime,
+) -> dict:
     local_actions = [action for action in actions if action["type"] in {"price", "update_fields"}]
     regenerate = next((action for action in actions if action["type"] == "regenerate"), None)
     publish_actions = [action for action in actions if action["type"] in {"delist", "relist"}]
@@ -262,7 +263,7 @@ async def _one_item(db: Session, run: AutomationRun, automation: Automation, ite
         if hold:
             state = WAITING_APPROVAL
         error = None if local.get("ok") else local.get("error")
-        return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down)
+        return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down, now=now)
 
     if regenerate:
         stepped = await _run_remote(db, run, automation, item, executor, regenerate, markets, None)
@@ -289,7 +290,7 @@ async def _one_item(db: Session, run: AutomationRun, automation: Automation, ite
             state = WAITING_APPROVAL
             remote.append({"type": "approval", "ok": True, "approval_id": approval.id, "state": state})
 
-    return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down)
+    return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down, now=now)
 
 
 async def _run_remote(db, run, automation, item, executor, action, markets, revision_id) -> dict:
@@ -313,7 +314,7 @@ async def _run_remote(db, run, automation, item, executor, action, markets, revi
     return {"remote": {"type": action["type"], **result}, "error": error, "state": result.get("state"), "down": result.get("down")}
 
 
-def _finish_item(db, run, automation, item, local, remote, *, error, state, down) -> dict:
+def _finish_item(db, run, automation, item, local, remote, *, error, state, down, now) -> dict:
     ok = error is None
     payload = {
         "automation_id": automation.id,
@@ -334,7 +335,8 @@ def _finish_item(db, run, automation, item, local, remote, *, error, state, down
     if (ok and not run.dry_run and state != DOWN_STATE and (automation.filters or {}).get("min_age_days")
             and (state != WAITING_APPROVAL or any(action["type"] in {"price", "update_fields", "regenerate"} for action in automation.actions or []))):
         listed = _parse_time(item.get("listed_at"))
-        record_application(db, automation.id, item["conversation_id"], listed, utcnow())
+        # The run's own time, so the cooldown counts from when this run happened.
+        record_application(db, automation.id, item["conversation_id"], listed, now)
     return _outcome(item, local, remote, error=error, job_id=job_id, dry_run=bool(run.dry_run), state=state, down=down)
 
 

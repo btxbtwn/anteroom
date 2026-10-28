@@ -80,6 +80,8 @@ interface Props {
   onReviewTabChange: (tab: ListingReviewTab) => void;
   onBulkListingsCreated?: (listings: BulkListingUploadResult[], generate: boolean) => void;
   onEditInventoryLocation?: () => void;
+  /** The listing's chat, floated over the form's corner on desktop. */
+  chat?: React.ReactNode;
 }
 
 const DIRECT_FORM_MARKETS = new Set(["ebay", "poshmark", "mercari", "depop", "sellwild"]);
@@ -125,6 +127,7 @@ export function ListingEditor({
   onReviewTabChange,
   onBulkListingsCreated,
   onEditInventoryLocation,
+  chat,
 }: Props) {
   const queryClient = useQueryClient();
   const [editTab, setEditTab] = React.useState("general");
@@ -509,6 +512,7 @@ export function ListingEditor({
         </Alert>
       )}
 
+      <div className={cn("listing-form-area", chat && "has-chat")}>
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || updateMutation.isPending} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
@@ -550,6 +554,8 @@ export function ListingEditor({
           </div>
         </>
       </MarketplacesLayout>
+      {chat}
+      </div>
 
       {vendooEnabled && <div className="listing-send-footer flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(28vh,220px)] max-[900px]:pb-[max(10px,env(safe-area-inset-bottom,0px))]">
         <SendToVendooButton
@@ -757,6 +763,10 @@ export function StructuredEditor({
               : categoryForm?.known === false
                 ? "The full category form is unavailable. Reference choices are shown where available."
                 : null;
+  // Renders its own hint beside the selected count.
+  const multiSelectControl = (f: EditorField) => Boolean(f.multi)
+    && !["inventory", "variations", "boolean", "textarea"].includes(String(f.type))
+    && fieldLeaf(f.key) !== "description";
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
     // A format or shipping change narrows the choices. Show the choice that fits
@@ -801,11 +811,11 @@ export function StructuredEditor({
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
       return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
-    if (f.multi) return <SearchableMultiSelect id={id} fieldKey={f.key}
+    if (multiSelectControl(f)) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
       selectionOnly={f.selectionOnly ?? Boolean(f.options?.length)} disabled={f.locked}
       choicesVerified={f.optionsSource === "marketplace"}
-      maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined}
+      maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined} help={f.help ?? undefined}
       onChange={(value) => commitField(f.key, value)} />;
     if (f.options?.length) {
       return (
@@ -851,7 +861,7 @@ export function StructuredEditor({
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
-    <div ref={formRef} key={tab} className="flex flex-col">
+    <div ref={formRef} key={tab} className="@container flex flex-col">
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
@@ -871,14 +881,15 @@ export function StructuredEditor({
             titleId={`listing-section-${tab}-${section.id}`}
             meta={section.id === "listing" ? null : `${filled} of ${section.fields.length} filled`}
           >
-            <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-4" : "grid-cols-2")}>
+            {/* A marketplace's own page layout uses its four-part rows; the general form spreads out when wide. */}
+            <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-4" : "grid-cols-2 @4xl:grid-cols-3")}>
               {section.fields.map((f) => (
                 <div key={f.key} className={cn("min-w-0", pageLayout
                   ? (f.width === "quarter" ? "col-span-1" : f.width === "half" ? "col-span-2" : "col-span-full")
                   : fullWidth(f) && "col-span-full")}>
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
                   {control(f)}
-                  {f.help && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
+                  {f.help && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
                   {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
