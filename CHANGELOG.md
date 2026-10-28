@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.480 — 2026-10-28
+
+- Hovering a listing no longer opens a marketplace status popover. The logos under each listing already show where it is live.
+
 ## 0.1.479 — 2026-10-28
 
 - A live listing with edits you haven’t sent stays under Active and wears an **unsent** tag instead of appearing under Draft. **Filters → Unsent edits** still collects them, with a count beside Filters for the tab you’re viewing, and the Filters badge no longer counts the selected tab.

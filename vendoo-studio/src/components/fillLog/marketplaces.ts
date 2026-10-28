@@ -200,7 +200,7 @@ function mergeScraped(
   return Object.keys(out).length ? out : undefined;
 }
 
-/** One status picture from the fields-panel item, the hover peek, and the sidebar cache. */
+/** One status picture from the fields-panel item and the sidebar cache. */
 export function mergeStatusDrafts(...drafts: unknown[]): StatusDraft | undefined {
   const parts = drafts.map(statusSlice).filter((part): part is StatusDraft => Boolean(part));
   if (!parts.length) return undefined;

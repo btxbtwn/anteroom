@@ -40,7 +40,6 @@ export async function refreshAfterReset(queryClient: QueryClient, convId: string
   queryClient.invalidateQueries({ queryKey: ["jobs"] });
   queryClient.invalidateQueries({ queryKey: ["fill-log"] });
   queryClient.invalidateQueries({ queryKey: ["vendoo-item"] });
-  queryClient.invalidateQueries({ queryKey: ["vendoo-item-peek"] });
   queryClient.invalidateQueries({ queryKey: ["settings-hidden-fields"] });
   queryClient.invalidateQueries({ queryKey: ["listing-fields", convId] });
   await Promise.all([
