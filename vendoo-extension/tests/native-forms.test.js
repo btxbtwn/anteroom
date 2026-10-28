@@ -16,6 +16,8 @@ const POSH = { colors: [{ name: 'Black' }], catalog: { departments: [{ id: 'men'
     size_sets: [sizeSet('standard', ['standard'], ['M', 'XL']), sizeSet('tall', ['big_&_tall'], ['XLT'])] },
   { id: 'shoes', display: 'Shoes', size_sets: [sizeSet('shoes', ['standard'], ['10', '11'])] },
 ] }] } };
+const POSH_DISPLAY = { type: 'root', children: [{ type: 'department', id: 'men', children: [
+  { type: 'category', id: 'shirts' }, { type: 'category', id: 'shoes' }] }] };
 const POSH_LISTING = { title: 'A tee', description: 'Details', price: 16, size: 'M', condition: 'Good',
   direct_category_ids: { poshmark: 'men/shirts/tees' }, form: { aspects: { tees_size: 'M', tees_size_scale: 'standard' },
     specifics: { smartSell: { enabled: true, minPrice: 10 } } }, tags: ['Casual'] };
@@ -31,7 +33,7 @@ const DEPOP = { department: [{ id: 'menswear', name: 'Men' }], group: [{ id: 'bo
 
 test('Poshmark title, description and brand follow General until this form sets them', () => {
   const c = loadWorker();
-  const form = call(c, 'poshmarkEditorForm', { ...POSH_LISTING, brand: 'Nike' }, POSH);
+  const form = call(c, 'poshmarkEditorForm', { ...POSH_LISTING, brand: 'Nike' }, POSH, POSH_DISPLAY);
   const fields = Object.fromEntries(form.fields.map(row => [row.path, row]));
   assert.equal(fields['poshmark_specifics.title'].value, 'A tee');
   assert.equal(fields['poshmark_specifics.description'].value, 'Details');
@@ -40,7 +42,7 @@ test('Poshmark title, description and brand follow General until this form sets 
   const overridden = call(c, 'poshmarkEditorForm', {
     ...POSH_LISTING, brand: 'Nike',
     poshmark_specifics: { title: 'Posh title', description: '', brand: 'Posh brand' },
-  }, POSH);
+  }, POSH, POSH_DISPLAY);
   const rows = Object.fromEntries(overridden.fields.map(row => [row.path, row]));
   assert.equal(rows['poshmark_specifics.title'].value, 'Posh title');
   assert.equal(rows['poshmark_specifics.description'].value, '');
@@ -49,7 +51,7 @@ test('Poshmark title, description and brand follow General until this form sets 
 
 test('Poshmark form uses native category, group and size IDs and only supported fields', () => {
   const c = loadWorker();
-  const form = clean(call(c, 'poshmarkEditorForm', POSH_LISTING, POSH, ['Casual'], [{ id: 'discount-1', label: 'Buyer Shipping: Free' }]));
+  const form = clean(call(c, 'poshmarkEditorForm', POSH_LISTING, POSH, POSH_DISPLAY, ['Casual'], [{ id: 'discount-1', label: 'Buyer Shipping: Free' }]));
   const fields = Object.fromEntries(form.fields.map(row => [row.path, row]));
   assert.equal(form.native, true);
   assert.deepEqual(fields['poshmark_specifics.shippingDiscountId'].option_values, { 'Buyer Shipping: Free': 'discount-1' });
@@ -72,8 +74,44 @@ test('Poshmark form uses native category, group and size IDs and only supported 
   assert.deepEqual(inventory.inventory_groups.map(row => row.id), ['standard', 'tall', 'custom']);
   assert.deepEqual(inventory.inventory_groups[0].sizes.map(row => row.id), ['M', 'XL']);
   assert.equal(fields['poshmark_specifics.smartSell.enabled'].input_type, 'boolean');
-  assert.ok(fields.cost.locked);
+  assert.ok(!fields.cost.locked);
   assert.ok(!form.fields.some(row => /shipping label|size scale/i.test(row.label)));
+});
+
+// Read from Poshmark's create-listing page on 2026-10-28.
+test('Poshmark form follows the create-listing page: headings, order, grouped categories and one Color field', () => {
+  const c = loadWorker();
+  const catalog = { ...POSH, colors: [{ name: 'Red' }, { name: 'Blue' }, { name: 'Black' }], catalog: { departments: [
+    ...POSH.catalog.departments,
+    { id: 'women', display: 'Women', categories: [{ id: 'kilts', display: 'Kilts', size_sets: [] }, { id: 'tops', display: 'Tops', size_sets: [] }] }] } };
+  // The page orders Women first, puts Tops before the group, and Kilts inside Global & Traditional Wear.
+  const display = { children: [
+    { type: 'department', id: 'women', children: [{ type: 'category', id: 'tops' },
+      { type: 'group', display: 'Global & Traditional Wear', children: [{ type: 'category', id: 'kilts' }] }] },
+    ...POSH_DISPLAY.children] };
+  const listing = { ...POSH_LISTING, primaryColor: 'Blue', secondaryColor: 'Black', cost: 4 };
+  const form = clean(call(c, 'poshmarkEditorForm', listing, catalog, display, [], [{ id: 'free', label: 'Free', discount_amount: { val: '6.49' } }]));
+  const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
+  assert.deepEqual(rows.Category.options, ['Women > Tops', 'Women > Global & Traditional Wear > Kilts',
+    'Men > Shirts > Tees', 'Men > Shirts > None', 'Men > Shoes']);
+  const headings = [];
+  for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
+  assert.deepEqual(headings, ['Title', 'Description', 'Category', 'Size', 'Condition', 'Brand', 'Color', 'Style Tags', 'Price',
+    'Availability', 'Additional Details (Private)']);
+  assert.deepEqual(form.fields.filter(row => row.section === 'Price').map(row => row.label),
+    ['Listing Price', 'Automate Offers', 'Lowest Price', 'Original Price', 'Shipping Discount']);
+  assert.deepEqual(form.fields.filter(row => row.section === 'Additional Details (Private)').map(row => row.label),
+    ['Listing SKU', 'Cost Price', 'Other Info']);
+  assert.deepEqual(rows.Color.options, ['Red', 'Blue', 'Black']);
+  assert.deepEqual(rows.Color.value, ['Blue', 'Black']);
+  assert.equal(rows.Color.max_values, 2);
+  assert.equal(rows['Cost Price'].value, 4);
+  assert.ok(!rows['Cost Price'].locked);
+  assert.equal(rows['Automate Offers'].help, 'Sell 50% faster by setting your lowest price.');
+  assert.equal(rows.Size.inventory_groups.at(-1).label, 'Custom');
+  // The form's Color picks are what direct List posts.
+  assert.deepEqual(clean(call(c, 'poshmarkColors', { ...listing, poshmark_specifics: { colors: ['Red'] } }, catalog)), ['Red']);
+  assert.deepEqual(clean(call(c, 'poshmarkColors', listing, catalog)), ['Blue', 'Black']);
 });
 
 test('explicit Poshmark group and native size beat the old imported size, without crossing groups', () => {
@@ -90,7 +128,7 @@ test('explicit Poshmark group and native size beat the old imported size, withou
 test('changing Poshmark category replaces the size list and refuses the previous group', () => {
   const c = loadWorker();
   const listing = { ...POSH_LISTING, direct_category_ids: { poshmark: 'men/shoes' }, poshmark_specifics: { sizeSetId: 'standard', nativeSizeId: 'XL' } };
-  const form = call(c, 'poshmarkEditorForm', listing, POSH);
+  const form = call(c, 'poshmarkEditorForm', listing, POSH, POSH_DISPLAY);
   const inventory = form.fields.find(row => row.input_type === 'inventory');
   assert.equal(inventory.value[0].sizeId, '');
   assert.deepEqual(clean(inventory.inventory_groups[0].sizes.map(row => row.id)), ['10', '11']);
@@ -369,7 +407,7 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   const headings = [];
   for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
   assert.deepEqual(headings, ['Description', 'Info', 'Enhance your listing', 'Item price', 'Boost your listing', 'Shipping']);
-  assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label), ['Size', 'Quantity', 'SKU']);
+  assert.deepEqual(form.fields.filter(row => row.width).map(row => [row.label, row.width]), [['Size', 'quarter'], ['Quantity', 'quarter'], ['SKU', 'half']]);
   // The picker shows the limit, so the hints leave it out.
   assert.equal(rows.Type.help, undefined);
   assert.equal(rows.Color.help, undefined);

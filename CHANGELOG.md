@@ -6,10 +6,21 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.466 — 2026-10-28
+## 0.1.468 — 2026-10-28
 
 - Listing forms are easier to read: fields stop at a comfortable width instead of stretching across a wide window, section headings stand out from field labels, labels and marketplace statuses are larger, and the description box has more room between lines.
-- In the inventory list, the search box reads “Search listings” instead of cutting off, and the marketplace logos under each listing are larger.
+- Category is one search box that shows the whole path, such as Men › Bottoms › Jeans. Type any part of it to find a category.
+- Fields that take several choices say how many in the empty box ("Choose up to 3"), and the count appears once you pick something.
+- Depop's hashtags show as tags under the description instead of a sentence.
+- The inventory list shows three suggestions with "Show all", the search box reads "Search listings" instead of cutting off, the status tabs no longer cut off "Active", and the marketplace logos under each listing are larger.
+
+## 0.1.467 — 2026-10-28
+
+- The Poshmark tab now matches Poshmark’s create-listing page for every category: the same headings and hints, categories in Poshmark’s order (with Global & Traditional Wear as its own group), the same size tabs and sizes, one Color field for up to two colors, and the price panel’s Listing Price, Automate Offers, Lowest Price, Original Price and Shipping Discount. Listing SKU, Cost Price and Other Info sit under Additional Details, and Cost Price can be changed here.
+
+## 0.1.466 — 2026-10-28
+
+- The Sellwild tab now shows your Shipping From address at the top of Item Shipping (and under Vehicle Shipping for vehicles), the same address Sellwild’s page shows and List uses. Change it in Sellwild’s Address Book. Package weight and size sit side by side in one row, as on Sellwild, and Depop’s Size and Quantity are narrow side by side, as on Depop.
 
 ## 0.1.465 — 2026-10-28
 

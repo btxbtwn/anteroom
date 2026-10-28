@@ -18,6 +18,18 @@ async function poshmarkCatalogData(deadline) {
   }));
 }
 
+// The order and grouping Poshmark's listing page shows its categories in
+// (departments, categories, and groups such as Global & Traditional Wear).
+async function poshmarkCatalogDisplay(deadline) {
+  return await marketplaceCatalog('poshmark:catalog_display', () => marketplaceCatalogRead('poshmark', 'category order', async () => {
+    const { data } = await marketplaceFetch(`${POSHMARK}/vm-rest/meta/catalog_display`, { marketplace: 'poshmark', step: 'catalog',
+      credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 30000 });
+    const display = data?.data?.us?.catalog_display;
+    if (!Array.isArray(display?.children)) throw marketplaceError('Poshmark\'s category list changed.', { code: 'schema_drift' });
+    return display;
+  }));
+}
+
 // Poshmark's own style tags. Free text is accepted too, so a failed read
 // only means the listing's tags go as the seller wrote them.
 async function poshmarkStyleTags(deadline) {
@@ -241,6 +253,16 @@ function poshmarkConditionFromText(value) {
   if (/good|imperfection|defect|pre-owned|used/.test(text)) return 'ug';
   if (/^new\b|brand new/.test(text)) return 'nwt';
   return null;
+}
+
+// The listing's Poshmark colors, up to two: the Poshmark tab's Color picks,
+// otherwise General's primary and secondary color.
+function poshmarkColors(listing, catalog) {
+  const names = new Set((catalog.colors || []).map(color => color.name));
+  const specifics = listing.poshmark_specifics || {};
+  const picked = Array.isArray(specifics.colors) ? specifics.colors
+    : [specifics.poshmarkColor ?? listing.primaryColor, specifics.poshmarkSecondaryColor ?? listing.secondaryColor];
+  return [...new Set(picked.map(value => ({ Grey: 'Gray', Beige: 'Tan' })[value] || value).filter(value => names.has(value)))].slice(0, 2);
 }
 
 // Poshmark takes whole dollars only. Vendoo rounds to the nearest one.
@@ -475,10 +497,7 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   const blankCost = listing.cost == null || listing.cost === '';
   if (hasCost && !blankCost && (!Number.isFinite(cost) || cost < 0)) missing.push({ field: 'cost', needs: 'a cost of $0 or more, or a blank cost' });
   if (missing.length) throw marketplaceMissing('poshmark', missing);
-  const colorNames = new Set((catalog.colors || []).map(color => color.name));
-  const colors = [listing.poshmark_specifics?.poshmarkColor ?? listing.primaryColor,
-    listing.poshmark_specifics?.poshmarkSecondaryColor ?? listing.secondaryColor]
-    .map(value => ({ Grey: 'Gray', Beige: 'Tan' })[value] || value).filter(value => colorNames.has(value));
+  const colors = poshmarkColors(listing, catalog);
   const minimum = poshmarkSmartMinimum(listing, price);
   // The item's cost (Anteroom's share of the box price), in dollars and cents as Poshmark's editor keeps it.
   const privateFields = {
