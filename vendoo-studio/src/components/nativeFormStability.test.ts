@@ -65,16 +65,20 @@ describe("native form structure", () => {
       package: { fitsShoebox: "yes" } } }, "mercari")).not.toBe(key);
   });
 
-  it("asks Mercari's package questions with Prepaid label, and the sides only when it does not fit a shoebox", () => {
+  it("asks Mercari's package questions with Prepaid label, and the sides only after No", () => {
     const row = (key: string, defaultValue = "") => ({ key, label: key, native: true, defaultValue });
     const fields = [row("mercari_specifics.shippingMethod", "MERCARI"), row("mercari_specifics.package.pounds", "1"),
       row("mercari_specifics.package.fitsShoebox"), row("mercari_specifics.package.length", "16"),
-      row("mercari_specifics.shippingClassId")];
+      row("mercari_specifics.package.skipDimensions"), row("mercari_specifics.shippingClassId")];
     const shown = (local: Record<string, string>) => fields
       .filter((field) => nativeFieldVisible(field, { tab: "mercari", listing: {}, local, fields, categoryStale: false }))
       .map((field) => field.key.split(".").pop());
-    expect(shown({})).toEqual(["shippingMethod", "pounds", "fitsShoebox", "length", "shippingClassId"]);
+    expect(shown({})).toEqual(["shippingMethod", "pounds", "fitsShoebox", "shippingClassId"]);
     expect(shown({ "mercari_specifics.package.fitsShoebox": "yes" })).toEqual(["shippingMethod", "pounds", "fitsShoebox", "shippingClassId"]);
+    expect(shown({ "mercari_specifics.package.fitsShoebox": "no" })).toEqual(
+      ["shippingMethod", "pounds", "fitsShoebox", "length", "skipDimensions", "shippingClassId"]);
+    expect(shown({ "mercari_specifics.package.fitsShoebox": "no", "mercari_specifics.package.skipDimensions": "true" })).toEqual(
+      ["shippingMethod", "pounds", "fitsShoebox", "skipDimensions", "shippingClassId"]);
     expect(shown({ "mercari_specifics.shippingMethod": "SOYO" })).toEqual(["shippingMethod"]);
   });
 
