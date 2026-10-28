@@ -574,8 +574,8 @@ export interface MarketplaceFormField {
   option_groups?: Record<string, string>;
   /** The heading this field sits under on the marketplace's own form. */
   section?: string;
-  /** Half: shares a row, as the marketplace's form lays it out. Absent means a full row. */
-  width?: "half";
+  /** Half or quarter of a row, as the marketplace's form lays it out. Absent means a full row. */
+  width?: "half" | "quarter";
   /** True when choosing a different category adds or removes this row. */
   category_specific?: boolean;
 }
