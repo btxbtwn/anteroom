@@ -259,7 +259,7 @@ class ListingGenerateHelpersTest(unittest.TestCase):
         self.assertIn("TITLE Formula", formulas)
         self.assertIn("{BRAND} {SIZE} {VIBE} {ITEM} {COLOR} {FIT}", formulas)
         self.assertIn("DESCRIPTION Formula", formulas)
-        self.assertIn("Flaws: {specific flaws}", formulas)
+        self.assertIn("- {one flaw per line}", formulas)
         pinned = with_pinned_formulas("### Some other rule\nNever invent brands.")
         self.assertTrue(pinned.startswith("## Formula Reference"))
         self.assertIn("Never invent brands", pinned)
@@ -434,7 +434,9 @@ class PersistListingTest(unittest.TestCase):
         )
         self.assertEqual(parsed["description"], (
             "Grunge oversized flannel.\n\n"
-            "Flaws: small stain near the hem. See photos for details.\n\n"
+            "Flaws:\n"
+            "- small stain near the hem\n"
+            "See photos for details.\n\n"
             'Measurements: Pit to pit: 22"; Length: 27"; Sleeve: 25"'
         ))
         saved = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
@@ -466,7 +468,14 @@ class PersistListingTest(unittest.TestCase):
         parsed = persist_generated_listing(
             self.db, self.conv.id, "", parsed={**LISTING_JSON, "description": description},
         )
-        self.assertEqual(parsed["description"], description)
+        self.assertEqual(parsed["description"], (
+            "Grunge oversized flannel.\n\n"
+            "Flaws:\n"
+            "- small stain near hem\n"
+            "- light pilling on the sleeves\n"
+            "See photos for details.\n\n"
+            "Measurements: See photos"
+        ))
 
     def test_saved_dimension_default_wins_over_model_estimate(self):
         with patch(
@@ -667,7 +676,60 @@ class PersistListingTest(unittest.TestCase):
         )
         listing = {"title": "Levi's 32 Y2K Jeans Blue Straight", "description": flawed}
         apply_send_readiness_fixes(listing)
-        self.assertEqual(listing["description"], flawed)
+        self.assertEqual(
+            listing["description"],
+            "Y2K straight leg jeans in a classic blue wash.\n\n"
+            "Flaws:\n"
+            "- small mark on hem\n"
+            "See photos for details.\n\n"
+            'Measurements: Waist: 16"; Inseam: 30"',
+        )
+
+    def test_custom_one_line_formula_keeps_flaws_on_one_line(self):
+        from unittest.mock import patch
+
+        from vendoo_studio.services.listing_generate import apply_send_readiness_fixes
+
+        listing = {
+            "title": "Levi's 32 Y2K Jeans Blue Straight",
+            "description": (
+                "Y2K straight leg jeans in a classic blue wash.\n\n"
+                "Flaws: small mark on hem; faded knee. See photos for details.\n\n"
+                'Measurements: Waist: 16"; Inseam: 30"'
+            ),
+        }
+        custom = "Flaws: {specific flaws}. See photos for details.\n\nMeasurements: {See photos}"
+        with patch(
+            "vendoo_studio.services.skill_formulas.get_listing_formulas",
+            return_value={"description": custom},
+        ):
+            apply_send_readiness_fixes(listing)
+        self.assertIn("Flaws: small mark on hem; faded knee. See photos for details.", listing["description"])
+        self.assertNotIn("\n- ", listing["description"])
+
+    def test_pricing_strip_keeps_each_flaw_on_its_line(self):
+        from vendoo_studio.services.listing_generate import strip_pricing_from_description
+
+        listing = {
+            "title": "Levi's 32 Y2K Jeans Blue Straight",
+            "description": (
+                "Y2K straight jeans. Offers welcome.\n\n"
+                "Flaws:\n"
+                "- Small mark on the hem\n"
+                "- Priced as-is, best offer considered\n"
+                "See photos for details.\n\n"
+                'Measurements: Waist: 16"'
+            ),
+        }
+        self.assertTrue(strip_pricing_from_description(listing))
+        self.assertEqual(
+            listing["description"],
+            "Y2K straight jeans.\n\n"
+            "Flaws:\n"
+            "- Small mark on the hem\n"
+            "See photos for details.\n\n"
+            'Measurements: Waist: 16"',
+        )
 
     def test_clear_not_applicable_values_empties_the_phrase(self):
         from vendoo_studio.services.fill_log import field_intentionally_empty
