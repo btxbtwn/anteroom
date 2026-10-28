@@ -46,20 +46,36 @@ describe("native form structure", () => {
     expect(nativeFormStructureKey({ ebay_specifics: { categoryId: "15709" } }, "ebay")).toBe("15709");
   });
 
-  it("reloads Mercari only when the category changes", () => {
+  it("reloads Mercari for a new category or package, as its label picker does", () => {
     const listing = {
       direct_category_ids: { mercari: "1911" },
       weight_oz: 8,
       mercari_specifics: { shippingMethod: "MERCARI", brand: "Nike" },
     };
+    const key = nativeFormStructureKey(listing, "mercari");
     expect(nativeFormStructureKey({ ...listing, mercari_specifics: { ...listing.mercari_specifics, brand: "Gap" } }, "mercari"))
-      .toBe("1911");
-    expect(nativeFormStructureKey({ ...listing, mercari_specifics: { shippingMethod: "SOYO" } }, "mercari"))
-      .toBe(nativeFormStructureKey(listing, "mercari"));
-    expect(nativeFormStructureKey({ ...listing, weight_oz: 16 }, "mercari"))
-      .toBe(nativeFormStructureKey(listing, "mercari"));
-    expect(nativeFormStructureKey({ ...listing, package_dimensions_in: "10x8x4" }, "mercari"))
-      .toBe(nativeFormStructureKey(listing, "mercari"));
+      .toBe(key);
+    expect(nativeFormStructureKey({ ...listing, price: 40 }, "mercari")).toBe(key);
+    expect(nativeFormStructureKey({ ...listing, direct_category_ids: { mercari: "2008" } }, "mercari")).not.toBe(key);
+    // The labels offered depend on the method, the weight and the box.
+    expect(nativeFormStructureKey({ ...listing, mercari_specifics: { shippingMethod: "SOYO" } }, "mercari")).not.toBe(key);
+    expect(nativeFormStructureKey({ ...listing, weight_oz: 16 }, "mercari")).not.toBe(key);
+    expect(nativeFormStructureKey({ ...listing, package_dimensions_in: "10x8x4" }, "mercari")).not.toBe(key);
+    expect(nativeFormStructureKey({ ...listing, mercari_specifics: { ...listing.mercari_specifics,
+      package: { fitsShoebox: "yes" } } }, "mercari")).not.toBe(key);
+  });
+
+  it("asks Mercari's package questions with Prepaid label, and the sides only when it does not fit a shoebox", () => {
+    const row = (key: string, defaultValue = "") => ({ key, label: key, native: true, defaultValue });
+    const fields = [row("mercari_specifics.shippingMethod", "MERCARI"), row("mercari_specifics.package.pounds", "1"),
+      row("mercari_specifics.package.fitsShoebox"), row("mercari_specifics.package.length", "16"),
+      row("mercari_specifics.shippingClassId")];
+    const shown = (local: Record<string, string>) => fields
+      .filter((field) => nativeFieldVisible(field, { tab: "mercari", listing: {}, local, fields, categoryStale: false }))
+      .map((field) => field.key.split(".").pop());
+    expect(shown({})).toEqual(["shippingMethod", "pounds", "fitsShoebox", "length", "shippingClassId"]);
+    expect(shown({ "mercari_specifics.package.fitsShoebox": "yes" })).toEqual(["shippingMethod", "pounds", "fitsShoebox", "shippingClassId"]);
+    expect(shown({ "mercari_specifics.shippingMethod": "SOYO" })).toEqual(["shippingMethod"]);
   });
 
   it("treats a category change as a new form and a price edit as the same form", () => {

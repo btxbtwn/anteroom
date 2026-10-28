@@ -49,8 +49,16 @@ export function nativeFormCategoryKey(listing: ListingData | undefined, marketpl
  * a new category both change it, because both write the same category id.
  */
 export function nativeFormStructureKey(listing: ListingData | undefined, marketplace: string): string {
-  return nativeFormCategoryKey(listing, marketplace);
+  const category = nativeFormCategoryKey(listing, marketplace);
+  if (marketplace !== "mercari") return category;
+  // Mercari's labels depend on the package: its picker asks for them again when the weight or size changes.
+  const specifics = asRecord(listing?.mercari_specifics);
+  return [category, textOf(specifics.shippingMethod), JSON.stringify(specifics.package ?? null),
+    textOf(listing?.weight_lb), textOf(listing?.weight_oz), textOf(listing?.package_dimensions_in)].join("|");
 }
+
+const MERCARI_LABEL_KEYS = new Set(["mercari_specifics.shippingClassId", "mercari_specifics.shippingPayerId"]);
+const MERCARI_SIDE_KEYS = new Set(["mercari_specifics.package.length", "mercari_specifics.package.width", "mercari_specifics.package.height"]);
 
 /** The previous category's rows are still on screen while the new category's form loads. */
 export function categorySpecificFieldsStale(
@@ -168,9 +176,14 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
     if (!template) return true;
     return field.key === "sellwild_specifics.package.weight" && SELLWILD_WEIGHED_PACKAGES.has(template);
   }
-  // Mercari shows the label and free-shipping choice only with Prepaid label, and the minimum price only with Smart pricing on.
-  if (context.tab === "mercari" && ["mercari_specifics.shippingClassId", "mercari_specifics.shippingPayerId"].includes(field.key)) {
-    return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.shippingMethod") !== "SOYO";
+  // Mercari shows the label, its package questions and the free-shipping choice only with Prepaid label,
+  // the sides only when the package does not fit in a shoebox, and the minimum price only with Smart pricing on.
+  if (context.tab === "mercari" && (MERCARI_LABEL_KEYS.has(field.key) || field.key.startsWith("mercari_specifics.package."))) {
+    if (shownChoice(context.fields, context.local, context.listing, "mercari_specifics.shippingMethod") === "SOYO") return false;
+    if (MERCARI_SIDE_KEYS.has(field.key)) {
+      return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.package.fitsShoebox") !== "yes";
+    }
+    return true;
   }
   if (context.tab === "mercari" && field.key === "mercari_specifics.smartPricing.minimumPrice") {
     return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.smartPricing.enabled") === "true";
