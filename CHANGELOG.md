@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.471 — 2026-10-28
+## 0.1.472 — 2026-10-28
 
 - The eBay tab follows eBay's Create listing page. Item specifics stay in eBay's order, with Show more for the rest. You get a subtitle and custom label under title options, a second category, scheduling, this listing's own policies and item location, charity, and one custom item specific. An auction shows its duration and bids instead of an item price.
+
+## 0.1.471 — 2026-10-28
+
+- Each flaw in a description is on its own line, so a list of flaws is easy to scan. A description formula you wrote yourself stays as you wrote it.
 
 ## 0.1.470 — 2026-10-28
 
