@@ -1,6 +1,6 @@
 import { ListingTemplatesDialog } from "../ListingTemplatesDialog";
 import { CopyListingDialog } from "../CopyListingDialog";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
@@ -13,11 +13,9 @@ import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { displayCoverUrl } from "./coverSrc";
 import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
-import { inventoryStatus, listedFromImport, liveMarketplaces, liveStatusClass, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
+import { inventoryStatus, listedFromImport, liveMarketplaces, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 import { useVendooEnabled } from "../../vendooMode";
-
-const HOVER_STATUS_DELAY_MS = 280;
 
 function canHover() {
   return typeof window === "undefined" || !window.matchMedia || window.matchMedia("(hover: hover)").matches;
@@ -72,9 +70,6 @@ export function ListingRow({
   const itemRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const skipRenameBlur = useRef(false);
-  const hoverTimer = useRef<number | null>(null);
-  const [hoverOpen, setHoverOpen] = useState(false);
-  const [popupPos, setPopupPos] = useState<{ top: number; left: number } | null>(null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -95,31 +90,9 @@ export function ListingRow({
     enabled: false,
   });
 
-  const peekQuery = useQuery({
-    queryKey: ["vendoo-item-peek", jobId],
-    queryFn: async () => {
-      const data = await api.jobs.vendooItem(jobId || "", { cacheOnly: true });
-      if (data?.ok && (data.item || data.form || data.statuses)) {
-        const existing = queryClient.getQueryData(["vendoo-item", jobId]) as { item?: { generalDetails?: unknown } } | undefined;
-        // The hover peek is the slim status cache. Writing it over the fields
-        // panel's full item drops the listing records the status is read from.
-        if (!existing?.item?.generalDetails) {
-          queryClient.setQueryData(["vendoo-item", jobId], data);
-        }
-      }
-      return data;
-    },
-    // Not gated on the Fields-panel cache: that observer is disabled, so a pull's
-    // invalidate never refetches it. Re-peeking after invalidation is what picks
-    // up the refreshed server draft.
-    enabled: Boolean(hoverOpen && jobId),
-    staleTime: Infinity,
-    retry: 0,
-  });
-
   const draft = useMemo(
-    () => mergeStatusDrafts(cachedDraftQuery.data, peekQuery.data, statusDraft),
-    [cachedDraftQuery.data, peekQuery.data, statusDraft],
+    () => mergeStatusDrafts(cachedDraftQuery.data, statusDraft),
+    [cachedDraftQuery.data, statusDraft],
   );
   const marketplaceStatuses = useMemo(
     () => marketplaceStatusesFromDraft(draft, visibleMarketplaces),
@@ -147,45 +120,6 @@ export function ListingRow({
   // than Studio's last write, and only a delist + relist in Vendoo fixes that.
   const relistMarketplaces = useMemo(() => marketplacesNeedingRelist(listing), [listing]);
   const relistStageNow = useMemo(() => relistStage(listing), [listing]);
-  const loadingStatus = Boolean(
-    hoverOpen && jobId && !draft && peekQuery.isFetching,
-  );
-  const missingStatus = Boolean(
-    hoverOpen && jobId && !draft && peekQuery.isFetched && !peekQuery.isFetching,
-  );
-
-  const clearHoverTimer = () => {
-    if (hoverTimer.current != null) {
-      window.clearTimeout(hoverTimer.current);
-      hoverTimer.current = null;
-    }
-  };
-
-  const updatePopupPos = useCallback(() => {
-    const el = itemRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    setPopupPos({
-      top: Math.max(8, Math.min(rect.top, window.innerHeight - 220)),
-      left: Math.min(rect.right + 8, window.innerWidth - 220),
-    });
-  }, []);
-
-  const openHover = () => {
-    // A tap focuses the row too; without a hovering pointer the peek only covers the list.
-    if (!jobId || renaming || !canHover()) return;
-    clearHoverTimer();
-    hoverTimer.current = window.setTimeout(() => {
-      updatePopupPos();
-      setHoverOpen(true);
-    }, HOVER_STATUS_DELAY_MS);
-  };
-
-  const closeHover = () => {
-    clearHoverTimer();
-    setHoverOpen(false);
-  };
-
   const activate = () => {
     // While selecting on a phone the whole row is the checkbox, as in Mail's edit mode.
     if (selecting && !canHover()) {
@@ -196,7 +130,6 @@ export function ListingRow({
   };
 
   const startRename = () => {
-    closeHover();
     skipRenameBlur.current = false;
     setDraftTitle(title);
     setRenaming(true);
@@ -221,8 +154,6 @@ export function ListingRow({
     renameListing.mutate(next);
   };
 
-  useEffect(() => () => clearHoverTimer(), []);
-
   useEffect(() => {
     if (!renaming) return;
     const input = renameInputRef.current;
@@ -231,31 +162,11 @@ export function ListingRow({
     input.select();
   }, [renaming]);
 
-  useEffect(() => {
-    if (!hoverOpen) return;
-    const onScroll = () => updatePopupPos();
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
-    return () => {
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
-    };
-  }, [hoverOpen, updatePopupPos]);
-
   const actionClass =
     "inline-flex size-5.5 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40";
 
   return (
-    <div
-      className="group/row relative mb-px"
-      ref={itemRef}
-      onMouseEnter={openHover}
-      onMouseLeave={closeHover}
-      onFocus={openHover}
-      onBlur={(event) => {
-        if (!itemRef.current?.contains(event.relatedTarget as Node | null)) closeHover();
-      }}
-    >
+    <div className="group/row relative mb-px" ref={itemRef}>
       {/* Row look follows T3 Code's sidebar thread rows (MIT, (c) 2026 T3 Tools Inc.). */}
       <div
         data-active={selected}
@@ -431,34 +342,6 @@ export function ListingRow({
       )}
       {templatesOpen?<ListingTemplatesDialog conversationId={listing.id} onClose={()=>setTemplatesOpen(false)}/>:null}
       {copyOpen ? <CopyListingDialog conversationId={listing.id} onClose={() => setCopyOpen(false)} onCopied={(id) => { setCopyOpen(false); onSelect(id); }} /> : null}
-      {hoverOpen && jobId && popupPos ? (
-        <div
-          className="dropdown-glass pointer-events-none fixed z-80 w-55 rounded-lg p-2 text-popover-foreground shadow-lg/10"
-          style={{ top: popupPos.top, left: popupPos.left }}
-          role="tooltip"
-        >
-          <div className="mb-1.5 px-0.5 text-3xs font-semibold tracking-wider text-muted-foreground uppercase">Listing status</div>
-          {loadingStatus ? (
-            <div className="px-0.5 py-1 text-2xs text-muted-foreground">Reading…</div>
-          ) : popupStatuses.length ? (
-            <ul className="m-0 flex list-none flex-col gap-1 p-0">
-              {popupStatuses.map((row) => (
-                <li key={row.id} className="flex min-h-5.5 items-center gap-2 px-0.5">
-                  <MarketplaceLogo id={row.id} label={row.label} size={16} />
-                  <span className="min-w-0 flex-1 truncate text-xs text-foreground/90">{row.label}</span>
-                  <span className={`pr-live-status ${liveStatusClass(row.status)}`}>{row.status}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="px-0.5 py-1 text-2xs leading-snug text-muted-foreground">
-              {missingStatus && vendooOn
-                ? "Pull from Vendoo to load live status."
-                : "No marketplace status yet."}
-            </div>
-          )}
-        </div>
-      ) : null}
     </div>
   );
 }

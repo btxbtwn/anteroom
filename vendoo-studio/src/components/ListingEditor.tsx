@@ -185,7 +185,6 @@ export function ListingEditor({
       queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       queryClient.invalidateQueries({ queryKey: ["vendoo-item"] });
-      queryClient.invalidateQueries({ queryKey: ["vendoo-item-peek"] });
       queryClient.invalidateQueries({ queryKey: ["vendoo-sync", convId] });
       toastManager.add({ type: "success", title: "Back to the Vendoo listing" });
     },
