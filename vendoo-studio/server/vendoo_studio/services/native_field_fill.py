@@ -28,9 +28,10 @@ log = logging.getLogger("vendoo_studio.native_field_fill")
 MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
 NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild"}
 # Rows about the sale rather than the item, or ones generation already decides.
+# Charity is the seller's choice to donate, not a fact about the item.
 _NOT_ITEM = re.compile(
     r"price|ship|parcel|package|quantity|sku|categor|worldwide|offer|format|duration|store|inventor"
-    r"|variation|zip|location|condition|title|description|brand|hashtag|tags"
+    r"|variation|zip|location|condition|title|description|brand|hashtag|tags|charity|donation"
 )
 # A row with more choices than this (eBay brands, for one) is not something to pick from a list.
 MAX_CHOICES = 300

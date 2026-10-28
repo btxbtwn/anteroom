@@ -469,3 +469,112 @@ export function SearchableMultiSelect({
     </div>
   );
 }
+
+/** One category in a department, or a group of categories such as Global & Traditional Wear. */
+export interface CascadeCategory {
+  type: "category";
+  label: string;
+  value: string;
+  /** What the closed category dropdown reads, such as "Women Jeans". */
+  display: string;
+  children: { label: string; value: string }[];
+}
+
+export interface CascadeGroup {
+  type: "group";
+  label: string;
+  items: CascadeCategory[];
+}
+
+export interface CascadeDepartment {
+  id: string;
+  label: string;
+  items: (CascadeCategory | CascadeGroup)[];
+}
+
+type Drill = { department: string; group?: string };
+
+function cascadeMatch(departments: readonly CascadeDepartment[], value: string): { category: CascadeCategory; department: CascadeDepartment } | null {
+  for (const department of departments) {
+    const categories = department.items.flatMap(item => item.type === "group" ? item.items : [item]);
+    const category = categories.find(item => item.value === value || item.children.some(child => child.value === value));
+    if (category) return { category, department };
+  }
+  return null;
+}
+
+/**
+ * Two dropdowns. The first drills departments, then categories, then a group.
+ * The second lists that category's subcategories and None.
+ */
+export function DependentSelectPair({
+  id, value, departments, disabled, onChange,
+}: {
+  id: string;
+  value: string;
+  departments: readonly CascadeDepartment[];
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const match = cascadeMatch(departments, value);
+  const [open, setOpen] = React.useState(false);
+  const [drill, setDrill] = React.useState<Drill | null>(null);
+  const root = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  const level = open ? drill : null;
+  const department = departments.find(entry => entry.id === level?.department);
+  const options: { key: string; label: string; pick: () => void }[] = [];
+  if (!department) {
+    for (const entry of departments) options.push({
+      key: entry.id, label: entry.label, pick: () => setDrill({ department: entry.id }),
+    });
+  } else {
+    options.push({ key: "all", label: "All Categories", pick: () => setDrill(null) });
+    const items = level?.group
+      ? (department.items.find(item => item.type === "group" && item.label === level.group) as CascadeGroup | undefined)?.items || []
+      : department.items;
+    for (const item of items) {
+      if (item.type === "group") options.push({ key: item.label, label: item.label, pick: () => setDrill({ department: department.id, group: item.label }) });
+      else options.push({
+        key: item.value, label: item.label, pick: () => {
+          onChange(item.value);
+          setOpen(false);
+          setDrill(null);
+        },
+      });
+    }
+  }
+  const subcategory = match && match.category.children.find(child => child.value === value && child.value !== match.category.value);
+  return (
+    <div ref={root} className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="relative min-w-0">
+        <FieldLabel htmlFor={id}>Category</FieldLabel>
+        <button type="button" id={id} data-listing-field={id} aria-haspopup="listbox" aria-expanded={open} disabled={disabled}
+          className="flex h-8.5 w-full items-center truncate rounded-lg border border-input bg-background px-3 text-left text-base shadow-xs/5 sm:h-7.5 sm:text-sm disabled:opacity-64"
+          onClick={() => { setDrill(null); setOpen(current => !current); }}>
+          {match ? match.category.display : "Select Category"}
+        </button>
+        {open && <ul role="listbox" aria-label="Category" className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-md">
+          {options.map(option => <li key={option.key} role="option" aria-selected={option.label === match?.department.label}>
+            <button type="button" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" onClick={option.pick}>{option.label}</button>
+          </li>)}
+        </ul>}
+      </div>
+      {match?.category.children.length ? <div className="min-w-0">
+        <FieldLabel htmlFor={`${id}-subcategory`}>Subcategory</FieldLabel>
+        <NativeSelect id={`${id}-subcategory`} aria-label="Subcategory" disabled={disabled}
+          value={subcategory?.value || ""} onChange={event => onChange(event.target.value || match.category.value)}>
+          <option value="">Select Subcategory (optional)</option>
+          {match.category.children.map(child => <option key={`${child.label}-${child.value}`} value={child.value}>{child.label}</option>)}
+        </NativeSelect>
+      </div> : null}
+    </div>
+  );
+}

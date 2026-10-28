@@ -314,9 +314,34 @@ test('Poshmark sends the selected quantity, original price and explicit SKU inst
   const post = c.poshmarkPostFields(CATALOG.data, listing, { brand: 'Hanes', styleTags: [] });
   assert.equal(post.inventory.multi_item, true);
   assert.equal(post.inventory.size_quantities[0].quantity_available, 3);
+  assert.equal(post.inventory.size_quantities[0].size_system, 'us');
   assert.equal(post.original_price_amount.val, '55');
   assert.deepEqual(JSON.parse(JSON.stringify(post.seller_private_info)), { sku: '' });
   assert.throws(() => c.poshmarkPostFields(CATALOG.data, { ...listing, quantity: 1.5 }, {}), /whole-number quantity/);
+  const single = c.poshmarkPostFields(CATALOG.data, { ...listing, quantity: 3, poshmark_specifics: { ...listing.poshmark_specifics, multiItem: 'false' } }, {});
+  assert.equal(single.inventory.multi_item, false);
+  assert.equal(single.inventory.size_quantities[0].quantity_available, 1);
+});
+
+test('Poshmark sends the size system the seller picked and a drop time for Drops', () => {
+  const c = loadWorker();
+  const catalog = structuredClone(CATALOG.data);
+  catalog.catalog.departments[0].categories[0].size_sets[0].size_systems.au = { sizes: [{ id: '0AU', display: '0', size_system: 'au' }] };
+  const soon = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+  const listing = { ...LISTING, poshmark_specifics: { ...LISTING.poshmark_specifics, sizeSystem: 'au', multiItem: 'true', availability: 'coming_soon', makeAvailableAt: soon,
+    inventoryRows: [{ sizeSetId: catalog.catalog.departments[0].categories[0].size_sets[0].id, sizeId: '0AU', quantity: 2, sku: '' }] } };
+  // The fixture set has no id; the editor stores the set id it was given.
+  listing.poshmark_specifics.inventoryRows[0].sizeSetId = undefined;
+  catalog.catalog.departments[0].categories[0].size_sets[0].id = 'standard';
+  listing.poshmark_specifics.inventoryRows[0].sizeSetId = 'standard';
+  const post = c.poshmarkPostFields(catalog, listing, { brand: 'Hanes', styleTags: [] });
+  assert.equal(post.inventory.multi_item, true);
+  assert.equal(post.inventory.status, 'coming_soon');
+  assert.equal(post.inventory.size_quantities[0].size_system, 'au');
+  assert.equal(post.inventory.size_quantities[0].size_id, '0AU');
+  assert.equal(post.make_available_at, new Date(soon).toISOString());
+  assert.throws(() => c.poshmarkPostFields(catalog, { ...listing, poshmark_specifics: { ...listing.poshmark_specifics, makeAvailableAt: '' } }, {}), /drop time/);
+  assert.throws(() => c.poshmarkPostFields(catalog, { ...listing, poshmark_specifics: { ...listing.poshmark_specifics, makeAvailableAt: new Date(Date.now() + 9 * 24 * 60 * 60 * 1000).toISOString() } }, {}), /7 days/);
 });
 
 test('Poshmark private notes and cost support clearing, and shipping discounts require a live option', async () => {

@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.474 — 2026-10-28
+## 0.1.475 — 2026-10-28
 
 - OpenRouter now has its own mark and keeps the model names OpenRouter gives them, in Settings and the model picker.
 - OpenRouter has a Reasoning setting with the levels the listing model supports. Default leaves the choice to OpenRouter.
+
+## 0.1.474 — 2026-10-27
+
+- The Poshmark tab now matches the rest of Poshmark’s create-listing page. Quantity is Single Item or Multi Item, separate from Size. Category and Subcategory sit side by side: the category starts with Women, Men, Kids, Home, Pets, or Electronics, and a chosen category reads like “Women Jeans.” Sizes can be US, AU, EU, or UK. Availability includes Drops, with a drop time within 7 days. Listing Price shows the Smart Sell badge, Discounted Shipping, and Your Earnings.
 
 ## 0.1.473 — 2026-10-28
 

@@ -42,7 +42,7 @@ for (const { parts, row } of pageRows) {
   if (!pick) continue;
   const form = clean(call(c, 'poshmarkEditorForm', { direct_category_ids: { poshmark: ours.option_values[pick] } }, catalog, display, [], []));
   const inv = form.fields.find(f => f.input_type === 'inventory');
-  const got = inv.inventory_groups.map(g => ({ tab: g.label, sizes: g.id === 'custom' ? [] : g.sizes.map(s => norm(s.label)) }));
+  const got = inv.inventory_groups.map(g => ({ tab: g.label, sizes: g.id === 'custom' ? [] : (g.systems?.us || g.sizes).map(s => norm(s.label)) }));
   const want = (row.sizes || []).map(t => ({ tab: t.tab, sizes: t.sizes.map(norm) }));
   sized++;
   if (JSON.stringify(got) !== JSON.stringify(want)) problems.push({ problem: 'sizes', category: label, anteroom: got.map(g => `${g.tab}:${g.sizes.length}`), page: want.map(g => `${g.tab}:${g.sizes.length}`) });
