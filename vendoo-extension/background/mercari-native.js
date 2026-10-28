@@ -243,10 +243,16 @@ function mercariWeightOz(listing) {
 }
 
 // Mercari sizes whose own numbers hold one of the seller's: kids' "XL (18/20)"
-// is Mercari's "2XL (18)", not the "XL (14-16)" a bare XL would pick.
+// is Mercari's "2XL (18)", not the "XL (14-16)" a bare XL would pick. Mercari
+// spells a letter size's numbers in its own label ("S (4-6)"), so a tag that
+// reads just "6" is that size too — unless the category lists a size called 6.
 function mercariNumberedSizes(wanted, sizes) {
-  const inner = /\(([^)]*)\)/.exec(wanted)?.[1];
-  const numbers = (inner || '').split(/[/,]|\s-\s|-/).map(part => part.trim()).filter(part => /^\d+(?:\.\d+)?$/.test(part)).map(Number);
+  const text = String(wanted || '').trim();
+  const inner = /\(([^)]*)\)/.exec(text)?.[1];
+  const bare = !inner && /^\d+(?:\.\d+)?$/.test(text);
+  if (bare && sizes.some(size => [size?.name, size?.title]
+    .some(label => sizeKey(label) === sizeKey(text)))) return [];
+  const numbers = (bare ? text : inner || '').split(/[/,]|\s-\s|-/).map(part => part.trim()).filter(part => /^\d+(?:\.\d+)?$/.test(part)).map(Number);
   if (!numbers.length) return [];
   return sizes.filter(size => {
     const range = /\((\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?\)\s*$/.exec(String(size.name || ''));
