@@ -64,6 +64,7 @@ import { CategoryTreeSelect, EbayCategorySelect, FieldLabel, InspectorSection, S
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
 import { Input } from "./ui/input";
 import { Spinner } from "./ui/spinner";
@@ -100,6 +101,7 @@ interface EditorField {
   optionValues?: Record<string, string>;
   clears?: string[];
   help?: string;
+  appends?: string[];
   valueConstraints?: Record<string, AspectConstraintRule[]>;
   required?: boolean;
   options?: string[];
@@ -888,6 +890,12 @@ export function StructuredEditor({
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
                   {control(f)}
                   {f.help && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
+                  {f.appends?.length ? (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                      <span className="me-0.5">Added at the end:</span>
+                      {f.appends.map((tag) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+                    </div>
+                  ) : null}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
                   {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
@@ -1266,6 +1274,7 @@ function schemaFieldsForTab(
     optionValues: field.option_values,
     clears: field.clears,
     help: field.help,
+    appends: field.appends,
     valueConstraints: field.value_constraints,
     label: field.required ? `${field.label} *` : field.label,
     required: field.required,

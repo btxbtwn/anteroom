@@ -362,16 +362,18 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   assert.deepEqual(rows.Color.options, ['Blue', 'Black']);
   assert.deepEqual(rows.Color.value, ['blue', 'black']);
   assert.equal(rows.Color.max_values, 2);
-  assert.match(rows.Description.help, /#denim/);
+  assert.ok(rows.Description.appends.includes('#denim'));
+  assert.equal(rows.Description.help, undefined);
   assert.equal(rows['Item price'].path, 'price');
   // The page's headings and row layout.
   const headings = [];
   for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
   assert.deepEqual(headings, ['Description', 'Info', 'Enhance your listing', 'Item price', 'Boost your listing', 'Shipping']);
   assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label), ['Size', 'Quantity', 'SKU']);
-  assert.equal(rows.Type.help, 'Select up to 3');
-  assert.equal(rows.Color.help, 'Select up to two colors');
-  assert.equal(rows.Age.help, 'Do you know when this item was made? Add up to 1');
+  // The picker shows the limit, so the hints leave it out.
+  assert.equal(rows.Type.help, undefined);
+  assert.equal(rows.Color.help, undefined);
+  assert.equal(rows.Age.help, 'Do you know when this item was made?');
   const kids = clean(call(c, 'depopEditorForm', { ...listing, direct_category_ids: { depop: 'kidswear_jeans' } }, attributes, []));
   assert.ok(!kids.fields.some(row => row.label === 'Type'));
   // The form's Color picks are what direct List posts.

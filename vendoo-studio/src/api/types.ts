@@ -555,6 +555,8 @@ export interface MarketplaceFormField {
   option_values?: Record<string, string>;
   clears?: string[];
   help?: string;
+  /** Text List adds after this field's value, such as Depop's hashtags. */
+  appends?: string[];
   value_constraints?: Record<string, {
     parentName?: string;
     parentValues?: string[];

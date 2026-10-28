@@ -7,7 +7,7 @@ import { ChevronDownIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { catalogLeafChoices, categoryChoiceAt, categoryPathKey, categorySegments, categorySteps, type CategoryChoice } from "./categoryTree";
+import { catalogLeafChoices, categoryPathLabel, categorySegments, matchCategoryChoices, type CategoryChoice } from "./categoryTree";
 import { cn } from "../lib/utils";
 import { Combobox, ComboboxCollection, ComboboxEmpty, ComboboxGroup, ComboboxGroupLabel, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup, ComboboxTrigger } from "./ui/combobox";
 import { toggleVariants } from "./ui/toggle";
@@ -156,6 +156,8 @@ export function SearchableSelect({
   choicesVerified = true,
   onSearch,
   optionGroups,
+  placeholder = "Search",
+  clearable = true,
 }: {
   id: string;
   fieldKey: string;
@@ -169,6 +171,8 @@ export function SearchableSelect({
   onSearch?: (query: string) => void;
   /** Choice label → the heading the marketplace lists it under, in option order. */
   optionGroups?: Record<string, string>;
+  placeholder?: string;
+  clearable?: boolean;
 }) {
   const [query, setQuery] = React.useState(value);
   React.useEffect(() => setQuery(value), [value]);
@@ -196,8 +200,8 @@ export function SearchableSelect({
         <ComboboxInput
           id={id}
           data-listing-field={fieldKey}
-          placeholder="Search"
-          showClear={Boolean(value) && !disabled}
+          placeholder={placeholder}
+          showClear={clearable && Boolean(value) && !disabled}
           disabled={disabled}
           maxLength={maxLength}
           aria-invalid={(unavailable && choicesVerified) || undefined}
@@ -229,8 +233,9 @@ export function SearchableSelect({
 }
 
 /**
- * Grouped category dropdowns. The seller keeps picking until the row is the
- * last one in its branch. A group does not save, so the form stays put.
+ * One searchable picker over every category the seller can save, each shown
+ * by its full path ("Men › Bottoms › Jeans") under its top-level heading.
+ * Typed words match the start of any word in the path.
  */
 export function CategoryTreeSelect({
   id, fieldKey, value, choices, disabled, onChange,
@@ -242,60 +247,24 @@ export function CategoryTreeSelect({
   disabled?: boolean;
   onChange: (choice: CategoryChoice) => void;
 }) {
-  // A group is not saved. This remembers the open branch; the parent remounts the control when the saved category changes.
-  const [path, setPath] = React.useState<string[] | null>(null);
-  const selected = path ?? categorySegments(value);
-  const selectedKey = categoryPathKey(selected);
-  const steps = React.useMemo(
-    () => categorySteps(choices, selectedKey ? categorySegments(selectedKey) : []),
-    [choices, selectedKey],
+  const [query, setQuery] = React.useState("");
+  const sorted = React.useMemo(
+    () => [...choices].sort((a, b) => categoryPathLabel(a.label).localeCompare(categoryPathLabel(b.label))),
+    [choices],
   );
-  const atLeaf = categoryChoiceAt(choices, selected);
-  const savedKnown = Boolean(value) && Boolean(categoryChoiceAt(choices, categorySegments(value)));
-  const hasDeeper = steps.some((step) => step.menu.groups.some((group) => group.items.some((item) => !item.terminal)));
-  const choose = (next: string, index: number) => {
-    if (!next) {
-      if (index === 0) return;
-      const previous = steps[index - 1]?.value;
-      setPath(previous ? categorySegments(previous) : []);
-      return;
-    }
-    const nextPath = categorySegments(next);
-    setPath(nextPath);
-    const choice = categoryChoiceAt(choices, nextPath);
-    if (choice) onChange(choice);
-  };
-  if (!steps.length) {
+  const byPath = React.useMemo(() => new Map(sorted.map((choice) => [categoryPathLabel(choice.label), choice])), [sorted]);
+  if (!sorted.length) {
     return <p role="status" className="text-xs text-muted-foreground">No categories are available yet. Reopen the listing to try again.</p>;
   }
+  const saved = value ? categoryPathLabel(value) : "";
+  // The input starts out holding the saved path; that is not a search yet.
+  const matches = matchCategoryChoices(sorted, query === saved ? "" : query).map((choice) => categoryPathLabel(choice.label));
+  const options = saved && byPath.has(saved) && !matches.includes(saved) ? [saved, ...matches] : matches;
+  const groups = Object.fromEntries(options.map((path) => [path, categorySegments(path)[0] || "Category"]));
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      {steps.map((step, index) => (
-        <NativeSelect
-          key={`level-${index}`}
-          id={index === 0 ? id : `${id}-level-${index}`}
-          data-listing-field={index === 0 ? fieldKey : undefined}
-          aria-label={index === 0 ? undefined : "Next category"}
-          disabled={disabled}
-          value={step.value}
-          onChange={(event) => choose(event.target.value, index)}
-        >
-          <option value="">{index === 0 ? "Choose a category" : "Choose a narrower category"}</option>
-          {step.menu.groups.map((group) => (
-            <optgroup key={group.heading} label={group.heading}>
-              {group.items.map((item) => {
-                const key = categoryPathKey(item.path);
-                return <option key={key} value={key}>{item.label}</option>;
-              })}
-            </optgroup>
-          ))}
-        </NativeSelect>
-      ))}
-      {!atLeaf && hasDeeper && <p className="text-xs text-muted-foreground">Choose a category group, then continue until the last one.</p>}
-      {Boolean(value) && !savedKnown && path == null && (
-        <p role="alert" className="text-xs text-warning-foreground">Saved category “{value}” is not in this list. Choose one to replace it.</p>
-      )}
-    </div>
+    <SearchableSelect id={id} fieldKey={fieldKey} value={saved} options={options} optionGroups={groups}
+      disabled={disabled} clearable={false} placeholder="Search categories" onSearch={setQuery}
+      onChange={(path) => { const choice = byPath.get(path); if (choice) onChange(choice); }} />
   );
 }
 
@@ -432,7 +401,9 @@ export function SearchableMultiSelect({
             rootClassName={query.trim() ? "min-w-16" : "min-w-0"}
             id={id}
             data-listing-field={fieldKey}
-            placeholder={value.length > 0 ? "" : (selectionOnly ? "Search choices" : "Search or add values")}
+            placeholder={value.length > 0 ? "" : maxValues != null
+              ? (maxValues === 1 ? "Choose one" : `Choose up to ${maxValues}`)
+              : (selectionOnly ? "Search choices" : "Search or add values")}
             disabled={disabled}
             maxLength={maxLength}
             aria-invalid={invalid || undefined}
@@ -459,9 +430,10 @@ export function SearchableMultiSelect({
           </ComboboxItem>}</ComboboxList>
         </ComboboxPopup>
       </Combobox>
-      {(help || maxValues != null) && <div className="mt-1.5 flex items-start gap-3 text-xs text-muted-foreground">
+      {/* The empty picker's placeholder names the limit; the count takes over once something is chosen. */}
+      {(help || (maxValues != null && value.length > 0)) && <div className="mt-1.5 flex items-start gap-3 text-xs text-muted-foreground">
         {help && <p id={`${id}-help`} className="min-w-0 flex-1">{help}</p>}
-        {maxValues != null && <p className={cn("ms-auto shrink-0 tabular-nums", overLimit && "text-warning-foreground")}
+        {maxValues != null && value.length > 0 && <p className={cn("ms-auto shrink-0 tabular-nums", overLimit && "text-warning-foreground")}
           aria-label={`${value.length} of ${maxValues} selected`}>{value.length}/{maxValues}</p>}
       </div>}
       {(unavailable.length > 0 || overLimit) && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">

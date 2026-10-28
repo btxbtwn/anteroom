@@ -126,7 +126,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
   // and the page names its field labels in plain English ("Body fit").
   const fields = [
     { ...nativeEditorBase(listing, { marketplace: 'depop', title: false, maxDescription: DEPOP_MAX_DESCRIPTION })[0],
-      ...(hashtags ? { help: `List adds the hashtags ${hashtags} to the end.` } : {}) },
+      ...(hashtags ? { appends: hashtags.split(/\s+/) } : {}) },
     nativeEditorChoice('direct_category_ids.depop', 'Category', depopDirectId(category), choices,
       { required: true, clears: ['depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'] }),
   ];
@@ -181,12 +181,12 @@ function depopEditorForm(listing, attributes, parcels = []) {
 
 // Depop's sell page, read 2026-10-27: its headings, the hint under each field,
 // and Size, Quantity and SKU at half width (Size and Quantity share a row).
+// Depop's "Add up to N" wording is left out: Anteroom's picker shows the limit.
 function depopPageLayout(fields) {
   const hints = {
-    'depop_specifics.colour': 'Select up to two colors',
-    'depop_specifics.source': max => `What kind of item is this? Add up to ${max}`,
-    'depop_specifics.age': max => `Do you know when this item was made? Add up to ${max}`,
-    'depop_specifics.style': max => `Pick relevant tags to describe this item's style. Add up to ${max}`,
+    'depop_specifics.source': 'What kind of item is this?',
+    'depop_specifics.age': 'Do you know when this item was made?',
+    'depop_specifics.style': "Pick relevant tags to describe this item's style.",
     'depop_specifics.parcelSize': "Your selection sets your shipping label and the buyer's shipping cost.",
   };
   const section = path => path === 'depop_specifics.description' ? 'Description'
@@ -196,10 +196,10 @@ function depopPageLayout(fields) {
           : path === 'depop_specifics.parcelSize' || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
             : 'Info';
   return fields.map(field => {
-    const hint = field.path.startsWith('depop_specifics.attributes.') ? `Select up to ${field.max_values}` : hints[field.path];
+    const hint = hints[field.path];
     return { ...field, section: section(field.path),
       ...(['depop_specifics.nativeSizeId', 'quantity', 'depop_specifics.sku'].includes(field.path) ? { width: 'half' } : {}),
-      ...(hint ? { help: [typeof hint === 'function' ? hint(field.max_values) : hint, field.help].filter(Boolean).join(' ') } : {}) };
+      ...(hint ? { help: [hint, field.help].filter(Boolean).join(' ') } : {}) };
   });
 }
 
