@@ -68,30 +68,32 @@ describe("marketplace choice controls", () => {
 describe("category tree dropdown", () => {
   const ignore = () => { throw new Error("Rendering must not save"); };
 
-  it("groups the first dropdown by category and commits a last-step row", () => {
+  it("opens the next level once a first-level category is saved", () => {
     const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
       value="Fashion > Shoes" choices={[
         { label: "Fashion > Shoes", id: "69" },
         { label: "Fashion > Tops", id: "70" },
         { label: "Home & Garden > Furniture", id: "61" },
       ]} onChange={ignore} />);
-    expect(html.match(/<select/g)).toHaveLength(1);
-    expect(html).toContain('label="Fashion"');
+    expect(html.match(/<select/g)).toHaveLength(2);
+    expect(html).toContain(">Fashion</option>");
+    expect(html).toContain(">Home &amp; Garden</option>");
     expect(html).toContain(">Shoes</option>");
-    expect(html).toContain('label="Home &amp; Garden"');
+    expect(html).not.toContain("<optgroup");
     expect(html).toContain('data-listing-field="sellwild_specifics.nativeCategoryId"');
     expect(html).not.toContain("continue until the last one");
   });
 
-  it("keeps a second dropdown open for a category that is not the last step", () => {
+  it("shows department, group and item as three dropdowns", () => {
     const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.depop"
       value="Men > Bottoms > Jeans" choices={[
         { label: "Men > Bottoms > Jeans", id: "menswear_jeans" },
         { label: "Men > Tops > T-shirts", id: "menswear_tshirts" },
         { label: "Women > Dresses > Mini", id: "womenswear_mini" },
       ]} onChange={ignore} />);
-    expect(html.match(/<select/g)).toHaveLength(2);
-    expect(html).toContain('label="Men"');
+    expect(html.match(/<select/g)).toHaveLength(3);
+    expect(html).toContain(">Men</option>");
+    expect(html).toContain(">Women</option>");
     expect(html).toContain(">Bottoms</option>");
     expect(html).toContain(">Jeans</option>");
     expect(html).toContain('aria-label="Next category"');
@@ -101,8 +103,8 @@ describe("category tree dropdown", () => {
   it("does not ask for another step when every row in the list is a last step", () => {
     const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
       value="" choices={[
-        { label: "Fashion > Shoes", id: "69" },
-        { label: "Home & Garden > Furniture", id: "61" },
+        { label: "Shoes", id: "69" },
+        { label: "Furniture", id: "61" },
       ]} onChange={ignore} />);
     expect(html).not.toContain("continue until the last one");
     expect(html).toContain(">Shoes</option>");
@@ -114,8 +116,8 @@ describe("category tree dropdown", () => {
         { label: "Kids > Girls tops > Girls (4+)", id: "1911" },
       ]} onChange={ignore} />);
     expect(html).toContain("Choose a category group, then continue until the last one.");
-    expect(html).toContain('label="Kids"');
-    expect(html).toContain(">Girls tops</option>");
+    expect(html).toContain(">Kids</option>");
+    expect(html.match(/<select/g)).toHaveLength(1);
   });
 });
 

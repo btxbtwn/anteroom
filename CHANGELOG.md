@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.462 — 2026-10-27
+
+- Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
+
 ## 0.1.461 — 2026-10-28
 
 - The listing form now takes the whole window, so fields are easier to read. The chat is a pop-up in the bottom-right corner: minimize it to a small button that still shows what it's working on and marks new replies, and press ⌘J to open or close it. It opens by itself when you ask about a field or start a new listing.
