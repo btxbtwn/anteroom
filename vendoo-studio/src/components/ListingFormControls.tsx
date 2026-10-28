@@ -3,13 +3,14 @@
  * styles (MIT, (c) 2026 T3 Tools Inc.): its segmented toggle for tab strips,
  * its input chrome for native selects, its muted field labels.
  */
-import { ChevronDownIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronRightIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { catalogLeafChoices, categoryChoiceAt, categoryMenu, categoryPathKey, categorySegments, type CategoryChoice, type CategoryItem } from "./categoryTree";
+import { catalogLeafChoices, categoryChoiceAt, categoryMenu, categoryPathKey, categorySearch, categorySegments, type CategoryChoice, type CategoryItem } from "./categoryTree";
 import { cn } from "../lib/utils";
-import { Combobox, ComboboxCollection, ComboboxEmpty, ComboboxGroup, ComboboxGroupLabel, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup, ComboboxTrigger } from "./ui/combobox";
+import { Combobox, ComboboxCollection, ComboboxEmpty, ComboboxGroup, ComboboxGroupLabel, ComboboxInput, ComboboxItem, ComboboxList, ComboboxListVirtualized, ComboboxPopup, ComboboxSearchInput, ComboboxStatus, ComboboxTrigger } from "./ui/combobox";
+import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { toggleVariants } from "./ui/toggle";
 
 /** A tab strip in T3's segmented-control look; keeps tablist/tab roles. */
@@ -234,7 +235,9 @@ export function SearchableSelect({
 
 /**
  * A category button that drills one level at a time, the way Poshmark's
- * category picker works. The chosen path reads with an arrow between levels.
+ * category picker works. The chosen path reads in full with an arrow between
+ * levels; the popover shows where the path sits, and searches every category
+ * when the seller does not want to drill.
  */
 export function CategoryDrilldown({
   id, fieldKey, value, choices, disabled, placeholder = "Choose a category", onChange,
@@ -248,60 +251,140 @@ export function CategoryDrilldown({
   onChange: (choice: CategoryChoice) => void;
 }) {
   const [open, setOpen] = React.useState(false);
-  const [drill, setDrill] = React.useState<string[] | null>(null);
-  const root = React.useRef<HTMLDivElement>(null);
+  const [drill, setDrill] = React.useState<string[]>([]);
+  const [query, setQuery] = React.useState("");
+  const searchRef = React.useRef<HTMLInputElement>(null);
+  // On a desktop the seller can type straight away; on touch, leave the tree
+  // in view instead of covering it with the keyboard.
   React.useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [open]);
-  const menu = open ? categoryMenu(choices, drill ?? []) : null;
+    if (!open || window.matchMedia("(pointer: coarse)").matches) return;
+    const frame = window.requestAnimationFrame(() => searchRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [open, drill]);
   const selectedKey = categoryPathKey(value);
+  const searching = query.trim().length > 0;
+  const menu = React.useMemo(() => categoryMenu(choices, drill), [choices, drill]);
+  const results = React.useMemo(() => (searching ? categorySearch(choices, query) : []), [choices, query, searching]);
+  const items = React.useMemo(() => (searching ? results : menu?.items ?? []), [menu, results, searching]);
+  const itemsByKey = React.useMemo(() => new Map(items.map((item) => [categoryPathKey(item.path), item])), [items]);
+  const itemKeys = React.useMemo(() => [...itemsByKey.keys()], [itemsByKey]);
+  const crumbs = ["All categories", ...drill];
   const choose = (item: CategoryItem) => {
     const choice = categoryChoiceAt(choices, item.path);
     if (choice) {
       onChange(choice);
       setOpen(false);
-      setDrill(null);
       return;
     }
     setDrill(item.path);
+    setQuery("");
   };
   return (
-    <div ref={root} className="relative min-w-0">
-      <button type="button" id={id} data-listing-field={fieldKey}
-        aria-haspopup="listbox" aria-expanded={open} disabled={disabled}
-        className="flex h-8.5 w-full items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 text-left text-base shadow-xs/5 disabled:opacity-64 sm:h-7.5 sm:text-sm"
-        onClick={() => { setDrill(null); setOpen((current) => !current); }}>
-        <span className={cn("truncate", !value.length && "text-muted-foreground")}>
-          {value.length ? value.join(" → ") : placeholder}
+    <Popover open={open} onOpenChange={(next) => {
+      setOpen(next);
+      setQuery("");
+      // Open where the saved category lives so its siblings are in view.
+      if (next) setDrill(value.length > 1 ? value.slice(0, -1) : []);
+    }}>
+      <PopoverTrigger id={id} data-listing-field={fieldKey} disabled={disabled}
+        aria-label={value.length ? `Category: ${value.join(" → ")}` : placeholder}
+        title={value.length ? value.join(" → ") : undefined}
+        className="flex min-h-8.5 w-full items-start justify-between gap-2 rounded-lg border border-input bg-background px-3 py-1.5 text-left text-base shadow-xs/5 disabled:opacity-64 sm:min-h-7.5 sm:text-sm">
+        <span className={cn("min-w-0 flex-1 whitespace-normal break-words leading-snug", !value.length && "text-muted-foreground")}>
+          {value.length
+            ? value.map((part, index) => (
+              <React.Fragment key={`${index}-${part}`}>
+                {index > 0 && <span aria-hidden="true" className="mx-1 text-muted-foreground/70">→</span>}
+                <span>{part}</span>
+              </React.Fragment>
+            ))
+            : placeholder}
         </span>
-        <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-icon-muted opacity-80" />
-      </button>
-      {open && menu && <ul role="listbox" aria-label="Category" className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-md">
-        {drill?.length ? <li role="option" aria-selected={false}>
-          <button type="button" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" onClick={() => setDrill(null)}>
-            All categories
-          </button>
-        </li> : null}
-        {menu.items.map((item) => {
-          const key = categoryPathKey(item.path);
-          return <li key={key} role="option" aria-selected={key === selectedKey}>
-            <button type="button" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" onClick={() => choose(item)}>{item.label}</button>
-          </li>;
-        })}
-      </ul>}
-    </div>
+        <ChevronDownIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-icon-muted opacity-80" />
+      </PopoverTrigger>
+      <PopoverPopup align="start" padding="none"
+        className="w-[max(var(--anchor-width),24rem)] max-w-(--available-width) p-0">
+        <Combobox<string>
+          inline
+          open
+          items={itemKeys}
+          filteredItems={itemKeys}
+          filter={null}
+          autoHighlight
+          // Keep the search text as typed; a picked row must not become the query.
+          autoComplete="none"
+          onValueChange={(key) => {
+            if (typeof key !== "string") return;
+            const item = itemsByKey.get(key);
+            if (item) choose(item);
+          }}>
+          <div className="flex min-h-0 flex-col" onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setOpen(false);
+            }
+          }}>
+            <nav aria-label="Category path" className="flex flex-wrap items-center gap-x-1 gap-y-0.5 px-3 pt-2.5 pb-1 text-xs">
+              {crumbs.map((part, index) => {
+                const current = index === crumbs.length - 1;
+                return (
+                  <React.Fragment key={`${index}-${part}`}>
+                    {index > 0 && <ChevronRightIcon aria-hidden="true" className="size-3 shrink-0 text-muted-foreground/60" />}
+                    {current
+                      ? <span aria-current="page" className="px-1 py-0.5 font-medium text-foreground">{part}</span>
+                      : <button type="button" className="rounded px-1 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          onClick={() => { setDrill(index === 0 ? [] : drill.slice(0, index)); setQuery(""); }}>
+                          {part}
+                        </button>}
+                  </React.Fragment>
+                );
+              })}
+            </nav>
+            <ComboboxSearchInput ref={searchRef} value={query} aria-label="Search all categories"
+              placeholder="Search all categories" onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" && !query && drill.length) {
+                  event.preventDefault();
+                  setDrill(drill.slice(0, -1));
+                }
+              }} />
+            <ComboboxListVirtualized className="size-auto max-h-64 min-h-0 overflow-y-auto overscroll-contain not-empty:p-1">
+              {itemKeys.map((key) => {
+                const item = itemsByKey.get(key)!;
+                return (
+                  <ComboboxItem key={key} value={key} className="items-start gap-2">
+                    {searching
+                      ? <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-0.5 text-left">
+                          {item.path.map((part, index) => (
+                            <React.Fragment key={`${index}-${part}`}>
+                              {index > 0 && <span aria-hidden="true" className="text-muted-foreground/50">›</span>}
+                              <span className={index === item.path.length - 1 ? "text-foreground" : "text-muted-foreground"}>{part}</span>
+                            </React.Fragment>
+                          ))}
+                        </span>
+                      : <span className="min-w-0 flex-1 text-left">{item.label}</span>}
+                    {key === selectedKey && <>
+                      <CheckIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
+                      <span className="sr-only">Selected</span>
+                    </>}
+                    {!item.terminal && <ChevronRightIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />}
+                  </ComboboxItem>
+                );
+              })}
+            </ComboboxListVirtualized>
+            <ComboboxEmpty>
+              {searching ? `No categories match “${query.trim()}”.` : "No categories here. Search or go back a level."}
+            </ComboboxEmpty>
+            <ComboboxStatus className="sr-only">
+              {searching
+                ? `${itemKeys.length} ${itemKeys.length === 1 ? "category" : "categories"} match ${query.trim()}.`
+                : itemKeys.length ? `${crumbs[crumbs.length - 1]} has ${itemKeys.length} ${itemKeys.length === 1 ? "category" : "categories"}.` : "No categories here."}
+            </ComboboxStatus>
+          </div>
+        </Combobox>
+      </PopoverPopup>
+    </Popover>
   );
 }
 
