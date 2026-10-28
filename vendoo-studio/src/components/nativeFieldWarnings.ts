@@ -2,12 +2,14 @@ import type { PreflightGap } from "../api/nativeMarketplaces";
 
 /**
  * A gap that names a different listing field from the row it fills. Poshmark
- * checks General's colors and shows its answer on its own Color row.
+ * checks General's colors and shows its answer on its own Color row, and its
+ * Size is the inventory list.
  */
 const ROW_ALIASES: Record<string, Record<string, string>> = {
   poshmark: {
     primaryColor: "poshmark_specifics.colors",
     secondaryColor: "poshmark_specifics.colors",
+    size: "poshmark_specifics.inventoryRows",
   },
 };
 
@@ -22,12 +24,11 @@ export function gapsByField(
   gaps: readonly PreflightGap[],
   rows: readonly { key: string }[],
 ): Map<string, string[]> {
-  const keys = new Set(rows.map((row) => row.key));
   const found = new Map<string, string[]>();
   for (const gap of gaps) {
     const message = String(gap.message || "").trim();
     if (!message) continue;
-    const key = rowForGap(marketplace, String(gap.field || ""), keys);
+    const key = rowForField(marketplace, String(gap.field || ""), rows);
     if (!key) continue;
     const messages = found.get(key) || [];
     // A revision can repeat the same answer; the seller reads it once.
@@ -36,13 +37,17 @@ export function gapsByField(
   return found;
 }
 
-/** The row this gap is about: its own key, the marketplace's form of it, or the same leaf. */
-function rowForGap(marketplace: string, field: string, keys: Set<string>): string {
+/**
+ * The row a marketplace's answer is about: the field's own key, the form's
+ * namespaced key for it, or a row with the same last name. Empty when this form
+ * has no such row.
+ */
+export function rowForField(marketplace: string, field: string, rows: readonly { key: string }[]): string {
+  const keys = rows.map((row) => row.key);
   const named = [ROW_ALIASES[marketplace]?.[field], field, `${marketplace}_specifics.${field}`];
-  const exact = named.find((key): key is string => Boolean(key) && keys.has(key as string));
-  if (exact) return exact;
+  const exact = named.find((key) => Boolean(key) && keys.includes(key as string));
+  if (exact) return exact as string;
   const leaf = field.split(".").pop()?.toLowerCase() || "";
   if (!leaf) return "";
-  for (const key of keys) if (key.split(".").pop()?.toLowerCase() === leaf) return key;
-  return "";
+  return keys.find((key) => key.split(".").pop()?.toLowerCase() === leaf) || "";
 }

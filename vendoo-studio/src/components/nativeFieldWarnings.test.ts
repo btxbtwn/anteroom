@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { gapsByField } from "./nativeFieldWarnings";
+import { gapsByField, rowForField } from "./nativeFieldWarnings";
 
 const poshmarkRows = [
   { key: "poshmark_specifics.title" },
   { key: "poshmark_specifics.description" },
   { key: "poshmark_specifics.colors" },
+  { key: "poshmark_specifics.inventoryRows" },
   { key: "price" },
   { key: "direct_category_ids.poshmark" },
 ];
@@ -31,6 +32,13 @@ describe("direct List gaps on the form", () => {
     expect(found.get("poshmark_specifics.title")).toEqual(["Poshmark titles are at most 80 characters."]);
     expect(found.get("price")).toEqual(["Poshmark lists this at $25."]);
     expect(found.get("direct_category_ids.poshmark")).toEqual(["Poshmark needs a category from its own list."]);
+  });
+
+  it("opens the row an Edit button is for, including the ones Poshmark names its own way", () => {
+    expect(rowForField("poshmark", "primaryColor", poshmarkRows)).toBe("poshmark_specifics.colors");
+    expect(rowForField("poshmark", "size", poshmarkRows)).toBe("poshmark_specifics.inventoryRows");
+    expect(rowForField("poshmark", "price", poshmarkRows)).toBe("price");
+    expect(rowForField("poshmark", "poshmark_specifics.sellerNotes", poshmarkRows)).toBe("");
   });
 
   it("keeps a listing-wide answer off the form, and repeats no message on one field", () => {

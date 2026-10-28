@@ -65,7 +65,7 @@ import { pathCategoryChoices } from "./categoryTree";
 import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
-import { gapsByField } from "./nativeFieldWarnings";
+import { gapsByField, rowForField } from "./nativeFieldWarnings";
 import type { NativeMarketplace } from "../api/nativeMarketplaces";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Badge } from "./ui/badge";
@@ -335,12 +335,12 @@ export function ListingEditor({
     if (!tabs.includes(editTab)) setEditTab("general");
   }, [editTab, tabs]);
 
-  const openBlocker = (field: string) => {
+  const openBlocker = (field: string, marketplace?: string) => {
     if (isEbayInventoryLocationEdit(field)) {
       onEditInventoryLocation?.();
       return;
     }
-    const target = blockerTarget(field);
+    const target = blockerTarget(field, marketplace);
     onReviewTabChange(target.reviewTab);
     setEditTab(tabs.includes(target.tab) ? target.tab : "general");
     setFieldTarget({ field, sequence: Date.now() });
@@ -841,7 +841,8 @@ export function StructuredEditor({
   const reachedTarget = React.useRef<number | null>(null);
   React.useEffect(() => {
     if (!target || reachedTarget.current === target.sequence) return;
-    const key = matchingEditorField(fields, target.field);
+    // A marketplace's answer can name the listing field its form row comes from.
+    const key = matchingEditorField(fields, target.field) ?? rowForField(tab, target.field, fields);
     if (!key) return;
     const input = [...(formRef.current?.querySelectorAll<HTMLElement>("[data-listing-field]") || [])].find((element) => element.dataset.listingField === key);
     if (!input) return;
