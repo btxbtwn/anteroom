@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.460 — 2026-10-27
+
+- The Sellwild tab now shows your Shipping From address at the top of Item Shipping (and under Vehicle Shipping for vehicles), the same address Sellwild’s page shows and List uses. Change it in Sellwild’s Address Book. Package weight and size sit side by side in one row, as on Sellwild.
+
 ## 0.1.459 — 2026-10-27
 
 - Mercari’s Size list is grouped under Mercari’s own headings (Standard, Petite, Inch and so on), as on Mercari.
