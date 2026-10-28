@@ -69,6 +69,13 @@ class NativeEditorTest(unittest.TestCase):
         self.assertIn("Connect Chrome", answer.json()["detail"])
         self.bridge.assert_not_called()
 
+    def test_a_lost_form_reply_is_asked_for_once_more(self):
+        self.bridge.side_effect = [BrowserBridgeError("Chrome did not answer in time."),
+                                   {"ok": True, "form": {"marketplace": "depop", "native": True, "fields": []}}]
+        answer = self.client.get(f"{self.url}/depop/form")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(self.bridge.await_count, 2)
+
     def test_a_lost_form_reply_names_why_chrome_did_not_answer(self):
         self.bridge.side_effect = BrowserBridgeError("Chrome did not answer in time.")
         answer = self.client.get(f"{self.url}/depop/form")

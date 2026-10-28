@@ -418,3 +418,28 @@ test('eBay sold listings keep what loaded when a later search is blocked', async
     ok: false, results: { 'y2k jeans': [{ id: '1' }] }, error: 'eBay did not show search results', removed: [7],
   });
 });
+
+test('a refused duplicate copy stands down until the reconnect alarm', async () => {
+  const vm = require('node:vm');
+  const duplicate = { type: 'error', duplicate_bridge: true, message: 'Another copy of the Anteroom Bridge is loaded in Chrome.' };
+  assert.equal(call(worker, 'isDuplicateCopyError', duplicate), true);
+  assert.equal(call(worker, 'isDuplicateCopyError', { type: 'error', message: 'Another copy of the Anteroom Bridge is loaded in Chrome.' }), true);
+  assert.equal(call(worker, 'isDuplicateCopyError', { type: 'error', message: 'Invalid pairing token' }), false);
+  assert.equal(call(worker, 'isDuplicateCopyError', { type: 'connection.accepted' }), false);
+
+  vm.runInContext('paired = true; duplicateBridge = false; ws = null;', worker);
+  call(worker, 'standDownForDuplicateCopy');
+  assert.equal(vm.runInContext('duplicateBridge', worker), true);
+  assert.equal(vm.runInContext('paired', worker), false);
+
+  // A quick retry here would restart the fight with the copy Studio is using.
+  const quiet = JSON.parse(JSON.stringify(await vm.runInContext('ensureStudioConnection()', worker)));
+  assert.equal(quiet.duplicateBridge, true);
+  assert.equal(vm.runInContext('ws', worker), null);
+
+  // The alarm is the one place that tries again.
+  const retried = JSON.parse(JSON.stringify(await vm.runInContext('ensureStudioConnection({ fromAlarm: true })', worker)));
+  assert.equal(retried.connecting, true);
+  assert.equal(vm.runInContext('duplicateBridge', worker), false);
+  assert.ok(vm.runInContext('ws', worker));
+});

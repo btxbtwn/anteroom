@@ -17,6 +17,7 @@ from vendoo_studio.services.chrome_bridge import (
     ChromeBridgeError,
     clear_extension_reload_pending,
     extension_build_status,
+    extension_in_lockstep,
     extension_reload_token_if_needed,
     install_bundled_extension,
     pending_extension_reload_token,
@@ -39,6 +40,16 @@ RECONNECT_SETTLE_SEC = 5.0
 # A socket that drops this fast never held a conversation, so say so in the log.
 FLAP_WARN_SEC = 10.0
 ROUTE_ITEM_IDS = frozenset({"new", "edit", "create"})
+# Two copies of the bridge (the app's folder plus an older Anteroom data folder,
+# or a checkout loaded by hand) both pair. Each pairing used to close the
+# other's socket, so they closed each other every half second and the replies in
+# flight went with them: a form read failed and a listing check never finished.
+DUPLICATE_BRIDGE = (
+    "Another copy of the Anteroom Bridge is loaded in Chrome. Remove it in chrome://extensions, "
+    "keep the copy Settings → Connections names, then reload that one."
+)
+# How long a refusal keeps saying so, so a seller who opens Settings sees it.
+DUPLICATE_REPORT_SEC = 300.0
 
 
 async def _warm_label_catalog() -> None:
@@ -97,6 +108,7 @@ class ExtensionManager:
         # Monotonic time of the last accepted pairing, kept across disconnects so
         # a reconnect loop is visible as one.
         self._last_handshake_at: float | None = None
+        self._duplicate_refused_at: float | None = None
 
     def register_wait(self, request_id: str, job_id: str | None = None) -> asyncio.Future:
         self.cancel_wait(request_id)
@@ -145,6 +157,31 @@ class ExtensionManager:
         self.version = None
         self.build = None
         self.reload_generation = None
+
+    def claims_connection(self, version: str | None, build: str | None) -> bool:
+        """Whether a connecting copy may take the socket from the paired one.
+
+        A connected copy is only replaced by one that runs this app's extension
+        while the paired copy does not. Anything else is a second copy asking
+        while the first is healthy, and taking it would drop every request in
+        flight and hand the socket back a moment later, forever.
+        """
+        if self.connection is None or not self.paired:
+            return True
+        if extension_in_lockstep(build, version) and not extension_in_lockstep(self.build, self.version):
+            return True
+        self._duplicate_refused_at = time.monotonic()
+        return False
+
+    @property
+    def duplicate_bridge(self) -> bool:
+        """True when a second copy asked to connect in the last few minutes."""
+        if self._duplicate_refused_at is None:
+            return False
+        if time.monotonic() - self._duplicate_refused_at > DUPLICATE_REPORT_SEC:
+            self._duplicate_refused_at = None
+            return False
+        return True
 
     @property
     def connected(self) -> bool:
@@ -809,6 +846,7 @@ def extension_status():
     return {
         "connected": extension_manager.connected,
         "paired": extension_manager.paired,
+        "duplicate_bridge": extension_manager.duplicate_bridge,
         **extension_build_status(
             extension_manager.version,
             extension_manager.reload_generation,
@@ -949,12 +987,21 @@ async def extension_websocket(ws: WebSocket):
                 if not extension_manager.verify_token(token):
                     await ws.send_json({"type": "error", "message": "Invalid pairing token"})
                     continue
+                version = _reported_version(payload)
+                build = _reported_build(payload)
+                if not extension_manager.claims_connection(version, build):
+                    # Leave the paired copy alone and tell this one to stand down,
+                    # rather than closing a working socket for a duplicate.
+                    log.warning("Refused a second bridge copy (version %s, build %s)", version, build)
+                    await ws.send_json({"type": "error", "message": DUPLICATE_BRIDGE, "duplicate_bridge": True})
+                    continue
                 old = extension_manager.connection
                 extension_manager.connection = ws
                 extension_manager.loop = asyncio.get_running_loop()
-                extension_manager.version = _reported_version(payload)
-                extension_manager.build = _reported_build(payload)
+                extension_manager.version = version
+                extension_manager.build = build
                 extension_manager.reload_generation = _reported_reload_generation(payload)
+                extension_manager._duplicate_refused_at = None
                 if old is not None and old is not ws:
                     try:
                         await old.close()
@@ -963,8 +1010,8 @@ async def extension_websocket(ws: WebSocket):
                 accepted = await handshake_extension(
                     ws,
                     _reported_reload_generation(payload),
-                    _reported_version(payload),
-                    _reported_build(payload),
+                    version,
+                    build,
                 )
                 if accepted:
                     extension_manager.paired = True

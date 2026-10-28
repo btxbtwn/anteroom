@@ -4,6 +4,7 @@ type ExtensionStatusData = {
   expected_version?: string | null;
   version?: string | null;
   load_path?: string | null;
+  duplicate_bridge?: boolean;
 };
 
 /** What Settings → Connections says about the listing extension. */
@@ -14,6 +15,17 @@ export function extensionConnection(data: ExtensionStatusData | undefined): {
 } {
   const connected = Boolean(data?.connected);
   const outdated = connected && data?.up_to_date === false;
+  if (data?.duplicate_bridge) {
+    return {
+      label: "Two copies loaded",
+      tone: "warning",
+      detail: [
+        "Chrome has more than one copy of the Anteroom Bridge, and they take turns on the connection, so form reads and listing checks can come back empty.",
+        data?.load_path ? `Keep the copy at ${data.load_path} and remove the others.` : "Keep one copy and remove the others.",
+        "Open chrome://extensions, remove the extra copy, then press Connect Chrome.",
+      ].join(" "),
+    };
+  }
   if (outdated) {
     const expected = data?.expected_version || null;
     const running = data?.version || null;

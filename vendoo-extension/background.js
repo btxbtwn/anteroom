@@ -29,6 +29,10 @@ let activeJob = null;
 let activePatch = null;
 let reconnectAttempt = 0;
 let socketOpenedAt = 0;
+// Set when Studio says another copy of the bridge already holds the socket.
+// Two copies that both reconnect close each other's socket every half second,
+// and every request in flight is lost with it.
+let duplicateBridge = false;
 
 importScripts('content-script-version.js');
 importScripts('diagnostic-collector.js');
@@ -201,8 +205,14 @@ function ensureReconnectAlarm() {
   }
 }
 
-async function ensureStudioConnection({ resetBackoff = false } = {}) {
+async function ensureStudioConnection({ resetBackoff = false, fromAlarm = false } = {}) {
   ensureReconnectAlarm();
+  if (duplicateBridge) {
+    // Only the reconnect alarm tries again: a fast retry here would restart the
+    // fight with the copy Studio is actually using.
+    if (!fromAlarm) return { ok: false, duplicateBridge: true };
+    duplicateBridge = false;
+  }
   if (resetBackoff) {
     reconnectAttempt = 0;
     if (reconnectTimer) {
@@ -247,6 +257,10 @@ function connect() {
   ws.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
+      if (isDuplicateCopyError(msg)) {
+        standDownForDuplicateCopy();
+        return;
+      }
       if (msg.type === 'error' && /invalid pairing token/i.test(String(msg.message || ''))) {
         fetchStudioPairingToken().then(() => sendIdent()).catch((err) => {
           error(`Pairing token refresh failed: ${err.message}`);
@@ -338,6 +352,23 @@ async function handleExtensionReload(generation) {
   chrome.runtime.reload();
 }
 
+/** Studio said a different copy of this bridge already holds the socket. */
+function isDuplicateCopyError(msg) {
+  if (!msg || msg.type !== 'error') return false;
+  return msg.duplicate_bridge === true || /another copy of the anteroom bridge/i.test(String(msg.message || ''));
+}
+
+// Two copies that both reconnect close each other's socket every half second and
+// lose every reply in flight. The refused one waits for the reconnect alarm
+// instead of retrying, so the copy Studio is using keeps a still socket.
+function standDownForDuplicateCopy() {
+  error('Another copy of the Anteroom Bridge is connected; standing down until the next reconnect check.');
+  duplicateBridge = true;
+  discardSocket();
+  paired = false;
+  stopHeartbeat();
+}
+
 function scheduleReconnect() {
   ensureReconnectAlarm();
   if (reconnectTimer) return;
@@ -352,7 +383,7 @@ function scheduleReconnect() {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (!alarm || alarm.name !== RECONNECT_ALARM) return;
-  ensureStudioConnection();
+  ensureStudioConnection({ fromAlarm: true });
 });
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -498,6 +529,7 @@ async function handleStudioMessage(msg) {
     case 'connection.accepted':
       log('Paired with Studio');
       paired = true;
+      duplicateBridge = false;
       flushVendooApiLogs();
       break;
 
