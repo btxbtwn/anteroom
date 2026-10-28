@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.474 — 2026-10-27
+
+- The Poshmark tab now matches the rest of Poshmark’s create-listing page. Quantity is Single Item or Multi Item, separate from Size. Category and Subcategory sit side by side: the category starts with Women, Men, Kids, Home, Pets, or Electronics, and a chosen category reads like “Women Jeans.” Sizes can be US, AU, EU, or UK. Availability includes Drops, with a drop time within 7 days. Listing Price shows the Smart Sell badge, Discounted Shipping, and Your Earnings.
+
 ## 0.1.473 — 2026-10-28
 
 - The eBay tab follows eBay's Create listing page. Item specifics stay in eBay's order, with Show more for the rest. You get a subtitle and custom label under title options, a second category, scheduling, this listing's own policies and item location, charity, and one custom item specific. An auction shows its duration and bids instead of an item price.

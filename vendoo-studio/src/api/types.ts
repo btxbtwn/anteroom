@@ -534,10 +534,19 @@ export interface EbayVariationAspect {
   options: string[];
 }
 
+export interface NativeInventorySize {
+  id: string;
+  label: string;
+  /** First equivalent size id in another system, used when the seller switches US/AU/EU/UK. */
+  equivalents?: Record<string, string>;
+}
+
 export interface NativeInventoryGroup {
   id: string;
   label: string;
-  sizes: { id: string; label: string }[];
+  sizes: NativeInventorySize[];
+  /** Sizes for each system the category offers. `sizes` stays the US list. */
+  systems?: Record<string, NativeInventorySize[]>;
 }
 
 export interface MarketplaceFormField {
@@ -545,7 +554,7 @@ export interface MarketplaceFormField {
   label: string;
   value: string | string[] | number | boolean | NativeInventoryRow[] | EbayVariations;
   path?: string;
-  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations" | "photos";
+  input_type?: "number" | "boolean" | "textarea" | "inventory" | "variations" | "photos" | "cascade" | "segmented" | "badge" | "datetime-local" | "text";
   inventory_groups?: NativeInventoryGroup[];
   variation_aspects?: EbayVariationAspect[];
   min_value?: number;
@@ -582,6 +591,12 @@ export interface MarketplaceFormField {
   section?: string;
   /** Half, a third or a quarter of a row, as the marketplace's form lays it out. Absent means a full row. */
   width?: "half" | "third" | "quarter";
+  /** The control is half the content column and still starts its own row. */
+  control_width?: "half";
+  /** Department, then category, then subcategory. The closed category reads "Women Jeans". */
+  cascade?: { id: string; label: string; items: unknown[] }[];
+  /** Shipping-discount id to the dollars the seller pays, for Your Earnings. */
+  option_amounts?: Record<string, number>;
   /** A question the page asks over several consecutive inputs ("How heavy will the package be?"). */
   group?: string;
   group_help?: string;
