@@ -17,9 +17,13 @@ _MARKER_LINE_RE = re.compile(r"(?m)^([A-Za-z][A-Za-z /]{1,20}):\s*\{")
 DEFAULT_TITLE_FORMULA = "{BRAND} {SIZE} {VIBE} {ITEM} {COLOR} {FIT}"
 DEFAULT_DESCRIPTION_FORMULA = (
     "{trendy vibe/style keyword sentence with period}\n\n"
-    "Flaws: {specific flaws}. See photos for details.\n\n"
+    "Flaws:\n"
+    "- {one flaw per line}\n"
+    "See photos for details.\n\n"
     "Measurements: {See photos OR specific measurements}"
 )
+# A custom formula that still writes flaws on one line keeps that layout.
+_FLAW_LIST_RE = re.compile(r"(?m)^[ \t]*-\s+\{")
 DEFAULT_DESCRIPTION_MARKERS = ("measurements:",)
 # A flawless item leaves its Flaws line out, so the marker is never required.
 OPTIONAL_DESCRIPTION_MARKERS = frozenset({"flaws:"})
@@ -85,6 +89,15 @@ def listing_formula_rules(*, max_chars: int = 8000) -> str:
     if description:
         text = _DESCRIPTION_BLOCK_RE.sub(lambda m: m.group(1) + description + m.group(2), text, count=1)
     return text[:max_chars]
+
+
+def description_lists_flaws() -> bool:
+    """True when the active description formula puts each flaw on its own line.
+
+    A seller who customized the formula to a single Flaws line keeps that layout.
+    """
+    template = get_listing_formulas().get("description") or DEFAULT_DESCRIPTION_FORMULA
+    return _FLAW_LIST_RE.search(template) is not None
 
 
 def description_formula_markers() -> tuple[str, ...]:
