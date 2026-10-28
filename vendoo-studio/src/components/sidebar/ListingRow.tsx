@@ -13,7 +13,7 @@ import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { displayCoverUrl } from "./coverSrc";
 import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
-import { inventoryStatus, listedFromImport, liveStatusClass, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
+import { inventoryStatus, listedFromImport, liveMarketplaces, liveStatusClass, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 import { useVendooEnabled } from "../../vendooMode";
 
@@ -61,6 +61,7 @@ export function ListingRow({
   const coverUrl = displayCoverUrl(listing.cover_photo_url || listing.vendoo_cover_url);
   const status = inventoryStatus(listing);
   const partial = partialSale(listing, status);
+  const unsentMarketplaces = listing.unsent_edits ? liveMarketplaces(listing) : [];
   const queryClient = useQueryClient();
   const vendooOn = useVendooEnabled();
   const statusTitle = partial ? `Active · ${partial}`
@@ -327,6 +328,18 @@ export function ListingRow({
           <div className="mt-0.5 flex items-center gap-2">
             <ListingStatusLabel status={status} title={statusTitle} />
             {partial ? <span className="truncate text-2xs text-sidebar-muted-foreground">{partial}</span> : null}
+            {listing.unsent_edits ? (
+              <ListingTag
+                tone="info"
+                title={unsentMarketplaces.length
+                  ? `Edited after it went live on ${unsentMarketplaces.map(marketplaceName).join(", ")}. Update those listings to send the changes.`
+                  : vendooOn
+                    ? "Edited in Anteroom since Vendoo last had this listing. Press Update Vendoo to write it onto the Vendoo form."
+                    : "Edited in Anteroom since this listing was last saved."}
+              >
+                unsent
+              </ListingTag>
+            ) : null}
             {vendooOn && relistMarketplaces.length ? (
               <ListingTag
                 tone="warning"
