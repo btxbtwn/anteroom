@@ -1479,7 +1479,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
                 async for _ in resp.aiter_text():
                     pass
         self.assertEqual(self.provider.analyze_calls, 1)
-        self.assertEqual(self.provider.chat_calls, 4)
+        self.assertEqual(self.provider.chat_calls, 6)
         prompt = _first_generate_prompt(self.provider)
         self.assertIn("already uploaded 1 product photo", prompt)
         self.assertIn("Never ask them to attach", prompt)
@@ -1783,7 +1783,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
                 body = "".join([chunk async for chunk in resp.aiter_text()])
             first_body = await first
         self.assertEqual(self.provider.analyze_calls, 1)
-        self.assertEqual(self.provider.chat_calls, 2)
+        self.assertEqual(self.provider.chat_calls, 3)
         self.assertIn(LISTING_JSON["title"], body)
         self.assertIn(LISTING_JSON["title"], first_body)
 

@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.474 — 2026-10-28
+## 0.1.475 — 2026-10-28
 
 - The Depop tab now follows Depop’s sell page: the description placeholder, the 1,000-character counter and the hashtag counter, US$ on the price, your shipping address, and suggested package sizes. List sends the same package size Depop’s page would. Worldwide shipping’s price appears, with US$, only when you turn that offer on.
 - The Sellwild tab shows the fee and what you earn, your discounts with none picked until you choose one, and packages grouped the way Sellwild groups them. A vehicle still shows Vehicle Shipping and no package. A discount you pick is applied after the listing is live.
+
+## 0.1.474 — 2026-10-27
+
+- The Poshmark tab now matches the rest of Poshmark’s create-listing page. Quantity is Single Item or Multi Item, separate from Size. Category and Subcategory sit side by side: the category starts with Women, Men, Kids, Home, Pets, or Electronics, and a chosen category reads like “Women Jeans.” Sizes can be US, AU, EU, or UK. Availability includes Drops, with a drop time within 7 days. Listing Price shows the Smart Sell badge, Discounted Shipping, and Your Earnings.
 
 ## 0.1.473 — 2026-10-28
 

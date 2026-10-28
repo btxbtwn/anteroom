@@ -20,6 +20,8 @@ async function poshmarkSweep(DEPTS) {
     const d = sizeDD(); if (!d || !vis(d)) return null;
     await open(d);
     const tabs = [...d.querySelectorAll('li[data-test^=horizontal-]')].filter(vis);
+    // The size menu opens on US. `sizes` is that US list; AU/EU/UK are the same tabs
+    // with the size-system switch, checked from the catalog rather than another pass here.
     const sizes = () => [...d.querySelectorAll('.multi-size-selector__button')].filter(vis).map(txt);
     const out = [];
     for (const t of tabs) { (t.querySelector('a') || t).click(); await sleep(300); out.push({ tab: txt(t), sizes: txt(t) === 'Custom' ? [] : sizes() }); }
