@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -93,6 +94,35 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari", "depop"], "confirm": True}).status_code, 409)
         self.ebay.assert_not_called()
+        self.bridge.assert_not_called()
+
+    def _store_vendoo_dates(self, dates: dict) -> None:
+        """Write the dates straight into the notes, the way an older import left them."""
+        notes = json.loads(self.conv.notes)
+        notes["vendooDates"] = dates
+        self.conv.notes = json.dumps(notes)
+        self.db.commit()
+
+    def test_a_zero_sold_date_from_vendoo_is_not_a_sale(self):
+        """Vendoo's "never sold" zero must not read as a Poshmark sale in 1970."""
+        self._store_vendoo_dates({
+            "listed": "2026-09-27T18:59:11+00:00",
+            "sold": "1970-01-01T00:00:00+00:00",
+            "soldByMarketplace": {"poshmark": "1970-01-01T00:00:00+00:00"},
+        })
+        entry = self.client.get(self.base).json()["poshmark"]
+        self.assertFalse(entry["sold_here"])
+        self.assertEqual(entry["state"], "live")
+        gone = self.client.post(f"{self.base}/delist", json={"marketplaces": ["poshmark"], "confirm": True})
+        self.assertEqual(gone.status_code, 200, gone.text)
+
+    def test_a_real_sold_date_from_vendoo_still_blocks_that_marketplace(self):
+        self._store_vendoo_dates({
+            "sold": "2026-08-02T00:00:00+00:00",
+            "soldByMarketplace": {"poshmark": "2026-08-02T00:00:00+00:00"},
+        })
+        self.assertTrue(self.client.get(self.base).json()["poshmark"]["sold_here"])
+        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["poshmark"], "confirm": True}).status_code, 409)
         self.bridge.assert_not_called()
 
     def test_a_failure_is_recorded_and_others_still_run(self):

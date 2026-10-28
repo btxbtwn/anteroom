@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -120,14 +121,63 @@ HTTP_URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.I)
 IMAGE_EXT_RE = re.compile(r"\.(?:jpe?g|png|webp|gif|heic|heif|bmp|avif)(?:$|\?)", re.I)
 
 
+# Vendoo writes a date that never happened as a zero: a Firestore 0, a JavaScript
+# epoch 0, Go's year-1 zero time. Read as a stamp it says 1 January 1970, which is
+# how a marketplace listing that never sold comes to read as sold there. Nothing
+# Vendoo records predates the service itself, so anything at or before this floor
+# is that zero and not a date.
+VENDOO_FIRST_DATE = datetime(2000, 1, 1, tzinfo=UTC)
+
+_DATE_KEYS = ("created", "modified", "listed", "sold")
+_DATE_BY_MARKETPLACE_KEYS = ("listedByMarketplace", "soldByMarketplace")
+
+
 def parse_notes(raw: str | None) -> dict[str, Any]:
+    """The conversation's notes, with Vendoo's zero dates left out.
+
+    A stored zero date is not inert: read back it says the listing sold on
+    1 January 1970, so Poshmark shows "Sold here", the item is refused a new
+    listing, and its relist warning never fires. Every reader and every write
+    of the notes goes through here, so the zeroes are dropped once instead of
+    guarded at each call site.
+    """
     if not raw:
         return {}
     try:
         data = json.loads(raw)
     except Exception:
         return {}
-    return data if isinstance(data, dict) else {}
+    return _without_zero_dates(data) if isinstance(data, dict) else {}
+
+
+def _is_zero_date(value: Any) -> bool:
+    """True for a written date that is Vendoo's zero rather than a date.
+
+    An empty stamp is left alone: it is already "no date", and dropping the key
+    would make these notes compare unequal to a freshly read set of dates.
+    """
+    return bool(str(value or "").strip()) and not _as_iso(value)
+
+
+def _without_zero_dates(notes: dict[str, Any]) -> dict[str, Any]:
+    """``notes`` with every Vendoo zero date removed."""
+    dates = notes.get("vendooDates")
+    if isinstance(dates, dict):
+        kept = dict(dates)
+        for key in _DATE_KEYS:
+            if key in kept and _is_zero_date(kept[key]):
+                kept.pop(key)
+        for key in _DATE_BY_MARKETPLACE_KEYS:
+            by_marketplace = kept.get(key)
+            if isinstance(by_marketplace, dict):
+                kept[key] = {name: when for name, when in by_marketplace.items() if not _is_zero_date(when)}
+        notes["vendooDates"] = kept
+    sale = notes.get("vendooSale")
+    if isinstance(sale, dict) and _is_zero_date(sale.get("soldAt")):
+        kept_sale = dict(sale)
+        kept_sale.pop("soldAt")
+        notes["vendooSale"] = kept_sale
+    return notes
 
 
 def split_vendoo_labels(raw: str | None) -> list[str]:
@@ -610,10 +660,9 @@ def _as_iso(raw: Any) -> str:
 
     ``/api/item`` answers Firestore timestamps as ``{_seconds, _nanoseconds}``,
     a document read straight from Firestore carries an ISO string, and a few
-    fields arrive as epoch numbers.
+    fields arrive as epoch numbers. Vendoo's zero date comes back as "", so no
+    caller can mistake a date that never happened for one that did.
     """
-    from datetime import UTC, datetime
-
     if isinstance(raw, dict):
         seconds = raw.get("_seconds", raw.get("seconds"))
         if seconds is None:
@@ -624,17 +673,20 @@ def _as_iso(raw: Any) -> str:
         # anything past the year 3000 read as seconds is really milliseconds.
         seconds = float(raw) / 1000 if float(raw) > 32503680000 else float(raw)
         try:
-            return datetime.fromtimestamp(seconds, UTC).isoformat()
+            parsed = datetime.fromtimestamp(seconds, UTC)
         except (OverflowError, OSError, ValueError):
             return ""
-    text = str(raw or "").strip()
-    if not text:
-        return ""
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return ""
-    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).isoformat()
+    else:
+        text = str(raw or "").strip()
+        if not text:
+            return ""
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return ""
+        if not parsed.tzinfo:
+            parsed = parsed.replace(tzinfo=UTC)
+    return parsed.isoformat() if parsed > VENDOO_FIRST_DATE else ""
 
 
 def _newest(*values: Any) -> str:
@@ -715,8 +767,6 @@ def oldest_live_listed_at(notes: dict[str, Any]) -> str:
     neither counts. An item with no per-marketplace dates falls back to the
     item-wide listing date.
     """
-    from datetime import datetime
-
     dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
     listed_by = dates.get("listedByMarketplace") if isinstance(dates.get("listedByMarketplace"), dict) else {}
     sold_by = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}

@@ -321,6 +321,46 @@ class VendooDatesTest(unittest.TestCase):
         self.assertEqual(dates["created"], "")
         self.assertEqual(dates["listed"], "")
 
+    def test_a_never_sold_marketplace_has_no_sold_date(self):
+        """Vendoo writes 0 for a listing that never sold; 1970 would read as a sale."""
+        dates = vendoo_dates({
+            "dateCreated": "2026-09-01T00:00:00Z",
+            "listings": {
+                "poshmark": {"dateListed": "2026-09-27T18:59:11Z", "dateSold": 0,
+                             "lastStatusDate": {"sold": {"_seconds": 0, "_nanoseconds": 0}}},
+            },
+        })
+        self.assertEqual(dates["soldByMarketplace"], {})
+        self.assertEqual(dates["sold"], "")
+        self.assertEqual(dates["listedByMarketplace"], {"poshmark": "2026-09-27T18:59:11+00:00"})
+
+    def test_notes_read_back_without_their_zero_dates(self):
+        stored = json.dumps({
+            "vendooItemId": "abc",
+            "vendooDates": {
+                "created": "2025-08-06T00:22:39+00:00",
+                "listed": "2026-10-26T03:39:28+00:00",
+                "sold": "1970-01-01T00:00:00+00:00",
+                "listedByMarketplace": {"poshmark": "2026-09-27T18:59:11+00:00"},
+                "soldByMarketplace": {"poshmark": "1970-01-01T00:00:00+00:00"},
+            },
+            "vendooSale": {"price": 12.0, "soldAt": "1970-01-01T00:00:00+00:00"},
+        })
+        notes = parse_notes(stored)
+        self.assertEqual(notes["vendooDates"], {
+            "created": "2025-08-06T00:22:39+00:00",
+            "listed": "2026-10-26T03:39:28+00:00",
+            "listedByMarketplace": {"poshmark": "2026-09-27T18:59:11+00:00"},
+            "soldByMarketplace": {},
+        })
+        # The sale itself is kept; only its placeholder date goes.
+        self.assertEqual(notes["vendooSale"], {"price": 12.0})
+
+    def test_a_real_sold_date_still_reads_as_one(self):
+        stored = json.dumps({"vendooDates": {"soldByMarketplace": {"poshmark": "2026-08-02T00:00:00+00:00"}}})
+        self.assertEqual(parse_notes(stored)["vendooDates"]["soldByMarketplace"],
+                         {"poshmark": "2026-08-02T00:00:00+00:00"})
+
 
 class VendooImageUrlTest(unittest.TestCase):
     """Vendoo stores image records, not links; these are the shapes it keeps."""
