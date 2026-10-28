@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.493 — 2026-10-28
+
+- Repricing an item used to leave its Best Offer prices behind, so the form held an auto-accept price above the offer minimum and eBay refused the listing with “This Offer is not available”. Auto-accept and Minimum now follow the new price, on eBay and in Poshmark's Smart Sell floor, and they clear once an item is too cheap to carry them. A Best Offer price you typed yourself is kept as it is, and an item you turned Best Offer off for stays off.
+- A price is now always whole dollars, which is what the offer prices are worked out from.
+
 ## 0.1.492 — 2026-10-28
 
 - List everywhere now leaves a marketplace out when its form still needs an answer. Mercari's shoebox question, shipping label, package weight, and ship-from ZIP are checked before it is offered, so Anteroom no longer starts a Mercari listing that its own form would refuse.

@@ -149,6 +149,65 @@ def best_offer_error(listing: dict[str, Any] | None) -> str | None:
     return None
 
 
+def whole_price(price: Any) -> str:
+    """The listing price as whole dollars, or "" without a usable price.
+
+    list-this prices at comp x 1.35 rounded to the nearest dollar, and Poshmark
+    only takes whole dollars. The floors are whole dollars off the same number,
+    so a fractional price would leave them describing a price the form cannot
+    show.
+    """
+    try:
+        amount = float(str(price or "").replace("$", "").replace(",", "").strip() or 0)
+    except (TypeError, ValueError):
+        return ""
+    if amount <= 0:
+        return ""
+    return str(int(round(amount)))
+
+
+def poshmark_smart_sell(price: Any) -> dict[str, str]:
+    """Smart Sell accepts offers down to the same minimum as eBay, or stays off."""
+    floors = offer_floors(price)
+    return {"enabled": floors is not None, "minPrice": floors[1] if floors else ""}
+
+
+def ebay_offer_terms(price: Any, chosen: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Best Offer terms for ``price``, with the seller's own settings on top.
+
+    Create and update both write this, so a draft can't keep floors from an
+    earlier price — a $30 item repriced to $16 that kept its $28 auto-accept
+    made eBay reject the offer (the auto-accept sat above the item price) and
+    the form refuse to save.
+
+    ``chosen`` is the seller's Best Offer block from the eBay form. When they
+    turned Best Offer off it stays off and both floors are cleared; when they
+    typed their own floors those win over the formula, exactly as create does.
+    """
+    chosen = chosen if isinstance(chosen, dict) else {}
+    if not best_offer_enabled(chosen):
+        return {"allowBestOffer": False, "acceptOffersOfAtLeast": "", "declineOffersLowerThan": ""}
+    accept, minimum = offer_floors(price) or ("", "")
+    seller_accept = _num_str(chosen.get("autoAcceptPrice"))
+    seller_minimum = _num_str(chosen.get("minimumOfferPrice") or chosen.get("autoDeclinePrice"))
+    accept = seller_accept or accept
+    minimum = seller_minimum or minimum
+    if accept and minimum:
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            ordered = Decimal(minimum) < Decimal(accept)
+        except (InvalidOperation, ValueError):
+            ordered = False
+        if not ordered:
+            # A formula floor that sits on the wrong side of the seller's price is left off.
+            if not seller_minimum:
+                minimum = ""
+            if not seller_accept:
+                accept = ""
+    return {"allowBestOffer": True, "acceptOffersOfAtLeast": accept, "declineOffersLowerThan": minimum}
+
+
 def _listing_price(listing: dict[str, Any], general: dict[str, Any]) -> str:
     return _num_str(listing.get("price") or general.get("price"))
 
@@ -168,39 +227,13 @@ def _apply_ebay_pricing(
     if not isinstance(fixed, dict):
         fixed = {}
         details["fixedPrice"] = fixed
-    price = _listing_price(listing, general)
+    price = whole_price(_listing_price(listing, general))
     if price:
         fixed["buyItNowPrice"] = price
     fixed["duration"] = _clean(fixed.get("duration")) or "GTC"
     ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
     chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
-    if not best_offer_enabled(chosen):
-        fixed["allowBestOffer"] = False
-        fixed.pop("acceptOffersOfAtLeast", None)
-        fixed.pop("declineOffersLowerThan", None)
-        return
-    fixed["allowBestOffer"] = True
-    accept, minimum = offer_floors(price or fixed.get("buyItNowPrice")) or ("", "")
-    # The seller's own floors (eBay → Best Offer in the editor) win over the formula.
-    seller_accept = _num_str(chosen.get("autoAcceptPrice"))
-    seller_minimum = _num_str(chosen.get("minimumOfferPrice") or chosen.get("autoDeclinePrice"))
-    accept = seller_accept or accept
-    minimum = seller_minimum or minimum
-    if accept and minimum:
-        from decimal import Decimal, InvalidOperation
-
-        try:
-            ordered = Decimal(minimum) < Decimal(accept)
-        except (InvalidOperation, ValueError):
-            ordered = False
-        if not ordered:
-            # A formula floor that sits on the wrong side of the seller's price is left off.
-            if not seller_minimum:
-                minimum = ""
-            if not seller_accept:
-                accept = ""
-    fixed["acceptOffersOfAtLeast"] = accept
-    fixed["declineOffersLowerThan"] = minimum
+    fixed.update(ebay_offer_terms(price or fixed.get("buyItNowPrice"), chosen))
 
 
 def _etsy_who_code(raw: Any) -> str:
@@ -308,8 +341,7 @@ def _apply_poshmark_smart_sell(
     listing: dict[str, Any],
 ) -> None:
     """Smart Sell accepts offers down to the same minimum as eBay, or stays off."""
-    floors = offer_floors(_listing_price(listing, general))
-    known["smartSell"] = {"enabled": floors is not None, "minPrice": floors[1] if floors else ""}
+    known["smartSell"] = poshmark_smart_sell(_listing_price(listing, general))
 
 
 def _apply_mercari_smart_pricing(known: dict[str, Any]) -> None:

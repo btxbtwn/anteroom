@@ -27,7 +27,7 @@ from vendoo_studio.services.vendoo_item_update import (
     force_condition_updates,
 )
 from vendoo_studio.services.vendoo_import import listing_from_vendoo
-from vendoo_studio.services.vendoo_marketplace_fields import offer_floors
+from vendoo_studio.services.vendoo_marketplace_fields import offer_floors, whole_price
 
 
 # Shaped like what GET /api/item/{id} returns: coded values carrying a label.
@@ -424,6 +424,28 @@ class BuildItemTest(unittest.TestCase):
         self.assertIsNone(offer_floors(4))
         self.assertIsNone(offer_floors(""))
         self.assertIsNone(offer_floors("abc"))
+
+    def test_the_form_price_is_whole_dollars(self):
+        """list-this prices at comp x 1.35 rounded to the nearest dollar.
+
+        Poshmark only takes whole dollars, and both offer floors are whole
+        dollars off the price, so a fractional price would leave them
+        describing a price the form never shows.
+        """
+        self.assertEqual(whole_price("22.45"), "22")
+        self.assertEqual(whole_price("19.99"), "20")
+        self.assertEqual(whole_price("16"), "16")
+        self.assertEqual(whole_price(20.5), "20")
+        self.assertEqual(whole_price("$1,234.40"), "1234")
+        self.assertEqual(whole_price(""), "")
+        self.assertEqual(whole_price("abc"), "")
+        self.assertEqual(whole_price("0"), "")
+
+        item, _ = build_vendoo_item({"title": "Tee", "price": "22.45"}, self.schema)
+        fixed = item["listings"]["ebay"]["marketplaceSpecifics"]["pricingFormatDetails"]["fixedPrice"]
+        self.assertEqual(fixed["buyItNowPrice"], "22")
+        self.assertEqual(fixed["acceptOffersOfAtLeast"], "20")
+        self.assertEqual(fixed["declineOffersLowerThan"], "18")
 
     def test_empty_brand_checks_mercari_no_brand(self):
         item, _ = build_vendoo_item({"title": "Tee", "brand": ""}, self.schema)
@@ -1545,6 +1567,142 @@ class ApplyUpdateAllTest(unittest.TestCase):
         out = changed_fields(current, desired)
         self.assertIs(out["listings.mercari.marketplaceSpecifics.smartPricing"], False)
         self.assertEqual(out["listings.mercari.marketplaceSpecifics.floorPrice"], "")
+
+    def test_ebay_offer_floors_follow_a_changed_price(self):
+        """Repricing an item rewrites both Best Offer floors, not just the price.
+
+        A $30 item carried $28 auto-accept / $26 minimum. Repricing it to $16
+        left those floors behind, so the form held an auto-accept above the item
+        price and eBay refused the offer (25713, "This Offer is not available").
+        """
+        current = {
+            "generalDetails": {"price": "30"},
+            "listings": {
+                "ebay": {
+                    "marketplaceID": "ebay",
+                    "overrides": {},
+                    "marketplaceSpecifics": {
+                        "pricingFormat": "FixedPriceItem",
+                        "pricingFormatDetails": {"fixedPrice": {
+                            "buyItNowPrice": "30", "allowBestOffer": True,
+                            "acceptOffersOfAtLeast": "28", "declineOffersLowerThan": "26",
+                        }},
+                    },
+                },
+            },
+        }
+        desired = {
+            "generalDetails": {"price": "16"},
+            "listings": {"ebay": {"marketplaceID": "ebay", "overrides": {}}},
+        }
+        apply_update_all(current, desired)
+        fixed = desired["listings"]["ebay"]["marketplaceSpecifics"]["pricingFormatDetails"]["fixedPrice"]
+        self.assertEqual(fixed["buyItNowPrice"], "16")
+        self.assertEqual(fixed["acceptOffersOfAtLeast"], "14")
+        self.assertEqual(fixed["declineOffersLowerThan"], "12")
+        out = changed_fields(current, desired)
+        base = "listings.ebay.marketplaceSpecifics.pricingFormatDetails.fixedPrice."
+        self.assertEqual(out[base + "acceptOffersOfAtLeast"], "14")
+        self.assertEqual(out[base + "declineOffersLowerThan"], "12")
+
+    def test_a_reprice_keeps_the_sellers_own_offer_floors(self):
+        """The floors follow the price only where the seller left them blank.
+
+        A seller who typed $15/$12 on eBay → Best Offer keeps those numbers when
+        the item is repriced, rather than having the formula overwrite them.
+        """
+        current = {
+            "generalDetails": {"price": "30"},
+            "listings": {"ebay": {"marketplaceID": "ebay", "overrides": {}, "marketplaceSpecifics": {}}},
+        }
+        desired = {
+            "generalDetails": {"price": "16"},
+            "listings": {"ebay": {"marketplaceID": "ebay", "overrides": {}}},
+        }
+        listing = {
+            "price": "16",
+            "ebay_specifics": {"bestOffer": {"autoAcceptPrice": 15, "minimumOfferPrice": 12}},
+        }
+        apply_update_all(current, desired, listing=listing)
+        fixed = desired["listings"]["ebay"]["marketplaceSpecifics"]["pricingFormatDetails"]["fixedPrice"]
+        self.assertEqual(fixed["buyItNowPrice"], "16")
+        self.assertEqual(fixed["acceptOffersOfAtLeast"], "15")
+        self.assertEqual(fixed["declineOffersLowerThan"], "12")
+
+    def test_a_reprice_leaves_best_offer_off_when_the_seller_turned_it_off(self):
+        current = {
+            "generalDetails": {"price": "30"},
+            "listings": {"ebay": {
+                "marketplaceID": "ebay", "overrides": {},
+                "marketplaceSpecifics": {"pricingFormatDetails": {"fixedPrice": {
+                    "buyItNowPrice": "30", "allowBestOffer": True,
+                    "acceptOffersOfAtLeast": "28", "declineOffersLowerThan": "26",
+                }}},
+            }},
+        }
+        desired = {
+            "generalDetails": {"price": "16"},
+            "listings": {"ebay": {"marketplaceID": "ebay", "overrides": {}}},
+        }
+        listing = {"price": "16", "ebay_specifics": {"bestOffer": {"enabled": "No"}}}
+        apply_update_all(current, desired, listing=listing)
+        fixed = desired["listings"]["ebay"]["marketplaceSpecifics"]["pricingFormatDetails"]["fixedPrice"]
+        self.assertEqual(fixed["buyItNowPrice"], "16")
+        self.assertIs(fixed["allowBestOffer"], False)
+        self.assertEqual(fixed["acceptOffersOfAtLeast"], "")
+        self.assertEqual(fixed["declineOffersLowerThan"], "")
+        out = changed_fields(current, desired)
+        base = "listings.ebay.marketplaceSpecifics.pricingFormatDetails.fixedPrice."
+        self.assertEqual(out[base + "acceptOffersOfAtLeast"], "")
+        self.assertEqual(out[base + "declineOffersLowerThan"], "")
+
+    def test_ebay_offer_floors_clear_when_the_price_no_longer_earns_them(self):
+        """Below $5 there is no floor, so stale floors must be blanked."""
+        current = {
+            "generalDetails": {"price": "30"},
+            "listings": {
+                "ebay": {
+                    "marketplaceID": "ebay",
+                    "overrides": {},
+                    "marketplaceSpecifics": {
+                        "pricingFormatDetails": {"fixedPrice": {
+                            "buyItNowPrice": "30",
+                            "acceptOffersOfAtLeast": "28", "declineOffersLowerThan": "26",
+                        }},
+                    },
+                },
+            },
+        }
+        desired = {
+            "generalDetails": {"price": "3"},
+            "listings": {"ebay": {"marketplaceID": "ebay", "overrides": {}}},
+        }
+        apply_update_all(current, desired)
+        out = changed_fields(current, desired)
+        base = "listings.ebay.marketplaceSpecifics.pricingFormatDetails.fixedPrice."
+        self.assertEqual(out[base + "acceptOffersOfAtLeast"], "")
+        self.assertEqual(out[base + "declineOffersLowerThan"], "")
+
+    def test_poshmark_smart_sell_floor_follows_a_changed_price(self):
+        current = {
+            "generalDetails": {"price": "30"},
+            "listings": {
+                "poshmark": {
+                    "marketplaceID": "poshmark",
+                    "overrides": {},
+                    "marketplaceSpecifics": {"smartSell": {"enabled": True, "minPrice": "26"}},
+                },
+            },
+        }
+        desired = {
+            "generalDetails": {"price": "16"},
+            "listings": {"poshmark": {"marketplaceID": "poshmark", "overrides": {}}},
+        }
+        apply_update_all(current, desired)
+        self.assertEqual(
+            desired["listings"]["poshmark"]["marketplaceSpecifics"]["smartSell"],
+            {"enabled": True, "minPrice": "12"},
+        )
 
     def test_regenerated_package_lands_on_every_marketplace_form(self):
         """A new weight and box size must not leave the old ones on the forms."""

@@ -124,7 +124,9 @@ async def preview_send(db, conv_id: str) -> dict:
         current["labels"] = [names.get(str(label), str(label)) for label in current.get("labels", [])]
         desired["labels"] = [names.get(str(label), str(label)) for label in snapshot.get("labels", [])]
     if item_id:
-        apply_update_all(current, desired, schema=schema, leave=marketplaces_left_empty(snapshot))
+        apply_update_all(
+            current, desired, schema=schema, leave=marketplaces_left_empty(snapshot), listing=snapshot,
+        )
     updates = changed_fields(current, desired)
     changes = [
         {"field": path, "before": _value(current, path), "after": value}
