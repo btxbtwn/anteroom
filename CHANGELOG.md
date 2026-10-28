@@ -6,9 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.460 — 2026-10-27
+## 0.1.461 — 2026-10-27
 
 - With Prepaid label, the Mercari tab now asks what Mercari’s label picker asks: the package weight in pounds and ounces, whether it fits in a shoebox, and its length, width and height when it doesn’t. They start from Item Details, the labels offered follow them, and List sends what you set there.
+
+## 0.1.460 — 2026-10-27
+
+- On multi-choice fields the hint and the number chosen share one line under the field (for example 1/4), and Clear is an × inside the field instead of a link underneath.
+- A scheduled price drop counts its waiting period from the time the task ran, so the next step down comes when it should.
 
 ## 0.1.459 — 2026-10-27
 
