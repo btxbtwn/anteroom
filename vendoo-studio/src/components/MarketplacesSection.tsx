@@ -577,7 +577,7 @@ export function MarketplacesLayout({
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-foreground">{name}</span>
                     {status && !quiet && (
-                      <span role="status" className={cn("flex items-center gap-1 truncate text-[10px] text-muted-foreground",
+                      <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground",
                         status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground")}>
                         {TONE_ICON[status.tone]}
                         <span className="truncate">{status.label}</span>
@@ -616,7 +616,8 @@ export function MarketplacesLayout({
           {railStatus && <div className="mt-1 flex min-h-6 items-center gap-1.5 border-t ps-2 pt-1">{railStatus}</div>}
         </div>
       </nav>
-      <div className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3">
+      {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
+      <div className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
         {(native.error || live.error || actionError || delist.error || mark.error) && (
           <p role="alert" className="text-destructive-foreground text-xs">{mark.error?.message || actionError || (delist.error || native.error || live.error)?.message}</p>
         )}

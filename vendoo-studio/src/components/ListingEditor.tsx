@@ -886,7 +886,7 @@ export function StructuredEditor({
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
     if (f.type === "note") return null;
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
-      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" placeholder={f.placeholder} value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25 [&_textarea]:py-2 [&_textarea]:leading-relaxed" placeholder={f.placeholder} value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (multiSelectControl(f)) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
@@ -1004,7 +1004,7 @@ export function StructuredEditor({
             {/* "See … options" sits at the top of eBay's section; "Show more" sits under the fields. */}
             {revealButtons(section.title, section.fields, (name) => name.startsWith("See "))}
             {/* A marketplace's own page layout uses a twelve-part row; the general form spreads out when wide. */}
-            <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-12" : "grid-cols-2 @4xl:grid-cols-3")}>
+            <div className={cn("grid min-w-0 gap-x-4 gap-y-5 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-12" : "grid-cols-2 @4xl:grid-cols-3")}>
               {pageLayout && section.fields[0]?.sectionHelp && <p className="col-span-full text-muted-foreground text-xs">{section.fields[0].sectionHelp}</p>}
               {visible.map((f, index) => {
                 const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));

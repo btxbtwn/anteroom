@@ -11,6 +11,9 @@ import { useVendooEnabled } from "../vendooMode";
 import { ListingThumb, SelectCheckbox, ShelfHeader } from "./sidebar/ListingBits";
 import { displayCoverUrl } from "./sidebar/coverSrc";
 
+/** Suggestions shown in the sidebar before "Show all". */
+const SIDEBAR_SUGGESTIONS = 3;
+
 export const SUGGESTION_KIND_LABELS: Record<SuggestionKind, string> = {
   failed: "Fix failed listing",
   ready_to_generate: "Generate listing",
@@ -78,6 +81,7 @@ export function SuggestionsPanel({
   });
   const suggestions = data?.suggestions || [];
   const [expanded, setExpanded] = useState(true);
+  const [showAll, setShowAll] = useState(false);
   const [markdownIds, setMarkdownIds] = useState<string[] | null>(null);
   const staleIds = staleSuggestionIds(suggestions);
   const markdown = staleIds.length > 0 && !selecting ? (
@@ -101,6 +105,12 @@ export function SuggestionsPanel({
 
   if (variant === "sidebar") {
     if (!suggestions.length) return markdownDialog;
+    // A few at a time so the inventory list stays in view. Selecting needs every
+    // row, and the open listing stays visible even when it is further down.
+    const selectedIndex = suggestions.findIndex((item) => item.conversation_id === selectedConvId);
+    const limit = showAll || selecting ? suggestions.length : Math.max(SIDEBAR_SUGGESTIONS, selectedIndex + 1);
+    const shown = suggestions.slice(0, limit);
+    const hidden = suggestions.length - shown.length;
     return (
       <>
         <section
@@ -114,7 +124,7 @@ export function SuggestionsPanel({
           />
           {expanded ? (
             <div className="flex min-h-0 flex-col gap-px overflow-y-auto overscroll-contain max-[900px]:overflow-visible">
-              {suggestions.map((item) => (
+              {shown.map((item) => (
                 <SuggestionRow
                   key={item.conversation_id}
                   suggestion={item}
@@ -128,6 +138,12 @@ export function SuggestionsPanel({
                   onSelect={onSelect}
                 />
               ))}
+              {(hidden > 0 || (showAll && suggestions.length > SIDEBAR_SUGGESTIONS)) && !selecting ? (
+                <Button type="button" variant="ghost-muted" size="xs" className="mx-2 mt-0.5 self-start"
+                  onClick={() => setShowAll((value) => !value)}>
+                  {hidden > 0 ? `Show all ${suggestions.length}` : "Show fewer"}
+                </Button>
+              ) : null}
               {markdown}
             </div>
           ) : null}
