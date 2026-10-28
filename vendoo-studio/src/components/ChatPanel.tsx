@@ -28,6 +28,7 @@ import { Spinner } from "./ui/spinner";
 import type { BrowserField } from "../api/client";
 import type { Message } from "../api/types";
 import { useVendooEnabled } from "../vendooMode";
+import type { ListingChatStatus } from "./ListingChatPopup";
 
 interface Props {
   convId: string;
@@ -36,6 +37,8 @@ interface Props {
   /** Draft open in Studio's browser. Messages then go to the fix agent with the picked fields. */
   browser?: { jobId: string; fields: BrowserField[] } | null;
   onBrowserFieldsChange?: (fields: BrowserField[]) => void;
+  /** What the chat is doing, for a minimized chat's pill. Reported once messages load. */
+  onStatusChange?: (status: ListingChatStatus) => void;
 }
 
 /** Spacing under each transcript row, as T3 Code's TimelineRowContent pads them. */
@@ -43,7 +46,7 @@ function messageRowPadding(m: Message): string {
   return m.role === "user" || m.role === "assistant" || m.role === "model" ? "pb-4" : "pb-2";
 }
 
-export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, browser, onBrowserFieldsChange }: Props) {
+export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, browser, onBrowserFieldsChange, onStatusChange }: Props) {
   const vendooOn = useVendooEnabled();
   const [input, setInput] = useState("");
   // Quotes live inline in the composer itself, T3 Code style: `input` is the
@@ -213,6 +216,14 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, brow
         : "Add a note, or generate the listing...";
 
   useGenerateRecovery(convId, generating, hasListingJson, streamFromFetch);
+
+  const messageCount = messages?.length ?? 0;
+  const loaded = messages !== undefined;
+  const empty = loaded && !hasMessages && !busy && !streamFailed;
+  const statusLabel = busy ? localLabel || activityDetail : "";
+  useEffect(() => {
+    if (loaded) onStatusChange?.({ convId, busy, label: statusLabel, messageCount, empty });
+  }, [onStatusChange, convId, loaded, busy, statusLabel, messageCount, empty]);
 
   const allMessages = messages ?? [];
   const foldPositions = placeTurnFolds(allMessages, foldedTurns);
