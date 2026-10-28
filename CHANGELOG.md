@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.467 — 2026-10-28
+## 0.1.468 — 2026-10-28
 
 - The eBay tab is laid out like eBay’s Create listing page: Title, Item category, Variations, Item specifics (Required, then Additional), Condition, Description, Pricing and Shipping, with eBay’s names for each field. Item specifics come in eBay’s order, Size offers only eBay’s sizes, Format reads Auction or Buy It Now, and an auction shows its duration and bids instead of an item price.
+
+## 0.1.467 — 2026-10-28
+
+- The Poshmark tab now matches Poshmark’s create-listing page for every category: the same headings and hints, categories in Poshmark’s order (with Global & Traditional Wear as its own group), the same size tabs and sizes, one Color field for up to two colors, and the price panel’s Listing Price, Automate Offers, Lowest Price, Original Price and Shipping Discount. Listing SKU, Cost Price and Other Info sit under Additional Details, and Cost Price can be changed here.
 
 ## 0.1.466 — 2026-10-28
 

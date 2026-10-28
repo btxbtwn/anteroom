@@ -185,6 +185,10 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
     }
     return true;
   }
+  // Poshmark asks for the lowest price only once Automate Offers is on.
+  if (context.tab === "poshmark" && field.key === "poshmark_specifics.smartSell.minimumPrice") {
+    return shownChoice(context.fields, context.local, context.listing, "poshmark_specifics.smartSell.enabled") === "true";
+  }
   if (context.tab === "mercari" && field.key === "mercari_specifics.smartPricing.minimumPrice") {
     return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.smartPricing.enabled") === "true";
   }
