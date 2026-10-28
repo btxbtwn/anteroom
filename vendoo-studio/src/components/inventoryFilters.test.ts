@@ -232,7 +232,7 @@ describe("filter options", () => {
       direct_marketplaces: ["depop", "ebay"],
       unsent_edits: true,
     };
-    expect(statusCounts([jacket])).toMatchObject({ all: 1, active: 1, draft: 1 });
+    expect(statusCounts([jacket])).toEqual({ all: 1, active: 1 });
     expect(filterListings([jacket], "", withFilters({ status: "active", marketplaces: ["depop"] }))).toEqual([jacket]);
     expect(filterListings([jacket], "", withFilters({ notListed: true }))).toEqual([]);
     expect(marketplaceCounts([jacket])).toMatchObject({ depop: 1, ebay: 1 });
@@ -258,7 +258,9 @@ describe("filter options", () => {
 
   it("counts what is filtering the list", () => {
     expect(activeFilterCount(DEFAULT_LISTING_FILTERS)).toBe(0);
-    expect(activeFilterCount(withFilters({ status: "sold", labels: ["A19"], notListed: true }))).toBe(3);
+    // The selected tab is already visible; it is not a menu filter.
+    expect(activeFilterCount(withFilters({ status: "sold" }))).toBe(0);
+    expect(activeFilterCount(withFilters({ status: "sold", labels: ["A19"], notListed: true }))).toBe(2);
     // "Not listed on eBay" is one narrowing; a second marketplace is a second.
     expect(activeFilterCount(withFilters({ notListed: true, marketplaces: ["ebay"] }))).toBe(1);
     expect(activeFilterCount(withFilters({ notListed: true, marketplaces: ["ebay", "etsy"] }))).toBe(2);
@@ -317,16 +319,16 @@ describe("unsent edits", () => {
     expect(filterListings([edited, sent], "", DEFAULT_LISTING_FILTERS)).toHaveLength(2);
   });
 
-  it("shows a live listing with unsent edits under Draft as well as Active", () => {
+  it("keeps a live listing with unsent edits in Active only", () => {
     const draftTab = { ...DEFAULT_LISTING_FILTERS, status: "draft" as const };
     const activeTab = { ...DEFAULT_LISTING_FILTERS, status: "active" as const };
-    expect(filterListings([edited, sent], "", draftTab)).toEqual([edited]);
+    expect(filterListings([edited, sent], "", draftTab)).toEqual([]);
     expect(filterListings([edited, sent], "", activeTab)).toEqual([edited, sent]);
   });
 
-  it("counts it on the Draft tab without counting a draft twice", () => {
+  it("counts each listing in exactly one tab", () => {
     const draft: FilterableListing = { ...tee, status: "draft", unsent_edits: true };
-    expect(statusCounts([edited, sent, draft])).toMatchObject({ all: 3, active: 2, draft: 2 });
+    expect(statusCounts([edited, sent, draft])).toEqual({ all: 3, active: 2, draft: 1 });
   });
 
   it("leaves a sold item under Sold alone", () => {

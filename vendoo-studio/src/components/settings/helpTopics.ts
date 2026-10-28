@@ -34,7 +34,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     steps: [
       "Connect Chrome and sign in to Vendoo first (see **Connect Chrome and the extension** below).",
       "Open the listing and press **Send to Vendoo**. Anteroom creates a Vendoo draft and links it to the listing.",
-      "After you change a listing, press **Update Vendoo** to write the changes onto the same draft; photos already in Vendoo stay. **Discard** puts the listing back to what Vendoo has. Once the item is live on a marketplace through **Marketplaces**, press **Update** there to send your changes.",
+      "After you change a listing, its row wears an **unsent** tag and **Filters → Unsent edits** collects them. Press **Update Vendoo** to write the changes onto the same draft; photos already in Vendoo stay. **Discard** puts the listing back to what Vendoo has. Once the item is live on a marketplace through **Marketplaces**, press **Update** there to send your changes.",
       "Sends run one at a time. Open **Queue** in the sidebar to see what is waiting or to **Cancel** one.",
       "Anteroom never publishes, lists or delists anything on its own: it only saves drafts. When you are ready, press **Open listing** and list the item yourself in Vendoo. If a live listing needs relisting to show your updates, follow the steps in its **Relist to show your updates** box, then press **I've relisted**.",
     ],

@@ -102,14 +102,13 @@ export function listingStatusTab(status?: string | null): string {
 }
 
 /**
- * Whether a listing shows under a status tab. Unsent edits are a draft Vendoo
- * has not been given yet, so a live listing carrying them also shows under
- * Draft. A sold item is finished and stays under Sold alone.
+ * Whether a listing shows under a status tab. The tabs are lifecycle states and
+ * nothing else: a live listing with unsent edits still belongs to Active, where
+ * its unsent tag and the filter can explain it.
  */
 export function inStatusTab(listing: FilterableListing, tab: ListingStatusFilter): boolean {
   if (tab === "all") return true;
-  const own = listingStatusTab(inventoryStatus(listing));
-  return own === tab || (tab === "draft" && Boolean(listing.unsent_edits) && own !== "sold");
+  return listingStatusTab(inventoryStatus(listing)) === tab;
 }
 
 function lower(value: string | null | undefined): string {
@@ -269,7 +268,6 @@ export function statusCounts(listings: FilterableListing[]): Record<string, numb
   for (const listing of listings) {
     const status = listingStatusTab(inventoryStatus(listing));
     counts[status] = (counts[status] || 0) + 1;
-    if (status !== "draft" && inStatusTab(listing, "draft")) counts.draft = (counts.draft || 0) + 1;
   }
   return counts;
 }
@@ -306,8 +304,9 @@ export function marketplaceOptions(
 }
 
 export function activeFilterCount(filters: ListingFilters): number {
+  // The selected status tab already shows itself, so the Filters badge counts
+  // only the menu filters underneath it.
   return (
-    (filters.status === "all" ? 0 : 1) +
     // "Not listed on eBay" is one narrowing, not two.
     Math.max(filters.marketplaces.length, filters.notListed ? 1 : 0) +
     filters.labels.length +

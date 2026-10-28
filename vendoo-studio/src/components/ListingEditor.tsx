@@ -66,6 +66,7 @@ import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Badge } from "./ui/badge";
 import { Button, InlineButton } from "./ui/button";
 import { Input } from "./ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
@@ -444,6 +445,18 @@ export function ListingEditor({
           <MarketplaceLinks urls={conversation?.vendoo_listing_urls} />
           {conversation?.unsent_edits ? (
             <>
+              <Badge
+                variant="info"
+                title={
+                  directMarketplaces.length
+                    ? `This listing has changed since it was listed on ${directMarketplaces.map(marketplaceName).join(", ")}. Update it there from Marketplaces.`
+                    : vendooEnabled
+                      ? "This listing has changed since Vendoo last had it. Update Vendoo writes it onto the Vendoo form."
+                      : "This listing has changed since it was last saved."
+                }
+              >
+                Unsent edits
+              </Badge>
               {/* Discard pulls Vendoo's copy, which a directly listed item no longer follows. */}
               {vendooEnabled && !directMarketplaces.length && (listingJob?.vendoo_item_id || importedItemId) ? (
                 <InlineButton
