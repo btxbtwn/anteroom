@@ -6,10 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.460 — 2026-10-28
+## 0.1.461 — 2026-10-28
 
 - When you pick a different category for a marketplace, on its tab or by asking chat, Anteroom fills that category’s new fields the same way it does after generating, choosing only from that marketplace’s own choices. Only the marketplace you changed is filled, and fields you set or locked are left alone.
-- Automations count a listing’s cooldown from when the run handled it.
+
+## 0.1.460 — 2026-10-27
+
+- On multi-choice fields the hint and the number chosen share one line under the field (for example 1/4), and Clear is an × inside the field instead of a link underneath.
+- A scheduled price drop counts its waiting period from the time the task ran, so the next step down comes when it should.
 
 ## 0.1.459 — 2026-10-27
 

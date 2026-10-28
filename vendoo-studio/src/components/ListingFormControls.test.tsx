@@ -40,6 +40,19 @@ describe("marketplace choice controls", () => {
     expect(field).toContain('data-listing-field="ebay_specifics.season"');
   });
 
+  it("puts the hint and the selected count on one line under the field", () => {
+    const html = renderToStaticMarkup(<SearchableMultiSelect id="occasion" fieldKey="depop_specifics.occasion"
+      value={["Casual"]} options={["Casual", "Going out", "Holiday"]} maxValues={3} help="Add up to 3"
+      onChange={() => { throw new Error("Rendering must not save"); }} />);
+    expect(html).toContain('id="occasion-help"');
+    expect(html).toContain("Add up to 3");
+    expect(html).toContain('aria-label="1 of 3 selected"');
+    expect(html).toContain(">1/3<");
+    expect(html).toContain('aria-describedby="occasion-help"');
+    const field = html.slice(html.indexOf('data-slot="multi-select"'), html.indexOf('id="occasion-help"'));
+    expect(field).toContain('aria-label="Clear values"');
+  });
+
   it("offers a clear control for a saved Depop style", () => {
     const html = renderToStaticMarkup(<SearchableMultiSelect id="style" fieldKey="depop_specifics.style"
       value={["Casual", "Minimalist", "Indie"]}
