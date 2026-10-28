@@ -330,7 +330,7 @@ const CLOTHING_DRAFT = { name: 'Boys graphic tee', description: 'Soft cotton tee
   itemCategory: { id: 1934 }, brand: { id: 5813 }, itemSize: { id: 168 }, shippingPayer: { id: 1 }, shippingClasses: [{ id: 2508 }],
   photos: [{ id: 'i1' }, { id: 'i2' }] };
 
-test('a full Mercari clothing listing sends its category, size, brand, label inside shipping, payer, ZIP and box', async () => {
+test('a full Mercari clothing listing sends its category, size, brand, label inside shipping, payer and ZIP, and no box until the shoebox question is answered', async () => {
   const { c, requests, journal, setDraft } = worker();
   setDraft(CLOTHING_DRAFT);
   const asked = withVendooBrand(c, journal, [200, [{ value: '9', label: 'Nike SB' }, { value: '5813', label: 'NIKE' }]]);
@@ -342,7 +342,7 @@ test('a full Mercari clothing listing sends its category, size, brand, label ins
   assert.deepEqual(JSON.parse(JSON.stringify(common)), { name: 'Boys graphic tee', isAutoPriceDrop: false, description: 'Soft cotton tee',
     price: 1800, categoryId: 1934, conditionId: 3, sizeId: 168,
     shipping: { payerId: 1, classIds: [2508], suggestedClassIds: [2508], zipCode: '70115',
-      dimensions: { unit: 'INCH', length: 13, width: 10, height: 3 }, weight: { weight: 7 } }, brandId: 5813,
+      dimensions: {}, weight: { weight: 7 } }, brandId: 5813,
     imageIds: ['i1', 'i2'] });
   assert.ok(!('shippingClassIds' in common));
   assert.equal(asked[0], 'masterQuery');

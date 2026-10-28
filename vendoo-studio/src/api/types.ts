@@ -580,8 +580,25 @@ export interface MarketplaceFormField {
   accept?: string;
   /** The heading this field sits under on the marketplace's own form. */
   section?: string;
-  /** Half or quarter of a row, as the marketplace's form lays it out. Absent means a full row. */
-  width?: "half" | "quarter";
+  /** Half, a third or a quarter of a row, as the marketplace's form lays it out. Absent means a full row. */
+  width?: "half" | "third" | "quarter";
+  /** A question the page asks over several consecutive inputs ("How heavy will the package be?"). */
+  group?: string;
+  group_help?: string;
+  /** The line the page shows under a section heading, carried on the section's first field. */
+  section_help?: string;
+  placeholder?: string;
+  /** Text inside the input before or after the value, such as "$" or "lb". */
+  prefix?: string;
+  suffix?: string;
+  /** The page shows no label above this input; the label stays for screen readers. */
+  label_hidden?: boolean;
+  /** Show the typed length beside the label, as "16/80". */
+  counter?: boolean;
+  /** Choices shown as radio buttons (stacked, or in one row), or a switch shown as a button. */
+  presentation?: "radio" | "radio-row" | "button";
+  /** Choice label → the line the page shows under that choice. */
+  option_help?: Record<string, string>;
   /** True when choosing a different category adds or removes this row. */
   category_specific?: boolean;
 }

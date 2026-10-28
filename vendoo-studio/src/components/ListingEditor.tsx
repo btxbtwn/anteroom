@@ -32,6 +32,9 @@ import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
 import { applyBottomsFields, isBottomsListing } from "../bottomsSizes";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
+import { Radio, RadioGroup } from "./ui/radio-group";
+import { Toggle } from "./ui/toggle";
 import { RegenerateListingButton } from "./ClearListingButton";
 import { MarketplacesLayout } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
@@ -119,7 +122,17 @@ interface EditorField {
   /** File-dialog filter from the marketplace's photo area (Depop: JPEG and PNG). */
   accept?: string;
   optionGroups?: Record<string, string>;
-  width?: "half" | "quarter";
+  width?: "half" | "third" | "quarter";
+  group?: string;
+  groupHelp?: string;
+  sectionHelp?: string;
+  placeholder?: string;
+  prefix?: string;
+  suffix?: string;
+  labelHidden?: boolean;
+  counter?: boolean;
+  presentation?: "radio" | "radio-row" | "button";
+  optionHelp?: Record<string, string>;
 }
 
 export function ListingEditor({
@@ -842,10 +855,12 @@ export function StructuredEditor({
     const categoryChoices = f.native && !f.multi ? pathCategoryChoices(f) : null;
     if (categoryChoices) return <CategoryTreeSelect key={text} id={id} fieldKey={f.key} value={text} choices={categoryChoices}
       disabled={f.locked} onChange={(choice) => commitField(f.key, choice.label)} />;
+    if (f.type === "boolean" && f.presentation === "button") return <Toggle id={id} data-listing-field={f.key} variant="outline"
+      className="w-full" pressed={text === "true"} disabled={f.locked} onPressedChange={(pressed) => commitField(f.key, pressed)}>{f.label}</Toggle>;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
-      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" placeholder={f.placeholder} value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (multiSelectControl(f)) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
@@ -853,6 +868,23 @@ export function StructuredEditor({
       choicesVerified={f.optionsSource === "marketplace"}
       maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined} help={f.help ?? undefined}
       onChange={(value) => commitField(f.key, value)} />;
+    if (f.options?.length && (f.presentation === "radio" || f.presentation === "radio-row")) {
+      return (
+        <RadioGroup id={id} data-listing-field={f.key} value={text} disabled={f.locked}
+          className={f.presentation === "radio-row" ? "grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-3" : undefined}
+          onValueChange={(value) => commitField(f.key, String(value))}>
+          {f.options.map((option) => (
+            <label key={option} className="flex min-w-0 items-start gap-2 text-sm">
+              <Radio value={option} className="mt-0.5" />
+              <span className="min-w-0">
+                <span className="block font-medium">{option}</span>
+                {f.optionHelp?.[option] && <span className="block text-muted-foreground text-xs">{f.optionHelp[option]}</span>}
+              </span>
+            </label>
+          ))}
+        </RadioGroup>
+      );
+    }
     if (f.options?.length) {
       return (
         <SearchableSelect
@@ -869,23 +901,32 @@ export function StructuredEditor({
         />
       );
     }
-    return (
-      <Input
-        nativeInput
-        id={id}
-        data-listing-field={f.key}
-        type={f.type || "text"}
-        min={f.minValue}
-        max={f.maxValue}
-        step={f.type === "number" ? f.step ?? "any" : undefined}
-        readOnly={f.locked}
-        disabled={f.selectionOnly && !f.options?.length}
-        maxLength={f.maxLength ?? undefined}
-        value={text}
-        onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }}
-        onBlur={() => handleBlur(f.key)}
-      />
-    );
+    const inputProps = {
+      nativeInput: true,
+      id,
+      "data-listing-field": f.key,
+      type: f.type || "text",
+      min: f.minValue,
+      max: f.maxValue,
+      step: f.type === "number" ? f.step ?? "any" : undefined,
+      readOnly: f.locked,
+      disabled: f.selectionOnly && !f.options?.length,
+      maxLength: f.maxLength ?? undefined,
+      placeholder: f.placeholder,
+      value: text,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); },
+      onBlur: () => handleBlur(f.key),
+    };
+    if (f.prefix || f.suffix) {
+      return (
+        <InputGroup>
+          {f.prefix && <InputGroupAddon>{f.prefix}</InputGroupAddon>}
+          <InputGroupInput {...inputProps} />
+          {f.suffix && <InputGroupAddon align="inline-end">{f.suffix}</InputGroupAddon>}
+        </InputGroup>
+      );
+    }
+    return <Input {...inputProps} />;
   };
   // Long text and the category path need the full row. A marketplace title is
   // stored under that form, so the leaf is what still makes it full width.
@@ -924,16 +965,33 @@ export function StructuredEditor({
           }
           return formFieldText(local[f.key]).trim() !== "";
         }).length;
+        const visible = section.fields.filter((f) => !f.reveal || revealed.has(`${tab}|${section.title}|${f.reveal}`));
         const rows = (
           <>
             {/* "See … options" sits at the top of eBay's section; "Show more" sits under the fields. */}
             {revealButtons(section.title, section.fields, (name) => name.startsWith("See "))}
-            <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-4" : "grid-cols-2 @4xl:grid-cols-3")}>
-              {section.fields.filter((f) => !f.reveal || revealed.has(`${tab}|${section.title}|${f.reveal}`)).map((f) => (
-                <div key={f.key} className={cn("min-w-0", pageLayout
-                  ? (f.width === "quarter" ? "col-span-1" : f.width === "half" ? "col-span-2" : "col-span-full")
+            {/* A marketplace's own page layout uses a twelve-part row; the general form spreads out when wide. */}
+            <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-12" : "grid-cols-2 @4xl:grid-cols-3")}>
+              {pageLayout && section.fields[0]?.sectionHelp && <p className="col-span-full text-muted-foreground text-xs">{section.fields[0].sectionHelp}</p>}
+              {visible.map((f, index) => (
+                <React.Fragment key={f.key}>
+                {pageLayout && f.group && visible[index - 1]?.group !== f.group && (
+                  <div className="col-span-full min-w-0">
+                    <p className="font-medium text-sm">{f.group}</p>
+                    {f.groupHelp && <p className="mt-0.5 text-muted-foreground text-xs">{f.groupHelp}</p>}
+                  </div>
+                )}
+                <div className={cn("min-w-0", pageLayout
+                  ? ({ quarter: "col-span-3", third: "col-span-4", half: "col-span-6" } as Record<string, string>)[f.width ?? ""] ?? "col-span-full"
                   : fullWidth(f) && "col-span-full")}>
-                  {f.label && <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>}
+                  {f.presentation !== "button" && f.label && (f.counter && f.maxLength != null ? (
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                      <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                      <span className="text-muted-foreground text-xs tabular-nums">{formFieldText(local[f.key]).length}/{f.maxLength}</span>
+                    </div>
+                  ) : (
+                    <FieldLabel htmlFor={`listing-field-${f.key}`} className={f.labelHidden ? "sr-only" : undefined}>{f.label}</FieldLabel>
+                  ))}
                   {control(f)}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
@@ -943,6 +1001,7 @@ export function StructuredEditor({
                     {f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"}
                   </p>}
                 </div>
+                </React.Fragment>
               ))}
             </div>
             {revealButtons(section.title, section.fields, (name) => !name.startsWith("See "))}
@@ -1346,6 +1405,15 @@ function schemaFieldsForTab(
     ...(field.accept ? { accept: field.accept } : {}),
     ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
+    ...(field.group ? { group: field.group, groupHelp: field.group_help } : {}),
+    ...(field.section_help ? { sectionHelp: field.section_help } : {}),
+    ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+    ...(field.prefix ? { prefix: field.prefix } : {}),
+    ...(field.suffix ? { suffix: field.suffix } : {}),
+    ...(field.label_hidden ? { labelHidden: true } : {}),
+    ...(field.counter ? { counter: true } : {}),
+    ...(field.presentation ? { presentation: field.presentation } : {}),
+    ...(field.option_help ? { optionHelp: field.option_help } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),
   }));
 }
