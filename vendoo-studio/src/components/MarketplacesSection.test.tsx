@@ -229,6 +229,16 @@ describe("marketplaces section", () => {
     expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).toContain("Delist everywhere…");
   });
 
+  it("offers List everywhere for the marketplaces that are ready, and names them", () => {
+    const html = render({}, { mercari: live }, { etsyReady: true });
+    expect(html).toContain("List everywhere…");
+    expect(html).toContain('title="List on eBay, Etsy, Poshmark, Depop, Sellwild, Vinted"');
+    const blocked = render({}, {}, { preflight: { marketplaces: { ebay: { ready: false, gaps: [{ field: "price", message: "eBay needs a price.", blocking: true }] } } } });
+    expect(blocked).toContain('title="List on Poshmark, Mercari, Depop, Sellwild, Vinted"');
+    const sold = { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } };
+    expect(render({}, sold)).not.toContain("List everywhere…");
+  });
+
   it("offers no new listings once the item sold somewhere", () => {
     const sold = { poshmark: { ...live, url: "https://poshmark.com/listing/x", listing_id: "x", sold_here: true } };
     expect(render({}, sold, { selected: "mercari" })).not.toContain("List…");
