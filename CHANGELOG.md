@@ -6,11 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.477 — 2026-10-28
+## 0.1.478 — 2026-10-28
 
 - Category fields now read as one path, with an arrow between each level: Women → Jeans, or Women → Global & Traditional Wear → Kilts.
 - Choosing a category opens the same department-and-group picker on every marketplace form, one level at a time, instead of a long dropdown. The saved category stays visible if the marketplace no longer offers it, so you can replace it rather than lose it.
 - Poshmark’s Category and Subcategory keep their own control, with an arrow between them so the next choice reads as a step.
+
+## 0.1.477 — 2026-10-28
+
+- Listing forms are easier to read: fields stop at a comfortable width instead of stretching across a wide window, section headings stand out from field labels, labels and marketplace statuses are larger, and the description box has more room between lines.
+- Fields that take several choices say how many they allow in the empty box ("Choose up to 3"), and the count appears once you pick something.
+- The inventory list shows three suggestions with "Show all" for the rest, the search box reads "Search listings" instead of cutting off, the status tabs no longer cut off "Active", and the marketplace logos under each listing are larger.
 
 ## 0.1.476 — 2026-10-28
 

@@ -132,7 +132,9 @@ export function ListingFilters({
   return (
     <div className="flex shrink-0 flex-col gap-1.5 px-(--sidebar-content-inset) pb-2">
       {/* The tabs answer to the sidebar's own width, which the reader drags
-          between 200px and 30vw: counts drop first, the selected one's last. */}
+          between 200px and 30vw: counts drop first, the selected one's last.
+          Each tab starts at its own text's width, so a long label is not cut
+          while a short one has room to spare. */}
       <div
         className="@container/tabs flex gap-0.5 rounded-[var(--control-radius)] bg-sidebar-control-surface p-0.5 ring-1 ring-sidebar-border ring-inset"
         role="tablist"
@@ -147,14 +149,14 @@ export function ListingFilters({
               role="tab"
               aria-selected={selected}
               data-active={selected}
-              className="group/tab relative flex h-6 max-[900px]:h-9 max-[900px]:after:absolute max-[900px]:after:inset-x-0 max-[900px]:after:-inset-y-1 min-w-0 flex-1 cursor-pointer items-center justify-center overflow-hidden rounded-md px-1 text-xs font-medium text-sidebar-muted-foreground outline-none transition-colors hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground data-[active=true]:shadow-xs/5"
+              className="group/tab relative flex h-6 max-[900px]:h-9 max-[900px]:after:absolute max-[900px]:after:inset-x-0 max-[900px]:after:-inset-y-1 min-w-0 flex-auto cursor-pointer items-center justify-center overflow-hidden rounded-md px-1 text-xs font-medium text-sidebar-muted-foreground outline-none transition-colors hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground data-[active=true]:shadow-xs/5"
               // A narrow sidebar drops the counts, so the tab itself carries one.
               title={`${STATUS_LABELS[status]} · ${counts[status] || 0}`}
               onClick={() => onChange({ ...filters, status })}
             >
               <span className="flex min-w-0 items-baseline gap-1">
                 <span className="min-w-0 truncate">{STATUS_LABELS[status]}</span>
-                <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums @max-[268px]/tabs:group-data-[active=false]/tab:hidden @max-[212px]/tabs:hidden">
+                <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums @max-[300px]/tabs:group-data-[active=false]/tab:hidden @max-[212px]/tabs:hidden">
                   {compactCount(counts[status] || 0)}
                 </span>
               </span>

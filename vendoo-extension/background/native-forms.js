@@ -206,7 +206,7 @@ function poshmarkEditorForm(listing, catalog, display, styleTags = [], shippingD
     at('Brand', 'Optional. Add details to help your buyers find your item quickly.')(
       nativeEditorField('poshmark_specifics.brand', 'Brand',
         Object.hasOwn(specifics, 'brand') ? specifics.brand : (listing.brand ?? listing.form?.overrides?.brand), { max_length: 50 })),
-    at('Color', 'Optional. Select up to 2 colors.')(
+    at('Color', 'Optional.')(
       nativeEditorChoice('poshmark_specifics.colors', 'Color', poshmarkColors(listing, catalog),
         (catalog.colors || []).map(color => color.name), { multi: true, max_values: 2 })),
     at('Style Tags', 'Optional. Make it easy for buyers to find your listings by selecting or creating up to 3 tags to describe your item (aesthetic, material, style, etc.)')(

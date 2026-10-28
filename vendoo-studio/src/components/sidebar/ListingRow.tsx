@@ -343,12 +343,12 @@ export function ListingRow({
           </div>
           {listedMarketplaces.length ? (
             <div
-              className="mt-1 flex flex-wrap gap-0.75"
+              className="mt-1.5 flex flex-wrap gap-1.5"
               aria-label={`Listed on ${listedMarketplaces.map((row) => row.label).join(", ")}`}
             >
               {listedMarketplaces.map((row) => (
                 <span key={row.id} className={cn("inline-flex", row.status === "SOLD" && "opacity-55")}>
-                  <MarketplaceLogo id={row.id} label={`${row.label} · ${row.status.toLowerCase()}`} size={14} />
+                  <MarketplaceLogo id={row.id} label={`${row.label} · ${row.status.toLowerCase()}`} size={18} />
                 </span>
               ))}
             </div>

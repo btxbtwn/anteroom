@@ -49,11 +49,11 @@ export function SegmentedTabs<T extends string>({
   );
 }
 
-/** Muted field caption above a control. */
+/** Field caption above a control: dimmer than the value, but still readable. */
 export function FieldLabel({ className, ...props }: React.ComponentProps<"label">) {
   return (
     <label
-      className={cn("mb-1.5 block font-medium text-muted-foreground text-xs", className)}
+      className={cn("mb-1.5 block font-medium text-foreground/75 text-[13px] leading-4", className)}
       {...props}
     />
   );
@@ -63,7 +63,7 @@ export function FieldLabel({ className, ...props }: React.ComponentProps<"label"
 export function SectionHeading({ className, ...props }: React.ComponentProps<"h3">) {
   return (
     <h3
-      className={cn("font-medium text-foreground text-sm", className)}
+      className={cn("font-semibold text-[15px] text-foreground leading-5", className)}
       {...props}
     />
   );
@@ -88,11 +88,11 @@ export function InspectorSection({
     <section
       {...props}
       aria-labelledby={titleId}
-      className={cn("flex min-w-0 flex-col gap-3 border-b py-4 first:pt-1 last:border-b-0", className)}
+      className={cn("flex min-w-0 flex-col gap-4 border-b pt-6 pb-6 first:pt-1 last:border-b-0", className)}
     >
       <div className="flex min-h-7 min-w-0 items-center gap-2">
         <SectionHeading id={titleId} className="shrink-0">{title}</SectionHeading>
-        {meta ? <span className="min-w-0 truncate text-muted-foreground text-xs">{meta}</span> : null}
+        {meta ? <span className="min-w-0 truncate text-muted-foreground text-[13px]">{meta}</span> : null}
         {actions ? <div className="ms-auto flex shrink-0 items-center gap-1">{actions}</div> : null}
       </div>
       {children}
@@ -156,6 +156,8 @@ export function SearchableSelect({
   choicesVerified = true,
   onSearch,
   optionGroups,
+  placeholder = "Search",
+  clearable = true,
 }: {
   id: string;
   fieldKey: string;
@@ -169,6 +171,8 @@ export function SearchableSelect({
   onSearch?: (query: string) => void;
   /** Choice label → the heading the marketplace lists it under, in option order. */
   optionGroups?: Record<string, string>;
+  placeholder?: string;
+  clearable?: boolean;
 }) {
   const [query, setQuery] = React.useState(value);
   React.useEffect(() => setQuery(value), [value]);
@@ -196,8 +200,8 @@ export function SearchableSelect({
         <ComboboxInput
           id={id}
           data-listing-field={fieldKey}
-          placeholder="Search"
-          showClear={Boolean(value) && !disabled}
+          placeholder={placeholder}
+          showClear={clearable && Boolean(value) && !disabled}
           disabled={disabled}
           maxLength={maxLength}
           aria-invalid={(unavailable && choicesVerified) || undefined}
@@ -463,7 +467,9 @@ export function SearchableMultiSelect({
             rootClassName={query.trim() ? "min-w-16" : "min-w-0"}
             id={id}
             data-listing-field={fieldKey}
-            placeholder={value.length > 0 ? "" : (selectionOnly ? "Search choices" : "Search or add values")}
+            placeholder={value.length > 0 ? "" : maxValues != null
+              ? (maxValues === 1 ? "Choose one" : `Choose up to ${maxValues}`)
+              : (selectionOnly ? "Search choices" : "Search or add values")}
             disabled={disabled}
             maxLength={maxLength}
             aria-invalid={invalid || undefined}
@@ -490,9 +496,10 @@ export function SearchableMultiSelect({
           </ComboboxItem>}</ComboboxList>
         </ComboboxPopup>
       </Combobox>
-      {(help || maxValues != null) && <div className="mt-1.5 flex items-start gap-3 text-xs text-muted-foreground">
+      {/* The empty picker's placeholder names the limit; the count takes over once something is chosen. */}
+      {(help || (maxValues != null && value.length > 0)) && <div className="mt-1.5 flex items-start gap-3 text-xs text-muted-foreground">
         {help && <p id={`${id}-help`} className="min-w-0 flex-1">{help}</p>}
-        {maxValues != null && <p className={cn("ms-auto shrink-0 tabular-nums", overLimit && "text-warning-foreground")}
+        {maxValues != null && value.length > 0 && <p className={cn("ms-auto shrink-0 tabular-nums", overLimit && "text-warning-foreground")}
           aria-label={`${value.length} of ${maxValues} selected`}>{value.length}/{maxValues}</p>}
       </div>}
       {(unavailable.length > 0 || overLimit) && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">
