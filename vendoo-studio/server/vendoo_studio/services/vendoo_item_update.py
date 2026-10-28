@@ -34,6 +34,8 @@ from vendoo_studio.services.vendoo_item_shape import (
 from vendoo_studio.services.vendoo_marketplace_fields import (
     _apply_mercari_shipping,
     _apply_mercari_smart_pricing,
+    ebay_offer_terms,
+    poshmark_smart_sell,
 )
 from vendoo_studio.services.vendoo_specifics import is_not_applicable
 
@@ -55,7 +57,18 @@ _ALWAYS_WRITE_CONDITION_MARKETPLACES = ("poshmark", "mercari")
 _TAGS_SPECIFICS_MARKETPLACES = frozenset({"etsy", "mercari"})
 
 
-def _set_ebay_bin_price(section: dict[str, Any], price: Any) -> None:
+def _set_ebay_bin_price(section: dict[str, Any], price: Any, listing: dict[str, Any] | None = None) -> None:
+    """The Buy It Now price and the Best Offer floors that follow from it.
+
+    Writing only the price left the floors from the previous price in place. An
+    item repriced from $30 to $16 kept a $28 auto-accept under its $26 minimum,
+    which eBay rejects and the form will not save. The floors are derived from
+    the same number here that create uses, so the two can't drift apart — and a
+    seller who typed their own floors keeps them.
+    """
+    ebay = (listing or {}).get("ebay_specifics") if isinstance(listing, dict) else None
+    ebay = ebay if isinstance(ebay, dict) else {}
+    chosen = ebay.get("bestOffer") if isinstance(ebay.get("bestOffer"), dict) else {}
     specs = _bucket(section, "marketplaceSpecifics")
     details = specs.get("pricingFormatDetails")
     if not isinstance(details, dict):
@@ -66,6 +79,7 @@ def _set_ebay_bin_price(section: dict[str, Any], price: Any) -> None:
         fixed = {}
         details["fixedPrice"] = fixed
     fixed["buyItNowPrice"] = deepcopy(price)
+    fixed.update(deepcopy(ebay_offer_terms(price, chosen)))
 
 
 def _apply_condition(
@@ -145,6 +159,7 @@ def apply_update_all(
     schema: dict[str, Any] | None = None,
     *,
     leave: Collection[str] = (),
+    listing: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Copy general-form values onto marketplace listings, like Vendoo's Update All.
 
@@ -229,7 +244,12 @@ def apply_update_all(
             want_section["dateCreated"] = deepcopy(have_section["dateCreated"])
         if price not in (None, ""):
             if marketplace == "ebay":
-                _set_ebay_bin_price(want_section, price)
+                _set_ebay_bin_price(want_section, price, listing)
+            if marketplace == "poshmark":
+                # Smart Sell's floor follows the price the same way Best Offer's does.
+                _bucket(want_section, "marketplaceSpecifics")["smartSell"] = deepcopy(
+                    poshmark_smart_sell(price)
+                )
             if marketplace in _PRICE_OVERRIDE_MARKETPLACES or "price" in (
                 have_section.get("overrides") if isinstance(have_section.get("overrides"), dict) else {}
             ):
@@ -295,8 +315,17 @@ def changed_fields(current: dict[str, Any], desired: dict[str, Any]) -> dict[str
     something is not the same as the seller clearing it — the exceptions being
     a "Does Not Apply" on the draft (cleared because the form shows the phrase
     as the item specific's value), an intentional marketplace condition reset
-    after Regenerate, and stale category-aspect keys after a leaf change.
+    after Regenerate, stale category-aspect keys after a leaf change, and an
+    offer floor the current price no longer earns.
     """
+    # A floor is derived, never the seller's own value, so clearing one is always
+    # wanted: a leftover auto-accept is what makes eBay reject the offer.
+    _CLEARABLE_DERIVED = (
+        ".marketplaceSpecifics.floorPrice",
+        ".pricingFormatDetails.fixedPrice.acceptOffersOfAtLeast",
+        ".pricingFormatDetails.fixedPrice.declineOffersLowerThan",
+        ".marketplaceSpecifics.smartSell.minPrice",
+    )
     out: dict[str, Any] = {}
 
     def walk(prefix: str, want: Any, have: Any) -> None:
@@ -312,7 +341,7 @@ def changed_fields(current: dict[str, Any], desired: dict[str, Any]) -> dict[str
                 have not in (None, "", []) and (
                     _is_condition_path(prefix)
                     or ".categorySpecifics." in prefix
-                    or prefix.endswith(".marketplaceSpecifics.floorPrice")
+                    or prefix.endswith(_CLEARABLE_DERIVED)
                 )
             ):
                 out[prefix] = want

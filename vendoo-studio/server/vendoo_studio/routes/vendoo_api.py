@@ -570,7 +570,9 @@ async def _write_claimed_draft(
             item_id=item_id,
             specifics=specifics,
         )
-        apply_update_all(current, desired, schema=schema, leave=marketplaces_left_empty(snapshot))
+        apply_update_all(
+            current, desired, schema=schema, leave=marketplaces_left_empty(snapshot), listing=snapshot,
+        )
         updates = changed_fields(current, desired)
         # The general form is saved on its own first, the way Vendoo's own save
         # runs it: anything that save copies down onto the marketplace forms

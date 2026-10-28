@@ -106,6 +106,38 @@ def _result(reply: dict[str, Any], op: str, index: int = 0) -> dict[str, Any]:
     return matches[index]
 
 
+# Fields createItem is known to drop, so a read-back repair has to push them.
+# This is a check on where the path lives, not a list of exact paths: a new
+# field under one of these buckets is repaired without touching this table.
+_REPAIRABLE_SUFFIXES = (
+    ".style", ".brand", ".noBrand",
+    ".marketplaceSpecifics.age", ".marketplaceSpecifics.source",
+    ".marketplaceSpecifics.whoMade", ".marketplaceSpecifics.whatIsIt",
+    ".marketplaceSpecifics.whenMade",
+    ".marketplaceSpecifics.smartPricing",
+    ".marketplaceSpecifics.floorPrice",
+    # Poshmark Smart Sell is a nested object, so its paths are longer.
+    ".marketplaceSpecifics.smartSell.enabled", ".marketplaceSpecifics.smartSell.minPrice",
+    ".marketplaceSpecifics.shippingLabel", ".marketplaceSpecifics.packageWeightLabel",
+    ".marketplaceSpecifics.carrier",
+)
+_REPAIRABLE_PREFIXES = (
+    ".marketplaceSpecifics.shipping.",
+    # Every Best Offer and price field: pricingFormat, and the fixedPrice
+    # buyItNowPrice plus both offer floors beneath it.
+    ".marketplaceSpecifics.pricingFormat",
+)
+
+
+def _is_repairable_field(path: str) -> bool:
+    """Whether a path holds a marketplace value createItem may have dropped."""
+    return (
+        path == "labels"
+        or path.endswith(_REPAIRABLE_SUFFIXES)
+        or any(fragment in path for fragment in _REPAIRABLE_PREFIXES)
+    )
+
+
 # --------------------------------------------------------------------------
 # Schema (learned from the user's own items)
 # --------------------------------------------------------------------------
@@ -1108,31 +1140,14 @@ async def create_item(
         fixes = {
             path: value
             for path, value in changed_fields(stored, item).items()
-            if path == "labels"
-            or path.endswith(".style")
-            or path.endswith(".brand")
-            or path.endswith(".noBrand")
-            or path.endswith(".marketplaceSpecifics.age")
-            or path.endswith(".marketplaceSpecifics.source")
-            or path.endswith(".marketplaceSpecifics.whoMade")
-            or path.endswith(".marketplaceSpecifics.whatIsIt")
-            or path.endswith(".marketplaceSpecifics.whenMade")
-            or path.endswith(".marketplaceSpecifics.smartSell")
-            or path.endswith(".marketplaceSpecifics.smartPricing")
-            or path.endswith(".marketplaceSpecifics.floorPrice")
-            or path.endswith(".marketplaceSpecifics.shippingLabel")
-            or path.endswith(".marketplaceSpecifics.packageWeightLabel")
-            or path.endswith(".marketplaceSpecifics.carrier")
-            or ".marketplaceSpecifics.shipping." in path
-            or ".marketplaceSpecifics.pricingFormat" in path
-            or ".pricingFormatDetails.fixedPrice." in path
+            if _is_repairable_field(path)
         }
         if recovered is not None:
             # A retry may approve newer copy. Reconcile it onto the same draft
             # instead of making another item. Only Studio's form fields change.
             from vendoo_studio.services.vendoo_item_update import apply_update_all
 
-            apply_update_all(stored, item, schema=schema)
+            apply_update_all(stored, item, schema=schema, listing=listing)
             fixes = changed_fields(stored, item)
             if (stored.get("generalDetails") or {}).get("images") != images:
                 fixes["generalDetails.images"] = images
