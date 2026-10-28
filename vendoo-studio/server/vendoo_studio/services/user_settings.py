@@ -51,7 +51,16 @@ AUTO_CURSOR_MODEL = "auto"
 DEFAULT_SETTLED_SHELF_EXPANDED = True
 PACKAGE_DIMENSIONS_KEY = "package_dimensions_in"
 SHIPS_FROM_ZIP_KEY = "ships_from_zip"
+MERCARI_SHIPPING_LABEL_KEY = "mercari_shipping_label"
 EBAY_INVENTORY_LOCATION_KEY = "ebay_inventory_location"
+MAX_SHIPPING_CLASS_ID = 40
+MAX_SHIPPING_LABEL = 120
+# Per-field answers the seller wants every listing to start with. Each maps to
+# the setting that already owns it, so one value is never stored twice.
+LISTING_FIELD_DEFAULTS = frozenset({
+    "mercari_specifics.shipsFrom",
+    "mercari_specifics.shippingClassId",
+})
 DEFAULT_EBAY_INVENTORY_LOCATION = "70125"
 _INVENTORY_LOCATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,'#-]{0,79}$")
 DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
@@ -119,6 +128,85 @@ def set_ships_from_zip(value: object) -> str:
 
     update_settings(mutator)
     return text
+
+
+def get_mercari_shipping_label() -> dict[str, str] | None:
+    """The Mercari label the seller wants every listing to start with, if any."""
+    raw = read_settings().get(MERCARI_SHIPPING_LABEL_KEY)
+    if not isinstance(raw, dict):
+        return None
+    class_id = str(raw.get("id") or "").strip()
+    label = " ".join(str(raw.get("label") or "").split())
+    if not class_id or not label:
+        return None
+    if len(class_id) > MAX_SHIPPING_CLASS_ID or len(label) > MAX_SHIPPING_LABEL:
+        return None
+    return {"id": class_id, "label": label}
+
+
+def set_mercari_shipping_label(*, class_id: object, label: object) -> dict[str, str]:
+    clean_id = str(class_id or "").strip()
+    clean_label = " ".join(str(label or "").split())
+    if not clean_id or len(clean_id) > MAX_SHIPPING_CLASS_ID:
+        raise ValueError("Choose a Mercari shipping label first.")
+    if not clean_label or len(clean_label) > MAX_SHIPPING_LABEL:
+        raise ValueError("The Mercari shipping label needs a name.")
+    saved = {"id": clean_id, "label": clean_label}
+
+    def mutator(payload: dict) -> None:
+        payload[MERCARI_SHIPPING_LABEL_KEY] = saved
+
+    update_settings(mutator)
+    return saved
+
+
+def clear_mercari_shipping_label() -> None:
+    def mutator(payload: dict) -> None:
+        payload.pop(MERCARI_SHIPPING_LABEL_KEY, None)
+
+    update_settings(mutator)
+
+
+def get_listing_field_defaults() -> dict[str, dict[str, str]]:
+    """Saved defaults for listing fields, keyed by the listing JSON path."""
+    defaults: dict[str, dict[str, str]] = {}
+    zip_code = get_ships_from_zip()
+    if zip_code:
+        defaults["mercari_specifics.shipsFrom"] = {"value": zip_code, "label": zip_code}
+    shipping_label = get_mercari_shipping_label()
+    if shipping_label:
+        defaults["mercari_specifics.shippingClassId"] = {
+            "value": shipping_label["id"],
+            "label": shipping_label["label"],
+        }
+    return defaults
+
+
+def _listing_field_default_key(path: object) -> str:
+    key = str(path or "").strip()
+    if key not in LISTING_FIELD_DEFAULTS:
+        raise ValueError("That field cannot be saved as a default.")
+    return key
+
+
+def set_listing_field_default(path: object, value: object, label: object = None) -> dict[str, dict[str, str]]:
+    """Save one field's value as the default every listing starts with."""
+    key = _listing_field_default_key(path)
+    if key == "mercari_specifics.shipsFrom":
+        set_ships_from_zip(value)
+    else:
+        set_mercari_shipping_label(class_id=value, label=label)
+    return get_listing_field_defaults()
+
+
+def clear_listing_field_default(path: object) -> dict[str, dict[str, str]]:
+    """Stop starting new listings with one saved field value."""
+    key = _listing_field_default_key(path)
+    if key == "mercari_specifics.shipsFrom":
+        set_ships_from_zip("")
+    else:
+        clear_mercari_shipping_label()
+    return get_listing_field_defaults()
 
 
 def normalize_ebay_inventory_location(value: object) -> str:

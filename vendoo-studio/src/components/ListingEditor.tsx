@@ -59,7 +59,7 @@ import { sourceFormsForJob } from "./fillLog/sourceForms";
 import { ListingActionsMenu, ListingBrowserButton, ListingReviewActions } from "./ListingReviewActions";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
-import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
+import { BookmarkCheckIcon, BookmarkPlusIcon, HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
 import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
@@ -72,6 +72,8 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Spinner } from "./ui/spinner";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { savedDefaultFor } from "./fieldDefaults";
 
 interface Props {
   convId: string;
@@ -134,6 +136,8 @@ interface EditorField {
   placeholder?: string;
   prefix?: string;
   suffix?: string;
+  /** The seller can keep this value as the default every new listing starts with. */
+  saveAsDefault?: boolean;
   labelHidden?: boolean;
   counter?: boolean;
   presentation?: "radio" | "radio-row" | "button";
@@ -603,6 +607,68 @@ export function ListingEditor({
   );
 }
 
+/** A field's label without its required marker or page punctuation. */
+function fieldName(label: string): string {
+  return label.replace(/\s*\*$/, "").replace(/:\s*$/, "").trim() || "This field";
+}
+
+/**
+ * Saves one field's value as the answer every new listing starts with.
+ * The bookmark is the field's own state: outline means not saved, filled means
+ * saved. Clicking a filled one stops using it. Nothing is saved until a value
+ * is there, so the control stays out of the label row until it can do something.
+ */
+function FieldDefaultControl({
+  label,
+  value,
+  saved,
+  busy,
+  onSave,
+  onClear,
+}: {
+  label: string;
+  value: string;
+  saved: boolean;
+  busy: boolean;
+  onSave: () => void;
+  onClear: () => void;
+}) {
+  if (!value.trim()) return null;
+  const name = fieldName(label);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="icon-micro"
+            variant="ghost-muted"
+            className="-my-1 shrink-0"
+            aria-label={saved
+              ? `Remove the default for ${name}`
+              : `Save ${name} as the default for new listings`}
+            aria-pressed={saved}
+            disabled={busy}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={saved ? onClear : onSave}
+          />
+        }
+      >
+        {busy
+          ? <Spinner size="xs" />
+          : saved
+            ? <BookmarkCheckIcon className="size-3.5 text-primary" />
+            : <BookmarkPlusIcon className="size-3.5" />}
+      </TooltipTrigger>
+      <TooltipPopup side="right" sideOffset={6}>
+        {saved
+          ? "Saved as the default for new listings. Click to remove it."
+          : "Save as the default for new listings"}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
 export function StructuredEditor({
   convId,
   listing,
@@ -662,6 +728,42 @@ export function StructuredEditor({
     queryKey: ["settings-ebay-inventory-location"],
     queryFn: api.settings.ebayInventoryLocation,
     staleTime: 30_000,
+  });
+  const { data: savedDefaults } = useQuery({
+    queryKey: ["settings-listing-defaults"],
+    queryFn: api.settings.listingDefaults,
+    staleTime: 30_000,
+  });
+  const queryClient = useQueryClient();
+  const saveDefault = useMutation({
+    mutationFn: (input: { path: string; value: string; label: string; fieldLabel: string }) =>
+      api.settings.setListingDefault({ path: input.path, value: input.value, label: input.label }),
+    onSuccess: (payload, input) => {
+      queryClient.setQueryData(["settings-listing-defaults"], { defaults: payload.defaults });
+      toastManager.add({
+        type: "success",
+        title: `${fieldName(input.fieldLabel)} saved as the default`,
+        description: `New listings start with ${input.label}.`,
+      });
+    },
+    onError: (err: Error) => {
+      toastManager.add({ type: "error", title: "Could not save the default", description: err.message });
+    },
+  });
+  const clearDefault = useMutation({
+    mutationFn: (input: { path: string; fieldLabel: string }) =>
+      api.settings.clearListingDefault(input.path),
+    onSuccess: (payload, input) => {
+      queryClient.setQueryData(["settings-listing-defaults"], { defaults: payload.defaults });
+      toastManager.add({
+        type: "success",
+        title: `${fieldName(input.fieldLabel)} default removed`,
+        description: "New listings will ask for this again.",
+      });
+    },
+    onError: (err: Error) => {
+      toastManager.add({ type: "error", title: "Could not remove the default", description: err.message });
+    },
   });
   // Direct listing forms are the category's fields plus that marketplace's standard
   // rows. They do not expand. Other editors can still open every saved field.
@@ -743,6 +845,36 @@ export function StructuredEditor({
     dirty.current = next.dirty;
     setLocal(next.local);
   }, [listing, revisionId, tab, fields]);
+
+  const fieldDefault = (field: EditorField) => {
+    if (!field.saveAsDefault || field.locked) return null;
+    const shown = formFieldText(local[field.key]);
+    const stored = field.optionValues?.[shown] ?? shown;
+    const saved = savedDefaultFor(savedDefaults?.defaults, field.key, stored, shown);
+    const busy = (saveDefault.isPending && saveDefault.variables?.path === field.key)
+      || (clearDefault.isPending && clearDefault.variables?.path === field.key);
+    return (
+      <FieldDefaultControl
+        label={field.label}
+        value={shown}
+        saved={Boolean(saved)}
+        busy={busy}
+        onSave={() => {
+          if (!shown.trim()) return;
+          // The click keeps the input's focus, so a typed answer is saved here
+          // rather than waiting for a blur that will not come. A closed choice
+          // already saves itself when selected, and writing its id now would pin
+          // a weight-specific class to this listing.
+          if (!field.selectionOnly
+            && String(getListingEditorValue(listing, field.key) ?? "") !== String(stored)) {
+            commitField(field.key, shown);
+          }
+          saveDefault.mutate({ path: field.key, value: String(stored), label: shown, fieldLabel: field.label });
+        }}
+        onClear={() => clearDefault.mutate({ path: field.key, fieldLabel: field.label })}
+      />
+    );
+  };
 
   const handleBlur = (key: string) => {
     if (local[key] == null) return;
@@ -1022,7 +1154,10 @@ export function StructuredEditor({
                   : fullWidth(f) && "col-span-full", f.controlWidth === "half" && "sm:max-w-[50%]")}>
                   {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.hashtagMax != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                      <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                        {fieldDefault(f)}
+                      </span>
                       <span className="flex gap-3 text-muted-foreground text-xs tabular-nums">
                         <span>Hashtags: {Math.max(0, f.hashtagMax - (formFieldText(local[f.key]).match(/#[^\s#]+/g) || []).length)}</span>
                         {f.maxLength != null && <span>{Math.max(0, f.maxLength - formFieldText(local[f.key]).length)}</span>}
@@ -1030,12 +1165,16 @@ export function StructuredEditor({
                     </div>
                   ) : f.counter && f.maxLength != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
-                      <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                        {fieldDefault(f)}
+                      </span>
                       <span className="text-muted-foreground text-xs tabular-nums">{formFieldText(local[f.key]).length}/{f.maxLength}</span>
                     </div>
                   ) : (
                     <div className="mb-1.5 flex items-center gap-2">
                       <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                      {fieldDefault(f)}
                       {badge && <button type="button" aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
                         onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
                     </div>
@@ -1465,6 +1604,7 @@ function schemaFieldsForTab(
     ...(field.label_hidden ? { labelHidden: true } : {}),
     ...(field.counter ? { counter: true } : {}),
     ...(field.hashtag_max != null ? { hashtagMax: field.hashtag_max } : {}),
+    ...(field.save_as_default ? { saveAsDefault: true } : {}),
     ...(field.presentation ? { presentation: field.presentation } : {}),
     ...(field.option_help ? { optionHelp: field.option_help } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),

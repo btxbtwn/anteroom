@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.479 — 2026-10-28
+
+- The Mercari Shipping fields now offer to remember themselves: a bookmark beside **Ships from** and **Shipping label** saves that ZIP or carrier as the default for every new listing, and pressing the filled bookmark stops using it.
+
 ## 0.1.478 — 2026-10-28
 
 - Category fields now read as one path, with an arrow between each level: Women → Jeans, or Women → Global & Traditional Wear → Kilts.

@@ -353,6 +353,13 @@ def _apply_mercari_shipping(
     shipping["deliveryMethod"] = "mercari_shipping"
     shipping["payerId"] = 1
     shipping["carrierId"] = carrier_id
+    if not str(known.get("mercariLocalInformation") or "").strip():
+        from vendoo_studio.services.user_settings import get_ships_from_zip
+
+        zip_code = get_ships_from_zip()
+        if zip_code:
+            # Vendoo's own "Ships From" control on the Mercari form.
+            known["mercariLocalInformation"] = zip_code
 
 
 def _learned(schema: dict[str, Any] | None, marketplace: str, name: str) -> dict[str, Any]:

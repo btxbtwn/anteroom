@@ -604,3 +604,22 @@ test('native Mercari preparation replaces stale sizes and labels before uploadin
   assert.equal(common.shipping.payerId, 2);
   assert.equal(c.mercariShippingListing({ mercari_specifics: { shippingClassId: '2508' } }, [{ id: 2550 }]).form.specifics.shipping.carrierId, null);
 });
+
+test('a saved shipping-label default follows its carrier across package weights', () => {
+  const c = loadWorker();
+  const classes = [
+    { id: 2551, carrierDisplayName: 'USPS Ground Advantage', name: '2 lb' },
+    { id: 2600, carrierDisplayName: 'UPS Ground', name: '2 lb' },
+  ];
+  // The saved id belonged to another weight tier, so the label picks this package's class.
+  const saved = c.mercariShippingListing({ mercari_specifics: {},
+    form: { mercari_shipping_label: { id: '2508', label: 'UPS Ground' } } }, classes);
+  assert.equal(saved.form.specifics.shipping.carrierId, 2600);
+  // No saved default keeps the seller's usual USPS Ground Advantage.
+  const automatic = c.mercariShippingListing({ mercari_specifics: {} }, classes);
+  assert.equal(automatic.form.specifics.shipping.carrierId, 2551);
+  // A choice made on this listing still wins over the saved default.
+  const explicit = c.mercariShippingListing({ mercari_specifics: { shippingClassId: '2551' },
+    form: { mercari_shipping_label: { id: '2508', label: 'UPS Ground' } } }, classes);
+  assert.equal(explicit.form.specifics.shipping.carrierId, 2551);
+});

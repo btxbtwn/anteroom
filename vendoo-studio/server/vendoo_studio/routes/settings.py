@@ -52,6 +52,12 @@ class ShipsFromZipConfig(BaseModel):
     zip: str = ""
 
 
+class ListingFieldDefaultConfig(BaseModel):
+    path: str
+    value: str
+    label: str | None = None
+
+
 class EbayInventoryLocationConfig(BaseModel):
     location: str
 
@@ -600,6 +606,33 @@ def set_ships_from_zip(config: ShipsFromZipConfig):
 
     try:
         return {"ok": True, "zip": save_zip(config.zip)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/listing-defaults")
+def get_listing_defaults():
+    from vendoo_studio.services.user_settings import get_listing_field_defaults
+
+    return {"defaults": get_listing_field_defaults()}
+
+
+@router.put("/listing-defaults")
+def set_listing_default(config: ListingFieldDefaultConfig):
+    from vendoo_studio.services.user_settings import set_listing_field_default as save_default
+
+    try:
+        return {"ok": True, "defaults": save_default(config.path, config.value, config.label)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.delete("/listing-defaults")
+def clear_listing_default(path: str):
+    from vendoo_studio.services.user_settings import clear_listing_field_default
+
+    try:
+        return {"ok": True, "defaults": clear_listing_field_default(path)}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
