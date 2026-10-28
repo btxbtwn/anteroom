@@ -174,9 +174,10 @@ describe("native form values", () => {
 
   it("shows eBay auction rows only for an auction, and offers only for a single fixed-price listing", () => {
     const fields: NativeFormRow[] = [
-      { key: "ebay_specifics.listingFormat", options: ["Fixed price", "Auction"], optionValues: { "Fixed price": "FIXED_PRICE", Auction: "AUCTION" } },
+      { key: "ebay_specifics.listingFormat", options: ["Buy It Now", "Auction"], optionValues: { "Buy It Now": "FIXED_PRICE", Auction: "AUCTION" } },
       { key: "ebay_specifics.listingDuration", options: ["Good 'Til Cancelled", "7 days"], optionValues: { "Good 'Til Cancelled": "GTC", "7 days": "DAYS_7" }, defaultValue: "GTC" },
       { key: "ebay_specifics.auctionStartPrice" },
+      { key: "ebay_specifics.price" },
       { key: "ebay_specifics.bestOffer.enabled" },
       { key: "ebay_specifics.variations" },
       { key: "quantity" },
@@ -191,8 +192,9 @@ describe("native form values", () => {
     const visible = (extra: Partial<NativeFieldContext>) => fields
       .filter((field) => nativeFieldVisible(field, { ...context, ...extra }))
       .map((field) => field.key);
+    // eBay's page: Buy It Now has an item price and no duration; an auction has a duration and bids, no item price.
     expect(visible({})).toEqual([
-      "ebay_specifics.listingFormat", "ebay_specifics.listingDuration", "ebay_specifics.bestOffer.enabled", "ebay_specifics.variations", "quantity",
+      "ebay_specifics.listingFormat", "ebay_specifics.price", "ebay_specifics.bestOffer.enabled", "ebay_specifics.variations", "quantity",
     ]);
     expect(visible({ local: { "ebay_specifics.listingFormat": "Auction" } })).toEqual([
       "ebay_specifics.listingFormat", "ebay_specifics.listingDuration", "ebay_specifics.auctionStartPrice", "quantity",
@@ -207,10 +209,32 @@ describe("native form values", () => {
     expect(duration.locked).toBe(false);
     expect(duration.options).toEqual(["7 days"]);
     expect(presentNativeField(fields[1], context).locked).toBe(true);
-    expect(presentNativeField(fields[0], varied).options).toEqual(["Fixed price"]);
-    expect(presentNativeField(fields[5], varied).locked).toBe(true);
-    expect(nativeFormNotes("ebay", varied.listing, {}, fields)).toEqual([
+    expect(presentNativeField(fields[0], varied).options).toEqual(["Buy It Now"]);
+    expect(presentNativeField(fields.find((field) => field.key === "quantity")!, varied).locked).toBe(true);
+    expect(nativeFormNotes("ebay", varied.listing)).toEqual([
       "With variations, Price is the price of any variation left without its own. eBay takes no offers on a listing with variations.",
+    ]);
+  });
+
+  it("shows the listing start time only while scheduling is on, and the offer amounts only while offers are on", () => {
+    const fields: NativeFormRow[] = [
+      { key: "ebay_specifics.schedule.enabled", defaultValue: false },
+      { key: "ebay_specifics.schedule.startAt" },
+      { key: "ebay_specifics.bestOffer.enabled", defaultValue: true },
+      { key: "ebay_specifics.bestOffer.minimumOfferPrice" },
+      { key: "ebay_specifics.bestOffer.autoAcceptPrice" },
+    ];
+    const context: NativeFieldContext = { tab: "ebay", listing: {}, local: {}, fields, categoryStale: false };
+    const visible = (local: Record<string, string>) => fields
+      .filter((field) => nativeFieldVisible(field, { ...context, local }))
+      .map((field) => field.key);
+    expect(visible({})).toEqual([
+      "ebay_specifics.schedule.enabled", "ebay_specifics.bestOffer.enabled",
+      "ebay_specifics.bestOffer.minimumOfferPrice", "ebay_specifics.bestOffer.autoAcceptPrice",
+    ]);
+    expect(visible({ "ebay_specifics.schedule.enabled": "true" })).toContain("ebay_specifics.schedule.startAt");
+    expect(visible({ "ebay_specifics.bestOffer.enabled": "false" })).toEqual([
+      "ebay_specifics.schedule.enabled", "ebay_specifics.bestOffer.enabled",
     ]);
   });
 
