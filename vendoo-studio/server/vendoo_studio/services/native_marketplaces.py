@@ -710,6 +710,20 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
             record = await _execute_step(db, job, conv_id, marketplace, step, options)
             if step == "save_draft" and not (record.get("state") == "draft" and not record.get("error") and record.get("draft_url")):
                 break
+            # Depop's drafts have no Boost; its live edit does. A List the seller set to boost
+            # turns it on with one edit of the listing it just posted.
+            if (marketplace == "depop" and step == "publish" and "update" not in steps
+                    and ((job.listing_snapshot or {}).get("depop_specifics") or {}).get("boost") is True
+                    and record.get("state") == "published" and not record.get("error")):
+                from vendoo_studio.services.marketplace_delist import listing_id
+
+                if live_id := listing_id(marketplace, record.get("listing_url")):
+                    _store(db, conv_id, marketplace, {"listing_id": live_id})
+                    steps.append("update")
+                else:
+                    # Listed, but Boost did not stick: shown on the live row, like Poshmark's Smart Pricing.
+                    _store(db, conv_id, marketplace, {"error": "Listed on Depop without Boost: Depop did not return the "
+                                                               "listing link. Turn Boost on with Update."})
             # A confirmed List found the saved draft deleted. Save a new one, then list that, in this same job.
             if (marketplace in {"depop", "vinted"} and step == "publish" and "save_draft" not in steps
                     and _draft_gone(record)):

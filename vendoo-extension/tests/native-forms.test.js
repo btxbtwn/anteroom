@@ -350,9 +350,11 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   const form = clean(call(c, 'depopEditorForm', listing, attributes, [{ title: 'Medium' }]));
   assert.deepEqual(form.fields.map(row => row.label), [
     'Description', 'Category', 'Type', 'Fit', 'Body fit', 'Brand', 'Condition', 'Color', 'Size', 'Quantity', 'SKU',
-    'Source', 'Age', 'Style', 'Item price', 'Package size', 'Offer worldwide shipping', 'Worldwide Shipping',
+    'Source', 'Age', 'Style', 'Item price', 'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.', 'Package size', 'Offer worldwide shipping', 'Worldwide Shipping',
   ]);
   const rows = Object.fromEntries(form.fields.map(row => [row.label, row]));
+  // Boost costs a fee on the sale, so it is off until the seller turns it on.
+  assert.deepEqual([rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].path, rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].input_type, rows['Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.'].value], ['depop_specifics.boost', 'boolean', false]);
   assert.deepEqual(rows.Category.options, ['Men > Bottoms > Jeans', 'Kids > Bottoms > Jeans', 'Kids > Bottoms > Skorts']);
   assert.deepEqual(rows.Fit.options, ['Straight']);
   assert.deepEqual(rows['Body fit'].options, ['Tall', 'Maternity']);
@@ -365,7 +367,7 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   // The page's headings and row layout.
   const headings = [];
   for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
-  assert.deepEqual(headings, ['Description', 'Info', 'Enhance your listing', 'Item price', 'Shipping']);
+  assert.deepEqual(headings, ['Description', 'Info', 'Enhance your listing', 'Item price', 'Boost your listing', 'Shipping']);
   assert.deepEqual(form.fields.filter(row => row.width === 'half').map(row => row.label), ['Size', 'Quantity', 'SKU']);
   assert.equal(rows.Type.help, 'Select up to 3');
   assert.equal(rows.Color.help, 'Select up to two colors');
@@ -374,4 +376,14 @@ test('Depop form lists the sell page fields in its order, as the page shows them
   assert.ok(!kids.fields.some(row => row.label === 'Type'));
   // The form's Color picks are what direct List posts.
   assert.deepEqual(clean(call(c, 'depopFormFields', { ...listing, depop_specifics: { colour: ['navy'] } }).colour), ['navy']);
+});
+
+test('Depop Update sends Boost the way Depop\'s product request does, only once the seller set it', () => {
+  const c = loadWorker();
+  const fields = { product_type: 'jeans', attributes: {}, variants: {}, shipping_methods: [] };
+  const product = { picture_ids: [11] };
+  const body = boost => clean(call(c, 'depopLiveWriteBody', product, { price: 20, depop_specifics: boost === undefined ? {} : { boost } }, fields));
+  assert.equal(body(undefined).boost, undefined);
+  assert.deepEqual(body(true).boost, { status: 'active' });
+  assert.deepEqual(body(false).boost, { status: 'inactive' });
 });

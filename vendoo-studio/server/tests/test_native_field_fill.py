@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -137,3 +138,94 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", edit_then_reply):
             self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence=""))
         self.assertEqual(self._current().listing_json, {"title": "Seller's title"})
+
+
+class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
+    """A category the seller picks later gets the same fill, for that marketplace only."""
+
+    async def asyncSetUp(self):
+        self.engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(self.engine)
+        self.db = sessionmaker(bind=self.engine)()
+        self.conv = ConversationRepo(self.db).create(title="Jeans")
+        self.repo = ListingRepo(self.db)
+        self.base = {"title": "Levi's jeans", "direct_category_ids": {"depop": "menswear_jeans", "ebay": "11483"}}
+        self.repo.save_revision(self.conv.id, self.base, source="model")
+        self.fills: list[set[str]] = []
+
+        async def fake_fill(conv_id, markets):
+            self.fills.append(set(markets))
+
+        patches = [
+            patch.object(native_field_fill, "SETTLE_SECONDS", 0.05),
+            patch.object(native_field_fill, "_fill_after_category", fake_fill),
+            patch.object(native_field_fill, "_loop", asyncio.get_running_loop()),
+        ]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    async def asyncTearDown(self):
+        self.db.close()
+        self.engine.dispose()
+
+    def save(self, change: dict, source="user_form"):
+        listing = json.loads(json.dumps(self.base))
+        listing["direct_category_ids"].update(change)
+        self.repo.save_revision(self.conv.id, listing, source=source)
+        self.base = listing
+
+    async def settle(self):
+        await asyncio.sleep(0.3)
+
+    def test_changed_categories_names_only_new_picks(self):
+        before = {"direct_category_ids": {"depop": "a", "ebay": "1"}, "sellwild_specifics": {"nativeCategoryId": "5"}}
+        after = {"direct_category_ids": {"depop": "b", "ebay": "1", "mercari": ""}, "sellwild_specifics": {"nativeCategoryId": "6"}}
+        self.assertEqual(native_field_fill.changed_categories(before, after), {"depop", "sellwild"})
+
+    async def test_a_new_category_fills_that_marketplace_only(self):
+        self.save({"depop": "menswear_trousers"})
+        await self.settle()
+        self.assertEqual(self.fills, [{"depop"}])
+
+    async def test_no_fill_when_the_category_is_unchanged(self):
+        listing = {**self.base, "title": "Levi's 505 jeans"}
+        self.repo.save_revision(self.conv.id, listing, source="user_form")
+        await self.settle()
+        self.assertEqual(self.fills, [])
+
+    async def test_its_own_revision_and_generation_do_not_start_a_fill(self):
+        self.save({"depop": "menswear_trousers"}, source="native_fields")
+        self.save({"ebay": "57989"}, source="generation_finalize")
+        await self.settle()
+        self.assertEqual(self.fills, [])
+
+    async def test_saves_close_together_are_one_fill(self):
+        # Chat saves its changes and then its category; a seller may click through categories.
+        self.save({"depop": "menswear_trousers"}, source="model_refinement")
+        self.save({"ebay": "57989"}, source="model_refinement")
+        self.save({"depop": "menswear_shorts"})
+        await self.settle()
+        self.assertEqual(self.fills, [{"depop", "ebay"}])
+
+
+class CategoryFillLocksTest(unittest.IsolatedAsyncioTestCase):
+    async def test_only_the_changed_marketplace_form_is_read_and_locks_hold(self):
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine)()
+        conv = ConversationRepo(db).create(title="Jeans")
+        ListingRepo(db).save_revision(conv.id, {"title": "Levi's", "seller_fields": ["depop_specifics.attributes.bottom-fit"]},
+                                      source="model")
+        reply = json.dumps({"fields": {"depop_specifics.attributes.bottom-fit": ["Ripped"],
+                                       "depop_specifics.age": ["90s"], "ebay_specifics.Rise": "High"}})
+        loaded = AsyncMock(return_value={"depop": DEPOP})
+        with patch.object(native_field_fill, "load_forms", loaded), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            updated = await fill_native_fields(db, conv.id, object(), evidence="", markets={"depop"})
+        self.assertEqual(loaded.call_args.args[2], {"depop"})
+        self.assertNotIn("bottom-fit", updated.get("depop_specifics", {}).get("attributes", {}))
+        self.assertEqual(updated["depop_specifics"]["age"], ["90s"])
+        self.assertNotIn("ebay_specifics", updated)
+        db.close()
+        engine.dispose()

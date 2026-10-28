@@ -481,6 +481,28 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(outcome["state"], "published")
         self.assertEqual(outcome["listing_url"], url)
 
+    def test_a_boosted_depop_list_turns_boost_on_with_one_edit_of_the_new_listing(self):
+        url = "https://www.depop.com/products/seller-boosted-tee/"
+
+        def answer(_job, kind, payload, **_kwargs):
+            if kind != "marketplace.execute":
+                return {"ok": True}
+            if payload["action"] == "save_draft":
+                return {"ok": True, "state": "draft", "draft_url": URLS["depop"]}
+            return {"ok": True, "state": "published", "draft_url": URLS["depop"], "listing_url": url}
+
+        self.bridge.side_effect = answer
+        listing = {**LISTING, "depop_specifics": {**LISTING["depop_specifics"], "boost": True}}
+        self.rev = ListingRepo(self.db).save_revision(self.conv.id, listing, "seller")
+        self.list("depop")
+        # A plain List stops at publish (test_list_saves_then_publishes_in_one_job_that_holds_the_slot).
+        self.assertEqual(self.actions(), ["save_draft", "publish", "update"])
+        update = [call.args[2] for call in self.bridge.call_args_list
+                  if call.args[1] == "marketplace.execute" and call.args[2]["action"] == "update"][0]
+        self.assertIs(update["confirm"], True)
+        self.assertEqual(update["listing_id"], "seller-boosted-tee")
+        self.assertIs(update["listing"]["depop_specifics"]["boost"], True)
+
     def test_a_deleted_depop_draft_is_forgotten_and_a_replacement_is_kept(self):
         old = URLS["depop"]
         new = "https://www.depop.com/sellinghub/drafts/edit/newdraft1/"

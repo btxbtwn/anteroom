@@ -921,6 +921,10 @@ function depopLiveWriteBody(product, listing, fields) {
   };
   if (Object.hasOwn(fields, 'international_shipping_cost')) body.international_shipping_cost = fields.international_shipping_cost;
   if (typeof fields.quantity === 'number') body.quantity = fields.quantity;
+  // Depop's product request carries boost as { status: 'active' | 'inactive' }.
+  // Sent only once the seller has set it, so an edit never turns it off by itself.
+  const boost = listing?.depop_specifics?.boost;
+  if (typeof boost === 'boolean') body.boost = { status: boost ? 'active' : 'inactive' };
   return Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined));
 }
 

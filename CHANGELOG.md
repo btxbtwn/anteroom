@@ -6,9 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.463 — 2026-10-27
+## 0.1.465 — 2026-10-28
 
 - With Prepaid label, the Mercari tab now asks what Mercari’s label picker asks: the package weight in pounds and ounces, whether it fits in a shoebox, and its length, width and height when it doesn’t. They start from Item Details, the labels offered follow them, and List sends what you set there.
+
+## 0.1.464 — 2026-10-28
+
+- When you pick a different category for a marketplace, on its tab or by asking chat, Anteroom fills that category’s new fields the same way it does after generating, choosing only from that marketplace’s own choices. Only the marketplace you changed is filled, and fields you set or locked are left alone.
+
+## 0.1.463 — 2026-10-28
+
+- The Depop tab has Depop’s “Boost your listing” switch, off unless you turn it on (Depop charges an extra 12% fee when a boosted item sells). Update sends it to the live listing. Depop drafts can’t hold Boost, so List posts the item and then turns Boost on with one update of that new listing.
 
 ## 0.1.462 — 2026-10-28
 

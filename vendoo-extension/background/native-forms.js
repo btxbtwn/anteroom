@@ -165,6 +165,9 @@ function depopEditorForm(listing, attributes, parcels = []) {
   }
   const [price] = nativeEditorBase(listing, { title: false, minPrice: 1, maxPrice: 9999999999.99 }).filter(row => row.path === 'price');
   fields.push({ ...price, label: 'Item price' },
+  // Off unless the seller turns it on: Depop charges an extra fee on the sale.
+  nativeEditorField('depop_specifics.boost', 'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.',
+    specifics.boost === true, { input_type: 'boolean' }),
   nativeEditorChoice('depop_specifics.parcelSize', 'Package size', specifics.parcelSize || '',
     parcels.map(row => String(row.title)), { required: true }),
   nativeEditorField('depop_specifics.worldwideShipping.enabled', 'Offer worldwide shipping', specifics.worldwideShipping?.enabled === true,
@@ -189,8 +192,9 @@ function depopPageLayout(fields) {
   const section = path => path === 'depop_specifics.description' ? 'Description'
     : ['depop_specifics.source', 'depop_specifics.age', 'depop_specifics.style'].includes(path) ? 'Enhance your listing'
       : path === 'price' ? 'Item price'
-        : path === 'depop_specifics.parcelSize' || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
-          : 'Info';
+        : path === 'depop_specifics.boost' ? 'Boost your listing'
+          : path === 'depop_specifics.parcelSize' || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
+            : 'Info';
   return fields.map(field => {
     const hint = field.path.startsWith('depop_specifics.attributes.') ? `Select up to ${field.max_values}` : hints[field.path];
     return { ...field, section: section(field.path),
