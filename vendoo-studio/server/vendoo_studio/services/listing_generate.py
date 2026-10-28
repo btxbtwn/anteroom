@@ -367,8 +367,9 @@ FINALIZE_GAPS_PROMPT = (
     "TITLE and DESCRIPTION follow list-this skill formulas exactly:\n"
     "- Title order: Brand Size Vibe Item Color Fit (max 80 chars); the size shown is the size "
     "field verbatim, and men's bottoms size is the waist alone (34), never waist x inseam.\n"
-    "- Physical description: one short trendy vibe/style keyword sentence, then a Flaws: line "
-    "only when the item has flaws, then a Measurements: line — with blank lines between blocks.\n"
+    "- Physical description: one short trendy vibe/style keyword sentence, then a Flaws: block "
+    "only when the item has flaws (one flaw per line, each starting with \"- \"), then a "
+    "Measurements: line — with blank lines between blocks.\n"
     "Preserve the current title and description unless a listed validation error is for title or "
     "description. Never replace a formula-compliant title/description with freeform marketing copy.\n"
     "Use exact marketplace dropdown values. Keep category_path and marketplace_categories unchanged.\n"
@@ -471,10 +472,19 @@ def _strip_description_sentences(listing: dict, pattern: re.Pattern[str]) -> boo
         block = _PARENTHETICAL_RE.sub(
             lambda match: "" if pattern.search(match.group(0)) else match.group(0), block
         )
-        sentences = _SENTENCE_SPLIT_RE.split(block.strip())
+        raw = block.strip()
+        lines = raw.splitlines()
+        # A flaw list is one item per line. Joining those lines into a paragraph
+        # would turn the list back into the run-on it replaced.
+        if any(re.match(r"\s*[-*•]\s+", line) for line in lines):
+            kept_lines = [line.strip() for index, line in enumerate(lines) if line.strip() and (index == 0 or keep(line))]
+            if kept_lines:
+                kept_blocks.append("\n".join(kept_lines))
+            continue
+        sentences = _SENTENCE_SPLIT_RE.split(raw)
         # Flaws:/Measurements: blocks are structural; their labelled first
         # sentence stays, only trailing asides can go.
-        if block.strip().lower().startswith(("flaws:", "measurements:")):
+        if raw.lower().startswith(("flaws:", "measurements:")):
             kept = [sentences[0], *filter(keep, sentences[1:])]
         else:
             kept = [part for part in sentences if keep(part)]
@@ -536,7 +546,7 @@ def clear_not_applicable_values(listing: dict) -> bool:
 
 def strip_empty_flaws_from_description(listing: dict) -> bool:
     """Drop a Flaws block that only says there are none; a flawless item has no Flaws line."""
-    from vendoo_studio.services.listing_carryover import says_no_flaws
+    from vendoo_studio.services.listing_carryover import flaw_items
 
     if not isinstance(listing, dict):
         return False
@@ -545,8 +555,7 @@ def strip_empty_flaws_from_description(listing: dict) -> bool:
     kept = [
         block
         for block in blocks
-        if not re.match(r"(?i)\s*flaws?\s*:", block)
-        or not says_no_flaws(re.sub(r"(?i)^\s*flaws?\s*:", "", block))
+        if not re.match(r"(?i)\s*flaws?\s*:", block) or flaw_items(block)
     ]
     if len(kept) == len(blocks):
         return False
@@ -940,6 +949,14 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
         changed = True
     if strip_empty_flaws_from_description(listing):
         changed = True
+    from vendoo_studio.services.listing_carryover import list_flaws_in_description
+    from vendoo_studio.services.skill_formulas import description_lists_flaws
+
+    if description_lists_flaws():
+        listed = list_flaws_in_description(str(listing.get("description") or ""))
+        if listed != str(listing.get("description") or ""):
+            listing["description"] = listed
+            changed = True
     if ensure_physical_description(listing):
         changed = True
     if not str(listing.get("package_dimensions_in") or "").strip():
@@ -1077,9 +1094,12 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
     """
     from vendoo_studio.services.listing_carryover import (
         description_block,
+        flaw_items,
+        render_flaws_block,
         set_description_block,
         without_see_photos,
     )
+    from vendoo_studio.services.skill_formulas import description_lists_flaws
 
     if not isinstance(listing, dict):
         return False
@@ -1087,10 +1107,12 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
     updated = desc
     flaws = without_see_photos(seller.get("knownFlaws"))
     # A model that names the seller's flaws and adds ones it saw keeps its block.
-    if flaws and _comparable(flaws) not in _comparable(description_block(updated, "flaws?")):
-        updated = set_description_block(
-            updated, "flaws?", f"Flaws: {flaws}. See photos for details.", before="measurements?"
-        )
+    seller_flaws = "; ".join(flaw_items(flaws))
+    described = _comparable(description_block(updated, "flaws?"))
+    if seller_flaws and _comparable(seller_flaws) not in described:
+        block = render_flaws_block(flaws, as_list=description_lists_flaws())
+        if block:
+            updated = set_description_block(updated, "flaws?", block, before="measurements?")
     measurements = _description_measurements(seller)
     if measurements and description_block(updated, "measurements?") != measurements.rstrip("."):
         updated = set_description_block(updated, "measurements?", f"Measurements: {measurements}")
