@@ -212,6 +212,28 @@ describe("native form values", () => {
     ]);
   });
 
+  it("shows the listing start time only while scheduling is on, and the offer amounts only while offers are on", () => {
+    const fields: NativeFormRow[] = [
+      { key: "ebay_specifics.schedule.enabled", defaultValue: false },
+      { key: "ebay_specifics.schedule.startAt" },
+      { key: "ebay_specifics.bestOffer.enabled", defaultValue: true },
+      { key: "ebay_specifics.bestOffer.minimumOfferPrice" },
+      { key: "ebay_specifics.bestOffer.autoAcceptPrice" },
+    ];
+    const context: NativeFieldContext = { tab: "ebay", listing: {}, local: {}, fields, categoryStale: false };
+    const visible = (local: Record<string, string>) => fields
+      .filter((field) => nativeFieldVisible(field, { ...context, local }))
+      .map((field) => field.key);
+    expect(visible({})).toEqual([
+      "ebay_specifics.schedule.enabled", "ebay_specifics.bestOffer.enabled",
+      "ebay_specifics.bestOffer.minimumOfferPrice", "ebay_specifics.bestOffer.autoAcceptPrice",
+    ]);
+    expect(visible({ "ebay_specifics.schedule.enabled": "true" })).toContain("ebay_specifics.schedule.startAt");
+    expect(visible({ "ebay_specifics.bestOffer.enabled": "false" })).toEqual([
+      "ebay_specifics.schedule.enabled", "ebay_specifics.bestOffer.enabled",
+    ]);
+  });
+
   it("hides Mercari's free-shipping choice under ship on your own, and the minimum price until Smart pricing is on", () => {
     const fields: NativeFormRow[] = [
       { key: "mercari_specifics.shippingMethod", options: ["Prepaid label", "Ship on your own"], optionValues: { "Prepaid label": "MERCARI", "Ship on your own": "SOYO" } },

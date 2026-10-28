@@ -88,9 +88,45 @@ def ebay_specifics_order(schema: list[dict]) -> list[dict]:
     return ordered
 
 
+async def _ebay_choices(snapshot: dict) -> list[dict]:
+    """Payment, shipping and return policy and item location, as the page offers them for this listing.
+
+    Each starts from the listing's own choice, then Settings, then the account's only one.
+    """
+    from vendoo_studio.services.ebay_listings import LISTING_CHOICE_KEYS, listing_profiles, own_listing_choices
+    from vendoo_studio.services.user_settings import get_ebay_listing_defaults
+
+    try:
+        profiles = await listing_profiles()
+        note = ""
+    except Exception as exc:  # noqa: BLE001 - the rest of the form still loads; List checks these again
+        profiles = {"fulfillment": [], "payment": [], "return": [], "locations": []}
+        note = str(exc) if "access" in str(exc) else "eBay's policies could not be loaded. Reopen the listing to try again."
+    own = own_listing_choices(snapshot)
+    defaults = get_ebay_listing_defaults()
+
+    def row(key: str, kind: str, label: str, section: str) -> dict:
+        options = profiles[kind]
+        ids = [option["id"] for option in options]
+        value = next((choice for choice in (own.get(key), defaults.get(LISTING_CHOICE_KEYS[key])) if choice in ids),
+                     ids[0] if len(ids) == 1 else "")
+        extra = {"help": note} if note else (
+            {"help": "Provide additional information to have your listing show up in a buyer's local search."}
+            if key == "merchantLocationKey" else {})
+        return field(f"ebay_specifics.{key}", label, value, required=True, selection_only=True, section=section,
+                     options=[option["title"] for option in options], options_source="marketplace",
+                     option_values={option["title"]: option["id"] for option in options}, **extra)
+
+    return [row("paymentPolicyId", "payment", "Payment policy", "Pricing"),
+            row("fulfillmentPolicyId", "fulfillment", "Shipping policy", "Shipping"),
+            row("merchantLocationKey", "locations", "Item location", "Preferences"),
+            row("returnPolicyId", "return", "Return policy", "Preferences")]
+
+
 async def ebay_form(snapshot: dict) -> dict:
     from vendoo_studio.services import marketplace_schemas
-    from vendoo_studio.services.ebay_listings import CONDITION_IDS, best_offer_terms, condition_description, ebay_aspects, ebay_category_id, ebay_condition, seller_sku
+    from vendoo_studio.services.ebay_listings import (CHARITY_PERCENTS, CONDITION_IDS, best_offer_terms, condition_description,
+                                                      ebay_aspects, ebay_category_id, ebay_condition, seller_sku)
     from vendoo_studio.services.seller_overrides import price_for
 
     from vendoo_studio.services.listing_result import ListingProblem
@@ -116,8 +152,15 @@ async def ebay_form(snapshot: dict) -> dict:
         constraints = marketplace_schemas.constraints_by_label(values)
         # eBay's page offers only its listed sizes, though its API takes others.
         selection = row["mode"] == "selection" or (name == "Size" and bool(values))
-        extra = {"help": "Personalize is required before providing Personalization Instructions"} \
-            if name == "Personalization Instructions" else {}
+        extra = {}
+        if name == "Personalization Instructions":
+            extra = {"help": "Personalize is required before providing Personalization Instructions"}
+        elif name == "Country of Origin":
+            extra = {"help": "The country or territory where the finished item was manufactured, produced, or grown—not "
+                             "where it ships from. This information may be needed for your listing to be visible to "
+                             "international buyers."}
+        elif condition:
+            extra = {"help": "Disclose all flaws to prevent returns and earn better feedback."}
         return field(f"ebay_specifics.{name}", "Item condition" if condition else name, value, required=row["required"],
                      multi=row["multi"], section=section, **extra,
                      **({"category_specific": True} if not condition else {}),
@@ -137,41 +180,92 @@ async def ebay_form(snapshot: dict) -> dict:
     selling = await _ebay_format_fields(snapshot, category, details)
     variations = await _ebay_variations_field(snapshot, category, schema)
     condition_row = next((row for row in schema if row.get("id") == "condition"), None)
+    payment, shipping_policy, location, returns = await _ebay_choices(snapshot)
+    schedule = details.get("schedule") if isinstance(details.get("schedule"), dict) else {}
+    second_path = details.get("secondaryCategoryPath") or details.get("secondaryCategoryId")
     quantity = (field("quantity", "Quantity", ebay_variations.total_quantity(snapshot), input_type="number", locked=True,
                       help="The quantity is the total of the variations.") if varied else
                 field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number"))
     fields = [
         field("ebay_specifics.title", "Item title", _shared(snapshot, "ebay", "title"), required=True, max_length=80, section="Title",
               help="Provide a title for your item. Use words people would search for when looking for your item."),
+        # eBay's "See title options" turns these on. Bold title is a $4 search upgrade the Inventory API does not take,
+        # so it is not offered here: a switch that did not list would be a false control.
+        field("ebay_specifics.subtitle", "Subtitle", details.get("subtitle"), max_length=55, section="Title",
+              reveal="See title options",
+              help="Subtitles appear in our search results in the list view, and can increase buyer interest by providing more "
+                   "descriptive info. A listing upgrade fee of $2.00 applies whether or not your item sells."),
         field("sku", "Custom label (SKU)", seller_sku(snapshot), locked=True, section="Title", max_length=50,
+              reveal="See title options",
               help="Create a custom label to enter information you want to track, such as your own SKU number. "
                    "It comes from Item Details."),
         field("direct_category_ids.ebay", "Category", (snapshot.get("direct_category_ids") or {}).get("ebay_path")
-              or (snapshot.get("marketplace_categories") or {}).get("ebay") or category, section="Item category"),
-        field("ebay_specifics.primaryStoreCategory", "First category", details.get("primaryStoreCategory"), section="Item category",
+              or (snapshot.get("marketplace_categories") or {}).get("ebay") or category, section="Item category", width="half"),
+        field("ebay_specifics.secondaryCategoryId", "Second category", second_path or "", section="Item category", width="half",
+              help="Fees may apply whether or not your item sells."),
+        field("ebay_specifics.primaryStoreCategory", "First category", details.get("primaryStoreCategory"), section="Store category",
               width="half", help="If you have an eBay Store, select the Store categories of the items you're listing."),
         field("ebay_specifics.secondaryStoreCategory", "Second category", details.get("secondaryStoreCategory"),
-              section="Item category", width="half"),
+              section="Store category", width="half"),
         *[{**row, "section": "Variations"} for row in variations],
-        *[aspect_field(row, EBAY_SPECIFIC_SECTIONS["required" if row.get("required") else
-                                                    "recommended" if row.get("usage") == "RECOMMENDED" else "optional"])
-          for row in ebay_specifics_order(schema)],
-        field("ebay_specifics.upc", "UPC", details.get("upc"), max_length=20, section=EBAY_SPECIFIC_SECTIONS["optional"]),
+        *[{**aspect_field(row, EBAY_SPECIFIC_SECTIONS[tier]), **({"reveal": "Show more"} if tier == "optional" else {})}
+          for row in ebay_specifics_order(schema)
+          for tier in ["required" if row.get("required") else "recommended" if row.get("usage") == "RECOMMENDED" else "optional"]],
+        field("ebay_specifics.upc", "UPC", details.get("upc"), max_length=20, section=EBAY_SPECIFIC_SECTIONS["optional"],
+              reveal="Show more"),
+        field("ebay_specifics.customAspectName", "Custom item specific", details.get("customAspectName") or "",
+              section=EBAY_SPECIFIC_SECTIONS["optional"], width="half", reveal="Add custom item specific",
+              help="Type in a unique detail that your buyers might look for."),
+        field("ebay_specifics.customAspectValue", "Custom detail", details.get("customAspectValue") or "",
+              section=EBAY_SPECIFIC_SECTIONS["optional"], width="half", reveal="Add custom item specific"),
         *([aspect_field(condition_row, "Condition")] if condition_row else []),
         field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}),
               input_type="textarea", max_length=1000, section="Condition",
               help="Let the buyer know what makes your item unique, including any interesting features or flaws."),
-        field("ebay_specifics.description", "Description", _shared(snapshot, "ebay", "description"), required=True, section="Description"),
+        field("ebay_specifics.description", "Item description", _shared(snapshot, "ebay", "description"), section="Description",
+              help="Describe the item you're selling and provide complete and accurate details. Use a clear and concise "
+                   "format to keep your description mobile-friendly."),
         *[{**row, "section": "Pricing"} for row in selling],
         field("price", "Item price", snapshot.get("price"), required=True, input_type="number", section="Pricing"),
         {**quantity, "section": "Pricing"},
+        payment,
         field("ebay_specifics.bestOffer.enabled", "Allow offers (optional)", terms.get("bestOfferEnabled", True), input_type="boolean",
               section="Pricing", help="Interested buyers can send an offer for this item. You can accept, counter, or decline."),
         field("ebay_specifics.bestOffer.minimumOfferPrice", "Minimum offer", (terms.get("autoDeclinePrice") or {}).get("value", ""),
               input_type="number", section="Pricing", width="half"),
         field("ebay_specifics.bestOffer.autoAcceptPrice", "Auto accept", (terms.get("autoAcceptPrice") or {}).get("value", ""),
               input_type="number", section="Pricing", width="half"),
+        field("ebay_specifics.schedule.enabled", "Schedule your listing", schedule.get("enabled") is True, input_type="boolean",
+              section="Pricing", help="Your listing goes live immediately, unless you select a time and date you want it to start."),
+        field("ebay_specifics.schedule.startAt", "Listing start time", schedule.get("startAt") or "", input_type="datetime-local",
+              section="Pricing", width="half", help="Your local time."),
+        field("ebay_specifics.salesTaxTable", "Sales tax",
+              "Use the sales tax table to manage the tax rate for jurisdictions where you may have an obligation to collect sales tax from buyers.",
+              locked=True, section="Pricing"),
+        # The fields eBay's "See pricing options" panel turns on: Your cost, Sell as a lot, Private listing.
+        field("cost", "Your cost", snapshot.get("cost"), input_type="number", section="Pricing", width="half",
+              reveal="See pricing options",
+              help="Enter your per-unit acquisition cost to see your earnings when the item sells. (Not visible to buyers.)"),
+        field("ebay_specifics.lotSize", "Quantity in lot", details.get("lotSize") or "", input_type="number", min_value=2, step=1,
+              section="Pricing", width="half", reveal="See pricing options",
+              help="Group similar or identical items together to sell to a single buyer."),
+        field("ebay_specifics.privateListing", "Private listing", details.get("privateListing") is True, input_type="boolean",
+              section="Pricing", reveal="See pricing options",
+              help="This allows buyers to remain anonymous when they bid on or buy an item."),
+        shipping_policy,
         *[{**row, "section": "Shipping"} for row in package(snapshot)],
+        field("ebay_specifics.irregularPackage", "Irregular package", details.get("irregularPackage") is True,
+              input_type="boolean", section="Shipping",
+              help="Carriers may charge extra for items not shipped in standard packages."),
+        location,
+        returns,
+        field("ebay_specifics.charityId", "Charity", details.get("charityId") or "", section="Charity", width="half",
+              help="Donate a portion to charity. You'll get a final value fee discount for sold items."),
+        field("ebay_specifics.donationPercent", "Percentage", str(details.get("donationPercent") or ""),
+              selection_only=True, section="Charity", width="half",
+              options=[f"{percent}%" for percent in CHARITY_PERCENTS],
+              option_values={f"{percent}%": percent for percent in CHARITY_PERCENTS},
+              help="If your item sells, you will donate the percentage of your item's final sale price to the charity you chose."),
     ]
     return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields}
 

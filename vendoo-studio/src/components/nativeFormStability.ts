@@ -192,13 +192,21 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
   if (context.tab === "mercari" && field.key === "mercari_specifics.smartPricing.minimumPrice") {
     return shownChoice(context.fields, context.local, context.listing, "mercari_specifics.smartPricing.enabled") === "true";
   }
+  if (context.tab === "ebay" && field.key === "ebay_specifics.schedule.startAt") {
+    return shownChoice(context.fields, context.local, context.listing, "ebay_specifics.schedule.enabled") === "true";
+  }
   if (context.tab === "ebay") {
     const auction = ebayFormat(context) === "AUCTION";
     const varied = ebayVaried(context.listing);
     // eBay's page: an auction has a duration and bids instead of an item price; Buy It Now runs until cancelled.
     if (EBAY_AUCTION_PRICE_KEYS.has(field.key) || field.key === "ebay_specifics.listingDuration") return auction;
     if (field.key === "ebay_specifics.price") return !auction;
-    if (EBAY_OFFER_KEYS.has(field.key)) return !auction && !varied;
+    if (EBAY_OFFER_KEYS.has(field.key)) {
+      if (auction || varied) return false;
+      // Minimum offer and Auto accept show only while Allow offers is on.
+      if (field.key === "ebay_specifics.bestOffer.enabled") return true;
+      return shownChoice(context.fields, context.local, context.listing, "ebay_specifics.bestOffer.enabled") === "true";
+    }
     if (field.key === "ebay_specifics.variations") return !(auction && !varied);
   }
   return true;

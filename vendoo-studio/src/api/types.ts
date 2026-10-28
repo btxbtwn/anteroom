@@ -572,6 +572,8 @@ export interface MarketplaceFormField {
   on_form?: boolean;
   /** Choice label → the heading the marketplace lists it under (Mercari's size groups). */
   option_groups?: Record<string, string>;
+  /** The button the marketplace's page hides this field behind ("Show more", "See title options"). */
+  reveal?: string;
   /** The heading this field sits under on the marketplace's own form. */
   section?: string;
   /** Half or quarter of a row, as the marketplace's form lays it out. Absent means a full row. */

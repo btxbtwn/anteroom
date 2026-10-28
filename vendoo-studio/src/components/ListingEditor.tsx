@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
-import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
@@ -113,6 +113,8 @@ interface EditorField {
   categorySpecific?: boolean;
   /** The marketplace form's heading for this field. */
   section?: string;
+  /** The button the marketplace hides this field behind. */
+  reveal?: string;
   optionGroups?: Record<string, string>;
   width?: "half" | "quarter";
 }
@@ -667,6 +669,22 @@ export function StructuredEditor({
     [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
   );
   const [local, setLocal] = React.useState<Record<string, string | string[]>>({});
+  // The seller's open or closed choice for "Show more" and "See … options". A saved value starts open.
+  const [revealOverride, setRevealOverride] = React.useState<ReadonlyMap<string, boolean>>(new Map());
+  const revealed = React.useMemo(() => {
+    const open = new Set<string>();
+    for (const field of fields) {
+      if (!field.reveal || !field.section) continue;
+      const value = editorFieldValue(listing, field, tab);
+      if (value === false || value === "false" || !editorValuePresent(value)) continue;
+      open.add(`${tab}|${field.section}|${field.reveal}`);
+    }
+    for (const [id, on] of revealOverride) {
+      if (on) open.add(id);
+      else open.delete(id);
+    }
+    return open;
+  }, [fields, listing, tab, revealOverride]);
   const dirty = React.useRef<Record<string, string | string[]>>({});
   // Go to an "Edit …" target once. The rows rebuild on every save, and
   // following the target again then pulled the seller back from whatever they were editing.
@@ -803,6 +821,12 @@ export function StructuredEditor({
       setListingEditorValue(updated, "direct_category_ids.ebay_path", path);
       onChange(updated);
     }} />;
+    if (f.native && f.key === "ebay_specifics.secondaryCategoryId") return <EbayCategorySelect id={id} value={text} onChange={(categoryId, path) => {
+      const updated = cloneListing(listing);
+      setListingEditorValue(updated, f.key, categoryId);
+      setListingEditorValue(updated, "ebay_specifics.secondaryCategoryPath", path);
+      onChange(updated);
+    }} />;
     const categoryChoices = f.native && !f.multi ? pathCategoryChoices(f) : null;
     if (categoryChoices) return <CategoryTreeSelect key={text} id={id} fieldKey={f.key} value={text} choices={categoryChoices}
       disabled={f.locked} onChange={(choice) => commitField(f.key, choice.label)} />;
@@ -858,6 +882,18 @@ export function StructuredEditor({
     return leaf === "title" || leaf === "description" || f.key === "category_path" || leaf === "categorypath"
       || f.label === "Category" || ["textarea", "inventory", "variations"].includes(f.type || "");
   };
+  const revealButtons = (title: string, rows: EditorField[], include: (name: string) => boolean) =>
+    [...new Set(rows.flatMap((f) => (f.reveal && include(f.reveal) ? [f.reveal] : [])))].map((reveal) => {
+      const id = `${tab}|${title}|${reveal}`;
+      const open = revealed.has(id);
+      return (
+        <InlineButton key={reveal} type="button" className="mt-2 text-xs" aria-expanded={open} onClick={() => setRevealOverride((current) => {
+          const next = new Map(current);
+          next.set(id, !open);
+          return next;
+        })}>{open && reveal === "Show more" ? "Show less" : reveal}</InlineButton>
+      );
+    });
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
@@ -881,9 +917,10 @@ export function StructuredEditor({
             titleId={`listing-section-${tab}-${section.id}`}
             meta={section.id === "listing" ? null : `${filled} of ${section.fields.length} filled`}
           >
-            {/* A marketplace's own page layout uses its four-part rows; the general form spreads out when wide. */}
+            {/* "See … options" sits at the top of eBay's section; "Show more" sits under the fields. */}
+            {revealButtons(section.title, section.fields, (name) => name.startsWith("See "))}
             <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-4" : "grid-cols-2 @4xl:grid-cols-3")}>
-              {section.fields.map((f) => (
+              {section.fields.filter((f) => !f.reveal || revealed.has(`${tab}|${section.title}|${f.reveal}`)).map((f) => (
                 <div key={f.key} className={cn("min-w-0", pageLayout
                   ? (f.width === "quarter" ? "col-span-1" : f.width === "half" ? "col-span-2" : "col-span-full")
                   : fullWidth(f) && "col-span-full")}>
@@ -899,6 +936,7 @@ export function StructuredEditor({
                 </div>
               ))}
             </div>
+            {revealButtons(section.title, section.fields, (name) => !name.startsWith("See "))}
           </InspectorSection>
         );
       })}
@@ -1282,6 +1320,7 @@ function schemaFieldsForTab(
     // The marketplace's own controls, such as title and price, stay.
     ...(field.category_specific || (!form.native && !coreFieldLabel(tab, field.label)) ? { categorySpecific: true } : {}),
     ...(field.section ? { section: field.section } : {}),
+    ...(field.reveal ? { reveal: field.reveal } : {}),
     ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),

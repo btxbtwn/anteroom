@@ -122,10 +122,13 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         listing = {"ebay_specifics": {
             "autoAccept": 14, "minimumOffer": 12, "category_path": ["Men", "T-Shirts"],
             "primaryStoreCategory": "Other", "secondaryStoreCategory": "Other",
+            "boldTitle": True, "charityId": "114792", "donationPercent": "10", "salesTaxTable": "note",
+            "customAspectName": "Wash", "customAspectValue": "Stone",
             "category_specifics": {"Brand": "Tennessee River", "Size": "XL", "storeCategoryName": "Other",
                                    "condition": "Pre-owned - Good", "upc": "Does Not Apply"},
         }}
-        self.assertEqual(ebay_listings.ebay_aspects(listing, {}), {"Brand": ["Tennessee River"], "Size": ["XL"]})
+        self.assertEqual(ebay_listings.ebay_aspects(listing, {}),
+                         {"Brand": ["Tennessee River"], "Size": ["XL"], "Wash": ["Stone"]})
 
     def setUp(self):
         self.temp = self.enterContext(tempfile.TemporaryDirectory())
@@ -314,6 +317,51 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         # A stored default that is no longer on the account is not used.
         self.defaults = {"fulfillment_policy_id": "gone"}
         self.assertEqual((await ebay_listings.listing_choices(Client(policies=1)))["fulfillmentPolicyId"], "f0")
+
+    async def test_the_rest_of_ebays_form_reaches_the_item_and_offer(self):
+        from datetime import UTC, datetime, timedelta
+
+        start = (datetime.now(UTC) + timedelta(days=2)).replace(second=0, microsecond=0)
+        listing = {**LISTING, "ebay_specifics": {
+            **(LISTING.get("ebay_specifics") or {}), "subtitle": "Rare wash", "secondaryCategoryId": "57990",
+            "schedule": {"enabled": True, "startAt": start.isoformat()}, "lotSize": "3", "privateListing": True,
+            "irregularPackage": True, "fulfillmentPolicyId": "f2", "paymentPolicyId": "p0", "merchantLocationKey": "home",
+            "charityId": "114792", "donationPercent": "10", "customAspectName": "Wash", "customAspectValue": "Stone"}}
+        client = Client(policies=3)
+        with patch.object(ebay_listings.EbayClient, "connect", return_value=client):
+            result = await ebay_listings.execute("list", listing, [self.photo], self.binding, self.record, self.active, confirm=True,
+                                                 conversation_id="abc123")
+        self.assertTrue(result["ok"], result)
+        item = next(iter(client.items.values()))
+        self.assertEqual(item["product"]["subtitle"], "Rare wash")
+        self.assertTrue(item["packageWeightAndSize"]["shippingIrregular"])
+        offer = client.offers["offer-1"]
+        self.assertEqual((offer["secondaryCategoryId"], offer["lotSize"], offer["hideBuyerDetails"]), ("57990", 3, True))
+        self.assertEqual(offer["listingStartDate"], start.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+        # The listing's own policy wins over Settings, which has none for several shipping policies.
+        self.assertEqual(offer["listingPolicies"]["fulfillmentPolicyId"], "f2")
+        self.assertEqual(offer["charity"], {"charityId": "114792", "donationPercentage": "10.0"})
+        self.assertNotIn("boldTitle", item)
+        self.assertEqual(item["product"]["aspects"]["Wash"], ["Stone"])
+
+    def test_ebay_form_options_are_checked_before_listing(self):
+        def options(**details):
+            return ebay_listings.listing_options({"ebay_specifics": details}, "11483")
+
+        self.assertEqual(options(), {})
+        for details, field in (({"subtitle": "x" * 56}, "ebay_specifics.subtitle"),
+                               ({"secondaryCategoryId": "11483"}, "ebay_specifics.secondaryCategoryId"),
+                               ({"lotSize": "1"}, "ebay_specifics.lotSize"),
+                               ({"schedule": {"enabled": True, "startAt": "2001-01-01T09:00"}}, "ebay_specifics.schedule.startAt"),
+                               ({"charityId": "park"}, "ebay_specifics.charityId"),
+                               ({"donationPercent": "10"}, "ebay_specifics.charityId"),
+                               ({"charityId": "114792", "donationPercent": "7"}, "ebay_specifics.donationPercent"),
+                               ({"customAspectName": "Wash"}, "ebay_specifics.customAspectValue")):
+            with self.assertRaises(ListingProblem) as caught:
+                options(**details)
+            self.assertIn(field, [item["field"] for item in caught.exception.fields])
+        # A schedule turned off is not sent.
+        self.assertEqual(options(schedule={"enabled": False, "startAt": "2001-01-01T09:00"}), {})
 
     async def test_best_offer_uses_the_vendoo_paths_floors(self):
         from vendoo_studio.services.native_form import vendoo_form
