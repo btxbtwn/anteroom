@@ -91,3 +91,14 @@ it("inside the form, still lets the seller send a different pick and warns past 
   expect(html).toContain("Reset to item photos");
   expect(html).toContain("Mercari keeps 12 photos. The first 12 of 13 are sent.");
 });
+
+it("shows List's answer about the photos above them, where the seller drags or leaves some off", () => {
+  serve(Array.from({ length: 9 }, (_, index) => photo(`p${index + 1}`)));
+  const warnings = ["You can add up to 8 photos. Depop shows the first 7, so leave one off or drag the ones you want first."];
+  const html = renderToStaticMarkup(<MarketplaceMedia convId="c1" marketplace="depop" listing={{}} onChange={vi.fn()}
+    warnings={warnings} page={{ hint: "Add up to 8 photos in JPEG or PNG format.", slots: ["Cover photo", "Front", "Back", "Side", "Label", "Detail", "Flaw"] }} />);
+  expect(html).toContain(warnings[0]);
+  // Read above the photos, with the one photo past the form's own limit of 8 marked there.
+  expect(html.indexOf(warnings[0])).toBeLessThan(html.indexOf("/api/photos/p1"));
+  expect(html.match(/Not sent/g)).toHaveLength(1);
+});

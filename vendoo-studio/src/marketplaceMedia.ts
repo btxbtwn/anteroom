@@ -48,6 +48,33 @@ export function withPick(listing: ListingData, marketplace: string, ids: string[
   return updated;
 }
 
+/**
+ * The listing with one photo left out of this form's pick. The rest of the pick
+ * stays in the seller's order; nothing is sent for a pick that only repeated the
+ * item's photos anyway.
+ */
+export function withoutPick(listing: ListingData, marketplace: string, photoId: string, item: Photo[]): ListingData {
+  return withPick(listing, marketplace, pickedIds(listing, marketplace).filter((id) => id !== photoId), item);
+}
+
+/**
+ * The sentence List writes when a photo it had picked falls past the form's
+ * slots, as the marketplace's cover photo or as one of its other pictures.
+ */
+export const COVER_LIMIT = /^Your cover photo is photo (\d+)\./;
+
+/** The photos one form holds in the slots its page draws. */
+const pageSlots = (slots: readonly string[] | undefined, limit: number | undefined) => (slots?.length || limit || 0);
+
+/**
+ * The photos past this form's page slots, as its own placeholder captions say:
+ * a cover slot holds its first photo and the others follow it.
+ */
+export function pastSlots(count: number, slots: readonly string[] | undefined, limit: number | undefined): number[] {
+  const room = pageSlots(slots, limit);
+  return Array.from({ length: Math.max(0, count - room) }, (_, index) => room + index);
+}
+
 /** The marketplace's video rules as one line, for the form's photos. */
 export function videoRuleText(rules: ListingVideoRules | undefined): string {
   if (!rules) return "";

@@ -203,6 +203,34 @@ async function depopListingFields(request, listing, deadline) {
   return fields;
 }
 
+/**
+ * Whether a draft's only missing field is a shipping cost. Those are written from
+ * this revision, so the count can be stale and asking again settles it; every
+ * other answer (a category, a size) needs the seller, not another write.
+ */
+function depopOnlyShippingMissing(draft) {
+  const fields = Array.isArray(draft?.missing_fields) ? draft.missing_fields.map(String) : null;
+  if (!fields?.length) return false;
+  const shipping = new Set(['national_shipping', 'national_shipping_cost', 'shipping', 'shipping_methods']);
+  return fields.every(field => shipping.has(field));
+}
+
+/**
+ * Depop's quoted cost for a parcel, as a dollar string the draft stores, or null
+ * when the row names no price at all. Its providers answer with a bare number,
+ * {amount}, or {price: {amount}}; a free label is the number 0.
+ */
+function depopQuotedCost(cost) {
+  const value = cost == null || typeof cost !== 'object'
+    ? cost
+    : (cost.amount ?? cost.price?.amount ?? cost.price ?? cost.value);
+  if (value == null || value === '') return null;
+  const amount = Number(typeof value === 'object' ? value.amount ?? value.value : value);
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  // Two decimals, as Depop stores a money amount, so "1.9" is not a different price.
+  return amount.toFixed(2);
+}
+
 // Depop Shipping for this item: the seller's ship-from address and the parcel the
 // quote names, which is the package size a draft cannot be published without.
 // Empty when Depop does not answer; publishing names what is missing.
@@ -221,8 +249,10 @@ async function depopShippingFields(listing, category, deadline) {
     ...depopLocation(listing, from),
   };
   // Depop's quote for that package, as the sell page shows it beside the size.
-  const quoted = parcel.cost?.amount ?? parcel.cost?.price?.amount ?? parcel.cost;
-  if (quoted != null && quoted !== '' && typeof quoted !== 'object') fields.national_shipping_cost = String(quoted);
+  // A draft Depop publishes needs a national shipping cost of its own, so a parcel
+  // row that names no price still gets the form's free-shipping amount rather than
+  // leaving the field off, which Depop would report as missing at publish.
+  fields.national_shipping_cost = depopQuotedCost(parcel.cost) ?? '0.00';
   return { from, parcel, fields };
 }
 
@@ -812,9 +842,10 @@ function depopDraftWriteBody(listing, fields, pictures, existing) {
     body.variants = {};
     if (source.quantity != null) body.quantity = source.quantity;
   }
-  for (const key of ['gender', 'national_shipping_cost']) {
-    if (!body[key]) delete body[key];
-  }
+  // An empty gender is not sent. A shipping cost is sent whenever it is a number:
+  // free shipping is "0.00", which is a value Depop needs, not a blank.
+  if (!body.gender) delete body.gender;
+  if (body.national_shipping_cost == null || body.national_shipping_cost === '') delete body.national_shipping_cost;
   return body;
 }
 
@@ -1097,11 +1128,15 @@ async function depopApiAction(action, payload) {
         || path === '/presentation/api/v1/addresses/'
         || path === '/presentation/api/v1/users/me/settings/shipping/'
         || /^\/presentation\/api\/v1\/shipping\/providers\/depop\/\?[A-Za-z0-9._~%=&+-]+$/.test(path));
-      const draftWrite = payload.action === 'save_draft' && (
+      const draftPath = /^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path);
+      const draftWrite = (payload.action === 'save_draft' && (
         (action === 'create' && method === 'POST' && path === '/presentation/api/v1/drafts/')
         || (action === 'photo' && method === 'POST' && path === '/presentation/api/v1/pictures/')
         || (action === 'save' && method === 'POST' && path === DEPOP_PICTURE_CHECK)
-        || (action === 'save' && method === 'PUT' && /^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)));
+        || (action === 'save' && method === 'PUT' && draftPath)))
+        // Publishing writes the draft once more when its only missing answer is the
+        // shipping cost this revision supplies, so Depop recounts before refusing.
+        || (action === 'publish' && payload.confirm === true && method === 'PUT' && draftPath);
       const publishWrite = action === 'publish' && payload.action === 'publish' && payload.confirm === true
         && method === 'POST' && path === '/presentation/api/v1/drafts/products/';
       // Live edit: read and PUT the product by the slug the seller opened.
@@ -1298,7 +1333,15 @@ async function depopApiAction(action, payload) {
     }
     if (action === 'prepare_publish' || action === 'publish') {
       if (payload.action !== 'publish' || payload.confirm !== true) throw marketplaceError('Confirm listing on Depop.');
-      const draft = await request('GET', path);
+      let draft = await request('GET', path);
+      // Depop's missing list is what it computed at the last write, so a draft saved
+      // before its shipping was complete keeps saying so after the fix. A shipping
+      // cost is ours to supply: write it again and let Depop recount before refusing.
+      if (depopOnlyShippingMissing(draft) && payload.depop_fields?.national_shipping_cost != null) {
+        // The draft's own pictures, so the recount does not cost the item its photos.
+        await request('PUT', path, depopDraftWriteBody(payload.listing, payload.depop_fields, draft, draft));
+        draft = await request('GET', path);
+      }
       const missing = [...(Array.isArray(draft.missing_fields) ? draft.missing_fields : []).map(String),
         ...(!draft.pictures?.length ? ['photos'] : []), ...(!(Number(draft.price_amount) > 0) ? ['price'] : [])];
       if (missing.length || !Array.isArray(draft.missing_fields)) {
