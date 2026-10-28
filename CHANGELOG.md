@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.463 — 2026-10-28
+
+- The Depop tab has Depop’s “Boost your listing” switch, off unless you turn it on (Depop charges an extra 12% fee when a boosted item sells). Update sends it to the live listing. Depop drafts can’t hold Boost, so List posts the item and then turns Boost on with one update of that new listing.
+
 ## 0.1.462 — 2026-10-28
 
 - A List everywhere button at the bottom of the marketplace list lists the item on every marketplace that's ready, after one confirmation that names them. Marketplaces still missing details are left out and named so you can finish them.
