@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.470 — 2026-10-28
+
+- Depop, Mercari, Poshmark, Sellwild, and eBay now show this item's photos where that marketplace's own page does. You can reorder them and pick which ones that marketplace gets, up to its limit. Depop stays JPEG and PNG.
+
 ## 0.1.469 — 2026-10-28
 
 - Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
