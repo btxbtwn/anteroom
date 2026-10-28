@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.464 — 2026-10-28
+## 0.1.465 — 2026-10-28
 
 - Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
+
+## 0.1.464 — 2026-10-28
+
+- When you pick a different category for a marketplace, on its tab or by asking chat, Anteroom fills that category’s new fields the same way it does after generating, choosing only from that marketplace’s own choices. Only the marketplace you changed is filled, and fields you set or locked are left alone.
 
 ## 0.1.463 — 2026-10-28
 

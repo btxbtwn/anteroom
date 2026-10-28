@@ -61,6 +61,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        from vendoo_studio.services.native_field_fill import start_category_fills
+        start_category_fills()
+    except Exception:
+        pass
+    try:
         from vendoo_studio.services.automation_scheduler import start_automation_scheduler
         start_automation_scheduler()
     except Exception:
