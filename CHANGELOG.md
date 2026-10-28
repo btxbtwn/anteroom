@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.490 — 2026-10-27
+
+- Chrome reconnected every half second while one listing was being checked, so the app sat loading and the check ended with “Check did not finish”. A reconnect used to repeat the whole start-up handshake each time — re-queueing interrupted sends and asking Chrome to check listings again — while the extension reset its retry delay on every attempt. Now only a Chrome that stays connected sets things going, a connection that keeps dropping waits longer each time, and a socket that closes early is written to the log instead of vanishing.
+
 ## 0.1.489 — 2026-10-27
 
 Anteroom's backend can now run on Postgres as well as SQLite. Every query, JSON read, upsert and schema migration goes through one layer that speaks both, so the hosted API can share one database while this Mac keeps using its own file. Nothing about listing changes, and an existing SQLite database opens exactly as before.
@@ -15,7 +19,7 @@ Anteroom's backend can now run on Postgres as well as SQLite. Every query, JSON 
 - On a marketplace tab, what List would still tell you about a field now appears under that field, as soon as the listing has a value there. Poshmark's color answer (“Poshmark does not list Navy, so that color is left off”) shows under Color, its title and description limits under those boxes, and its price answer under Price. The same notes stay beside List, which is what holds List.
 - **Edit** beside one of those notes now opens that marketplace's form at the field the note names — Poshmark's color answer opens Poshmark's Color, its size answer opens its Size — instead of the General form. A refused Mercari List names its own fields (sizeId, categoryId, name), and those open Mercari's Size, Category and Title.
 - Generating a listing now knows which colors Poshmark lists, so it writes the closest one instead of a shade Poshmark silently leaves off.
-
+=======
 ## 0.1.487 — 2026-10-28
 
 - Vinted listing failed with “Reconnect Vinted in Anteroom first” even while you were signed in. Anteroom looked for Vinted’s security token in a form the page no longer uses, so every Vinted action stopped before it asked Vinted anything. It also never renewed the one-hour pass Vinted hands out, even though Chrome keeps your sign-in for a week. **List**, **Update**, **Delist**, Import and sale checks on Vinted now read the token, renew the hour in the background, and ask Vinted for English names so your saved category, condition, size, colour, brand and package size match. **Reconnect Vinted** now says whether it found your sign-in, and who as, instead of leaving the old message in place.
