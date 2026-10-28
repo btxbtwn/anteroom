@@ -9,6 +9,12 @@
 
 const VINTED_ORIGIN = 'https://www.vinted.com';
 const VINTED_MAX_PHOTOS = 20;
+// Vinted's web access token lasts an hour; Chrome keeps a week-long refresh
+// token beside it. The site renews the hour at /session-refresh, so the
+// extension asks the same route rather than reading an hour-old expiry as a
+// signed-out seller.
+const VINTED_REFRESH_URL = `${VINTED_ORIGIN}/web/api/auth/refresh`;
+const VINTED_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 function vintedDraftUrl(id) {
   return `${VINTED_ORIGIN}/items/${id}/edit`;
@@ -42,6 +48,54 @@ function vintedMatch(options, wanted) {
   if (!text) return null;
   const exact = options.filter(option => marketplaceText(option.title).toLowerCase() === text);
   return exact.length === 1 ? exact[0] : null;
+}
+
+function vintedSizeText(value) {
+  return marketplaceText(value).toLowerCase().replace(/\s*\/\s*/g, ' / ').replace(/\s+/g, ' ');
+}
+
+// Vinted writes its own clothing sizes as "S / US 4-6" and its waists as
+// "W32"; Anteroom stores "6", "S / 6" or "M", and its bottoms mapping still
+// carries Vendoo's older letter. The number a seller typed is the size they
+// mean, so it decides; the letter is used when there is no number.
+function vintedSizeNumber(title, digits) {
+  const waist = /^w?(\d{1,2})$/.exec(title);
+  if (waist) return waist[1] === digits;
+  const range = / \/ us (\d{1,2})(?:-(\d{1,2}))?$/.exec(title);
+  if (!range) return false;
+  if (!range[2]) return range[1] === digits;
+  return Number(digits) >= Number(range[1]) && Number(digits) <= Number(range[2]);
+}
+
+function vintedSizeMatch(options, wanted) {
+  const text = vintedSizeText(wanted);
+  if (!text) return null;
+  const exact = options.filter(option => vintedSizeText(option.title) === text);
+  if (exact.length === 1) return exact[0];
+  const [first, second] = text.replace(/^us /, '').split(' / ');
+  const digits = (second ?? first).match(/^\d{1,2}$/)?.[0] || '';
+  if (digits) {
+    // Two options answering the same number would be a guess, not a match.
+    const byNumber = options.filter(option => vintedSizeNumber(vintedSizeText(option.title), digits));
+    return byNumber.length === 1 ? byNumber[0] : null;
+  }
+  const letter = /^[a-z]{1,4}$/.test(first) ? first : '';
+  if (!letter) return null;
+  const byLetter = options.filter(option => (/^([a-z]{1,4})(?: \/|$)/.exec(vintedSizeText(option.title))?.[1] || '') === letter);
+  return byLetter.length === 1 ? byLetter[0] : null;
+}
+
+// Package sizes carry a stable code (SMALL, MEDIUM, LARGE) beside their title,
+// which Vinted translates. Match the app's English name to the code.
+function vintedPackageMatch(options, wanted) {
+  const exact = vintedMatch(options, wanted);
+  if (exact) return exact;
+  const key = value => marketplaceText(value).toLowerCase().replace(/[\s_-]+/g, '')
+    .replace(/^extrasmall$/, 'xsmall').replace(/^extralarge$/, 'xlarge');
+  const wantedKey = key(wanted);
+  if (!wantedKey) return null;
+  const matches = options.filter(option => key(option.code) === wantedKey);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function vintedFindCatalog(nodes, parts, index = 0) {
@@ -102,6 +156,7 @@ function vintedAllowed(method, url, action, confirm) {
     return method === 'GET' && /^\/shipping-estimation\/external\/catalogs\/[1-9]\d{0,14}\/package_sizes$/.test(path);
   }
   if (parsed.hostname !== 'www.vinted.com') return false;
+  if (method === 'POST' && path === '/web/api/auth/refresh') return true;
   if (method === 'GET' && (path === '/items/new' || path === '/api/v2/users/current' || path === '/api/v2/item_upload/catalogs'
       || path === '/api/v2/item_upload/colors' || path === '/api/v2/item_upload/brands' || path === '/api/v2/item_upload/size_groups'
       || /^\/api\/v2\/item_upload\/items\/[1-9]\d{0,14}$/.test(path) || /^\/api\/v2\/items\/[1-9]\d{0,14}$/.test(path)
@@ -124,7 +179,64 @@ async function vintedAnonId() {
   }
 }
 
+function vintedTokenExpiry(token) {
+  try {
+    const part = String(token || '').split('.')[1];
+    if (!part) return 0;
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/');
+    const claims = JSON.parse(atob(padded + '='.repeat((4 - (padded.length % 4)) % 4)));
+    const exp = Number(claims?.exp);
+    return Number.isFinite(exp) && exp > 0 ? Math.floor(exp) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// One of Vinted's token cookies, as Chrome holds it. The value never leaves the worker.
+async function vintedTokenCookie(name) {
+  let cookie = null;
+  try { cookie = await chrome.cookies.get({ url: `${VINTED_ORIGIN}/`, name }); } catch { /* no cookie jar here */ }
+  const token = String(cookie?.value || '');
+  return { cookie, token, expires_at: vintedTokenExpiry(token) };
+}
+
+// Renews the hour-long access token with the refresh token Chrome keeps. The
+// answer sets both cookies, and its body carries the same access token.
+async function vintedRefreshAccess(deadline) {
+  let body = null;
+  try {
+    ({ data: body } = await marketplaceFetch(VINTED_REFRESH_URL, {
+      marketplace: 'vinted', step: 'session', method: 'POST', credentials: 'include', expect: 'json',
+      deadline, headers: { Accept: 'application/json, text/plain, */*' }, retry: false,
+    }));
+  } catch (error) {
+    // A refused renewal is a sign-in problem; anything else keeps its own words.
+    if (['network', 'challenge', 'rate_limited'].includes(error?.code)) throw error;
+    throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out', status: error?.status ?? null });
+  }
+  if (vintedTokenExpiry(body?.access_token)) return;
+  if ((await vintedTokenCookie('access_token_web')).expires_at) return;
+  throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
+}
+
+// Refreshes only when the hour is nearly up, so a token that still works can
+// finish the call. `force` retries once after Vinted says the token is invalid.
+// Returns whether a new token was actually fetched.
+async function vintedKeepSignedIn(deadline, { force = false } = {}) {
+  const { expires_at } = await vintedTokenCookie('access_token_web');
+  const now = Date.now();
+  if (!force && expires_at * 1000 - now > VINTED_REFRESH_MARGIN_MS) return false;
+  try {
+    await vintedRefreshAccess(deadline);
+    return true;
+  } catch (error) {
+    if (!force && expires_at * 1000 > now) return false;
+    throw error;
+  }
+}
+
 async function vintedSession(deadline) {
+  const renewed = await vintedKeepSignedIn(deadline);
   const page = await marketplaceFetch(`${VINTED_ORIGIN}/items/new`, {
     marketplace: 'vinted', step: 'session', expect: 'text', credentials: 'include', deadline,
   });
@@ -135,6 +247,8 @@ async function vintedSession(deadline) {
     Accept: 'application/json, text/plain, */*',
     'x-csrf-token': csrf,
     'x-enable-multiple-size-groups': 'true',
+    // Anteroom's own choices are English; ask Vinted for the same names.
+    Locale: 'en-US',
     ...(anon ? { 'x-anon-id': anon } : {}),
   };
   const call = async (method, url, { step, body, retry, action, confirm }) => {
@@ -148,14 +262,21 @@ async function vintedSession(deadline) {
     });
     return data;
   };
+  const currentUser = () => call('GET', `${VINTED_ORIGIN}/api/v2/users/current`, { step: 'session' });
+  const signedOut = error => error?.code === 'signed_out' || error?.status === 401 || error?.status === 403;
   let account;
   try {
-    account = await call('GET', `${VINTED_ORIGIN}/api/v2/users/current`, { step: 'session' });
+    account = await currentUser();
   } catch (error) {
-    if (error.code === 'signed_out' || error.status === 401 || error.status === 403) {
-      throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
+    if (!signedOut(error)) throw error;
+    // The hour can turn over between the check above and this call.
+    if (!renewed) await vintedKeepSignedIn(deadline, { force: true });
+    try {
+      account = await currentUser();
+    } catch (retry) {
+      if (signedOut(retry)) throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
+      throw retry;
     }
-    throw error;
   }
   const userId = vintedAccountId(account);
   if (!userId) throw marketplaceError('Reconnect Vinted in Anteroom first.', { code: 'signed_out' });
@@ -235,8 +356,10 @@ async function vintedFields(call, listing, currency) {
   }
   const condition = vintedMatch(byCode('condition').concat(byCode('status')), specifics.condition);
   if (!condition) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.condition', needs: 'a condition Vinted offers' }]);
-  const size = vintedMatch(sizes, specifics.size);
-  if (String(specifics.size || '').trim() && !size) {
+  // A size the Vinted form leaves blank still has the listing's General size.
+  const sizeName = String(marketplaceCopy(listing, 'vinted', 'size') || '').trim();
+  const size = vintedSizeMatch(sizes, sizeName);
+  if (sizeName && !size) {
     throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.size', needs: 'a size Vinted offers in this category' }]);
   }
   if (!size && sizes.length) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.size', needs: 'a size' }]);
@@ -251,7 +374,7 @@ async function vintedFields(call, listing, currency) {
     brand = match.title;
   }
   const colorIds = [];
-  const colorName = String(specifics.color || '').trim();
+  const colorName = String(marketplaceCopy(listing, 'vinted', 'color') || '').trim();
   if (colorName) {
     const colors = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/colors`, { step: 'color' });
     const match = vintedMatch((colors?.colors || []).map(row => ({ id: Number(row.id), title: row.title })), colorName);
@@ -259,8 +382,8 @@ async function vintedFields(call, listing, currency) {
     colorIds.push(match.id);
   }
   const packages = await call('GET', `https://api.www.vinted.com/shipping-estimation/external/catalogs/${catalogId}/package_sizes`, { step: 'package' });
-  const packageSize = vintedMatch((packages?.package_sizes || []).map(row => ({
-    id: Number(row.id), title: row.title || row.name || row.code,
+  const packageSize = vintedPackageMatch((packages?.package_sizes || []).map(row => ({
+    id: Number(row.id), title: row.title || row.name || row.code, code: row.code || '',
   })), specifics.packageSize || 'Medium');
   if (!packageSize) throw marketplaceMissing('vinted', [{ field: 'vinted_specifics.packageSize', needs: 'a package size Vinted offers' }]);
   const itemAttributes = [{ code: 'condition', ids: [condition.id] }];

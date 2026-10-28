@@ -6,9 +6,21 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.485 — 2026-10-27
+## 0.1.489 — 2026-10-27
 
 - Anteroom's backend can now run on Postgres as well as SQLite. Every query, JSON read, upsert and schema migration goes through one layer that speaks both, so the hosted API can share one database while this Mac keeps using its own file. Nothing about listing changes, and an existing SQLite database opens exactly as before.
+
+## 0.1.487 — 2026-10-28
+
+- Vinted listing failed with “Reconnect Vinted in Anteroom first” even while you were signed in. Anteroom looked for Vinted’s security token in a form the page no longer uses, so every Vinted action stopped before it asked Vinted anything. It also never renewed the one-hour pass Vinted hands out, even though Chrome keeps your sign-in for a week. **List**, **Update**, **Delist**, Import and sale checks on Vinted now read the token, renew the hour in the background, and ask Vinted for English names so your saved category, condition, size, colour, brand and package size match. **Reconnect Vinted** now says whether it found your sign-in, and who as, instead of leaving the old message in place.
+
+## 0.1.486 — 2026-10-27
+
+- A listing that comes back empty now asks the model again with reasoning turned off. DeepSeek sometimes spent its whole reply thinking and stopped before writing anything, so chat said “Listing generation returned no text” and the draft stayed blank. The retry writes the listing, and if the model still answers with nothing the message says how much it thought and why it stopped instead of repeating that generic line.
+
+## 0.1.484 — 2026-10-28
+
+- The category picker now shows the whole path in the field instead of cutting it off at “Wo…”, and its panel stays on screen and scrolls rather than being clipped by the form. The panel shows where you are as a breadcrumb you can click, searches every category by any part of its path, and marks the saved category so you can see its siblings.
 
 ## 0.1.483 — 2026-10-27
 

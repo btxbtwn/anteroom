@@ -9,6 +9,9 @@ function worker(routes) {
   const c = loadWorker();
   Object.assign(c, { AbortSignal });
   c.chrome.declarativeNetRequest.updateSessionRules = async () => {};
+  // Vinted's hour-long access token, with time left on it.
+  c.chrome.cookies = { get: async ({ name }) => (name === 'access_token_web'
+    ? { value: `x.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.y` } : null) };
   const calls = [];
   c.fetch = async url => {
     calls.push(String(url));

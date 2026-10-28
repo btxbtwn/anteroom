@@ -349,6 +349,7 @@ async function sellwildImportListing(id, deadline) {
 // ---- Vinted ----
 
 async function vintedImportAccount(deadline) {
+  await vintedKeepSignedIn(deadline);
   const id = vintedAccountId(await importGet('vinted', `${VINTED_ORIGIN}/api/v2/users/current`, deadline));
   if (!id) throw marketplaceError('Sign in to Vinted in Chrome first.', { code: 'signed_out' });
   return id;

@@ -45,7 +45,7 @@ function ensureMarketplaceRequestContext() {
         marketplaceHeaderRule(17005, { Origin: 'https://poshmark.com', Referer: 'https://poshmark.com/create-listing' },
           '^https://poshmark\\.com/(vm-rest/|api/|create-listing$)', ['get', 'post', 'put', 'delete']),
         marketplaceHeaderRule(17024, { Origin: 'https://www.vinted.com', Referer: 'https://www.vinted.com/' },
-          '^https://www\\.vinted\\.com/(items/new|api/v2/users/current|api/v2/items/\\d+(/delete)?)(\\?|$)', ['get', 'post']),
+          '^https://www\\.vinted\\.com/(items/new|web/api/auth/refresh|api/v2/users/current|api/v2/items/\\d+(/delete)?)(\\?|$)', ['get', 'post']),
         marketplaceHeaderRule(17025, { Origin: 'https://www.vinted.com', Referer: 'https://www.vinted.com/items/new' },
           '^https://www\\.vinted\\.com/api/v2/item_upload/(catalogs|colors|brands|attributes|size_groups|items(/\\d+)?|drafts(/\\d+(/completion)?)?)(\\?|$)', ['get', 'post', 'put']),
         marketplaceHeaderRule(17026, { Origin: 'https://www.vinted.com', Referer: 'https://www.vinted.com/items/new' },

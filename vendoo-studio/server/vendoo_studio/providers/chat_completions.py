@@ -57,6 +57,32 @@ def parse_evidence(content: str) -> dict:
     return {"evidence": {}, "raw": content}
 
 
+class EmptyCompletionError(RuntimeError):
+    """A model finished a reply without any visible text.
+
+    Reasoning models sometimes spend the whole reply thinking and stop before
+    writing the answer, which arrives as an empty reply rather than an HTTP
+    error. Naming what came back makes that retryable instead of mystifying.
+    """
+
+    def __init__(self, label: str, model: str, finish: str = "", reasoning_chars: int = 0):
+        if reasoning_chars:
+            detail = f"streamed {reasoning_chars:,} characters of reasoning but no answer"
+        else:
+            detail = "returned no answer"
+        if finish:
+            detail += f" (finish: {finish})"
+        super().__init__(f"{label} ({model}) {detail}.")
+
+
+def finish_reason(payload: dict) -> str:
+    """The reply's ``finish_reason``, when the provider sent one."""
+    choices = payload.get("choices") or []
+    choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+    value = choice.get("finish_reason")
+    return value if isinstance(value, str) and value else ""
+
+
 @dataclass(frozen=True)
 class ModelEntry:
     """One model in a provider's catalog, with what its picker needs."""
@@ -184,13 +210,32 @@ class ChatCompletionsProvider:
             async for chunk in self._stream(messages, model):
                 yielded = True
                 yield chunk
+            return
+        except EmptyCompletionError as exc:
+            first = exc
         except Exception:
             if yielded:
                 raise
             yield await self._complete(messages, model)
             return
         if not yielded:
-            yield await self._complete(messages, model)
+            # Nothing arrived over the stream; one plain request may still work.
+            try:
+                yield await self._complete(messages, model)
+                return
+            except EmptyCompletionError as exc:
+                raise RuntimeError(f"{first} {exc}") from exc
+        # A reasoning model can spend the whole reply thinking and stop before
+        # writing the listing. Ask again with reasoning off so the visible answer
+        # gets the entire budget. A model that always reasons ignores the flag, so
+        # the second try can fail the same way; both reasons are then reported.
+        try:
+            async for chunk in self._stream(messages, model, reasoning=False):
+                yield chunk
+        except EmptyCompletionError as exc:
+            raise RuntimeError(f"{first} Retried with reasoning off and {exc}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"{first} Retrying with reasoning off failed: {exc}") from exc
 
     async def vision_chat(self, messages: list[dict]):
         yield await self._complete(messages, self.vision_model)
@@ -198,9 +243,13 @@ class ChatCompletionsProvider:
     async def quick_chat(self, messages: list[dict]):
         yield await self._complete(messages, self.listing_model)
 
-    def _body(self, messages: list[dict], model: str, **extra) -> dict:
+    def _body(self, messages: list[dict], model: str, *, reasoning: bool = True, **extra) -> dict:
         body = {"model": model, "messages": messages, **extra}
-        if self.reasoning_effort and model == self.listing_model:
+        if self.spec.reasoning and not reasoning:
+            # OpenRouter's switch for a reply that does not think first. Models
+            # that always reason ignore it.
+            body["reasoning"] = {"enabled": False}
+        elif self.reasoning_effort and model == self.listing_model:
             body["reasoning"] = {"effort": self.reasoning_effort}
         return body
 
@@ -212,13 +261,16 @@ class ChatCompletionsProvider:
         return resp.json()
 
     async def _complete(self, messages: list[dict], model: str) -> str:
-        text = chunk_text(await self._post(self._body(messages, model)))
-        if not text:
-            raise RuntimeError(f"{self.spec.label} returned an empty response")
+        payload = await self._post(self._body(messages, model))
+        text = chunk_text(payload)
+        if not text.strip():
+            raise EmptyCompletionError(
+                self.spec.label, model, finish_reason(payload), len(chunk_thinking(payload)),
+            )
         return text
 
-    async def _stream(self, messages: list[dict], model: str):
-        body = self._body(messages, model, stream=True)
+    async def _stream(self, messages: list[dict], model: str, *, reasoning: bool = True):
+        body = self._body(messages, model, reasoning=reasoning, stream=True)
         async with httpx.AsyncClient(timeout=300) as client:
             async with client.stream(
                 "POST", f"{self.base_url}/chat/completions", headers=self._headers(), json=body
@@ -226,6 +278,9 @@ class ChatCompletionsProvider:
                 if resp.status_code >= 400:
                     await resp.aread()
                     raise RuntimeError(self._http_error(resp))
+                content_chars = 0
+                reasoning_chars = 0
+                finish = ""
                 async for line in resp.aiter_lines():
                     data = line[5:].strip() if line.startswith("data:") else line.strip()
                     if not data or data.startswith(":"):
@@ -236,12 +291,17 @@ class ChatCompletionsProvider:
                         payload = json.loads(data)
                     except json.JSONDecodeError:
                         continue
+                    finish = finish_reason(payload) or finish
                     thinking = chunk_thinking(payload)
                     if thinking:
+                        reasoning_chars += len(thinking)
                         yield StreamChunk(thinking, "thinking")
                     text = chunk_text(payload)
                     if text:
+                        content_chars += len(text.strip())
                         yield StreamChunk(text, "content")
+                if not content_chars:
+                    raise EmptyCompletionError(self.spec.label, model, finish, reasoning_chars)
 
 
 def openrouter_sources(payload: dict) -> list[dict]:

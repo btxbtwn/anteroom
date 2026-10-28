@@ -100,6 +100,7 @@ test('Vinted request context covers the signed-in read and delete, and nothing e
   const target = new RegExp(rule.condition.regexFilter);
   for (const url of [
     'https://www.vinted.com/items/new',
+    'https://www.vinted.com/web/api/auth/refresh',
     'https://www.vinted.com/api/v2/users/current',
     'https://www.vinted.com/api/v2/items/42',
     'https://www.vinted.com/api/v2/items/42/delete',

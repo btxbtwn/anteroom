@@ -123,6 +123,32 @@ def test_chat_completions_streams_thinking_and_text(fake_http):
     assert "temperature" not in body and "max_tokens" not in body
 
 
+def test_reasoning_only_stream_is_retried_without_reasoning(fake_http):
+    replies = iter([
+        sse(
+            {"choices": [{"delta": {"reasoning_content": "weighing it"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+        ),
+        sse({"choices": [{"delta": {"content": "Listing"}}]}),
+    ])
+    calls = fake_http(lambda request: httpx.Response(200, content=next(replies)))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "listing-m")
+    chunks = run(collect(provider.chat([{"role": "user", "content": "go"}])))
+    assert chunks == [StreamChunk("weighing it", "thinking"), StreamChunk("Listing", "content")]
+    assert len(calls) == 2
+    assert json.loads(calls[1].content)["reasoning"] == {"enabled": False}
+
+
+def test_no_text_after_retry_names_the_finish_reason(fake_http):
+    calls = fake_http(lambda request: httpx.Response(200, content=sse(
+        {"choices": [{"delta": {"reasoning_content": "hmm"}, "finish_reason": "length"}]},
+    )))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "listing-m")
+    with pytest.raises(RuntimeError, match="streamed 3 characters of reasoning but no answer \\(finish: length\\)"):
+        run(collect(provider.chat([{"role": "user", "content": "go"}])))
+    assert len(calls) == 2
+
+
 def test_chat_with_photos_uses_the_vision_model(fake_http):
     calls = fake_http(lambda request: httpx.Response(200, json={"choices": [{"message": {"content": "seen"}}]}))
     provider = ChatCompletionsProvider(KEY_PROVIDERS["gemini"], "g", "vision-m", "listing-m")

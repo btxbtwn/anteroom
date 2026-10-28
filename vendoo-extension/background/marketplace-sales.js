@@ -187,6 +187,7 @@ async function sellwildSales(ids) {
 
 async function vintedSales(ids) {
   await ensureMarketplaceRequestContext();
+  await vintedKeepSignedIn(Date.now() + 20000);
   const account = vintedAccountId(await saleJson('https://www.vinted.com/api/v2/users/current', { credentials: 'include' }));
   if (!account) throw new Error('Seller not found');
   const pending = new Set(ids);

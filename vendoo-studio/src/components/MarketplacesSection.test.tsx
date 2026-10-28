@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts } from "../api/nativeMarketplaces";
-import { MarketplacesSection, askChatPrompt, deletable, facebookCheckText, rowStatus } from "./MarketplacesSection";
+import { MarketplacesSection, askChatPrompt, deletable, facebookCheckText, reconnectText, rowStatus } from "./MarketplacesSection";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -149,6 +149,14 @@ describe("marketplaces section", () => {
     const later = new Date(Date.now() + 60_000).toISOString();
     const limited = render({ poshmark: { state: "not_saved", error: "Poshmark is busy.", error_code: "rate_limited", retry_after: later } }, {}, { selected: "poshmark" });
     expect(/<button[^>]*disabled=""[^>]*>Retry in \d+s<\/button>/.test(limited)).toBe(true);
+  });
+
+  it("says what a reconnect found instead of leaving the last refusal as the answer", () => {
+    expect(reconnectText("Vinted", { ok: true, signed_in: true, state: "signed_in", label: "betwixtandbetween" }))
+      .toBe("Vinted is connected as betwixtandbetween. Press List… again to list this item.");
+    expect(reconnectText("Vinted", { ok: true, signed_in: false, state: "signed_out" }))
+      .toContain("Vinted still needs a sign-in");
+    expect(reconnectText("Vinted", undefined)).toBeNull();
   });
 
   it("asks chat to fix the named fields, not to list", () => {
