@@ -3,7 +3,6 @@ import {
   catalogLeafChoices,
   categoryChoiceAt,
   categoryMenu,
-  categorySteps,
   pathCategoryChoices,
 } from "./categoryTree";
 
@@ -28,10 +27,6 @@ describe("category tree menus", () => {
       ["Shoes", true],
       ["Tops", true],
     ]);
-    expect(categorySteps(choices, ["Fashion", "Shoes"]).map((step) => step.value)).toEqual([
-      "Fashion",
-      "Fashion > Shoes",
-    ]);
     expect(categoryChoiceAt(choices, ["Fashion", "Shoes"])?.id).toBe("69");
   });
 
@@ -44,12 +39,6 @@ describe("category tree menus", () => {
     expect(categoryMenu(depop, ["Men", "Bottoms"])?.items.map((item) => [item.label, item.terminal])).toEqual([
       ["Jeans", true],
     ]);
-    expect(categorySteps(depop, ["Men", "Bottoms", "Jeans"]).map((step) => step.value)).toEqual([
-      "Men",
-      "Men > Bottoms",
-      "Men > Bottoms > Jeans",
-    ]);
-    expect(categorySteps(depop, ["Men"]).map((step) => step.value)).toEqual(["Men", ""]);
     expect(categoryChoiceAt(depop, ["Men", "Bottoms"])).toBeUndefined();
     expect(categoryChoiceAt(depop, ["Men", "Bottoms", "Jeans"])?.id).toBe("menswear_jeans");
   });
@@ -65,7 +54,6 @@ describe("category tree menus", () => {
       ["Shoes", true],
     ]);
     expect(categoryMenu(choices, ["Men", "Shirts"])?.items.map((item) => item.label)).toEqual(["None", "Tees"]);
-    expect(categorySteps(choices, ["Men", "Shoes"]).map((step) => step.value)).toEqual(["Men", "Men > Shoes"]);
   });
 
   it("keeps a category that is itself a choice open for narrower rows", () => {
@@ -94,6 +82,13 @@ describe("category tree menus", () => {
       label: "Condition",
       options: ["Good"],
     })).toBeNull();
+    expect(pathCategoryChoices({
+      key: "sellwild_specifics.nativeCategoryId",
+      label: "Category",
+      options: ["Vehicles | Cars"],
+      optionValues: { "Vehicles | Cars": "43" },
+    })).toEqual([{ label: "Vehicles | Cars", id: "43" }]);
+    expect(categoryMenu([{ label: "Vehicles | Cars", id: "43" }], [])?.items.map((item) => item.label)).toEqual(["Vehicles"]);
   });
 
   it("reads leaves from a synced category tree", () => {

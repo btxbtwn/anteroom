@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.477 — 2026-10-28
+
+- Category fields now read as one path, with an arrow between each level: Women → Jeans, or Women → Global & Traditional Wear → Kilts.
+- Choosing a category opens the same department-and-group picker on every marketplace form, one level at a time, instead of a long dropdown. The saved category stays visible if the marketplace no longer offers it, so you can replace it rather than lose it.
+- Poshmark’s Category and Subcategory keep their own control, with an arrow between them so the next choice reads as a step.
+
 ## 0.1.476 — 2026-10-28
 
 - The Depop tab now follows Depop’s sell page: the description placeholder, the 1,000-character counter and the hashtag counter, US$ on the price, your shipping address, and suggested package sizes. List sends the same package size Depop’s page would. Worldwide shipping’s price appears, with US$, only when you turn that offer on.

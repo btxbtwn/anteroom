@@ -7,7 +7,7 @@ import { ChevronDownIcon, ChevronsUpDownIcon, XIcon } from "lucide-react";
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { catalogLeafChoices, categoryChoiceAt, categoryPathKey, categorySegments, categorySteps, type CategoryChoice } from "./categoryTree";
+import { catalogLeafChoices, categoryChoiceAt, categoryMenu, categoryPathKey, categorySegments, type CategoryChoice, type CategoryItem } from "./categoryTree";
 import { cn } from "../lib/utils";
 import { Combobox, ComboboxCollection, ComboboxEmpty, ComboboxGroup, ComboboxGroupLabel, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup, ComboboxTrigger } from "./ui/combobox";
 import { toggleVariants } from "./ui/toggle";
@@ -229,8 +229,81 @@ export function SearchableSelect({
 }
 
 /**
- * Grouped category dropdowns. The seller keeps picking until the row is the
- * last one in its branch. A group does not save, so the form stays put.
+ * A category button that drills one level at a time, the way Poshmark's
+ * category picker works. The chosen path reads with an arrow between levels.
+ */
+export function CategoryDrilldown({
+  id, fieldKey, value, choices, disabled, placeholder = "Choose a category", onChange,
+}: {
+  id: string;
+  fieldKey?: string;
+  value: readonly string[];
+  choices: readonly CategoryChoice[];
+  disabled?: boolean;
+  placeholder?: string;
+  onChange: (choice: CategoryChoice) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [drill, setDrill] = React.useState<string[] | null>(null);
+  const root = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open]);
+  const menu = open ? categoryMenu(choices, drill ?? []) : null;
+  const selectedKey = categoryPathKey(value);
+  const choose = (item: CategoryItem) => {
+    const choice = categoryChoiceAt(choices, item.path);
+    if (choice) {
+      onChange(choice);
+      setOpen(false);
+      setDrill(null);
+      return;
+    }
+    setDrill(item.path);
+  };
+  return (
+    <div ref={root} className="relative min-w-0">
+      <button type="button" id={id} data-listing-field={fieldKey}
+        aria-haspopup="listbox" aria-expanded={open} disabled={disabled}
+        className="flex h-8.5 w-full items-center justify-between gap-2 rounded-lg border border-input bg-background px-3 text-left text-base shadow-xs/5 disabled:opacity-64 sm:h-7.5 sm:text-sm"
+        onClick={() => { setDrill(null); setOpen((current) => !current); }}>
+        <span className={cn("truncate", !value.length && "text-muted-foreground")}>
+          {value.length ? value.join(" → ") : placeholder}
+        </span>
+        <ChevronDownIcon aria-hidden="true" className="size-3.5 shrink-0 text-icon-muted opacity-80" />
+      </button>
+      {open && menu && <ul role="listbox" aria-label="Category" className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-md">
+        {drill?.length ? <li role="option" aria-selected={false}>
+          <button type="button" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" onClick={() => setDrill(null)}>
+            All categories
+          </button>
+        </li> : null}
+        {menu.items.map((item) => {
+          const key = categoryPathKey(item.path);
+          return <li key={key} role="option" aria-selected={key === selectedKey}>
+            <button type="button" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" onClick={() => choose(item)}>{item.label}</button>
+          </li>;
+        })}
+      </ul>}
+    </div>
+  );
+}
+
+/**
+ * A category path picker. The seller drills one level per step, as Poshmark's
+ * selector does, and a group does not save until a real category is chosen.
  */
 export function CategoryTreeSelect({
   id, fieldKey, value, choices, disabled, onChange,
@@ -242,53 +315,15 @@ export function CategoryTreeSelect({
   disabled?: boolean;
   onChange: (choice: CategoryChoice) => void;
 }) {
-  // A group is not saved. This remembers the open branch; the parent remounts the control when the saved category changes.
-  const [path, setPath] = React.useState<string[] | null>(null);
-  const selected = path ?? categorySegments(value);
-  const selectedKey = categoryPathKey(selected);
-  const steps = React.useMemo(
-    () => categorySteps(choices, selectedKey ? categorySegments(selectedKey) : []),
-    [choices, selectedKey],
-  );
-  const atLeaf = categoryChoiceAt(choices, selected);
-  const savedKnown = Boolean(value) && Boolean(categoryChoiceAt(choices, categorySegments(value)));
-  const hasDeeper = steps.some((step) => step.menu.items.some((item) => !item.terminal));
-  const choose = (next: string, index: number) => {
-    if (!next) {
-      if (index === 0) return;
-      const previous = steps[index - 1]?.value;
-      setPath(previous ? categorySegments(previous) : []);
-      return;
-    }
-    const nextPath = categorySegments(next);
-    setPath(nextPath);
-    const choice = categoryChoiceAt(choices, nextPath);
-    if (choice) onChange(choice);
-  };
-  if (!steps.length) {
+  const selected = categorySegments(value);
+  const savedKnown = Boolean(value) && Boolean(categoryChoiceAt(choices, selected));
+  if (!choices.length) {
     return <p role="status" className="text-xs text-muted-foreground">No categories are available yet. Reopen the listing to try again.</p>;
   }
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      {steps.map((step, index) => (
-        <NativeSelect
-          key={`level-${index}`}
-          id={index === 0 ? id : `${id}-level-${index}`}
-          data-listing-field={index === 0 ? fieldKey : undefined}
-          aria-label={index === 0 ? undefined : "Next category"}
-          disabled={disabled}
-          value={step.value}
-          onChange={(event) => choose(event.target.value, index)}
-        >
-          <option value="">{index === 0 ? "Choose a category" : "Choose a narrower category"}</option>
-          {step.menu.items.map((item) => {
-            const key = categoryPathKey(item.path);
-            return <option key={key} value={key}>{item.label}</option>;
-          })}
-        </NativeSelect>
-      ))}
-      {!atLeaf && hasDeeper && <p className="text-xs text-muted-foreground">Choose a category group, then continue until the last one.</p>}
-      {Boolean(value) && !savedKnown && path == null && (
+      <CategoryDrilldown id={id} fieldKey={fieldKey} value={selected} choices={choices} disabled={disabled} onChange={onChange} />
+      {Boolean(value) && !savedKnown && (
         <p role="alert" className="text-xs text-warning-foreground">Saved category “{value}” is not in this list. Choose one to replace it.</p>
       )}
     </div>
@@ -475,8 +510,6 @@ export interface CascadeCategory {
   type: "category";
   label: string;
   value: string;
-  /** What the closed category dropdown reads, such as "Women Jeans". */
-  display: string;
   children: { label: string; value: string }[];
 }
 
@@ -492,20 +525,34 @@ export interface CascadeDepartment {
   items: (CascadeCategory | CascadeGroup)[];
 }
 
-type Drill = { department: string; group?: string };
+type CascadeMatch = { category: CascadeCategory; department: CascadeDepartment; group?: CascadeGroup };
 
-function cascadeMatch(departments: readonly CascadeDepartment[], value: string): { category: CascadeCategory; department: CascadeDepartment } | null {
+function cascadeMatch(departments: readonly CascadeDepartment[], value: string): CascadeMatch | null {
   for (const department of departments) {
-    const categories = department.items.flatMap(item => item.type === "group" ? item.items : [item]);
-    const category = categories.find(item => item.value === value || item.children.some(child => child.value === value));
-    if (category) return { category, department };
+    for (const item of department.items) {
+      const categories = item.type === "group" ? item.items : [item];
+      const category = categories.find((row) => row.value === value || row.children.some((child) => child.value === value));
+      if (category) return { category, department, ...(item.type === "group" ? { group: item } : {}) };
+    }
   }
   return null;
 }
 
+function cascadeChoices(departments: readonly CascadeDepartment[]): CategoryChoice[] {
+  return departments.flatMap((department) => department.items.flatMap((item) => {
+    if (item.type === "group") {
+      return item.items.map((category) => ({
+        label: [department.label, item.label, category.label].join(" > "), id: category.value,
+      }));
+    }
+    return [{ label: [department.label, item.label].join(" > "), id: item.value }];
+  }));
+}
+
 /**
- * Two dropdowns. The first drills departments, then categories, then a group.
- * The second lists that category's subcategories and None.
+ * Poshmark's category picker: the category drills departments, groups and
+ * categories, the selected path reads with arrows, and the subcategory sits
+ * beside it when the category has narrower choices.
  */
 export function DependentSelectPair({
   id, value, departments, disabled, onChange,
@@ -517,64 +564,27 @@ export function DependentSelectPair({
   onChange: (value: string) => void;
 }) {
   const match = cascadeMatch(departments, value);
-  const [open, setOpen] = React.useState(false);
-  const [drill, setDrill] = React.useState<Drill | null>(null);
-  const root = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-  const level = open ? drill : null;
-  const department = departments.find(entry => entry.id === level?.department);
-  const options: { key: string; label: string; pick: () => void }[] = [];
-  if (!department) {
-    for (const entry of departments) options.push({
-      key: entry.id, label: entry.label, pick: () => setDrill({ department: entry.id }),
-    });
-  } else {
-    options.push({ key: "all", label: "All Categories", pick: () => setDrill(null) });
-    const items = level?.group
-      ? (department.items.find(item => item.type === "group" && item.label === level.group) as CascadeGroup | undefined)?.items || []
-      : department.items;
-    for (const item of items) {
-      if (item.type === "group") options.push({ key: item.label, label: item.label, pick: () => setDrill({ department: department.id, group: item.label }) });
-      else options.push({
-        key: item.value, label: item.label, pick: () => {
-          onChange(item.value);
-          setOpen(false);
-          setDrill(null);
-        },
-      });
-    }
-  }
-  const subcategory = match && match.category.children.find(child => child.value === value && child.value !== match.category.value);
+  const choices = React.useMemo(() => cascadeChoices(departments), [departments]);
+  const path = match ? [match.department.label, ...(match.group ? [match.group.label] : []), match.category.label] : [];
+  const subcategory = match && match.category.children.find((child) => child.value === value && child.value !== match.category.value);
   return (
-    <div ref={root} className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-      <div className="relative min-w-0">
+    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end">
+      <div className="min-w-0 sm:flex-1">
         <FieldLabel htmlFor={id}>Category</FieldLabel>
-        <button type="button" id={id} data-listing-field={id} aria-haspopup="listbox" aria-expanded={open} disabled={disabled}
-          className="flex h-8.5 w-full items-center truncate rounded-lg border border-input bg-background px-3 text-left text-base shadow-xs/5 sm:h-7.5 sm:text-sm disabled:opacity-64"
-          onClick={() => { setDrill(null); setOpen(current => !current); }}>
-          {match ? match.category.display : "Select Category"}
-        </button>
-        {open && <ul role="listbox" aria-label="Category" className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border bg-popover p-1 shadow-md">
-          {options.map(option => <li key={option.key} role="option" aria-selected={option.label === match?.department.label}>
-            <button type="button" className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent" onClick={option.pick}>{option.label}</button>
-          </li>)}
-        </ul>}
+        <CategoryDrilldown id={id} value={path} choices={choices} disabled={disabled} placeholder="Select Category"
+          onChange={(choice) => onChange(choice.id)} />
       </div>
-      {match?.category.children.length ? <div className="min-w-0">
-        <FieldLabel htmlFor={`${id}-subcategory`}>Subcategory</FieldLabel>
-        <NativeSelect id={`${id}-subcategory`} aria-label="Subcategory" disabled={disabled}
-          value={subcategory?.value || ""} onChange={event => onChange(event.target.value || match.category.value)}>
-          <option value="">Select Subcategory (optional)</option>
-          {match.category.children.map(child => <option key={`${child.label}-${child.value}`} value={child.value}>{child.label}</option>)}
-        </NativeSelect>
-      </div> : null}
+      {match?.category.children.length ? <>
+        <span aria-hidden="true" className="hidden shrink-0 pb-2 text-muted-foreground sm:inline">→</span>
+        <div className="min-w-0 sm:flex-1">
+          <FieldLabel htmlFor={`${id}-subcategory`}>Subcategory</FieldLabel>
+          <NativeSelect id={`${id}-subcategory`} aria-label="Subcategory" disabled={disabled}
+            value={subcategory?.value || ""} onChange={(event) => onChange(event.target.value || match.category.value)}>
+            <option value="">Select Subcategory (optional)</option>
+            {match.category.children.map((child) => <option key={`${child.label}-${child.value}`} value={child.value}>{child.label}</option>)}
+          </NativeSelect>
+        </div>
+      </> : null}
     </div>
   );
 }

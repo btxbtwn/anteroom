@@ -68,56 +68,44 @@ describe("marketplace choice controls", () => {
 describe("category tree dropdown", () => {
   const ignore = () => { throw new Error("Rendering must not save"); };
 
-  it("opens the next level once a first-level category is saved", () => {
-    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
-      value="Fashion > Shoes" choices={[
-        { label: "Fashion > Shoes", id: "69" },
-        { label: "Fashion > Tops", id: "70" },
-        { label: "Home & Garden > Furniture", id: "61" },
-      ]} onChange={ignore} />);
-    expect(html.match(/<select/g)).toHaveLength(2);
-    expect(html).toContain(">Fashion</option>");
-    expect(html).toContain(">Home &amp; Garden</option>");
-    expect(html).toContain(">Shoes</option>");
-    expect(html).not.toContain("<optgroup");
-    expect(html).toContain('data-listing-field="sellwild_specifics.nativeCategoryId"');
-    expect(html).not.toContain("continue until the last one");
-  });
-
-  it("shows department, group and item as three dropdowns", () => {
+  it("shows the chosen path with an arrow between each level", () => {
     const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.depop"
       value="Men > Bottoms > Jeans" choices={[
         { label: "Men > Bottoms > Jeans", id: "menswear_jeans" },
         { label: "Men > Tops > T-shirts", id: "menswear_tshirts" },
         { label: "Women > Dresses > Mini", id: "womenswear_mini" },
       ]} onChange={ignore} />);
-    expect(html.match(/<select/g)).toHaveLength(3);
-    expect(html).toContain(">Men</option>");
-    expect(html).toContain(">Women</option>");
-    expect(html).toContain(">Bottoms</option>");
-    expect(html).toContain(">Jeans</option>");
-    expect(html).toContain('aria-label="Next category"');
-    expect(html).not.toContain("continue until the last one");
+    expect(html).toContain("Men → Bottoms → Jeans");
+    expect(html).toContain('aria-haspopup="listbox"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('data-listing-field="direct_category_ids.depop"');
+    expect(html).not.toContain("<select");
   });
 
-  it("does not ask for another step when every row in the list is a last step", () => {
+  it("asks for a category when none is chosen yet", () => {
     const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
       value="" choices={[
         { label: "Shoes", id: "69" },
         { label: "Furniture", id: "61" },
       ]} onChange={ignore} />);
-    expect(html).not.toContain("continue until the last one");
-    expect(html).toContain(">Shoes</option>");
+    expect(html).toContain("Choose a category");
+    expect(html).toContain('data-listing-field="sellwild_specifics.nativeCategoryId"');
   });
 
-  it("asks the seller to continue when no category is chosen yet", () => {
+  it("keeps a saved category that is outside the list and asks the seller to replace it", () => {
     const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.mercari"
-      value="" choices={[
+      value="Kids > Girls tops > Gone" choices={[
         { label: "Kids > Girls tops > Girls (4+)", id: "1911" },
       ]} onChange={ignore} />);
-    expect(html).toContain("Choose a category group, then continue until the last one.");
-    expect(html).toContain(">Kids</option>");
-    expect(html.match(/<select/g)).toHaveLength(1);
+    expect(html).toContain("Kids → Girls tops → Gone");
+    expect(html).toContain("Saved category");
+    expect(html).toContain('role="alert"');
+  });
+
+  it("says when the marketplace gave no categories", () => {
+    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.mercari"
+      value="" choices={[]} onChange={ignore} />);
+    expect(html).toContain("No categories are available yet.");
   });
 });
 
@@ -126,27 +114,28 @@ describe("dependent category dropdowns", () => {
     id: "women",
     label: "Women",
     items: [
-      { type: "category" as const, label: "Jeans", value: "women/jeans", display: "Women Jeans", children: [
+      { type: "category" as const, label: "Jeans", value: "women/jeans", children: [
         { label: "Skinny", value: "women/jeans/skinny" }, { label: "None", value: "women/jeans" },
       ] },
       { type: "group" as const, label: "Global & Traditional Wear", items: [
-        { type: "category" as const, label: "Kilts", value: "women/kilts", display: "Women Kilts", children: [] },
+        { type: "category" as const, label: "Kilts", value: "women/kilts", children: [] },
       ] },
     ],
   }];
 
-  it("shows the department and category together, and the subcategory beside it", () => {
+  it("shows the department, group and category with arrows, and the subcategory beside it", () => {
     const html = renderToStaticMarkup(<DependentSelectPair id="category" value="women/jeans/skinny" departments={departments} onChange={() => {}} />);
-    expect(html).toContain("Women Jeans");
+    expect(html).toContain("Women → Jeans");
     expect(html).toContain("Subcategory");
+    expect(html).toContain("→</span>");
     expect(html).toContain(">Skinny</option>");
     expect(html).toContain(">None</option>");
     expect(html).toContain("Select Subcategory (optional)");
   });
 
-  it("leaves subcategory empty when the category has no narrower choices", () => {
+  it("shows a group in the chosen path", () => {
     const html = renderToStaticMarkup(<DependentSelectPair id="category" value="women/kilts" departments={departments} onChange={() => {}} />);
-    expect(html).toContain("Women Kilts");
+    expect(html).toContain("Women → Global &amp; Traditional Wear → Kilts");
     expect(html).not.toContain("<select");
   });
 });
