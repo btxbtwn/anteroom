@@ -349,7 +349,8 @@ export function ListingSidebar({
                 value={listingQuery}
                 onChange={(e) => handleSearchChange(e.target.value)}
                 className={SEARCH_INPUT_CLASS}
-                placeholder="Search by title, SKU or label"
+                placeholder="Search listings"
+                title="Search by title, SKU or label"
                 aria-label="Search listings by title, SKU or label"
               />
             </label>

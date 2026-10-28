@@ -116,7 +116,7 @@ export function PhotoThumb({
         <LazyImage src={url} className="size-full" />
       </div>
       {numbered ? (
-        <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded-sm bg-black/60 px-1 font-mono text-[9px] text-white/90 leading-3.5 tabular-nums">
+        <span className="pointer-events-none absolute bottom-0.5 left-0.5 rounded-sm bg-black/60 px-1 font-mono text-[10px] text-white leading-3.5 tabular-nums">
           {String(number).padStart(2, "0")}
         </span>
       ) : null}

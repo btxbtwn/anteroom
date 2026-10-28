@@ -809,7 +809,7 @@ export function StructuredEditor({
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
-      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25 [&_textarea]:py-2 [&_textarea]:leading-relaxed" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (multiSelectControl(f)) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
@@ -882,7 +882,7 @@ export function StructuredEditor({
             meta={section.id === "listing" ? null : `${filled} of ${section.fields.length} filled`}
           >
             {/* A marketplace's own page layout keeps its two columns; the general form spreads out when wide. */}
-            <div className={cn("grid min-w-0 grid-cols-2 gap-3 max-[900px]:grid-cols-1", !pageLayout && "@4xl:grid-cols-3")}>
+            <div className={cn("grid min-w-0 grid-cols-2 gap-x-4 gap-y-5 max-[900px]:grid-cols-1", !pageLayout && "@4xl:grid-cols-3")}>
               {section.fields.map((f) => (
                 <div key={f.key} className={cn("min-w-0", (pageLayout ? f.width !== "half" : fullWidth(f)) && "col-span-full")}>
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>

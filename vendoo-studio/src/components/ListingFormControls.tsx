@@ -49,11 +49,11 @@ export function SegmentedTabs<T extends string>({
   );
 }
 
-/** Muted field caption above a control. */
+/** Field caption above a control: dimmer than the value, but still readable. */
 export function FieldLabel({ className, ...props }: React.ComponentProps<"label">) {
   return (
     <label
-      className={cn("mb-1.5 block font-medium text-muted-foreground text-xs", className)}
+      className={cn("mb-1.5 block font-medium text-foreground/75 text-[13px] leading-4", className)}
       {...props}
     />
   );
@@ -63,7 +63,7 @@ export function FieldLabel({ className, ...props }: React.ComponentProps<"label"
 export function SectionHeading({ className, ...props }: React.ComponentProps<"h3">) {
   return (
     <h3
-      className={cn("font-medium text-foreground text-sm", className)}
+      className={cn("font-semibold text-[15px] text-foreground leading-5", className)}
       {...props}
     />
   );
@@ -88,11 +88,11 @@ export function InspectorSection({
     <section
       {...props}
       aria-labelledby={titleId}
-      className={cn("flex min-w-0 flex-col gap-3 border-b py-4 first:pt-1 last:border-b-0", className)}
+      className={cn("flex min-w-0 flex-col gap-4 border-b pt-6 pb-6 first:pt-1 last:border-b-0", className)}
     >
       <div className="flex min-h-7 min-w-0 items-center gap-2">
         <SectionHeading id={titleId} className="shrink-0">{title}</SectionHeading>
-        {meta ? <span className="min-w-0 truncate text-muted-foreground text-xs">{meta}</span> : null}
+        {meta ? <span className="min-w-0 truncate text-muted-foreground text-[13px]">{meta}</span> : null}
         {actions ? <div className="ms-auto flex shrink-0 items-center gap-1">{actions}</div> : null}
       </div>
       {children}

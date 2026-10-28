@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.466 — 2026-10-28
+
+- Listing forms are easier to read: fields stop at a comfortable width instead of stretching across a wide window, section headings stand out from field labels, labels and marketplace statuses are larger, and the description box has more room between lines.
+- In the inventory list, the search box reads “Search listings” instead of cutting off, and the marketplace logos under each listing are larger.
+
 ## 0.1.465 — 2026-10-28
 
 - With Prepaid label, the Mercari tab now asks what Mercari’s label picker asks: the package weight in pounds and ounces, whether it fits in a shoebox, and its length, width and height when it doesn’t. They start from Item Details, the labels offered follow them, and List sends what you set there.
