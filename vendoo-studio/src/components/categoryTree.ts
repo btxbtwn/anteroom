@@ -13,13 +13,8 @@ export interface CategoryItem {
   terminal: boolean;
 }
 
-export interface CategoryGroup {
-  heading: string;
-  items: CategoryItem[];
-}
-
 export interface CategoryMenu {
-  groups: CategoryGroup[];
+  items: CategoryItem[];
 }
 
 export interface CategoryStep {
@@ -51,63 +46,26 @@ function matchesPrefix(parts: readonly string[], prefix: readonly string[]): boo
 }
 
 /**
- * The next dropdown for a path already chosen.
- * A group heading is the category those rows belong to. A row that still has
- * categories under it is not terminal, so the seller can keep going.
+ * The next dropdown for a path already chosen: one level of the tree, as the
+ * marketplaces' own sell pages show it (Men / Women / Kids, then the group,
+ * then the item). A row with categories under it is not terminal, so the
+ * seller keeps going; a row that is itself a choice still saves when picked.
  * One pass: eBay's leaf list is large, and each keystroke must not rescan it.
  */
 export function categoryMenu(choices: readonly CategoryChoice[], prefix: readonly string[]): CategoryMenu | null {
-  const rows: string[][] = [];
-  let deeper = false;
+  const items = new Map<string, CategoryItem>();
   for (const choice of choices) {
     const parts = categorySegments(choice.label);
     if (parts.length <= prefix.length || !matchesPrefix(parts, prefix)) continue;
-    rows.push(parts);
-    if (parts.length > prefix.length + 1) deeper = true;
+    const path = parts.slice(0, prefix.length + 1);
+    const key = categoryPathKey(path);
+    const deeper = parts.length > path.length;
+    const item = items.get(key);
+    if (item) item.terminal &&= !deeper;
+    else items.set(key, { label: path[path.length - 1], path, terminal: !deeper });
   }
-  if (!rows.length) return null;
-  if (!deeper) {
-    const heading = prefix[prefix.length - 1] || "Category";
-    const seen = new Set<string>();
-    const items: CategoryItem[] = [];
-    for (const parts of rows) {
-      const key = categoryPathKey(parts);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      items.push({ label: parts[prefix.length] || key, path: parts, terminal: true });
-    }
-    items.sort(byLabel);
-    return { groups: [{ heading, items }] };
-  }
-  const groups = new Map<string, Map<string, CategoryItem>>();
-  const extended = new Set<string>();
-  for (const parts of rows) {
-    const heading = parts[prefix.length];
-    let items = groups.get(heading);
-    if (!items) {
-      items = new Map();
-      groups.set(heading, items);
-    }
-    if (parts.length === prefix.length + 1) {
-      const key = categoryPathKey(parts);
-      if (!items.has(key)) items.set(key, { label: heading, path: parts, terminal: true });
-    } else {
-      const path = parts.slice(0, prefix.length + 2);
-      const key = categoryPathKey(path);
-      if (parts.length > path.length) extended.add(key);
-      if (!items.has(key)) items.set(key, { label: path[path.length - 1], path, terminal: true });
-    }
-  }
-  for (const items of groups.values()) {
-    for (const [key, item] of items) {
-      if (extended.has(key)) item.terminal = false;
-    }
-  }
-  return {
-    groups: [...groups.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([heading, items]) => ({ heading, items: [...items.values()].sort(byLabel) })),
-  };
+  if (!items.size) return null;
+  return { items: [...items.values()].sort(byLabel) };
 }
 
 /** Each dropdown from the top of the tree through the current selection. */
@@ -117,8 +75,7 @@ export function categorySteps(choices: readonly CategoryChoice[], selected: read
   for (let guard = 0; guard < 8; guard += 1) {
     const menu = categoryMenu(choices, prefix);
     if (!menu) break;
-    const match = menu.groups
-      .flatMap((group) => group.items)
+    const match = menu.items
       .filter((item) => item.path.every((segment, index) => selected[index] === segment))
       .sort((a, b) => b.path.length - a.path.length)[0];
     steps.push({ menu, value: match ? categoryPathKey(match.path) : "" });

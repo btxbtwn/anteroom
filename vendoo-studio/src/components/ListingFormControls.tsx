@@ -252,7 +252,7 @@ export function CategoryTreeSelect({
   );
   const atLeaf = categoryChoiceAt(choices, selected);
   const savedKnown = Boolean(value) && Boolean(categoryChoiceAt(choices, categorySegments(value)));
-  const hasDeeper = steps.some((step) => step.menu.groups.some((group) => group.items.some((item) => !item.terminal)));
+  const hasDeeper = steps.some((step) => step.menu.items.some((item) => !item.terminal));
   const choose = (next: string, index: number) => {
     if (!next) {
       if (index === 0) return;
@@ -281,14 +281,10 @@ export function CategoryTreeSelect({
           onChange={(event) => choose(event.target.value, index)}
         >
           <option value="">{index === 0 ? "Choose a category" : "Choose a narrower category"}</option>
-          {step.menu.groups.map((group) => (
-            <optgroup key={group.heading} label={group.heading}>
-              {group.items.map((item) => {
-                const key = categoryPathKey(item.path);
-                return <option key={key} value={key}>{item.label}</option>;
-              })}
-            </optgroup>
-          ))}
+          {step.menu.items.map((item) => {
+            const key = categoryPathKey(item.path);
+            return <option key={key} value={key}>{item.label}</option>;
+          })}
         </NativeSelect>
       ))}
       {!atLeaf && hasDeeper && <p className="text-xs text-muted-foreground">Choose a category group, then continue until the last one.</p>}

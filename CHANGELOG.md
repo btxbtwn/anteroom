@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.469 — 2026-10-28
+
+- Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
+
 ## 0.1.468 — 2026-10-28
 
 - Depop offer previews recognize the currency in Depop's current listing data, so a US dollar listing is no longer skipped because its currency could not be read.
