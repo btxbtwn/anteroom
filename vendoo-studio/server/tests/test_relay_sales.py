@@ -91,6 +91,36 @@ class RecordSalesTest(unittest.TestCase):
             self.assertEqual(sale.state, "new")
             self.assertEqual(sale.sold_at.isoformat(), "2026-10-24T01:00:00")
 
+    def test_a_depop_sale_finds_its_listing_by_the_slug_it_learned(self):
+        # Depop reports a sale by numeric product ID but links to the item by
+        # slug (/products/<title>-<hash>/), and one cannot be derived from the
+        # other, so the pair has to be remembered.
+        slug = "betwixtandbetweenco-ford-mustang-graphic-tee-a28a"
+        with self.Session() as db:
+            conv = _listing(db, "mustang tee", {
+                "depop": f"https://www.depop.com/products/{slug}/",
+            })
+            conv_id = conv.id
+            relay_sales.record_depop_slug(db, conv, "903068770", slug)
+            sale = relay_sales.record_sale(
+                db, marketplace="depop", order_id="468061004475",
+                line_id="903068770", listing_id="903068770", quantity=None, sold_at=None,
+            )
+            self.assertIsNotNone(sale)
+            self.assertEqual(sale.conversation_id, conv_id)
+
+    def test_a_depop_sale_with_no_learned_slug_is_recorded_unmatched(self):
+        with self.Session() as db:
+            _listing(db, "mustang tee", {
+                "depop": "https://www.depop.com/products/betwixtandbetweenco-ford-mustang-graphic-tee-a28a/",
+            })
+            sale = relay_sales.record_sale(
+                db, marketplace="depop", order_id="1",
+                line_id="903068770", listing_id="903068770", quantity=None, sold_at=None,
+            )
+            self.assertIsNotNone(sale)
+            self.assertIsNone(sale.conversation_id)
+
     def test_unmatched_sales_are_still_recorded(self):
         self.handle(_ebay_event(order="99-1", lines=(("li-9", "5550001111"),)))
         with self.Session() as db:

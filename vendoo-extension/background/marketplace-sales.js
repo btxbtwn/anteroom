@@ -123,10 +123,18 @@ function mercariPageSold(html, id) {
   return sold;
 }
 
+// Mercari answers a scripted page load with a verification challenge rather
+// than the listing, so a sold item never appears in what comes back. Name that
+// instead of asking the seller to sign in again, which cannot fix it.
+function mercariChallengePage(html) {
+  return /Just a moment|__cf_chl|cf-browser-verification|challenge-platform|verify you are human/i.test(html || '');
+}
+
 async function readMercariSales(listingIds) {
   const sales = [];
   let checked = 0;
   let failed = 0;
+  let challenged = 0;
   for (const id of listingIds) {
     if (!MERCARI_ITEM_ID.test(id) || sales.length >= 40) continue;
     checked += 1;
@@ -136,10 +144,14 @@ async function readMercariSales(listingIds) {
         credentials: 'include', headers: { Accept: 'text/html' }, signal: AbortSignal.timeout(15000),
       });
     } catch { failed += 1; continue; }
-    if (!response.ok) { failed += 1; continue; }
     let html = '';
-    try { html = (await response.text()).slice(0, 300000); } catch { failed += 1; continue; }
+    try { html = (await response.text()).slice(0, 300000); } catch { html = ''; }
+    if (mercariChallengePage(html)) { challenged += 1; failed += 1; continue; }
+    if (!response.ok) { failed += 1; continue; }
     if (mercariPageSold(html, id) === true) sales.push({ listing_id: id, order_id: id });
+  }
+  if (checked && challenged === checked) {
+    return { ok: false, error: 'Mercari is asking for browser verification, so its listings cannot be read. Sales there are not detected until that stops.' };
   }
   if (checked && failed === checked) return { ok: false, error: 'Could not check sales.' };
   return { ok: true, sales };

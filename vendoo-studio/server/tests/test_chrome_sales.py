@@ -56,6 +56,38 @@ class ChromeSaleParsingTest(unittest.TestCase):
             self.assertEqual(sale.conversation_id, conv_id)
             self.assertEqual(sale.marketplace, "poshmark")
 
+    def test_a_depop_sale_matches_a_listing_whose_link_ends_in_a_slug(self):
+        # Depop product links carry a slug, not the numeric ID the receipts API
+        # reports, so a link like this used to orphan every sale it recorded.
+        Session = sessionmaker(bind=_engine())
+        listing_id = "762263520"
+        with Session() as db:
+            conv = ConversationRepo(db).create(title="floral blouse")
+            conv.notes = json.dumps({"nativeMarketplaceDrafts": {
+                "depop": {"listing_url": f"https://www.depop.com/products/floral-blouse-{listing_id}/"},
+            }})
+            db.commit()
+            conv_id = conv.id
+        created = chrome_sales.record_reported_sales(
+            "depop", [("468061004475", listing_id)], session_factory=Session,
+        )
+        self.assertEqual(len(created), 1)
+        with Session() as db:
+            self.assertEqual(db.query(MarketplaceSale).one().conversation_id, conv_id)
+
+    def test_the_check_cursor_survives_a_restart(self):
+        # The cursor used to live in module memory, so every restart re-checked
+        # the same first batch and starved the listings after it.
+        saved = chrome_sales._cursor.copy()
+        try:
+            chrome_sales.save_cursor("mercari", 7)
+            chrome_sales._cursor.clear()
+            self.assertEqual(chrome_sales.load_cursor("mercari"), 7)
+            chrome_sales.save_cursor("mercari", 0)
+        finally:
+            chrome_sales._cursor.clear()
+            chrome_sales._cursor.update(saved)
+
     def test_a_turned_off_marketplace_is_not_checked(self):
         user_settings.set_sale_detection("depop", False)
         chrome_sales._last.clear()
@@ -93,3 +125,30 @@ class SaleDetectionRouteTest(unittest.TestCase):
         saved = client.put("/api/settings/sale-detection", json={"marketplace": "sellwild", "enabled": False}).json()
         self.assertFalse(saved["enabled"]["sellwild"])
         self.assertEqual(client.put("/api/settings/sale-detection", json={"marketplace": "facebook", "enabled": True}).status_code, 400)
+
+class CursorRestartTest(unittest.TestCase):
+    def test_listing_ids_to_check_advances_past_a_restart(self):
+        Session = sessionmaker(bind=_engine())
+        ids = [f"m70322377{400 + i}" for i in range(30)]
+        saved = chrome_sales._cursor.copy()
+        try:
+            with Session() as db:
+                for n, mid in enumerate(ids):
+                    conv = ConversationRepo(db).create(title=f"item {n}")
+                    conv.notes = json.dumps({"nativeMarketplaceDrafts": {
+                        "mercari": {"listing_url": f"https://www.mercari.com/us/item/{mid}/"},
+                    }})
+                db.commit()
+            import vendoo_studio.database as database
+            orig = database.SessionLocal
+            database.SessionLocal = Session
+            try:
+                first = chrome_sales.listing_ids_to_check("mercari")
+                chrome_sales._cursor.clear()
+                second = chrome_sales.listing_ids_to_check("mercari")
+            finally:
+                database.SessionLocal = orig
+            self.assertNotEqual(first, second, "a restart re-checked the same batch")
+        finally:
+            chrome_sales._cursor.clear()
+            chrome_sales._cursor.update(saved)

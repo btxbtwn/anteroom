@@ -80,6 +80,27 @@ def normalize_sales(marketplace: str, raw: object) -> list[tuple[str, str]]:
     return found
 
 
+def _cursor_key(marketplace: str) -> str:
+    return f"chrome_sales_cursor_{marketplace}"
+
+
+def load_cursor(marketplace: str) -> int:
+    """Where the last pass stopped, so a restart does not re-check the same first batch forever."""
+    from vendoo_studio.services.user_settings import read_settings
+
+    value = read_settings().get(_cursor_key(marketplace))
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def save_cursor(marketplace: str, position: int) -> None:
+    from vendoo_studio.services.user_settings import update_settings
+
+    def mutator(payload: dict) -> None:
+        payload[_cursor_key(marketplace)] = position
+
+    update_settings(mutator)
+
+
 def listing_ids_to_check(marketplace: str) -> list[str]:
     """Known Mercari or Sellwild listing IDs, a few at a time."""
     from vendoo_studio.database import SessionLocal
@@ -111,8 +132,10 @@ def listing_ids_to_check(marketplace: str) -> list[str]:
                 found.append(listing_id)
     if not found:
         return []
-    start = _cursor.get(marketplace, 0) % len(found)
+    start = _cursor.get(marketplace) or load_cursor(marketplace)
+    start %= len(found)
     _cursor[marketplace] = start + BATCH
+    save_cursor(marketplace, _cursor[marketplace])
     ordered = found[start:] + found[:start]
     return ordered[:BATCH]
 

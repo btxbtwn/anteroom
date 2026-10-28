@@ -30,7 +30,9 @@ LISTING_URL_ID = {
     "etsy": re.compile(r"etsy\.com/(?:[a-z-]+/)?listing/(\d+)", re.I),
     "poshmark": re.compile(r"poshmark\.com/listing/(?:[^/?#]+-)?([a-f0-9]{24})(?:[/?#]|$)", re.I),
     "mercari": re.compile(r"mercari\.com/(?:us/)?item/(m\d{8,14})(?:[/?#]|$)", re.I),
-    "depop": re.compile(r"depop\.com/.*/(\d{5,12})(?:[/?#]|$)", re.I),
+    # Depop links end in a slug, not the product ID: /products/shop-tee-136d/ and
+    # /products/12345678/ both occur, and the receipts API reports the ID alone.
+    "depop": re.compile(r"depop\.com/(?:[^/?#]+/)*?(?:[a-z0-9-]+-)?(\d{5,12})(?:[/?#]|$)", re.I),
     "sellwild": re.compile(r"sellwild\.com/product/(\d{1,12})(?:[/?#]|$)", re.I),
 }
 
@@ -44,24 +46,74 @@ def listing_id_from_url(marketplace: str, url: str | None) -> str | None:
     return found.lower() if marketplace == "poshmark" else found
 
 
+def _linked_urls(marketplace: str, notes: dict) -> list[str]:
+    """Every URL a listing records for one marketplace."""
+    urls = notes.get("vendooListingUrls") or {}
+    marks = notes.get("marketplaceMarks") or {}
+    mark = marks.get(marketplace) if isinstance(marks, dict) else None
+    native = notes.get("nativeMarketplaceDrafts") or {}
+    binding = native.get(marketplace) if isinstance(native, dict) else None
+    return [u for u in (
+        urls.get(marketplace) if isinstance(urls, dict) else None,
+        mark.get("url") if isinstance(mark, dict) and mark.get("state") == "listed" else None,
+        binding.get("listing_url") if isinstance(binding, dict) else None,
+    ) if isinstance(u, str) and u]
+
+
 def find_listing(db: Session, marketplace: str, listing_id: str | None) -> Conversation | None:
     """The Studio listing whose Vendoo-reported or seller-linked URL on ``marketplace`` has this ID."""
     if not listing_id:
         return None
     rows = db.query(Conversation).filter(Conversation.notes.contains(listing_id)).all()
     for conv in rows:
-        notes = parse_notes(conv.notes)
-        urls = notes.get("vendooListingUrls") or {}
-        marks = notes.get("marketplaceMarks") or {}
-        mark = marks.get(marketplace) if isinstance(marks, dict) else None
-        native = notes.get("nativeMarketplaceDrafts") or {}
-        binding = native.get(marketplace) if isinstance(native, dict) else None
-        linked = [urls.get(marketplace) if isinstance(urls, dict) else None,
-                  mark.get("url") if isinstance(mark, dict) and mark.get("state") == "listed" else None,
-                  binding.get("listing_url") if isinstance(binding, dict) else None]
-        if any(listing_id_from_url(marketplace, url) == listing_id for url in linked):
+        if any(listing_id_from_url(marketplace, url) == listing_id
+               for url in _linked_urls(marketplace, parse_notes(conv.notes))):
             return conv
     return None
+
+
+def find_depop_listing_by_slug(db: Session, slug: str | None) -> Conversation | None:
+    """The listing whose Depop URL is this slug.
+
+    Depop opens a product at ``/products/<title-slug>-<hash>/`` but reports a sale
+    by the numeric product ID, and the slug cannot be derived from it. A sale
+    carries the slug once ``record_depop_slug`` has seen it, so matching walks
+    the stored links rather than trusting the reported ID.
+    """
+    if not slug or "/" in slug:
+        return None
+    rows = db.query(Conversation).filter(Conversation.notes.contains(slug)).all()
+    for conv in rows:
+        if any((url.rstrip("/").rsplit("/", 1)[-1]) == slug
+               for url in _linked_urls("depop", parse_notes(conv.notes))):
+            return conv
+    return None
+
+
+DEPOP_SLUG_IDS_KEY = "depopProductSlugs"
+
+
+def depop_slug_for(db: Session, listing_id: str) -> str | None:
+    """The Depop slug already learned for a numeric product ID."""
+    for conv in db.query(Conversation).filter(Conversation.notes.contains(DEPOP_SLUG_IDS_KEY)).all():
+        known = parse_notes(conv.notes).get(DEPOP_SLUG_IDS_KEY)
+        if isinstance(known, dict) and isinstance(known.get(listing_id), str):
+            return known[listing_id]
+    return None
+
+
+def record_depop_slug(db: Session, conv: Conversation, listing_id: str, slug: str) -> None:
+    """Remember that this Depop product ID and slug are the same listing."""
+    from vendoo_studio.services.vendoo_import import merge_notes
+
+    notes = parse_notes(conv.notes)
+    known = notes.get(DEPOP_SLUG_IDS_KEY)
+    known = dict(known) if isinstance(known, dict) else {}
+    if known.get(listing_id) == slug:
+        return
+    known[listing_id] = slug
+    conv.notes = merge_notes(conv.notes, {DEPOP_SLUG_IDS_KEY: known})
+    db.commit()
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -94,6 +146,10 @@ def record_sale(
     if exists:
         return None
     conv = find_listing(db, marketplace, listing_id)
+    if conv is None and marketplace == "depop" and listing_id:
+        # Depop names a sale by product ID but links to it by slug, and the two
+        # cannot be derived from each other. Use the pair learned earlier.
+        conv = find_depop_listing_by_slug(db, depop_slug_for(db, listing_id))
     sale = MarketplaceSale(
         marketplace=marketplace,
         order_id=order_id,

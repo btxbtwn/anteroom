@@ -1,6 +1,6 @@
 [project]
 name = "vendoo-studio"
-version = "0.1.344"
+version = "0.1.345"
 description = "Local web app for generating and automating Vendoo marketplace listings"
 requires-python = ">=3.12"
 dependencies = [

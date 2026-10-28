@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.345 — 2026-10-27
+
+- Depop sales find their listing again. Depop reports a sale by the product number but opens the item at a link ending in a slug, and one cannot be worked out from the other. Anteroom now remembers which slug belongs to which product number, so a sale lands on the right item. The Depop sales already on record were matched to their items too.
+- Mercari sales are read past the first batch. Anteroom remembers where it stopped instead of starting over every time it opens, so a listing further down the list is still checked.
+- When Mercari answers with a browser check, Settings → Connections now says so instead of asking you to sign in again.
+
 ## 0.1.344 — 2026-10-24
 
 - Settings → Connections opens on Marketplaces. Each marketplace has Detect sales. Turn it off to stop new sale notices there. Nothing is taken down until you choose.
