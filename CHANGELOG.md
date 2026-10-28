@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.487 — 2026-10-27
+## 0.1.488 — 2026-10-27
 
 - Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.
+
+## 0.1.487 — 2026-10-28
+
+- Vinted listing failed with “Reconnect Vinted in Anteroom first” even while you were signed in. Anteroom looked for Vinted’s security token in a form the page no longer uses, so every Vinted action stopped before it asked Vinted anything. It also never renewed the one-hour pass Vinted hands out, even though Chrome keeps your sign-in for a week. **List**, **Update**, **Delist**, Import and sale checks on Vinted now read the token, renew the hour in the background, and ask Vinted for English names so your saved category, condition, size, colour, brand and package size match. **Reconnect Vinted** now says whether it found your sign-in, and who as, instead of leaving the old message in place.
 
 ## 0.1.486 — 2026-10-27
 

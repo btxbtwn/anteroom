@@ -74,8 +74,12 @@ async function deleteDepop(slug, deadline) {
     marketplace_message: left ? `status ${left}` : '' });
 }
 
+// Vinted's page carries the token inside an escaped JSON string
+// (\"CSRF_TOKEN\":\"…\"), so both the quotes and the colons may arrive
+// backslashed. Reading it with plain quotes found nothing and every Vinted
+// action answered “Reconnect Vinted in Anteroom first.”.
 function vintedCsrfToken(html) {
-  const match = String(html || '').match(/"CSRF_TOKEN"\s*:\s*"([^"]+)"/);
+  const match = String(html || '').match(/\\?"CSRF_TOKEN\\?"\s*:\s*\\?"([^"\\]+)\\?"/);
   const token = match ? match[1] : '';
   if (!token || token.length > 200 || /[\s\u0000-\u001f]/.test(token)) return '';
   return token;
@@ -99,6 +103,7 @@ function vintedOwnerId(item) {
 async function deleteVinted(id, deadline) {
   // Vinted's own closet delete: read the item, then POST /api/v2/items/{id}/delete
   // with the page's CSRF token. Cookies stay in Chrome.
+  await vintedKeepSignedIn(deadline);
   const headers = { Accept: 'application/json' };
   const call = async (method, path, step) => {
     try {

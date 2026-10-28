@@ -26,6 +26,36 @@ test('ensureStudioConnection resets backoff and opens a socket when idle', async
   assert.ok(vm.runInContext('ws', worker));
 });
 
+// A worker that pairs and drops straight away used to reconnect every 500ms
+// forever, so only a socket that stays up clears the backoff.
+function openAndCloseWorkerSocket(worker, livedMs) {
+  const vm = require('node:vm');
+  vm.runInContext('sendIdent = async () => {}; sendPendingObservations = async () => {};', worker);
+  vm.runInContext('ws = null; paired = false; reconnectTimer = null; socketOpenedAt = 0;', worker);
+  const realNow = vm.runInContext('Date.now', worker);
+  worker.__realNow = realNow;
+  vm.runInContext('Date.now = () => 1000;', worker);
+  vm.runInContext('connect()', worker);
+  vm.runInContext('ws.onopen();', worker);
+  vm.runInContext(`Date.now = () => ${1000 + livedMs};`, worker);
+  vm.runInContext('ws.onclose({ code: 1006 });', worker);
+  vm.runInContext('Date.now = __realNow', worker);
+  return vm.runInContext('reconnectAttempt', worker);
+}
+
+test('a socket that drops at once keeps the retry backoff', () => {
+  const vm = require('node:vm');
+  vm.runInContext('reconnectAttempt = 3;', worker);
+  assert.equal(openAndCloseWorkerSocket(worker, 200), 4);
+});
+
+test('a socket that stays up clears the retry backoff', () => {
+  const vm = require('node:vm');
+  vm.runInContext('reconnectAttempt = 3;', worker);
+  // Reset on close, then the retry it schedules counts as the first one.
+  assert.equal(openAndCloseWorkerSocket(worker, 20000), 1);
+});
+
 test('Vendoo URL helpers recognise draft pages', () => {
   assert.equal(call(worker, 'isNewItemUrl', 'https://web.vendoo.co/app/item/new?marketplace=general'), true);
   assert.equal(call(worker, 'isNewItemUrl', 'https://web.vendoo.co/app/item/abc123'), false);

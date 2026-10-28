@@ -5,6 +5,10 @@ const STUDIO_URL = typeof STUDIO_API_ORIGIN === 'string' ? STUDIO_API_ORIGIN : '
 if (!/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(STUDIO_URL)) throw new Error('Anteroom Bridge requires a loopback API address.');
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8000;
+// A socket that stays up this long counts as a good connection, and only then
+// does the retry backoff reset. Clearing it on open let a worker that pairs and
+// drops straight away reconnect every 500ms indefinitely, which starves Studio.
+const STABLE_CONNECTION_MS = 10000;
 const HEARTBEAT_MS = 20000;
 const RECONNECT_ALARM = 'studio-reconnect';
 // Chrome's minimum repeating alarm period; wakes the MV3 worker if setTimeout died with it.
@@ -24,6 +28,7 @@ let paired = false;
 let activeJob = null;
 let activePatch = null;
 let reconnectAttempt = 0;
+let socketOpenedAt = 0;
 
 importScripts('content-script-version.js');
 importScripts('diagnostic-collector.js');
@@ -185,6 +190,7 @@ function discardSocket() {
     }
   } catch (_) {}
   ws = null;
+  socketOpenedAt = 0;
 }
 
 function ensureReconnectAlarm() {
@@ -232,7 +238,7 @@ function connect() {
 
   ws.onopen = () => {
     log('WebSocket connected');
-    reconnectAttempt = 0;
+    socketOpenedAt = Date.now();
     startHeartbeat();
     sendIdent();
     sendPendingObservations();
@@ -260,7 +266,10 @@ function connect() {
   };
 
   ws.onclose = (event) => {
-    log(`WebSocket closed code=${event.code}`);
+    const lived = socketOpenedAt ? Date.now() - socketOpenedAt : 0;
+    socketOpenedAt = 0;
+    if (lived >= STABLE_CONNECTION_MS) reconnectAttempt = 0;
+    log(`WebSocket closed after ${lived}ms code=${event.code}`);
     ws = null;
     paired = false;
     stopHeartbeat();

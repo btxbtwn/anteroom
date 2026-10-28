@@ -5,12 +5,15 @@ const { loadWorker, reply } = require('./worker-context');
 const USER = 'a'.repeat(24);
 const POST = 'b'.repeat(24);
 const jwt = `x.${Buffer.from(JSON.stringify({ user_id: USER })).toString('base64')}.y`;
+// A Vinted hour that still has time on it, so no refresh is asked for.
+const VINTED_TOKEN = `x.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.y`;
 
 function worker(routes) {
   const c = loadWorker();
   c.AbortSignal = AbortSignal;
   c.setTimeout = (fn) => { fn(); return 0; };
-  c.chrome.cookies = { get: async ({ name }) => ({ jwt: { value: jwt }, access_token: { value: 'private-token' } })[name] };
+  c.chrome.cookies = { get: async ({ name }) => ({ jwt: { value: jwt }, access_token: { value: 'private-token' },
+    access_token_web: { value: VINTED_TOKEN, expirationDate: Math.floor(Date.now() / 1000) + 3600 } })[name] };
   c.chrome.declarativeNetRequest = { updateSessionRules: async () => {} };
   c.atob = atob;
   c.chrome.storage = { local: { get: async () => ({}), set: async () => {} } };
@@ -125,7 +128,15 @@ test('nothing is deleted without confirmation or a valid ID', async () => {
 const VINTED_ITEM = 'www.vinted.com/api/v2/items/42';
 const VINTED_USER = { user: { id: 7, login: 'seller', email: 'secret@example.com', real_name: 'Secret Name' } };
 const VINTED_LIVE = { item: { id: 42, user: { id: 7, login: 'seller' }, is_closed: false, is_hidden: false, is_reserved: false, title: 'private title' } };
-const VINTED_PAGE = '<html><script>"CSRF_TOKEN":"csrf-secret"</script></html>';
+// Vinted embeds the token in an escaped JSON string on its own page.
+const VINTED_PAGE = '<html><script>{\\"CSRF_TOKEN\\":\\"csrf-secret\\"}</script></html>';
+
+test('the Vinted CSRF token is read from the page JSON, escaped or plain', () => {
+  const { c } = worker({});
+  assert.equal(c.vintedCsrfToken('{\\"CSRF_TOKEN\\":\\"abc-123\\"}'), 'abc-123');
+  assert.equal(c.vintedCsrfToken('"CSRF_TOKEN":"abc-123"'), 'abc-123');
+  assert.equal(c.vintedCsrfToken('<html><body>sign in</body></html>'), '');
+});
 
 function vintedRoutes(item, { after = null, deleteStatus = 200 } = {}) {
   return {

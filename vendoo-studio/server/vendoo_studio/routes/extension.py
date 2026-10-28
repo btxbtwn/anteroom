@@ -32,6 +32,12 @@ VENDOO_GET_TIMEOUT_SEC = 120
 SEND_TIMEOUT_SEC = 5.0
 # Showing a tab is quick; past this Studio opens the listing in Chrome itself.
 OPEN_LISTING_TIMEOUT_SEC = 8.0
+# A worker that pairs again this soon after the last pairing is flapping rather
+# than reconnecting: resuming interrupted sends and reconciling direct listings
+# on every one of those ticks re-queues work and keeps Chrome busy in a loop.
+RECONNECT_SETTLE_SEC = 5.0
+# A socket that drops this fast never held a conversation, so say so in the log.
+FLAP_WARN_SEC = 10.0
 ROUTE_ITEM_IDS = frozenset({"new", "edit", "create"})
 
 
@@ -88,6 +94,9 @@ class ExtensionManager:
         self._pairing_token: str | None = None
         self._waits: dict[str, asyncio.Future] = {}
         self._wait_jobs: dict[str, str] = {}
+        # Monotonic time of the last accepted pairing, kept across disconnects so
+        # a reconnect loop is visible as one.
+        self._last_handshake_at: float | None = None
 
     def register_wait(self, request_id: str, job_id: str | None = None) -> asyncio.Future:
         self.cancel_wait(request_id)
@@ -117,6 +126,18 @@ class ExtensionManager:
         for request_id, wait_job_id in list(self._wait_jobs.items()):
             if wait_job_id == job_id:
                 self.cancel_wait(request_id)
+
+    def note_handshake(self, now: float | None = None) -> bool:
+        """Record an accepted pairing. True when it is not part of a reconnect loop.
+
+        A worker that pairs, drops and pairs again every second looks healthy
+        from the outside while it re-runs the work a reconnect implies. Those
+        side effects only run for a pairing that stands on its own.
+        """
+        moment = time.monotonic() if now is None else now
+        previous = self._last_handshake_at
+        self._last_handshake_at = moment
+        return previous is None or (moment - previous) >= RECONNECT_SETTLE_SEC
 
     def _mark_disconnected(self) -> None:
         self.connection = None
@@ -172,6 +193,14 @@ class ExtensionManager:
             await asyncio.wait_for(connection.send_json(message), SEND_TIMEOUT_SEC)
             return True
         except Exception:
+            # Studio closing the socket on purpose is the other half of a
+            # reconnect loop; name it, or a flapping bridge looks like Chrome's
+            # fault alone.
+            log.warning(
+                "Extension send failed (%s); closing the socket so it reconnects",
+                message.get("type"),
+                exc_info=True,
+            )
             if self.connection is connection:
                 self._mark_disconnected()
                 # Closing makes the extension reconnect on a fresh socket.
@@ -301,6 +330,53 @@ def schedule_advance_job_queue() -> None:
 
 _saved_item_syncs: set[asyncio.Task] = set()
 _reconnect_tasks: set[asyncio.Task] = set()
+
+
+def _run_reconnect_work(db) -> bool:
+    """Resume what a reconnect implies, once the pairing is not itself a flap.
+
+    A worker that pairs, drops and pairs again every half second looks paired
+    each time. Resuming interrupted sends and reconciling direct listings on
+    every one of those ticks re-queues work and keeps asking Chrome for a
+    listing check it cannot answer, until the check times out. So the work
+    waits for a pairing that stands on its own.
+    """
+    if not extension_manager.note_handshake():
+        log.info("Extension paired again within %ss; holding reconnect work", RECONNECT_SETTLE_SEC)
+        return False
+
+    from vendoo_studio.repositories.queries import JobRepo
+
+    _resume_interrupted_sends(JobRepo(db), JobRepo(db).requeue_interrupted())
+
+    from vendoo_studio.services.native_marketplaces import reconcile_then_dispatch
+
+    # Read unconfirmed direct listings before a queued Send takes Chrome. Off
+    # this loop: the checks wait on replies it reads.
+    _reconnect_tasks.add(task := asyncio.create_task(reconcile_then_dispatch()))
+    task.add_done_callback(_reconnect_tasks.discard)
+    # Warm label names in the background so Item Details can rename opaque chips
+    # without blocking the handshake.
+    asyncio.create_task(_warm_label_catalog())
+    return True
+
+
+async def _reconnect_work_after_settle(ws: WebSocket) -> None:
+    """Run the reconnect work for a pairing that was too soon, if it survives."""
+    await asyncio.sleep(RECONNECT_SETTLE_SEC)
+    if extension_manager.connection is not ws:
+        # It flapped again; whichever pairing outlasts the window decides.
+        return
+    with SessionLocal() as db:
+        _run_reconnect_work(db)
+
+
+def _after_pairing(db, ws: WebSocket) -> None:
+    """Do the reconnect work now, or once a flapping pairing has settled."""
+    if _run_reconnect_work(db):
+        return
+    _reconnect_tasks.add(task := asyncio.create_task(_reconnect_work_after_settle(ws)))
+    task.add_done_callback(_reconnect_tasks.discard)
 
 
 def _schedule_saved_item_sync(conv_id: str) -> None:
@@ -858,6 +934,7 @@ async def extension_websocket(ws: WebSocket):
         return
 
     await ws.accept()
+    opened_at = time.monotonic()
     db = SessionLocal()
     try:
         while True:
@@ -891,17 +968,7 @@ async def extension_websocket(ws: WebSocket):
                 )
                 if accepted:
                     extension_manager.paired = True
-                    from vendoo_studio.repositories.queries import JobRepo
-                    _resume_interrupted_sends(JobRepo(db), JobRepo(db).requeue_interrupted())
-                    from vendoo_studio.services.native_marketplaces import reconcile_then_dispatch
-
-                    # Read unconfirmed direct listings before a queued Send takes
-                    # Chrome. Off this loop: the checks wait on replies it reads.
-                    _reconnect_tasks.add(task := asyncio.create_task(reconcile_then_dispatch()))
-                    task.add_done_callback(_reconnect_tasks.discard)
-                    # Warm label names in the background so Item Details can rename
-                    # opaque chips without blocking the handshake.
-                    asyncio.create_task(_warm_label_catalog())
+                    _after_pairing(db, ws)
                 continue
 
             if extension_manager.connection is not ws or not extension_manager.paired:
@@ -1221,9 +1288,14 @@ async def extension_websocket(ws: WebSocket):
                 pass
 
     except WebSocketDisconnect:
-        pass
+        lived = time.monotonic() - opened_at
+        if lived < FLAP_WARN_SEC:
+            # A worker that pairs and drops within seconds is flapping, and a
+            # silent close is what let that go unnoticed.
+            log.warning("Extension socket closed %.1fs after it paired", lived)
     except Exception:
-        pass
+        # Never swallow: a socket that dies mid-message has to leave a trace.
+        log.warning("Extension socket failed after %.1fs", time.monotonic() - opened_at, exc_info=True)
     finally:
         if extension_manager.connection is ws:
             extension_manager._mark_disconnected()
