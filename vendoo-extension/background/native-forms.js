@@ -383,7 +383,7 @@ function mercariPackageRows(listing) {
     nativeEditorField('mercari_specifics.package.ounces', 'oz', pick('ounces', listing.weight_oz), { ...weight, max_value: 15.99 }),
     nativeEditorChoice('mercari_specifics.package.fitsShoebox', 'Will your item fit in a shoebox?', mercariShoeboxAnswer(listing),
       [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }],
-      { presentation: 'radio', help: 'A standard shoebox measures 14\u201d x 10\u201d x 5\u201d.' }),
+      { required: true, presentation: 'radio', help: 'A standard shoebox measures 14\u201d x 10\u201d x 5\u201d.' }),
     nativeEditorField('mercari_specifics.package.length', 'Length', pick('length', details[0]), side),
     nativeEditorField('mercari_specifics.package.width', 'Width', pick('width', details[1]), side),
     nativeEditorField('mercari_specifics.package.height', 'Height', pick('height', details[2]), side),

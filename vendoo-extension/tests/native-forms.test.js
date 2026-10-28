@@ -309,6 +309,7 @@ test('Mercari form follows the sell page sections and order', () => {
     ['Ships from:', 'lb', 'oz', 'Minimum price']);
   assert.deepEqual(form.fields.filter(row => row.width === 'third').map(row => row.label), ['Length', 'Width', 'Height']);
   assert.deepEqual(rows['Will your item fit in a shoebox?'].options, ['Yes', 'No']);
+  assert.equal(rows['Will your item fit in a shoebox?'].required, true);
   // No heading. The page's two lines are the hint, and any image type is accepted.
   assert.deepEqual([form.fields[0].path, form.fields[0].input_type, form.fields[0].help, form.fields[0].accept],
     ['marketplace_photos.mercari', 'photos', 'Add up to 12 photos\nOr drag and drop', undefined]);
