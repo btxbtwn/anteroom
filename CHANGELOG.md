@@ -8,7 +8,8 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.490 — 2026-10-27
 
-Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.
+- Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.
+- Chrome reconnected every half second while one listing was being checked, so the app sat loading and the check ended with “Check did not finish”. A reconnect used to repeat the whole start-up handshake each time — re-queueing interrupted sends and asking Chrome to check listings again — while the extension reset its retry delay on every attempt. Now only a Chrome that stays connected sets things going, a connection that keeps dropping waits longer each time, and a socket that closes early is written to the log instead of vanishing.
 
 ## 0.1.489 — 2026-10-27
 
