@@ -112,8 +112,9 @@ class NativeEditorTest(unittest.TestCase):
         answer = self.client.get(f"{self.url}/sellwild/form")
         self.assertEqual(answer.status_code, 200, answer.text)
         rows = answer.json()["fields"]
+        self.assertEqual((rows[0]["input_type"], rows[0]["help"]), ("photos", "Please add Photos of your Listing. Max 20."))
         self.assertEqual([(row.get("section"), row["label"]) for row in rows], [
-            ("Add a Title", "What are you selling?"), ("Name Your Price (USD)", "Price"),
+            ("", ""), ("Add a Title", "What are you selling?"), ("Name Your Price (USD)", "Price"),
             ("Add Details", "Describe your item (Optional)"), ("Add Details", "Category"), ("Add Details", "Condition"),
             ("Item Shipping", "Shipping From"),
             ("Item Shipping", "Package"), ("Item Shipping", "Weight (lbs)"), ("Item Shipping", "Height (in)"),
@@ -245,6 +246,10 @@ class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["ebay_specifics.conditionDescription"]["max_length"], 1000)
         self.assertEqual(ebay_listings.ebay_condition({"ebay_specifics": {"condition": "1000"}}), "NEW")
         self.assertEqual(fields["sku"]["value"], "")
+        # eBay's photo area comes first, as on its listing page.
+        photos = form["fields"][0]
+        self.assertEqual((photos["path"], photos["input_type"], photos["section"]), ("marketplace_photos.ebay", "photos", "Photos & Video"))
+        self.assertTrue(photos["help"].startswith("You can add up to 24 photos and a 1-minute video."))
 
     async def test_ebay_format_choices_come_from_ebays_category_rules(self):
         from vendoo_studio.services.ebay_client import EbayClient
