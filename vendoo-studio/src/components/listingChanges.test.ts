@@ -21,6 +21,12 @@ describe("listing review", () => {
     expect(blockerTarget("photos").reviewTab).toBe("input");
     expect(blockerTarget("price").tab).toBe("general");
   });
+  it("opens a marketplace's own answer on that marketplace's form, not General", () => {
+    expect(blockerTarget("primaryColor", "poshmark")).toEqual({ reviewTab: "forms", tab: "poshmark", field: "primaryColor" });
+    expect(blockerTarget("price", "mercari").tab).toBe("mercari");
+    // The field's own marketplace still wins when one is named.
+    expect(blockerTarget("ebay_specifics.size", "poshmark").tab).toBe("poshmark");
+  });
   it("sends a missing category to the marketplace form that has the category control", () => {
     expect(blockerTarget("direct_category_ids.depop").tab).toBe("depop");
     expect(blockerTarget("direct_category_ids.mercari").tab).toBe("mercari");
