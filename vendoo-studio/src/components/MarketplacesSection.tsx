@@ -4,7 +4,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, FacebookCheck, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
-import { EXTENSION_SESSION_MARKETS, type ExtensionSessionMarket } from "../api/marketplaceSessions";
+import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
 import { cn } from "../lib/utils";
 import { confirmDialog } from "../ui/confirmDialog";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -41,6 +41,13 @@ export const ETSY_NOT_ELIGIBLE = "Etsy only allows vintage (20+ years), handmade
 /** A record whose job is running now. A busy state with no job running is unconfirmed until checked. */
 export function isRunning(draft: NativeDraft | undefined): boolean {
   return Boolean(draft?.running) || (BUSY.has(draft?.state ?? "") && draft?.running === undefined);
+}
+
+/** What a reconnect found, so a success is not hidden behind the last refusal. */
+export function reconnectText(name: string, session: ExtensionSessionConnect | undefined): string | null {
+  if (!session) return null;
+  if (session.signed_in) return `${name} is connected${session.label ? ` as ${session.label}` : ""}. Press List… again to list this item.`;
+  return `${name} still needs a sign-in. Finish signing in in the Chrome tab, then choose Reconnect ${name} again.`;
 }
 
 /** The words chat gets for a refused List: which marketplace, both explanations, and the fields to fix. */
@@ -184,6 +191,8 @@ export function MarketplacesLayout({
   }, [waiting]);
   const listings: MarketplaceListings = live.data ?? {};
   const [draftLinks, setDraftLinks] = useState<Partial<Record<NativeMarketplace, string>>>({});
+  // What the last reconnect found, so the stale refusal does not read as the answer.
+  const [reconnected, setReconnected] = useState<Partial<Record<Marketplace, ExtensionSessionConnect>>>({});
   const [linking, setLinking] = useState<{ marketplace: Marketplace; url: string } | null>(null);
   // Mark as sold opens a sale form; the number remounts it with a fresh request id.
   const [selling, setSelling] = useState<{ marketplace: SaleMarketplace; key: number } | null>(null);
@@ -211,9 +220,11 @@ export function MarketplacesLayout({
       if (kind === "cancel") return api.nativeMarketplaces.cancel(convId, marketplace);
       if (kind === "reset") return api.nativeMarketplaces.reset(convId, marketplace);
       if (kind === "reconnect") {
-        if (marketplace === "ebay" || marketplace === "etsy") await api.directConnections.connect(marketplace);
-        else if ((EXTENSION_SESSION_MARKETS as readonly string[]).includes(marketplace)) await api.marketplaceSessions.connect(marketplace as ExtensionSessionMarket);
-        return drafts[marketplace];
+        if (marketplace === "ebay" || marketplace === "etsy") return await api.directConnections.connect(marketplace);
+        if ((EXTENSION_SESSION_MARKETS as readonly string[]).includes(marketplace)) {
+          return await api.marketplaceSessions.connect(marketplace as ExtensionSessionMarket);
+        }
+        return undefined;
       }
       if (!revisionId) throw new Error("Generate a listing first.");
       if (kind === "save_draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId);
@@ -224,8 +235,16 @@ export function MarketplacesLayout({
     onMutate: ({ marketplace, kind }) => {
       setStarting((current) => ({ ...current, [marketplace]: kind }));
       setActionErrors((current) => ({ ...current, [marketplace]: undefined }));
+      setReconnected((current) => ({ ...current, [marketplace]: undefined }));
     },
     onError: (error, { marketplace }) => setActionErrors((current) => ({ ...current, [marketplace]: error.message })),
+    onSuccess: (data, { marketplace, kind }) => {
+      if (kind !== "reconnect") return;
+      const session = data as ExtensionSessionConnect | undefined;
+      if (typeof session?.signed_in !== "boolean") return;
+      void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
+      setReconnected((current) => ({ ...current, [marketplace]: session }));
+    },
     onSettled: (_data, _error, { marketplace }) => {
       setStarting((current) => ({ ...current, [marketplace]: undefined }));
       void queryClient.invalidateQueries({ queryKey: nativeKey });
@@ -499,6 +518,13 @@ export function MarketplacesLayout({
     return buttons.length ? <div className="flex flex-wrap items-center gap-1.5">{buttons}</div> : null;
   }
 
+  function reconnectNotice(marketplace: Marketplace): ReactNode {
+    const session = reconnected[marketplace];
+    const text = reconnectText(marketplaceName(marketplace), session);
+    if (!text) return null;
+    return <p role="status" className={session?.signed_in ? "text-success-foreground" : "text-warning-foreground"}>{text}</p>;
+  }
+
   function linkForm(marketplace: Marketplace): ReactNode {
     if (linking?.marketplace !== marketplace) return null;
     const name = marketplaceName(marketplace);
@@ -651,6 +677,7 @@ export function MarketplacesLayout({
             {selectedStatus.detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
               role={selectedStatus.tone === "failed" ? "alert" : undefined}>{selectedStatus.detail}</p>}
             {selectedStatus.said && <p className="whitespace-pre-wrap break-words text-muted-foreground" data-marketplace-message>{selectedStatus.said}</p>}
+            {reconnectNotice(selectedMarketplace)}
             {errorActions(selectedMarketplace)}
             {preflightNotice(selectedMarketplace)}
             {settings(selectedMarketplace)}

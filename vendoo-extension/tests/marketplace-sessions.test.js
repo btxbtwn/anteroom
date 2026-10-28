@@ -86,10 +86,14 @@ test('Sellwild uses the session response and hides the account payload', async (
   assert.equal(text.includes('user-secret'), false);
 });
 
-test('Vinted sign-in is the current user login and hides the token', async () => {
-  const token = jwt({ exp: Math.floor(Date.now() / 1000) + 86400 * 10, sub: '42' });
+test('Vinted sign-in is the current user login, and the week it lasts, never the hour', async () => {
+  const token = jwt({ exp: Math.floor(Date.now() / 1000) + 3600, sub: '42' });
+  const week = Math.floor(Date.now() / 1000) + 86400 * 7;
   const { c } = worker({
-    cookies: { 'https://www.vinted.com/ access_token_web': { value: token, expirationDate: Math.floor(Date.now() / 1000) + 86400 * 10 } },
+    cookies: {
+      'https://www.vinted.com/ access_token_web': { value: token, expirationDate: week },
+      'https://www.vinted.com/ refresh_token_web': { value: jwt({ exp: week }), expirationDate: week },
+    },
     fetch: async url => (url === 'https://www.vinted.com/api/v2/users/current'
       ? reply(200, { user: { id: 42, login: 'ada', email: 'secret@example.com', real_name: 'Ada Lovelace' } })
       : reply(404, {})),
@@ -97,11 +101,34 @@ test('Vinted sign-in is the current user login and hides the token', async () =>
   const summary = await c.readExtensionSession('vinted');
   assert.equal(summary.state, 'signed_in');
   assert.equal(summary.label, 'ada');
+  // The access token lasts an hour; the hour is renewed, so that is not the sign-in.
+  assert.equal(summary.expires_at, week);
   assert.equal(summary.expiring, false);
   const text = JSON.stringify(summary);
   assert.equal(text.includes(token), false);
   assert.equal(text.includes('secret@example.com'), false);
   assert.equal(text.includes('Ada Lovelace'), false);
+});
+
+test('a Vinted hour that ran out is renewed instead of reporting a sign-out', async () => {
+  const week = Math.floor(Date.now() / 1000) + 86400 * 7;
+  const calls = [];
+  const { c } = worker({
+    cookies: {
+      'https://www.vinted.com/ access_token_web': { value: jwt({ exp: Math.floor(Date.now() / 1000) - 60 }), expirationDate: week },
+      'https://www.vinted.com/ refresh_token_web': { value: jwt({ exp: week }), expirationDate: week },
+    },
+    fetch: async (url, options = {}) => {
+      calls.push(`${options.method || 'GET'} ${url}`);
+      if (url === 'https://www.vinted.com/web/api/auth/refresh') return reply(200, { access_token: jwt({ exp: Math.floor(Date.now() / 1000) + 3600 }) });
+      if (url === 'https://www.vinted.com/api/v2/users/current') return reply(200, { user: { id: 42, login: 'ada' } });
+      return reply(404, {});
+    },
+  });
+  const summary = await c.readExtensionSession('vinted');
+  assert.equal(summary.state, 'signed_in');
+  assert.equal(summary.label, 'ada');
+  assert.deepEqual(calls, ['POST https://www.vinted.com/web/api/auth/refresh', 'GET https://www.vinted.com/api/v2/users/current']);
 });
 
 test('an anonymous Vinted token is signed out, and a failed check is unknown', async () => {
@@ -111,7 +138,11 @@ test('an anonymous Vinted token is signed out, and a failed check is unknown', a
   const signedOut = await anonymous.c.readExtensionSession('vinted');
   assert.equal(signedOut.state, 'signed_out');
   assert.equal(JSON.stringify(signedOut).includes('anon-secret'), false);
-  const rejected = worker({ fetch: async () => reply(401, { message_code: 'invalid_authentication_token', access_token_web: 'secret-token' }) });
+  const rejected = worker({
+    fetch: async (url, options = {}) => ((options.method || 'GET') === 'POST'
+      ? reply(401, { message_code: 'invalid_authentication_token' })
+      : reply(401, { message_code: 'invalid_authentication_token', access_token_web: 'secret-token' })),
+  });
   assert.equal((await rejected.c.readExtensionSession('vinted')).state, 'signed_out');
   const offline = worker({ fetch: async () => { throw new Error('offline'); } });
   assert.deepEqual(JSON.parse(JSON.stringify(await offline.c.readExtensionSession('vinted'))), { state: 'unknown', expires_at: null, label: null, expiring: false });
