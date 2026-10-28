@@ -135,7 +135,6 @@ def convert_stored_labels(db, names: dict[str, str] | None = None, *, dry_run: b
     are and are reported, so no label is dropped. Running it again changes
     nothing that is already a name.
     """
-    from sqlalchemy import func
 
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.listing import ListingRevision
@@ -175,11 +174,12 @@ def convert_stored_labels(db, names: dict[str, str] | None = None, *, dry_run: b
             items.add(conv.id)
             if not dry_run:
                 conv.notes = merge_notes(conv.notes, {"vendooLabels": ", ".join(renamed)})
-    revisions = db.query(ListingRevision).filter(
-        func.json_array_length(ListingRevision.listing_json, "$.labels") > 0
-    )
-    for revision in revisions:
+    # A JSON array's length is written differently on SQLite and Postgres, so
+    # the revisions that carry labels are picked here instead of in SQL.
+    for revision in db.query(ListingRevision):
         data = revision.listing_json if isinstance(revision.listing_json, dict) else {}
+        if not data.get("labels"):
+            continue
         renamed = rename(data.get("labels") or [])
         if renamed is not None:
             items.add(revision.conversation_id)

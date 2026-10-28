@@ -43,9 +43,17 @@ def migrations_dir() -> Path:
 
 
 def alembic_config(url: str | None = None) -> Config:
+    """Alembic settings for ``url``, or the app's own database.
+
+    The URL rides in ``attributes`` rather than the ini options: ini values are
+    %-interpolated, and a Postgres URL carries percent-encoded characters and a
+    password that must not be masked.
+    """
+    from vendoo_studio.database import database_url
+
     config = Config()
     config.set_main_option("script_location", str(migrations_dir()))
-    config.set_main_option("sqlalchemy.url", url or f"sqlite:///{DATABASE_PATH}")
+    config.attributes["url"] = url or database_url()
     return config
 
 
@@ -77,12 +85,15 @@ def _known(revision: str) -> bool:
 
 
 def database_path(engine: Engine) -> Path:
-    """The file behind a SQLite engine."""
+    """The file behind a SQLite engine; only meaningful for SQLite."""
     return Path(engine.url.database or DATABASE_PATH)
 
 
 def _snapshot(reason: str, engine: Engine) -> None:
     from vendoo_studio.services.backups import snapshot_quietly
+
+    if engine.dialect.name != "sqlite":
+        return  # The host's point-in-time backups cover a hosted Postgres.
 
     path = database_path(engine)
     if path.exists():
@@ -100,6 +111,9 @@ def _adopt_legacy(engine: Engine, config: Config) -> str:
     from vendoo_studio.database import Base, _ensure_sqlite_columns, load_models
     from vendoo_studio.services.schema_drift import describe, inspect_database
 
+    if engine.dialect.name != "sqlite":
+        # Only Mac databases predate migrations; a Postgres one was always migrated.
+        raise SchemaError("This Postgres database has tables but no migration record.")
     log.info("Adopting a database from before migrations were introduced")
     _snapshot("pre-adopt", engine)
 
@@ -124,7 +138,7 @@ def ensure_schema(engine: Engine | None = None) -> str:
     from vendoo_studio.database import engine as default_engine
 
     target = engine or default_engine
-    config = alembic_config(str(target.url))
+    config = alembic_config(target.url.render_as_string(hide_password=False))
     config.attributes["connection"] = None
     head = head_revision()
 

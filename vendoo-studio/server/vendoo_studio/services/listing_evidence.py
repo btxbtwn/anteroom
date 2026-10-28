@@ -6,8 +6,8 @@ import json
 from datetime import UTC
 
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.sqlite import insert
 
+from vendoo_studio.database import dialect_insert
 from vendoo_studio.models.listing_evidence import ListingCorrection, SaleSnapshot
 from vendoo_studio.services.sell_through import _parse_moment
 
@@ -34,7 +34,7 @@ def capture_sale_snapshot(db: Session, conv_id: str, item: dict | None, form: di
     key = sale_key(vendoo_sale(item, form), vendoo_dates(item, form))
     if not key or db.query(SaleSnapshot.id).filter_by(conversation_id=conv_id, sale_key=key).first():
         return
-    db.execute(insert(SaleSnapshot).values(
+    db.execute(dialect_insert(db)(SaleSnapshot).values(
         conversation_id=conv_id, sale_key=key,
         listing=copy.deepcopy(listing_from_vendoo(item, form)),
         source="vendoo_first_observed_sold",

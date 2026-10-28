@@ -1,4 +1,4 @@
-"""Alembic environment for Studio's SQLite database.
+"""Alembic environment for Studio's database: SQLite on the Mac, Postgres hosted.
 
 Lives inside the package rather than beside it so the migration scripts travel
 with the frozen Mac app: ``script_location`` is resolved from
@@ -11,15 +11,18 @@ from __future__ import annotations
 from alembic import context
 from sqlalchemy import create_engine
 
-from vendoo_studio.config import DATABASE_PATH
-from vendoo_studio.database import Base, load_models
+from vendoo_studio.database import Base, database_url, load_models
 
 load_models()
 target_metadata = Base.metadata
 
 
 def _url() -> str:
-    return context.config.get_main_option("sqlalchemy.url") or f"sqlite:///{DATABASE_PATH}"
+    return (
+        context.config.attributes.get("url")
+        or context.config.get_main_option("sqlalchemy.url")
+        or database_url()
+    )
 
 
 def run_migrations_offline() -> None:

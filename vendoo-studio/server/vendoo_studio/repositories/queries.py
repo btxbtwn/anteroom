@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import json_value
 from vendoo_studio.models.conversation import Conversation, Message, Photo, new_id, utcnow
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.job import (
@@ -74,7 +75,7 @@ def _facet(sku: Any, price: Any, etsy: Any = None, year: Any = None) -> dict[str
         amount = float(price) if price is not None and str(price) != "" else None
     except (TypeError, ValueError):
         amount = None
-    # json_extract hands an object back as JSON text.
+    # json_value hands back a dict; JSON text is still accepted.
     try:
         specifics = json.loads(etsy) if isinstance(etsy, str) else etsy
     except json.JSONDecodeError:
@@ -86,16 +87,16 @@ def _facet(sku: Any, price: Any, etsy: Any = None, year: Any = None) -> dict[str
     return {"sku": text or None, "price": amount, "etsy_eligible": etsy_eligible(listing)}
 
 
-# What ``_facet`` reads from a revision, extracted inside SQLite.
+# What ``_facet`` reads from a revision, extracted inside the database.
 def _facet_columns() -> tuple:
     doc = ListingRevision.listing_json
     return (
-        func.json_extract(doc, "$.sku"),
-        func.json_extract(doc, "$.price"),
-        func.json_extract(doc, "$.etsy_specifics"),
+        json_value(doc, "sku"),
+        json_value(doc, "price"),
+        json_value(doc, "etsy_specifics"),
         func.coalesce(
-            func.json_extract(doc, "$.ebay_specifics.yearManufactured"),
-            func.json_extract(doc, "$.ebay_specifics.year_manufactured"),
+            json_value(doc, "ebay_specifics.yearManufactured"),
+            json_value(doc, "ebay_specifics.year_manufactured"),
         ),
     )
 

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.489 — 2026-10-27
+
+Anteroom's backend can now run on Postgres as well as SQLite. Every query, JSON read, upsert and schema migration goes through one layer that speaks both, so the hosted API can share one database while this Mac keeps using its own file. Nothing about listing changes, and an existing SQLite database opens exactly as before.
+
 ## 0.1.488 — 2026-10-28
 
 - On a marketplace tab, what List would still tell you about a field now appears under that field, as soon as the listing has a value there. Poshmark's color answer (“Poshmark does not list Navy, so that color is left off”) shows under Color, its title and description limits under those boxes, and its price answer under Price. The same notes stay beside List, which is what holds List.

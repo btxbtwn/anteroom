@@ -286,9 +286,10 @@ def tree_leaf(marketplace: str, path: str) -> dict[str, Any] | None:
     jackets" has Boys 0-24 mos, 2T-5T and 4+ under it). Mercari lists such a
     parent with no size, so for Mercari a node with children is never a leaf.
     """
-    import sqlite3
+    from sqlalchemy.exc import SQLAlchemyError
 
-    from vendoo_studio.config import DATABASE_PATH
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.models.catalog import CategoryTreeNode
     from vendoo_studio.services.vendoo_categories import path_parts
 
     parts = path_parts(path)
@@ -296,17 +297,20 @@ def tree_leaf(marketplace: str, path: str) -> dict[str, Any] | None:
     if not wanted:
         return None
     try:
-        with sqlite3.connect(DATABASE_PATH) as db:
-            row = db.execute(
-                "SELECT category_id, path, label, has_children FROM category_tree_nodes "
-                "WHERE marketplace = ? AND path = ? AND is_leaf = 1 AND (? = 0 OR has_children = 0) LIMIT 1",
-                (marketplace, wanted, 1 if marketplace == "mercari" else 0),
-            ).fetchone()
-            if not row:
+        with SessionLocal() as db:
+            query = db.query(CategoryTreeNode).filter(
+                CategoryTreeNode.marketplace == marketplace,
+                CategoryTreeNode.path == wanted,
+                CategoryTreeNode.is_leaf.is_(True),
+            )
+            if marketplace == "mercari":
+                query = query.filter(CategoryTreeNode.has_children.is_(False))
+            node = query.first()
+            if node is None:
                 return None
-            cat_id, node_path, label, has_children = row
+            cat_id, node_path, label, has_children = node.category_id, node.path, node.label, node.has_children
             ancestors = _tree_ancestors(db, marketplace, str(cat_id))
-    except sqlite3.Error:
+    except SQLAlchemyError:
         return None
     # Shaped like a ``category_search`` hit so one mapper handles both. The
     # tree has no ``payload_text``, so ``extras`` only comes from a live hit.
@@ -322,18 +326,20 @@ def tree_leaf(marketplace: str, path: str) -> dict[str, Any] | None:
 
 def _tree_ancestors(db, marketplace: str, category_id: str) -> list[str]:
     """Ancestor ids root-first, which ``categoryV2.path`` lists before the leaf."""
+    from vendoo_studio.models.catalog import CategoryTreeNode
+
     chain: list[str] = []
     seen: set[str] = set()
     current = category_id
     while current and current not in seen:
         seen.add(current)
-        row = db.execute(
-            "SELECT parent_id FROM category_tree_nodes WHERE marketplace = ? AND category_id = ?",
-            (marketplace, current),
-        ).fetchone()
-        if not row or not row[0]:
+        parent = db.query(CategoryTreeNode.parent_id).filter(
+            CategoryTreeNode.marketplace == marketplace,
+            CategoryTreeNode.category_id == current,
+        ).scalar()
+        if not parent:
             break
-        parent = str(row[0])
+        parent = str(parent)
         # The seeded tree hangs every root off a ``__root`` sentinel Vendoo
         # does not store.
         if parent.startswith("__") or parent in ("", "root", "0"):

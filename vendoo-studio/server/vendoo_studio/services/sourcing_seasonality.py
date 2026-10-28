@@ -7,9 +7,10 @@ import math
 import statistics
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import json_value
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.listing_evidence import SaleSnapshot
@@ -65,20 +66,21 @@ def seasonal_sales_context(db: Session, window: dict, today: date) -> dict:
     replace current comparable prices.
     """
     periods = historical_windows(window, today)
-    remote_status = func.json_extract(
-        func.iif(func.json_valid(Conversation.notes), Conversation.notes, "{}"), "$.vendooStatus",
-    )
+    # Notes are free text that is usually JSON. Matching the key's text keeps
+    # every sold item in the result on any database; the loop below re-reads
+    # the parsed status and drops the rest.
+    remote_sold = Conversation.notes.like('%"vendooStatus"%sold%')
     rows = db.query(
         Conversation.id, Conversation.status, Conversation.notes,
-        *(func.json_extract(ListingRevision.listing_json, f"$.{key}") for key in FACETS),
+        *(json_value(ListingRevision.listing_json, key) for key in FACETS),
     ).join(Listing, Listing.conversation_id == Conversation.id).join(
         ListingRevision, ListingRevision.id == Listing.current_revision_id,
-    ).filter(or_(Conversation.status == "sold", remote_status == "sold")).all()
+    ).filter(or_(Conversation.status == "sold", remote_sold)).all()
     ids = [row[0] for row in rows]
     # Only relevant facets of frozen listings are read, never whole private JSON.
     snapshots = {(row[0], row[1]): row[2:] for row in db.query(
         SaleSnapshot.conversation_id, SaleSnapshot.sale_key,
-        *(func.json_extract(SaleSnapshot.listing, f"$.{key}") for key in FACETS),
+        *(json_value(SaleSnapshot.listing, key) for key in FACETS),
     ).filter(SaleSnapshot.conversation_id.in_(ids)).all()}
     groups = {}
     seen = set()

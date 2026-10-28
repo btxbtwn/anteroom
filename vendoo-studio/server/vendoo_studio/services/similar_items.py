@@ -19,9 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import json_value
 from vendoo_studio.services.chrome_import import MATCH_THRESHOLD, title_similarity, title_tokens
 from vendoo_studio.services.photo_store import photo_store
 
@@ -103,9 +103,9 @@ def _load(db: Session) -> dict[str, _Item]:
         conv_id: (brand, size, price)
         for conv_id, brand, size, price in db.query(
             Listing.conversation_id,
-            func.json_extract(ListingRevision.listing_json, "$.brand"),
-            func.json_extract(ListingRevision.listing_json, "$.size"),
-            func.json_extract(ListingRevision.listing_json, "$.price"),
+            json_value(ListingRevision.listing_json, "brand"),
+            json_value(ListingRevision.listing_json, "size"),
+            json_value(ListingRevision.listing_json, "price"),
         ).join(ListingRevision, ListingRevision.id == Listing.current_revision_id).all()
     }
     items: dict[str, _Item] = {}

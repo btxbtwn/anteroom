@@ -282,8 +282,24 @@ def database_bytes(source: str | Path | None = None) -> int:
     return database.stat().st_size + (wal.stat().st_size if wal.exists() else 0)
 
 
+HOSTED_BACKUPS = "The hosted database is backed up by its host, not by Anteroom."
+
+
+def _hosted() -> bool:
+    """Whether the app's database is Postgres rather than this Mac's SQLite file.
+
+    Snapshots copy a SQLite file with ``VACUUM INTO``. A hosted Postgres has no
+    file here to copy; its host keeps point-in-time backups instead.
+    """
+    from vendoo_studio.database import IS_SQLITE
+
+    return not IS_SQLITE
+
+
 def snapshot_blocker(*, source: str | Path | None = None) -> str | None:
     """Why a snapshot cannot be taken right now, in the seller's words."""
+    if source is None and _hosted():
+        return HOSTED_BACKUPS
     database = Path(source or DATABASE_PATH)
     if not database.exists():
         return f"No database at {database}"
@@ -433,7 +449,7 @@ def start_snapshot_timer() -> threading.Thread | None:
     """
     global _timer
 
-    if _timer is not None and _timer.is_alive():
+    if _hosted() or (_timer is not None and _timer.is_alive()):
         return None
 
     def _run() -> None:
