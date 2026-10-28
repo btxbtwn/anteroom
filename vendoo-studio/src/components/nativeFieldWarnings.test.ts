@@ -10,6 +10,18 @@ const poshmarkRows = [
   { key: "direct_category_ids.poshmark" },
 ];
 
+const mercariRows = [
+  { key: "mercari_specifics.title" },
+  { key: "mercari_specifics.description" },
+  { key: "mercari_specifics.brand" },
+  { key: "mercari_specifics.condition" },
+  { key: "mercari_specifics.nativeSizeId" },
+  { key: "mercari_specifics.shippingClassId" },
+  { key: "mercari_specifics.package.pounds" },
+  { key: "price" },
+  { key: "direct_category_ids.mercari" },
+];
+
 describe("direct List gaps on the form", () => {
   it("puts Poshmark's color answer under its Color row", () => {
     const found = gapsByField("poshmark", [{
@@ -32,6 +44,16 @@ describe("direct List gaps on the form", () => {
     expect(found.get("poshmark_specifics.title")).toEqual(["Poshmark titles are at most 80 characters."]);
     expect(found.get("price")).toEqual(["Poshmark lists this at $25."]);
     expect(found.get("direct_category_ids.poshmark")).toEqual(["Poshmark needs a category from its own list."]);
+  });
+
+  it("finds the row behind Mercari's own field names", () => {
+    expect(rowForField("mercari", "sizeId", mercariRows)).toBe("mercari_specifics.nativeSizeId");
+    expect(rowForField("mercari", "name", mercariRows)).toBe("mercari_specifics.title");
+    expect(rowForField("mercari", "categoryId", mercariRows)).toBe("direct_category_ids.mercari");
+    expect(rowForField("mercari", "conditionId", mercariRows)).toBe("mercari_specifics.condition");
+    expect(rowForField("mercari", "brandId", mercariRows)).toBe("mercari_specifics.brand");
+    expect(rowForField("mercari", "weight", mercariRows)).toBe("mercari_specifics.package.pounds");
+    expect(rowForField("mercari", "photos", mercariRows)).toBe("");
   });
 
   it("opens the row an Edit button is for, including the ones Poshmark names its own way", () => {

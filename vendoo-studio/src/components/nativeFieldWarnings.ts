@@ -1,15 +1,27 @@
 import type { PreflightGap } from "../api/nativeMarketplaces";
 
 /**
- * A gap that names a different listing field from the row it fills. Poshmark
- * checks General's colors and shows its answer on its own Color row, and its
- * Size is the inventory list.
+ * A marketplace's own name for one of its rows, when it differs from the row's
+ * key. Mercari answers a refusal with its form's names (``sizeId``,
+ * ``categoryId``, ``name``); Poshmark checks General's colors and shows its
+ * answer on its own Color row, and its Size is the inventory list.
  */
 const ROW_ALIASES: Record<string, Record<string, string>> = {
   poshmark: {
     primaryColor: "poshmark_specifics.colors",
     secondaryColor: "poshmark_specifics.colors",
     size: "poshmark_specifics.inventoryRows",
+  },
+  mercari: {
+    name: "mercari_specifics.title",
+    categoryId: "direct_category_ids.mercari",
+    conditionId: "mercari_specifics.condition",
+    size: "mercari_specifics.nativeSizeId",
+    sizeId: "mercari_specifics.nativeSizeId",
+    brandId: "mercari_specifics.brand",
+    shippingClassIds: "mercari_specifics.shippingClassId",
+    weight: "mercari_specifics.package.pounds",
+    photos: "marketplace_photos.mercari",
   },
 };
 
