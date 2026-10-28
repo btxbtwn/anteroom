@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.464 — 2026-10-27
+
+- The eBay tab is laid out like eBay’s Create listing page: Title, Item category, Variations, Item specifics (Required, then Additional), Condition, Description, Pricing and Shipping, with eBay’s names for each field. Item specifics come in eBay’s order, Size offers only eBay’s sizes, Format reads Auction or Buy It Now, and an auction shows its duration and bids instead of an item price.
+
 ## 0.1.463 — 2026-10-28
 
 - The Depop tab has Depop’s “Boost your listing” switch, off unless you turn it on (Depop charges an extra 12% fee when a boosted item sells). Update sends it to the live listing. Depop drafts can’t hold Boost, so List posts the item and then turns Boost on with one update of that new listing.

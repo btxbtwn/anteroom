@@ -57,16 +57,34 @@ def _shared(snapshot: dict, marketplace: str, name: str):
     return snapshot.get(name)
 
 
-def base(snapshot: dict, title_max: int, marketplace: str) -> list[dict]:
-    return [field(f"{marketplace}_specifics.title", "Title", _shared(snapshot, marketplace, "title"), required=True, max_length=title_max),
-            field(f"{marketplace}_specifics.description", "Description", _shared(snapshot, marketplace, "description"), required=True),
-            field("price", "Price", snapshot.get("price"), required=True, input_type="number")]
-
-
 def package(snapshot: dict) -> list[dict]:
-    return [field(key, label, snapshot.get(key), locked=True, help="Change the package in Item Details.")
-            for key, label in (("weight_lb", "Packed weight (lb)"), ("weight_oz", "Packed weight (oz)"),
-                               ("package_dimensions_in", "Package dimensions (in)"))]
+    """eBay's "Package weight" in lbs. and oz. side by side, then "Package dimensions", from Item Details."""
+    return [field(key, label, snapshot.get(key), locked=True, help="Change the package in Item Details.",
+                  **({"width": "half"} if key.startswith("weight_") else {}))
+            for key, label in (("weight_lb", "Package weight (lbs.)"), ("weight_oz", "Package weight (oz.)"),
+                               ("package_dimensions_in", "Package dimensions (in.)"))]
+
+
+# eBay's Create listing page (ebay.com/lstng, read 2026-10-27), section by section.
+EBAY_SPECIFIC_SECTIONS = {"required": "Item specifics: Required", "recommended": "Item specifics: Additional (optional)",
+                          "optional": "Item specifics: Additional (optional)"}
+
+
+def ebay_specifics_order(schema: list[dict]) -> list[dict]:
+    """Item specifics as eBay's page lists them: required, then recommended, then the rest
+    (behind "Show more"), each in eBay's order. Personalization Instructions follows Personalize."""
+    aspects = [row for row in schema if row.get("id") != "condition"]
+
+    def tier(row: dict) -> int:
+        return 0 if row.get("required") else 1 if row.get("usage") == "RECOMMENDED" else 2
+
+    ordered = [row for rank in (0, 1, 2) for row in aspects if tier(row) == rank]
+    instructions = next((row for row in ordered if row["name"] == "Personalization Instructions"), None)
+    personalize = next((row for row in ordered if row["name"] == "Personalize"), None)
+    if instructions and personalize and tier(instructions) == tier(personalize):
+        ordered.remove(instructions)
+        ordered.insert(ordered.index(personalize) + 1, instructions)
+    return ordered
 
 
 async def ebay_form(snapshot: dict) -> dict:
@@ -85,63 +103,75 @@ async def ebay_form(snapshot: dict) -> dict:
     except Exception as exc:  # noqa: BLE001 - never substitute a different form
         raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from exc
     aspects = ebay_aspects(snapshot, snapshot.get("form") or {})
-    fields = base(snapshot, 80, "ebay")
-    fields.append(field("direct_category_ids.ebay", "Category", (snapshot.get("direct_category_ids") or {}).get("ebay_path")
-                        or (snapshot.get("marketplace_categories") or {}).get("ebay") or category,
-                        help="Changing category reloads its condition and item-specific choices."))
-    for row in schema:
+    details = snapshot.get("ebay_specifics") or {}
+
+    def aspect_field(row: dict, section: str) -> dict:
         name = row["name"]
         condition = row["id"] == "condition"
         value = CONDITION_IDS[ebay_condition(snapshot)] if condition else aspects.get(name, [])
         if not row["multi"] and isinstance(value, list):
             value = value[0] if value else ""
         values = row.get("values") or []
-        filled_from_general = {"size": "Filled from General. A change here stays on eBay.",
-                               "department": "Filled from General. A change here stays on eBay."}
         constraints = marketplace_schemas.constraints_by_label(values)
-        # Every aspect from this category is on the form. Condition stays on every eBay listing.
-        fields.append(field(f"ebay_specifics.{name}", name, value, required=row["required"], multi=row["multi"],
-                            **({"help": filled_from_general[name.casefold()]} if name.casefold() in filled_from_general else {}),
-                            **({"category_specific": True} if not condition else {}),
-                            selection_only=row["mode"] == "selection",
-                            options=list(dict.fromkeys(v["label"] for v in values)),
-                            option_values={v["label"]: str(v["id"]) for v in values}, options_source="marketplace",
-                            max_values=row.get("max_values"), max_length=row.get("max_length"),
-                            **({"value_constraints": constraints} if constraints else {})))
-    details = snapshot.get("ebay_specifics") or {}
+        # eBay's page offers only its listed sizes, though its API takes others.
+        selection = row["mode"] == "selection" or (name == "Size" and bool(values))
+        extra = {"help": "Personalize is required before providing Personalization Instructions"} \
+            if name == "Personalization Instructions" else {}
+        return field(f"ebay_specifics.{name}", "Item condition" if condition else name, value, required=row["required"],
+                     multi=row["multi"], section=section, **extra,
+                     **({"category_specific": True} if not condition else {}),
+                     selection_only=selection,
+                     options=list(dict.fromkeys(v["label"] for v in values)),
+                     option_values={v["label"]: str(v["id"]) for v in values}, options_source="marketplace",
+                     max_values=row.get("max_values"), max_length=row.get("max_length"),
+                     **({"value_constraints": constraints} if constraints else {}))
+
     terms = best_offer_terms(snapshot.get("form") or {}, str(price_for(snapshot, "ebay") or 0), snapshot)
     from vendoo_studio.services import ebay_variations
 
-    from vendoo_studio.services.ebay_listings import AUCTION, FIXED_PRICE
-
     varied = ebay_variations.has_variations(snapshot)
-    kind = marketplace_schemas._ebay_listing_type(details.get("listingFormat")) or FIXED_PRICE
     # Auction prices, offers and variations all travel with the category. The
     # editor shows the ones the current format uses, so a format change does
     # not load the form again.
     selling = await _ebay_format_fields(snapshot, category, details)
     variations = await _ebay_variations_field(snapshot, category, schema)
-    offers = [
-        field("ebay_specifics.bestOffer.enabled", "Allow offers", terms.get("bestOfferEnabled", True), input_type="boolean"),
-        field("ebay_specifics.bestOffer.autoAcceptPrice", "Automatically accept offers at", (terms.get("autoAcceptPrice") or {}).get("value", ""), input_type="number",
-              help="Clear this amount to turn off automatic acceptance."),
-        field("ebay_specifics.bestOffer.minimumOfferPrice", "Decline offers below", (terms.get("autoDeclinePrice") or {}).get("value", ""), input_type="number",
-              help="Clear this amount to turn off automatic declines."),
-    ]
+    condition_row = next((row for row in schema if row.get("id") == "condition"), None)
     quantity = (field("quantity", "Quantity", ebay_variations.total_quantity(snapshot), input_type="number", locked=True,
                       help="The quantity is the total of the variations.") if varied else
-                field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number",
-                      **({"help": "An eBay auction sells one item."} if kind == AUCTION else {})))
-    fields.extend([*selling,
-                   *variations,
-                   quantity,
-                   field("sku", "SKU", seller_sku(snapshot), locked=True, help="SKU comes from Item Details."),
-                   field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}), input_type="textarea", max_length=1000),
-                   *offers,
-                   *[field(f"ebay_specifics.{key}", key.upper(), details.get(key)) for key in ("upc", "ean", "isbn")],
-                   *[field(f"ebay_specifics.{key}", label, details.get(key)) for key, label in
-                     (("primaryStoreCategory", "Primary store category"), ("secondaryStoreCategory", "Secondary store category"))],
-                   *package(snapshot)])
+                field("quantity", "Quantity", snapshot.get("quantity") or 1, input_type="number"))
+    fields = [
+        field("ebay_specifics.title", "Item title", _shared(snapshot, "ebay", "title"), required=True, max_length=80, section="Title",
+              help="Provide a title for your item. Use words people would search for when looking for your item."),
+        field("sku", "Custom label (SKU)", seller_sku(snapshot), locked=True, section="Title", max_length=50,
+              help="Create a custom label to enter information you want to track, such as your own SKU number. "
+                   "It comes from Item Details."),
+        field("direct_category_ids.ebay", "Category", (snapshot.get("direct_category_ids") or {}).get("ebay_path")
+              or (snapshot.get("marketplace_categories") or {}).get("ebay") or category, section="Item category"),
+        field("ebay_specifics.primaryStoreCategory", "First category", details.get("primaryStoreCategory"), section="Item category",
+              width="half", help="If you have an eBay Store, select the Store categories of the items you're listing."),
+        field("ebay_specifics.secondaryStoreCategory", "Second category", details.get("secondaryStoreCategory"),
+              section="Item category", width="half"),
+        *[{**row, "section": "Variations"} for row in variations],
+        *[aspect_field(row, EBAY_SPECIFIC_SECTIONS["required" if row.get("required") else
+                                                    "recommended" if row.get("usage") == "RECOMMENDED" else "optional"])
+          for row in ebay_specifics_order(schema)],
+        field("ebay_specifics.upc", "UPC", details.get("upc"), max_length=20, section=EBAY_SPECIFIC_SECTIONS["optional"]),
+        *([aspect_field(condition_row, "Condition")] if condition_row else []),
+        field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}),
+              input_type="textarea", max_length=1000, section="Condition",
+              help="Let the buyer know what makes your item unique, including any interesting features or flaws."),
+        field("ebay_specifics.description", "Description", _shared(snapshot, "ebay", "description"), required=True, section="Description"),
+        *[{**row, "section": "Pricing"} for row in selling],
+        field("price", "Item price", snapshot.get("price"), required=True, input_type="number", section="Pricing"),
+        {**quantity, "section": "Pricing"},
+        field("ebay_specifics.bestOffer.enabled", "Allow offers (optional)", terms.get("bestOfferEnabled", True), input_type="boolean",
+              section="Pricing", help="Interested buyers can send an offer for this item. You can accept, counter, or decline."),
+        field("ebay_specifics.bestOffer.minimumOfferPrice", "Minimum offer", (terms.get("autoDeclinePrice") or {}).get("value", ""),
+              input_type="number", section="Pricing", width="half"),
+        field("ebay_specifics.bestOffer.autoAcceptPrice", "Auto accept", (terms.get("autoAcceptPrice") or {}).get("value", ""),
+              input_type="number", section="Pricing", width="half"),
+        *[{**row, "section": "Shipping"} for row in package(snapshot)],
+    ]
     return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields}
 
 
@@ -204,30 +234,29 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
             note = "eBay's auction rules for this category could not be loaded. Reopen the listing to try again."
     auction_lengths = allowed.get(AUCTION) or []
     offers_auction = bool(auction_lengths) or kind == AUCTION
-    kinds = [FIXED_PRICE] + ([AUCTION] if offers_auction else [])
-    if not offers_auction and not note and category:
-        note = "eBay does not offer auctions in this category."
+    # eBay's Format menu lists Auction, then Buy It Now.
+    kinds = ([AUCTION] if offers_auction else []) + [FIXED_PRICE]
     rows = [field("ebay_specifics.listingFormat", "Format", kind, selection_only=True, required=True,
                   options=[FORMAT_LABELS[value] for value in kinds],
                   option_values={FORMAT_LABELS[value]: value for value in kinds}, options_source="marketplace",
                   clears=_FORMAT_CLEARS, **({"help": note} if note else {}))]
     if not offers_auction:
-        rows.append(field("ebay_specifics.listingDuration", "Duration", "GTC", locked=True,
-                          options=[duration_label("GTC")], option_values={duration_label("GTC"): "GTC"},
-                          help="eBay fixed-price listings run Good 'Til Cancelled."))
+        # Fixed price runs Good 'Til Cancelled; eBay's page shows no duration for it.
         return rows
     lengths = list(dict.fromkeys(["GTC", *auction_lengths]))
     chosen = "GTC" if kind != AUCTION else marketplace_schemas.ebay_duration(details.get("listingDuration")) or (
         DEFAULT_AUCTION_DURATION if DEFAULT_AUCTION_DURATION in auction_lengths or not auction_lengths else auction_lengths[0])
+    # eBay's page during an auction: duration, then Starting bid beside Buy It Now, then the reserve.
     rows += [
-        field("ebay_specifics.listingDuration", "Duration", chosen, selection_only=True, required=True,
+        field("ebay_specifics.listingDuration", "Auction duration", chosen, selection_only=True, required=True,
               options=[duration_label(value) for value in lengths],
               option_values={duration_label(value): value for value in lengths}, options_source="marketplace"),
-        field("ebay_specifics.auctionStartPrice", "Starting bid", details.get("auctionStartPrice"), input_type="number", required=True),
-        field("ebay_specifics.auctionReservePrice", "Reserve (optional)", details.get("auctionReservePrice"), input_type="number",
-              help="eBay charges a fee for a reserve, whether or not the item sells."),
+        field("ebay_specifics.auctionStartPrice", "Starting bid", details.get("auctionStartPrice"), input_type="number", required=True,
+              width="half"),
         field("ebay_specifics.auctionBuyItNow", "Buy It Now (optional)", details.get("auctionBuyItNow"), input_type="number",
-              help="In most categories eBay needs Buy It Now at least 30% above the starting bid."),
+              width="half", help="Minimum: 30% more than starting bid"),
+        field("ebay_specifics.auctionReservePrice", "Reserve price (optional) — fees apply", details.get("auctionReservePrice"),
+              input_type="number", width="half"),
     ]
     return rows
 

@@ -742,7 +742,7 @@ export function StructuredEditor({
   const viewFields = fields.map((field) => presentNativeField(field, viewContext));
   const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
   const formNotes = nativeTab
-    ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing, local, fields)]
+    ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing)]
     : [];
   // A marketplace form that names its headings keeps them, with its order and row layout.
   const pageLayout = nativeTab && renderedFields.some((field) => field.section);

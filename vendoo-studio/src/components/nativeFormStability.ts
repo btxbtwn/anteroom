@@ -178,7 +178,9 @@ export function nativeFieldVisible(field: NativeFormRow, context: NativeFieldCon
   if (context.tab === "ebay") {
     const auction = ebayFormat(context) === "AUCTION";
     const varied = ebayVaried(context.listing);
-    if (EBAY_AUCTION_PRICE_KEYS.has(field.key)) return auction;
+    // eBay's page: an auction has a duration and bids instead of an item price; Buy It Now runs until cancelled.
+    if (EBAY_AUCTION_PRICE_KEYS.has(field.key) || field.key === "ebay_specifics.listingDuration") return auction;
+    if (field.key === "ebay_specifics.price") return !auction;
     if (EBAY_OFFER_KEYS.has(field.key)) return !auction && !varied;
     if (field.key === "ebay_specifics.variations") return !(auction && !varied);
   }
@@ -245,29 +247,15 @@ export function presentNativeField<T extends NativeFormRow>(field: T, context: N
     if (ebayVaried(context.listing)) {
       return { ...field, locked: true, help: "The quantity is the total of the variations." };
     }
-    if (ebayFormat(context) === "AUCTION") {
-      return { ...field, locked: false, help: "An eBay auction sells one item." };
-    }
     return { ...field, locked: false, help: undefined };
   }
   return field;
 }
 
-/** Sentences that follow the current format or shipping method, not the last form load. */
-export function nativeFormNotes(
-  tab: string,
-  listing: ListingData | undefined,
-  local: Record<string, string | string[] | undefined>,
-  fields: readonly NativeFormRow[],
-): string[] {
-  const context: NativeFieldContext = { tab, listing, local, fields, categoryStale: false };
-  if (tab === "ebay") {
-    const notes: string[] = [];
-    if (ebayFormat(context) === "AUCTION") notes.push("An auction uses Starting bid and Buy It Now, not Price.");
-    if (ebayVaried(listing)) {
-      notes.push("With variations, Price is the price of any variation left without its own. eBay takes no offers on a listing with variations.");
-    }
-    return notes;
+/** Sentences that follow the current variations, not the last form load. */
+export function nativeFormNotes(tab: string, listing: ListingData | undefined): string[] {
+  if (tab === "ebay" && ebayVaried(listing)) {
+    return ["With variations, Price is the price of any variation left without its own. eBay takes no offers on a listing with variations."];
   }
   return [];
 }

@@ -261,7 +261,8 @@ def store_category_names(listing: dict) -> list[str]:
 
 FIXED_PRICE = "FIXED_PRICE"
 AUCTION = "AUCTION"
-FORMAT_LABELS = {FIXED_PRICE: "Fixed price", AUCTION: "Auction"}
+# eBay's own names on its listing form.
+FORMAT_LABELS = {FIXED_PRICE: "Buy It Now", AUCTION: "Auction"}
 DEFAULT_AUCTION_DURATION = "DAYS_7"
 
 
