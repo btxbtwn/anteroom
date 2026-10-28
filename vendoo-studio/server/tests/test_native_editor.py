@@ -15,6 +15,7 @@ from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import native_editor, marketplace_schemas, ebay_listings
+from vendoo_studio.services.browser_bridge import BrowserBridgeError
 from vendoo_studio.services.listing_result import ListingProblem
 from vendoo_studio.services.vendoo_import import merge_notes
 
@@ -67,6 +68,20 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(answer.status_code, 409)
         self.assertIn("Connect Chrome", answer.json()["detail"])
         self.bridge.assert_not_called()
+
+    def test_a_lost_form_reply_is_asked_for_once_more(self):
+        self.bridge.side_effect = [BrowserBridgeError("Chrome did not answer in time."),
+                                   {"ok": True, "form": {"marketplace": "depop", "native": True, "fields": []}}]
+        answer = self.client.get(f"{self.url}/depop/form")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(self.bridge.await_count, 2)
+
+    def test_a_lost_form_reply_names_why_chrome_did_not_answer(self):
+        self.bridge.side_effect = BrowserBridgeError("Chrome did not answer in time.")
+        answer = self.client.get(f"{self.url}/depop/form")
+        self.assertEqual(answer.status_code, 502)
+        self.assertIn("did not answer in time", answer.json()["detail"])
+        self.assertIn("Reopen the listing", answer.json()["detail"])
 
     def test_catalog_refusal_is_visible_and_never_returns_a_different_form(self):
         self.bridge.return_value = {"ok": False, "error": "Depop’s category list changed."}

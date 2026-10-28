@@ -10,6 +10,19 @@ describe("extensionConnection", () => {
     });
   });
 
+  it("names the extra copy when Chrome has two bridges loaded", () => {
+    const view = extensionConnection({
+      connected: true,
+      up_to_date: true,
+      duplicate_bridge: true,
+      load_path: "~/Library/Application Support/Anteroom/vendoo-extension",
+    });
+    expect(view.label).toBe("Two copies loaded");
+    expect(view.tone).toBe("warning");
+    expect(view.detail).toContain("~/Library/Application Support/Anteroom/vendoo-extension");
+    expect(view.detail).toContain("chrome://extensions");
+  });
+
   it("says offline when Chrome has not connected", () => {
     const view = extensionConnection(undefined);
     expect(view.label).toBe("Offline");

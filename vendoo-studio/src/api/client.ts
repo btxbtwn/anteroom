@@ -1337,6 +1337,7 @@ export const api = {
         files_in_sync?: boolean;
         version_mismatch?: boolean;
         load_path?: string | null;
+        duplicate_bridge?: boolean;
       }>("/extension/status"),
     pairingToken: () => request<{ token: string }>("/extension/pairing-token"),
     reload: () => request<{ ok: boolean; sent: boolean }>("/extension/reload", { method: "POST" }),

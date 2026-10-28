@@ -31,6 +31,8 @@ LISTING = {"title": "ANTEROOM DRAFT CHECK - DO NOT PUBLISH", "description": "Pri
            "size": "M",
            "weight_oz": 8, "package_dimensions_in": "12x9x2",
            "marketplace_category_ids": {"ebay": "11450", "poshmark": "5c3c3d4a6a2b3c4d5e6f7081", "mercari": "1934", "depop": "menswear_tshirts"},
+           "mercari_specifics": {"shipsFrom": "70125", "shippingClassId": "2550",
+                                "package": {"fitsShoebox": "no", "pounds": 1}},
            "depop_specifics": {"parcelSize": "Medium"}}
 SELLWILD = {"sellwild_category_id": 272, "sellwild_condition_id": 2}
 

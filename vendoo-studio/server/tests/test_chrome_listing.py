@@ -76,6 +76,30 @@ class ChromePreflightTest(unittest.TestCase):
         }, Context())
         self.assertTrue(any(gap["blocking"] and "subcategories" in gap["message"] for gap in mercari))
 
+    def test_mercari_needs_its_shipping_answers_before_list_everywhere_tries(self):
+        listing = {"description": "Light wash jeans", "direct_category_ids": {"mercari": "1931"}, "form": {"overrides": {}}}
+        blocking = {gap["field"] for gap in mercari_requirements(listing, Context()) if gap["blocking"]}
+        self.assertIn("mercari_specifics.shipsFrom", blocking)
+        self.assertIn("mercari_specifics.package.fitsShoebox", blocking)
+        self.assertIn("mercari_specifics.package.pounds", blocking)
+        self.assertIn("mercari_specifics.shippingClassId", blocking)
+
+        complete = {**listing, "weight_oz": 8, "mercari_specifics": {
+            "shipsFrom": "70125", "shippingClassId": "2550", "package": {"fitsShoebox": "no"}}}
+        self.assertFalse([gap for gap in mercari_requirements(complete, Context()) if gap["blocking"]])
+
+        # A saved carrier default is a label too; the extension matches it to this package's tier.
+        saved_label = {**listing, "weight_oz": 8, "mercari_specifics": {
+            "shipsFrom": "70125", "package": {"fitsShoebox": "yes"}},
+            "form": {"overrides": {}, "mercari_shipping_label": {"id": "2550", "label": "USPS Ground Advantage"}}}
+        self.assertFalse([gap for gap in mercari_requirements(saved_label, Context()) if gap["blocking"]])
+
+        # Ship on your own uses the seller's own label and needs none of the prepaid answers.
+        own_label = {"description": "Light wash jeans", "direct_category_ids": {"mercari": "1931"},
+                     "form": {"overrides": {}},
+                     "mercari_specifics": {"shipsFrom": "70125", "shippingMethod": "SOYO"}}
+        self.assertFalse([gap for gap in mercari_requirements(own_label, Context()) if gap["blocking"]])
+
     def test_mercari_ignores_a_mirrored_size_table_and_checks_native_sizes_in_chrome(self):
         listing = {"description": "Graphic tee", "marketplace_category_ids": {"mercari": "1934"},
                    "form": {"sizes": [{"id": 4, "name": "M"}]}}
@@ -204,6 +228,9 @@ class MercariParentCategoryTest(unittest.TestCase):
         self.db.close()
 
     def _gaps(self, **listing):
+        listing.setdefault("mercari_specifics", {
+            "shipsFrom": "70125", "shippingClassId": "2550", "package": {"fitsShoebox": "no", "pounds": 1},
+        })
         return mercari_requirements({"description": "Windbreaker", **listing}, Context(db=self.db))
 
     def test_a_stored_parent_id_is_refused_and_its_subcategories_named(self):
