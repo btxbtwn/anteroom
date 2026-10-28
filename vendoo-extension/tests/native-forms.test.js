@@ -55,7 +55,7 @@ test('Poshmark form uses native category, group and size IDs and only supported 
   const fields = Object.fromEntries(form.fields.map(row => [row.path, row]));
   assert.equal(form.native, true);
   assert.deepEqual(fields['poshmark_specifics.shippingDiscountId'].option_values, { 'Buyer Shipping: Free': 'discount-1' });
-  assert.deepEqual(fields['poshmark_specifics.availability'].option_values, { 'For Sale': 'available', 'Not For Sale': 'not_for_sale' });
+  assert.deepEqual(fields['poshmark_specifics.availability'].option_values, { 'For Sale': 'available', 'Not For Sale': 'not_for_sale', Drops: 'coming_soon' });
   assert.equal(fields['poshmark_specifics.sellerNotes'].value, '');
   assert.equal(fields['direct_category_ids.poshmark'].value, 'men/shirts/tees');
   assert.equal(fields['direct_category_ids.poshmark'].option_values['Men > Shirts > Tees'], 'men/shirts/tees');
@@ -73,7 +73,7 @@ test('Poshmark form uses native category, group and size IDs and only supported 
   assert.deepEqual(inventory.value, [{ sizeSetId: 'standard', sizeId: 'M', quantity: 1, sku: '' }]);
   assert.deepEqual(inventory.inventory_groups.map(row => row.id), ['standard', 'tall', 'custom']);
   assert.deepEqual(inventory.inventory_groups[0].sizes.map(row => row.id), ['M', 'XL']);
-  assert.equal(fields['poshmark_specifics.smartSell.enabled'].input_type, 'boolean');
+  assert.equal(fields['poshmark_specifics.smartSell.enabled'].input_type, 'badge');
   assert.ok(!fields.cost.locked);
   assert.ok(!form.fields.some(row => /shipping label|size scale/i.test(row.label)));
 });
@@ -96,12 +96,12 @@ test('Poshmark form follows the create-listing page: headings, order, grouped ca
     'Men > Shirts > Tees', 'Men > Shirts > None', 'Men > Shoes']);
   const headings = [];
   for (const row of form.fields) if (headings.at(-1) !== row.section) headings.push(row.section);
-  assert.deepEqual(headings, ['Photos & Video', 'Title', 'Description', 'Category', 'Size', 'Condition', 'Brand', 'Color', 'Style Tags', 'Price',
+  assert.deepEqual(headings, ['Photos & Video', 'Title', 'Description', 'Category', 'Quantity', 'Size', 'Condition', 'Brand', 'Color', 'Style Tags', 'Price',
     'Availability', 'Additional Details (Private)']);
   assert.deepEqual([form.fields[0].path, form.fields[0].input_type, form.fields[0].help],
     ['marketplace_photos.poshmark', 'photos', 'Add up to 16 photos and 1 video to show the angles and details of your item.']);
   assert.deepEqual(form.fields.filter(row => row.section === 'Price').map(row => row.label),
-    ['Listing Price', 'Automate Offers', 'Lowest Price', 'Original Price', 'Shipping Discount']);
+    ['Listing Price', 'Smart Sell', 'Lowest Price', 'Discounted Shipping', 'Your Earnings']);
   assert.deepEqual(form.fields.filter(row => row.section === 'Additional Details (Private)').map(row => row.label),
     ['Listing SKU', 'Cost Price', 'Other Info']);
   assert.deepEqual(rows.Color.options, ['Red', 'Blue', 'Black']);
@@ -109,11 +109,42 @@ test('Poshmark form follows the create-listing page: headings, order, grouped ca
   assert.equal(rows.Color.max_values, 2);
   assert.equal(rows['Cost Price'].value, 4);
   assert.ok(!rows['Cost Price'].locked);
-  assert.equal(rows['Automate Offers'].help, 'Sell 50% faster by setting your lowest price.');
+  assert.equal(rows['Smart Sell'].help, 'Sell 50% faster by setting your lowest price.');
+  assert.equal(rows['Your Earnings'].locked, true);
+  assert.equal(rows['Your Earnings'].value, '$12.80');
   assert.equal(rows.Size.inventory_groups.at(-1).label, 'Custom');
   // The form's Color picks are what direct List posts.
   assert.deepEqual(clean(call(c, 'poshmarkColors', { ...listing, poshmark_specifics: { colors: ['Red'] } }, catalog)), ['Red']);
   assert.deepEqual(clean(call(c, 'poshmarkColors', listing, catalog)), ['Blue', 'Black']);
+  const jeans = form.fields.find(row => row.path === 'direct_category_ids.poshmark').cascade;
+  assert.equal(jeans[0].label, 'Women');
+  assert.equal(jeans[0].items[0].display, 'Women Tops');
+  assert.equal(jeans[0].items[1].type, 'group');
+  assert.equal(jeans[0].items[1].items[0].display, 'Women Kilts');
+  assert.equal(form.fields.find(row => row.path === 'poshmark_specifics.multiItem').input_type, 'segmented');
+  assert.equal(form.fields.find(row => row.path === 'poshmark_specifics.makeAvailableAt').label, 'Drop Time');
+});
+
+test('Poshmark sizes follow the selected system and earnings subtract the seller shipping discount', () => {
+  const c = loadWorker();
+  const catalog = { colors: [], catalog: { departments: [{ id: 'women', display: 'Women', categories: [{ id: 'jeans', display: 'Jeans',
+    size_sets: [{ id: 'standard', name: 'Standard', tags: ['standard'], size_systems: {
+      us: { sizes: [{ id: '23', display: '23', equivalent_sizes: { au: ['0AU'] } }] },
+      au: { sizes: [{ id: '0AU', display: '0', equivalent_sizes: { us: ['23'] } }] },
+    } }] }] }] } };
+  const display = { children: [{ id: 'women', children: [{ id: 'jeans' }] }] };
+  const form = clean(call(c, 'poshmarkEditorForm', { price: 20, direct_category_ids: { poshmark: 'women/jeans' } }, catalog, display, [],
+    [{ id: 'free', label: 'Free', discount_amount: { val: '6.49' } }, { id: 'none', label: 'No Discount', discount_amount: { val: '0' } }]));
+  const inventory = form.fields.find(row => row.input_type === 'inventory');
+  assert.deepEqual(inventory.inventory_groups[0].sizes.map(row => row.id), ['23']);
+  assert.deepEqual(inventory.inventory_groups[0].systems.au.map(row => row.label), ['0']);
+  assert.equal(inventory.inventory_groups[0].systems.us[0].equivalents.au, '0AU');
+  assert.equal(form.fields.find(row => row.label === 'Your Earnings').value, '$16.00');
+  const discounted = clean(call(c, 'poshmarkEditorForm', { price: 20, poshmark_specifics: { shippingDiscountId: 'free' } }, catalog, display, [],
+    [{ id: 'free', label: 'Free', discount_amount: { val: '6.49' } }]));
+  assert.equal(discounted.fields.find(row => row.label === 'Your Earnings').value, '$9.51');
+  assert.equal(call(c, 'poshmarkEarnings', 10, 0), '$7.05');
+  assert.equal(call(c, 'poshmarkEarnings', 3, 6.49), '$0.00');
 });
 
 test('explicit Poshmark group and native size beat the old imported size, without crossing groups', () => {

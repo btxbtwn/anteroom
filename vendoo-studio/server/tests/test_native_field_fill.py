@@ -53,6 +53,7 @@ class FillableRowsTest(unittest.TestCase):
     def test_a_row_locked_by_the_form_or_with_too_many_choices_is_skipped(self):
         form = {"fields": [row("ebay_specifics.Color", "Color", [str(n) for n in range(400)]),
                            row("ebay_specifics.Style", "Style", ["Jeans"], locked=True),
+                           row("ebay_specifics.donationPercent", "Percentage", ["10%", "100%"]),
                            row("ebay_specifics.Fit", "Fit", ["Slim"])]}
         self.assertEqual([r["path"] for r in fillable_rows(form, "ebay", {})], ["ebay_specifics.Fit"])
 

@@ -6,13 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-
-## 0.1.474 — 2026-10-28
+## 0.1.475 — 2026-10-28
 
 - Listing forms are easier to read: fields stop at a comfortable width instead of stretching across a wide window, section headings stand out from field labels, labels and marketplace statuses are larger, and the description box has more room between lines.
 - Fields that take several choices say how many they allow in the empty box ("Choose up to 3"), and the count appears once you pick something.
 - Depop's hashtags show as chips under the description instead of a sentence.
 - The inventory list shows three suggestions with "Show all" for the rest, the search box reads "Search listings" instead of cutting off, the status tabs no longer cut off "Active", and the marketplace logos under each listing are larger.
+
+## 0.1.474 — 2026-10-27
+
+- The Poshmark tab now matches the rest of Poshmark’s create-listing page. Quantity is Single Item or Multi Item, separate from Size. Category and Subcategory sit side by side: the category starts with Women, Men, Kids, Home, Pets, or Electronics, and a chosen category reads like “Women Jeans.” Sizes can be US, AU, EU, or UK. Availability includes Drops, with a drop time within 7 days. Listing Price shows the Smart Sell badge, Discounted Shipping, and Your Earnings.
 
 ## 0.1.473 — 2026-10-28
 

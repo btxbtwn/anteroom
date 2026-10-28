@@ -63,7 +63,7 @@ import type { BulkListingUploadResult } from "../bulkPhotoUpload";
 import { HistoryIcon, Link2Icon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
-import { CategoryTreeSelect, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect } from "./ListingFormControls";
+import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
 import { groupFieldsIntoSections } from "./listingFieldSections";
 import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
@@ -126,6 +126,10 @@ interface EditorField {
   accept?: string;
   optionGroups?: Record<string, string>;
   width?: "half" | "third" | "quarter";
+  /** The control itself is half the row, stacked, as on Poshmark's price and private fields. */
+  controlWidth?: "half";
+  cascade?: CascadeDepartment[];
+  optionAmounts?: Record<string, number>;
   group?: string;
   groupHelp?: string;
   sectionHelp?: string;
@@ -827,14 +831,34 @@ export function StructuredEditor({
     if (f.type === "inventory") {
       const stored = resolvedEditorValue(f, listing);
       const rows = Array.isArray(stored) ? stored.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : [];
+      const multiField = viewFields.find(row => row.key === "poshmark_specifics.multiItem");
+      const multiShown = formFieldText(local["poshmark_specifics.multiItem"] ?? resolvedEditorValue(multiField || { key: "poshmark_specifics.multiItem" }, listing));
+      const multi = tab !== "poshmark" || (multiField?.optionValues?.[multiShown] ?? multiShown) === "true";
+      const sizeSystem = formFieldText(getListingEditorValue(listing, "poshmark_specifics.sizeSystem")) || "us";
       return <NativeInventoryEditor
         value={rows}
-        groups={f.inventoryGroups || []} disabled={f.locked} onChange={(next) => {
+        groups={f.inventoryGroups || []} disabled={f.locked} multi={multi} sizeSystem={sizeSystem}
+        onSizeSystem={(system, next) => {
+          const updated = cloneListing(listing);
+          setListingEditorValue(updated, "poshmark_specifics.sizeSystem", system);
+          setListingEditorValue(updated, f.key, next);
+          onChange(updated);
+        }}
+        onChange={(next) => {
           const updated = cloneListing(listing);
           setListingEditorValue(updated, f.key, next);
           onChange(updated);
         }} />;
     }
+    if (f.type === "cascade") {
+      // The draft stores the id. The control's text is that id's label until it is chosen again.
+      const stored = f.optionValues?.[text] ?? text;
+      return <DependentSelectPair id={id} value={stored} departments={f.cascade || []} disabled={f.locked}
+        onChange={next => commitField(f.key, next)} />;
+    }
+    if (f.type === "segmented") return <SegmentedTabs label={f.label} value={text}
+      tabs={(f.options || []).map(label => ({ id: label, label }))} onChange={next => commitField(f.key, next)} />;
+    if (f.type === "badge") return null;
     if (f.type === "variations") return <EbayVariationsEditor convId={convId} listing={listing}
       value={normalizeVariations(resolvedEditorValue(f, listing))} aspects={f.variationAspects || []} disabled={f.locked} onChange={value => {
         const updated = cloneListing(listing);
@@ -904,6 +928,13 @@ export function StructuredEditor({
         />
       );
     }
+    if (f.type === "datetime-local") {
+      return <Input nativeInput id={id} data-listing-field={f.key} type="datetime-local" readOnly={f.locked} disabled={f.locked}
+        value={text ? text.slice(0, 16) : ""} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+    }
+    if (f.key === "poshmark_specifics.earnings") {
+      return <Input nativeInput id={id} data-listing-field={f.key} readOnly value={formFieldText(f.defaultValue)} />;
+    }
     const inputProps = {
       nativeInput: true,
       id,
@@ -957,8 +988,8 @@ export function StructuredEditor({
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
-        // Photos are counted on the photo area itself, not as a field to fill.
-        const counted = section.fields.filter((f) => f.type !== "photos");
+        // Photos are counted on the photo area itself, and Smart Sell is a badge on Listing Price.
+        const counted = section.fields.filter((f) => f.type !== "photos" && f.type !== "badge");
         const filled = counted.filter((f) => {
           if (f.type === "inventory" || f.type === "variations") {
             const stored = resolvedEditorValue(f, listing);
@@ -968,7 +999,7 @@ export function StructuredEditor({
           }
           return formFieldText(local[f.key]).trim() !== "";
         }).length;
-        const visible = section.fields.filter((f) => !f.reveal || revealed.has(`${tab}|${section.title}|${f.reveal}`));
+        const visible = section.fields.filter((f) => f.type !== "badge" && (!f.reveal || revealed.has(`${tab}|${section.title}|${f.reveal}`)));
         const rows = (
           <>
             {/* "See … options" sits at the top of eBay's section; "Show more" sits under the fields. */}
@@ -976,7 +1007,10 @@ export function StructuredEditor({
             {/* A marketplace's own page layout uses a twelve-part row; the general form spreads out when wide. */}
             <div className={cn("grid min-w-0 gap-x-4 gap-y-5 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-12" : "grid-cols-2 @4xl:grid-cols-3")}>
               {pageLayout && section.fields[0]?.sectionHelp && <p className="col-span-full text-muted-foreground text-xs">{section.fields[0].sectionHelp}</p>}
-              {visible.map((f, index) => (
+              {visible.map((f, index) => {
+                const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));
+                const badgeOn = badge ? formFieldText(local[badge.key] ?? badge.defaultValue) === "true" : false;
+                return (
                 <React.Fragment key={f.key}>
                 {pageLayout && f.group && visible[index - 1]?.group !== f.group && (
                   <div className="col-span-full min-w-0">
@@ -986,14 +1020,18 @@ export function StructuredEditor({
                 )}
                 <div className={cn("min-w-0", pageLayout
                   ? ({ quarter: "col-span-3", third: "col-span-4", half: "col-span-6" } as Record<string, string>)[f.width ?? ""] ?? "col-span-full"
-                  : fullWidth(f) && "col-span-full")}>
-                  {f.presentation !== "button" && f.label && (f.counter && f.maxLength != null ? (
+                  : fullWidth(f) && "col-span-full", f.controlWidth === "half" && "sm:max-w-[50%]")}>
+                  {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.counter && f.maxLength != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
                       <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
                       <span className="text-muted-foreground text-xs tabular-nums">{formFieldText(local[f.key]).length}/{f.maxLength}</span>
                     </div>
                   ) : (
-                    <FieldLabel htmlFor={`listing-field-${f.key}`} className={f.labelHidden ? "sr-only" : undefined}>{f.label}</FieldLabel>
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                      {badge && <button type="button" aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
+                        onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
+                    </div>
                   ))}
                   {control(f)}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
@@ -1011,7 +1049,8 @@ export function StructuredEditor({
                   </p>}
                 </div>
                 </React.Fragment>
-              ))}
+                );
+              })}
             </div>
             {revealButtons(section.title, section.fields, (name) => !name.startsWith("See "))}
           </>
@@ -1415,6 +1454,9 @@ function schemaFieldsForTab(
     ...(field.accept ? { accept: field.accept } : {}),
     ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
+    ...(field.control_width ? { controlWidth: field.control_width } : {}),
+    ...(field.cascade ? { cascade: field.cascade as EditorField["cascade"] } : {}),
+    ...(field.option_amounts ? { optionAmounts: field.option_amounts } : {}),
     ...(field.group ? { group: field.group, groupHelp: field.group_help } : {}),
     ...(field.section_help ? { sectionHelp: field.section_help } : {}),
     ...(field.placeholder ? { placeholder: field.placeholder } : {}),
