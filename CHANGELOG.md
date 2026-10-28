@@ -6,10 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.475 — 2026-10-28
+## 0.1.476 — 2026-10-28
 
 - The Depop tab now follows Depop’s sell page: the description placeholder, the 1,000-character counter and the hashtag counter, US$ on the price, your shipping address, and suggested package sizes. List sends the same package size Depop’s page would. Worldwide shipping’s price appears, with US$, only when you turn that offer on.
 - The Sellwild tab shows the fee and what you earn, your discounts with none picked until you choose one, and packages grouped the way Sellwild groups them. A vehicle still shows Vehicle Shipping and no package. A discount you pick is applied after the listing is live.
+
+## 0.1.475 — 2026-10-28
+
+- OpenRouter now has its own mark and keeps the model names OpenRouter gives them, in Settings and the model picker.
+- OpenRouter has a Reasoning setting with the levels the listing model supports. Default leaves the choice to OpenRouter.
 
 ## 0.1.474 — 2026-10-27
 

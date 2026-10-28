@@ -276,7 +276,10 @@ export function useComposerModel() {
         ? []
         : id === activeKey && activeKeyModels.data
           ? providerModelOptions(
-              activeKeyModels.data.models.map((slug) => ({ slug, name: slug })),
+              activeKeyModels.data.models.map((slug) => ({
+                slug,
+                name: activeKeyModels.data?.labels?.[slug] || slug,
+              })),
               savedModel[id],
             )
           : savedModel[id]
@@ -298,6 +301,15 @@ export function useComposerModel() {
     }
     if (active === "cursor" && cursor.data?.reasoning) {
       return { options: cursor.data.reasoning.options, value: cursor.data.reasoning.value };
+    }
+    if (isKeyProviderId(active) && activeKeyModels.data?.reasoning) {
+      return {
+        options: activeKeyModels.data.reasoning.options.map((option) => ({
+          ...option,
+          label: EFFORT_LABELS[option.value] ?? option.label,
+        })),
+        value: activeKeyModels.data.reasoning.value,
+      };
     }
     return null;
   })();
@@ -326,6 +338,7 @@ export function useComposerModel() {
       if (active === "chatgpt") await api.settings.setChatGPTModels({ reasoning_effort: value });
       else if (active === "claude") await api.settings.setClaudeModels({ effort: value });
       else if (active === "cursor") await api.settings.setCursorModels({ reasoning_effort: value });
+      else if (isKeyProviderId(active)) await api.settings.setAIKeyModels(active, { reasoning_effort: value });
     },
     onSettled: refresh,
   });

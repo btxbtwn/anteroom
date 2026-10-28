@@ -45,6 +45,7 @@ const PROVIDER_LABELS: Record<ListingProviderId, { short: string; full: string }
 
 const REASONING_LABELS: Record<string, string> = {
   none: "Off",
+  minimal: "Minimal",
   low: "Low",
   medium: "Medium",
   high: "High",
@@ -478,7 +479,8 @@ function KeyProviderEditor({
     staleTime: 5 * 60_000,
   });
   const setModels = useMutation({
-    mutationFn: (model: { vision_model: string } | { listing_model: string }) => api.settings.setAIKeyModels(id, model),
+    mutationFn: (change: { vision_model?: string; listing_model?: string; reasoning_effort?: string }) =>
+      api.settings.setAIKeyModels(id, change),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["ai-key-models", id] });
       onChanged();
@@ -578,12 +580,30 @@ function KeyProviderEditor({
         <SettingsSection title="Models">
           <ProviderModelRows
             provider={id}
-            models={(models?.models ?? []).map((slug) => ({ value: slug, label: slug }))}
+            models={(models?.models ?? []).map((slug) => ({
+              value: slug,
+              label: models?.labels?.[slug] || slug,
+            }))}
             visionModel={models?.vision_model ?? entry?.vision_model ?? ""}
             listingModel={models?.listing_model ?? entry?.listing_model ?? ""}
             onModel={(model) => setModels.mutate(model)}
-            reasoning={null}
-            reasoningDescription=""
+            reasoning={
+              models?.reasoning
+                ? {
+                    value: models.reasoning.value,
+                    options: models.reasoning.options.map((option) => ({
+                      value: option.value,
+                      label: REASONING_LABELS[option.value] ?? option.label,
+                    })),
+                    onChange: (value) => setModels.mutate({ reasoning_effort: value }),
+                  }
+                : null
+            }
+            reasoningDescription={
+              id === "openrouter"
+                ? "Higher uses more reasoning tokens and takes longer. Options come from the listing model; Default leaves the choice to OpenRouter. Applies to the listing model."
+                : ""
+            }
             pending={setModels.isPending}
             error={models?.error || setModels.error?.message}
           />

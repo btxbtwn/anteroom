@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 
 import httpx
 
@@ -56,14 +57,31 @@ def parse_evidence(content: str) -> dict:
     return {"evidence": {}, "raw": content}
 
 
+@dataclass(frozen=True)
+class ModelEntry:
+    """One model in a provider's catalog, with what its picker needs."""
+
+    slug: str
+    name: str
+    reasoning_efforts: tuple[str, ...] = ()
+
+
 class ChatCompletionsProvider:
-    def __init__(self, spec: KeyProvider, api_key: str, vision_model: str, listing_model: str):
+    def __init__(
+        self,
+        spec: KeyProvider,
+        api_key: str,
+        vision_model: str,
+        listing_model: str,
+        reasoning_effort: str | None = None,
+    ):
         self.spec = spec
         self.name = spec.id
         self.base_url = spec.base_url
         self.api_key = api_key.strip()
         self.vision_model = vision_model
         self.listing_model = listing_model
+        self.reasoning_effort = reasoning_effort
 
     def _headers(self) -> dict[str, str]:
         headers = {
@@ -91,18 +109,44 @@ class ChatCompletionsProvider:
         label = self.spec.label
         return f"{label} HTTP {resp.status_code}: {text}" if text else f"{label} HTTP {resp.status_code}"
 
-    async def list_models(self) -> list[str]:
+    async def list_model_entries(self) -> list[ModelEntry]:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.get(f"{self.base_url}/models", headers=self._headers())
         if resp.status_code >= 400:
             raise RuntimeError(self._http_error(resp))
         data = resp.json().get("data") or []
-        slugs = {
-            str(item["id"]).removeprefix("models/")
-            for item in data
-            if isinstance(item, dict) and isinstance(item.get("id"), str)
-        }
-        return sorted(slugs)
+        entries: dict[str, ModelEntry] = {}
+        for item in data:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                continue
+            slug = item["id"].removeprefix("models/")
+            name = item.get("name")
+            entries[slug] = ModelEntry(
+                slug=slug,
+                name=name.strip() if isinstance(name, str) and name.strip() else slug,
+                reasoning_efforts=self._reasoning_efforts(item),
+            )
+        return [entries[slug] for slug in sorted(entries)]
+
+    def _reasoning_efforts(self, item: dict) -> tuple[str, ...]:
+        """The model's advertised efforts, when it takes OpenRouter's reasoning knob."""
+        if not self.spec.reasoning:
+            return ()
+        params = item.get("supported_parameters")
+        if not isinstance(params, list) or not {"reasoning", "reasoning_effort"} & set(params):
+            return ()
+        reasoning = item.get("reasoning")
+        efforts = reasoning.get("supported_efforts") if isinstance(reasoning, dict) else None
+        if isinstance(efforts, list):
+            values = tuple(str(effort).strip() for effort in efforts if str(effort).strip())
+            if values:
+                return values
+        # OpenRouter accepts these for any reasoning-capable model; a few models
+        # advertise no list of their own.
+        return ("low", "medium", "high")
+
+    async def list_models(self) -> list[str]:
+        return [entry.slug for entry in await self.list_model_entries()]
 
     async def test_connection(self) -> bool:
         await self.list_models()
@@ -155,7 +199,10 @@ class ChatCompletionsProvider:
         yield await self._complete(messages, self.listing_model)
 
     def _body(self, messages: list[dict], model: str, **extra) -> dict:
-        return {"model": model, "messages": messages, **extra}
+        body = {"model": model, "messages": messages, **extra}
+        if self.reasoning_effort and model == self.listing_model:
+            body["reasoning"] = {"effort": self.reasoning_effort}
+        return body
 
     async def _post(self, body: dict, timeout: float = 300) -> dict:
         async with httpx.AsyncClient(timeout=timeout) as client:

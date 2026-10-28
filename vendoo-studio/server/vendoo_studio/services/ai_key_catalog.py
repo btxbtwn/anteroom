@@ -33,6 +33,8 @@ class KeyProvider:
     web_search: bool = False
     # The provider offers its own sign-in that hands Studio a key.
     sign_in: bool = False
+    # The provider takes a reasoning effort for models that support it.
+    reasoning: bool = False
 
 
 KEY_PROVIDERS: dict[str, KeyProvider] = {
@@ -102,6 +104,7 @@ KEY_PROVIDERS: dict[str, KeyProvider] = {
             key_hint="sk-or-...",
             web_search=True,
             sign_in=True,
+            reasoning=True,
         ),
     )
 }

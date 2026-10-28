@@ -20,6 +20,12 @@ class AIKeyConfig(BaseModel):
 class AIKeyModelsConfig(BaseModel):
     vision_model: str | None = None
     listing_model: str | None = None
+    reasoning_effort: str | None = None
+
+
+# Efforts OpenRouter accepts across providers; a model's own catalog entry is
+# preferred when it advertises a narrower list.
+REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
 
 
 def _spec(provider_id: str):
@@ -98,31 +104,85 @@ async def test_ai_key(provider_id: str):
 
 @router.get("/{provider_id}/models")
 async def ai_key_models(provider_id: str):
+    from vendoo_studio.services.user_settings import get_key_provider_reasoning
+
+    spec = _spec(provider_id)
     provider = _instance(provider_id)
+    entries: list = []
     try:
-        models = await provider.list_models()
+        if hasattr(provider, "list_model_entries"):
+            entries = await provider.list_model_entries()
+        else:
+            from vendoo_studio.providers.chat_completions import ModelEntry
+
+            entries = [ModelEntry(slug, slug) for slug in await provider.list_models()]
         error = None
     except Exception as exc:
-        models, error = [], str(exc)
+        error = str(exc)
+    models = sorted(entry.slug for entry in entries)
+    labels = {entry.slug: entry.name for entry in entries if entry.name != entry.slug}
+    reasoning = None
+    if spec.reasoning and error is None:
+        entry = next((item for item in entries if item.slug == provider.listing_model), None)
+        if entry is not None and entry.reasoning_efforts:
+            efforts = entry.reasoning_efforts
+            saved = get_key_provider_reasoning(provider_id)
+            value = "default"
+            if (
+                saved
+                and saved["model"] == provider.listing_model
+                and saved["value"] in efforts
+            ):
+                value = saved["value"]
+            reasoning = {
+                "options": [
+                    {"value": "default", "label": "Default"},
+                    *({"value": effort, "label": effort.capitalize()} for effort in efforts),
+                ],
+                "value": value,
+            }
     return {
         "models": models,
+        "labels": labels,
         "vision_model": provider.vision_model,
         "listing_model": provider.listing_model,
+        "reasoning": reasoning,
         "error": error,
     }
 
 
 @router.put("/{provider_id}/models")
 def set_ai_key_models(provider_id: str, config: AIKeyModelsConfig):
-    from vendoo_studio.services.user_settings import set_key_provider_models
+    from vendoo_studio.services.user_settings import (
+        clear_key_provider_reasoning,
+        resolved_key_provider_models,
+        set_key_provider_models,
+        set_key_provider_reasoning,
+    )
 
-    _spec(provider_id)
+    spec = _spec(provider_id)
+    reasoning = (config.reasoning_effort or "").strip().lower()
+    if not (config.vision_model or config.listing_model or reasoning):
+        raise HTTPException(400, "Choose a photo model, listing model, or reasoning level.")
+    if reasoning and not spec.reasoning:
+        raise HTTPException(400, f"{spec.label} has no reasoning setting.")
+    if reasoning not in ("", "default", *REASONING_EFFORTS):
+        raise HTTPException(400, f"{spec.label} does not support reasoning level {reasoning}.")
     try:
-        models = set_key_provider_models(
-            provider_id,
-            vision_model=config.vision_model,
-            listing_model=config.listing_model,
-        )
+        if config.vision_model or config.listing_model:
+            models = set_key_provider_models(
+                provider_id,
+                vision_model=config.vision_model,
+                listing_model=config.listing_model,
+            )
+        else:
+            models = {}
+        if reasoning:
+            _, listing_model = resolved_key_provider_models(provider_id)
+            if reasoning == "default":
+                clear_key_provider_reasoning(provider_id)
+            else:
+                set_key_provider_reasoning(provider_id, model=listing_model, value=reasoning)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, **models}
