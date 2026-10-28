@@ -12,7 +12,6 @@ from vendoo_studio.services.photo_edits import BackgroundRemovalError, PhotoEdit
 from vendoo_studio.services.photos import (
     THUMBNAIL_MIME,
     THUMBNAIL_SIZES,
-    delete_photo_file,
     get_or_create_thumbnail,
     process_upload,
 )

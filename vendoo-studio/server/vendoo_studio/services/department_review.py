@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from vendoo_studio.services.category_lookup import category_department
+from vendoo_studio.services.photo_store import photo_store
 
 _CONFIDENCE_RE = re.compile(r"model confidence \(not verified\):\s*([0-9.]+)", re.I)
 _EVIDENCE_RE = re.compile(r"Evidence for department:\s*(.+)", re.I)
@@ -74,11 +75,9 @@ def apply_department(listing: dict, department: str) -> dict:
 
 
 async def review_department(db: Session, conv_id: str, *, apply: bool = False) -> dict[str, Any]:
-    from vendoo_studio.config import PHOTOS_DIR
     from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
     from vendoo_studio.services.listing_generate import analyze_photos_with_tag_retry, latest_photo_analysis
     from vendoo_studio.services.listing_provider import get_listing_provider
-    from pathlib import Path
 
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
@@ -94,8 +93,7 @@ async def review_department(db: Session, conv_id: str, *, apply: bool = False) -
                 "error": "Connect a model in Settings to re-read department from the photos.",
             }
         photos = repo.get_photos(conv_id)
-        paths = [str(Path(PHOTOS_DIR) / photo.stored_filename) for photo in photos]
-        paths = [path for path in paths if Path(path).is_file()]
+        paths = [str(path) for path in photo_store().local_paths([photo.stored_filename for photo in photos])]
         if not paths:
             return {"ok": False, "error": "Add photos before asking for a department."}
         result = await analyze_photos_with_tag_retry(provider, paths)

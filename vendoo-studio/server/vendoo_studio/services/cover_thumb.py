@@ -14,6 +14,7 @@ from pathlib import Path
 
 import httpx
 
+from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.photos import save_jpeg_thumbnail
 from vendoo_studio.services.safe_fetch import (
     DOWNLOAD_TIMEOUT_SEC,
@@ -31,12 +32,8 @@ _DECODE_LIMIT = asyncio.Semaphore(2)
 
 
 def cover_cache_path(url: str) -> Path:
-    from vendoo_studio.config import PHOTOS_DIR
-
     digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
-    folder = Path(PHOTOS_DIR) / "remote-covers"
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder / f"{digest}.jpg"
+    return photo_store().cache_dir("remote-covers") / f"{digest}.jpg"
 
 
 async def remote_cover_thumb(url: str) -> Path:

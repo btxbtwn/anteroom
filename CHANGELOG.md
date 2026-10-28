@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.481 — 2026-10-28
+
+- Photos now go through one store that every part of Anteroom reads and writes, so a photo store can later live somewhere other than this Mac without changing the rest. Editing, rotating, thumbnails, copying a listing and the file cleanup on delete all use it; nothing looks in a fixed folder any more.
+
 ## 0.1.480 — 2026-10-28
 
 - Hovering a listing no longer opens a marketplace status popover. The logos under each listing already show where it is live.

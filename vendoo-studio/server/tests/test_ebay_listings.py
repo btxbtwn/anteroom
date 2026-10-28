@@ -1104,7 +1104,7 @@ class EbayVideoTest(unittest.IsolatedAsyncioTestCase):
         from vendoo_studio.services import listing_videos
 
         self.temp = self.enterContext(tempfile.TemporaryDirectory())
-        self.enterContext(patch.object(ebay_listings, "PHOTOS_DIR", self.temp))
+        self.enterContext(patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(self.temp)))
         self.enterContext(patch.object(listing_videos, "VIDEOS_DIR", Path(self.temp)))
         self.enterContext(patch.object(ebay_listings, "VIDEO_POLL_S", 0))
         Path(self.temp, "tee.jpg").write_bytes(b"image")
