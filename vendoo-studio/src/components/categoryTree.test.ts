@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   catalogLeafChoices,
-  categoryPathLabel,
-  matchCategoryChoices,
+  categoryChoiceAt,
+  categoryMenu,
+  categorySteps,
   pathCategoryChoices,
 } from "./categoryTree";
 
@@ -12,23 +13,70 @@ const depop = [
   { label: "Women > Dresses > Mini", id: "womenswear_mini" },
 ];
 
-describe("category path search", () => {
-  it("shows a stored path with the picker's separator", () => {
-    expect(categoryPathLabel("Men > Bottoms > Jeans")).toBe("Men › Bottoms › Jeans");
-    expect(categoryPathLabel("Men › Bottoms›Jeans")).toBe("Men › Bottoms › Jeans");
+describe("category tree menus", () => {
+  it("shows one level per dropdown and stops at a leaf", () => {
+    const choices = [
+      { label: "Fashion > Shoes", id: "69" },
+      { label: "Fashion > Tops", id: "70" },
+      { label: "Home & Garden > Furniture", id: "61" },
+    ];
+    expect(categoryMenu(choices, [])?.items.map((item) => [item.label, item.terminal])).toEqual([
+      ["Fashion", false],
+      ["Home & Garden", false],
+    ]);
+    expect(categoryMenu(choices, ["Fashion"])?.items.map((item) => [item.label, item.terminal])).toEqual([
+      ["Shoes", true],
+      ["Tops", true],
+    ]);
+    expect(categorySteps(choices, ["Fashion", "Shoes"]).map((step) => step.value)).toEqual([
+      "Fashion",
+      "Fashion > Shoes",
+    ]);
+    expect(categoryChoiceAt(choices, ["Fashion", "Shoes"])?.id).toBe("69");
   });
 
-  it("matches every typed word at the start of a word in the path", () => {
-    expect(matchCategoryChoices(depop, "men jeans").map((choice) => choice.id)).toEqual(["menswear_jeans"]);
-    expect(matchCategoryChoices(depop, "t-shirt").map((choice) => choice.id)).toEqual(["menswear_tshirts"]);
-    expect(matchCategoryChoices(depop, "mini").map((choice) => choice.id)).toEqual(["womenswear_mini"]);
-    expect(matchCategoryChoices(depop, "eans")).toEqual([]);
+  it("starts with the department, then the group, then the item", () => {
+    expect(categoryMenu(depop, [])?.items.map((item) => item.label)).toEqual(["Men", "Women"]);
+    expect(categoryMenu(depop, ["Men"])?.items.map((item) => [item.label, item.terminal])).toEqual([
+      ["Bottoms", false],
+      ["Tops", false],
+    ]);
+    expect(categoryMenu(depop, ["Men", "Bottoms"])?.items.map((item) => [item.label, item.terminal])).toEqual([
+      ["Jeans", true],
+    ]);
+    expect(categorySteps(depop, ["Men", "Bottoms", "Jeans"]).map((step) => step.value)).toEqual([
+      "Men",
+      "Men > Bottoms",
+      "Men > Bottoms > Jeans",
+    ]);
+    expect(categorySteps(depop, ["Men"]).map((step) => step.value)).toEqual(["Men", ""]);
+    expect(categoryChoiceAt(depop, ["Men", "Bottoms"])).toBeUndefined();
+    expect(categoryChoiceAt(depop, ["Men", "Bottoms", "Jeans"])?.id).toBe("menswear_jeans");
   });
 
-  it("returns everything for an empty search, up to the limit, in the order given", () => {
-    expect(matchCategoryChoices(depop, "")).toEqual(depop);
-    expect(matchCategoryChoices(depop, " ", 2)).toEqual(depop.slice(0, 2));
+  it("lets a category be chosen on its own or through a narrower leaf", () => {
+    const choices = [
+      { label: "Men > Shirts > None", id: "men/shirts" },
+      { label: "Men > Shirts > Tees", id: "men/shirts/tees" },
+      { label: "Men > Shoes", id: "men/shoes" },
+    ];
+    expect(categoryMenu(choices, ["Men"])?.items.map((item) => [item.label, item.terminal])).toEqual([
+      ["Shirts", false],
+      ["Shoes", true],
+    ]);
+    expect(categoryMenu(choices, ["Men", "Shirts"])?.items.map((item) => item.label)).toEqual(["None", "Tees"]);
+    expect(categorySteps(choices, ["Men", "Shoes"]).map((step) => step.value)).toEqual(["Men", "Men > Shoes"]);
   });
+
+  it("keeps a category that is itself a choice open for narrower rows", () => {
+    const choices = [
+      { label: "Men", id: "men" },
+      { label: "Men > Shirts > Tees", id: "men/shirts/tees" },
+    ];
+    expect(categoryMenu(choices, [])?.items.map((item) => [item.label, item.terminal])).toEqual([["Men", false]]);
+    expect(categoryChoiceAt(choices, ["Men"])?.id).toBe("men");
+  });
+
   it("uses path-shaped category options and leaves other fields alone", () => {
     expect(pathCategoryChoices({
       key: "direct_category_ids.depop",

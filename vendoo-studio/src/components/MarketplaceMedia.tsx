@@ -25,12 +25,14 @@ import { Button } from "./ui/button";
 
 const DRAG_TYPE = "application/x-vendoo-form-photo-id";
 
-export function MarketplaceMedia({ convId, marketplace, listing, disabled, onChange }: {
+export function MarketplaceMedia({ convId, marketplace, listing, disabled, onChange, page }: {
   convId: string;
   marketplace: string;
   listing: ListingData;
   disabled?: boolean;
   onChange: (listing: ListingData) => void;
+  /** Shown inside the marketplace's own form: its hint, slot captions, and file types. */
+  page?: { hint?: string; slots?: string[]; accept?: string };
 }) {
   const queryClient = useQueryClient();
   const input = React.useRef<HTMLInputElement>(null);
@@ -81,9 +83,12 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
 
   const addFiles = async (files: File[]) => {
     const images = files.filter((file) => isImageFile(file));
+    const acceptedImages = page?.accept ? images.filter((file) => matchesAccept(file, page.accept!)) : images;
     const videos = videoRules ? files.filter((file) => isVideoFile(file)) : [];
-    if (!images.length && !videos.length) {
-      setError(videoRules ? "Choose photos or a video." : `${name} takes photos only, not video.`);
+    if (!acceptedImages.length && !videos.length) {
+      setError(images.length && page?.accept
+        ? `${name} takes JPEG or PNG photos.`
+        : videoRules ? "Choose photos or a video." : `${name} takes photos only, not video.`);
       return;
     }
     setBusy(true);
@@ -91,8 +96,9 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     const problems: string[] = [];
     try {
       let updated = listing;
-      if (images.length) {
-        const result = await api.conversations.uploadPhotos(convId, images, marketplace);
+      if (images.length > acceptedImages.length) problems.push(`${name} takes JPEG or PNG photos.`);
+      if (acceptedImages.length) {
+        const result = await api.conversations.uploadPhotos(convId, acceptedImages, marketplace);
         await queryClient.invalidateQueries({ queryKey: ownKey });
         problems.push(...(result.errors || []));
         updated = withPick(updated, marketplace, [...ids, ...result.photos.map((photo) => photo.id)], item);
@@ -172,7 +178,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
 
   const thumbs = picked.map((photo, index) => {
     const overLimit = limit !== undefined && index >= limit;
-    return <PhotoThumb
+    const slot = page?.slots?.[index];
+    const thumb = <PhotoThumb
       key={photo.id}
       url={photoThumbUrl(photo)}
       index={index}
@@ -211,9 +218,99 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       removeLabel={`Leave photo ${index + 1} off ${name}`}
       controlsInViewerOnTouch
     />;
+    return slot ? <SlotCaption key={photo.id} caption={slot}>{thumb}</SlotCaption> : thumb;
   });
+  // The page's empty slots keep their captions after the photos, up to its limit.
+  const emptySlots = (page?.slots ?? []).slice(picked.length);
 
   if (!sessionActive) return null;
+
+  const addTile = (
+    <button type="button" disabled={locked} onClick={() => input.current?.click()}
+      className="flex size-16 shrink-0 items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:border-ring/60 disabled:opacity-50"
+      aria-label={videoRules ? `Add photos or a video to ${name}` : `Add photos to ${name}`}
+      title={videoRules ? "Drop or choose photos or a video" : "Drop or choose photos"}>
+      <PlusIcon className="size-4" />
+    </button>
+  );
+  const fileInput = <input ref={input} type="file" multiple hidden aria-label={`Add photos${videoRules ? " or a video" : ""} to ${name}`}
+    accept={page?.accept ?? (videoRules ? "image/*,video/*" : "image/*")}
+    onChange={(event) => { if (event.target.files) void addFiles(Array.from(event.target.files)); }} />;
+  const reset = custom && <Button variant="ghost" size="xs" disabled={locked} title="Send the item's photos in item order"
+    onClick={() => setPick(item.map((photo) => photo.id))}>
+    <RotateCcwIcon />
+    Reset to item photos
+  </Button>;
+
+  const untickedTiles = <>
+    {otherVideos.map((entry) => {
+      const problem = videoProblem(entry, videoRules);
+      return <VideoTile key={entry.id} video={entry} label={entry.original_filename} problem={problem} muted
+        onAdd={locked || problem ? undefined : () => onChange(withVideo(listing, entry.id))}
+        onRemove={locked ? undefined : () => void deleteVideo(entry)} removeLabel={`Delete video ${entry.original_filename}`} />;
+    })}
+    {unticked.map((photo) => <PhotoThumb
+      key={photo.id}
+      url={photoThumbUrl(photo)}
+      index={all.indexOf(photo)}
+      numbered={false}
+      className="opacity-60"
+      badge={photo.marketplace ? name : undefined}
+      onOpen={() => setPreviewId(photo.id)}
+      onAdd={locked ? undefined : () => setPick([...ids, photo.id])}
+      addLabel={`Send this photo to ${name}`}
+      onRemove={locked || !photo.marketplace ? undefined : () => void deleteOwn(photo)}
+      removeLabel={`Delete this ${name} photo`}
+      controlsInViewerOnTouch
+    />)}
+  </>;
+  const viewers = <>
+    {previewIndex >= 0 && <PhotoLightbox
+      urls={all.map((photo) => photo.url)}
+      index={previewIndex}
+      onStep={(next) => setPreviewId(all[next].id)}
+      onRotate={(degrees) => void rotate(all[previewIndex].id, degrees)}
+      edited={Boolean(all[previewIndex].edits)}
+      onEdit={() => { setEditingId(all[previewIndex].id); setPreviewId(null); }}
+      onMove={previewIndex < picked.length && !locked ? (delta) => {
+        const next = moveItem(ids, previewIndex, previewIndex + delta);
+        if (next !== ids) setPick(next);
+      } : undefined}
+      onClose={() => setPreviewId(null)}
+    />}
+    {editing && <PhotoEditor key={editing.id} convId={convId} photo={editing} index={all.indexOf(editing)}
+      onSaved={() => void refreshPhotos()}
+      onClose={() => { setPreviewId(editing.id); setEditingId(null); }} />}
+  </>;
+
+  if (page) {
+    return (
+      <div data-marketplace-media={marketplace} onDragOver={onStripDragOver} onDragLeave={() => setDropping(false)} onDrop={onStripDrop}
+        className={cn("min-w-0 space-y-2 rounded-lg", dropping && "ring-2 ring-ring")}>
+        {page.hint && <p className="text-xs whitespace-pre-line text-muted-foreground">{page.hint}</p>}
+        <PhotoStrip>
+          {video && <VideoTile video={video} label={`${name} video`} problem={videoProblem(video, videoRules)}
+            onRemove={locked ? undefined : () => onChange(withVideo(listing, ""))} />}
+          {thumbs}
+          {emptySlots.length
+            ? emptySlots.map((caption, index) => <SlotCaption key={caption} caption={caption}>{index === 0 ? addTile : <EmptySlot />}</SlotCaption>)
+            : addTile}
+        </PhotoStrip>
+        {videoId && library && !video && <p role="alert" className="text-xs text-destructive">The selected video is missing. Add another video or remove it.</p>}
+        {fileInput}
+        {(unticked.length > 0 || otherVideos.length > 0) && <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Not on {name}. Add one back with +.</p>
+          <PhotoStrip>{untickedTiles}</PhotoStrip>
+        </div>}
+        {reset}
+        {limit !== undefined && picked.length > limit && <p role="status" className="text-xs text-warning-foreground">
+          {name} keeps {limit} photos. The first {limit} of {picked.length} are sent. Leave some off or drag the ones you want first.
+        </p>}
+        {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+        {viewers}
+      </div>
+    );
+  }
 
   return (
     <InspectorSection
@@ -221,18 +318,12 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       title="Photos"
       meta={`${Math.min(picked.length, limit ?? picked.length)}${limit ? ` of ${limit}` : ""} sent to ${name}${custom ? " · this form's own" : " · the item's photos"}`}
       actions={<>
-        {custom && <Button variant="ghost" size="xs" disabled={locked} title="Send the item's photos in item order"
-          onClick={() => setPick(item.map((photo) => photo.id))}>
-          <RotateCcwIcon />
-          Reset to item photos
-        </Button>}
+        {reset}
         <Button variant="outline" size="xs" disabled={locked} onClick={() => input.current?.click()}>
           <ImagePlusIcon />
           {busy ? "Adding…" : videoRules ? "Add photos or video" : "Add photos"}
         </Button>
-        <input ref={input} type="file" multiple hidden aria-label={`Add photos${videoRules ? " or a video" : ""} to ${name}`}
-          accept={videoRules ? "image/*,video/*" : "image/*"}
-          onChange={(event) => { if (event.target.files) void addFiles(Array.from(event.target.files)); }} />
+        {fileInput}
       </>}
     >
       <div
@@ -246,37 +337,11 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
             onRemove={locked ? undefined : () => onChange(withVideo(listing, ""))} />}
           {videoId && library && !video && <p role="alert" className="text-xs text-destructive">The selected video is missing. Add another video or remove it.</p>}
           {thumbs}
-          <button type="button" disabled={locked} onClick={() => input.current?.click()}
-            className="flex size-16 shrink-0 items-center justify-center rounded-lg border border-dashed text-muted-foreground hover:border-ring/60 disabled:opacity-50"
-            aria-label={videoRules ? `Add photos or a video to ${name}` : `Add photos to ${name}`}
-            title={videoRules ? "Drop or choose photos or a video" : "Drop or choose photos"}>
-            <PlusIcon className="size-4" />
-          </button>
+          {addTile}
         </PhotoStrip>
         {(unticked.length > 0 || otherVideos.length > 0) && <div className="space-y-1">
           <p className="text-xs text-muted-foreground">Not on {name}. Add one back with +.</p>
-          <PhotoStrip>
-            {otherVideos.map((entry) => {
-              const problem = videoProblem(entry, videoRules);
-              return <VideoTile key={entry.id} video={entry} label={entry.original_filename} problem={problem} muted
-                onAdd={locked || problem ? undefined : () => onChange(withVideo(listing, entry.id))}
-                onRemove={locked ? undefined : () => void deleteVideo(entry)} removeLabel={`Delete video ${entry.original_filename}`} />;
-            })}
-            {unticked.map((photo) => <PhotoThumb
-              key={photo.id}
-              url={photoThumbUrl(photo)}
-              index={all.indexOf(photo)}
-              numbered={false}
-              className="opacity-60"
-              badge={photo.marketplace ? name : undefined}
-              onOpen={() => setPreviewId(photo.id)}
-              onAdd={locked ? undefined : () => setPick([...ids, photo.id])}
-              addLabel={`Send this photo to ${name}`}
-              onRemove={locked || !photo.marketplace ? undefined : () => void deleteOwn(photo)}
-              removeLabel={`Delete this ${name} photo`}
-              controlsInViewerOnTouch
-            />)}
-          </PhotoStrip>
+          <PhotoStrip>{untickedTiles}</PhotoStrip>
         </div>}
         <p className="text-xs text-muted-foreground">
           {limit ? `${name} takes up to ${limit} photos. ` : ""}
@@ -288,22 +353,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
         </p>}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
       </div>
-      {previewIndex >= 0 && <PhotoLightbox
-        urls={all.map((photo) => photo.url)}
-        index={previewIndex}
-        onStep={(next) => setPreviewId(all[next].id)}
-        onRotate={(degrees) => void rotate(all[previewIndex].id, degrees)}
-        edited={Boolean(all[previewIndex].edits)}
-        onEdit={() => { setEditingId(all[previewIndex].id); setPreviewId(null); }}
-        onMove={previewIndex < picked.length && !locked ? (delta) => {
-          const next = moveItem(ids, previewIndex, previewIndex + delta);
-          if (next !== ids) setPick(next);
-        } : undefined}
-        onClose={() => setPreviewId(null)}
-      />}
-      {editing && <PhotoEditor key={editing.id} convId={convId} photo={editing} index={all.indexOf(editing)}
-        onSaved={() => void refreshPhotos()}
-        onClose={() => { setPreviewId(editing.id); setEditingId(null); }} />}
+      {viewers}
     </InspectorSection>
   );
 }
@@ -336,4 +386,34 @@ function VideoTile({ video, label, problem, muted, onAdd, onRemove, removeLabel 
       </Button>}
     </div>
   );
+}
+
+/** The page's caption under a photo slot, such as Depop's Cover photo and Front. */
+function SlotCaption({ caption, children }: { caption: string; children: React.ReactNode }) {
+  return (
+    <div className="flex shrink-0 flex-col items-center gap-1">
+      {children}
+      <span className="max-w-16 truncate text-[10px] text-muted-foreground">{caption}</span>
+    </div>
+  );
+}
+
+function EmptySlot() {
+  return <div aria-hidden className="size-16 shrink-0 rounded-lg border border-dashed opacity-60" />;
+}
+
+/** The photo area's file dialog filter. An empty browser type still matches a listed extension. */
+function matchesAccept(file: File, accept: string): boolean {
+  const type = (file.type || "").toLowerCase();
+  const name = (file.name || "").toLowerCase();
+  return accept.split(",").some((rule) => {
+    const token = rule.trim().toLowerCase();
+    if (!token) return false;
+    if (token.endsWith("/*")) return type.startsWith(token.slice(0, -1));
+    if (token.startsWith(".")) return name.endsWith(token);
+    if (type === token) return true;
+    if (token === "image/jpeg") return type === "image/jpg" || name.endsWith(".jpg") || name.endsWith(".jpeg");
+    if (token === "image/png") return name.endsWith(".png");
+    return false;
+  });
 }

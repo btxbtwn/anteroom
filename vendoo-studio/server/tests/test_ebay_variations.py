@@ -404,7 +404,7 @@ class VariationFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ebay_specifics.bestOffer.enabled", fields)
         self.assertTrue(fields["quantity"]["locked"])
         self.assertEqual(fields["quantity"]["value"], 5)
-        self.assertEqual(fields["ebay_specifics.listingFormat"]["options"], ["Fixed price", "Auction"])
+        self.assertEqual(fields["ebay_specifics.listingFormat"]["options"], ["Auction", "Buy It Now"])
         plain_fields = {row["path"]: row for row in plain["fields"]}
         self.assertEqual(set(fields), set(plain_fields))
         self.assertEqual(plain_fields["ebay_specifics.variations"]["value"], {"aspects": [], "rows": [], "photos": {}})

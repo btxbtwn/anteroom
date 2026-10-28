@@ -65,35 +65,59 @@ describe("marketplace choice controls", () => {
   });
 });
 
-describe("category picker", () => {
+describe("category tree dropdown", () => {
   const ignore = () => { throw new Error("Rendering must not save"); };
-  const depop = [
-    { label: "Men > Bottoms > Jeans", id: "menswear_jeans" },
-    { label: "Men > Tops > T-shirts", id: "menswear_tshirts" },
-    { label: "Women > Dresses > Mini", id: "womenswear_mini" },
-  ];
 
-  it("is one searchable field that shows the saved category's full path", () => {
-    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.depop"
-      value="Men > Bottoms > Jeans" choices={depop} onChange={ignore} />);
-    expect(html).not.toContain("<select");
-    expect(html).toContain('value="Men › Bottoms › Jeans"');
-    expect(html).toContain('data-listing-field="direct_category_ids.depop"');
-    expect(html).toContain('placeholder="Search categories"');
-    expect(html).not.toContain("unavailable");
-  });
-
-  it("warns when the saved category is not one of the choices", () => {
+  it("opens the next level once a first-level category is saved", () => {
     const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
-      value="Fashion > Hats" choices={[{ label: "Fashion > Shoes", id: "69" }]} onChange={ignore} />);
-    expect(html).toContain("Fashion › Hats");
-    expect(html).toContain("is unavailable in these choices");
+      value="Fashion > Shoes" choices={[
+        { label: "Fashion > Shoes", id: "69" },
+        { label: "Fashion > Tops", id: "70" },
+        { label: "Home & Garden > Furniture", id: "61" },
+      ]} onChange={ignore} />);
+    expect(html.match(/<select/g)).toHaveLength(2);
+    expect(html).toContain(">Fashion</option>");
+    expect(html).toContain(">Home &amp; Garden</option>");
+    expect(html).toContain(">Shoes</option>");
+    expect(html).not.toContain("<optgroup");
+    expect(html).toContain('data-listing-field="sellwild_specifics.nativeCategoryId"');
+    expect(html).not.toContain("continue until the last one");
   });
 
-  it("says so when there are no categories", () => {
+  it("shows department, group and item as three dropdowns", () => {
+    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.depop"
+      value="Men > Bottoms > Jeans" choices={[
+        { label: "Men > Bottoms > Jeans", id: "menswear_jeans" },
+        { label: "Men > Tops > T-shirts", id: "menswear_tshirts" },
+        { label: "Women > Dresses > Mini", id: "womenswear_mini" },
+      ]} onChange={ignore} />);
+    expect(html.match(/<select/g)).toHaveLength(3);
+    expect(html).toContain(">Men</option>");
+    expect(html).toContain(">Women</option>");
+    expect(html).toContain(">Bottoms</option>");
+    expect(html).toContain(">Jeans</option>");
+    expect(html).toContain('aria-label="Next category"');
+    expect(html).not.toContain("continue until the last one");
+  });
+
+  it("does not ask for another step when every row in the list is a last step", () => {
+    const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="sellwild_specifics.nativeCategoryId"
+      value="" choices={[
+        { label: "Shoes", id: "69" },
+        { label: "Furniture", id: "61" },
+      ]} onChange={ignore} />);
+    expect(html).not.toContain("continue until the last one");
+    expect(html).toContain(">Shoes</option>");
+  });
+
+  it("asks the seller to continue when no category is chosen yet", () => {
     const html = renderToStaticMarkup(<CategoryTreeSelect id="category" fieldKey="direct_category_ids.mercari"
-      value="" choices={[]} onChange={ignore} />);
-    expect(html).toContain("No categories are available yet.");
+      value="" choices={[
+        { label: "Kids > Girls tops > Girls (4+)", id: "1911" },
+      ]} onChange={ignore} />);
+    expect(html).toContain("Choose a category group, then continue until the last one.");
+    expect(html).toContain(">Kids</option>");
+    expect(html.match(/<select/g)).toHaveLength(1);
   });
 });
 

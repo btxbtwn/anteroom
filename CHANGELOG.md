@@ -6,13 +6,33 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.469 — 2026-10-28
+
+## 0.1.474 — 2026-10-28
 
 - Listing forms are easier to read: fields stop at a comfortable width instead of stretching across a wide window, section headings stand out from field labels, labels and marketplace statuses are larger, and the description box has more room between lines.
-- Category is one search box that shows the whole path, such as Men › Bottoms › Jeans. Type any part of it to find a category.
-- Fields that take several choices say how many in the empty box ("Choose up to 3"), and the count appears once you pick something.
-- Depop's hashtags show as tags under the description instead of a sentence.
-- The inventory list shows three suggestions with "Show all", the search box reads "Search listings" instead of cutting off, the status tabs no longer cut off "Active", and the marketplace logos under each listing are larger.
+- Fields that take several choices say how many they allow in the empty box ("Choose up to 3"), and the count appears once you pick something.
+- Depop's hashtags show as chips under the description instead of a sentence.
+- The inventory list shows three suggestions with "Show all" for the rest, the search box reads "Search listings" instead of cutting off, the status tabs no longer cut off "Active", and the marketplace logos under each listing are larger.
+
+## 0.1.473 — 2026-10-28
+
+- The eBay tab follows eBay's Create listing page. Item specifics stay in eBay's order, with Show more for the rest. You get a subtitle and custom label under title options, a second category, scheduling, this listing's own policies and item location, charity, and one custom item specific. An auction shows its duration and bids instead of an item price.
+
+## 0.1.472 — 2026-10-27
+
+- On the Mercari tab, package weight is one question, "How heavy will the package be?", with pounds and ounces side by side. Length, width and height stay hidden until you say the item will not fit in a shoebox, and you can skip them. Once the item has a price, Smart pricing shows as on, with a suggested lowest price.
+
+## 0.1.471 — 2026-10-28
+
+- Each flaw in a description is on its own line, so a list of flaws is easy to scan. A description formula you wrote yourself stays as you wrote it.
+
+## 0.1.470 — 2026-10-28
+
+- Depop, Mercari, Poshmark, Sellwild, and eBay now show this item's photos where that marketplace's own page does. You can reorder them and pick which ones that marketplace gets, up to its limit. Depop stays JPEG and PNG.
+
+## 0.1.469 — 2026-10-28
+
+- Category on the marketplace tabs starts with its own dropdown for the department (Men, Women, Kids and so on), then the group, then the item, one step at a time as on Depop, Poshmark and Mercari.
 
 ## 0.1.468 — 2026-10-28
 

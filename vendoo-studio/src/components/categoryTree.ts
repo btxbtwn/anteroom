@@ -4,6 +4,25 @@ export interface CategoryChoice {
   id: string;
 }
 
+export interface CategoryItem {
+  /** The name shown in the dropdown. */
+  label: string;
+  /** Path from the top of the tree through this row. */
+  path: string[];
+  /** True when choosing this row is the last step. */
+  terminal: boolean;
+}
+
+export interface CategoryMenu {
+  items: CategoryItem[];
+}
+
+export interface CategoryStep {
+  menu: CategoryMenu;
+  /** The path key of the row selected at this step, or empty. */
+  value: string;
+}
+
 const SEPARATOR = /\s*(?:>|›)\s*/;
 
 /** Split a stored path on either separator the catalogs use. */
@@ -11,31 +30,65 @@ export function categorySegments(label: string): string[] {
   return label.split(SEPARATOR).map((part) => part.trim()).filter(Boolean);
 }
 
-/** A stored path as the picker shows it: "Men › Bottoms › Jeans". */
-export function categoryPathLabel(label: string): string {
-  return categorySegments(label).join(" › ");
+export function categoryPathKey(path: readonly string[]): string {
+  return path.join(" > ");
 }
 
-function startsWord(text: string, word: string): boolean {
-  for (let at = text.indexOf(word); at !== -1; at = text.indexOf(word, at + 1)) {
-    if (at === 0 || !/[a-z0-9]/.test(text[at - 1])) return true;
+function byLabel(a: { label: string }, b: { label: string }): number {
+  return a.label.localeCompare(b.label);
+}
+
+function matchesPrefix(parts: readonly string[], prefix: readonly string[]): boolean {
+  for (let index = 0; index < prefix.length; index += 1) {
+    if (parts[index] !== prefix[index]) return false;
   }
-  return false;
+  return true;
 }
 
 /**
- * Choices whose path starts a word with every word typed, in the order given,
- * at most `limit`. "men jeans" finds "Men › Bottoms › Jeans" but not "Women › …".
+ * The next dropdown for a path already chosen: one level of the tree, as the
+ * marketplaces' own sell pages show it (Men / Women / Kids, then the group,
+ * then the item). A row with categories under it is not terminal, so the
+ * seller keeps going; a row that is itself a choice still saves when picked.
+ * One pass: eBay's leaf list is large, and each keystroke must not rescan it.
  */
-export function matchCategoryChoices(choices: readonly CategoryChoice[], query: string, limit = 100): CategoryChoice[] {
-  const words = query.toLowerCase().split(/[\s›>]+/).filter(Boolean);
-  const matches: CategoryChoice[] = [];
+export function categoryMenu(choices: readonly CategoryChoice[], prefix: readonly string[]): CategoryMenu | null {
+  const items = new Map<string, CategoryItem>();
   for (const choice of choices) {
-    if (matches.length >= limit) break;
-    const path = choice.label.toLowerCase();
-    if (words.every((word) => startsWord(path, word))) matches.push(choice);
+    const parts = categorySegments(choice.label);
+    if (parts.length <= prefix.length || !matchesPrefix(parts, prefix)) continue;
+    const path = parts.slice(0, prefix.length + 1);
+    const key = categoryPathKey(path);
+    const deeper = parts.length > path.length;
+    const item = items.get(key);
+    if (item) item.terminal &&= !deeper;
+    else items.set(key, { label: path[path.length - 1], path, terminal: !deeper });
   }
-  return matches;
+  if (!items.size) return null;
+  return { items: [...items.values()].sort(byLabel) };
+}
+
+/** Each dropdown from the top of the tree through the current selection. */
+export function categorySteps(choices: readonly CategoryChoice[], selected: readonly string[]): CategoryStep[] {
+  const steps: CategoryStep[] = [];
+  let prefix: string[] = [];
+  for (let guard = 0; guard < 8; guard += 1) {
+    const menu = categoryMenu(choices, prefix);
+    if (!menu) break;
+    const match = menu.items
+      .filter((item) => item.path.every((segment, index) => selected[index] === segment))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+    steps.push({ menu, value: match ? categoryPathKey(match.path) : "" });
+    if (!match || match.terminal) break;
+    prefix = match.path;
+  }
+  return steps;
+}
+
+/** The choice whose path is exactly these segments. */
+export function categoryChoiceAt(choices: readonly CategoryChoice[], path: readonly string[]): CategoryChoice | undefined {
+  const key = categoryPathKey(path);
+  return choices.find((choice) => categoryPathKey(categorySegments(choice.label)) === key);
 }
 
 /** Path-shaped category options for a direct listing form. eBay loads its own tree. */
