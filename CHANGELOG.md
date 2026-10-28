@@ -9,6 +9,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 ## 0.1.460 — 2026-10-27
 
 - On multi-choice fields the hint and the number chosen share one line under the field (for example 1/4), and Clear is an × inside the field instead of a link underneath.
+- A scheduled price drop counts its waiting period from the time the task ran, so the next step down comes when it should.
 
 ## 0.1.459 — 2026-10-27
 
