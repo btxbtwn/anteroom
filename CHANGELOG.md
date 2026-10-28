@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.462 — 2026-10-28
+## 0.1.463 — 2026-10-28
 
 - When you pick a different category for a marketplace, on its tab or by asking chat, Anteroom fills that category’s new fields the same way it does after generating, choosing only from that marketplace’s own choices. Only the marketplace you changed is filled, and fields you set or locked are left alone.
+
+## 0.1.462 — 2026-10-28
+
+- A List everywhere button at the bottom of the marketplace list lists the item on every marketplace that's ready, after one confirmation that names them. Marketplaces still missing details are left out and named so you can finish them.
 
 ## 0.1.461 — 2026-10-28
 
