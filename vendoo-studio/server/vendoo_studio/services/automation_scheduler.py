@@ -334,7 +334,9 @@ def _finish_item(db, run, automation, item, local, remote, *, error, state, down
     if (ok and not run.dry_run and state != DOWN_STATE and (automation.filters or {}).get("min_age_days")
             and (state != WAITING_APPROVAL or any(action["type"] in {"price", "update_fields", "regenerate"} for action in automation.actions or []))):
         listed = _parse_time(item.get("listed_at"))
-        record_application(db, automation.id, item["conversation_id"], listed, utcnow())
+        # The run's own clock, so the age cooldown counts from when this run handled the item.
+        record_application(db, automation.id, item["conversation_id"], listed,
+                           as_utc(run.started_at) if run.started_at else utcnow())
     return _outcome(item, local, remote, error=error, job_id=job_id, dry_run=bool(run.dry_run), state=state, down=down)
 
 

@@ -515,6 +515,13 @@ class ListingRepo:
         return self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
 
     def save_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None) -> ListingRevision:
+        from vendoo_studio.services.native_field_fill import FILL_ON_SOURCES, category_saved
+
+        before: dict = {}
+        if source in FILL_ON_SOURCES:
+            current = self.get_current(conv_id)
+            previous = self.get_revision(current.current_revision_id) if current and current.current_revision_id else None
+            before = previous.listing_json if previous is not None and isinstance(previous.listing_json, dict) else {}
         revision = ListingRevision(
             conversation_id=conv_id,
             listing_json=listing_json,
@@ -549,6 +556,9 @@ class ListingRepo:
 
         self.db.commit()
         self.db.refresh(revision)
+        if source in FILL_ON_SOURCES:
+            # A newly chosen marketplace category has new fields for the listing agent to fill.
+            category_saved(conv_id, before, listing_json, source)
         return revision
 
     def revision_bodies(self, revision_ids: set[str]) -> dict[str, dict]:

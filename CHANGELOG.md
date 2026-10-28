@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.460 — 2026-10-28
+
+- When you pick a different category for a marketplace, on its tab or by asking chat, Anteroom fills that category’s new fields the same way it does after generating, choosing only from that marketplace’s own choices. Only the marketplace you changed is filled, and fields you set or locked are left alone.
+- Automations count a listing’s cooldown from when the run handled it.
+
 ## 0.1.459 — 2026-10-27
 
 - Mercari’s Size list is grouped under Mercari’s own headings (Standard, Petite, Inch and so on), as on Mercari.
