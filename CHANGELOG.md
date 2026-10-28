@@ -6,14 +6,19 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.491 — 2026-10-28
+## 0.1.492 — 2026-10-28
 
 - List everywhere now leaves a marketplace out when its form still needs an answer. Mercari's shoebox question, shipping label, package weight, and ship-from ZIP are checked before it is offered, so Anteroom no longer starts a Mercari listing that its own form would refuse.
 - Two copies of the Chrome extension used to take turns on the connection, closing each other every half second. That is what made a marketplace form fail to load with “Chrome could not read the marketplace form” and a listing check end as “Check did not finish.” Anteroom now keeps the copy that is running its own extension and tells the extra one to stand down, Settings → Connections says when more than one copy is loaded, and a form read that loses its reply is asked for once more before it fails. A connected extension also no longer reloads itself over and over after an Anteroom update, and the error names the Chrome call that failed.
 
+## 0.1.491 — 2026-10-27
+
+- Marking an item as listed now puts it back on the marketplace list even when Anteroom had already given up on the publish. Before, if a Depop publish took too long to confirm, Anteroom set the item back to a draft, and telling it you had listed it yourself afterwards left that draft in place, so the marketplace never showed the item as listed anywhere.
+
 ## 0.1.490 — 2026-10-27
 
-Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.
+- Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.
+- Chrome reconnected every half second while one listing was being checked, so the app sat loading and the check ended with “Check did not finish”. A reconnect used to repeat the whole start-up handshake each time — re-queueing interrupted sends and asking Chrome to check listings again — while the extension reset its retry delay on every attempt. Now only a Chrome that stays connected sets things going, a connection that keeps dropping waits longer each time, and a socket that closes early is written to the log instead of vanishing.
 
 ## 0.1.489 — 2026-10-27
 
