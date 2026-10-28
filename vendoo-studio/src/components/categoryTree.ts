@@ -68,6 +68,30 @@ export function categoryChoiceAt(choices: readonly CategoryChoice[], path: reado
   return choices.find((choice) => categoryPathKey(categorySegments(choice.label)) === key);
 }
 
+/**
+ * Every choice whose path contains each word of the query, named by its full
+ * path so a seller can find a category without drilling through the tree.
+ * Matches on the last segment come first, then the rest, then ancestors.
+ */
+export function categorySearch(choices: readonly CategoryChoice[], query: string, limit = 40): CategoryItem[] {
+  const compact = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
+  // Drop a plural “s” so “womens”, “jeans” and “shoes” find the singular names.
+  const terms = query.split(/\s+/).map((term) => compact(term).replace(/s$/, "")).filter(Boolean);
+  if (!terms.length) return [];
+  const matches: (CategoryItem & { score: number })[] = [];
+  for (const choice of choices) {
+    const path = categorySegments(choice.label);
+    const searchable = path.map(compact);
+    if (!terms.every((term) => searchable.some((part) => part.includes(term)))) continue;
+    const last = searchable[searchable.length - 1] ?? "";
+    const childMatch = terms.every((term) => last.startsWith(term));
+    const segmentMatch = terms.every((term) => searchable.some((part) => part.startsWith(term)));
+    matches.push({ label: categoryPathKey(path), path, terminal: true, score: childMatch ? 0 : segmentMatch ? 1 : 2 });
+  }
+  matches.sort((a, b) => a.score - b.score || a.label.localeCompare(b.label));
+  return matches.slice(0, limit).map(({ score: _score, ...item }) => item);
+}
+
 /** Path-shaped category options for a direct listing form. eBay loads its own tree. */
 export function pathCategoryChoices(field: {
   key: string;

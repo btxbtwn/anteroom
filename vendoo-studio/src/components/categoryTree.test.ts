@@ -3,6 +3,7 @@ import {
   catalogLeafChoices,
   categoryChoiceAt,
   categoryMenu,
+  categorySearch,
   pathCategoryChoices,
 } from "./categoryTree";
 
@@ -100,5 +101,36 @@ describe("category tree menus", () => {
       ],
     })).toEqual([{ label: "Women > Tees", id: "tees" }]);
     expect(catalogLeafChoices({ coverage: "observed", nodes: [] })).toEqual([]);
+  });
+});
+
+describe("category search", () => {
+  const choices = [
+    { label: "Clothing, Shoes & Accessories > Women > Pants", id: "pants" },
+    { label: "Clothing, Shoes & Accessories > Women > Jeans", id: "jeans" },
+    { label: "Clothing, Shoes & Accessories > Men > Jeans", id: "mens-jeans" },
+    { label: "Home & Garden > Furniture", id: "furniture" },
+  ];
+
+  it("finds a category anywhere in its path and names the whole path", () => {
+    expect(categorySearch(choices, "women jeans").map((item) => [item.label, item.path, item.terminal])).toEqual([
+      ["Clothing, Shoes & Accessories > Women > Jeans", ["Clothing, Shoes & Accessories", "Women", "Jeans"], true],
+    ]);
+    expect(categorySearch(choices, "womens jeans").map((item) => item.label)).toEqual([
+      "Clothing, Shoes & Accessories > Women > Jeans",
+    ]);
+  });
+
+  it("puts a match in the category name ahead of a match in an ancestor", () => {
+    expect(categorySearch(choices, "jeans").map((item) => item.label)).toEqual([
+      "Clothing, Shoes & Accessories > Men > Jeans",
+      "Clothing, Shoes & Accessories > Women > Jeans",
+    ]);
+    expect(categorySearch(choices, "clothing").map((item) => item.label)).toHaveLength(3);
+  });
+
+  it("does nothing for an empty query and stops at the limit", () => {
+    expect(categorySearch(choices, "  ")).toEqual([]);
+    expect(categorySearch(choices, "clothing", 2)).toHaveLength(2);
   });
 });

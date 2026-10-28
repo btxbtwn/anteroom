@@ -109,3 +109,13 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
   - **Fly.io** for the hosted Anteroom API, built from a Dockerfile. Docker is for the hosted API only; the Mac app does not need it.
   - **`webhook-relay/` on Cloudflare Workers**, as below.
 - `webhook-relay/` on Cloudflare Workers It never calls Studio and never acts on a listing. It stores only device IDs, token hashes, linked marketplace account IDs and event IDs, plus sign-in tokens for at most 15 minutes until the device collects them: no buyer names, addresses, prices or listing text. Etsy API calls pass through it unstored. Studio reaches it outbound only, so the loopback-only rule still holds.
+
+## Cursor Cloud specific instructions
+
+- Run `./setup.sh`, then `./start.sh`. The UI is http://127.0.0.1:5173 and the API is http://127.0.0.1:4318 (`GET /api/health`). Both stay on loopback.
+- `./setup.sh` looks for Google Chrome at the macOS app path (`~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` or `/Applications/...`). On Linux, link the `chrome` binary there before setup. The Cloud Agent install does that.
+- Ubuntu has no `python` on `PATH`. After setup, `python` is a wrapper for `vendoo-studio/.venv/bin/python`, and `ruff`, `pytest`, `alembic`, `semble`, and `uvicorn` on `PATH` are that venv. Backend checks from `vendoo-studio/`: `ruff check server` and `VENDOO_STUDIO_DATA_DIR=$(mktemp -d) python -m pytest -q -n auto`.
+- An unpacked dev server stores data in `vendoo-studio/data/`. `scripts/doctor.sh` still looks for the macOS data folder and warns when that file is absent. On Linux, startup logs a keychain warning (`keyring` selects the macOS backend). Reads fail and provider secrets stay unset; the API still serves `/api/health` and drafts.
+- **Create a listing** on the empty inventory screen stays disabled until Settings has a provider. `POST /api/conversations` still creates a draft, and the sidebar shows it. Generating copy needs a provider. Do not publish.
+- Webhook relay: `cd webhook-relay && npm test`. Extension: `node --test 'vendoo-extension/tests/*.test.js'`.
+- `./setup.sh` redraws icon PNGs. The Cloud Agent install checks those tracked files back out so the worktree stays clean.

@@ -6,9 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.484 — 2026-10-27
+## 0.1.487 — 2026-10-27
 
 - Sign in with ChatGPT now uses OpenAI's official sign-in for apps. Sign in once more in Settings → Providers: approve Anteroom in your browser and leave token sharing on, and listings keep running on your ChatGPT plan. Plan usage now shows in ChatGPT → Settings → Usage instead of in Anteroom.
+
+## 0.1.486 — 2026-10-27
+
+- A listing that comes back empty now asks the model again with reasoning turned off. DeepSeek sometimes spent its whole reply thinking and stopped before writing anything, so chat said “Listing generation returned no text” and the draft stayed blank. The retry writes the listing, and if the model still answers with nothing the message says how much it thought and why it stopped instead of repeating that generic line.
+
+## 0.1.484 — 2026-10-28
+
+- The category picker now shows the whole path in the field instead of cutting it off at “Wo…”, and its panel stays on screen and scrolls rather than being clipped by the form. The panel shows where you are as a breadcrumb you can click, searches every category by any part of its path, and marks the saved category so you can see its siblings.
 
 ## 0.1.483 — 2026-10-27
 
