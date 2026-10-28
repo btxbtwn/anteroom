@@ -114,7 +114,7 @@ interface EditorField {
   /** The marketplace form's heading for this field. */
   section?: string;
   optionGroups?: Record<string, string>;
-  width?: "half";
+  width?: "half" | "quarter";
 }
 
 export function ListingEditor({
@@ -881,10 +881,12 @@ export function StructuredEditor({
             titleId={`listing-section-${tab}-${section.id}`}
             meta={section.id === "listing" ? null : `${filled} of ${section.fields.length} filled`}
           >
-            {/* A marketplace's own page layout keeps its two columns; the general form spreads out when wide. */}
-            <div className={cn("grid min-w-0 grid-cols-2 gap-3 max-[900px]:grid-cols-1", !pageLayout && "@4xl:grid-cols-3")}>
+            {/* A marketplace's own page layout uses its four-part rows; the general form spreads out when wide. */}
+            <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-4" : "grid-cols-2 @4xl:grid-cols-3")}>
               {section.fields.map((f) => (
-                <div key={f.key} className={cn("min-w-0", (pageLayout ? f.width !== "half" : fullWidth(f)) && "col-span-full")}>
+                <div key={f.key} className={cn("min-w-0", pageLayout
+                  ? (f.width === "quarter" ? "col-span-1" : f.width === "half" ? "col-span-2" : "col-span-full")
+                  : fullWidth(f) && "col-span-full")}>
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
                   {control(f)}
                   {f.help && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}

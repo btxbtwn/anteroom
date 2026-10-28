@@ -24,9 +24,10 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     snapshot = direct_preflight.prepare(db, conv, revision.listing_json, marketplace)
     if marketplace == "ebay":
         return await ebay_form(snapshot)
-    if marketplace == "sellwild":
-        return sellwild_form(snapshot, conv_id, db)
     from vendoo_studio.routes.extension import extension_manager
+
+    if marketplace == "sellwild":
+        return sellwild_form(snapshot, conv_id, db, ship_from=await _sellwild_ship_from(extension_manager.connected, snapshot))
 
     if not extension_manager.connected:
         raise NativeMarketplaceError(409, "Connect Chrome to load this marketplace’s current form.")
@@ -58,9 +59,9 @@ def _shared(snapshot: dict, marketplace: str, name: str):
 
 
 def package(snapshot: dict) -> list[dict]:
-    """eBay's "Package weight" in lbs. and oz. side by side, then "Package dimensions", from Item Details."""
+    """eBay's one shipping row: "Package weight" in lbs. and oz., then "Package dimensions", from Item Details."""
     return [field(key, label, snapshot.get(key), locked=True, help="Change the package in Item Details.",
-                  **({"width": "half"} if key.startswith("weight_") else {}))
+                  width="quarter" if key.startswith("weight_") else "half")
             for key, label in (("weight_lb", "Package weight (lbs.)"), ("weight_oz", "Package weight (oz.)"),
                                ("package_dimensions_in", "Package dimensions (in.)"))]
 
@@ -261,8 +262,30 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
     return rows
 
 
-def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
-    """Sellwild's sell page (sellwild.com/sell, read 2026-10-27), section by section and in its order."""
+async def _sellwild_ship_from(connected: bool, snapshot: dict) -> str | None:
+    """The Shipping From card Sellwild's sell page shows. None when Chrome cannot read it."""
+    if not connected:
+        return None
+    try:
+        answer = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form",
+                                              {"marketplace": "sellwild", "listing": snapshot}, timeout=15)
+    except browser_bridge.BrowserBridgeError:
+        return None
+    if not isinstance(answer, dict) or not answer.get("ok"):
+        return None
+    return str(answer.get("ship_from") or "")
+
+
+def _ship_from_row(ship_from: str | None, section: str) -> dict:
+    # A card on Sellwild's page; the address is changed in Sellwild's Address Book.
+    help_text = ("Connect Chrome to show your Sellwild address." if ship_from is None
+                 else "Add a Shipping From address in Sellwild's Address Book." if not ship_from else None)
+    return field("sellwild_specifics.shipFrom", "Shipping From", ship_from or "", input_type="textarea", locked=True,
+                 section=section, **({"help": help_text} if help_text else {}))
+
+
+def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | None = None) -> dict:
+    """Sellwild's sell page (sellwild.com/sell, read 2026-10-27; signed in), section by section and in its order."""
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
     from vendoo_studio.services.sellwild_listing import MAX_PRICE, VEHICLE_CATEGORIES, chosen, package_pounds, package_sides, sellwild_catalog
 
@@ -295,8 +318,10 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
                             section="Vehicle Information", **extra)
                       for key, label, extra in (("vin", "Vehicle Identification Number", {}),
                                                 ("mileage", "Mileage", {"input_type": "number", "min_value": 1})))
+        fields.append(_ship_from_row(ship_from, "Vehicle Shipping"))
         return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
                 "fields": fields}
+    fields.append(_ship_from_row(ship_from, "Item Shipping"))
     # The package list: Custom Package Dimensions, the four flat-rate boxes, then "Add other packaging".
     template = str(details.get("parcelTemplate") or "")
 
@@ -317,8 +342,9 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session) -> dict:
     measured = (("weight", "Weight (lbs)", round(pounds, 2) if pounds else ""),
                 *((key, f"{key.title()} (in)", sides[index] if sides else "")
                   for key, index in (("height", 2), ("width", 1), ("depth", 0))))
+    # The page sets weight and the three sides side by side in one row.
     fields.extend(field(f"sellwild_specifics.package.{key}", label, value, input_type="number", min_value=0,
-                        category_specific=True, section="Item Shipping", width="half")
+                        category_specific=True, section="Item Shipping", width="quarter")
                   for key, label, value in measured)
     return {"marketplace": "sellwild", "native": True, "known": True, "category_id": str(picks["category_id"] or ""),
             "fields": fields}
