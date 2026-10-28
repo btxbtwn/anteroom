@@ -23,7 +23,8 @@ _PATHS = {
     "etsy": r"/(?:[a-z-]+/)?listing/(?P<id>[1-9]\d*)(?:/[^/]+)?",
     "poshmark": r"/(?:my-)?listing/(?:[^/]*-)?(?P<id>[a-fA-F0-9]{24})",
     "mercari": r"/(?:us/)?item/(?P<id>m\d{6,})",
-    "depop": r"/products/(?P<id>[a-z0-9][a-z0-9-]{0,200})",
+    # The seller's own product page ends in /manage, which is what the address bar shows.
+    "depop": r"/products/(?P<id>[a-z0-9][a-z0-9-]{0,200})(?:/manage)?",
     "sellwild": r"/product/(?P<id>\d+)(?:/[^/]+)?",
     "vinted": r"/items/(?P<id>\d+)(?:-[^/]+)?",
     "facebook": r"/marketplace/item/(?P<id>\d{6,20})",
@@ -49,7 +50,8 @@ def listing_reference(marketplace: str, url: str | None) -> tuple[str, str] | No
     if not match:
         return None
     item_id = match["id"].lower() if marketplace == "poshmark" else match["id"]
-    if marketplace == "facebook":
+    if marketplace in {"facebook", "depop"}:
+        # Depop's manage view is the seller's own page; the public one is the product alone.
         return item_id, public_listing_url(marketplace, item_id)
     public_host = host if marketplace in {"poshmark", "sellwild"} else f"www.{host}"
     return item_id, urlunsplit(("https", public_host, parsed.path, "", ""))

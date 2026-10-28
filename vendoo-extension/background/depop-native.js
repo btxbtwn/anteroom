@@ -194,38 +194,36 @@ async function depopListingFields(request, listing, deadline) {
     Object.assign(fields, await depopCountryLocation(request, deadline));
   } catch { /* The publish check names a missing location. */ }
   try {
-    const settings = await request('GET', '/presentation/api/v1/users/me/settings/shipping/');
-    const active = (settings?.shipping_providers || []).filter(row => row?.active && row.id);
-    const provider = active.find(row => row.id === 'USPS') || (active.length === 1 ? active[0] : null);
-    const addresses = await request('GET', '/presentation/api/v1/addresses/');
-    const from = (Array.isArray(addresses) ? addresses : [])
-      .filter(row => row?.id != null)
-      .sort((a, b) => String(b.last_modified || '').localeCompare(String(a.last_modified || '')))[0];
-    const price = Number(listing?.price);
-    if (provider && from && fields.country_code && Number.isFinite(price)) {
-      const catalogCategory = attributes ? depopCategory(listing, attributes) : null;
-      const params = depopShippingParams(catalogCategory || {
-        product_type: category?.product_type,
-        department: category?.is_kids ? 'kidswear' : category?.gender === 'male' ? 'menswear' : category?.gender === 'female' ? 'womenswear' : '',
-      });
-      params.set('ids', String(provider.id));
-      params.set('item_cost', price.toFixed(2));
-      params.set('item_currency', 'USD');
-      const quoted = await request('GET', `/presentation/api/v1/shipping/providers/depop/?${params}`, undefined, {
-        'x-country-code': fields.country_code,
-      });
-      const quote = (Array.isArray(quoted) ? quoted : []).find(row => row?.id === provider.id);
-      const size = depopParcelSize(quote?.parcel_sizes || quote?.parcelSizes, listing);
-      if (size?.id) {
-        fields.shipping_methods = [{
-          payer: 'buyer', parcel_size: String(size.id), shipping_provider_id: String(provider.id),
-          ship_from_address_id: from.id,
-        }];
-        if (size.cost?.amount != null && size.cost.amount !== '') fields.national_shipping_cost = String(size.cost.amount);
-      }
-    }
+    const catalogCategory = attributes ? depopCategory(listing, attributes) : null;
+    Object.assign(fields, (await depopShippingFields(listing, catalogCategory || category, deadline)).fields);
   } catch { /* The publish check names missing shipping. */ }
+  // Depop's listing site leaves sku off when it is blank, and so does Anteroom.
+  const sku = String(listing?.depop_specifics?.sku ?? listing?.sku ?? '').trim();
+  if (sku) fields.sku = sku;
   return fields;
+}
+
+// Depop Shipping for this item: the seller's ship-from address and the parcel the
+// quote names, which is the package size a draft cannot be published without.
+// Empty when Depop does not answer; publishing names what is missing.
+async function depopShippingFields(listing, category, deadline) {
+  const from = depopAddress(listing, await depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', deadline));
+  const params = depopShippingParams(category);
+  params.set('item_cost', Number(depopPrice(listing)).toFixed(2));
+  params.set('item_currency', 'USD');
+  const providers = await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline);
+  const parcel = depopParcelSize(depopParcelRows(providers), listing);
+  if (!from || !parcel?.id) return { from, parcel, fields: {} };
+  const fields = {
+    // The draft's shipping entry uses parcel_size. parcel_size_id is the partner
+    // API's name, and Depop refuses a draft that carries it.
+    shipping_methods: [{ payer: 'buyer', parcel_size: String(parcel.id), shipping_provider_id: 'USPS', ship_from_address_id: from.id }],
+    ...depopLocation(listing, from),
+  };
+  // Depop's quote for that package, as the sell page shows it beside the size.
+  const quoted = parcel.cost?.amount ?? parcel.cost?.price?.amount ?? parcel.cost;
+  if (quoted != null && quoted !== '' && typeof quoted !== 'object') fields.national_shipping_cost = String(quoted);
+  return { from, parcel, fields };
 }
 
 // Depop's names for the fields a draft still lacks, in plain words.
@@ -528,13 +526,8 @@ async function depopResolvedFields(payload) {
   fields.international_shipping_cost = worldwide?.enabled === true ? internationalPrice.toFixed(2) : null;
   const parcelLabel = String(listing.depop_specifics?.parcelSize || listing.depop_specifics?.parcel_size || '').trim();
   if (missing.length) throw marketplaceMissing('depop', missing);
-  const from = depopAddress(listing, await depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', payload.deadline));
-  const params = depopShippingParams(category);
-  params.set('item_cost', Number(price).toFixed(2));
-  params.set('item_currency', 'USD');
-  const providers = await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', payload.deadline);
-  const parcels = depopParcelRows(providers);
-  const parcel = depopParcelSize(parcels, listing);
+  const shipping = await depopShippingFields(listing, category, payload.deadline);
+  const { from, parcel } = shipping;
   if (!from) {
     const zip = String(listing.form?.ships_from_zip || '').replace(/\D/g, '').slice(0, 5);
     missing.push({ field: 'address', needs: zip
@@ -543,12 +536,7 @@ async function depopResolvedFields(payload) {
   }
   if (!parcel?.id) missing.push({ field: 'parcel_size', needs: `a parcel size Depop offers (it has no "${parcelLabel}")` });
   if (missing.length) throw marketplaceMissing('depop', missing);
-  // The draft's shipping entry uses parcel_size. parcel_size_id is the partner
-  // API's name, and Depop refuses a draft that carries it.
-  fields.shipping_methods = [{
-    payer: 'buyer', parcel_size: String(parcel.id), shipping_provider_id: 'USPS', ship_from_address_id: from.id,
-  }];
-  Object.assign(fields, depopLocation(listing, from));
+  Object.assign(fields, shipping.fields);
   return fields;
 }
 
@@ -858,7 +846,8 @@ function depopDraftMismatch(draft, listing, fields) {
   if (fields.condition != null && depopCondition(fields.condition) !== view.condition
     && marketplaceNameKey(fields.condition) !== marketplaceNameKey(view.condition)) wrong.push('condition');
   if (fields.brand != null && depopBrandToken(view.brand) !== depopBrandToken(fields.brand)) wrong.push('brand');
-  if (fields.sku && String(view.sku || '') !== String(fields.sku)) wrong.push('SKU');
+  // Depop takes a SKU once. A draft that carries none is still this revision's draft.
+  if (fields.sku && String(view.sku || '').trim() && String(view.sku) !== String(fields.sku)) wrong.push('SKU');
   if (Object.hasOwn(fields, 'international_shipping_cost')) {
     const actual = view.international_shipping_cost;
     if (fields.international_shipping_cost == null ? actual != null && actual !== ''
@@ -867,9 +856,10 @@ function depopDraftMismatch(draft, listing, fields) {
   if (fields.variants && depopVariantIds(fields.variants).some(id => view.variants && typeof view.variants === 'object' && !Array.isArray(view.variants)
     && Object.hasOwn(view.variants, id) && depopVariantQuantity(view.variants[id]) !== depopVariantQuantity(fields.variants[id]))) wrong.push('quantity');
   if (fields.quantity != null && Number(view.quantity) !== fields.quantity) wrong.push('quantity');
-  if (Array.isArray(fields.shipping_methods) && Array.isArray(view.shipping_methods)) {
+  if (Array.isArray(fields.shipping_methods)) {
+    // A draft that lost its package size can be saved but never published.
     const parcel = methods => depopCleanShipping(methods).map(method => String(method?.parcel_size || '')).sort().join();
-    if (parcel(fields.shipping_methods) !== parcel(view.shipping_methods)) wrong.push('shipping');
+    if (Array.isArray(view.shipping_methods) && parcel(fields.shipping_methods) !== parcel(view.shipping_methods)) wrong.push('shipping');
   }
   if (Array.isArray(fields.measurements) && Array.isArray(view.measurements)) {
     const norm = rows => rows.map(row => `${row?.id}:${String(row?.value ?? '').trim()}`).sort().join();
@@ -1155,15 +1145,20 @@ async function depopApiAction(action, payload) {
       marketplaceLog('depop', 'read-back', { body: detail || null });
       return error;
     };
-    const readDraft = async () => {
-      const primary = await request('GET', path);
-      if (!payload.depop_fields) return primary;
-      const score = draft => depopDraftMismatch(draft, payload.listing, payload.depop_fields).length
+    const readDraft = async (fields, first) => {
+      const primary = first || await request('GET', path);
+      const wanted = fields || payload.depop_fields;
+      if (!wanted) return primary;
+      // The summary document does not carry the package size, so a want that has one
+      // counts as unresolved here until a read reports it.
+      const score = draft => depopDraftMismatch(draft, payload.listing, wanted).length
+        + (Array.isArray(wanted.shipping_methods) && !Array.isArray(depopDraftView(draft).shipping_methods) ? 1 : 0)
         + (payload.expected_photo_count != null && depopPictureCount(draft) !== payload.expected_photo_count ? 1 : 0);
       if (!score(primary)) return primary;
       // The presentation document can be a summary. The editor document is on v2.
       try {
         const fuller = await request('GET', `/api/v2/drafts/${id}/`);
+        if (Array.isArray(wanted.shipping_methods) && Array.isArray(depopDraftView(fuller).shipping_methods)) return fuller;
         if (score(fuller) < score(primary)) return fuller;
       } catch { /* Keep the presentation document and show it on the error. */ }
       return primary;
@@ -1178,6 +1173,8 @@ async function depopApiAction(action, payload) {
         product_type: view.product_type, variant_set_id: view.variant_set, variants: view.variants,
         brand: view.brand, condition: view.condition, colour: view.colour, age: view.age, source: view.source, style: view.style,
         attributes: view.attributes, sku: view.sku, quantity: view.quantity,
+        // The package size a draft cannot be published without, as the read saw it.
+        shipping_methods: view.shipping_methods,
         international_shipping_cost: view.international_shipping_cost,
         picture_ids: pictureIds, photo_count: pictureIds.length || depopPictureRows(draft).length,
         missing_fields: draft.missing_fields || draft.missingFields || [] };
@@ -1245,9 +1242,13 @@ async function depopApiAction(action, payload) {
     if (action === 'save') {
       const existing = await request('GET', path);
       let fields = payload.depop_fields;
-      // A direct save has no precomputed fields. Fill category, brand, location, and shipping here.
+      // A direct save has no resolved fields yet: fill what Depop needs, package size
+      // included, since a draft without one can be saved but never published.
       if (!fields) fields = await depopListingFields(request, payload.listing, payload.deadline);
       else fields = await depopWithCountry(request, fields, payload.deadline);
+      // The run's verification compares against these too, so a save whose reply is
+      // lost is checked against what this revision resolved, not against nothing.
+      if (!payload.depop_fields) payload.depop_fields = fields;
       let pictures = existing;
       if (payload.uploaded_photo_ids?.length) {
         pictures = await depopProcessedPhotos(request, payload.uploaded_photo_ids);
@@ -1261,19 +1262,39 @@ async function depopApiAction(action, payload) {
         && typeof existing.national_shipping_cost !== 'object') {
         draft.national_shipping_cost = String(existing.national_shipping_cost);
       }
-      const reply = await request('PUT', path, draft);
-      let saved = await readDraft();
+      let reply;
+      let withoutSku = false;
+      try {
+        reply = await request('PUT', path, draft);
+      } catch (error) {
+        // Depop's SKU is the seller's own inventory id and has to be unique across
+        // their listings. A duplicate blocks the draft, not the item, so a new draft
+        // is written again without it and the seller is told.
+        if (!depopSkuTaken(error, draft.sku)) throw error;
+        const stored = String(depopDraftView(existing).sku || '').trim();
+        if (stored) {
+          // A save never clears a SKU once Depop holds it, so the draft has to be fixed on Depop.
+          throw marketplaceError(`Depop already has a listing with the SKU ${draft.sku}. Clear this draft's SKU `
+            + 'on Depop, or delete the other listing, then List again.', { marketplace_message: error.marketplace_message });
+        }
+        delete draft.sku;
+        delete fields.sku;
+        withoutSku = true;
+        reply = await request('PUT', path, draft);
+      }
+      let saved = await readDraft(fields);
       for (let attempt = 0; attempt < 2 && !depopPhotosKept(saved, draft.pictures); attempt += 1) {
         await marketplaceSleep(300);
-        saved = await readDraft();
+        saved = await readDraft(fields);
       }
-      const wrong = depopDraftMismatch(saved, payload.listing, payload.depop_fields);
+      const wrong = depopDraftMismatch(saved, payload.listing, fields);
       const photosKept = depopPhotosKept(saved, draft.pictures);
       if (wrong.length || !photosKept) {
         const parts = [...wrong, ...(!photosKept ? ['photos'] : [])];
         throw keptError(parts, saved, reply);
       }
-      return summary(saved);
+      return { ...summary(saved), ...(withoutSku ? { warning: `Depop already has the SKU ${payload.listing?.sku}, `
+        + 'so this draft was saved without it. Depop only takes a SKU once.' } : {}) };
     }
     if (action === 'prepare_publish' || action === 'publish') {
       if (payload.action !== 'publish' || payload.confirm !== true) throw marketplaceError('Confirm listing on Depop.');
@@ -1285,8 +1306,14 @@ async function depopApiAction(action, payload) {
         throw marketplaceMissing('depop', [...new Set(missing.length ? missing : ['details'])]
           .map(field => ({ field, needs: depopFieldNeeds(field) })), named ? `missing_fields: ${named}` : '');
       }
-      const wrong = depopDraftMismatch(draft, payload.listing, payload.depop_fields);
-      if (wrong.length) throw marketplaceError(`Depop's draft has a different ${wrong.join(', ')} than this revision. List again.`);
+      // The editor document is the one the draft page reads, and the one that shows
+      // whether the package size is still there. Only a summary that does not report
+      // it is read again.
+      const reported = Array.isArray(depopDraftView(draft).shipping_methods);
+      const wrong = depopDraftMismatch(Array.isArray(payload.depop_fields?.shipping_methods) && !reported
+        ? await readDraft(null, draft) : draft, payload.listing, payload.depop_fields);
+      if (wrong.length) throw marketplaceError(`Depop's draft has a different ${wrong.join(', ')} than this revision. List again.`,
+        { code: 'rejected', marketplace_message: `fields: ${wrong.join(', ')}` });
       if (action === 'prepare_publish') return { ok: true };
       const job = await request('POST', '/presentation/api/v1/drafts/products/', { draft_ids: [id] });
       if (!/^[A-Za-z0-9_-]+$/.test(String(job.id))) throw marketplaceError('Depop did not confirm the publish result. Check its result before trying again.', { code: 'schema_drift', rejected: false });
@@ -1347,8 +1374,20 @@ async function depopApiAction(action, payload) {
     if (action === 'publish_status') {
       if (!/^[A-Za-z0-9_-]+$/.test(String(payload.publish_job_id))) throw marketplaceError('A Depop publish receipt is required.');
       const status = await request('GET', `/api/v3/drafts/products/${payload.publish_job_id}/status/`);
-      const complete = status.count_by_status?.COMPLETE === 1 && status.count_by_status?.PENDING === 0;
-      const pending = status.count_by_status?.PENDING > 0;
+      // Only a count names an answer. A job Depop has accepted but not started yet
+      // reports no counts at all, which is waiting, not a refusal.
+      const counts = status?.count_by_status && typeof status.count_by_status === 'object' ? status.count_by_status : {};
+      const count = key => Number(counts[key]) || 0;
+      const complete = count('COMPLETE') === 1 && count('PENDING') === 0;
+      // A job that ended without posting is an answer too: nothing is live and the draft is still there.
+      const failed = !complete && ['FAILED', 'ERROR', 'CANCELLED'].some(key => count(key) > 0);
+      // Depop's own words, so a job it refused is never a silent one.
+      const said = [status?.error, status?.message, status?.detail, ...(Array.isArray(status?.errors) ? status.errors : [])]
+        .map(item => (item && typeof item === 'object' ? item.message || item.detail || item.error || '' : item))
+        .filter(text => typeof text === 'string' && text.trim());
+      const reason = marketplaceScrub(said.join(' '));
+      // Depop's counts are the only record of what its publish queue did. Keep them in the worker console.
+      if (!complete) marketplaceLog('depop', 'publish-status', { counts: JSON.stringify(counts), ...(reason ? { said: reason } : {}) });
       // The status counts say the draft posted. The public link is a separate field, or the seller's selling list.
       // Publish status is only a count. The public link is on the product, or on the one shop row that is this listing.
       let listing_url = complete ? depopStatusUrl(status, id) : '';
@@ -1359,12 +1398,18 @@ async function depopApiAction(action, payload) {
         } catch { /* A posted draft is gone. The shop row is the remaining place to read the link. */ }
       }
       if (complete && !listing_url) listing_url = await depopShopUrl(request, payload);
-      return { complete, pending, ...(listing_url ? { listing_url } : {}) };
+      return { complete, failed, counts, ...(reason ? { reason } : {}), ...(listing_url ? { listing_url } : {}) };
     }
     throw marketplaceError('Unsupported Depop action.');
   } catch (error) {
     return marketplaceFailure(error, !wrote);
   }
+}
+
+// Depop's own words when it refuses a SKU that another listing already carries.
+function depopSkuTaken(error, sku) {
+  const said = `${error?.message || ''} ${error?.marketplace_message || ''}`;
+  return Boolean(String(sku || '').trim()) && /sku/i.test(said) && /unique|already|duplicate/i.test(said);
 }
 
 function depopDraftGone(error) {
@@ -1587,12 +1632,15 @@ async function runDepopNative(msg, recovery = false) {
           payload.uploaded_photo_ids.push(uploaded.id);
         }
       }
-      try { await depopAction('save', payload); } catch (error) {
+      let saved;
+      try { saved = await depopAction('save', payload); } catch (error) {
         if (error.rejected !== true) committed = true;
         throw error;
       }
       committed = true;
-      return await verify();
+      const verified = await verify();
+      // What the save had to leave off, such as a SKU Depop already holds, belongs on the answer.
+      return saved?.warning ? { ...verified, warning: saved.warning } : verified;
     }
     if (!recovery) {
       // What this revision resolves to on Depop, so publish refuses a draft
@@ -1610,13 +1658,22 @@ async function runDepopNative(msg, recovery = false) {
       }
     }
     if (!payload.publish_job_id) throw new Error('No confirmed Depop publish receipt is available. Review the native account.');
+    let status = {};
     while (Date.now() < payload.deadline) {
-      const result = await depopAction('publish_status', payload);
-      if (result.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(result.listing_url ? { listing_url: result.listing_url } : {}) };
-      if (!result.pending) throw new Error('Depop did not confirm the listing. Check Depop before listing again.');
+      status = await depopAction('publish_status', payload);
+      if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
+      if (status.failed) {
+        // Depop's job ended without posting this draft. The draft is untouched, so List can run again.
+        return marketplaceFailure(marketplaceError(`Depop could not publish this listing.${status.reason ? ` ${status.reason}` : ''}`,
+          { code: 'rejected', marketplace_message: status.reason || `counts: ${JSON.stringify(status.counts || {})}` }), true,
+        { draft_url: payload.draft_url });
+      }
+      // Depop publishes in a queue of its own. Until it reports the job complete,
+      // whether the item is live is unknown, so keep asking rather than guess.
       await marketplaceSleep(2000);
     }
-    throw new Error('Depop has not confirmed publishing yet. Check its result later.');
+    throw marketplaceError('Depop has not confirmed publishing yet. Check its result later.',
+      { code: 'uncertain', rejected: false, marketplace_message: `counts: ${JSON.stringify(status.counts || {})}` });
   } catch (error) {
     if (depopDraftGone(error) && !replacedDraft) payload.draft_url = '';
     // A write may have landed and the reply was lost. Read Depop before answering
