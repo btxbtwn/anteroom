@@ -36,7 +36,6 @@ export function useListingSync(convId: string, vendooBound: boolean): { vendooCo
     queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
     queryClient.invalidateQueries({ queryKey: ["vendoo-item"] });
-    queryClient.invalidateQueries({ queryKey: ["vendoo-item-peek"] });
     queryClient.invalidateQueries({ queryKey: ["marketplace-statuses"] });
     queryClient.invalidateQueries({ queryKey: ["vendoo-sync", convId] });
   }, [convId, queryClient]);
