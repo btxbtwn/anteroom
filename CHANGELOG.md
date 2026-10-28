@@ -6,13 +6,17 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.468 — 2026-10-28
+## 0.1.469 — 2026-10-28
 
 - Listing forms are easier to read: fields stop at a comfortable width instead of stretching across a wide window, section headings stand out from field labels, labels and marketplace statuses are larger, and the description box has more room between lines.
 - Category is one search box that shows the whole path, such as Men › Bottoms › Jeans. Type any part of it to find a category.
 - Fields that take several choices say how many in the empty box ("Choose up to 3"), and the count appears once you pick something.
 - Depop's hashtags show as tags under the description instead of a sentence.
 - The inventory list shows three suggestions with "Show all", the search box reads "Search listings" instead of cutting off, the status tabs no longer cut off "Active", and the marketplace logos under each listing are larger.
+
+## 0.1.468 — 2026-10-28
+
+- Depop offer previews recognize the currency in Depop's current listing data, so a US dollar listing is no longer skipped because its currency could not be read.
 
 ## 0.1.467 — 2026-10-28
 
