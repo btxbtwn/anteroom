@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.461 — 2026-10-27
+## 0.1.462 — 2026-10-27
 
 - With Prepaid label, the Mercari tab now asks what Mercari’s label picker asks: the package weight in pounds and ounces, whether it fits in a shoebox, and its length, width and height when it doesn’t. They start from Item Details, the labels offered follow them, and List sends what you set there.
+
+## 0.1.461 — 2026-10-28
+
+- The listing form now takes the whole window, so fields are easier to read. The chat is a pop-up in the bottom-right corner: minimize it to a small button that still shows what it's working on and marks new replies, and press ⌘J to open or close it. It opens by itself when you ask about a field or start a new listing.
 
 ## 0.1.460 — 2026-10-27
 
