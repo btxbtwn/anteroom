@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.461 — 2026-10-28
+## 0.1.462 — 2026-10-28
 
 - When you pick a different category for a marketplace, on its tab or by asking chat, Anteroom fills that category’s new fields the same way it does after generating, choosing only from that marketplace’s own choices. Only the marketplace you changed is filled, and fields you set or locked are left alone.
+
+## 0.1.461 — 2026-10-28
+
+- The listing form now takes the whole window, so fields are easier to read. The chat is a pop-up in the bottom-right corner: minimize it to a small button that still shows what it's working on and marks new replies, and press ⌘J to open or close it. It opens by itself when you ask about a field or start a new listing.
 
 ## 0.1.460 — 2026-10-27
 

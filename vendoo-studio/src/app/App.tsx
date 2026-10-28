@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useRef, useState, useReducer, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, useReducer, type CSSProperties, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, jobsPollMs, pollMs } from "../api/polling";
 import type { BrowserField } from "../api/client";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { ChatPanel } from "../components/ChatPanel";
+import { isChatToggleShortcut, ListingChatPopup, type ListingChatStatus } from "../components/ListingChatPopup";
 import { ListingSession } from "../components/listingSession";
 import { SetupChecklist } from "../components/SetupChecklist";
 import { BrowserPreview } from "../components/BrowserPreview";
@@ -51,7 +52,7 @@ import { ThemeSync } from "../components/ThemeSync";
 import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSessionNotice";
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
-import { initialOpenListing, openListingReducer } from "./openListing";
+import { initialOpenListing, openListingReducer, type OpenListing } from "./openListing";
 
 const ListingEditor = lazy(() =>
   import("../components/ListingEditor").then((module) => ({ default: module.ListingEditor })),
@@ -94,9 +95,6 @@ const MOBILE_LAYOUT_QUERY = "(max-width: 900px)";
 /* Open wider for listing titles; resizing still stops at the footer's minimum width. */
 const SIDEBAR_WIDTH: PanelWidthLimits = { min: SIDEBAR_FOOTER_WIDTH, max: 420, maxVw: 30 };
 const THREADS_WIDTH: PanelWidthLimits = { min: 200, max: 420, maxVw: 30 };
-/* Min 420 so the inspector can't shrink under the titlebar listing chrome.
-   Max leaves room to widen it when the marketplace rail sits beside the form. */
-const DETAIL_WIDTH: PanelWidthLimits = { min: 420, max: 760, maxVw: 50 };
 const MAIN_PANEL_MIN_WIDTH = 360;
 let setupGuideAutoOpen: boolean | null = null;
 
@@ -147,16 +145,17 @@ export function App() {
   const wasBrowserOpen = useRef(false);
   const mainPanelRef = useRef<HTMLElement>(null);
   const [sidebarWidth, setSidebarWidth] = usePanelWidth("sidebar");
-  const [detailWidth, setDetailWidth] = usePanelWidth("detail");
   const [threadsWidth, setThreadsWidth] = usePanelWidth("threads");
   const [sidebarCollapsed, setSidebarCollapsed] = usePanelCollapsed("sidebar");
-  const [detailCollapsed, setDetailCollapsed] = usePanelCollapsed("detail");
+  // On desktop the listing's chat is a pop-up over the form; minimized, it is a pill.
+  const [chatMinimized, setChatMinimized] = usePanelCollapsed("listing-chat");
+  const [chatStatus, setChatStatus] = useState<ListingChatStatus | null>(null);
+  const setChatOpen = useCallback((open: boolean) => setChatMinimized(!open), [setChatMinimized]);
   const [threadsCollapsed, setThreadsCollapsed] = usePanelCollapsed("threads");
   const panelWidthStyle = {
     // A width the seller dragged to wins, unless it would clip the footer buttons.
     "--sidebar-width": `${Math.max(sidebarWidth ?? 340, SIDEBAR_WIDTH.min)}px`,
     "--sidebar-min-width": `${SIDEBAR_WIDTH.min}px`,
-    ...(detailWidth ? { "--detail-width": `${detailWidth}px` } : {}),
     ...(threadsWidth ? { "--threads-width": `${threadsWidth}px` } : {}),
   } as CSSProperties;
 
@@ -313,7 +312,6 @@ export function App() {
   // The sidebar overlays the workspace on mobile and the editor is its own pane
   // there, so the desktop collapse states only apply to the desktop layout.
   const sidebarHidden = !isMobile && sidebarCollapsed;
-  const detailHidden = !isMobile && detailCollapsed;
   const threadsHidden = !isMobile && threadsCollapsed;
 
   const closeMobileSidebar = () => setMobileSidebarOpen(false);
@@ -489,6 +487,17 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeView, isMobile, mobileSidebarOpen]);
 
+  useEffect(() => {
+    if (isMobile || activeView !== "listings" || !selectedConvId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!isChatToggleShortcut(event) || isConfirmDialogOpen()) return;
+      event.preventDefault();
+      setChatMinimized(!chatMinimized);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isMobile, activeView, selectedConvId, chatMinimized, setChatMinimized]);
+
   const showMailToolbar = isMobile && activeView === "listings" && mobileSidebarOpen;
 
   /** Phone pages open from the navigation drawer; a listing and a settings section step back to their list. */
@@ -655,6 +664,47 @@ export function App() {
     },
   });
 
+  const renderChat = (listing: OpenListing) => (
+    <ChatPanel
+      convId={listing.id}
+      queuedMessage={listing.queuedMessage}
+      onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: listing.id, value: null })}
+      browser={browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
+      onBrowserFieldsChange={setBrowserFields}
+      onStatusChange={setChatStatus}
+    />
+  );
+  const renderEditor = (listing: OpenListing, chat?: ReactNode) => (
+    <Suspense fallback={null}>
+      <ListingEditor
+        convId={listing.id}
+        reviewTab={listing.reviewTab}
+        onReviewTabChange={(value) => dispatchOpenListing({ type: "review", id: listing.id, value })}
+        onOpenBrowser={(jobId) => openBrowser.mutate(jobId)}
+        browserOpen={browserOpen}
+        onAskChat={(text) => {
+          dispatchOpenListing({ type: "message", id: listing.id, value: text });
+          setMobilePane("workspace");
+          setChatOpen(true);
+        }}
+        onCleared={() => {
+          clearListingWorkspace(listing.id);
+        }}
+        onEditInventoryLocation={openEbayInventoryLocation}
+        onBulkListingsCreated={(listings, generate) => {
+          if (generate) void generateBatch(listings);
+          const first = listings[0]?.convId;
+          if (!first) return;
+          setSelectedConvId(first);
+          goListings();
+          setMobilePane("workspace");
+          setMobileSidebarOpen(false);
+        }}
+        chat={chat}
+      />
+    </Suspense>
+  );
+
   return (
     <div className="app-shell" style={panelWidthStyle}>
       <MarketplaceSessionNotice />
@@ -663,21 +713,14 @@ export function App() {
         sidebarOpen={!sidebarHidden}
         onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
         rightPanel={
-          activeView === "listings"
+          activeView === "assistant"
             ? {
-                open: !detailHidden,
-                name: "the listing inspector",
-                controls: "listing-inspector",
-                onToggle: () => setDetailCollapsed(!detailCollapsed),
+                open: !threadsHidden,
+                name: "chats",
+                controls: "assistant-threads",
+                onToggle: () => setThreadsCollapsed(!threadsCollapsed),
               }
-            : activeView === "assistant"
-              ? {
-                  open: !threadsHidden,
-                  name: "chats",
-                  controls: "assistant-threads",
-                  onToggle: () => setThreadsCollapsed(!threadsCollapsed),
-                }
-              : null
+            : null
         }
       />
       <div
@@ -885,66 +928,36 @@ export function App() {
                   )}
                   {openListingState && (
                     <div className="listing-workspace-main listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
-                      <div className="chat-column">
-                        <ListingSession active={activeView === "listings"}>
-                          <ChatPanel
-                            convId={openListingState.id}
-                            queuedMessage={openListingState.queuedMessage}
-                            onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: openListingState.id, value: null })}
-                            browser={browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
-                            onBrowserFieldsChange={setBrowserFields}
-                          />
-                        </ListingSession>
-                      </div>
+                      <ListingSession active={activeView === "listings"}>
+                        {isMobile ? (
+                          <div className="chat-column">{renderChat(openListingState)}</div>
+                        ) : (
+                          renderEditor(openListingState, (
+                            <ListingChatPopup
+                              convId={openListingState.id}
+                              open={!chatMinimized}
+                              onOpenChange={setChatOpen}
+                              status={chatStatus}
+                            >
+                              {renderChat(openListingState)}
+                            </ListingChatPopup>
+                          ))
+                        )}
+                      </ListingSession>
                     </div>
                   )}
                 </div>
               )}
             </main>
 
-            {activeView === "listings" && !detailHidden && (
-              <PanelResizeHandle
-                label="Resize listing editor"
-                panel="after"
-                width={detailWidth}
-                onResize={setDetailWidth}
-                absorberRef={mainPanelRef}
-                absorberMin={MAIN_PANEL_MIN_WIDTH}
-                {...DETAIL_WIDTH}
-              />
-            )}
-            {(openListingState || (activeView === "listings" && !detailHidden)) && (
-              <aside id="listing-inspector" className="panel detail-panel" hidden={activeView !== "listings" || detailHidden}>
+            {/* On a phone the form is its own pane; on desktop it is the main panel. */}
+            {isMobile && (openListingState || activeView === "listings") && (
+              <aside id="listing-inspector" className="panel detail-panel" hidden={activeView !== "listings"}>
                 {openListingState ? (
                   <div className="listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>
-                    <Suspense fallback={null}>
-                      <ListingSession active={activeView === "listings"}>
-                        <ListingEditor
-                          convId={openListingState.id}
-                          reviewTab={openListingState.reviewTab}
-                          onReviewTabChange={(value) => dispatchOpenListing({ type: "review", id: openListingState.id, value })}
-                          onOpenBrowser={(jobId) => openBrowser.mutate(jobId)}
-                          browserOpen={browserOpen}
-                          onAskChat={(text) => {
-                            dispatchOpenListing({ type: "message", id: openListingState.id, value: text });
-                            setMobilePane("workspace");
-                          }}
-                          onCleared={() => {
-                            clearListingWorkspace(openListingState.id);
-                          }}
-                          onEditInventoryLocation={openEbayInventoryLocation}
-                          onBulkListingsCreated={(listings, generate) => {
-                            if (generate) void generateBatch(listings);
-                            const first = listings[0]?.convId;
-                            if (!first) return;
-                            setSelectedConvId(first);
-                            goListings();
-                            setMobilePane("workspace");
-                            setMobileSidebarOpen(false);
-                          }}
-                        />
-                      </ListingSession>
-                    </Suspense>
+                    <ListingSession active={activeView === "listings"}>
+                      {renderEditor(openListingState)}
+                    </ListingSession>
                   </div>
                 ) : (
                   <Empty className="h-full">

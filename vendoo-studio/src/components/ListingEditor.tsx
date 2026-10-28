@@ -80,6 +80,8 @@ interface Props {
   onReviewTabChange: (tab: ListingReviewTab) => void;
   onBulkListingsCreated?: (listings: BulkListingUploadResult[], generate: boolean) => void;
   onEditInventoryLocation?: () => void;
+  /** The listing's chat, floated over the form's corner on desktop. */
+  chat?: React.ReactNode;
 }
 
 const DIRECT_FORM_MARKETS = new Set(["ebay", "poshmark", "mercari", "depop", "sellwild"]);
@@ -125,6 +127,7 @@ export function ListingEditor({
   onReviewTabChange,
   onBulkListingsCreated,
   onEditInventoryLocation,
+  chat,
 }: Props) {
   const queryClient = useQueryClient();
   const [editTab, setEditTab] = React.useState("general");
@@ -509,6 +512,7 @@ export function ListingEditor({
         </Alert>
       )}
 
+      <div className={cn("listing-form-area", chat && "has-chat")}>
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || updateMutation.isPending} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
@@ -550,6 +554,8 @@ export function ListingEditor({
           </div>
         </>
       </MarketplacesLayout>
+      {chat}
+      </div>
 
       {vendooEnabled && <div className="listing-send-footer flex max-h-[min(42vh,320px)] min-w-0 shrink-0 flex-col overflow-y-auto overflow-x-hidden border-t px-3 py-2.5 max-[900px]:max-h-[min(28vh,220px)] max-[900px]:pb-[max(10px,env(safe-area-inset-bottom,0px))]">
         <SendToVendooButton
@@ -855,7 +861,7 @@ export function StructuredEditor({
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
-    <div ref={formRef} key={tab} className="flex flex-col">
+    <div ref={formRef} key={tab} className="@container flex flex-col">
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
@@ -875,7 +881,8 @@ export function StructuredEditor({
             titleId={`listing-section-${tab}-${section.id}`}
             meta={section.id === "listing" ? null : `${filled} of ${section.fields.length} filled`}
           >
-            <div className="grid min-w-0 grid-cols-2 gap-3 max-[900px]:grid-cols-1">
+            {/* A marketplace's own page layout keeps its two columns; the general form spreads out when wide. */}
+            <div className={cn("grid min-w-0 grid-cols-2 gap-3 max-[900px]:grid-cols-1", !pageLayout && "@4xl:grid-cols-3")}>
               {section.fields.map((f) => (
                 <div key={f.key} className={cn("min-w-0", (pageLayout ? f.width !== "half" : fullWidth(f)) && "col-span-full")}>
                   <FieldLabel htmlFor={`listing-field-${f.key}`}>{f.label}</FieldLabel>
