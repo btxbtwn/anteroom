@@ -385,11 +385,10 @@ export function FirstRunGuide({
                     ) : chatgptPending ? (
                       <>
                         <p className="setup-guide-copy">
-                          Open{" "}
-                          <a href={chatgptPending.verification_url} target="_blank" rel="noreferrer">
-                            {chatgptPending.verification_url}
-                          </a>{" "}
-                          and enter <code>{chatgptPending.user_code}</code>
+                          Approve Anteroom in your browser, and leave token sharing on.{" "}
+                          <a href={chatgptPending.authorize_url} target="_blank" rel="noreferrer">
+                            Open the sign-in page again
+                          </a>
                         </p>
                         <button
                           type="button"

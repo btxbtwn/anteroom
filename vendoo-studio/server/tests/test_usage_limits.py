@@ -15,15 +15,6 @@ from vendoo_studio.services import usage_limits, user_settings
 
 CHECKED_AT = "2026-10-21T05:00:00Z"
 
-# What `/backend-api/wham/usage` returns for a paid ChatGPT plan.
-CHATGPT_PLUS = {
-    "plan_type": "plus",
-    "rate_limit": {
-        "primary_window": {"used_percent": 42.5, "reset_at": 1792560000, "limit_window_seconds": 18000},
-        "secondary_window": {"used_percent": 130, "reset_at": 1792900000, "limit_window_seconds": 604800},
-    },
-}
-
 # Claude Code's `get_usage` control response (trimmed from a real Max account).
 CLAUDE_MAX = {
     "subscription_type": "max",
@@ -60,42 +51,13 @@ CURSOR_PRO = {
 }
 
 
-class ChatGptParserTest(unittest.TestCase):
-    def test_paid_plan_has_session_and_weekly(self):
-        limits = usage_limits.chatgpt_usage_to_limits(CHATGPT_PLUS, CHECKED_AT)
-        self.assertEqual(limits["provider"], "chatgpt")
-        self.assertEqual(limits["plan"], "Plus")
-        self.assertNotIn("unavailable", limits)
-        session, weekly = limits["windows"]
-        self.assertEqual(
-            session,
-            {
-                "id": "primary",
-                "kind": "session",
-                "label": "Session",
-                "used_percent": 42.5,
-                "window_duration_mins": 300,
-                "resets_at": "2026-10-21T05:20:00Z",
-            },
-        )
-        self.assertEqual(weekly["kind"], "weekly")
-        self.assertEqual(weekly["used_percent"], 100.0)
-        self.assertEqual(weekly["window_duration_mins"], 10080)
-
-    def test_free_plan_without_duration_is_monthly(self):
-        body = {"plan_type": "free", "rate_limit": {"primary_window": {"used_percent": 10, "reset_at": None}}}
-        limits = usage_limits.chatgpt_usage_to_limits(body, CHECKED_AT)
-        self.assertEqual(limits["plan"], "Free")
-        [window] = limits["windows"]
-        self.assertEqual((window["kind"], window["label"], window["window_duration_mins"]), ("monthly", "Monthly", 43200))
-        self.assertNotIn("resets_at", window)
-
-    def test_missing_windows(self):
-        limits = usage_limits.chatgpt_usage_to_limits({"plan_type": "pro", "rate_limit": None}, CHECKED_AT)
+class ChatGptUsageTest(unittest.TestCase):
+    def test_signed_in_usage_points_to_chatgpt_settings(self):
+        with mock.patch("vendoo_studio.services.chatgpt_oauth.chatgpt_signed_in", return_value=True):
+            limits = asyncio.run(usage_limits.fetch_chatgpt())
         self.assertEqual(limits["windows"], [])
-        limits = usage_limits.chatgpt_usage_to_limits({"rate_limit": {"primary_window": {"used_percent": "x"}}}, CHECKED_AT)
-        self.assertEqual(limits["windows"], [])
-        self.assertNotIn("plan", limits)
+        self.assertEqual(limits["unavailable"]["reason"], "unsupported")
+        self.assertIn("ChatGPT → Settings → Usage", limits["unavailable"]["message"])
 
 
 class ClaudeParserTest(unittest.TestCase):

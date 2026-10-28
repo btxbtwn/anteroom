@@ -17,7 +17,12 @@ SECRETS_ACCOUNT = "studio-secrets"
 KEYRING_ACCOUNT = "xiaomi-mimo-api-key"
 BRAVE_ACCOUNT = "brave-search-api-key"
 CURSOR_ACCOUNT = "cursor-api-key"
+# The Sign in with ChatGPT connection. The name predates it: the old Codex
+# sign-in used the same item, and chatgpt_oauth drops a record of that shape.
 CHATGPT_ACCOUNT = "chatgpt-codex-oauth"
+# The app registration OpenAI issued at the first sign-in, kept across sign-outs:
+# {"client_id": "oaiapp_...", "redirect_uri", "subject", "email", "host_id", "sharing_enabled"}.
+CHATGPT_REGISTRATION_ACCOUNT = "chatgpt-registration"
 CHATGPT_MODELS_ACCOUNT = "chatgpt-models"
 # This Mac's registration with Anteroom's relay: {"deviceId", "token"}.
 RELAY_DEVICE_ACCOUNT = "relay-device"
@@ -307,6 +312,14 @@ def _get_json(account: str) -> dict | None:
     except Exception:
         return None
     return value if isinstance(value, dict) else None
+
+
+def get_chatgpt_registration() -> dict:
+    return _get_json(CHATGPT_REGISTRATION_ACCOUNT) or {}
+
+
+def set_chatgpt_registration(registration: dict):
+    _set(CHATGPT_REGISTRATION_ACCOUNT, json.dumps(registration))
 
 
 def get_relay_device() -> dict | None:

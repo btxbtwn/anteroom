@@ -17,18 +17,12 @@ from vendoo_studio.providers.xiaomi_mimo import (
     encode_images,
     unpack_stream_item,
 )
-from vendoo_studio.services.chatgpt_oauth import (
-    ORIGINATOR,
-    account_id_from_tokens,
-    refresh_chatgpt_tokens,
-)
+from vendoo_studio.services.chatgpt_oauth import RESOURCE, refresh_chatgpt_tokens
 from vendoo_studio.services import live_trace
 from vendoo_studio.services.keychain import get_chatgpt_models
-from vendoo_studio.version import app_version
 
-CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
-USER_AGENT = f"VendooStudio/{app_version()}"
-MODELS_CLIENT_VERSION = "1.0.0"
+# Sign in with ChatGPT tokens reach the public API, where the seller's plan pays.
+OPENAI_BASE_URL = RESOURCE
 VISION_MODEL = "gpt-5.5"
 LISTING_MODEL = "gpt-5.5"
 DEFAULT_REASONING_EFFORT = "low"
@@ -79,9 +73,16 @@ def clamp_reasoning_effort(effort: str, model: str) -> str:
 
 
 def visible_model_slugs(payload: object) -> list[str]:
+    """Listed model slugs, best first.
+
+    A ChatGPT token gets the plan's catalog (``models`` with slug, visibility
+    and priority); the plain API list (``data`` with ids) is read as well.
+    """
     entries = payload.get("models") if isinstance(payload, dict) else None
     if not isinstance(entries, list):
-        return []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        ids = {item["id"].strip() for item in data or [] if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()}
+        return sorted(ids)
     sortable: list[tuple[int, str]] = []
     seen: set[str] = set()
     for item in entries:
@@ -344,38 +345,27 @@ async def _http_client() -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
-async def _codex_headers() -> dict[str, str]:
-    tokens = await refresh_chatgpt_tokens()
-    if not tokens:
+async def _chatgpt_headers() -> dict[str, str]:
+    record = await refresh_chatgpt_tokens()
+    if not record:
         raise RuntimeError("Not signed in with ChatGPT")
-    headers = {
-        "Authorization": f"Bearer {tokens['access_token']}",
+    return {
+        "Authorization": f"Bearer {record['access_token']}",
         "Content-Type": "application/json",
         "Accept": "text/event-stream",
-        "User-Agent": USER_AGENT,
-        "originator": ORIGINATOR,
-        "OpenAI-Beta": "responses=experimental",
     }
-    account_id = account_id_from_tokens(tokens)
-    if account_id:
-        headers["ChatGPT-Account-ID"] = account_id
-    return headers
 
 
-async def fetch_codex_models(*, force: bool = False) -> list[str]:
+async def fetch_chatgpt_models(*, force: bool = False) -> list[str]:
+    """Models the signed-in ChatGPT plan can use, as OpenAI lists them for this token."""
     global _catalog_cached_at, _catalog_slugs
     now = time.time()
     if not force and _catalog_slugs and now - _catalog_cached_at < CATALOG_TTL_S:
         return list(_catalog_slugs)
-    headers = await _codex_headers()
+    headers = await _chatgpt_headers()
     headers.pop("Accept", None)
     async with _http_client() as client:
-        resp = await client.get(
-            f"{CODEX_BASE_URL}/models",
-            params={"client_version": MODELS_CLIENT_VERSION},
-            headers=headers,
-            timeout=20,
-        )
+        resp = await client.get(f"{OPENAI_BASE_URL}/models", headers=headers, timeout=20)
     if resp.status_code >= 400:
         raise RuntimeError(_http_error(resp))
     slugs = visible_model_slugs(resp.json())
@@ -386,20 +376,20 @@ async def fetch_codex_models(*, force: bool = False) -> list[str]:
 
 class ChatGPTCodexProvider:
     name = "chatgpt"
-    base_url = CODEX_BASE_URL
+    base_url = OPENAI_BASE_URL
 
     def __init__(self):
         self.vision_model, self.listing_model = resolved_chatgpt_models()
         self.reasoning_effort = resolved_chatgpt_reasoning()
 
     async def _headers(self) -> dict[str, str]:
-        return await _codex_headers()
+        return await _chatgpt_headers()
 
     def _http_error(self, resp: httpx.Response) -> str:
         return _http_error(resp)
 
     async def test_connection(self) -> bool:
-        await fetch_codex_models(force=True)
+        await fetch_chatgpt_models(force=True)
         return True
 
     async def analyze_photos(

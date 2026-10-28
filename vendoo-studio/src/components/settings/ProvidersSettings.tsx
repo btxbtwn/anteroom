@@ -732,7 +732,7 @@ export function ProvidersSettings() {
 
   const chatgpt = provider?.chatgpt;
   const chatgptPending = chatgpt?.pending;
-  const pendingCode = chatgptPending?.user_code;
+  const pendingSignIn = chatgptPending?.authorize_url;
   const claude = provider?.claude;
   const primary: ListingProviderId = isListingProviderId(provider?.primary) ? provider.primary : "chatgpt";
   const fallback: ListingFallbackId =
@@ -771,13 +771,13 @@ export function ProvidersSettings() {
     : ["none", "low", "medium", "high", "xhigh"];
 
   useEffect(() => {
-    if (!pendingCode) return;
+    if (!pendingSignIn) return;
     const id = window.setInterval(() => {
       queryClient.invalidateQueries({ queryKey: ["settings-provider"] });
       queryClient.invalidateQueries({ queryKey: ["status"] });
     }, 2000);
     return () => window.clearInterval(id);
-  }, [pendingCode, queryClient]);
+  }, [pendingSignIn, queryClient]);
 
   const roleSentence = (id: ListingProviderId) =>
     primary === id ? "Primary for listings." : fallback === id ? "Fallback for listings." : "Not in the listing order.";
@@ -828,7 +828,7 @@ export function ProvidersSettings() {
                   {chatgpt?.plan ? ` · ${chatgpt.plan}` : ""}. {roleSentence("chatgpt")}
                 </>
               ) : (
-                "Uses your ChatGPT subscription to generate listings and look up sold comps. Usage counts against Codex quota, not a Platform API key."
+                "Uses your ChatGPT plan to generate listings and look up sold comps. You approve Anteroom in your browser, and usage counts against your plan, not an API key."
               )
             }
             status={
@@ -871,23 +871,16 @@ export function ProvidersSettings() {
               <div className="grid max-w-xl gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-sm">
                 <p className="flex items-center gap-2 text-muted-foreground">
                   <Spinner size="sm" tone="muted" />
-                  Waiting for you to finish signing in.
-                </p>
-                <p className="text-muted-foreground">
-                  Enter code{" "}
-                  <code className="select-all rounded-sm bg-background px-1.5 py-0.5 font-mono text-base tracking-widest text-foreground">
-                    {chatgptPending.user_code}
-                  </code>{" "}
-                  in your browser.
+                  Approve Anteroom in your browser, and leave token sharing on.
                 </p>
                 <Button
                   size="xs"
                   variant="outline"
                   className="w-fit"
-                  render={<a href={chatgptPending.verification_url} target="_blank" rel="noreferrer" />}
+                  render={<a href={chatgptPending.authorize_url} target="_blank" rel="noreferrer" />}
                 >
                   <ExternalLinkIcon />
-                  Open {chatgptPending.verification_url.replace(/^https?:\/\//, "")}
+                  Open the sign-in page again
                 </Button>
               </div>
             ) : chatgptLoginMutation.isError ? (
@@ -917,7 +910,7 @@ export function ProvidersSettings() {
                     }
                   : null
               }
-              reasoningDescription="Higher uses more Codex quota and takes longer. Default is Low. Applies to both models."
+              reasoningDescription="Higher uses more of your ChatGPT plan and takes longer. Default is Low. Applies to both models."
               pending={setChatGPTModelsMutation.isPending}
               error={chatgptModels?.error || setChatGPTModelsMutation.error?.message}
             />
