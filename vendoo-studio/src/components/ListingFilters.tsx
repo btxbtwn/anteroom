@@ -165,7 +165,7 @@ export function ListingFilters({
         })}
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="@container/filters flex items-center gap-1">
         <Menu>
           <MenuTrigger
             data-active={chosen > 0}
@@ -275,7 +275,7 @@ export function ListingFilters({
             {chosen ? (
               <>
                 <MenuSeparator />
-                <MenuItem onClick={() => onChange({ ...DEFAULT_LISTING_FILTERS, sort: filters.sort })}>
+                <MenuItem onClick={() => onChange({ ...DEFAULT_LISTING_FILTERS, status: filters.status, sort: filters.sort })}>
                   <XIcon />
                   Clear filters
                 </MenuItem>
@@ -283,6 +283,28 @@ export function ListingFilters({
             ) : null}
           </MenuPopup>
         </Menu>
+
+        {unsentCount || filters.unsent ? (
+          <button
+            type="button"
+            aria-label={`Unsent edits · ${unsentCount}`}
+            aria-pressed={filters.unsent}
+            data-active={filters.unsent}
+            title={vendooOn
+              ? "Show the listings in this tab with edits Vendoo has not been given yet"
+              : "Show the listings in this tab with edits that have not been saved yet"}
+            onClick={() => onChange({ ...filters, unsent: !filters.unsent })}
+            className={cn(
+              "inline-flex h-7 max-[900px]:h-11 shrink-0 items-center gap-1.5 rounded-full border border-sidebar-border px-2 text-2xs font-medium text-sidebar-muted-foreground outline-none transition-colors",
+              "hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+              "data-[active=true]:bg-sidebar-row-selected data-[active=true]:text-sidebar-foreground",
+            )}
+          >
+            <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+            <span className="truncate @max-[260px]/filters:hidden">Unsent</span>
+            <span className="tabular-nums">{compactCount(unsentCount)}</span>
+          </button>
+        ) : null}
 
         <Menu>
           <MenuTrigger
