@@ -342,6 +342,16 @@ test('Depop check reads eligible likers from the send-all preview, without requi
   assert.equal(single.results[0].like_count, 1);
 });
 
+test('Depop offer previews read the current product pricing currency and still refuse other currencies', async () => {
+  for (const currency of ['USD', 'GBP']) {
+    const product = { ...depopProduct, price_currency: undefined, pricing: { currency } };
+    const run = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, product] }));
+    await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer', listing_id: SLUG, discount_percent: 5 } });
+    assert.equal(run.results[0].ok, currency === 'USD');
+    assert.ok(run.requests.every(r => r.key.startsWith('GET')));
+  }
+});
+
 test('Depop submits one bulk job, waits for success, and never invents a delivered count or repeats the POST', async () => {
   const statuses = ['QUEUED', 'PROCESSING', 'SUCCESS'];
   const sent = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: () => [200, { status: statuses.shift() }] }));

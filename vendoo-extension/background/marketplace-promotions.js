@@ -315,7 +315,7 @@ async function depopOfferState(requests, slug, deadline) {
   if (owner == null || String(owner) !== String(me?.id)) throw marketplaceError('This Depop listing belongs to another account.');
   if (product.status !== 'STATUS_ONSALE' || product.sold === true) throw marketplaceError('This Depop listing has sold or is not on sale.');
   if (depopImportVariants(product).length > 1) throw marketplaceError('Depop does not send offers on listings with several sizes.');
-  const currency = String(product.price_currency ?? product.pricing?.currency_name ?? product.currency ?? '').toUpperCase();
+  const currency = String(product.pricing?.currency ?? product.price_currency ?? product.pricing?.currency_name ?? product.currency ?? '').toUpperCase();
   const price = Math.round((depopProductPrice(product) || 0) * 100);
   if (currency !== 'USD' || !(price > 0)) throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.', { code: 'schema_drift' });
   const preview = requests.preview.read((await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview')).data, product);
