@@ -6,6 +6,26 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.466 — 2026-10-28
+
+- The Sellwild tab now shows your Shipping From address at the top of Item Shipping (and under Vehicle Shipping for vehicles), the same address Sellwild’s page shows and List uses. Change it in Sellwild’s Address Book. Package weight and size sit side by side in one row, as on Sellwild, and Depop’s Size and Quantity are narrow side by side, as on Depop.
+
+## 0.1.465 — 2026-10-28
+
+- With Prepaid label, the Mercari tab now asks what Mercari’s label picker asks: the package weight in pounds and ounces, whether it fits in a shoebox, and its length, width and height when it doesn’t. They start from Item Details, the labels offered follow them, and List sends what you set there.
+
+## 0.1.464 — 2026-10-28
+
+- When you pick a different category for a marketplace, on its tab or by asking chat, Anteroom fills that category’s new fields the same way it does after generating, choosing only from that marketplace’s own choices. Only the marketplace you changed is filled, and fields you set or locked are left alone.
+
+## 0.1.463 — 2026-10-28
+
+- The Depop tab has Depop’s “Boost your listing” switch, off unless you turn it on (Depop charges an extra 12% fee when a boosted item sells). Update sends it to the live listing. Depop drafts can’t hold Boost, so List posts the item and then turns Boost on with one update of that new listing.
+
+## 0.1.462 — 2026-10-28
+
+- A List everywhere button at the bottom of the marketplace list lists the item on every marketplace that's ready, after one confirmation that names them. Marketplaces still missing details are left out and named so you can finish them.
+
 ## 0.1.461 — 2026-10-28
 
 - The listing form now takes the whole window, so fields are easier to read. The chat is a pop-up in the bottom-right corner: minimize it to a small button that still shows what it's working on and marks new replies, and press ⌘J to open or close it. It opens by itself when you ask about a field or start a new listing.

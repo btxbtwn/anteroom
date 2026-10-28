@@ -10,10 +10,12 @@ marketplace: this only saves a listing revision.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -140,13 +142,13 @@ def write_value(listing: dict, path: str, value: Any) -> None:
     set_path(listing, path, value)
 
 
-async def load_forms(db: Session, conv_id: str) -> dict[str, dict]:
-    """Each direct marketplace's current form. One that cannot be read is skipped."""
+async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str, dict]:
+    """Each named direct marketplace's current form. One that cannot be read is skipped."""
     from vendoo_studio.routes.extension import extension_manager
     from vendoo_studio.services.native_editor import editor_form
 
     forms = {}
-    for market in MARKETS:
+    for market in (market for market in MARKETS if market in set(markets)):
         if market not in ("ebay", "sellwild") and not extension_manager.connected:
             continue
         try:
@@ -159,7 +161,8 @@ async def load_forms(db: Session, conv_id: str) -> dict[str, dict]:
     return forms
 
 
-async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: str) -> dict | None:
+async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: str,
+                             markets: Iterable[str] = MARKETS) -> dict | None:
     """Save the agent's picks for empty category fields. None when nothing was filled."""
     if provider is None:
         return None
@@ -169,7 +172,7 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
     if revision is None or not isinstance(revision.listing_json, dict):
         return None
     listing = revision.listing_json
-    forms = await load_forms(db, conv_id)
+    forms = await load_forms(db, conv_id, markets)
     rows_by_market = {market: rows for market, form in forms.items() if (rows := fillable_rows(form, market, listing))}
     if not rows_by_market:
         return None
@@ -218,3 +221,104 @@ def filled_message(accepted: dict[str, tuple[Any, list[str]]], rows: dict[str, d
     lines = [f"Filled {count} marketplace category field{'s' if count != 1 else ''}:"]
     lines += [f"- {market}: " + "; ".join(items) for market, items in by_market.items()]
     return "\n".join(lines)
+
+
+# --- A category the seller changes later -------------------------------------
+#
+# Generation fills every marketplace once. When the seller picks another
+# category afterwards, in the editor or through chat, that marketplace's form
+# has new fields, so they are filled the same way. Saves within a few seconds
+# of each other are one fill: chat saves twice for one request (its changes,
+# then the category it chose), and a seller may click through categories.
+
+# Saves made by the seller's form and by chat. Generation fills on its own,
+# and this fill's own revision ("native_fields") must not start another.
+FILL_ON_SOURCES = frozenset({"user_form", "model_refinement"})
+SETTLE_SECONDS = 3.0
+
+_loop: asyncio.AbstractEventLoop | None = None
+_pending: dict[str, set[str]] = {}
+_timers: dict[str, asyncio.TimerHandle] = {}
+_running: dict[str, asyncio.Task] = {}
+
+
+def start_category_fills() -> None:
+    """Remember the app's event loop. Call from it at startup."""
+    global _loop
+    _loop = asyncio.get_running_loop()
+
+
+def _category(listing: dict, market: str) -> str:
+    if not isinstance(listing, dict):
+        return ""
+    if market == "sellwild":
+        specifics = listing.get("sellwild_specifics")
+        return str((specifics if isinstance(specifics, dict) else {}).get("nativeCategoryId") or "").strip()
+    ids = listing.get("direct_category_ids")
+    return str((ids if isinstance(ids, dict) else {}).get(market) or "").strip()
+
+
+def changed_categories(before: dict, after: dict) -> set[str]:
+    """Marketplaces whose chosen category is new in this save."""
+    return {market for market in MARKETS
+            if _category(after, market) and _category(after, market) != _category(before, market)}
+
+
+def category_saved(conv_id: str, before: dict, after: dict, source: str) -> None:
+    """Queue a fill for each marketplace whose category this save changed. Safe from any thread."""
+    if source not in FILL_ON_SOURCES or _loop is None or _loop.is_closed():
+        return
+    markets = changed_categories(before, after)
+    if markets:
+        _loop.call_soon_threadsafe(_queue, conv_id, markets)
+
+
+def _queue(conv_id: str, markets: set[str]) -> None:
+    _pending.setdefault(conv_id, set()).update(markets)
+    if timer := _timers.pop(conv_id, None):
+        timer.cancel()
+    _timers[conv_id] = asyncio.get_running_loop().call_later(SETTLE_SECONDS, _start, conv_id)
+
+
+def _start(conv_id: str) -> None:
+    _timers.pop(conv_id, None)
+    if conv_id in _running:
+        return  # Picked up again when the running fill ends.
+    markets = _pending.pop(conv_id, set())
+    if not markets:
+        return
+    from vendoo_studio.services import activity
+
+    task = asyncio.get_running_loop().create_task(_fill_after_category(conv_id, markets))
+    _running[conv_id] = task
+    activity.track_task(conv_id, "Filling the new category's fields…", task)
+    task.add_done_callback(lambda _task: _finished(conv_id))
+
+
+def _finished(conv_id: str) -> None:
+    _running.pop(conv_id, None)
+    if _pending.get(conv_id):
+        _queue(conv_id, set())
+
+
+async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.services.listing_generate import latest_photo_analysis, seller_item_details
+    from vendoo_studio.services.listing_provider import get_listing_provider
+
+    provider = get_listing_provider()
+    if provider is None:
+        return
+    db = SessionLocal()
+    try:
+        repo = ConversationRepo(db)
+        conv = repo.get(conv_id)
+        if conv is None:
+            return
+        evidence = "\n\n".join(part for part in (
+            latest_photo_analysis(repo.get_messages(conv_id)) or "", seller_item_details(conv.notes)) if part)
+        await fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets)
+    except Exception:
+        log.exception("category field fill failed for %s", conv_id)
+    finally:
+        db.close()

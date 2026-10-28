@@ -165,6 +165,9 @@ function depopEditorForm(listing, attributes, parcels = []) {
   }
   const [price] = nativeEditorBase(listing, { title: false, minPrice: 1, maxPrice: 9999999999.99 }).filter(row => row.path === 'price');
   fields.push({ ...price, label: 'Item price' },
+  // Off unless the seller turns it on: Depop charges an extra fee on the sale.
+  nativeEditorField('depop_specifics.boost', 'Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.',
+    specifics.boost === true, { input_type: 'boolean' }),
   nativeEditorChoice('depop_specifics.parcelSize', 'Package size', specifics.parcelSize || '',
     parcels.map(row => String(row.title)), { required: true }),
   nativeEditorField('depop_specifics.worldwideShipping.enabled', 'Offer worldwide shipping', specifics.worldwideShipping?.enabled === true,
@@ -177,7 +180,7 @@ function depopEditorForm(listing, attributes, parcels = []) {
 }
 
 // Depop's sell page, read 2026-10-27: its headings, the hint under each field,
-// and Size, Quantity and SKU at half width (Size and Quantity share a row).
+// Size and Quantity at a quarter of the row each, SKU at half.
 function depopPageLayout(fields) {
   const hints = {
     'depop_specifics.colour': 'Select up to two colors',
@@ -189,14 +192,35 @@ function depopPageLayout(fields) {
   const section = path => path === 'depop_specifics.description' ? 'Description'
     : ['depop_specifics.source', 'depop_specifics.age', 'depop_specifics.style'].includes(path) ? 'Enhance your listing'
       : path === 'price' ? 'Item price'
-        : path === 'depop_specifics.parcelSize' || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
-          : 'Info';
+        : path === 'depop_specifics.boost' ? 'Boost your listing'
+          : path === 'depop_specifics.parcelSize' || path.startsWith('depop_specifics.worldwideShipping.') ? 'Shipping'
+            : 'Info';
   return fields.map(field => {
     const hint = field.path.startsWith('depop_specifics.attributes.') ? `Select up to ${field.max_values}` : hints[field.path];
     return { ...field, section: section(field.path),
-      ...(['depop_specifics.nativeSizeId', 'quantity', 'depop_specifics.sku'].includes(field.path) ? { width: 'half' } : {}),
+      ...(['depop_specifics.nativeSizeId', 'quantity'].includes(field.path) ? { width: 'quarter' }
+        : field.path === 'depop_specifics.sku' ? { width: 'half' } : {}),
       ...(hint ? { help: [typeof hint === 'function' ? hint(field.max_values) : hint, field.help].filter(Boolean).join(' ') } : {}) };
   });
+}
+
+function mercariPackageRows(listing) {
+  const own = mercariOwnPackage(listing);
+  const sides = String(listing.package_dimensions_in || '').split(/\s*[x×*]\s*/i).map(Number);
+  const known = sides.length === 3 && sides.every(side => Number.isFinite(side) && side > 0);
+  const pick = (key, fallback) => (own[key] ?? '') !== '' ? own[key] : fallback ?? '';
+  const number = { input_type: 'number', min_value: 0, width: 'half' };
+  return [
+    nativeEditorField('mercari_specifics.package.pounds', 'Weight (lb)', pick('pounds', listing.weight_lb), { ...number, step: 1,
+      help: 'How heavy will the package be? Think about the packaging you\u2019ll use. It can push your item into a higher weight class.' }),
+    nativeEditorField('mercari_specifics.package.ounces', 'Weight (oz)', pick('ounces', listing.weight_oz), { ...number, max_value: 15.99 }),
+    nativeEditorChoice('mercari_specifics.package.fitsShoebox', 'Will your item fit in a shoebox?', own.fitsShoebox || '',
+      [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }], { help: 'A standard shoebox measures 14\u201d x 10\u201d x 5\u201d.' }),
+    nativeEditorField('mercari_specifics.package.length', 'Length (in)', pick('length', known ? sides[0] : ''), { ...number,
+      help: 'How big will the package be? Get access to cheaper rates and avoid penalty fees when you input your package dimensions.' }),
+    nativeEditorField('mercari_specifics.package.width', 'Width (in)', pick('width', known ? sides[1] : ''), number),
+    nativeEditorField('mercari_specifics.package.height', 'Height (in)', pick('height', known ? sides[2] : ''), number),
+  ];
 }
 
 function mercariEditorForm(listing, master) {
@@ -249,10 +273,12 @@ function mercariEditorForm(listing, master) {
     nativeEditorChoice('mercari_specifics.shippingMethod', 'Shipping method', specifics.shippingMethod ?? 'MERCARI',
       [{ label: 'Prepaid label', value: 'MERCARI' }, { label: 'Ship on your own', value: 'SOYO' }], { required: true,
         help: 'Prepaid label: we\'ll email you a label and you\'ll ship the item. Includes delivery protection. Ship on your own: you provide your own label and ship the item. It\'s not covered by shipping protection.' }),
-    // Shown with Prepaid label. Mercari's picker asks the package weight; Anteroom uses the package in Item Details.
+    // Prepaid label's picker, read 2026-10-27: the package weight, whether it fits in a shoebox,
+    // and the sides when it does not. They start from Item Details and set the labels offered.
+    ...mercariPackageRows(listing),
     nativeEditorChoice('mercari_specifics.shippingClassId', 'Shipping label', listing.form?.specifics?.shipping?.carrierId || '',
       (listing.form?.shipping_classes || []).map(row => ({ label: `${row.carrierDisplayName} | ${row.name} | $${(row.fee / 100).toFixed(2)}`, value: row.id })),
-      { required: true, help: 'Labels for the packed weight and size in Item Details.' }),
+      { required: true }),
     nativeEditorChoice('mercari_specifics.shippingPayerId', 'Offer buyers free shipping?', ownShipping ? 2 : specifics.shippingPayerId ?? 1,
       [{ label: 'Yes (Recommended)', value: 2 }, { label: 'No', value: 1 }]),
   ].map(product('Shipping')));
@@ -304,6 +330,11 @@ async function handleNativeMarketplaceForm(msg) {
       const master = await mercariCatalogData(deadline);
       const prepared = mercariShippingListing(listing, await mercariShippingClasses(listing, deadline));
       reply({ ok: true, form: mercariEditorForm(prepared, master) });
+    }
+    else if (marketplace === 'sellwild') {
+      // Sellwild's form is built in Anteroom; only the Shipping From address needs the seller's session.
+      const addresses = await sellwildFetch('/api/addresses', { deadline, step: 'addresses' });
+      reply({ ok: true, ship_from: addresses?.success ? sellwildShipFromText(addresses.addresses) : '' });
     }
     else reply({ ok: false, error: 'This marketplace has no Chrome form reader.' });
   } catch (error) {
