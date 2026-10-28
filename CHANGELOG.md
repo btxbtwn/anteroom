@@ -6,9 +6,25 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.470 — 2026-10-27
+## 0.1.474 — 2026-10-27
 
 - The Poshmark tab now matches the rest of Poshmark’s create-listing page. Quantity is Single Item or Multi Item, separate from Size. Category and Subcategory sit side by side: the category starts with Women, Men, Kids, Home, Pets, or Electronics, and a chosen category reads like “Women Jeans.” Sizes can be US, AU, EU, or UK. Availability includes Drops, with a drop time within 7 days. Listing Price shows the Smart Sell badge, Discounted Shipping, and Your Earnings.
+
+## 0.1.473 — 2026-10-28
+
+- The eBay tab follows eBay's Create listing page. Item specifics stay in eBay's order, with Show more for the rest. You get a subtitle and custom label under title options, a second category, scheduling, this listing's own policies and item location, charity, and one custom item specific. An auction shows its duration and bids instead of an item price.
+
+## 0.1.472 — 2026-10-27
+
+- On the Mercari tab, package weight is one question, "How heavy will the package be?", with pounds and ounces side by side. Length, width and height stay hidden until you say the item will not fit in a shoebox, and you can skip them. Once the item has a price, Smart pricing shows as on, with a suggested lowest price.
+
+## 0.1.471 — 2026-10-28
+
+- Each flaw in a description is on its own line, so a list of flaws is easy to scan. A description formula you wrote yourself stays as you wrote it.
+
+## 0.1.470 — 2026-10-28
+
+- Depop, Mercari, Poshmark, Sellwild, and eBay now show this item's photos where that marketplace's own page does. You can reorder them and pick which ones that marketplace gets, up to its limit. Depop stays JPEG and PNG.
 
 ## 0.1.469 — 2026-10-28
 

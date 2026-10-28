@@ -5,6 +5,7 @@ import unittest
 from vendoo_studio.services.listing_carryover import (
     carryover_updates,
     description_block,
+    list_flaws_in_description,
     set_description_block,
 )
 
@@ -88,6 +89,42 @@ class CarryoverUpdatesTest(unittest.TestCase):
     def test_flaws_drop_the_see_photos_phrase(self):
         listing = {"description": "Tee.\n\nFlaws: tiny hole on the cuff. See photos for details.\n\nMeasurements: See photos"}
         self.assertEqual(carryover_updates(listing, {}), {"knownFlaws": "tiny hole on the cuff"})
+
+    def test_bullet_flaws_carry_without_the_dashes(self):
+        listing = {
+            "description": (
+                "Y2K jeans.\n\n"
+                "Flaws:\n"
+                "- Both leg openings have fraying\n"
+                "- Small distressed area on the left knee\n"
+                "See photos for details.\n\n"
+                'Measurements: Waist: 16"'
+            ),
+        }
+        self.assertEqual(
+            carryover_updates(listing, {}),
+            {
+                "knownFlaws": "Both leg openings have fraying; Small distressed area on the left knee",
+                "descriptionMeasurements": 'Waist: 16"',
+            },
+        )
+
+    def test_semicolon_flaws_become_a_list(self):
+        description = (
+            "Y2K jeans.\n\n"
+            "Flaws: Both leg openings have fraying; Small distressed area. See photos for details.\n\n"
+            "Measurements: See photos"
+        )
+        self.assertEqual(
+            list_flaws_in_description(description),
+            "Y2K jeans.\n\n"
+            "Flaws:\n"
+            "- Both leg openings have fraying\n"
+            "- Small distressed area\n"
+            "See photos for details.\n\n"
+            "Measurements: See photos",
+        )
+        self.assertEqual(list_flaws_in_description(list_flaws_in_description(description)), list_flaws_in_description(description))
 
     def test_default_package_does_not_block_listing_package(self):
         listing = {

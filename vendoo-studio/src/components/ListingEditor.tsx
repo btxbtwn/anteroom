@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
-import { cloneListing, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
@@ -32,6 +32,9 @@ import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
 import { applyBottomsFields, isBottomsListing } from "../bottomsSizes";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
+import { Radio, RadioGroup } from "./ui/radio-group";
+import { Toggle } from "./ui/toggle";
 import { RegenerateListingButton } from "./ClearListingButton";
 import { MarketplacesLayout } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
@@ -113,12 +116,27 @@ interface EditorField {
   categorySpecific?: boolean;
   /** The marketplace form's heading for this field. */
   section?: string;
+  /** The button the marketplace hides this field behind. */
+  reveal?: string;
+  slotLabels?: string[];
+  /** File-dialog filter from the marketplace's photo area (Depop: JPEG and PNG). */
+  accept?: string;
   optionGroups?: Record<string, string>;
-  width?: "half" | "quarter";
+  width?: "half" | "third" | "quarter";
   /** The control itself is half the row, stacked, as on Poshmark's price and private fields. */
   controlWidth?: "half";
   cascade?: CascadeDepartment[];
   optionAmounts?: Record<string, number>;
+  group?: string;
+  groupHelp?: string;
+  sectionHelp?: string;
+  placeholder?: string;
+  prefix?: string;
+  suffix?: string;
+  labelHidden?: boolean;
+  counter?: boolean;
+  presentation?: "radio" | "radio-row" | "button";
+  optionHelp?: Record<string, string>;
 }
 
 export function ListingEditor({
@@ -537,7 +555,8 @@ export function ListingEditor({
               <ItemDetails convId={convId} />
             </>
           )}
-          {reviewTab === "forms" && MEDIA_MARKETPLACES.has(editTab) && listing && (
+          {/* A direct marketplace's form shows its photos where its own page has them. */}
+          {reviewTab === "forms" && MEDIA_MARKETPLACES.has(editTab) && !DIRECT_FORM_MARKETS.has(editTab) && listing && (
             <MarketplaceMedia key={editTab} convId={convId} marketplace={editTab} listing={listing}
               disabled={generating || updateMutation.isPending} onChange={(updated) => updateMutation.mutate(updated)} />
           )}
@@ -547,6 +566,7 @@ export function ListingEditor({
             revisionId={data?.current_revision_id}
             tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
             target={fieldTarget}
+            disabled={generating || updateMutation.isPending}
             onChange={(updated) => updateMutation.mutate(updated)}
           />
           {/* Past versions are a look-back, so they close the form instead of crowding its header. */}
@@ -589,6 +609,7 @@ export function StructuredEditor({
   tab,
   onChange,
   target,
+  disabled,
 }: {
   convId: string;
   listing: ListingData;
@@ -596,6 +617,7 @@ export function StructuredEditor({
   tab: string;
   onChange: (v: ListingData) => void;
   target: { field: string; sequence: number } | null;
+  disabled?: boolean;
 }) {
   const formRef = React.useRef<HTMLDivElement>(null);
   const nativeTab = DIRECT_FORM_MARKETS.has(tab);
@@ -671,6 +693,22 @@ export function StructuredEditor({
     [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
   );
   const [local, setLocal] = React.useState<Record<string, string | string[]>>({});
+  // The seller's open or closed choice for "Show more" and "See … options". A saved value starts open.
+  const [revealOverride, setRevealOverride] = React.useState<ReadonlyMap<string, boolean>>(new Map());
+  const revealed = React.useMemo(() => {
+    const open = new Set<string>();
+    for (const field of fields) {
+      if (!field.reveal || !field.section) continue;
+      const value = editorFieldValue(listing, field, tab);
+      if (value === false || value === "false" || !editorValuePresent(value)) continue;
+      open.add(`${tab}|${field.section}|${field.reveal}`);
+    }
+    for (const [id, on] of revealOverride) {
+      if (on) open.add(id);
+      else open.delete(id);
+    }
+    return open;
+  }, [fields, listing, tab, revealOverride]);
   const dirty = React.useRef<Record<string, string | string[]>>({});
   // Go to an "Edit …" target once. The rows rebuild on every save, and
   // following the target again then pulled the seller back from whatever they were editing.
@@ -689,7 +727,7 @@ export function StructuredEditor({
   React.useEffect(() => {
     const init: Record<string, string | string[]> = {};
     fields.forEach((f) => {
-      if (f.type === "inventory" || f.type === "variations") return;
+      if (f.type === "inventory" || f.type === "variations" || f.type === "photos") return;
       const value = editorFieldValue(listing, f, tab);
       const label = (v: string) => Object.entries(f.optionValues || {}).find(([, id]) => id === v)?.[0] ?? v;
       const followed = marketplacePriceFollowsGeneral(listing, f, tab);
@@ -746,7 +784,7 @@ export function StructuredEditor({
   const viewFields = fields.map((field) => presentNativeField(field, viewContext));
   const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
   const formNotes = nativeTab
-    ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing, local, fields)]
+    ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing)]
     : [];
   // A marketplace form that names its headings keeps them, with its order and row layout.
   const pageLayout = nativeTab && renderedFields.some((field) => field.section);
@@ -782,6 +820,11 @@ export function StructuredEditor({
       && ["ebay_specifics.listingDuration", "ebay_specifics.listingFormat", "mercari_specifics.shippingPayerId"].includes(f.key)
       ? (f.options.includes(fallbackLabel) ? fallbackLabel : f.options.includes(fallback) ? fallback : f.options[0] ?? typed)
       : typed;
+    // The marketplace's own photo area, where its page has it: this form's pick, order and limit.
+    if (f.type === "photos") {
+      return <MarketplaceMedia convId={convId} marketplace={tab} listing={listing} disabled={disabled} onChange={onChange}
+        page={{ hint: f.help, slots: f.slotLabels, accept: f.accept }} />;
+    }
     if (f.type === "inventory") {
       const stored = resolvedEditorValue(f, listing);
       const rows = Array.isArray(stored) ? stored.filter((row): row is NativeInventoryRow => typeof row === "object" && row !== null) : [];
@@ -827,13 +870,21 @@ export function StructuredEditor({
       setListingEditorValue(updated, "direct_category_ids.ebay_path", path);
       onChange(updated);
     }} />;
+    if (f.native && f.key === "ebay_specifics.secondaryCategoryId") return <EbayCategorySelect id={id} value={text} onChange={(categoryId, path) => {
+      const updated = cloneListing(listing);
+      setListingEditorValue(updated, f.key, categoryId);
+      setListingEditorValue(updated, "ebay_specifics.secondaryCategoryPath", path);
+      onChange(updated);
+    }} />;
     const categoryChoices = f.native && !f.multi ? pathCategoryChoices(f) : null;
     if (categoryChoices) return <CategoryTreeSelect key={text} id={id} fieldKey={f.key} value={text} choices={categoryChoices}
       disabled={f.locked} onChange={(choice) => commitField(f.key, choice.label)} />;
+    if (f.type === "boolean" && f.presentation === "button") return <Toggle id={id} data-listing-field={f.key} variant="outline"
+      className="w-full" pressed={text === "true"} disabled={f.locked} onPressedChange={(pressed) => commitField(f.key, pressed)}>{f.label}</Toggle>;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
-      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" placeholder={f.placeholder} value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (multiSelectControl(f)) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
@@ -841,6 +892,23 @@ export function StructuredEditor({
       choicesVerified={f.optionsSource === "marketplace"}
       maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined} help={f.help ?? undefined}
       onChange={(value) => commitField(f.key, value)} />;
+    if (f.options?.length && (f.presentation === "radio" || f.presentation === "radio-row")) {
+      return (
+        <RadioGroup id={id} data-listing-field={f.key} value={text} disabled={f.locked}
+          className={f.presentation === "radio-row" ? "grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-3" : undefined}
+          onValueChange={(value) => commitField(f.key, String(value))}>
+          {f.options.map((option) => (
+            <label key={option} className="flex min-w-0 items-start gap-2 text-sm">
+              <Radio value={option} className="mt-0.5" />
+              <span className="min-w-0">
+                <span className="block font-medium">{option}</span>
+                {f.optionHelp?.[option] && <span className="block text-muted-foreground text-xs">{f.optionHelp[option]}</span>}
+              </span>
+            </label>
+          ))}
+        </RadioGroup>
+      );
+    }
     if (f.options?.length) {
       return (
         <SearchableSelect
@@ -864,23 +932,32 @@ export function StructuredEditor({
     if (f.key === "poshmark_specifics.earnings") {
       return <Input nativeInput id={id} data-listing-field={f.key} readOnly value={formFieldText(f.defaultValue)} />;
     }
-    return (
-      <Input
-        nativeInput
-        id={id}
-        data-listing-field={f.key}
-        type={f.type || "text"}
-        min={f.minValue}
-        max={f.maxValue}
-        step={f.type === "number" ? f.step ?? "any" : undefined}
-        readOnly={f.locked}
-        disabled={f.selectionOnly && !f.options?.length}
-        maxLength={f.maxLength ?? undefined}
-        value={text}
-        onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }}
-        onBlur={() => handleBlur(f.key)}
-      />
-    );
+    const inputProps = {
+      nativeInput: true,
+      id,
+      "data-listing-field": f.key,
+      type: f.type || "text",
+      min: f.minValue,
+      max: f.maxValue,
+      step: f.type === "number" ? f.step ?? "any" : undefined,
+      readOnly: f.locked,
+      disabled: f.selectionOnly && !f.options?.length,
+      maxLength: f.maxLength ?? undefined,
+      placeholder: f.placeholder,
+      value: text,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); },
+      onBlur: () => handleBlur(f.key),
+    };
+    if (f.prefix || f.suffix) {
+      return (
+        <InputGroup>
+          {f.prefix && <InputGroupAddon>{f.prefix}</InputGroupAddon>}
+          <InputGroupInput {...inputProps} />
+          {f.suffix && <InputGroupAddon align="inline-end">{f.suffix}</InputGroupAddon>}
+        </InputGroup>
+      );
+    }
+    return <Input {...inputProps} />;
   };
   // Long text and the category path need the full row. A marketplace title is
   // stored under that form, so the leaf is what still makes it full width.
@@ -889,6 +966,18 @@ export function StructuredEditor({
     return leaf === "title" || leaf === "description" || f.key === "category_path" || leaf === "categorypath"
       || f.label === "Category" || ["textarea", "inventory", "variations"].includes(f.type || "");
   };
+  const revealButtons = (title: string, rows: EditorField[], include: (name: string) => boolean) =>
+    [...new Set(rows.flatMap((f) => (f.reveal && include(f.reveal) ? [f.reveal] : [])))].map((reveal) => {
+      const id = `${tab}|${title}|${reveal}`;
+      const open = revealed.has(id);
+      return (
+        <InlineButton key={reveal} type="button" className="mt-2 text-xs" aria-expanded={open} onClick={() => setRevealOverride((current) => {
+          const next = new Map(current);
+          next.set(id, !open);
+          return next;
+        })}>{open && reveal === "Show more" ? "Show less" : reveal}</InlineButton>
+      );
+    });
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
@@ -896,8 +985,9 @@ export function StructuredEditor({
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
-        const countable = section.fields.filter((f) => f.type !== "badge");
-        const filled = countable.filter((f) => {
+        // Photos are counted on the photo area itself, and Smart Sell is a badge on Listing Price.
+        const counted = section.fields.filter((f) => f.type !== "photos" && f.type !== "badge");
+        const filled = counted.filter((f) => {
           if (f.type === "inventory" || f.type === "variations") {
             const stored = resolvedEditorValue(f, listing);
             if (Array.isArray(stored)) return stored.length > 0;
@@ -906,29 +996,42 @@ export function StructuredEditor({
           }
           return formFieldText(local[f.key]).trim() !== "";
         }).length;
-        return (
-          <InspectorSection
-            key={section.id}
-            title={section.title}
-            titleId={`listing-section-${tab}-${section.id}`}
-            meta={section.id === "listing" ? null : `${filled} of ${countable.length} filled`}
-          >
-            {/* A marketplace's own page layout uses its four-part rows; the general form spreads out when wide. */}
-            <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-4" : "grid-cols-2 @4xl:grid-cols-3")}>
-              {countable.map((f) => {
+        const visible = section.fields.filter((f) => f.type !== "badge" && (!f.reveal || revealed.has(`${tab}|${section.title}|${f.reveal}`)));
+        const rows = (
+          <>
+            {/* "See … options" sits at the top of eBay's section; "Show more" sits under the fields. */}
+            {revealButtons(section.title, section.fields, (name) => name.startsWith("See "))}
+            {/* A marketplace's own page layout uses a twelve-part row; the general form spreads out when wide. */}
+            <div className={cn("grid min-w-0 gap-3 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-12" : "grid-cols-2 @4xl:grid-cols-3")}>
+              {pageLayout && section.fields[0]?.sectionHelp && <p className="col-span-full text-muted-foreground text-xs">{section.fields[0].sectionHelp}</p>}
+              {visible.map((f, index) => {
                 const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));
                 const badgeOn = badge ? formFieldText(local[badge.key] ?? badge.defaultValue) === "true" : false;
                 return (
-                <div key={f.key} className={cn("min-w-0", pageLayout
-                  ? (f.width === "quarter" ? "col-span-1" : f.width === "half" ? "col-span-2" : "col-span-full")
+                <React.Fragment key={f.key}>
+                {pageLayout && f.group && visible[index - 1]?.group !== f.group && (
+                  <div className="col-span-full min-w-0">
+                    <p className="font-medium text-sm">{f.group}</p>
+                    {f.groupHelp && <p className="mt-0.5 text-muted-foreground text-xs">{f.groupHelp}</p>}
+                  </div>
+                )}
+                <div className={cn("min-w-0", pageLayout
+                  ? ({ quarter: "col-span-3", third: "col-span-4", half: "col-span-6" } as Record<string, string>)[f.width ?? ""] ?? "col-span-full"
                   : fullWidth(f) && "col-span-full", f.controlWidth === "half" && "sm:max-w-[50%]")}>
-                  {f.type !== "cascade" && <div className="mb-1.5 flex items-center gap-2">
-                    <FieldLabel htmlFor={`listing-field-${f.key}`} className="mb-0">{f.label}</FieldLabel>
-                    {badge && <button type="button" aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
-                      onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
-                  </div>}
+                  {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.counter && f.maxLength != null ? (
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                      <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                      <span className="text-muted-foreground text-xs tabular-nums">{formFieldText(local[f.key]).length}/{f.maxLength}</span>
+                    </div>
+                  ) : (
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                      {badge && <button type="button" aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
+                        onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
+                    </div>
+                  ))}
                   {control(f)}
-                  {f.help && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
+                  {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
                   {f.selectionOnly && !f.options?.length && <p role="alert" className="mt-1 text-xs text-warning-foreground">Choices unavailable. Reopen the listing to load this field.</p>}
@@ -936,9 +1039,23 @@ export function StructuredEditor({
                     {f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"}
                   </p>}
                 </div>
+                </React.Fragment>
                 );
               })}
             </div>
+            {revealButtons(section.title, section.fields, (name) => !name.startsWith("See "))}
+          </>
+        );
+        // A part of the page with no heading (Mercari's and Sellwild's photos) has none here either.
+        if (!section.title) return <section key={section.id} className="min-w-0 border-b py-4 first:pt-1 last:border-b-0">{rows}</section>;
+        return (
+          <InspectorSection
+            key={section.id}
+            title={section.title}
+            titleId={`listing-section-${tab}-${section.id}`}
+            meta={section.id === "listing" || !counted.length ? null : `${filled} of ${counted.length} filled`}
+          >
+            {rows}
           </InspectorSection>
         );
       })}
@@ -950,7 +1067,7 @@ export function StructuredEditor({
 export function nativeFormSections<T extends { key: string; section?: string }>(fields: T[]): { id: string; title: string; fields: T[] }[] {
   const sections: { id: string; title: string; fields: T[] }[] = [];
   for (const field of fields) {
-    const title = field.section || "Listing";
+    const title = field.section ?? "Listing";
     const last = sections[sections.length - 1];
     if (last && last.title === title) last.fields.push(field);
     else sections.push({ id: `${sections.length}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`, title, fields: [field] });
@@ -1321,12 +1438,24 @@ function schemaFieldsForTab(
     // A Vendoo category attribute is replaced when the category changes.
     // The marketplace's own controls, such as title and price, stay.
     ...(field.category_specific || (!form.native && !coreFieldLabel(tab, field.label)) ? { categorySpecific: true } : {}),
-    ...(field.section ? { section: field.section } : {}),
+    ...(field.section !== undefined ? { section: field.section } : {}),
+    ...(field.reveal ? { reveal: field.reveal } : {}),
+    ...(field.slot_labels ? { slotLabels: field.slot_labels } : {}),
+    ...(field.accept ? { accept: field.accept } : {}),
     ...(field.option_groups ? { optionGroups: field.option_groups } : {}),
     ...(field.width ? { width: field.width } : {}),
     ...(field.control_width ? { controlWidth: field.control_width } : {}),
     ...(field.cascade ? { cascade: field.cascade as EditorField["cascade"] } : {}),
     ...(field.option_amounts ? { optionAmounts: field.option_amounts } : {}),
+    ...(field.group ? { group: field.group, groupHelp: field.group_help } : {}),
+    ...(field.section_help ? { sectionHelp: field.section_help } : {}),
+    ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+    ...(field.prefix ? { prefix: field.prefix } : {}),
+    ...(field.suffix ? { suffix: field.suffix } : {}),
+    ...(field.label_hidden ? { labelHidden: true } : {}),
+    ...(field.counter ? { counter: true } : {}),
+    ...(field.presentation ? { presentation: field.presentation } : {}),
+    ...(field.option_help ? { optionHelp: field.option_help } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),
   }));
 }

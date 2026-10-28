@@ -25,6 +25,8 @@ _NO_FLAWS_RE = re.compile(r"(?i)^(?:none|no known|no visible|no notable|nothing|
 _DIGIT_RE = re.compile(r"\d")
 # The formula's closing phrase, not part of the flaws themselves.
 _SEE_PHOTOS_RE = re.compile(r"(?i)[\s.;,]*see (?:the )?photos(?: for (?:details|more))?[\s.]*$")
+_BULLET_RE = re.compile(r"^\s*[-*•]\s+")
+_FLAWS_LABEL_RE = re.compile(r"(?i)^\s*flaws?\s*:\s*")
 
 DEFAULT_PACKAGE_DIMENSIONS = "13x10x3"
 
@@ -66,6 +68,41 @@ def without_see_photos(flaws: Any) -> str:
     return _SEE_PHOTOS_RE.sub("", str(flaws or "")).strip().rstrip(".")
 
 
+def flaw_items(text: Any) -> list[str]:
+    """One entry per flaw, whether they arrived as bullets, lines, or ``a; b``."""
+    raw = _FLAWS_LABEL_RE.sub("", without_see_photos(text))
+    items: list[str] = []
+    for chunk in re.split(r"\s*;\s*|\n+", raw):
+        part = _BULLET_RE.sub("", chunk).strip().rstrip(".")
+        part = without_see_photos(part).strip().rstrip(".")
+        if not part or says_no_flaws(part):
+            continue
+        items.append(part)
+    return items
+
+
+def render_flaws_block(flaws: Any, *, as_list: bool) -> str:
+    """The Flaws block for ``flaws``, or "" when there is nothing to disclose."""
+    items = flaw_items(flaws)
+    if not items:
+        return ""
+    if as_list:
+        lines = ["Flaws:", *(f"- {item}" for item in items), "See photos for details."]
+        return "\n".join(lines)
+    return f"Flaws: {'; '.join(items)}. See photos for details."
+
+
+def list_flaws_in_description(description: Any) -> str:
+    """Rewrite a Flaws block so each flaw is its own ``- `` line."""
+    text = str(description or "")
+    items = flaw_items(description_block(text, "flaws?"))
+    if not items:
+        return text
+    return set_description_block(
+        text, "flaws?", render_flaws_block("; ".join(items), as_list=True), before="measurements?"
+    )
+
+
 def _measurements_from_description(description: Any) -> str:
     """Measurements worth keeping: "See photos" carries nothing to carry over."""
     block = description_block(description, "measurements?")
@@ -78,8 +115,7 @@ def says_no_flaws(text: str) -> bool:
 
 
 def _flaws_from_description(description: Any) -> str:
-    block = without_see_photos(description_block(description, "flaws?"))
-    return "" if says_no_flaws(block) else block
+    return "; ".join(flaw_items(description_block(description, "flaws?")))
 
 
 def _money(value: Any) -> str:

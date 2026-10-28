@@ -257,15 +257,18 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 ```
 {trendy vibe/style keyword sentence with period}
 
-Flaws: {specific flaws}. See photos for details.
+Flaws:
+- {one flaw per line}
+See photos for details.
 
 Measurements: {See photos OR specific measurements}
 ```
-- Include the Flaws line only when the item has flaws. When there are none, leave the line out entirely — never write "none noted" or any other no-flaws filler.
+- Include the Flaws block only when the item has flaws. When there are none, leave the block out entirely — never write "none noted" or any other no-flaws filler.
+- Put each flaw on its own line, starting with "- ". Do not run several flaws together on one line with semicolons or commas.
 - Keep the first line short and keyword-driven (vibe, decade/trend, fit, fabric) — not two separate sentences.
 - Max 918 characters. Mercari allows 1,000, Poshmark allows 1,500, and Depop allows 1,000 for the title, a blank line, and this description together. Titles are at most 80 characters, so 918 is the longest description that still fits all three.
 - Do not add Size, a full condition write-up, shipping speed, or bundle/discount lines — those are covered by marketplace fields and marketplace-level promos already.
-- Do not count lint or wrinkles as flaws or mention them in the description. If those are the only visible issues, write `Flaws: none noted. See photos for details.` Continue to disclose actual damage such as stains, holes, or tears.
+- Do not count lint or wrinkles as flaws or mention them in the description. If those are the only visible issues, leave the Flaws block out. Continue to disclose actual damage such as stains, holes, or tears.
 - NEVER include pricing details in the description: no prices, dollar amounts, comps, sold-listing counts, market or resale value, MSRP, discounts, offers, or notes about pricing confidence. Pricing belongs in the price field only.
 
 ### eBay Jackets and Coats: Required Outer Shell Material
