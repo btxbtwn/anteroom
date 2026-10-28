@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.461 — 2026-10-28
+
+- A List everywhere button at the bottom of the marketplace list lists the item on every marketplace that's ready, after one confirmation that names them. Marketplaces still missing details are left out and named so you can finish them.
+
 ## 0.1.460 — 2026-10-27
 
 - On multi-choice fields the hint and the number chosen share one line under the field (for example 1/4), and Clear is an × inside the field instead of a link underneath.

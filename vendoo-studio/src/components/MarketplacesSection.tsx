@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, FacebookCheck, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
@@ -305,6 +305,14 @@ export function MarketplacesLayout({
     if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.${extra}`,
       { confirmLabel: `List on ${name}` })) action.mutate({ marketplace, kind: "list" });
   }
+  /** Starts List on each marketplace named, after one confirmation that names them all. */
+  async function listEverywhere(marketplaces: NativeMarketplace[], skipped: Marketplace[]) {
+    const lines = marketplaces.map((marketplace) => `• ${marketplaceName(marketplace)}`).join("\n");
+    const left = skipped.length ? `\nNot on ${skipped.map(marketplaceName).join(", ")}: list those from their own page once they're ready.` : "";
+    if (!(await confirmDialog(`List “${title}” on ${marketplaces.length} marketplaces?\n${lines}\nEach one gets a live listing from the listing saved in Anteroom.${left}`,
+      { confirmLabel: `List on ${marketplaces.length}` }))) return;
+    for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" });
+  }
   async function runDelist(marketplaces: Marketplace[], lead?: string) {
     const names = marketplaces.map(marketplaceName);
     const lines = marketplaces.map((marketplace) => `• ${marketplaceName(marketplace)}: ${REMOVED[marketplace].toLowerCase()}`).join("\n");
@@ -540,6 +548,11 @@ export function MarketplacesLayout({
   }
 
   const statusById = new Map(ORDER.map((marketplace, index) => [marketplace, statuses[index]]));
+  // List everywhere covers the marketplaces on the rail that are ready now; the rest wait for the seller.
+  const unlisted = ORDER.filter((marketplace) => ids.includes(marketplace) && !running(marketplace) && !startingOn(marketplace)
+    && listable(marketplace, statusById.get(marketplace)!));
+  const readyToList = unlisted.filter((marketplace) => !listBlocked(marketplace)) as NativeMarketplace[];
+  const notReady = unlisted.filter((marketplace) => listBlocked(marketplace));
   const selectedMarketplace = MANAGED.has(selected) ? selected as Marketplace : null;
   const selectedStatus = selectedMarketplace ? statusById.get(selectedMarketplace) : undefined;
 
@@ -589,6 +602,10 @@ export function MarketplacesLayout({
             rail's foot: quiet rows that match it, the destructive one last. */}
         <div className="mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&>[data-slot=button]]:w-full [&>[data-slot=button]]:justify-start">
           {railActions}
+          {readyToList.length > 1 && (
+            <Button size="xs" variant="ghost" disabled={busy} title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
+              onClick={() => void listEverywhere(readyToList, notReady)}><SendIcon />List everywhere…</Button>
+          )}
           <Button size="xs" variant="ghost-muted" disabled={busy} title="A sale in person or anywhere off these marketplaces"
             onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>
           {removable.length > 1 && (
