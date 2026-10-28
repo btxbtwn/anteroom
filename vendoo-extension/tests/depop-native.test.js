@@ -72,6 +72,30 @@ test('Depop sends and verifies an exact SKU and quantity, and leaves a blank SKU
   await assert.rejects(c.depopResolvedFields({ listing: { ...item, quantity: 0 }, deadline: Date.now() + 30000 }), /whole-number quantity/);
 });
 
+test('Depop posts the parcel id the sell page uses for that title', async () => {
+  const { c } = newDraft();
+  withCatalog(c, { providers: [200, [{ id: 'USPS', parcel_sizes: [
+    { id: 'under_12oz', title: 'Small', subtitle: 'Under 12oz' },
+    { id: 'under_1lb', title: 'Medium', subtitle: 'Under 1lb', suggested: true },
+    { id: 'medium', title: 'Large', subtitle: 'Under 2lb' },
+  ] }]] });
+  const seen = [];
+  const original = c.fetch;
+  c.fetch = async (url, options = {}) => { seen.push(String(url)); return original(url, options); };
+  const fields = await c.depopResolvedFields({ listing: FULL, deadline: Date.now() + 30000 });
+  assert.equal(fields.shipping_methods[0].parcel_size, 'under_1lb');
+  const quote = new URL(seen.find(url => url.includes('/shipping/providers/depop/')));
+  assert.equal(quote.searchParams.get('group'), 'tops');
+  assert.equal(quote.searchParams.get('product_type'), 'tshirts');
+  assert.equal(quote.searchParams.get('gender'), 'male');
+  seen.length = 0;
+  const suggested = await c.depopResolvedFields({
+    listing: { ...FULL, depop_specifics: { material: ['Cotton'], occasion: ['Casual'] } },
+    deadline: Date.now() + 30000,
+  });
+  assert.equal(suggested.shipping_methods[0].parcel_size, 'under_1lb');
+});
+
 test('Depop worldwide shipping accepts free or paid shipping and verifies clearing', async () => {
   const { c } = newDraft();
   withCatalog(c);
@@ -114,7 +138,9 @@ function withCatalog(c, { attributes = [200, ATTRIBUTES], addresses = [200, [{ i
       return reply(200, { category_size_mapping: body.category_size_mapping, size_sets: body.size_sets });
     }
     if (pathname === '/api/v1/addresses/') { reads.push('addresses'); return reply(...addresses); }
-    if (pathname === '/api/v1/shipping-providers/') { reads.push('providers'); return reply(...providers); }
+    if (pathname === '/api/v1/shipping-providers/' || pathname === '/presentation/api/v1/shipping/providers/depop/') {
+      reads.push('providers'); return reply(...providers);
+    }
     return original(url, options);
   };
   return reads;
@@ -659,6 +685,8 @@ test('a boys jacket draft sends Depop\'s category, brand, location, and parcel',
   assert.equal(body.national_shipping_cost, '1.99');
   const quote = requests.find(request => request.url.includes('/shipping/providers/depop/'));
   assert.equal(new URL(quote.url).searchParams.get('item_cost'), '12.00');
+  assert.equal(new URL(quote.url).searchParams.get('product_type'), 'jackets');
+  assert.equal(new URL(quote.url).searchParams.get('gender'), null);
   assert.equal(quote.headers['x-country-code'], 'US');
   assert.equal(call(c, 'depopBrandId', brands, 'Columbia'), 'columbia-sportswear');
   assert.equal(call(c, 'depopBrandId', brands, 'Columbia Sportswear'), 'columbia-sportswear');

@@ -32,7 +32,6 @@ import { withDropdownOptions, withSchemaOptions } from "../dropdownOptions";
 import { applyBottomsFields, isBottomsListing } from "../bottomsSizes";
 import { activityPollMs, EXTENSION_STATUS_POLL_MS, fillLogPollMs, jobsPollMs, pollMs } from "../api/polling";
 import { toastManager } from "./ui/toast";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Radio, RadioGroup } from "./ui/radio-group";
 import { Toggle } from "./ui/toggle";
 import { RegenerateListingButton } from "./ClearListingButton";
@@ -69,6 +68,7 @@ import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisib
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button, InlineButton } from "./ui/button";
 import { Input } from "./ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Spinner } from "./ui/spinner";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
@@ -121,6 +121,7 @@ interface EditorField {
   slotLabels?: string[];
   /** File-dialog filter from the marketplace's photo area (Depop: JPEG and PNG). */
   accept?: string;
+  hashtagMax?: number;
   optionGroups?: Record<string, string>;
   width?: "half" | "third" | "quarter";
   /** The control itself is half the row, stacked, as on Poshmark's price and private fields. */
@@ -883,6 +884,7 @@ export function StructuredEditor({
       className="w-full" pressed={text === "true"} disabled={f.locked} onPressedChange={(pressed) => commitField(f.key, pressed)}>{f.label}</Toggle>;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
+    if (f.type === "note") return null;
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
       return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25" placeholder={f.placeholder} value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
     }
@@ -985,8 +987,8 @@ export function StructuredEditor({
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {sections.map((section) => {
-        // Photos are counted on the photo area itself, and Smart Sell is a badge on Listing Price.
-        const counted = section.fields.filter((f) => f.type !== "photos" && f.type !== "badge");
+        // Photos are counted on the photo area. A note is page text, and Smart Sell is a badge on Listing Price.
+        const counted = section.fields.filter((f) => f.type !== "photos" && f.type !== "note" && f.type !== "badge");
         const filled = counted.filter((f) => {
           if (f.type === "inventory" || f.type === "variations") {
             const stored = resolvedEditorValue(f, listing);
@@ -1018,7 +1020,15 @@ export function StructuredEditor({
                 <div className={cn("min-w-0", pageLayout
                   ? ({ quarter: "col-span-3", third: "col-span-4", half: "col-span-6" } as Record<string, string>)[f.width ?? ""] ?? "col-span-full"
                   : fullWidth(f) && "col-span-full", f.controlWidth === "half" && "sm:max-w-[50%]")}>
-                  {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.counter && f.maxLength != null ? (
+                  {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.hashtagMax != null ? (
+                    <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                      <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
+                      <span className="flex gap-3 text-muted-foreground text-xs tabular-nums">
+                        <span>Hashtags: {Math.max(0, f.hashtagMax - (formFieldText(local[f.key]).match(/#[^\s#]+/g) || []).length)}</span>
+                        {f.maxLength != null && <span>{Math.max(0, f.maxLength - formFieldText(local[f.key]).length)}</span>}
+                      </span>
+                    </div>
+                  ) : f.counter && f.maxLength != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
                       <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
                       <span className="text-muted-foreground text-xs tabular-nums">{formFieldText(local[f.key]).length}/{f.maxLength}</span>
@@ -1426,7 +1436,7 @@ function schemaFieldsForTab(
     clears: field.clears,
     help: field.help,
     valueConstraints: field.value_constraints,
-    label: field.required ? `${field.label} *` : field.label,
+    label: field.required && !form.page_labels ? `${field.label} *` : field.label,
     required: field.required,
     multi: field.multi,
     selectionOnly: form.native ? field.selection_only : field.selection_only || field.options_source === "reference"
@@ -1454,6 +1464,7 @@ function schemaFieldsForTab(
     ...(field.suffix ? { suffix: field.suffix } : {}),
     ...(field.label_hidden ? { labelHidden: true } : {}),
     ...(field.counter ? { counter: true } : {}),
+    ...(field.hashtag_max != null ? { hashtagMax: field.hashtag_max } : {}),
     ...(field.presentation ? { presentation: field.presentation } : {}),
     ...(field.option_help ? { optionHelp: field.option_help } : {}),
     defaultValue: form.native ? field.value : formFieldText(field.value),
