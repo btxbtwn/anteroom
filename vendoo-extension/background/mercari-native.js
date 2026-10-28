@@ -127,8 +127,16 @@ async function mercariShippingClasses(listing, deadline) {
 function mercariShippingListing(listing, classes) {
   const selected = listing.mercari_specifics?.shippingClassId;
   const preferred = classes.find(row => String(row.id) === String(selected));
+  // A saved default is a carrier, not one tier's id: Mercari only offers the
+  // tiers that carry this package, so the same label has a different id at
+  // another weight. An explicit id on the listing still wins, and stays blank
+  // when this package cannot use it.
+  const savedLabel = String(listing.form?.mercari_shipping_label?.label || '').trim();
+  const saved = savedLabel
+    ? classes.find(row => (row.carrierDisplayName || row.name) === savedLabel)
+    : undefined;
   const automatic = classes.find(row => row.carrierDisplayName === 'USPS Ground Advantage');
-  const label = selected != null && selected !== '' ? preferred : automatic;
+  const label = selected != null && selected !== '' ? preferred : (saved || automatic);
   return { ...listing, form: { ...listing.form, shipping_classes: classes,
     specifics: { ...listing.form?.specifics, shipping: { ...listing.form?.specifics?.shipping,
       carrierId: label?.id ?? null } } } };

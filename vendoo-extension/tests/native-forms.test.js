@@ -187,6 +187,10 @@ test('Mercari ship on your own records seller-paid shipping, and the form keeps 
   assert.deepEqual(fields['mercari_specifics.shippingPayerId'].option_values, { 'Yes (Recommended)': '2', No: '1' });
   assert.equal(fields['mercari_specifics.shipsFrom'].value, '70125');
   assert.ok(fields['mercari_specifics.shippingClassId']);
+  // These two answers stay the same on every listing, so the field offers to remember them.
+  assert.equal(fields['mercari_specifics.shipsFrom'].save_as_default, true);
+  assert.equal(fields['mercari_specifics.shippingClassId'].save_as_default, true);
+  assert.ok(!fields['mercari_specifics.shippingMethod'].save_as_default);
   assert.ok(!fields.weight_oz && !fields.package_dimensions_in);
 });
 

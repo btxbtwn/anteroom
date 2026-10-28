@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.481 — 2026-10-28
+## 0.1.482 — 2026-10-28
 
 - Photos now go through one store that every part of Anteroom reads and writes, so a photo store can later live somewhere other than this Mac without changing the rest. Editing, rotating, thumbnails, copying a listing and the file cleanup on delete all use it; nothing looks in a fixed folder any more.
+
+## 0.1.481 — 2026-10-28
+
+- The Mercari Shipping fields now offer to remember themselves: a bookmark beside **Ships from** and **Shipping label** saves that ZIP or carrier as the default for every new listing, and pressing the filled bookmark stops using it.
 
 ## 0.1.480 — 2026-10-28
 
