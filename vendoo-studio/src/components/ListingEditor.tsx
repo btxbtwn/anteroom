@@ -714,9 +714,11 @@ export function StructuredEditor({
   // edit must not start a new read: that used to drop every row until the form
   // answered, leaving only the marketplace price on screen. A new category,
   // chosen here or written onto the listing, is what loads a new set of rows.
+  // A refill can replace the saved definition without changing the category;
+  // include it so its refreshed dependent choices reach the editor too.
   const formStructureKey = nativeFormStructureKey(listing, tab);
   const nativeQuery = useQuery({
-    queryKey: ["native-editor-form", convId, tab, formStructureKey],
+    queryKey: ["native-editor-form", convId, tab, formStructureKey, getListingEditorValue(listing, `_native_forms.${tab}`)],
     queryFn: () => api.nativeMarketplaces.form(convId, tab),
     enabled: nativeTab,
     staleTime: Infinity,
@@ -957,7 +959,9 @@ export function StructuredEditor({
   const viewContext = { tab, listing, local, fields, categoryStale };
   const viewFields = fields.map((field) => presentNativeField(field, viewContext));
   const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
-  const gaps = nativeTab ? preflight.data?.marketplaces?.[tab as NativeMarketplace]?.gaps ?? [] : [];
+  // Placeholder checks describe the previous revision, before its fields were filled.
+  const gaps = nativeTab && !preflight.isPlaceholderData && !preflight.isError
+    ? preflight.data?.marketplaces?.[tab as NativeMarketplace]?.gaps ?? [] : [];
   const shownMessages = React.useContext(MarketplaceMessagesContext);
   const fieldWarnings = gapsByField(tab, gaps, renderedFields);
   // List's photo answer belongs with the photos, on the control that sends them.

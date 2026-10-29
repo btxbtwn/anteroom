@@ -113,6 +113,35 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         saved = self.repo.get_current(self.conv.id)
         return self.repo.get_revision(saved.current_revision_id)
 
+    async def test_depop_refill_removes_obsolete_fields_and_keeps_evidence_with_native_answers(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "womenswear_trousers", "page_labels": True, "fields": [
+            row("depop_specifics.nativeSizeId", "Size", ["M"], required=True, option_values={"M": "103"}),
+            row("depop_specifics.attributes.occasion", "Occasion", ["Work"], multi=True),
+            row("depop_specifics.source", "Source", ["Preloved"], multi=True),
+            row("depop_specifics.age", "Age", ["Modern"], multi=True),
+            row("depop_specifics.style", "Style", ["Preppy"], multi=True),
+        ]}
+        listing = {"direct_category_ids": {"depop": "womenswear_trousers"},
+                   "depop_specifics": {"occasion": ["Work"], "source": ["Preloved"],
+                                       "age": ["Modern"], "style": ["Preppy"]}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
+        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        values = {"nativeSizeId": "103", "attributes.occasion": ["Work"],
+                  "source": ["Preloved"], "age": ["Modern"], "style": ["Preppy"]}
+        evidence = "Seller: size M, Work, Preloved, Modern, Preppy."
+        reply = json.dumps({"fields": {f"depop_specifics.{key}": {"value": value, "evidence": evidence}
+                                       for key, value in values.items()}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            await fill_native_fields(self.db, self.conv.id, object(), evidence=evidence, markets={"depop"})
+        saved = self._current().listing_json
+        self.assertNotIn("occasion", saved["depop_specifics"])
+        self.assertEqual(saved["depop_specifics"]["nativeSizeId"], "103")
+        self.assertEqual(saved["depop_specifics"]["attributes"]["occasion"], ["Work"])
+        self.assertEqual(native_contract.gaps(saved, "depop"), [])
+
     async def test_an_earlier_guess_is_cleared_and_form_defaults_cannot_restore_it(self):
         from vendoo_studio.services import native_contract
 

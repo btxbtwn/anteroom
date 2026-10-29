@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.507 — 2026-10-29
+
+- Marketplace fields stop showing warnings from an older revision, and refreshed dropdown choices appear after category fields refill. Warnings stay with the field they describe.
+- Saved Vinted sizes are no longer flagged just because a reference list omits them. The Draft count matches the listings visible in the working list.
+
 ## 0.1.506 — 2026-10-29
 
 - Poshmark's categories and size groups load in Anteroom with Chrome closed. Saved shipping-discount choices are retained; unavailable account choices are identified rather than guessed.

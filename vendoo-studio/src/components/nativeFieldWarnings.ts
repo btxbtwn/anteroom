@@ -56,15 +56,19 @@ export function gapsByField(
 
 /**
  * The row a marketplace's answer is about: the field's own key, the form's
- * namespaced key for it, or a row with the same last name. Empty when this form
- * has no such row.
+ * namespaced key for it, or a row matching an unqualified marketplace name.
+ * Qualified paths identify distinct fields even when their last names match.
  */
 export function rowForField(marketplace: string, field: string, rows: readonly { key: string }[]): string {
   const keys = rows.map((row) => row.key);
   const named = [ROW_ALIASES[marketplace]?.[field], field, `${marketplace}_specifics.${field}`];
   const exact = named.find((key) => Boolean(key) && keys.includes(key as string));
   if (exact) return exact as string;
+  // eBay's posting encoder names its aspects under category_specifics; its
+  // native form names those same aspects directly. Other qualified paths
+  // must not route obsolete fields onto a different current control.
+  if (field.includes(".") && !(marketplace === "ebay" && field.startsWith("ebay_specifics.category_specifics."))) return "";
   const leaf = field.split(".").pop()?.toLowerCase() || "";
   if (!leaf) return "";
-  return keys.find((key) => key.split(".").pop()?.toLowerCase() === leaf) || "";
+  return keys.find((key) => !key.startsWith("marketplace_photos.") && key.split(".").pop()?.toLowerCase() === leaf) || "";
 }
