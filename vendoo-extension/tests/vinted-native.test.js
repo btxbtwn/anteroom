@@ -245,6 +245,25 @@ test('the app size is matched to Vinted\'s own size title', async () => {
   }
 });
 
+test('a Vinted draft reads size from its native attributes', async () => {
+  const { c } = worker({ attributes: WOMENS_SIZES, read: () => ({ ...DRAFT,
+    item_attributes: [{ code: 'condition', ids: [3] }, { code: 'size', ids: [3] }],
+  }) });
+  const result = await c.runVintedNative(message({ listing: { ...listing, vinted_specifics: { ...listing.vinted_specifics, size: '6' } } }));
+  assert.equal(result.ok, true);
+});
+
+test('checking a saved draft still refuses a size mismatch and writes nothing', async () => {
+  const { c, requests } = worker({ attributes: WOMENS_SIZES, read: () => ({ ...DRAFT, size_id: 4 }) });
+  const result = await c.runVintedNative(message({ draft_url: DRAFT_URL, expected_photo_count: 1,
+    listing: { ...listing, vinted_specifics: { ...listing.vinted_specifics, size: '6' } },
+  }), true);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /size/);
+  assert.equal(requests.filter(request => request.method !== 'GET'
+    && request.pathname !== '/api/v2/item_upload/attributes').length, 0);
+});
+
 test('a Vinted size left blank on its form uses the listing\'s General size', async () => {
   const { c, sent } = worker({ attributes: WOMENS_SIZES, read: () => ({ ...DRAFT, size_id: 3 }) });
   const { size, ...specifics } = listing.vinted_specifics;

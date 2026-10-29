@@ -115,6 +115,7 @@ function vintedView(item) {
   const photoIds = photos ? photos.map(photo => Number(photo?.id)).filter(photoId => Number.isInteger(photoId) && photoId > 0) : null;
   const condition = (item.item_attributes || []).find(attribute => attribute?.code === 'condition');
   const conditionId = condition?.ids?.[0] ?? item.status_id;
+  const sizeId = (item.item_attributes || []).find(attribute => attribute?.code === 'size')?.ids?.[0] ?? item.size_id;
   return {
     id: String(item.id),
     title: item.title ?? null,
@@ -122,7 +123,7 @@ function vintedView(item) {
     price: vintedAmount(item.price ?? item.price_numeric),
     catalog_id: item.catalog_id != null ? Number(item.catalog_id) : null,
     condition_id: conditionId != null ? Number(conditionId) : null,
-    size_id: item.size_id != null ? Number(item.size_id) : null,
+    size_id: sizeId != null ? Number(sizeId) : null,
     photo_count: photos ? photos.length : null,
     photo_ids: photoIds,
     is_draft: item.is_draft === true ? true : item.is_draft === false ? false : null,
@@ -575,10 +576,8 @@ async function runVintedNative(msg, recovery = false) {
         }
       }
       if (!view) return fail(marketplaceError('Vinted did not confirm a draft. Check your Vinted drafts before trying again.', { code: 'uncertain', rejected: false }));
-      const expected = {
-        title: marketplaceCopy(listing, 'vinted', 'title'), description: marketplaceCopy(listing, 'vinted', 'description'), price: vintedAmount(listing.vinted_specifics?.price ?? listing.price),
-        photo_count: payload.expected_photo_count ?? null,
-      };
+      const fields = await vintedFields(call, listing, session.currency);
+      const expected = vintedExpected(fields, payload.expected_photo_count ?? photos.length);
       const differ = vintedDifferences(view, expected);
       if (differ.length) {
         return fail(marketplaceError(`Vinted's listing does not match this revision (${differ.join(', ')}). List again.`, { code: 'uncertain', rejected: false }));
