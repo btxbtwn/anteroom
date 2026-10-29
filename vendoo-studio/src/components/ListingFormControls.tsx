@@ -181,7 +181,7 @@ export function SearchableSelect({
   const matches = options.length > 200 ? options.filter((item) => item.toLowerCase().includes(query.toLowerCase())).slice(0, 100) : options;
   const items = custom ? [custom, ...matches] : matches;
   const groups = optionGroups && !custom ? groupedChoices(items, optionGroups) : null;
-  const unavailable = Boolean(selectionOnly && options.length && value && !options.includes(value));
+  const unavailable = Boolean(choicesVerified && selectionOnly && options.length && value && !options.includes(value));
   return (
     <div className="min-w-0">
       <Combobox<string>
@@ -205,7 +205,7 @@ export function SearchableSelect({
           showClear={clearable && Boolean(value) && !disabled}
           disabled={disabled}
           maxLength={maxLength}
-          aria-invalid={(unavailable && choicesVerified) || undefined}
+          aria-invalid={unavailable || undefined}
           aria-describedby={unavailable ? `${id}-unavailable` : undefined}
         />
         <ComboboxPopup>
@@ -225,9 +225,7 @@ export function SearchableSelect({
         </ComboboxPopup>
       </Combobox>
       {unavailable && <p id={`${id}-unavailable`} role="alert" className="mt-1.5 text-xs text-warning-foreground">
-        {choicesVerified
-          ? `Saved value “${value}” is unavailable in these choices. Choose another value or clear it.`
-          : `Saved value “${value}” is outside these reference choices. Verify it on the marketplace before changing it.`}
+        {`Saved value “${value}” is unavailable in these choices. Choose another value or clear it.`}
       </p>}
     </div>
   );

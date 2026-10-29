@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
+import type { ListingData } from "../api/types";
 import type { NativeDraft, NativeDrafts } from "../api/nativeMarketplaces";
 import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, facebookCheckText, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
 
@@ -17,10 +18,12 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
   etsyReady = false, selected = "", notes = undefined as string[] | undefined,
   onAskChat = undefined as ((text: string) => void) | undefined, onEditField = undefined as ((field: string) => void) | undefined,
   preflight = { marketplaces: {} } as { marketplaces: Record<string, { ready: boolean; gaps: { field: string; message: string; blocking: boolean }[] }> } | undefined,
-  preflightMissing = false, preflightPlaceholder = false, preflightError = false } = {}) {
+  preflightMissing = false, preflightPlaceholder = false, preflightError = false,
+  nativeFields = [] as { key: string; path: string; label: string; value: string; required: boolean; options: string[] }[],
+  listing = {} as ListingData } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
-    : queryKey[0] === "native-editor-form" ? { data: { marketplace: selected, fields: [], notes: notes ?? [] } }
+    : queryKey[0] === "native-editor-form" ? { data: { marketplace: selected, native: true, fields: nativeFields, notes: notes ?? [] } }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
     : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2", return_policy_id: "3" } : {}, isSuccess: true, isPending: false }
     : queryKey[0] === "native-preflight" ? { data: preflightMissing ? undefined : preflight, isPending: preflightMissing, isPlaceholderData: preflightPlaceholder, isError: preflightError }
@@ -29,7 +32,7 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
   if (notes) return renderToStaticMarkup(
     <MarketplacesLayout convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
       ids={["general", "mercari"]} selected={selected} onSelect={() => {}} onEditField={onEditField} onAskChat={onAskChat}>
-      <StructuredEditor convId="item" listing={{}} tab={selected} target={null} onChange={() => {}} onAskChat={onAskChat} />
+      <StructuredEditor convId="item" listing={listing} tab={selected} target={null} onChange={() => {}} onAskChat={onAskChat} />
     </MarketplacesLayout>,
   );
   return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
@@ -45,6 +48,42 @@ const enabledButton = (html: string, label: string) => new RegExp(`<button(?![^>
 
 describe("marketplaces section", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("reloads the editor when a refill saves a new definition for the same category", () => {
+    const queryKey = (options: { label: string }) => {
+      render({}, {}, { selected: "mercari", notes: [], listing: {
+        direct_category_ids: { mercari: "2008" },
+        _native_forms: { mercari: { fields: [{ path: "mercari_specifics.shippingClassId", options: [options.label] }] } },
+      } });
+      return [...useQuery.mock.calls].reverse().find(([arg]) => arg.queryKey[0] === "native-editor-form")?.[0].queryKey;
+    };
+    const before = queryKey({ label: "Old label" });
+    const after = queryKey({ label: "Current label" });
+    expect(before.slice(0, 4)).toEqual(after.slice(0, 4));
+    expect(before).not.toEqual(after);
+  });
+
+  it.each(["placeholder", "error"])("hides previous revision field warnings during %s checks while keeping List blocked", (state) => {
+    const message = "Brand: Required field is empty.";
+    const options = {
+      selected: "mercari", notes: [] as string[],
+      preflight: { marketplaces: { mercari: { ready: false, gaps: [
+        { field: "mercari_specifics.brand", message, blocking: true },
+      ] } } },
+    };
+    expect(render({}, {}, options)).toContain(message);
+    const html = render({}, {}, { ...options,
+      preflightPlaceholder: state === "placeholder", preflightError: state === "error",
+    });
+    expect(html).not.toContain(message);
+    expect(disabledButton(html, "List…")).toBe(true);
+    const withField = { ...options, nativeFields: [{ key: "mercari_specifics.brand", path: "mercari_specifics.brand",
+      label: "Brand", value: "Anne Klein", required: true, options: [] as string[] }] };
+    expect(render({}, {}, withField)).toContain(message);
+    expect(render({}, {}, { ...withField,
+      preflightPlaceholder: state === "placeholder", preflightError: state === "error",
+    })).not.toContain(message);
+  });
 
   it("shows a repeated category error once across preflight gaps and form notes, keeping each repair action", () => {
     const message = "That Mercari category has subcategories. Choose the most specific one.";

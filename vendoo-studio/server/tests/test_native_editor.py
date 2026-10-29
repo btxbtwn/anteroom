@@ -21,6 +21,24 @@ from vendoo_studio.services.vendoo_import import merge_notes
 
 
 class NativeEditorTest(unittest.TestCase):
+    def test_mercari_override_keeps_the_saved_form_valid_through_posting_preparation(self):
+        from vendoo_studio.services import direct_preflight, native_contract
+
+        listing = copy.deepcopy(self.listing)
+        listing["mercari_specifics"] = {"brand": "Anne Klein", "condition": "3"}
+        form = {"category_id": "", "page_labels": True, "fields": [
+            {"path": "mercari_specifics.brand", "label": "Brand", "options": []},
+            {"path": "mercari_specifics.condition", "label": "Condition", "options": []},
+        ]}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"mercari": form}, ["mercari"])
+        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "native_schema")
+        answer = self.client.get(f"{self.url}/mercari/form?revision_id={revision.id}")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(answer.json()["fields"][0]["value"], "Anne Klein")
+        snapshot = direct_preflight.prepare(self.db, self.conv, listing, "mercari")
+        self.assertEqual(native_contract.gaps(snapshot, "mercari"), [])
+        self.bridge.assert_not_called()
+
     def test_fresh_poshmark_form_and_generation_choices_work_with_chrome_closed(self):
         import asyncio
 

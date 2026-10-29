@@ -47,6 +47,8 @@ export const LISTING_STATUS_TABS = ["draft", "active", "sold", "failed"] as cons
 export type ListingStatusFilter = "all" | (typeof LISTING_STATUS_TABS)[number];
 
 export type FilterableListing = {
+  id?: string;
+  settled_at?: string | null;
   title?: string | null;
   status?: string | null;
   sku?: string | null;
@@ -263,11 +265,26 @@ export function sortListings<T extends FilterableListing>(listings: T[], sort: L
   return compare ? [...listings].sort(compare) : listings;
 }
 
-export function statusCounts(listings: FilterableListing[]): Record<string, number> {
-  const counts: Record<string, number> = { all: listings.length };
+/** Finished listings stay out of the working list, but remain findable in search and Sold. */
+export function visibleInInventory(
+  listing: FilterableListing,
+  tab: string,
+  searching = false,
+  selectedId: string | null = null,
+): boolean {
+  return !listing.settled_at || searching || tab === "sold" || Boolean(selectedId && listing.id === selectedId);
+}
+
+export function statusCounts(
+  listings: FilterableListing[],
+  searching = false,
+  selectedId: string | null = null,
+): Record<string, number> {
+  const counts: Record<string, number> = { all: 0 };
   for (const listing of listings) {
+    if (visibleInInventory(listing, "all", searching, selectedId)) counts.all += 1;
     const status = listingStatusTab(inventoryStatus(listing));
-    counts[status] = (counts[status] || 0) + 1;
+    if (visibleInInventory(listing, status, searching, selectedId)) counts[status] = (counts[status] || 0) + 1;
   }
   return counts;
 }

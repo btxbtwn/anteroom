@@ -61,6 +61,15 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     if market == "sellwild":
         paths.add("sellwild_specifics.nativeCategoryId")
     result = {path: copy.deepcopy(get_path(listing, path)) for path in sorted(paths)}
+    # Posting applies marketplace overrides before checking this contract. Compare
+    # the same effective choices when capturing the unprepared listing revision.
+    result["brand"] = marketplace_text(listing, market, "brand")
+    from vendoo_studio.models.schema import ListingSchema
+
+    from vendoo_studio.services.seller_overrides import followed_entry
+
+    condition = followed_entry(listing, market, "condition")
+    result["condition"] = condition[1] if condition is not None else ListingSchema.validate_condition(listing.get("condition"))
     result["category_id"] = str(get_path(listing, f"direct_category_ids.{market}")
                                 or get_path(listing, f"marketplace_category_ids.{market}") or "")
     return result

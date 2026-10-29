@@ -28,6 +28,29 @@ def seed():
 
 
 class NativeContractTest(unittest.TestCase):
+    def test_marketplace_overrides_do_not_make_the_saved_form_stale(self):
+        from vendoo_studio.services.seller_overrides import apply_marketplace_overrides
+
+        listing = seed()
+        listing.update(brand="General brand", condition="Pre-Owned - Good")
+        listing["mercari_specifics"].update(brand="Anne Klein", condition="3")
+        fields = listing[contract.KEY]["mercari"]["fields"]
+        captured = contract.inputs(listing, "mercari", fields)
+        prepared = copy.deepcopy(listing)
+        apply_marketplace_overrides(prepared, "mercari")
+        self.assertEqual(prepared["brand"], "Anne Klein")
+        self.assertEqual(captured, contract.inputs(prepared, "mercari", fields))
+        listing["mercari_specifics"]["condition"] = "4"
+        self.assertNotEqual(captured, contract.inputs(listing, "mercari", fields))
+
+    def test_general_condition_normalization_does_not_make_the_saved_form_stale(self):
+        listing = seed()
+        listing["condition"] = "Good"
+        fields = listing[contract.KEY]["mercari"]["fields"]
+        captured = contract.inputs(listing, "mercari", fields)
+        listing["condition"] = "Pre-Owned - Good"
+        self.assertEqual(captured, contract.inputs(listing, "mercari", fields))
+
     def test_validation_only_contract_is_not_rendered_as_a_complete_editor(self):
         listing = seed()
         listing[contract.KEY]["mercari"].pop("page_labels")

@@ -10,6 +10,7 @@ import {
   matchesSearch,
   sortListings,
   statusCounts,
+  visibleInInventory,
   isStale,
   labelCounts,
   listedDaysAgo,
@@ -217,6 +218,32 @@ describe("sortListings", () => {
 });
 
 describe("filter options", () => {
+  const finishedDraft = { ...draft, id: "finished-draft", settled_at: "2026-10-28T12:00:00Z" };
+
+  it("counts only the draft rows the working list shows", () => {
+    const listings = [draft, finishedDraft];
+    const shown = filterListings(listings, "", withFilters({ status: "draft" }))
+      .filter((listing) => visibleInInventory(listing, "draft"));
+    expect(shown).toEqual([draft]);
+    expect(statusCounts(listings).draft).toBe(shown.length);
+    expect(statusCounts(listings).all).toBe(1);
+  });
+
+  it("includes finished drafts in search and when the finished draft is open", () => {
+    const listings = [draft, finishedDraft];
+    expect(visibleInInventory(finishedDraft, "draft", true)).toBe(true);
+    expect(statusCounts(listings, true)).toEqual({ all: 2, draft: 2 });
+    expect(visibleInInventory(finishedDraft, "draft", false, finishedDraft.id)).toBe(true);
+    expect(statusCounts(listings, false, finishedDraft.id)).toEqual({ all: 2, draft: 2 });
+    expect(statusCounts(listings, false, "another-listing")).toEqual({ all: 1, draft: 1 });
+  });
+
+  it("keeps finished sold listings in the Sold count", () => {
+    const sold = { ...boots, settled_at: "2026-10-28T12:00:00Z" };
+    expect(visibleInInventory(sold, "sold")).toBe(true);
+    expect(statusCounts([draft, sold])).toEqual({ all: 1, draft: 1, sold: 1 });
+  });
+
   it("counts each status tab", () => {
     expect(statusCounts(inventory)).toEqual({ all: 3, active: 1, sold: 1, draft: 1 });
   });

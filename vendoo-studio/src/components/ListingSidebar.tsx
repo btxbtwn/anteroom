@@ -26,6 +26,7 @@ import {
   staleCounts,
   sortListings,
   statusCounts,
+  visibleInInventory,
   type ListingFilters as Filters,
 } from "./inventoryFilters";
 import { PlusIcon, SearchIcon, XIcon } from "lucide-react";
@@ -140,8 +141,8 @@ export function ListingSidebar({
 
   // Finished listings stay out of the working list. Search and the Sold tab still find them.
   const shownListings = useMemo(() => {
-    const includeFinished = Boolean(needle) || filters.status === "sold";
-    const rows = includeFinished ? [...activeListings, ...settledListings] : [...activeListings];
+    const rows = [...activeListings, ...settledListings].filter((listing) =>
+      visibleInInventory(listing, filters.status, Boolean(needle)));
     if (activeView === "listings" && selectedConvId && !rows.some((listing) => listing.id === selectedConvId)) {
       const open = settledListings.find((listing) => listing.id === selectedConvId);
       if (open) rows.unshift(open);
@@ -193,7 +194,8 @@ export function ListingSidebar({
     () => (conversations || []).filter((listing) => matchesSearch(listing, needle)),
     [conversations, needle],
   );
-  const counts = useMemo(() => statusCounts(searched), [searched]);
+  const counts = useMemo(() => statusCounts(searched, Boolean(needle), activeView === "listings" ? selectedConvId : null),
+    [searched, needle, activeView, selectedConvId]);
   // Each filter row carries how many listings it would keep, counted over the
   // status tab in front of the reader rather than the whole inventory.
   const facetSource = useMemo(

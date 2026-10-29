@@ -410,6 +410,7 @@ export function MarketplacesLayout({
     return !soldSomewhere;
   }
   function preflightGaps(marketplace: Marketplace): PreflightGap[] {
+    if (preflight.isPlaceholderData || preflight.isError) return [];
     return preflight.data?.marketplaces?.[marketplace as NativeMarketplace]?.gaps ?? [];
   }
   function listBlocked(marketplace: Marketplace): boolean {
