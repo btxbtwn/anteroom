@@ -1,12 +1,12 @@
 """Read-only editor definitions from the catalogs used by direct List."""
 from __future__ import annotations
 
-from types import SimpleNamespace
+import asyncio
 
 from sqlalchemy.orm import Session
 
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, direct_preflight
+from vendoo_studio.services import direct_preflight
 from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
 
@@ -34,6 +34,15 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
         from vendoo_studio.services.mercari_form import editor_form as mercari_form
 
         return await mercari_form(snapshot)
+    if marketplace == "sellwild":
+        from vendoo_studio.services.sellwild_browser import account_choices
+
+        session = await asyncio.to_thread(account_choices)
+        result = sellwild_form(snapshot, conv_id, db, ship_from=session["ship_from"], coupons=session["coupons"],
+                               default_parcel=session["default_parcel"])
+        if session.get("unavailable"):
+            result["notes"] = ["Some Sellwild account choices are unavailable. Sign in to Sellwild in Anteroom, then reload choices."]
+        return result
     if not refresh:
         from vendoo_studio.services import native_contract
 
@@ -45,13 +54,6 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
             raise NativeMarketplaceError(409, "The category or dependent choices changed. Reload this form's choices before continuing.")
     if marketplace == "ebay":
         return await ebay_form(snapshot)
-    from vendoo_studio.routes.extension import extension_manager
-
-    if marketplace == "sellwild":
-        session = await _sellwild_session(extension_manager.connected, snapshot)
-        return sellwild_form(snapshot, conv_id, db, ship_from=session["ship_from"], coupons=session["coupons"],
-                             default_parcel=session["default_parcel"])
-
     raise NativeMarketplaceError(404, "This marketplace has no native editor form.")
 
 
@@ -383,26 +385,9 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
     return rows
 
 
-async def _sellwild_session(connected: bool, snapshot: dict) -> dict:
-    """The sell page's address card, coupons, and profile package. Address is None when Chrome cannot read it."""
-    empty = {"ship_from": None, "coupons": [], "default_parcel": ""}
-    if not connected:
-        return empty
-    try:
-        answer = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.form",
-                                              {"marketplace": "sellwild", "listing": snapshot}, timeout=15)
-    except browser_bridge.BrowserBridgeError:
-        return empty
-    if not isinstance(answer, dict) or not answer.get("ok"):
-        return empty
-    coupons = answer.get("coupons") if isinstance(answer.get("coupons"), list) else []
-    return {"ship_from": str(answer.get("ship_from") or ""), "coupons": coupons,
-            "default_parcel": str(answer.get("default_parcel") or "")}
-
-
 def _ship_from_row(ship_from: str | None, section: str) -> dict:
     # A card on Sellwild's page; the address is changed in Sellwild's Address Book.
-    help_text = ("Connect Chrome to show your Sellwild address." if ship_from is None
+    help_text = ("Sign in to Sellwild in Anteroom, then reload choices to show your address." if ship_from is None
                  else "Add a Shipping From address in Sellwild's Address Book." if not ship_from else None)
     return field("sellwild_specifics.shipFrom", "Shipping From", ship_from or "", input_type="textarea", locked=True,
                  section=section, **({"help": help_text} if help_text else {}))

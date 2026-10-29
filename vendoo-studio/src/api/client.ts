@@ -534,6 +534,8 @@ export const api = {
       request<FacebookCheck>(`/conversations/${convId}/marketplace-listings/facebook/check`, { method: "POST" }),
   },
   nativeMarketplaces: {
+    sellwildConnect: (convId: string) =>
+      request<OkResponse>(`/conversations/${convId}/native-marketplaces/sellwild/connect`, { method: "POST" }),
     vintedConnect: (convId: string) =>
       request<OkResponse>(`/conversations/${convId}/native-marketplaces/vinted/connect`, { method: "POST" }),
     vintedCategories: (convId: string) =>

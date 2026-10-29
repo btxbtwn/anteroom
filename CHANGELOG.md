@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.531 — 2026-10-29
+
+- Prepare Sellwild listings with Chrome closed: sign in inside Anteroom to load your shipping address, discounts, and default package, then reload those choices after signing in.
+
 ## 0.1.530 — 2026-10-29
 
 - Listing edits reject stale saves, and direct marketplace actions keep the exact photos you approved even if you change them later.

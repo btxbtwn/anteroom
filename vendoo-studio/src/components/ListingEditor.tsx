@@ -1,3 +1,4 @@
+import { SellwildAccountChoices } from "./SellwildAccountChoices";
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -1194,6 +1195,7 @@ export function StructuredEditor({
     <fieldset ref={formRef} key={tab} disabled={disabled} aria-busy={disabled || undefined}
       aria-label={`${marketplaceName(tab)} listing fields`} className="@container flex min-w-0 flex-col border-0 p-0">
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
+      {tab === "sellwild" && <SellwildAccountChoices convId={convId} disabled={disabled} />}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {formNotes.length > 0 && onAskChat && <div className="pb-2">
         <Button size="xs" variant="outline" disabled={disabled}
