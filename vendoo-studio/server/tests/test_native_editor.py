@@ -66,7 +66,7 @@ class NativeEditorTest(unittest.TestCase):
             generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"depop"}))
         self.assertEqual(answer.status_code, 200, answer.text)
         fields = {row["path"]: row for row in answer.json()["fields"]}
-        self.assertEqual(len(fields["direct_category_ids.depop"]["option_values"]), 247)
+        self.assertEqual(len(fields["direct_category_ids.depop"]["option_values"]), 281)
         self.assertIn("Cotton", fields["depop_specifics.attributes.material"]["options"])
         self.assertIn('32"', fields["depop_specifics.size"]["options"])
         self.assertEqual(generation_forms["depop"]["category_id"], "menswear_jeans")
