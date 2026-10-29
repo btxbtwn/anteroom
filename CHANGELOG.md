@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.529 — 2026-10-29
+
+- Added protections that keep hosted seller accounts from reading or changing another seller’s listings and shop history. Access across devices is still being built.
+
 ## 0.1.528 — 2026-10-29
 
 - A saved marketplace form stops asking you to reload its fields when nothing about the listing changed. An answer the listing left empty, a setting switched off, and an untouched dropdown were each being read as a change, which held back drafts on eBay, Mercari, Poshmark and Depop.

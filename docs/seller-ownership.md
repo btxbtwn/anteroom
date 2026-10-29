@@ -41,7 +41,8 @@ when the backend suite runs with `ANTEROOM_TEST_DATABASE_URL`.
 
 ## What this does not enable yet
 
-Ownership columns alone do not enforce isolation. The desktop repositories and
+Ownership columns alone do not enforce isolation. The [hosted isolation layer](seller-isolation.md)
+adds PostgreSQL policies and restricted seller sessions. The desktop repositories and
 background services still operate as one seller. The hosted API continues to
 expose only health and verified identity; no seller-data routes are added.
 
