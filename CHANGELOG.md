@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.527 — 2026-10-29
+
+- Listings, chats and page buttons prepare their next screen as you hover, focus or touch them, so opening a saved conversation can show it immediately. Listing search and selection redraw fewer rows, and opening an item no longer reads all its saved revisions.
+
 ## 0.1.526 — 2026-10-29
 
 - Marketplace forms stop flagging fields that are already answered. A row the listing filled under another spelling, or that eBay fills from the listing's own brand, size, colour and department, no longer shows an error, so eBay, Poshmark, Mercari and Sellwild drafts that were ready to list stop being held back.
