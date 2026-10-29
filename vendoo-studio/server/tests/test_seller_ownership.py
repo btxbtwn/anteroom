@@ -17,7 +17,7 @@ from vendoo_studio.models.ownership import LOCAL_USER_ID, SellerOwned
 from vendoo_studio.services import backups, schema_migrations
 
 PREVIOUS_REVISION = "3ec056c582ed"
-OWNERSHIP_REVISION = "d8b6f2a19c40"
+CURRENT_REVISION = schema_migrations.head_revision()
 SHARED_TABLES = {"category_trees", "category_tree_nodes"}
 
 
@@ -109,8 +109,8 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
     foreign_keys = {name: inspector.get_foreign_keys(name) for name in inspector.get_table_names()}
     old_indexes = {name: {index["name"] for index in inspector.get_indexes(name)} for name in inspector.get_table_names()}
 
-    assert schema_migrations.ensure_schema(engine) == OWNERSHIP_REVISION
-    assert schema_migrations.recorded_revision(engine) == OWNERSHIP_REVISION
+    assert schema_migrations.ensure_schema(engine) == CURRENT_REVISION
+    assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     after = read_rows(engine, names)
     for name, rows in before.items():
         assert after[name] == [dict(row, user_id=LOCAL_USER_ID) for row in rows]
@@ -129,7 +129,7 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
     # Reopening a migrated install must leave its records and ownership alone.
-    assert schema_migrations.ensure_schema(engine) == OWNERSHIP_REVISION
+    assert schema_migrations.ensure_schema(engine) == CURRENT_REVISION
     assert read_rows(engine, names) == after
 
 
@@ -161,10 +161,10 @@ def test_pre_alembic_database_gets_ownership_without_losing_rows(migration_engin
         connection.execute(sa.text("DROP TABLE alembic_version"))
         # Adoption must handle a mix of old and newly created tables.
         connection.execute(sa.text("DROP TABLE similar_item_reviews"))
-    assert schema_migrations.ensure_schema(engine) == OWNERSHIP_REVISION
+    assert schema_migrations.ensure_schema(engine) == CURRENT_REVISION
     for name, rows in before.items():
         assert read_rows(engine, [name])[name] == [dict(row, user_id=LOCAL_USER_ID) for row in rows]
-    assert schema_migrations.recorded_revision(engine) == OWNERSHIP_REVISION
+    assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     assert len(backups.list_snapshots(backups.BACKUPS_DIR)) == 1
 
 

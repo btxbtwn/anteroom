@@ -5,7 +5,9 @@ Postgres support and the photo-store interface have merged (#790, #787).
 The hosted session-verification foundation is described in
 [hosted-auth.md](hosted-auth.md). The
 [seller ownership schema](seller-ownership.md) assigns ownership to existing
-and new records; access isolation and account linking are next.
+and new records. [Hosted database isolation](seller-isolation.md) adds restricted
+seller sessions and row policies; seller-specific constraints, file scoping and
+account linking remain before hosted listing routes open.
 
 ## Goal
 
