@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.513 — 2026-10-29
+
+- Creating a listing uses the marketplaces’ own forms instead of fetching Vendoo category fields or preparing Vendoo fields in the background. Vendoo preparation runs only when you choose Send.
+
 ## 0.1.512 — 2026-10-29
 
 - ChatGPT generation now sends listing rules as developer messages, fixing the “System messages are not allowed” error.
