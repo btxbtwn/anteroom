@@ -115,6 +115,17 @@ class NativeMarketplacesTest(unittest.TestCase):
 
     # --- listing -----------------------------------------------------------------
 
+    def test_list_without_a_category_never_starts_a_marketplace_job(self):
+        listing = {**LISTING, "marketplace_category_ids": {}, "marketplace_category_objects": {},
+                   "marketplace_categories": {}, "direct_category_ids": {}}
+        revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "user_form")
+        self.bridge.reset_mock()
+        response = self.client.post(f"{self.base}/mercari/list", json={"revision_id": revision.id, "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["error_code"], "missing_fields")
+        self.assertEqual(self.launched, [])
+        self.assertNotIn("list", self.actions())
+
     def test_save_draft_runs_one_private_step_and_never_publishes_on_check(self):
         for platform in URLS:
             with self.subTest(platform=platform):
@@ -376,20 +387,23 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(self.client.post(f"{self.base}/sellwild/list", json={"revision_id": self.rev.id, "confirm": True, **SELLWILD}).status_code, 409)
         self.assertEqual(self.bridge.call_count, 1)
 
-    def test_sellwild_keeps_only_the_sellers_pick_and_matches_the_rest_on_each_list(self):
+    def test_sellwild_requires_a_saved_category_instead_of_matching_one_at_list_time(self):
         mens = {**LISTING, "condition": "Pre-Owned - Good", "category_path": "Clothing, Shoes & Accessories > Men > Coats & Jackets"}
         mens.pop("marketplace_category_ids")
         rev = ListingRepo(self.db).save_revision(self.conv.id, mens, "model")
-        native.save_local_sellwild_draft(self.conv.id, native.ListRequest(revision_id=rev.id, sellwild_condition_id=2), self.db)
+        with self.assertRaises(native.NativeMarketplaceError):
+            native.save_local_sellwild_draft(self.conv.id, native.ListRequest(revision_id=rev.id, sellwild_condition_id=2), self.db)
+        native.save_local_sellwild_draft(self.conv.id, native.ListRequest(
+            revision_id=rev.id, sellwild_category_id=272, sellwild_condition_id=2), self.db)
         record = self.record("sellwild")
-        self.assertIsNone(record.get("sellwild_category_id"))
+        self.assertEqual(record["sellwild_category_id"], 272)
         self.assertEqual(record["sellwild_condition_id"], 2)
         payload = native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, mens, [], "job")["sellwild"]
         self.assertEqual((payload["category_id"], payload["condition_id"]), (272, 2))
         boys = {**mens, "category_path": "", "department": "Boys", "title": "Columbia windbreaker jacket",
                 "marketplace_category_objects": {"sellwild": {"displayPath": ["Fashion", "Mens Clothing"]}}}
         payload = native._execute_payload("sellwild", "publish", {**record, "operation_id": "op"}, boys, [], "job")["sellwild"]
-        self.assertEqual((payload["category_id"], payload["condition_id"]), (246, 2))
+        self.assertEqual((payload["category_id"], payload["condition_id"]), (272, 2))
 
     def test_sellwild_needs_a_category_and_condition(self):
         for extra in ({"sellwild_category_id": 183, "sellwild_condition_id": 2}, {"sellwild_category_id": 272, "sellwild_condition_id": 9}):

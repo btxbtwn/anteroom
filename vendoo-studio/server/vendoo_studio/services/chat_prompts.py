@@ -68,12 +68,16 @@ def learned_fields_prompt(db: Session, conv_id: str) -> str:
     return f"\n\n--- Learned fields ---\n\n{text}"
 
 
-def current_listing_prompt(db: Session, conv_id: str) -> str:
+def current_listing_prompt(db: Session, conv_id: str, *, include_native_forms: bool = True) -> str:
     import json
     revisions = ListingRepo(db).get_revisions(conv_id)
     if not revisions or not isinstance(revisions[0].listing_json, dict):
         return ""
-    listing = revisions[0].listing_json
+    listing = {key: value for key, value in revisions[0].listing_json.items() if key != "_native_forms"}
+    contracts = revisions[0].listing_json.get("_native_forms")
+    from vendoo_studio.services.native_contract import prompt
+
+    native = prompt(contracts) if include_native_forms and isinstance(contracts, dict) else ""
     ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
     return (
         "\n\n--- Current listing ---\n"
@@ -84,6 +88,7 @@ def current_listing_prompt(db: Session, conv_id: str) -> str:
         "If the seller changes gender or category, replace department and category_path together. "
         "category_path names the last category in the branch, such as Men > Shirts > Tees. "
         "Do not leave a women's category on a men's item.\n"
+        + native
     )
 
 
@@ -389,6 +394,7 @@ def listing_generation_messages(
     conv_id: str,
     comps_text: str = "",
     photo_count: int = 0,
+    native_forms: dict | None = None,
 ) -> list[dict]:
     comps_block = f"\n\n--- Sold comps ---\n\n{comps_text}" if comps_text else ""
     photo_line = (
@@ -403,7 +409,7 @@ def listing_generation_messages(
     system_content = (
         f"{LISTING_INSTRUCTIONS}\n\n"
         f"--- Listing Rules ---\n\n{skill_rules}"
-        f"{learned_fields_prompt(db, conv_id)}"
+        f"{learned_fields_prompt(db, conv_id) if native_forms is None else ''}"
         "\n\n--- This item ---\n\n"
         f"{photo_line}"
         f"{item_details}\n\n"
@@ -411,11 +417,20 @@ def listing_generation_messages(
         f"{comps_block}"
         f"{seller_history_prompt(db, conv_id, analysis_text)}"
         f"{generation_evidence_prompt(db, conv_id)}"
-        f"{current_listing_prompt(db, conv_id)}"
-        f"{_empty_discovered_fields_prompt(db, conv_id, field_evidence)}"
-        f"{_live_category_fields_prompt(db, conv_id)}"
-        f"{_item_form_prompt(db, conv_id)}"
+        f"{current_listing_prompt(db, conv_id, include_native_forms=native_forms is None)}"
+        f"{_empty_discovered_fields_prompt(db, conv_id, field_evidence) if native_forms is None else ''}"
+        f"{_live_category_fields_prompt(db, conv_id) if native_forms is None else ''}"
+        f"{_item_form_prompt(db, conv_id) if native_forms is None else ''}"
     )
+    if native_forms is not None:
+        from vendoo_studio.services.native_contract import prompt
+        from vendoo_studio.services.form_schema import form_schema_prompt
+
+        revisions = ListingRepo(db).get_revisions(conv_id)
+        seed = revisions[0].listing_json if revisions else {}
+        system_content += form_schema_prompt(seed, exclude=native_forms)
+
+        system_content += prompt(native_forms)
     return [
         {"role": "system", "content": system_content},
         {

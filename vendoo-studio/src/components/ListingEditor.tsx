@@ -1713,7 +1713,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         { key: "size", label: "Size" },
         { key: "sku", label: "SKU" },
         { key: "zipCode", label: "Inventory location" },
-        { key: "category_path", label: "Category",
+        { key: "category_path", label: "Category *", required: true,
           help: "Applied to each marketplace form. Name the last category, such as Men > Shirts > Tees. Each marketplace form keeps its own category list." },
         { key: "department", label: "Department" },
         { key: "weight_oz", label: "Package Weight (oz)", type: "number" },
@@ -1737,7 +1737,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
     case "vinted":
       return [
         { key: "price", label: "Price", type: "number" },
-        { key: "vinted_specifics.category", label: "Category" },
+        { key: "vinted_specifics.category", label: "Category *", required: true },
         { key: "vinted_specifics.condition", label: "Condition" },
         { key: "vinted_specifics.brand", label: "Brand" },
         { key: "vinted_specifics.size", label: "Size" },

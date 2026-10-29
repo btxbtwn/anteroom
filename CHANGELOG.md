@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.496 — 2026-10-29
+## 0.1.497 — 2026-10-29
 
 - Search Vinted brands directly in the listing form and choose a matching brand.
+
+## 0.1.496 — 2026-10-29
+
+- Categories are required before listing. The listing agent uses the fields and choices from each loaded native form, checks item answers against photo or seller evidence, and keeps drafts incomplete when forms or required facts are missing.
 
 ## 0.1.495 — 2026-10-28
 

@@ -779,6 +779,25 @@ async def _list_or_delist(conv_id: str, body: ListRequest, db: Session, *, delis
         "item_id": item_id,
         "marketplaces": [str(mp).strip().lower() for mp in body.marketplaces if str(mp or "").strip()],
     }
+    if not op["marketplaces"]:
+        raise HTTPException(400, "Name the marketplaces before continuing.")
+    if not delist:
+        from vendoo_studio.services.category_fields import listing_category_ids
+        from vendoo_studio.services.direct_preflight import seeded_leaf
+
+        listing = ListingRepo(db).get_current(conv_id)
+        revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
+        categories = listing_category_ids(revision.listing_json if revision else {})
+        missing = [mp for mp in op["marketplaces"]
+                   if not categories.get(mp) or seeded_leaf(db, mp, categories[mp]) is False]
+        if missing:
+            raise HTTPException(400, "Choose a category before listing on " + ", ".join(missing) + ".")
+        from vendoo_studio.services.native_contract import gaps as native_form_gaps
+
+        for marketplace in op["marketplaces"]:
+            issues = native_form_gaps(revision.listing_json, marketplace)
+            if issues:
+                raise HTTPException(400, issues[0]["message"])
     log.warning("seller-triggered %s of %s to %s", action, item_id, op["marketplaces"])
     try:
         reply = await run_ops(SimpleNamespace(id=None), [op])
