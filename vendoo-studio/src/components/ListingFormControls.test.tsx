@@ -19,10 +19,15 @@ describe("marketplace choice controls", () => {
     expect(html).not.toContain('aria-invalid="true"');
   });
 
-  it("does not declare a value invalid only because a reference list omits it", () => {
-    const html = renderToStaticMarkup(<SearchableSelect id="condition" fieldKey="condition"
-      value="Pre-Owned - Good" options={["Pre-owned"]} choicesVerified={false} onChange={() => {}} />);
-    expect(html).toContain("outside these reference choices");
+  it.each([
+    { fieldKey: "condition", value: "Pre-Owned - Good", options: ["Pre-owned"] },
+    { fieldKey: "vinted_specifics.size", value: "M", options: ["S / 8", "M / 10", "L / 12"] },
+  ])("preserves $fieldKey without a warning when a reference list omits its saved value", ({ fieldKey, value, options }) => {
+    const html = renderToStaticMarkup(<SearchableSelect id={fieldKey} fieldKey={fieldKey}
+      value={value} options={options} choicesVerified={false} onChange={() => { throw new Error("Rendering must not save"); }} />);
+    expect(html).toContain(`value="${value}"`);
+    expect(html).not.toContain('role="alert"');
+    expect(html).not.toContain("aria-describedby");
     expect(html).not.toContain('aria-invalid="true"');
   });
 

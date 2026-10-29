@@ -23,6 +23,26 @@ const mercariRows = [
 ];
 
 describe("direct List gaps on the form", () => {
+  it("keeps an obsolete Depop field separate from its current native attribute", () => {
+    const rows = [{ key: "depop_specifics.attributes.occasion" }];
+    const message = "This field is not provided by the selected marketplace form.";
+    expect(rowForField("depop", "depop_specifics.occasion", rows)).toBe("");
+    expect([...gapsByField("depop", [{ field: "depop_specifics.occasion", message, blocking: true }], rows)]).toEqual([]);
+    expect(rowForField("depop", "depop_specifics.attributes.occasion", rows)).toBe(rows[0].key);
+    expect(rowForField("depop", "occasion", rows)).toBe(rows[0].key);
+  });
+
+  it("still maps eBay's encoded aspect paths onto its native aspect rows", () => {
+    expect(rowForField("ebay", "ebay_specifics.category_specifics.Size", [{ key: "ebay_specifics.Size" }]))
+      .toBe("ebay_specifics.Size");
+  });
+  it("keeps category warnings off the marketplace photo row", () => {
+    const rows = [{ key: "marketplace_photos.mercari" }, { key: "direct_category_ids.mercari" }];
+    const gap = { field: "direct_category_ids.mercari", message: "Reload the form.", blocking: true };
+    expect([...gapsByField("mercari", [gap], rows)]).toEqual([["direct_category_ids.mercari", [gap.message]]]);
+    expect([...gapsByField("mercari", [gap], [rows[0]])]).toEqual([]);
+    expect(rowForField("mercari", "photos", rows)).toBe("marketplace_photos.mercari");
+  });
   it.each(["ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"])(
     "%s displays field and photo messages without command metadata",
     (marketplace) => {
