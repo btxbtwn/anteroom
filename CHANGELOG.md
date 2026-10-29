@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.522 — 2026-10-29
+## 0.1.523 — 2026-10-29
 
 - Anteroom loads less code at startup, keeps listing search responsive while filtering, and reads inventory cover photos more efficiently.
+
+## 0.1.522 — 2026-10-29
+
+- eBay forms open when the saved condition ID and the condition name mean the same thing, instead of getting stuck asking you to reload their fields.
 
 ## 0.1.521 — 2026-10-29
 
