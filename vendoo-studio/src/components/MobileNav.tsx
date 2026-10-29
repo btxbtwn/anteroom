@@ -13,6 +13,7 @@ import {
 import { cn } from "../lib/utils";
 import { Sheet, SheetPopup, SheetTitle } from "./ui/sheet";
 import type { WorkspaceView } from "./workspaceCrumbs";
+import { pageLoaders } from "../app/pageLoaders";
 
 export type MobileNavTarget = "assistant" | "listings" | "sourcing" | "analytics" | "usage" | "settings" | "marketplaces" | "automations";
 
@@ -76,6 +77,8 @@ export function MobileNav({
                 data-active={active}
                 aria-current={active ? "page" : undefined}
                 className="flex min-h-12 w-full cursor-pointer items-center gap-3 rounded-xl px-3 text-left text-base font-medium text-foreground/85 outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:bg-accent data-[active=true]:text-foreground"
+                onPointerDown={() => { if (id !== "listings") void pageLoaders[id]().catch(() => {}); }}
+                onFocus={() => { if (id !== "listings") void pageLoaders[id]().catch(() => {}); }}
                 onClick={() => {
                   onOpenChange(false);
                   onNavigate(id);

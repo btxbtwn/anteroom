@@ -1,6 +1,6 @@
 import { ListingTemplatesDialog } from "../ListingTemplatesDialog";
 import { CopyListingDialog } from "../CopyListingDialog";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
@@ -16,12 +16,15 @@ import { mergeStatusDrafts, statusIsListed } from "../fillLog/marketplaces";
 import { inventoryStatus, listedFromImport, marketplaceStatusesFromDraft, partialSale, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 import { useVendooEnabled } from "../../vendooMode";
+import { prefetchListingReads } from "../../api/navigationQueries";
+import { preloadListingCode } from "../../app/pageLoaders";
+import { useNavigationIntent } from "../../lib/useNavigationIntent";
 
 function canHover() {
   return typeof window === "undefined" || !window.matchMedia || window.matchMedia("(hover: hover)").matches;
 }
 
-export function ListingRow({
+export const ListingRow = memo(function ListingRow({
   listing,
   selected,
   settled,
@@ -60,6 +63,11 @@ export function ListingRow({
   const status = inventoryStatus(listing);
   const partial = partialSale(listing, status);
   const queryClient = useQueryClient();
+  const navigationIntent = useNavigationIntent(() => {
+    if (selecting) return;
+    preloadListingCode();
+    void prefetchListingReads(queryClient, listing.id);
+  });
   const vendooOn = useVendooEnabled();
   const statusTitle = partial ? `Active · ${partial}`
     : status === "active" && String(listing.status || "draft") !== "active"
@@ -165,7 +173,7 @@ export function ListingRow({
     "inline-flex size-5.5 cursor-pointer items-center justify-center rounded-md text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40";
 
   return (
-    <div className="group/row relative mb-px" ref={itemRef}>
+    <div className="group/row relative mb-px" ref={itemRef} {...navigationIntent}>
       {/* Row look follows T3 Code's sidebar thread rows (MIT, (c) 2026 T3 Tools Inc.). */}
       <div
         data-active={selected}
@@ -331,4 +339,4 @@ export function ListingRow({
       {copyOpen ? <CopyListingDialog conversationId={listing.id} onClose={() => setCopyOpen(false)} onCopied={(id) => { setCopyOpen(false); onSelect(id); }} /> : null}
     </div>
   );
-}
+});

@@ -118,6 +118,10 @@ def removed_marketplaces(notes: dict, anteroom_urls: dict[str, str]) -> list[str
     for marketplace in MARKETPLACES:
         mark = marks.get(marketplace) if isinstance(marks.get(marketplace), dict) else {}
         record = delists.get(marketplace) if isinstance(delists.get(marketplace), dict) else {}
+        # Inventory reads call this for every item. Only removal records need
+        # URL resolution to check whether a newer listing superseded them.
+        if mark.get("state") != "not_listed" and record.get("state") != "deleted":
+            continue
         url, _source = current_listing(marketplace, anteroom_urls.get(marketplace), urls.get(marketplace), mark)
         item_id = listing_id(marketplace, url)
         if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):

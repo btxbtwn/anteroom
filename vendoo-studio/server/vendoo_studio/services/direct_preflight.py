@@ -144,14 +144,35 @@ def gaps(snapshot: dict, marketplace: str, context: Context | None = None) -> li
     from vendoo_studio.services.native_contract import gaps as native_form_gaps
 
     found.extend(native_form_gaps(snapshot, marketplace))
-    seen: set[tuple[str, str]] = set()
+    # One missing answer is said once. The module checks and the captured form
+    # both name the same field, and the form's own row is the less informative
+    # way to say it, so a field keeps its first message after the blocking ones
+    # and the specific ones are preferred over "Required field is empty."
+    seen: set[str] = set()
     unique = []
-    for item in sorted(found, key=lambda item: not item["blocking"]):
-        key = (item["field"], item["message"])
+    for item in sorted(found, key=lambda item: (not item["blocking"], _generic(item["message"]))):
+        key = _same_answer(item["field"])
         if key not in seen:
             seen.add(key)
             unique.append(item)
     return unique
+
+
+# A marketplace form's copy of a shared field follows General until the seller
+# edits it on that form, so both paths name one answer.
+_FOLLOWED = frozenset({"title", "description", "brand", "department"})
+
+
+def _same_answer(field: str) -> str:
+    """The key two reports of one missing answer share."""
+    head, _, leaf = str(field).rpartition(".")
+    if leaf in _FOLLOWED and head.endswith("_specifics"):
+        return leaf
+    return str(field)
+
+
+def _generic(message: str) -> bool:
+    return "Required field is empty" in str(message)
 
 
 def blocking(found: list[dict]) -> list[dict]:

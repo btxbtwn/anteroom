@@ -6,9 +6,23 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.526 — 2026-10-29
+## 0.1.529 — 2026-10-29
 
 - Vinted’s category picker can open a separate sign-in window in Anteroom to load categories and search brands without Chrome. This private sign-in ends when Anteroom closes.
+
+## 0.1.528 — 2026-10-29
+
+- A saved marketplace form stops asking you to reload its fields when nothing about the listing changed. An answer the listing left empty, a setting switched off, and an untouched dropdown were each being read as a change, which held back drafts on eBay, Mercari, Poshmark and Depop.
+- An empty answer is reported once. A marketplace's own check and its form no longer both explain the same missing price, description or condition, and a policy taken from your account says so instead of reading as an empty required field.
+
+## 0.1.527 — 2026-10-29
+
+- Listings, chats and page buttons prepare their next screen as you hover, focus or touch them, so opening a saved conversation can show it immediately. Listing search and selection redraw fewer rows, and opening an item no longer reads all its saved revisions.
+
+## 0.1.526 — 2026-10-29
+
+- Marketplace forms stop flagging fields that are already answered. A row the listing filled under another spelling, or that eBay fills from the listing's own brand, size, colour and department, no longer shows an error, so eBay, Poshmark, Mercari and Sellwild drafts that were ready to list stop being held back.
+- The start bid, the return policy and fields a marketplace form no longer has are no longer treated as blocking. They are shown as a note instead, like the other details the marketplace fills in when you list.
 
 ## 0.1.525 — 2026-10-29
 

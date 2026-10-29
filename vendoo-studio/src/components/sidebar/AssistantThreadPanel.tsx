@@ -6,6 +6,22 @@ import type { AssistantThread } from "../../api/assistant";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { cn } from "../../lib/utils";
 import { SIDEBAR_ROW } from "./sidebarStyles";
+import { prefetchAssistantThread } from "../../api/navigationQueries";
+import { useNavigationIntent } from "../../lib/useNavigationIntent";
+
+function ThreadButton({ thread, selected, onPick }: {
+  thread: AssistantThread; selected: boolean; onPick: (id: string) => void;
+}) {
+  const client = useQueryClient();
+  const intent = useNavigationIntent(() => { void prefetchAssistantThread(client, thread.id); });
+  return (
+    <button type="button" className={cn(SIDEBAR_ROW, "min-w-0 flex-1")}
+      data-active={selected} aria-current={selected ? "true" : undefined}
+      {...intent} onClick={() => { void prefetchAssistantThread(client, thread.id); onPick(thread.id); }}>
+      <span className="truncate">{thread.title}</span>
+    </button>
+  );
+}
 
 const SEARCH_CLASS =
   "flex h-8 min-w-0 flex-1 cursor-text items-center gap-2 rounded-[var(--control-radius)] px-2 text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover focus-within:bg-sidebar-row-hover";
@@ -113,15 +129,7 @@ export function AssistantThreadPanel({
         ) : (
           shown.map((thread) => (
             <div key={thread.id} className="group flex items-center gap-0.5">
-              <button
-                type="button"
-                className={cn(SIDEBAR_ROW, "min-w-0 flex-1")}
-                data-active={selectedId === thread.id}
-                aria-current={selectedId === thread.id ? "true" : undefined}
-                onClick={() => pick(thread.id)}
-              >
-                <span className="truncate">{thread.title}</span>
-              </button>
+              <ThreadButton thread={thread} selected={selectedId === thread.id} onPick={pick} />
               <button
                 type="button"
                 className="inline-flex size-7 max-[900px]:size-11 shrink-0 cursor-pointer items-center justify-center rounded-[var(--control-radius)] text-sidebar-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 group-hover:opacity-100 max-[900px]:opacity-100"
