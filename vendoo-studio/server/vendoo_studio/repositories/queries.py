@@ -215,21 +215,23 @@ class ConversationRepo:
 
     def cover_photos(self) -> dict[str, tuple[str, str | None]]:
         """Map each conversation to its first photo's id and checksum, for sidebar thumbnails."""
-        rows = (
-            self.db.query(Photo.conversation_id, Photo.id, Photo.checksum)
-            .order_by(Photo.conversation_id, Photo.display_order, Photo.created_at)
-            .all()
-        )
-        covers: dict[str, tuple[str, str | None]] = {}
-        for conv_id, photo_id, checksum in rows:
-            covers.setdefault(conv_id, (photo_id, checksum))
-        return covers
+        ranked = self.db.query(
+            Photo.conversation_id, Photo.id, Photo.checksum,
+            func.row_number().over(
+                partition_by=Photo.conversation_id,
+                order_by=(Photo.display_order, Photo.created_at, Photo.id),
+            ).label("position"),
+        ).subquery()
+        rows = self.db.query(
+            ranked.c.conversation_id, ranked.c.id, ranked.c.checksum,
+        ).filter(ranked.c.position == 1).all()
+        return {conv_id: (photo_id, checksum) for conv_id, photo_id, checksum in rows}
 
     def cover_photo(self, conv_id: str) -> tuple[str, str | None] | None:
         row = (
             self.db.query(Photo.id, Photo.checksum)
             .filter(Photo.conversation_id == conv_id)
-            .order_by(Photo.display_order, Photo.created_at)
+            .order_by(Photo.display_order, Photo.created_at, Photo.id)
             .first()
         )
         return (row[0], row[1]) if row else None

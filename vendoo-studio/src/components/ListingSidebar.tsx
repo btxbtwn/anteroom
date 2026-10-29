@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { mergeRegenerateIds } from "../bulkRegenerate";
@@ -127,7 +127,9 @@ export function ListingSidebar({
     return map;
   }, [jobs]);
 
-  const needle = listingQuery.trim().toLowerCase();
+  // Keep the controlled search input responsive while filtering large inventories.
+  const deferredQuery = useDeferredValue(listingQuery);
+  const needle = deferredQuery.trim().toLowerCase();
   const { activeListings, settledListings } = useMemo(() => {
     const visible = filterListings(conversations || [], needle, filters);
     const active = visible.filter((listing) => !listing.settled_at).sort((left, right) => activeAnchorMs(right) - activeAnchorMs(left));
