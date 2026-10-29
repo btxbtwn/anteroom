@@ -1136,7 +1136,7 @@ export function StructuredEditor({
   const fullWidth = (f: EditorField) => {
     const leaf = fieldLeaf(f.key);
     return leaf === "title" || leaf === "description" || f.key === "category_path" || leaf === "categorypath"
-      || f.label === "Category" || ["textarea", "inventory", "variations"].includes(f.type || "");
+      || f.label === "Category" || ["textarea", "inventory", "variations", "photos", "note"].includes(f.type || "");
   };
   const revealButtons = (title: string, rows: EditorField[], include: (name: string) => boolean) =>
     [...new Set(rows.flatMap((f) => (f.reveal && include(f.reveal) ? [f.reveal] : [])))].map((reveal) => {
@@ -1173,8 +1173,8 @@ export function StructuredEditor({
           <>
             {/* "See … options" sits at the top of eBay's section; "Show more" sits under the fields. */}
             {revealButtons(section.title, section.fields, (name) => name.startsWith("See "))}
-            {/* A marketplace's own page layout uses a twelve-part row; the general form spreads out when wide. */}
-            <div className={cn("grid min-w-0 gap-x-4 gap-y-5 max-[900px]:grid-cols-1", pageLayout ? "grid-cols-12" : "grid-cols-2 @4xl:grid-cols-3")}>
+            {/* Pair short fields when the editor itself has room, including beside a sidebar. */}
+            <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 @xl:grid-cols-2">
               {pageLayout && section.fields[0]?.sectionHelp && <p className="col-span-full text-muted-foreground text-xs">{section.fields[0].sectionHelp}</p>}
               {visible.map((f, index) => {
                 const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));
@@ -1187,9 +1187,7 @@ export function StructuredEditor({
                     {f.groupHelp && <p className="mt-0.5 text-muted-foreground text-xs">{f.groupHelp}</p>}
                   </div>
                 )}
-                <div className={cn("min-w-0", pageLayout
-                  ? ({ quarter: "col-span-3", third: "col-span-4", half: "col-span-6" } as Record<string, string>)[f.width ?? ""] ?? "col-span-full"
-                  : fullWidth(f) && "col-span-full", f.controlWidth === "half" && "sm:max-w-[50%]")}>
+                <div className={cn("min-w-0", fullWidth(f) && "col-span-full")}>
                   {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.hashtagMax != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-1.5">
@@ -1239,7 +1237,8 @@ export function StructuredEditor({
         if (!section.title) return <section key={section.id} className="min-w-0 border-b py-4 first:pt-1 last:border-b-0">{rows}</section>;
         return (
           <InspectorSection
-            key={section.id}
+            key={`${tab}-${section.id}`}
+            className="gap-3 py-4"
             title={section.title}
             titleId={`listing-section-${tab}-${section.id}`}
             meta={section.id === "listing" || !counted.length ? null : `${filled} of ${counted.length} filled`}
