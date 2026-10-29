@@ -36,6 +36,7 @@ import { toastManager } from "./ui/toast";
 import { Radio, RadioGroup } from "./ui/radio-group";
 import { Toggle } from "./ui/toggle";
 import { RegenerateListingButton } from "./ClearListingButton";
+import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
 import { MarketplacesLayout, useReportFieldsShown } from "./MarketplacesSection";
 import { confirmDialog } from "../ui/confirmDialog";
 import { useChatBusy } from "./chat/liveChatStore";
@@ -586,6 +587,7 @@ export function ListingEditor({
             revisionId={data?.current_revision_id}
             tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
             target={fieldTarget}
+            onAskChat={askChat}
             disabled={generating || updateMutation.isPending}
             onChange={(updated) => updateMutation.mutate(updated)}
           />
@@ -692,6 +694,7 @@ export function StructuredEditor({
   onChange,
   target,
   disabled,
+  onAskChat,
 }: {
   convId: string;
   listing: ListingData;
@@ -700,6 +703,7 @@ export function StructuredEditor({
   onChange: (v: ListingData) => void;
   target: { field: string; sequence: number } | null;
   disabled?: boolean;
+  onAskChat?: (text: string) => void;
 }) {
   const formRef = React.useRef<HTMLDivElement>(null);
   const nativeTab = DIRECT_FORM_MARKETS.has(tab);
@@ -942,6 +946,7 @@ export function StructuredEditor({
   const viewFields = fields.map((field) => presentNativeField(field, viewContext));
   const renderedFields = viewFields.filter((field) => nativeFieldVisible(field, viewContext));
   const gaps = nativeTab ? preflight.data?.marketplaces?.[tab as NativeMarketplace]?.gaps ?? [] : [];
+  const shownMessages = React.useContext(MarketplaceMessagesContext);
   const fieldWarnings = gapsByField(tab, gaps, renderedFields);
   // List's photo answer belongs with the photos, on the control that sends them.
   const photoWarnings = gapsByField(tab, gaps, [{ key: `marketplace_photos.${tab}` }]).get(`marketplace_photos.${tab}`) ?? [];
@@ -950,7 +955,7 @@ export function StructuredEditor({
   useReportFieldsShown(tab, gaps.filter((gap) => fieldWarnings.has(rowForField(tab, String(gap.field || ""), renderedFields))
     || (photoWarnings.length > 0 && String(gap.field || "") === "photos")).map((gap) => String(gap.field || "")));
   const formNotes = nativeTab
-    ? [...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing)]
+    ? uniqueMarketplaceMessages([...(nativeQuery.data?.notes ?? []), ...nativeFormNotes(tab, listing)], [...shownMessages, ...gaps.map((gap) => gap.message)])
     : [];
   // A marketplace form that names its headings keeps them, with its order and row layout.
   const pageLayout = nativeTab && renderedFields.some((field) => field.section);
@@ -989,7 +994,7 @@ export function StructuredEditor({
     // The marketplace's own photo area, where its page has it: this form's pick, order and limit.
     if (f.type === "photos") {
       return <MarketplaceMedia convId={convId} marketplace={tab} listing={listing} disabled={disabled} onChange={onChange}
-        warnings={photoWarnings} page={{ hint: f.help, slots: f.slotLabels, accept: f.accept }} />;
+        warnings={uniqueMarketplaceMessages(photoWarnings, shownMessages)} page={{ hint: f.help, slots: f.slotLabels, accept: f.accept }} />;
     }
     if (f.type === "inventory") {
       const stored = resolvedEditorValue(f, listing);
@@ -1156,6 +1161,16 @@ export function StructuredEditor({
     <div ref={formRef} key={tab} className="@container flex flex-col">
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
+      {formNotes.length > 0 && onAskChat && <div className="pb-2">
+        <Button size="xs" variant="outline" disabled={disabled}
+          title="Chat fixes the fields in this listing. It does not list the item."
+          onClick={() => onAskChat([
+            `Review these ${marketplaceName(tab)} form messages and fix the affected fields in this listing:`,
+            ...formNotes,
+            "Save the corrections in this listing. Do not list or publish it; I will press List after reviewing the changes.",
+          ].join("\n"))}>Ask chat</Button>
+      </div>}
+
       {sections.map((section) => {
         // Photos are counted on the photo area. A note is page text, and Smart Sell is a badge on Listing Price.
         const counted = section.fields.filter((f) => f.type !== "photos" && f.type !== "note" && f.type !== "badge");
@@ -1217,7 +1232,7 @@ export function StructuredEditor({
                   ))}
                   {control(f)}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
-                  {(fieldWarnings.get(f.key) ?? []).map((message) =>
+                  {uniqueMarketplaceMessages(f.type === "photos" ? [] : fieldWarnings.get(f.key) ?? [], shownMessages).map((message) =>
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
                   {f.maxLength != null && (f.multi ? formFieldValues(local[f.key], f.options) : [formFieldText(local[f.key])]).some((value) => value.length > f.maxLength!) &&
                     <p role="alert" className="mt-1 text-xs text-warning-foreground">Each value allows at most {f.maxLength} characters. Shorten the saved value.</p>}
