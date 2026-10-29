@@ -12,11 +12,17 @@ function readForms(marketplace, listings) {
     'build = {"depop": depop_form.form, "poshmark": poshmark_form.form}[sys.argv[1]]',
     'print(json.dumps([build(listing) for listing in json.load(sys.stdin)]))',
   ].join('\n');
-  return JSON.parse(execFileSync(python, ['-c', script, marketplace], {
-    cwd: studio,
-    env: { ...process.env, PYTHONPATH: [path.join(studio, 'server'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
-    input: JSON.stringify(listings), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-  }));
+  // Each form can include a complete brand catalog. Bound the subprocess
+  // output per batch instead of overflowing its buffer on a full sweep.
+  const forms = [];
+  for (let offset = 0; offset < listings.length; offset += 10) {
+    forms.push(...JSON.parse(execFileSync(python, ['-c', script, marketplace], {
+      cwd: studio,
+      env: { ...process.env, PYTHONPATH: [path.join(studio, 'server'), process.env.PYTHONPATH].filter(Boolean).join(path.delimiter) },
+      input: JSON.stringify(listings.slice(offset, offset + 10)), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+    })));
+  }
+  return forms;
 }
 
 module.exports = { readForms };

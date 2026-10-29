@@ -122,8 +122,22 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
 
 def prompt(contracts: dict) -> str:
     # Presentation metadata belongs to the editor, not the generation context.
+    def schema(row, contract):
+        definition = {key: value for key, value in row.items() if key in _SCHEMA_KEYS}
+        if path_of(row).endswith("_specifics.brand") and len(row.get("options") or []) > 300:
+            # Brand catalogs contain tens of thousands of unrelated names. Keep
+            # the complete editor/validation contract, but only offer the known
+            # brand in generation context; a brand choice is never evidence.
+            brand = str((contract.get("inputs") or {}).get("brand") or "").strip().casefold()
+            options = [label for label in row["options"] if label.casefold() == brand]
+            definition["options"] = options
+            if "option_values" in row:
+                definition["option_values"] = {label: row["option_values"][label] for label in options
+                                               if label in row["option_values"]}
+        return definition
+
     contracts = {market: {**contract, "fields": [
-        {key: value for key, value in row.items() if key in _SCHEMA_KEYS}
+        schema(row, contract)
         for row in contract.get("fields") or []]} for market, contract in contracts.items()}
     return (
         "\n\n--- Authoritative native marketplace forms ---\n"

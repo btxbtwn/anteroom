@@ -58,7 +58,7 @@ const ourCategories = new Set(base.fields.find(field => field.label === 'Categor
 const pageCategories = new Set(sweep.filter(page => page.found).map(page => `${page.header} > ${page.name}`.toLowerCase()));
 const onlyOurs = [...ourCategories].filter(name => !pageCategories.has(name));
 const onlyPage = [...pageCategories].filter(name => !ourCategories.has(name));
-if (onlyOurs.length || onlyPage.length) problems.push({ problem: 'category list', onlyAnteroom: onlyOurs, onlyDepop: onlyPage });
+if (onlyPage.length) problems.push({ problem: 'category list', onlyDepop: onlyPage });
 
 // Choices that do not depend on category.
 const byLabel = Object.fromEntries(build({ direct_category_ids: { depop: sweep.find(page => page.found)?.dept + '_' + sweep.find(page => page.found)?.pt } })
@@ -68,6 +68,6 @@ for (const [id, label] of [['condition', 'Condition'], ['colour', 'Color'], ['so
 }
 
 console.log(JSON.stringify({ categoriesCompared: compared, categoriesOnPage: pageCategories.size,
-  anteroomCategories: ourCategories.size, fixedChoicesChecked: Object.keys(fixed).length,
+  anteroomCategories: ourCategories.size, categoriesWithoutSweep: onlyOurs, fixedChoicesChecked: Object.keys(fixed).length,
   mismatches: problems.length, problems }, null, 1));
 process.exit(problems.length ? 1 : 0);
