@@ -61,8 +61,9 @@ class ListingPromptOrderTest(unittest.TestCase):
         self.assertNotIn("Pattern", section)
 
     def test_prompt_requires_vendoo_general_color_options(self):
-        self.assertIn("Colors must be exact Vendoo General dropdown values", chat_prompts.LISTING_INSTRUCTIONS)
-        self.assertIn("Use Blue for navy", chat_prompts.LISTING_INSTRUCTIONS)
+        rules = chat_prompts.load_skill_rules("navy tee", self.db)
+        self.assertIn("MUST be an exact Vendoo General dropdown value", rules)
+        self.assertIn("Navy → **Blue**", rules)
 
     def test_first_generation_receives_required_flags_and_exact_allowed_options(self):
         ListingRepo(self.db).save_revision(self.conv.id, {"category_path": "Clothing > Tops"}, source="category_analysis")

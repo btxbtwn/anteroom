@@ -130,6 +130,7 @@ async def run_listing_generation(
         stage_started = now
 
     timing_saved = False
+    timing_id: str | None = None
 
     def save_timings(outcome: str) -> str | None:
         """Record the run once: a failure after it was saved as done is not a second run."""
@@ -336,7 +337,7 @@ async def run_listing_generation(
             time.monotonic() - run_started,
             " ".join(f"{stage}={seconds}s" for stage, seconds in timings.items()),
         )
-        timing_id = save_timings("done")
+        timing_id = save_timings("preparing")
         stream_repo.update_status(conv_id, "draft")
         run.publish("data: [DONE]\n\n")
         if listing:
@@ -362,6 +363,8 @@ async def run_listing_generation(
             if not task.done():
                 task.cancel()
         save_timings("cancelled")
+        if timing_id is not None:
+            generation_timing.add_stages(timing_id, timings, total_sec=time.monotonic() - run_started, outcome="cancelled")
         # Clear/Regenerate discarded this run; saving now would write the old
         # listing into the wiped conversation.
         if (
@@ -384,6 +387,8 @@ async def run_listing_generation(
         raise
     except Exception as e:
         save_timings("failed")
+        if timing_id is not None:
+            generation_timing.add_stages(timing_id, timings, total_sec=time.monotonic() - run_started, outcome="failed")
         message = str(e).strip() or type(e).__name__
         if isinstance(e, TimeoutError) and not str(e).strip():
             stage = (run.last_status or "").strip()
@@ -436,6 +441,7 @@ async def _finish_generation_background(
     )
     model_slots.bind()
     finish_started = time.monotonic()
+    outcome = "superseded"
     stages: dict[str, float] = {}
     db = SessionLocal()
     repo = ConversationRepo(db)
@@ -473,6 +479,9 @@ async def _finish_generation_background(
         native = await timed("native_fields", fill_native())
         if native is not None:
             current = native
+        from vendoo_studio.services.listing_generate import _validation_blockers
+
+        outcome = "incomplete" if _validation_blockers(copy.deepcopy(current)) else "done"
         # Posted only now: said before the fill, it reported fields as empty
         # and "Send when ready" while chat was still filling them.
         repo.add_message(
@@ -485,6 +494,7 @@ async def _finish_generation_background(
     except RevisionConflict:
         log.info("discarding stale generation finish for %s", conv_id)
     except Exception:
+        outcome = "failed"
         log.exception("post-generate finish failed for %s", conv_id)
         try:
             repo.add_message(
@@ -499,5 +509,5 @@ async def _finish_generation_background(
     finally:
         stages["finish"] = round(time.monotonic() - finish_started, 2)
         if run_started is not None:
-            generation_timing.add_stages(timing_id, stages, total_sec=time.monotonic() - run_started)
+            generation_timing.add_stages(timing_id, stages, total_sec=time.monotonic() - run_started, outcome=outcome)
         db.close()
