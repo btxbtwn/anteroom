@@ -145,7 +145,7 @@ function marketplaceStopped(marketplace) {
 //   guard: false for cleanup that must run after a cancel or the deadline
 // Returns { status, data, headers }.
 async function marketplaceFetch(url, { marketplace, step, method = 'GET', headers = {}, body, credentials = 'include',
-  deadline, timeoutMs = 25000, retry = method === 'GET', expect = 'json', guard = true } = {}) {
+  deadline, timeoutMs = 25000, retry = method === 'GET', expect = 'json', guard = true, cache } = {}) {
   const label = marketplaceLabel(marketplace);
   const write = !['GET', 'HEAD'].includes(method);
   await ensureMarketplaceRequestContext();
@@ -160,6 +160,7 @@ async function marketplaceFetch(url, { marketplace, step, method = 'GET', header
     let failure = null;
     try {
       response = await fetch(url, { method, headers, credentials, ...(body === undefined ? {} : { body }),
+        ...(cache ? { cache } : {}),
         signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0] });
     } catch (error) {
       const cancelled = operation?.cancelled === true;
