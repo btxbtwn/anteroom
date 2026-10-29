@@ -327,10 +327,11 @@ async function depopBearer() {
 }
 
 // One signed-in read for the seller's own shipping options.
-async function depopAccountRead(path, what, deadline) {
+async function depopAccountRead(path, what, deadline, timeoutMs) {
+  if (timeoutMs) deadline = Math.min(deadline, Date.now() + timeoutMs);
   return await marketplaceCatalogRead('depop', what, async () => {
     const { data } = await marketplaceFetch(`${DEPOP_WEBAPI}${path}`, { marketplace: 'depop', step: 'catalog', credentials: 'omit',
-      headers: { Accept: 'application/json', Authorization: await depopBearer() }, deadline });
+      headers: { Accept: 'application/json', Authorization: await depopBearer() }, deadline, ...(timeoutMs ? { timeoutMs } : {}) });
     return data;
   }, { signedIn: true });
 }
