@@ -107,6 +107,27 @@ class NativeEditorTest(unittest.TestCase):
                 self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
                 self.bridge.assert_not_called()
 
+    def test_saved_form_survives_the_category_path_posting_prepares(self):
+        from vendoo_studio.services import native_contract
+
+        snapshot = copy.deepcopy(self.listing)
+        snapshot.update(title="Chase Authentics XL Y2K Tony Stewart #20 NASCAR T-Shirt Black Straight Cut",
+                        category_path="Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts & T-Shirts",
+                        ebay_specifics={"condition": "3000"})
+        form = {"marketplace": "ebay", "native": True, "known": True, "page_labels": True, "category_id": "15687",
+                "fields": [
+                    {"path": "ebay_specifics.condition", "label": "Item condition", "options": ["Pre-Owned - Good"],
+                     "option_values": {"Pre-Owned - Good": "3000"}},
+                    {"path": "ebay_specifics.brand", "label": "Brand", "options": ["Nike"],
+                     "option_values": {"Nike": "Nike"}},
+                ]}
+        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"ebay": form}, ["ebay"])
+        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        answer = self.client.get(f"{self.url}/ebay/form?revision_id={revision.id}")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(answer.json()["marketplace"], "ebay")
+        self.bridge.assert_not_called()
+
     def test_saved_form_with_changed_category_does_not_show_old_choices_or_contact_chrome(self):
         from vendoo_studio.services import native_contract
 

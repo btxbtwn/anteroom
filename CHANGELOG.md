@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.516 — 2026-10-29
+## 0.1.517 — 2026-10-29
 
 - Mercari’s categories, brands, conditions and grouped sizes now load in Anteroom with Chrome closed. Shipping labels and current prices load directly from Mercari after you answer the package questions.
+
+## 0.1.516 — 2026-10-29
+
+- Marketplace forms open again for drafts whose category path was saved before posting normalizes it. Saved forms no longer look stale, and their fields are not cleared by that normalization.
 
 ## 0.1.515 — 2026-10-29
 

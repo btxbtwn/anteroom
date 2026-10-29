@@ -41,6 +41,18 @@ def item_field(row: dict, market: str) -> bool:
             and row.get("input_type") not in {"note", "badge", "photos", "inventory", "variations"})
 
 
+def _category_path(path, listing: dict):
+    """The category path posting prepares: the shared path mapped to its selectable leaf."""
+    if not isinstance(path, str) or not path.strip():
+        return path
+    try:
+        from vendoo_studio.services.registry import map_vendoo_category_path
+
+        return map_vendoo_category_path(path, listing)
+    except Exception:  # noqa: BLE001 - an unmapped path is still the choice it names
+        return path
+
+
 def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     """Choices that change the fields or options returned by the native builder."""
     paths = {"category_path", "brand", "condition"}
@@ -72,7 +84,37 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     result["condition"] = condition[1] if condition is not None else ListingSchema.validate_condition(listing.get("condition"))
     result["category_id"] = str(get_path(listing, f"direct_category_ids.{market}")
                                 or get_path(listing, f"marketplace_category_ids.{market}") or "")
+    # Posting maps the shared path to the leaf its category picker names. Compare
+    # the mapped path, so a path recorded before preparation is not a change.
+    result["category_path"] = _category_path(result.get("category_path"), listing)
     return result
+
+
+def inputs_match(listing: dict, market: str, fields: list[dict], stored) -> bool:
+    """True when ``stored`` still names this listing's current controlling choices.
+
+    A contract recorded before category paths were compared in their prepared
+    form keeps the raw shared path. Map that stored path too, so upgrading does
+    not make every saved form look stale.
+    """
+    current = inputs(listing, market, fields)
+    if current == stored:
+        return True
+    if not isinstance(stored, dict):
+        return False
+    canonical = copy.deepcopy(stored)
+    if "category_path" in canonical:
+        canonical["category_path"] = _category_path(canonical.get("category_path"), listing)
+    return current == canonical
+
+
+def changed_inputs(listing: dict, market: str, fields: list[dict], stored) -> set[str]:
+    """Controlling choices that differ from the saved contract's, in current terms."""
+    current = inputs(listing, market, fields)
+    previous = copy.deepcopy(stored) if isinstance(stored, dict) else {}
+    if "category_path" in previous:
+        previous["category_path"] = _category_path(previous.get("category_path"), listing)
+    return {path for path, value in current.items() if previous.get(path) != value}
 
 
 def capture(listing: dict, forms: dict[str, dict], markets) -> dict:
@@ -100,7 +142,7 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
     if not isinstance(contract, dict) or contract.get("unavailable") or "page_labels" not in contract:
         return None
     fields = contract.get("fields") or []
-    if not fields or inputs(listing, market, fields) != contract.get("inputs"):
+    if not fields or not inputs_match(listing, market, fields, contract.get("inputs")):
         return None
     values = listing if values is None else values
     rows = []
@@ -308,7 +350,7 @@ def gaps(listing: dict, market: str) -> list[dict]:
     if contract.get("unavailable"):
         return [gap(f"{market}_specifics", "The marketplace form could not be loaded. Reload its fields before listing.")]
     fields = contract.get("fields") or []
-    if inputs(listing, market, fields) != contract.get("inputs"):
+    if not inputs_match(listing, market, fields, contract.get("inputs")):
         return [gap(f"direct_category_ids.{market}", "The form's category or dependent choices changed. Reload its fields before listing.")]
     found = []
     rows = {path_of(row): row for row in fields}
@@ -339,8 +381,7 @@ def invalidate_dependents(previous: dict, listing: dict) -> None:
     """Clear carried answers when a category or a declared controlling field changes."""
     for market, contract in (previous.get(KEY) or {}).items():
         fields = contract.get("fields") or []
-        old_inputs = contract.get("inputs") or {}
-        changed = {path for path, value in inputs(listing, market, fields).items() if old_inputs.get(path) != value}
+        changed = changed_inputs(listing, market, fields, contract.get("inputs"))
         if not changed:
             continue
         category_changed = any("categor" in path.casefold() for path in changed)
