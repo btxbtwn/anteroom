@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.506 — 2026-10-29
+
+- Poshmark's categories and size groups load in Anteroom with Chrome closed. Saved shipping-discount choices are retained; unavailable account choices are identified rather than guessed.
+- Captured Depop categories, fields and dropdown choices load directly in Anteroom with Chrome closed. Uncaptured categories stay incomplete rather than using guessed fields.
+
+## 0.1.505 — 2026-10-29
+
+- Manage saved labels in Settings → Inventory: add, delete, restore and choose colors. Remove a selected label with its ×, and find older inventory labels in the dropdown beyond the first twelve suggestions. Deleting a suggestion keeps labels assigned to items.
+
 ## 0.1.504 — 2026-10-29
 
 - Reopen saved marketplace forms with Chrome closed, keeping their dropdown choices and layout. Changed categories still need fresh choices before listing.

@@ -19,12 +19,13 @@ MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
 SALE_FIELDS = re.compile(
     r"price|ship|parcel|package|quantity|sku|categor|worldwide|offer|format|duration|store|inventor"
     r"|variation|zip|location|condition|title|description|brand|hashtag|tags|charity|donation"
+    r"|availab|smartsell|boost|sellernotes"
 )
 _SCHEMA_KEYS = ("path", "key", "label", "required", "multi", "selection_only", "options", "option_values",
                 "max_values", "max_length", "min_value", "max_value", "step", "input_type", "locked",
-                "category_specific", "clears", "value_constraints", "help")
+                "category_specific", "clears", "value_constraints", "help", "inventory_groups", "inventory_system")
 _EDITOR_KEYS = ("section", "section_help", "width", "control_width", "presentation", "placeholder", "prefix", "suffix", "counter",
-                "label_hidden", "group", "group_help", "reveal", "cascade", "inventory_groups",
+                "label_hidden", "group", "group_help", "reveal", "cascade",
                 "option_groups", "option_help", "option_amounts", "slot_labels", "accept", "hashtag_max",
                 "save_as_default")
 
@@ -53,7 +54,10 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     if market == "ebay":
         paths.update(("ebay_specifics.listingFormat", "ebay_specifics.sizeType", "sizeType"))
     if market == "poshmark":
-        paths.update(("poshmark_specifics.sizeSetId", "poshmark_specifics.multiItem"))
+        paths.update(("poshmark_specifics.sizeSetId", "poshmark_specifics.multiItem", "poshmark_specifics.sizeSystem"))
+        paths.update(("poshmark_specifics.smartSell.enabled", "poshmark_specifics.availability"))
+    if market == "depop":
+        paths.add("depop_specifics.worldwideShipping.enabled")
     if market == "sellwild":
         paths.add("sellwild_specifics.nativeCategoryId")
     result = {path: copy.deepcopy(get_path(listing, path)) for path in sorted(paths)}
@@ -147,6 +151,30 @@ def value_error(row: dict, value) -> str | None:
     values = value if many else [value]
     if row.get("max_values") and len(values) > int(row["max_values"]):
         return f"Choose at most {row['max_values']} values."
+    if row.get("input_type") == "inventory" and "inventory_groups" in row:
+        if not isinstance(value, list):
+            return "Use a list of sizes and quantities."
+        groups = {str(group["id"]): group for group in row.get("inventory_groups") or []}
+        seen = set()
+        for item in value:
+            if not isinstance(item, dict):
+                return "Use a size and quantity for each inventory row."
+            group = groups.get(str(item.get("sizeSetId") or ""))
+            size_id = str(item.get("sizeId") or "").strip()
+            if not group or not size_id:
+                return "Choose a size group and size for every inventory row."
+            sizes = (group.get("systems") or {}).get(row.get("inventory_system") or "us", group.get("sizes") or [])
+            if group["id"] != "custom" and size_id not in {str(size["id"]) for size in sizes}:
+                return "Choose a size from this category, group and size system."
+            if size_id in seen:
+                return "Use each size only once in inventory."
+            seen.add(size_id)
+            error = value_error({"required": True, "input_type": "number", "min_value": 1, "step": 1,
+                                 "max_value": 9007199254740991}, item.get("quantity"))
+            if error:
+                return "Inventory quantities must be positive whole numbers."
+            if len(str(item.get("sku") or "")) > 50:
+                return "Inventory SKUs must be at most 50 characters."
     if row.get("selection_only"):
         allowed = {str(item) for item in row.get("options") or []}
         allowed.update(str(item) for item in (row.get("option_values") or {}).values())

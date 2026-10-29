@@ -39,10 +39,45 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(native_contract.gaps(snapshot, "mercari"), [])
         self.bridge.assert_not_called()
 
+    def test_fresh_poshmark_form_and_generation_choices_work_with_chrome_closed(self):
+        import asyncio
+
+        from vendoo_studio.services.native_field_fill import load_forms
+
+        with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
+            answer = self.client.get(f"{self.url}/poshmark/form")
+            generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"poshmark"}))
+        self.assertEqual(answer.status_code, 200, answer.text)
+        fields = {row["path"]: row for row in answer.json()["fields"]}
+        self.assertEqual(len(fields["direct_category_ids.poshmark"]["options"]), 747)
+        self.assertIn("poshmark_specifics.inventoryRows", fields)
+        self.assertIn("poshmark", generation_forms)
+        self.bridge.assert_not_called()
+
+    def test_fresh_depop_form_and_generation_choices_work_with_chrome_closed(self):
+        import asyncio
+
+        from vendoo_studio.services.native_field_fill import load_forms
+
+        snapshot = {**self.listing, "direct_category_ids": {"depop": "menswear_jeans"}}
+        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "category_analysis")
+        with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
+            answer = self.client.get(f"{self.url}/depop/form")
+            generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"depop"}))
+        self.assertEqual(answer.status_code, 200, answer.text)
+        fields = {row["path"]: row for row in answer.json()["fields"]}
+        self.assertEqual(len(fields["direct_category_ids.depop"]["option_values"]), 247)
+        self.assertIn("Cotton", fields["depop_specifics.attributes.material"]["options"])
+        self.assertIn('32"', fields["depop_specifics.size"]["options"])
+        self.assertEqual(generation_forms["depop"]["category_id"], "menswear_jeans")
+        self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+        self.bridge.assert_not_called()
+
     def test_saved_forms_load_with_chrome_closed_and_current_values(self):
         from vendoo_studio.services import native_contract
 
-        for market in ("poshmark", "mercari", "depop", "sellwild", "ebay"):
+        for market in ("mercari", "sellwild", "ebay"):
             with self.subTest(market=market):
                 snapshot = copy.deepcopy(self.listing)
                 snapshot[f"{market}_specifics"] = {"material": "cotton", "description": "Edited description"}
@@ -77,11 +112,11 @@ class NativeEditorTest(unittest.TestCase):
 
         snapshot = copy.deepcopy(self.listing)
         form = {"category_id": "men/shirts", "fields": [
-            {"path": "poshmark_specifics.nativeSizeId", "label": "Size", "options": ["L"]}]}
-        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"poshmark": form}, ["poshmark"])
-        snapshot["direct_category_ids"]["poshmark"] = "men/shoes"
+            {"path": "mercari_specifics.nativeSizeId", "label": "Size", "options": ["L"]}]}
+        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"mercari": form}, ["mercari"])
+        snapshot["direct_category_ids"]["mercari"] = "men/shoes"
         ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
-        answer = self.client.get(f"{self.url}/poshmark/form")
+        answer = self.client.get(f"{self.url}/mercari/form")
         self.assertEqual(answer.status_code, 409)
         self.assertIn("dependent choices", answer.json()["detail"])
         self.bridge.assert_not_called()
@@ -101,6 +136,15 @@ class NativeEditorTest(unittest.TestCase):
         self.enterContext(patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=True)))
         self.bridge = self.enterContext(patch("vendoo_studio.services.native_editor.browser_bridge.request", new_callable=AsyncMock))
         self.bridge.return_value = {"ok": True, "form": {"marketplace": "poshmark", "native": True, "known": True, "fields": []}}
+        self.prepared = []
+        prepare = native_editor.direct_preflight.prepare
+
+        def record_prepared(*args, **kwargs):
+            result = prepare(*args, **kwargs)
+            self.prepared.append(result)
+            return result
+
+        self.enterContext(patch.object(native_editor.direct_preflight, "prepare", side_effect=record_prepared))
 
     def tearDown(self):
         app.dependency_overrides.pop(get_db, None)
@@ -113,13 +157,12 @@ class NativeEditorTest(unittest.TestCase):
         before = copy.deepcopy(self.rev.listing_json)
         answer = self.client.get(f"{self.url}/poshmark/form?revision_id={self.rev.id}")
         self.assertEqual(answer.status_code, 200, answer.text)
-        payload = self.bridge.call_args.args[2]
-        self.assertEqual(self.bridge.call_args.args[1], "marketplace.form")
+        payload = {"listing": self.prepared[-1]}
+        self.bridge.assert_not_called()
         self.assertEqual(payload["listing"]["cost"], 3.65)
         self.assertEqual(payload["listing"]["package_dimensions_in"], "13x10x3")
         self.assertEqual(payload["listing"]["sku"], "SKU1")
         self.assertNotIn("confirm", payload)
-        self.assertIsNone(self.bridge.call_args.args[0].id)
         self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, self.rev.id)
         self.assertEqual(ListingRepo(self.db).get_revision(self.rev.id).listing_json, before)
         self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
@@ -129,32 +172,32 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(stale.status_code, 409)
         self.bridge.assert_not_called()
         with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
-            answer = self.client.get(f"{self.url}/depop/form")
+            answer = self.client.get(f"{self.url}/mercari/form")
         self.assertEqual(answer.status_code, 409)
         self.assertIn("Connect Chrome", answer.json()["detail"])
         self.bridge.assert_not_called()
 
     def test_a_lost_form_reply_is_asked_for_once_more(self):
         self.bridge.side_effect = [BrowserBridgeError("Chrome did not answer in time."),
-                                   {"ok": True, "form": {"marketplace": "depop", "native": True, "fields": []}}]
-        answer = self.client.get(f"{self.url}/depop/form")
+                                   {"ok": True, "form": {"marketplace": "mercari", "native": True, "fields": []}}]
+        answer = self.client.get(f"{self.url}/mercari/form")
         self.assertEqual(answer.status_code, 200, answer.text)
         self.assertEqual(self.bridge.await_count, 2)
 
     def test_a_lost_form_reply_names_why_chrome_did_not_answer(self):
         self.bridge.side_effect = BrowserBridgeError("Chrome did not answer in time.")
-        answer = self.client.get(f"{self.url}/depop/form")
+        answer = self.client.get(f"{self.url}/mercari/form")
         self.assertEqual(answer.status_code, 502)
         self.assertIn("did not answer in time", answer.json()["detail"])
         self.assertIn("Reopen the listing", answer.json()["detail"])
 
     def test_catalog_refusal_is_visible_and_never_returns_a_different_form(self):
-        self.bridge.return_value = {"ok": False, "error": "Depop’s category list changed."}
-        answer = self.client.get(f"{self.url}/depop/form")
+        self.bridge.return_value = {"ok": False, "error": "Mercari’s category list changed."}
+        answer = self.client.get(f"{self.url}/mercari/form")
         self.assertEqual(answer.status_code, 502)
-        self.assertEqual(answer.json()["detail"], "Depop’s category list changed.")
+        self.assertEqual(answer.json()["detail"], "Mercari’s category list changed.")
         self.bridge.return_value = {"ok": True, "form": {"marketplace": "poshmark", "native": True}}
-        self.assertEqual(self.client.get(f"{self.url}/depop/form").status_code, 502)
+        self.assertEqual(self.client.get(f"{self.url}/mercari/form").status_code, 502)
 
     def test_native_choices_survive_form_save_and_posting_preparation(self):
         submitted = {**self.listing, "poshmark_specifics": {"sizeSetId": "native-group", "nativeSizeId": "XL", "smartSell": {"enabled": False}},
@@ -163,7 +206,7 @@ class NativeEditorTest(unittest.TestCase):
         answer = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
         self.assertEqual(answer.status_code, 200, answer.text)
         self.client.get(f"{self.url}/poshmark/form")
-        snapshot = self.bridge.call_args.args[2]["listing"]
+        snapshot = self.prepared[-1]
         self.assertEqual(snapshot["poshmark_specifics"]["nativeSizeId"], "XL")
         self.assertEqual(snapshot["poshmark_specifics"]["sizeSetId"], "native-group")
         self.assertIs(snapshot["poshmark_specifics"]["smartSell"]["enabled"], False)
@@ -284,17 +327,18 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(answer.status_code, 200, answer.text)
         response = self.client.get(f"{self.url}/depop/form")
         self.assertEqual(response.status_code, 200, response.text)
-        snapshot = self.bridge.call_args.args[2]["listing"]
-        self.assertEqual(snapshot["depop_specifics"]["style"], ["cute"])
-        self.assertEqual(snapshot["depop_specifics"]["age"], [])
-        self.assertEqual(snapshot["depop_specifics"]["source"], [])
+        fields = {row["path"]: row for row in response.json()["fields"]}
+        self.assertEqual(fields["depop_specifics.style"]["value"], ["cute"])
+        self.assertEqual(fields["depop_specifics.age"]["value"], [])
+        self.assertEqual(fields["depop_specifics.source"]["value"], [])
+        self.bridge.assert_not_called()
 
     def test_seller_original_price_survives_snapshot_defaults(self):
         submitted = {**self.listing, "poshmark_specifics": {"originalPrice": 55}}
         response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
         self.assertEqual(response.status_code, 200, response.text)
         self.client.get(f"{self.url}/poshmark/form")
-        self.assertEqual(self.bridge.call_args.args[2]["listing"]["poshmark_specifics"]["originalPrice"], 55)
+        self.assertEqual(self.prepared[-1]["poshmark_specifics"]["originalPrice"], 55)
 
     def test_clearing_existing_depop_age_and_source_persists(self):
         previous = {**self.listing, "depop_specifics": {"style": ["Casual", "Retro", "Minimalist"], "age": "Modern", "source": "Preloved"}}
