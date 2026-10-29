@@ -6,6 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.523 — 2026-10-29
+
+- Anteroom loads less code at startup, keeps listing search responsive while filtering, and reads inventory cover photos more efficiently.
+
+## 0.1.522 — 2026-10-29
+
+- eBay forms open when the saved condition ID and the condition name mean the same thing, instead of getting stuck asking you to reload their fields.
+
+## 0.1.521 — 2026-10-29
+
+- Listing generation reads every uploaded photo, refreshes its analysis when photos change, and keeps newer seller edits safe while background fields finish.
+
 ## 0.1.520 — 2026-10-29
 
 - Opening a marketplace form checks its saved requirements in Anteroom without contacting Chrome or changing the listing’s categories. Live marketplace verification stays with the seller-confirmed List action.

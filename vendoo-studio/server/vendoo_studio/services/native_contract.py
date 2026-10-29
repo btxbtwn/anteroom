@@ -101,6 +101,19 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     return result
 
 
+def _condition_inputs(value: dict, market: str, fields: list[dict]) -> dict:
+    """Compare eBay's condition label and its native id as the same choice."""
+    result = copy.deepcopy(value)
+    if market == "ebay":
+        condition = str(result.get("condition") or "").strip().casefold()
+        for row in fields:
+            if path_of(row).casefold() == "ebay_specifics.condition":
+                for label, native_id in (row.get("option_values") or {}).items():
+                    if str(label).strip().casefold() == condition:
+                        result["condition"] = str(native_id)
+    return result
+
+
 def _stored_inputs(listing: dict, stored) -> dict | None:
     """A saved contract's inputs in the current terms, or None when it has none."""
     if not isinstance(stored, dict):
@@ -122,14 +135,16 @@ def inputs_match(listing: dict, market: str, fields: list[dict], stored) -> bool
     saved = _stored_inputs(listing, stored)
     if saved is None:
         return False
-    return inputs(listing, market, fields) == saved or _raw_inputs(listing, market, fields) == saved
+    saved = _condition_inputs(saved, market, fields)
+    return any(_condition_inputs(candidate, market, fields) == saved
+               for candidate in (inputs(listing, market, fields), _raw_inputs(listing, market, fields)))
 
 
 def changed_inputs(listing: dict, market: str, fields: list[dict], stored) -> set[str]:
     """Controlling choices that differ from the saved contract's, in current terms."""
-    current = inputs(listing, market, fields)
-    saved = _stored_inputs(listing, stored) or {}
-    if current == saved or _raw_inputs(listing, market, fields) == saved:
+    current = _condition_inputs(inputs(listing, market, fields), market, fields)
+    saved = _condition_inputs(_stored_inputs(listing, stored) or {}, market, fields)
+    if current == saved or _condition_inputs(_raw_inputs(listing, market, fields), market, fields) == saved:
         return set()
     return {path for path, value in current.items() if saved.get(path) != value}
 

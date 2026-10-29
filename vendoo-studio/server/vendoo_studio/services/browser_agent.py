@@ -337,7 +337,7 @@ class FixAgent:
     def _context(self) -> tuple[dict, str, list[str]]:
 
         from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-        from vendoo_studio.services.listing_generate import latest_photo_analysis
+        from vendoo_studio.services.listing_generate import current_photo_analysis
         from vendoo_studio.services.photo_store import photo_store
 
         db = self.db_factory()
@@ -345,7 +345,7 @@ class FixAgent:
             revisions = ListingRepo(db).get_revisions(self.request.conversation_id)
             listing = dict(revisions[0].listing_json) if revisions and isinstance(revisions[0].listing_json, dict) else {}
             conversations = ConversationRepo(db)
-            evidence = latest_photo_analysis(conversations.get_messages(self.request.conversation_id)) or ""
+            evidence = current_photo_analysis(conversations, self.request.conversation_id) or ""
             keys = [photo.stored_filename for photo in conversations.get_photos(self.request.conversation_id)]
         finally:
             db.close()

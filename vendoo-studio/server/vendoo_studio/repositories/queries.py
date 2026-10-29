@@ -215,21 +215,23 @@ class ConversationRepo:
 
     def cover_photos(self) -> dict[str, tuple[str, str | None]]:
         """Map each conversation to its first photo's id and checksum, for sidebar thumbnails."""
-        rows = (
-            self.db.query(Photo.conversation_id, Photo.id, Photo.checksum)
-            .order_by(Photo.conversation_id, Photo.display_order, Photo.created_at)
-            .all()
-        )
-        covers: dict[str, tuple[str, str | None]] = {}
-        for conv_id, photo_id, checksum in rows:
-            covers.setdefault(conv_id, (photo_id, checksum))
-        return covers
+        ranked = self.db.query(
+            Photo.conversation_id, Photo.id, Photo.checksum,
+            func.row_number().over(
+                partition_by=Photo.conversation_id,
+                order_by=(Photo.display_order, Photo.created_at, Photo.id),
+            ).label("position"),
+        ).subquery()
+        rows = self.db.query(
+            ranked.c.conversation_id, ranked.c.id, ranked.c.checksum,
+        ).filter(ranked.c.position == 1).all()
+        return {conv_id: (photo_id, checksum) for conv_id, photo_id, checksum in rows}
 
     def cover_photo(self, conv_id: str) -> tuple[str, str | None] | None:
         row = (
             self.db.query(Photo.id, Photo.checksum)
             .filter(Photo.conversation_id == conv_id)
-            .order_by(Photo.display_order, Photo.created_at)
+            .order_by(Photo.display_order, Photo.created_at, Photo.id)
             .first()
         )
         return (row[0], row[1]) if row else None
@@ -401,10 +403,12 @@ class ConversationRepo:
         provider: str | None = None,
         model: str | None = None,
         attachments: list[dict] | None = None,
+        photo_fingerprint: str | None = None,
     ) -> Message:
         msg = Message(
             conversation_id=conv_id, role=role, text=text, provider=provider, model=model,
             attachments=attachments or None,
+            photo_fingerprint=photo_fingerprint,
         )
         self.db.add(msg)
         # ``created_at`` is a column default, so it exists only once the INSERT
@@ -517,6 +521,7 @@ class ListingRepo:
         return self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
 
     def save_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None) -> ListingRevision:
+        """Save atomically; an empty expected id means no listing may exist yet."""
         from vendoo_studio.services.native_field_fill import FILL_ON_SOURCES, category_saved
 
         before: dict = {}
@@ -547,7 +552,13 @@ class ListingRepo:
         self.db.flush()
 
         listing = self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
-        if expected_revision_id is not None:
+        if expected_revision_id == "":
+            if listing is not None:
+                self.db.rollback()
+                raise RevisionConflict("This listing changed since you reviewed it")
+            listing = Listing(conversation_id=conv_id, current_revision_id=revision.id)
+            self.db.add(listing)
+        elif expected_revision_id is not None:
             result = self.db.execute(update(Listing).where(
                 Listing.conversation_id == conv_id, Listing.current_revision_id == expected_revision_id,
             ).values(current_revision_id=revision.id))
