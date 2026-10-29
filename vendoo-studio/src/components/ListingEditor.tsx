@@ -1602,7 +1602,8 @@ export function fieldsForMarketplaceForm(
     ? [...SHARED_FORM_FIELDS, ...PACKAGE_FORM_FIELDS]
     : SHARED_FORM_FIELDS;
   // A marketplace with its own category path is categorised by that, not the shared one.
-  if (own.some((field) => field.label === "Category")) {
+  // The label carries a required marker ("Category *"), so compare without it.
+  if (own.some((field) => field.label.replace(/\s*\*$/, "") === "Category")) {
     shared = shared.filter((field) => field.key !== "category_path");
   }
   const merged = mergeEditorFields([...shared, ...own, ...schema]);

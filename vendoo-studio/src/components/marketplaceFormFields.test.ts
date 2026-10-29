@@ -242,6 +242,18 @@ describe("marketplace form fields", () => {
     }
   });
 
+  it("keeps Vinted's own category row instead of the shared category path", () => {
+    const item = {
+      ...listing,
+      category_path: "Clothing, Shoes & Accessories > Women > Women's Clothing > Pants",
+      vinted_specifics: { category: "Women > Clothing > Trousers & leggings > Wide-leg trousers" },
+    };
+    const fields = fieldsForMarketplaceForm(item, "vinted", undefined);
+    const category = fields.filter((field) => field.label.replace(/\s*\*$/, "") === "Category");
+    expect(category).toHaveLength(1);
+    expect(category[0].key).toBe("vinted_specifics.category");
+  });
+
   it("shows a marketplace's own controls until its category schema arrives", () => {
     const etsy = fieldsForMarketplaceForm({
       ...listing,
