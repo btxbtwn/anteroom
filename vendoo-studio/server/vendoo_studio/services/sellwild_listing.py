@@ -116,7 +116,7 @@ _CONTACT = (
 
 
 def chosen(listing: dict, choices: dict) -> dict:
-    """The category and condition List will send: the seller's pick, else Anteroom's match."""
+    """The saved category and condition List will send. Category must be chosen."""
     automatic = suggest_sellwild(listing)
     specifics = listing.get("sellwild_specifics") or {}
 
@@ -124,7 +124,7 @@ def chosen(listing: dict, choices: dict) -> dict:
         if field in specifics:
             value = str(specifics[field] or "")
             return int(value) if re.fullmatch(r"[1-9]\d*", value) else None
-        return choices.get(f"sellwild_{key}_id") or automatic[f"{key}_id"]
+        return choices.get(f"sellwild_{key}_id") or (automatic["condition_id"] if key == "condition" else None)
 
     return {"category_id": pick("category", "nativeCategoryId"), "condition_id": pick("condition", "nativeConditionId")}
 

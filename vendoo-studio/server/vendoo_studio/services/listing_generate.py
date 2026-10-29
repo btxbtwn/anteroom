@@ -1398,6 +1398,9 @@ def persist_generated_listing(
             specifics = {}
         specifics["originalPrice"] = 0
         listing["poshmark_specifics"] = specifics
+    from vendoo_studio.services.native_contract import constrain_generated
+
+    constrain_generated(listing, revisions[0].listing_json if revisions else {})
     cap_listing_description(listing)
     ListingRepo(db).save_revision(conv_id, listing, source=source)
 
@@ -1466,6 +1469,9 @@ async def persist_generated_listing_with_repair(
                 apply_seller_description_facts(updated, parse_notes(conv.notes))
             if listing.get("package_dimensions_in"):
                 updated["package_dimensions_in"] = listing["package_dimensions_in"]
+            from vendoo_studio.services.native_contract import constrain_generated
+
+            constrain_generated(updated, listing)
             cap_listing_description(updated)
             listing = updated
             ListingRepo(db).save_revision(conv_id, listing, source="generation_finalize")

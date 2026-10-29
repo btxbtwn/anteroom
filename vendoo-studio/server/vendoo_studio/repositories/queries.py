@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from typing import Any
 
@@ -519,10 +520,23 @@ class ListingRepo:
         from vendoo_studio.services.native_field_fill import FILL_ON_SOURCES, category_saved
 
         before: dict = {}
-        if source in FILL_ON_SOURCES:
-            current = self.get_current(conv_id)
-            previous = self.get_revision(current.current_revision_id) if current and current.current_revision_id else None
-            before = previous.listing_json if previous is not None and isinstance(previous.listing_json, dict) else {}
+        current = self.get_current(conv_id)
+        previous = self.get_revision(current.current_revision_id) if current and current.current_revision_id else None
+        before = previous.listing_json if previous is not None and isinstance(previous.listing_json, dict) else {}
+        from vendoo_studio.services import native_contract
+
+        if source != "native_schema" and native_contract.KEY in before:
+            listing_json = copy.deepcopy(listing_json)
+            if source in FILL_ON_SOURCES:
+                listing_json[native_contract.KEY] = copy.deepcopy(before[native_contract.KEY])
+                listing_json[native_contract.EVIDENCE_KEY] = copy.deepcopy(before.get(native_contract.EVIDENCE_KEY) or {})
+                native_contract.invalidate_dependents(before, listing_json)
+                if source != "user_form":
+                    native_contract.constrain_generated(listing_json, before, freeze_categories=False)
+            else:
+                native_contract.constrain_generated(listing_json, before, freeze_categories=source not in {
+                    "native_fields", "native_categories", "vendoo_prepare", "category_analysis", "category_schema_cache"},
+                    keep_evidence=source == "native_fields")
         revision = ListingRevision(
             conversation_id=conv_id,
             listing_json=listing_json,

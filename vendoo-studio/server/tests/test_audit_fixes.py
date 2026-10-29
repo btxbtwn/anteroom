@@ -128,6 +128,13 @@ class PairingTokenTest(unittest.TestCase):
 
 
 class ValidationCasesTest(unittest.TestCase):
+    def test_general_category_is_required_even_when_no_marketplaces_are_selected(self):
+        for blank in (None, "", "   "):
+            listing = {**VALID_LISTING, "category_path": blank}
+            result = validate_listing(listing, 5, selected_marketplaces=[])
+            self.assertFalse(result.can_send)
+            self.assertIn({"field": "category_path", "message": "Category is required"}, result.errors)
+
     def test_missing_title_and_photos(self):
         result = validate_listing({}, 0, selected_marketplaces=["ebay"])
         fields = {err["field"] for err in result.errors}
@@ -209,6 +216,7 @@ class ValidationCasesTest(unittest.TestCase):
             "price": 4.99,
             "brand": "List This Audit",
             "sku": "AUDIT-ETSY-DIGITAL-001",
+            "category_path": "Craft Supplies & Tools > Patterns & How To > Digital > Prints",
             "etsy_specifics": {
                 "who_made": "I did",
                 "what_is": "A finished product",

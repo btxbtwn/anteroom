@@ -271,6 +271,10 @@ async def run_listing_generation(
             run.pulse()
         mark("categories_and_comps")
         schema_seed = schema_task.result()
+        from vendoo_studio.services.native_field_fill import prepare_generation_forms
+
+        native_forms = await timed("native_forms", prepare_generation_forms(
+            stream_db, conv_id, provider, evidence=f"{prompt_analysis}\n{item_details}"))
         if comps_task is not None:
             comps_text = comps_task.result() or ""
         if comps_text:
@@ -288,6 +292,7 @@ async def run_listing_generation(
             conv_id,
             comps_text,
             photo_count=photo_count,
+            native_forms=native_forms,
         )
         run.publish(sse_event("status", "thinking"))
 
@@ -520,8 +525,8 @@ async def _finish_generation_background(
                     ),
                 )
             except (BrowserBridgeError, VendooCreateError):
-                # Offline generation still saves a usable listing. Send will
-                # resolve anything that could not be read ahead of time.
+                # Keep the draft. Native form validation below holds it
+                # incomplete until its authoritative fields can be read.
                 log.info("Vendoo preparation unavailable for %s", conv_id)
             else:
                 db.expire_all()

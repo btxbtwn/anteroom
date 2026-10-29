@@ -34,6 +34,22 @@ class SellwildConditionTest(unittest.TestCase):
 
 
 class ChromePreflightTest(unittest.TestCase):
+    def test_missing_categories_block_every_direct_marketplace(self):
+        from vendoo_studio.services.direct_preflight import blocking, gaps
+
+        listing = {"title": "Vintage dress pants", "description": "Vintage dress pants", "price": 20,
+                   "etsy_specifics": {"who_made": "Someone else", "what_is": "A finished product",
+                                      "when_made": "Before 2007 (Vintage)"}}
+        for market in ("ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"):
+            with self.subTest(market=market):
+                found = blocking(gaps(listing, market, Context()))
+                self.assertTrue(any("categor" in item["field"].lower() for item in found), found)
+
+    def test_a_poshmark_breadcrumb_without_a_selected_category_is_incomplete(self):
+        listing = {"marketplace_category_objects": {"poshmark": {"path": "Women > Pants"}}}
+        self.assertTrue(any(item["field"] == "direct_category_ids.poshmark" and item["blocking"]
+                            for item in poshmark_requirements(listing, Context())))
+
     def test_depop_worldwide_shipping_requires_a_native_fee_and_accepts_free_shipping(self):
         for price, valid in [(0, True), ("15.25", True), ("", False), (-1, False), (100, False), ("1.111", False)]:
             listing = {"direct_category_ids": {"depop": "menswear_tshirts"}, "depop_specifics": {

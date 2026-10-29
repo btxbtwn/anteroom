@@ -972,9 +972,8 @@ POSHMARK_CONDITIONS = ["New With Tags (NWT)", "Like New", "Good", "Fair"]
 def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> dict:
     """Record the seller's Sellwild category and condition in Anteroom; Sellwild has no draft of its own.
 
-    Only a value the seller picked is stored. One left to Anteroom stays empty and
-    is matched again from the listing on every List, so an edited listing is not
-    sent with the category its earlier revision suggested.
+    Category must already be saved on the form or supplied in this request.
+    Condition may still use Anteroom's match when it has not been set.
     """
     import uuid
 
@@ -990,7 +989,7 @@ def save_local_sellwild_draft(conv_id: str, body: ListRequest, db: Session) -> d
     choice = chosen(snapshot, picked)
     category_id, condition_id = choice["category_id"], choice["condition_id"]
     if category_id not in {option["id"] for option in catalog["categories"]}:
-        raise NativeMarketplaceError(400, "Anteroom couldn't match a Sellwild category for this item. Choose one with Change.")
+        raise NativeMarketplaceError(400, "Choose a Sellwild category before continuing.")
     if condition_id not in {option["id"] for option in catalog["conditions"]}:
         raise NativeMarketplaceError(400, "Anteroom couldn't match a Sellwild condition for this item. Choose one with Change.")
     with start_gate():
