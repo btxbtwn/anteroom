@@ -47,6 +47,26 @@ def test_head_revision_is_resolvable():
     assert schema_migrations.migrations_dir().is_dir()
 
 
+def test_photo_fingerprint_upgrade_preserves_existing_messages(engine, snapshots):
+    from alembic import command
+    from sqlalchemy import text
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "e748219a0f6c")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO conversations (id, title) VALUES ('c1', 'Keep me')"))
+        connection.execute(text(
+            "INSERT INTO messages (id, conversation_id, role, text) "
+            "VALUES ('m1', 'c1', 'system', 'Photo analysis: old reading')"
+        ))
+    ensure_schema(engine)
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT text, photo_fingerprint FROM messages")).one() == (
+            "Photo analysis: old reading", None,
+        )
+    assert inspect_database(engine.url.database).clean
+
+
 def test_fresh_database_is_created_at_head(engine, snapshots):
     revision = ensure_schema(engine)
 

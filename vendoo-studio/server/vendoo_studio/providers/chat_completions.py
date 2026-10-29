@@ -191,7 +191,7 @@ class ChatCompletionsProvider:
         if listing_rules:
             system += f"\n\nAdditional rules:\n{listing_rules}"
         parts: list[dict] = [{"type": "text", "text": "Analyze these product photos:"}]
-        for url in await encode_images(photo_paths[:10], max_side):
+        for url in await encode_images(photo_paths, max_side):
             parts.append({"type": "image_url", "image_url": {"url": url}})
         messages = [{"role": "system", "content": system}, {"role": "user", "content": parts}]
         try:

@@ -225,12 +225,12 @@ def _current_listing(conv_id: str, db: Session) -> tuple[dict, list]:
 
 
 def _preview_inputs(conv_id: str, db: Session) -> tuple[dict, list, str, list, int | None]:
-    from vendoo_studio.services.listing_generate import latest_photo_analysis
+    from vendoo_studio.services.listing_generate import current_photo_analysis
     from vendoo_studio.services.sell_through import collect_outcomes, listing_age_days
 
     listing, revisions = _current_listing(conv_id, db)
     conv_repo = ConversationRepo(db)
-    analysis = latest_photo_analysis(conv_repo.get_messages(conv_id))
+    analysis = current_photo_analysis(conv_repo, conv_id)
     conv = conv_repo.get(conv_id)
     age_days = listing_age_days(conv.notes if conv else None)
     return listing, revisions, analysis, collect_outcomes(db), age_days

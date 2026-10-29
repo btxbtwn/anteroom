@@ -304,6 +304,7 @@ async def prepare_generation_schema(
     ListingRepo(db).save_revision(
         conv_id, seed, source="category_analysis",
         parent_revision_id=revisions[0].id if revisions else None,
+        expected_revision_id=revisions[0].id if revisions else "",
     )
     seed["_schema_source"] = "native"
     return seed

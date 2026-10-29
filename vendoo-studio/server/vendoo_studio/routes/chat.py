@@ -25,6 +25,7 @@ from vendoo_studio.services.listing_generate import (
     PhotoAnalysisError,
     analyze_photos_with_tag_retry,
     photo_analysis_failure,
+    photo_fingerprint,
     require_photo_analysis,
     seller_item_details,
 )
@@ -309,6 +310,7 @@ async def analyze_photos(conv_id: str, db: Session = Depends(get_db)):
         raise HTTPException(400, "No photos to analyze")
 
     paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]
+    analysis_fingerprint = photo_fingerprint(photos)
 
     try:
         result = await analyze_photos_with_tag_retry(provider, paths, notes=conv.notes or "")
@@ -329,6 +331,7 @@ async def analyze_photos(conv_id: str, db: Session = Depends(get_db)):
         analysis_text,
         provider=vision_name,
         model=vision_model,
+        photo_fingerprint=analysis_fingerprint,
     )
 
     return result
@@ -366,6 +369,7 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
     if seller_answers:
         item_details += "\nSeller answers:\n" + seller_answers
     paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]
+    analysis_fingerprint = photo_fingerprint(photos)
     photo_count = len(photos)
     # Release the request-scoped session before background work opens its own.
     db.close()
@@ -382,6 +386,7 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
         seller_answers=seller_answers,
         paths=paths,
         photo_count=photo_count,
+        analysis_fingerprint=analysis_fingerprint,
     ))
     await asyncio.sleep(0)
     return stream_generation(run)

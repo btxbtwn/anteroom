@@ -448,7 +448,7 @@ class CursorProvider:
             system += f"\n\nAdditional rules:\n{listing_rules}"
 
         content_parts: list[dict] = [{"type": "text", "text": "Analyze these product photos:"}]
-        for url in await encode_images(photo_paths[:10], max_side):
+        for url in await encode_images(photo_paths, max_side):
             content_parts.append({
                 "type": "image_url",
                 "image_url": {"url": url},
