@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.522 — 2026-10-29
+
+- eBay forms open when the saved condition ID and the condition name mean the same thing, instead of getting stuck asking you to reload their fields.
+
 ## 0.1.521 — 2026-10-29
 
 - Listing generation reads every uploaded photo, refreshes its analysis when photos change, and keeps newer seller edits safe while background fields finish.
