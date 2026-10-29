@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.509 — 2026-10-29
+## 0.1.510 — 2026-10-29
 
 - Vinted's Category field now opens Vinted's category picker. It had been showing the shared category path as a text box, so the picker never appeared.
+
+## 0.1.509 — 2026-10-29
+
+- eBay minimum offer and auto-accept edits stay visible after you click out of the field.
 
 ## 0.1.508 — 2026-10-29
 
