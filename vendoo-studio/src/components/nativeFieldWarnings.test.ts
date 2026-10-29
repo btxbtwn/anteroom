@@ -89,6 +89,14 @@ describe("direct List gaps on the form", () => {
     expect(rowForField("poshmark", "poshmark_specifics.sellerNotes", poshmarkRows)).toBe("");
   });
 
+  it("puts eBay's condition answer on the row that offers it", () => {
+    // The leaf's condition aspect is stored apart from the row; the seller reads it on "Item condition".
+    const rows = [{ key: "ebay_specifics.condition" }, { key: "ebay_specifics.conditionDescription" }];
+    const message = "Pre-Owned - Good could not be matched to one of eBay's conditions, so this listing would send none. Pick the condition above.";
+    expect([...gapsByField("ebay", [{ field: "ebay_specifics.category_specifics.condition", message, blocking: false }], rows)])
+      .toEqual([["ebay_specifics.condition", [message]]]);
+  });
+
   it("keeps a listing-wide answer off the form, and repeats no message on one field", () => {
     const found = gapsByField("poshmark", [
       { field: "listing", message: "Something about the whole listing.", blocking: true },
