@@ -127,6 +127,9 @@ def test_merge_moves_links_sales_and_labels_and_keeps_the_other_item(db):
     db.add(MarketplaceListing(conversation_id=other.id, marketplace="poshmark", state="published", listing_id="p1"))
     db.add(MarketplaceSale(marketplace="poshmark", order_id="o1", line_id="l1", conversation_id=other.id))
     db.commit()
+    original = ListingRepo(db).get_revisions(keep.id)[0]
+    original_body = json.loads(json.dumps(original.listing_json))
+    original_id = original.id
 
     response = TestClient(app).post("/api/similar-items/merge", json={"keep_id": keep.id, "merge_id": other.id})
     assert response.status_code == 200, response.text
@@ -136,11 +139,53 @@ def test_merge_moves_links_sales_and_labels_and_keeps_the_other_item(db):
     assert {row.marketplace for row in db.query(MarketplaceListing).filter_by(conversation_id=keep.id)} == {"ebay", "poshmark"}
     assert db.query(MarketplaceSale).filter_by(order_id="o1").one().conversation_id == keep.id
     assert json.loads(db.get(Conversation, keep.id).notes)["vendooLabels"] == "A19, Closet"
-    assert ListingRepo(db).get_revisions(keep.id)[0].listing_json["labels"] == ["A19", "Closet"]
+    revisions = ListingRepo(db).get_revisions(keep.id)
+    assert revisions[0].listing_json["labels"] == ["A19", "Closet"]
+    assert revisions[0].id != original_id
+    assert revisions[0].parent_revision_id == original_id
+    assert revisions[1].id == original_id and revisions[1].listing_json == original_body
     merged = db.get(Conversation, other.id)
     assert merged is not None and merged.settled_at is not None
     assert json.loads(merged.notes)["mergedInto"] == keep.id
     assert _pairs(db, keep, other) == {}
+
+
+def test_merge_without_new_labels_does_not_create_a_listing_revision(db):
+    keep = _item(db, "Same coat", labels="A19")
+    other = _item(db, "Same coat", labels="a19")
+    previous_id = ListingRepo(db).get_current(keep.id).current_revision_id
+    count = ListingRepo(db).revision_count(keep.id)
+    similar_items.merge(db, keep.id, other.id)
+    assert ListingRepo(db).revision_count(keep.id) == count
+    assert ListingRepo(db).get_current(keep.id).current_revision_id == previous_id
+
+
+def test_concurrent_listing_edit_rolls_back_the_entire_merge(db, monkeypatch):
+    keep = _item(db, "Same coat", labels="A19")
+    other = _item(db, "Same coat", labels="Closet")
+    keep_id, other_id = keep.id, other.id
+    db.add(MarketplaceListing(conversation_id=other_id, marketplace="ebay", state="published", listing_id="race"))
+    db.add(MarketplaceSale(marketplace="ebay", order_id="race", line_id="race", conversation_id=other_id))
+    db.commit()
+    original_save = ListingRepo.save_revision
+
+    def intervening_save(repo, conv_id, body, source, *args, **kwargs):
+        # Another editor's completed save wins before the merge's CAS write.
+        repo.db.rollback()
+        original_save(repo, conv_id, {"title": "New seller edit", "price": 99}, "user")
+        return original_save(repo, conv_id, body, source, *args, **kwargs)
+
+    monkeypatch.setattr(ListingRepo, "save_revision", intervening_save)
+    with pytest.raises(similar_items.MergeError) as error:
+        similar_items.merge(db, keep_id, other_id)
+    assert error.value.status == 409
+    db.expire_all()
+    assert db.query(MarketplaceListing).filter_by(listing_id="race").one().conversation_id == other_id
+    assert db.query(MarketplaceSale).filter_by(order_id="race").one().conversation_id == other_id
+    assert "mergedInto" not in json.loads(db.get(Conversation, other_id).notes)
+    assert json.loads(db.get(Conversation, keep_id).notes)["vendooLabels"] == "A19"
+    current = ListingRepo(db).get_revisions(keep_id)[0]
+    assert current.listing_json["price"] == 99
 
 
 def test_merge_refuses_two_listings_on_one_marketplace(db):

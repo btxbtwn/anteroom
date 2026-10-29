@@ -51,6 +51,29 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _local_test_client_origin():
+    """Exercise the same Host checks as the real loopback app, not testserver."""
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+
+    original = TestClient.__init__
+    original_websocket = TestClient.websocket_connect
+
+    def initialize(self, *args, **kwargs):
+        if len(args) < 2:
+            kwargs.setdefault("base_url", "http://127.0.0.1:4318")
+        original(self, *args, **kwargs)
+
+    def websocket(self, url, *args, **kwargs):
+        if url.startswith("/"):
+            url = str(self.base_url.copy_with(scheme="ws")).rstrip("/") + url
+        return original_websocket(self, url, *args, **kwargs)
+
+    with patch.object(TestClient, "__init__", initialize), patch.object(TestClient, "websocket_connect", websocket):
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _isolate_studio_settings(tmp_path_factory):
     previous = os.environ.get("VENDOO_STUDIO_DATA_DIR")
     root = tmp_path_factory.mktemp("studio-settings")

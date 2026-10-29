@@ -24,6 +24,19 @@ describe("errorMessage", () => {
   });
 });
 
+describe("Listing revision protection", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends the revision the editor actually read", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, revision_id: "next" })));
+    vi.stubGlobal("fetch", fetch);
+    await api.listings.update("coat", { title: "Edited coat" }, "reviewed-revision");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+      listing: { title: "Edited coat" }, expected_revision_id: "reviewed-revision",
+    });
+  });
+});
+
 describe("Listing action deadlines", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

@@ -33,6 +33,10 @@ export class Directory extends DurableObject {
         created_at INTEGER NOT NULL
       );
     `);
+    ctx.blockConcurrencyWhile(async () => {
+      this.#expireSessions();
+      await this.#scheduleExpiry();
+    });
   }
 
   createDevice(id, tokenHash) {
@@ -49,10 +53,11 @@ export class Directory extends DurableObject {
     return rows[0]?.id ?? null;
   }
 
-  deleteDevice(id) {
+  async deleteDevice(id) {
     this.sql.exec("DELETE FROM accounts WHERE device_id = ?", id);
     this.sql.exec("DELETE FROM oauth_sessions WHERE device_id = ?", id);
     this.sql.exec("DELETE FROM devices WHERE id = ?", id);
+    await this.#scheduleExpiry();
   }
 
   // A sign-in proves the account is the seller's, so linking moves the account
@@ -107,10 +112,26 @@ export class Directory extends DurableObject {
   }
 
   #expireSessions() {
-    this.sql.exec("DELETE FROM oauth_sessions WHERE created_at < ?", Date.now() - SESSION_TTL_MS);
+    this.sql.exec("DELETE FROM oauth_sessions WHERE created_at <= ?", Date.now() - SESSION_TTL_MS);
   }
 
-  startSession(state, deviceId, marketplace, verifier = null) {
+  async #scheduleExpiry() {
+    const { oldest } = this.sql.exec("SELECT MIN(created_at) AS oldest FROM oauth_sessions").one();
+    const alarm = await this.ctx.storage.getAlarm();
+    if (oldest === null) {
+      if (alarm !== null) await this.ctx.storage.deleteAlarm();
+    } else {
+      const next = Math.max(Date.now() + 1, oldest + SESSION_TTL_MS);
+      if (alarm !== next) await this.ctx.storage.setAlarm(next);
+    }
+  }
+
+  async alarm() {
+    this.#expireSessions();
+    await this.#scheduleExpiry();
+  }
+
+  async startSession(state, deviceId, marketplace, verifier = null) {
     this.#expireSessions();
     this.sql.exec(
       "INSERT INTO oauth_sessions (state, device_id, marketplace, verifier, created_at) VALUES (?, ?, ?, ?, ?)",
@@ -120,32 +141,38 @@ export class Directory extends DurableObject {
       verifier,
       Date.now(),
     );
+    await this.#scheduleExpiry();
   }
 
-  session(state) {
+  async session(state) {
     this.#expireSessions();
+    await this.#scheduleExpiry();
     const row = this.sql.exec("SELECT * FROM oauth_sessions WHERE state = ?", state).toArray()[0];
     if (!row) return null;
     return { deviceId: row.device_id, marketplace: row.marketplace, verifier: row.verifier, done: row.result !== null };
   }
 
-  finishSession(state, result) {
+  async finishSession(state, result) {
+    this.#expireSessions();
     this.sql.exec(
       "UPDATE oauth_sessions SET result = ?, verifier = NULL WHERE state = ? AND result IS NULL",
       JSON.stringify(result),
       state,
     );
+    await this.#scheduleExpiry();
   }
 
   // Hands the sign-in result to the device that started it, once.
-  takeResult(state, deviceId) {
+  async takeResult(state, deviceId) {
     this.#expireSessions();
+    await this.#scheduleExpiry();
     const row = this.sql
       .exec("SELECT result FROM oauth_sessions WHERE state = ? AND device_id = ?", state, deviceId)
       .toArray()[0];
     if (!row) return { status: "unknown" };
     if (row.result === null) return { status: "pending" };
     this.sql.exec("DELETE FROM oauth_sessions WHERE state = ?", state);
+    await this.#scheduleExpiry();
     return { status: "done", result: JSON.parse(row.result) };
   }
 }

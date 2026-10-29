@@ -389,7 +389,9 @@ async def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequ
             raise NativeMarketplaceError(409, "Connect Chrome first.")
         if getattr(extension_manager, "build", None) != expected_extension_build():
             raise NativeMarketplaceError(409, "Connect Chrome to load the current Anteroom Bridge before continuing.")
-    return snapshot, _photos(db, conv_id, snapshot, marketplace)[0]
+    photos, warning = _photos(db, conv_id, snapshot, marketplace)
+    snapshot["_approved_photo_warning"] = warning
+    return snapshot, photos
 
 
 def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tuple[list, str]:
@@ -465,7 +467,24 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str, d
         repo = JobRepo(db)
         if (busy := blocking_job(repo, marketplace)) is not None:
             raise NativeMarketplaceError(409, _busy_message(busy, marketplace))
-        job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{steps[0]}")
+        from vendoo_studio.services import approved_photos
+
+        try:
+            snapshot[approved_photos.KEY] = approved_photos.capture(photos)
+        except (OSError, ValueError) as exc:
+            raise NativeMarketplaceError(409, "Could not preserve the approved photos. Review them and try again.") from exc
+        if steps == ["publish"] and marketplace != "sellwild":
+            previous_job = repo.get(record.get("job_id")) if record.get("job_id") else None
+            previous_photos = (previous_job.listing_snapshot or {}).get(approved_photos.KEY, []) if previous_job else []
+            previous_versions = [(row["id"], row["checksum"]) for row in previous_photos]
+            current_versions = [(row["id"], row["checksum"]) for row in snapshot[approved_photos.KEY]]
+            if previous_versions != current_versions:
+                steps = ["save_draft", "publish"]
+        try:
+            job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{steps[0]}")
+        except BaseException:
+            approved_photos.release(snapshot)
+            raise
         claim_api_job(job.id)
         record = _store(db, conv_id, marketplace, {
             **extra, **_CLEARED_ERROR, "state": STEP_STATE[steps[0]], "action": steps[0], "job_id": job.id,
@@ -582,7 +601,8 @@ def _result_context(db: Session, conv_id: str, marketplace: str, record: dict, s
     return {"marketplace": marketplace, "action": record.get("action"), "operation_id": record.get("operation_id"),
             "draft_url": candidate, "listing_id": record.get("listing_id"), "local_draft_id": record.get("local_draft_id"),
             "revision_id": record.get("revision_id"), "photo_ids": record.get("photo_ids"),
-            "expected_photo_count": (len(record["photo_ids"]) if record.get("photo_ids") is not None
+            "expected_photo_count": (len(snapshot["_approved_photos"]) if "_approved_photos" in snapshot
+                                     else len(record["photo_ids"]) if record.get("photo_ids") is not None
                                      else len(_photos(db, conv_id, snapshot, marketplace)[0]) if first_save or marketplace == "poshmark" else None),
             "listing": snapshot}
 
@@ -620,8 +640,14 @@ async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, rec
 
 
 async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: str, options: dict) -> dict:
+    from vendoo_studio.services import approved_photos
+
     snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
-    photos, warning = _photos(db, conv_id, snapshot, marketplace)
+    try:
+        photos = approved_photos.load(snapshot)
+    except ValueError as exc:
+        raise NativeMarketplaceError(409, str(exc)) from exc
+    warning = snapshot.get("_approved_photo_warning") or ""
     binding = _record(db, conv_id, marketplace)
     if marketplace in API_MARKETPLACES:
         def record(values: dict) -> None:

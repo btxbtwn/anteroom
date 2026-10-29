@@ -53,6 +53,13 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
 
     job_ids = [row[0] for row in db.query(Job.id).filter(Job.conversation_id == conv_id).all() if row[0] not in kept_jobs]
     if job_ids:
+        from vendoo_studio.services.approved_photos import KEY, release
+
+        retained = {photo["stored_filename"]
+                    for (snapshot,) in db.query(Job.listing_snapshot).filter(Job.id.in_(kept_jobs))
+                    for photo in (snapshot or {}).get(KEY, [])}
+        for (snapshot,) in db.query(Job.listing_snapshot).filter(Job.id.in_(job_ids)):
+            release(snapshot or {}, keep=retained)
         db.query(FieldObservation).filter(
             FieldObservation.diagnostic_run_id.in_(
                 db.query(DiagnosticRun.id).filter(DiagnosticRun.job_id.in_(job_ids))

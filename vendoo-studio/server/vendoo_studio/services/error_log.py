@@ -31,6 +31,21 @@ _entries: deque[dict[str, Any]] = deque(maxlen=MAX_ENTRIES)
 _seq = 0
 
 
+class RedactingFormatter(logging.Formatter):
+    def __init__(self, formatter: logging.Formatter | None = None):
+        super().__init__()
+        self.formatter = formatter or logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(self.formatter.format(record))
+
+
+class RedactingStreamHandler(logging.StreamHandler):
+    def handleError(self, record: logging.LogRecord) -> None:
+        # StreamHandler's default fallback prints the original message and args.
+        return
+
+
 class ErrorLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         global _seq
@@ -52,7 +67,7 @@ class ErrorLogHandler(logging.Handler):
                     "detail": detail,
                 })
         except Exception:
-            self.handleError(record)
+            return  # Logging failures must not dump the unredacted record to stderr.
 
 
 def install() -> None:
@@ -62,16 +77,24 @@ def install() -> None:
     # keep their own WARNING threshold, so the terminal stays warnings and errors.
     if studio.level == logging.NOTSET or studio.level > logging.INFO:
         studio.setLevel(logging.INFO)
-    if not any(isinstance(h, logging.StreamHandler) for h in studio.handlers):
-        # Without a handler of its own, Studio's warnings reached the log file
-        # only through logging's last-resort printer, which the ring handler
-        # below would switch off.
-        stream = logging.StreamHandler(sys.stderr)
-        stream.setLevel(logging.WARNING)
-        stream.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-        studio.addHandler(stream)
     for name in LOGGERS:
         logger = logging.getLogger(name)
+        # Own every output path; a root/uvicorn parent handler would see the raw record.
+        logger.propagate = False
+        if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+            stream = RedactingStreamHandler(sys.stderr)
+            stream.setLevel(logging.WARNING)
+            logger.addHandler(stream)
+        for index, stream in enumerate(logger.handlers):
+            if type(stream) is logging.StreamHandler:
+                replacement = RedactingStreamHandler(stream.stream)
+                replacement.setLevel(stream.level)
+                replacement.setFormatter(stream.formatter)
+                for filter_ in stream.filters:
+                    replacement.addFilter(filter_)
+                logger.handlers[index] = stream = replacement
+            if isinstance(stream, logging.StreamHandler) and not isinstance(stream.formatter, RedactingFormatter):
+                stream.setFormatter(RedactingFormatter(stream.formatter))
         if not any(isinstance(h, ErrorLogHandler) for h in logger.handlers):
             handler = ErrorLogHandler(level=logging.WARNING)
             logger.addHandler(handler)
@@ -118,7 +141,7 @@ class AppLogHandler(logging.Handler):
             }
             _append_disk(entry)
         except Exception:
-            self.handleError(record)
+            return
 
 
 def _append_disk(entry: dict[str, Any]) -> None:

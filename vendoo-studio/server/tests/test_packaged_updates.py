@@ -300,6 +300,9 @@ class PackagedUpdateTest(unittest.TestCase):
             calls.append(args)
             if args[:2] == ["/usr/bin/codesign", "-dv"]:
                 return type("Result", (), {"returncode": 0, "stdout": "", "stderr": display})()
+            if args[:2] == ["/usr/bin/codesign", "-dr"]:
+                return type("Result", (), {"returncode": 0, "stdout": "",
+                    "stderr": 'designated => anchor apple generic and certificate leaf[subject.OU] = "TRUSTEDTEAM"'})()
             self.assertEqual(args[:4], ["/usr/bin/codesign", "--verify", "--deep", "--strict"])
             return type(
                 "Result", (), {"returncode": verify_code, "stdout": "", "stderr": verify_err}
@@ -315,7 +318,10 @@ class PackagedUpdateTest(unittest.TestCase):
         )
         with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
             packaged_updates._verify_app_signature(app)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
+        self.assertIn("-R", calls[-1])
+        self.assertIn('certificate leaf[subject.OU] = "TRUSTEDTEAM"', calls[-1][-2])
+        self.assertIn('identifier "local.listthis.studio"', calls[-1][-2])
 
     def test_verify_app_signature_rejects_adhoc(self):
         app = Path(self.tmp.name) / "Anteroom.app"
@@ -324,6 +330,43 @@ class PackagedUpdateTest(unittest.TestCase):
         with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
             with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "certificate"):
                 packaged_updates._verify_app_signature(app)
+
+    def test_verify_app_signature_rejects_another_publishers_valid_signature(self):
+        app = Path(self.tmp.name) / "Foreign.app"
+        app.mkdir()
+        fake_run, calls = self._fake_codesign(
+            "Authority=Developer ID Application: Another Publisher\n",
+            verify_code=1,
+            verify_err="code failed to satisfy specified code requirement(s)",
+        )
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "signing identity"):
+                packaged_updates._verify_app_signature(app)
+        self.assertIn('"TRUSTEDTEAM"', calls[-1][-2])
+
+    def test_verify_app_signature_requires_installed_signing_identity(self):
+        from subprocess import CompletedProcess
+
+        app = Path(self.tmp.name) / "Anteroom.app"
+        for status, requirement in [(1, "not signed"), (0, "")]:
+            with self.subTest(status=status), patch.object(packaged_updates.subprocess, "run", side_effect=[
+                CompletedProcess([], 0, "", "Authority=Developer ID Application\n"),
+                CompletedProcess([], status, "", requirement),
+            ]) as run:
+                with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "installed app"):
+                    packaged_updates._verify_app_signature(app)
+                self.assertEqual(run.call_count, 2)
+
+    def test_verify_app_signature_accepts_implicit_designated_requirement(self):
+        from subprocess import CompletedProcess
+
+        with patch.object(packaged_updates.subprocess, "run", side_effect=[
+            CompletedProcess([], 0, "", "Authority=Developer ID Application\n"),
+            CompletedProcess([], 0, "", '# designated => identifier "local.listthis.studio" and anchor apple'),
+            CompletedProcess([], 0, "", ""),
+        ]) as run:
+            packaged_updates._verify_app_signature(Path(self.tmp.name) / "Anteroom.app")
+        self.assertIn('identifier "local.listthis.studio" and anchor apple', run.call_args.args[0][-2])
 
     def test_verify_app_signature_rejects_broken_seal(self):
         app = Path(self.tmp.name) / "Anteroom.app"

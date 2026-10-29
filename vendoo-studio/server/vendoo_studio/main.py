@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +15,7 @@ from vendoo_studio.static_files import FrontendFiles
 from vendoo_studio.routes import health, conversations, photos, listings, jobs, settings, extension, chat, updates, desktop, imports, listing_commands
 from vendoo_studio.routes import ad_spend, analytics, etsy, assistant, attachments, backups, boxes, browser, catalog, changelog, marketplace_accounts, measurements, sale_calendar, scout, sourcing, vendoo_api, suggestions
 from vendoo_studio.version import app_version
+from vendoo_studio.services.local_requests import LocalRequestMiddleware
 from vendoo_studio.routes import marketplace_listings, marketplace_schemas, native_marketplaces
 from vendoo_studio.routes import ebay_offers, listing_promotions, promotion_automations
 from vendoo_studio.routes import ebay
@@ -29,6 +31,9 @@ async def lifespan(app: FastAPI):
     from vendoo_studio.services.error_log import install as install_error_log
 
     install_error_log()
+    from vendoo_studio.services import tailscale_serve
+
+    await asyncio.to_thread(tailscale_serve.status)
     init_db()
     try:
         from vendoo_studio.services.keychain import warm_keychain
@@ -204,6 +209,7 @@ app.add_middleware(
 # text, and over Tailscale a phone pulls them across a mobile connection.
 # Live event streams and photos are left alone by the middleware's defaults.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.add_middleware(LocalRequestMiddleware)
 
 app.include_router(health.router)
 app.include_router(marketplace_accounts.router)

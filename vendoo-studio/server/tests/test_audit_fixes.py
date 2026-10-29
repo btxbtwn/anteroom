@@ -22,7 +22,7 @@ from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
 from vendoo_studio.models.validation import validate_listing
-from vendoo_studio.repositories.queries import JobRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services.safe_fetch import UnsafeURLError, validate_fetch_url
 from vendoo_studio.services.vendoo_import import listing_from_vendoo, merge_notes
 from extension_sources import background_source
@@ -104,7 +104,7 @@ class WebSocketOriginTest(unittest.TestCase):
 
         self.assertTrue(_ws_origin_allowed("http://127.0.0.1:4318"))
         self.assertTrue(_ws_origin_allowed("http://127.0.0.1:5173"))
-        self.assertTrue(_ws_origin_allowed("chrome-extension://abcdefghijklmnop"))
+        self.assertTrue(_ws_origin_allowed("chrome-extension://abcdefghijklmnopabcdefghijklmnop"))
         self.assertFalse(_ws_origin_allowed("http://127.0.0.1.evil.example:4318"))
         self.assertFalse(_ws_origin_allowed("http://localhost.evil.example:4318"))
         self.assertFalse(_ws_origin_allowed("https://web.vendoo.co"))
@@ -1107,7 +1107,7 @@ class ListingIntegrityRouteTest(unittest.TestCase):
     def test_rejects_corrupt_nested_json(self):
         response = self.client.put(
             f"/api/conversations/{self.conv.id}/listing",
-            json={"listing": {"title": "X", "ebay_specifics": "oops"}},
+            json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": {"title": "X", "ebay_specifics": "oops"}},
         )
         self.assertEqual(response.status_code, 422)
 
@@ -1129,7 +1129,7 @@ class ListingIntegrityRouteTest(unittest.TestCase):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()["current_revision_id"], initial["current_revision_id"])
-            response = self.client.put(url, json={"listing": response.json()["listing"]})
+            response = self.client.put(url, json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": response.json()["listing"]})
             self.assertEqual(response.status_code, 200)
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
@@ -1145,12 +1145,12 @@ class ListingIntegrityRouteTest(unittest.TestCase):
         url = f"/api/conversations/{self.conv.id}/listing"
 
         # Other edits leave Item Details alone.
-        response = self.client.put(url, json={"listing": {**listing, "price": 30}})
+        response = self.client.put(url, json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": {**listing, "price": 30}})
         self.assertEqual(response.status_code, 200)
         self.db.refresh(self.conv)
         self.assertNotIn("sku", json.loads(self.conv.notes))
 
-        response = self.client.put(url, json={"listing": {**listing, "sku": "BIN4-001"}})
+        response = self.client.put(url, json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": {**listing, "sku": "BIN4-001"}})
         self.assertEqual(response.status_code, 200)
         self.db.refresh(self.conv)
         self.assertEqual(
@@ -1216,7 +1216,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         }
         response = self.client.put(
             f"/api/conversations/{self.conv.id}/listing",
-            json={"listing": updated},
+            json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": updated},
         )
         self.assertEqual(response.status_code, 200)
         self.db.refresh(job)
@@ -1236,7 +1236,7 @@ class JobSafetyRouteTest(unittest.TestCase):
         self.db.add_all(jobs)
         self.db.commit()
         response = self.client.put(f"/api/conversations/{self.conv.id}/listing",
-                                   json={"listing": {**VALID_LISTING, "title": "New local edit"}})
+                                   json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": {**VALID_LISTING, "title": "New local edit"}})
         self.assertEqual(response.status_code, 200, response.text)
         for job in jobs:
             self.db.refresh(job)

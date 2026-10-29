@@ -825,6 +825,18 @@ def serve_job_photo(job_id: str, photo_id: str, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(404, "Job not found")
 
+    from vendoo_studio.services import approved_photos
+
+    if approved_photos.KEY in (job.listing_snapshot or {}):
+        photo = next((row for row in job.listing_snapshot[approved_photos.KEY] if row["id"] == photo_id), None)
+        if photo is None:
+            raise HTTPException(404, "Photo not approved for this job")
+        try:
+            filepath = photo_store().local_path(photo["stored_filename"])
+        except FileNotFoundError:
+            raise HTTPException(404, "Approved photo file not found") from None
+        return FileResponse(str(filepath), media_type=photo["mime_type"])
+
     photo = db.query(Photo).filter(
         Photo.id == photo_id,
         Photo.conversation_id == job.conversation_id,

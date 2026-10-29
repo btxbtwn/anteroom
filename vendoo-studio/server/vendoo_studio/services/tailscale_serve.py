@@ -111,6 +111,14 @@ def _public_url(host: str) -> str:
 
 def status() -> dict[str, Any]:
     """Inspect Tailscale and whether Studio's private Serve route is active."""
+    from vendoo_studio.services.local_requests import set_private_origin
+
+    payload = _status()
+    set_private_origin(payload["url"] if payload["enabled"] else None)
+    return payload
+
+
+def _status() -> dict[str, Any]:
     payload: dict[str, Any] = {
         "available": False,
         "installed": bool(_which_tailscale()),

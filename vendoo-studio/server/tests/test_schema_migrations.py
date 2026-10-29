@@ -1,7 +1,7 @@
 import sqlite3
 
 import pytest
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 
 from vendoo_studio.services import backups, schema_migrations
@@ -264,6 +264,37 @@ def test_a_new_revision_is_applied_and_snapshotted_first(engine, snapshots, scri
     assert ensure_schema(engine) == "0002"
     assert "note" in {column["name"] for column in inspect(engine).get_columns("probe")}
     assert [snapshot.reason for snapshot in backups.list_snapshots(snapshots)] == ["pre-migration"]
+
+
+def test_a_failed_backup_blocks_migration_without_changing_the_database(engine, snapshots, scripted_migrations, monkeypatch):
+    scripted_migrations("0001", None, "op.create_table('probe', sa.Column('id', sa.String(), primary_key=True))")
+    ensure_schema(engine)
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO probe (id) VALUES ('keep-me')"))
+    scripted_migrations("0002", "0001", "op.add_column('probe', sa.Column('note', sa.String(), nullable=True))")
+
+    def unavailable(*args, **kwargs):
+        raise backups.BackupError("disk full")
+
+    monkeypatch.setattr(backups, "take_snapshot", unavailable)
+    with pytest.raises(SchemaError, match="recovery snapshot"):
+        ensure_schema(engine)
+    assert recorded_revision(engine) == "0001"
+    assert [column["name"] for column in inspect(engine).get_columns("probe")] == ["id"]
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT id FROM probe")).scalar() == "keep-me"
+
+
+def test_a_failed_backup_blocks_legacy_adoption(engine, snapshots, monkeypatch):
+    _legacy_database(engine)
+
+    def unavailable(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(backups, "take_snapshot", unavailable)
+    with pytest.raises(SchemaError, match="recovery snapshot"):
+        ensure_schema(engine)
+    assert recorded_revision(engine) is None
 
 
 def test_a_failing_revision_leaves_the_snapshot_behind(engine, snapshots, scripted_migrations, tmp_path):

@@ -4,6 +4,7 @@ import asyncio
 import unittest
 from datetime import timedelta
 from types import SimpleNamespace
+from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -20,6 +21,7 @@ from vendoo_studio.services import native_marketplaces as native
 from vendoo_studio.services.api_job_lock import api_job_is_live, claim_api_job, release_api_job
 from vendoo_studio.services.browser_bridge import BrowserBridgeError
 from vendoo_studio.services.job_watchdog import fail_stalled_jobs
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
 URLS = {"mercari": "https://www.mercari.com/sell/draft/testNativeDraft/",
@@ -39,6 +41,11 @@ SELLWILD = {"sellwild_category_id": 272, "sellwild_condition_id": 2}
 
 class NativeMarketplacesTest(unittest.TestCase):
     def setUp(self):
+        directory = self.enterContext(TemporaryDirectory())
+        store = LocalPhotoStore(directory)
+        for name in ("test.jpg", "back.jpg", "collage.jpg"):
+            store.put(name, b"test photo")
+        self.enterContext(patch("vendoo_studio.services.photo_store._store", store))
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         Base.metadata.create_all(engine)
         self.sessions = sessionmaker(bind=engine)
@@ -152,6 +159,78 @@ class NativeMarketplacesTest(unittest.TestCase):
                 self.run_jobs()
                 self.assertEqual(self.actions(), ["save_draft", "save_draft"])
                 self.assertEqual(self.bridge.call_args.args[2]["draft_url"], URLS[platform])
+
+    def test_an_approved_job_keeps_its_photos_after_the_item_photos_are_replaced(self):
+        from vendoo_studio.services.photo_store import photo_store
+        from vendoo_studio.services.listing_delete import delete_listing
+
+        repo = ConversationRepo(self.db)
+        [original] = repo.get_photos(self.conv.id)
+        self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": URLS["mercari"]}
+        reply = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(reply.status_code, 200, reply.text)
+        job_id = reply.json()["job_id"]
+        pinned = JobRepo(self.db).get(job_id).listing_snapshot["_approved_photos"][0]["stored_filename"]
+        repo.delete_photo(self.conv.id, original.id)
+        photo_store().delete("test.jpg")
+        photo_store().put("new.jpg", b"Different product")
+        replacement = repo.add_photo(self.conv.id, "new.jpg", "new.jpg", "image/jpeg", 17)
+        self.run_jobs()
+        payload = self.bridge.call_args.args[2]
+        self.assertEqual([photo["id"] for photo in payload["photos"]], [original.id])
+        image = self.client.get(f"/api/jobs/{job_id}/photos/{original.id}")
+        self.assertEqual(image.status_code, 200, image.text)
+        self.assertEqual(image.content, b"test photo")
+        self.assertEqual(self.client.get(f"/api/jobs/{job_id}/photos/{replacement.id}").status_code, 404)
+        delete_listing(self.db, self.conv.id)
+        self.assertFalse(photo_store().exists(pinned))
+
+    def test_a_missing_photo_prevents_dispatch(self):
+        from vendoo_studio.services.photo_store import photo_store
+
+        photo_store().delete("test.jpg")
+        reply = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(reply.status_code, 409, reply.text)
+        self.assertEqual(self.launched, [])
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+
+    def test_clear_keeps_approved_files_shared_by_the_action_and_its_check(self):
+        from vendoo_studio.services.listing_delete import wipe_contents
+        from vendoo_studio.services.photo_store import photo_store
+
+        draft = {"ok": True, "state": "draft", "draft_url": URLS["mercari"]}
+        self.bridge.return_value = draft
+        saved = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.run_jobs()
+        job_id = saved.json()["job_id"]
+        key = JobRepo(self.db).get(job_id).listing_snapshot["_approved_photos"][0]["stored_filename"]
+        self.bridge.return_value = {"finished": True, "result": draft}
+        checked = self.client.post(f"{self.base}/mercari/check")
+        self.assertEqual(checked.status_code, 200, checked.text)
+        wipe_contents(self.db, self.conv.id, keep_photos=True, keep_marketplace_listings=True)
+        self.db.commit()
+        self.assertTrue(photo_store().exists(key))
+        self.assertIsNotNone(JobRepo(self.db).get(job_id))
+
+    def test_listing_a_saved_draft_refreshes_a_photo_edited_since_the_save(self):
+        from vendoo_studio.services.photo_store import photo_store
+
+        self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": URLS["mercari"]}
+        reply = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.run_jobs()
+        [photo] = ConversationRepo(self.db).get_photos(self.conv.id)
+        photo_store().put("edited.jpg", b"Edited photo")
+        photo.stored_filename = "edited.jpg"
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.bridge.side_effect = [
+            {"ok": True, "state": "draft", "draft_url": URLS["mercari"]},
+            self.published("mercari"),
+        ]
+        self.list("mercari")
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
 
     def test_a_form_with_its_own_photos_sends_them_and_every_other_form_keeps_the_item_photos(self):
         repo = ConversationRepo(self.db)
@@ -563,9 +642,11 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertNotEqual(unrelated["state"], "unknown")
 
     def test_listing_again_replaces_a_deleted_depop_draft_in_the_same_list(self):
-        MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {
-            "state": "draft", "draft_url": URLS["depop"], "revision_id": self.rev.id,
-        })
+        self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": URLS["depop"]}
+        saved = self.client.post(f"{self.base}/depop/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.run_jobs()
+        self.bridge.reset_mock()
         new = "https://www.depop.com/sellinghub/drafts/edit/newdraft1/"
         self.bridge.side_effect = [
             {"ok": False, "safe_to_retry": True, "error": "Depop refused the request (HTTP 404).",
@@ -713,12 +794,16 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(JobRepo(self.db).get(record["job_id"]).status, "completed")
 
     def test_a_deleted_vinted_draft_is_saved_again_in_the_same_list(self):
+        from vendoo_studio.services import approved_photos
+
         listing = {**LISTING, "vinted_specifics": {"category": "Women > Clothing", "condition": "Good"}}
         revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "model")
         old = "https://www.vinted.com/items/42/edit"
         new = "https://www.vinted.com/items/43/edit"
+        snapshot = {**listing, approved_photos.KEY: approved_photos.capture(ConversationRepo(self.db).get_photos(self.conv.id))}
+        saved = JobRepo(self.db).create(self.conv.id, revision.id, snapshot, status="completed")
         MarketplaceListingRepo(self.db).save(self.conv.id, "vinted", {
-            "state": "draft", "draft_url": old, "revision_id": revision.id,
+            "state": "draft", "draft_url": old, "revision_id": revision.id, "job_id": saved.id,
         })
         self.bridge.side_effect = [
             {"ok": False, "safe_to_retry": True, "error": "Could not find draft on Vinted. List again.",

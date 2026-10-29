@@ -822,10 +822,10 @@ export const api = {
 
   listings: {
     get: (convId: string) => request<ListingResponse>(`/conversations/${convId}/listing`),
-    update: (convId: string, listing: ListingData) =>
+    update: (convId: string, listing: ListingData, expectedRevisionId: string) =>
       request<ListingUpdateResult>(`/conversations/${convId}/listing`, {
         method: "PUT",
-        body: JSON.stringify({ listing }),
+        body: JSON.stringify({ listing, expected_revision_id: expectedRevisionId }),
       }),
     validate: (convId: string) =>
       request<ValidationResult>(`/conversations/${convId}/listing/validate`, { method: "POST" }),

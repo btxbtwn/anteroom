@@ -290,7 +290,7 @@ def merge(db: Session, keep_id: str, merge_id: str) -> dict[str, Any]:
     from vendoo_studio.models.listing import Listing, ListingRevision
     from vendoo_studio.models.marketplace_listing import MarketplaceListing
     from vendoo_studio.models.marketplace_sale import MarketplaceSale
-    from vendoo_studio.repositories.queries import BUSY_LISTING_STATUSES, _settle
+    from vendoo_studio.repositories.queries import BUSY_LISTING_STATUSES, ListingRepo, RevisionConflict, _settle
     from vendoo_studio.services.native_marketplaces import NAMES, running_marketplace
     from vendoo_studio.services.vendoo_import import merge_notes, parse_notes, split_vendoo_labels
 
@@ -323,20 +323,31 @@ def merge(db: Session, keep_id: str, merge_id: str) -> dict[str, Any]:
         label for label in split_vendoo_labels(parse_notes(other.notes).get("vendooLabels"))
         if label.casefold() not in {kept.casefold() for kept in kept_labels}
     ]
+    label_revision = None
     if added:
         labels = [*kept_labels, *added]
         keep.notes = merge_notes(keep.notes, {"vendooLabels": ", ".join(labels)})
         current = db.get(Listing, keep_id)
         revision = db.get(ListingRevision, current.current_revision_id) if current and current.current_revision_id else None
         if revision is not None and isinstance(revision.listing_json, dict):
-            revision.listing_json = {**revision.listing_json, "labels": labels}
+            label_revision = (revision.id, {**revision.listing_json, "labels": labels})
 
     now = utcnow()
     other.notes = merge_notes(other.notes, {"mergedInto": keep_id})
     _settle(other, now, force=True)
     keep.updated_at = now
     _record(db, keep_id, merge_id, "merged", kept_id=keep_id)
-    db.commit()
+    if label_revision:
+        revision_id, body = label_revision
+        try:
+            # Commit the new revision and the links, sales and merge decision
+            # together. A concurrent editor save rolls the entire merge back.
+            ListingRepo(db).save_revision(keep_id, body, source="merge", parent_revision_id=revision_id,
+                                          expected_revision_id=revision_id)
+        except RevisionConflict as exc:
+            raise MergeError(409, "This listing changed while merging. Review it and try again.") from exc
+    else:
+        db.commit()
     return {
         "kept_id": keep_id,
         "merged_id": merge_id,

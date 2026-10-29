@@ -8,7 +8,13 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
 ## 0.1.530 — 2026-10-29
 
-- Vinted’s category picker can open a separate sign-in window in Anteroom to load categories and search brands without Chrome. This private sign-in ends when Anteroom closes.
+- Listing edits reject stale saves, and direct marketplace actions keep the exact photos you approved even if you change them later.
+- Correcting an inventory quantity before a sale removes the mistaken stock count. Reducing a quantity after a partial sale keeps the established stock history safe.
+- Marketplace forms follow their supplied row widths and disable editing consistently while saving or generating. Typed answers stay in the editor during refreshes.
+- Merging duplicate items creates a new listing revision and preserves the earlier listing history.
+- Anteroom rejects requests from untrusted websites, masks secrets in terminal errors, and checks that updates match the installed app's signing identity.
+- Database upgrades stop safely if Anteroom cannot save a recovery backup first. Marketplace sign-in tokens expire automatically in the relay, and CI checks Python dependencies and relay failures.
+- Vinted category and brand choices can use a private sign-in window in the Anteroom Mac app without opening Chrome.
 
 ## 0.1.529 — 2026-10-29
 

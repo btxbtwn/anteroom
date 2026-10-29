@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -14,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
+from vendoo_studio.services.photo_store import LocalPhotoStore
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import native_marketplaces as native
 from vendoo_studio.services.marketplace_delist import listing_id
@@ -56,6 +58,10 @@ class VintedCategoryTest(unittest.TestCase):
 
 class VintedListRouteTest(unittest.TestCase):
     def setUp(self):
+        directory = self.enterContext(TemporaryDirectory())
+        store = LocalPhotoStore(directory)
+        store.put("test.jpg", b"test photo")
+        self.enterContext(patch("vendoo_studio.services.photo_store._store", store))
         engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         Base.metadata.create_all(engine)
         self.sessions = sessionmaker(bind=engine)

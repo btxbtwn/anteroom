@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value
@@ -553,11 +554,24 @@ class ListingRepo:
 
         listing = self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
         if expected_revision_id == "":
-            if listing is not None:
+            if listing is not None and listing.current_revision_id is not None:
                 self.db.rollback()
                 raise RevisionConflict("This listing changed since you reviewed it")
-            listing = Listing(conversation_id=conv_id, current_revision_id=revision.id)
-            self.db.add(listing)
+            if listing is None:
+                listing = Listing(conversation_id=conv_id, current_revision_id=revision.id)
+                self.db.add(listing)
+                try:
+                    self.db.flush()
+                except IntegrityError as exc:
+                    self.db.rollback()
+                    raise RevisionConflict("This listing changed since you reviewed it") from exc
+            else:
+                result = self.db.execute(update(Listing).where(
+                    Listing.conversation_id == conv_id, Listing.current_revision_id.is_(None),
+                ).values(current_revision_id=revision.id))
+                if result.rowcount != 1:
+                    self.db.rollback()
+                    raise RevisionConflict("This listing changed since you reviewed it")
         elif expected_revision_id is not None:
             result = self.db.execute(update(Listing).where(
                 Listing.conversation_id == conv_id, Listing.current_revision_id == expected_revision_id,

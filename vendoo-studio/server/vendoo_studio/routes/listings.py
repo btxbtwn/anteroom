@@ -30,6 +30,8 @@ def _first_error(validation) -> str:
 
 class ListingUpdate(BaseModel):
     listing: dict
+    # Empty only when the editor has not yet saved a first revision.
+    expected_revision_id: str = Field(max_length=100)
 
 
 class ListingResponse(BaseModel):
@@ -133,9 +135,13 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
 
 @router.put("/api/conversations/{conv_id}/listing")
 def update_listing(conv_id: str, body: ListingUpdate, db: Session = Depends(get_db)):
+    from vendoo_studio.repositories.queries import RevisionConflict
     from vendoo_studio.services.listing_editor import save_listing_edit
 
-    return save_listing_edit(conv_id, body.listing, db)
+    try:
+        return save_listing_edit(conv_id, body.listing, db, expected_revision_id=body.expected_revision_id)
+    except RevisionConflict as exc:
+        raise HTTPException(409, "This listing changed. Reload it before saving your edits.") from exc
 
 
 @router.post("/api/conversations/{conv_id}/listing/validate")
@@ -201,7 +207,8 @@ def restore_revision(conv_id: str, revision_id: str, body: RevisionRestoreReques
         raise HTTPException(409, "This listing changed while you were comparing revisions. Review it again before restoring.")
     if listing_busy(conv_id, db):
         raise HTTPException(409, "Wait for generation or sending to finish before restoring a revision.")
-    result = update_listing(conv_id, ListingUpdate(listing=copy.deepcopy(target.listing_json)), db)
+    result = update_listing(conv_id, ListingUpdate(listing=copy.deepcopy(target.listing_json),
+                                                 expected_revision_id=body.expected_revision_id), db)
     listing_repo.get_revision(result["revision_id"]).source = "restore"
     from vendoo_studio.models.listing_evidence import ListingCorrection
     db.query(ListingCorrection).filter_by(revision_id=result["revision_id"]).update({"source": "restore"})

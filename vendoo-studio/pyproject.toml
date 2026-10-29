@@ -15,7 +15,10 @@ dependencies = [
     "websockets>=13.0",
     "truststore>=0.10.0",
     "python-multipart>=0.0.9",
-    "pillow>=10.0.0",
+    "pillow>=13.0.0",
+    # Security floors for the HTTP trust bundle and shared cache locks.
+    "certifi>=2026.10.19",
+    "filelock>=4.2.1",
     "pillow-heif>=0.18",
     "hachoir>=3.4,<4",
     "numpy>=2.0",
@@ -34,6 +37,7 @@ hosted = [
     "psycopg[binary]>=3.2",
 ]
 dev = [
+    "pip-audit>=2.9",
     "psycopg[binary]>=3.2",
     "pytest>=8.3",
     "pytest-xdist>=3.6",

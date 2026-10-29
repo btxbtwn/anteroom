@@ -113,7 +113,7 @@ class ListingReviewTest(unittest.TestCase):
         self.assertEqual(review.payload["snapshot"]["price"], 30)
         self.assertEqual(job.approved_revision_id, self.current.id)
         # A later form edit must not silently change the queued approval.
-        result = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": {**LISTING, "price": 20}})
+        result = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": {**LISTING, "price": 20}})
         self.assertEqual(result.status_code, 200, result.text)
         self.db.refresh(job)
         self.assertEqual(job.listing_snapshot["price"], 30)
