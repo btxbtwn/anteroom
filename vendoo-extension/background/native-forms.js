@@ -453,9 +453,12 @@ function mercariEditorForm(listing, master) {
   // The size list sits under its group headings (Standard, Petite, Inch, Alpha); a group with no title has none.
   const sizeGroups = Object.fromEntries(sizeChoices.map((row, index) => [row.label, sizes[index].group_name])
     .filter(([, group]) => group));
-  if (sizes.length || size.none === 'unknown') fields.push(product('Product info')(nativeEditorChoice('mercari_specifics.nativeSizeId', 'Size',
-    size.id ?? specifics.nativeSizeId ?? specifics.size ?? listing.size ?? '', sizeChoices,
-    { required: true, category_specific: true, placeholder: 'Select size', ...(Object.keys(sizeGroups).length ? { option_groups: sizeGroups } : {}) })));
+  if (sizes.length || size.none === 'unknown') {
+    const alias = mercariSizeAlias(listing, size);
+    fields.push(product('Product info')(nativeEditorChoice('mercari_specifics.nativeSizeId', 'Size', mercariSizeValue(size), sizeChoices,
+      { required: true, category_specific: true, placeholder: 'Select size', ...(Object.keys(sizeGroups).length ? { option_groups: sizeGroups } : {}),
+        ...(Object.keys(alias).length ? { option_aliases: alias } : {}) })));
+  }
   fields.push(...[
     nativeEditorField('mercari_specifics.shipsFrom', 'Ships from:', mercariShipsFrom(listing),
       { required: true, max_length: 5, width: 'quarter', save_as_default: true }),
