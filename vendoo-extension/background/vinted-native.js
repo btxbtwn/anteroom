@@ -257,6 +257,7 @@ async function vintedSession(deadline) {
     const json = body !== undefined && !(body instanceof FormData);
     const { data } = await marketplaceFetch(url, {
       marketplace: 'vinted', step, method, credentials: 'include', deadline,
+      ...(method === 'GET' ? { cache: 'no-store' } : {}),
       retry: retry ?? method === 'GET', expect: 'json',
       headers: { ...headers, ...(json ? { 'Content-Type': 'application/json', 'x-upload-form': 'true' } : {}) },
       ...(body === undefined ? {} : { body: json ? JSON.stringify(body) : body }),
@@ -434,6 +435,25 @@ async function vintedUploadPhotos(call, jobId, photos, sessionId, deadline) {
 
 const VINTED_LIVE_READ_WAITS_MS = [0, 700, 1500];
 
+// Publication can take a moment to appear in Vinted's reads. Only read again;
+// repeating completion could publish twice after a lost acknowledgement.
+async function vintedConfirmLive(call, id) {
+  let view = null;
+  for (const wait of VINTED_LIVE_READ_WAITS_MS) {
+    if (wait) await marketplaceSleep(wait);
+    try {
+      view = await vintedRead(call, id);
+    } catch (error) {
+      // Safe reads already retry transport errors. If one still fails, the
+      // next confirmation can recover, but cancellation/auth failures stop.
+      if (error.code !== 'network' || error.cancelled || error.rejected === true) throw error;
+      continue;
+    }
+    if (vintedLive(view)) break;
+  }
+  return view;
+}
+
 function vintedColorIds(item) {
   if (Array.isArray(item?.color_ids)) return item.color_ids.map(Number).filter(id => id > 0);
   return [item?.color1_id, item?.color2_id].map(Number).filter(id => id > 0);
@@ -561,7 +581,7 @@ async function runVintedNative(msg, recovery = false) {
     if (recovery && payload.action === 'publish') {
       const journal = (await chrome.storage.local.get(key))[key] || {};
       if (journal.listing_url) return { ok: true, state: 'published', draft_url: payload.draft_url, listing_url: journal.listing_url };
-      const view = id ? await vintedRead(call, id) : null;
+      const view = id ? await vintedConfirmLive(call, id) : null;
       if (vintedLive(view)) return { ok: true, state: 'published', draft_url: payload.draft_url, listing_url: vintedPublicUrl(view.id) };
       return fail(marketplaceError('Vinted did not confirm the listing. Check your Vinted listings before trying again.', { code: 'uncertain', rejected: false }));
     }
@@ -607,17 +627,24 @@ async function runVintedNative(msg, recovery = false) {
       const form = vintedForm(fields, completionPhotos, crypto.randomUUID(), Number(id));
       const { assigned_photos: attached, ...rest } = form;
       wrote = true;
-      const completed = await call('POST', `${VINTED_ORIGIN}/api/v2/item_upload/drafts/${id}/completion`, {
-        step: 'publish', retry: false, body: {
-          draft: { ...rest, photos: attached },
-          push_up: false, parcel: null, upload_session_id: form.temp_uuid,
-        },
-      });
+      let completed;
+      try {
+        completed = await call('POST', `${VINTED_ORIGIN}/api/v2/item_upload/drafts/${id}/completion`, {
+          step: 'publish', retry: false, body: {
+            draft: { ...rest, photos: attached },
+            push_up: false, parcel: null, upload_session_id: form.temp_uuid,
+          },
+        });
+      } catch (error) {
+        // The write may have succeeded even when its reply was lost. Verify
+        // the known item; never send completion a second time.
+        if (error.rejected !== false || error.cancelled) throw error;
+      }
       const publishedId = String(completed?.item?.id || completed?.draft?.id || id);
       if (!/^[1-9]\d{0,14}$/.test(publishedId)) {
         throw marketplaceError('Vinted did not confirm the new listing. Check your Vinted listings before trying again.', { code: 'uncertain', rejected: false });
       }
-      const after = await vintedRead(call, publishedId);
+      const after = await vintedConfirmLive(call, publishedId);
       if (!vintedLive(after)) {
         throw marketplaceError('Vinted did not confirm the listing. Check your Vinted listings before trying again.', { code: 'uncertain', rejected: false });
       }
