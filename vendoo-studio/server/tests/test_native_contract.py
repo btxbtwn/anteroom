@@ -210,6 +210,61 @@ class NativeContractTest(unittest.TestCase):
         listing[contract.EVIDENCE_KEY] = {"mercari_specifics.material": {"value": "wool", "quote": "100% wool"}}
         self.assertIn("evidence", contract.gaps(listing, "mercari")[0]["message"])
 
+    def test_an_aspect_stored_under_another_spelling_answers_its_row(self):
+        listing = ebay_tshirt()
+        # The listing JSON keeps the aspect lowercase; the form names the row Style.
+        row = next(row for row in listing[contract.KEY]["ebay"]["fields"] if row["path"] == "ebay_specifics.style")
+        row["path"] = "ebay_specifics.Style"
+        row["required"] = True
+        listing[contract.KEY]["ebay"]["inputs"] = contract.inputs(
+            listing, "ebay", listing[contract.KEY]["ebay"]["fields"])
+        listing["ebay_specifics"]["style"] = "Graphic Tee"
+        listing[contract.EVIDENCE_KEY] = {"ebay_specifics.style": {"value": "Graphic Tee", "quote": "graphic tee"}}
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+
+    def test_a_required_aspect_general_already_answers_is_not_reported_empty(self):
+        listing = {"title": "Beige pants", "brand": "Anne Klein", "size": "M", "department": "Women",
+                   "condition": "Pre-Owned - Good", "direct_category_ids": {"ebay": "63863"},
+                   "ebay_specifics": {"condition": "3000"}}
+        form = {"marketplace": "ebay", "native": True, "known": True, "page_labels": True, "category_id": "63863",
+                "fields": [
+                    {"path": "ebay_specifics.condition", "label": "Item condition", "options": ["Pre-Owned - Good"],
+                     "option_values": {"Pre-Owned - Good": "3000"}},
+                    {"path": "ebay_specifics.Brand", "label": "Brand", "required": True,
+                     "options": ["Anne Klein"], "option_values": {"Anne Klein": "Anne Klein"}},
+                    {"path": "ebay_specifics.Size", "label": "Size", "required": True,
+                     "selection_only": True, "options": ["S", "M", "L"],
+                     "option_values": {"S": "S", "M": "M", "L": "L"}},
+                    {"path": "ebay_specifics.Department", "label": "Department", "required": True,
+                     "options": ["Women"], "option_values": {"Women": "Women"}},
+                ]}
+        listing[contract.KEY] = contract.capture(listing, {"ebay": form}, ["ebay"])
+        # eBay's posting path fills these aspects from the listing's own fields.
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+
+    def test_a_start_bid_is_not_required_for_a_fixed_price_listing(self):
+        row = {"path": "ebay_specifics.auctionStartPrice", "required": True}
+        fixed = {"ebay_specifics": {"listingFormat": "FIXED_PRICE"}}
+        auction = {"ebay_specifics": {"listingFormat": "AUCTION"}}
+        self.assertFalse(contract.required_for_this_listing(row, fixed, row["path"]))
+        self.assertTrue(contract.required_for_this_listing(row, auction, row["path"]))
+
+    def test_a_missing_account_policy_is_noted_not_refused(self):
+        listing = ebay_tshirt()
+        listing[contract.KEY]["ebay"]["fields"].append(
+            {"path": "ebay_specifics.returnPolicyId", "label": "Return policy", "required": True})
+        listing["ebay_specifics"].pop("returnPolicyId", None)
+        found = [item for item in contract.gaps(listing, "ebay") if item["field"] == "ebay_specifics.returnPolicyId"]
+        self.assertTrue(found)
+        self.assertFalse(found[0]["blocking"])
+
+    def test_a_field_the_form_no_longer_has_is_noted_not_refused(self):
+        listing = ebay_tshirt()
+        listing["ebay_specifics"]["obsoleteAspect"] = "Something"
+        found = contract.gaps(listing, "ebay")
+        self.assertTrue(found)
+        self.assertTrue(all(not item["blocking"] for item in found))
+
     def test_a_missing_form_blocks_instead_of_using_reference_fields(self):
         listing = seed()
         listing[contract.KEY] = contract.capture(listing, {}, ["mercari"])
