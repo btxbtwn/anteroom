@@ -4,7 +4,6 @@ import { api } from "../api/client";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, jobsPollMs, pollMs } from "../api/polling";
 import type { BrowserField } from "../api/client";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
-import { ChatPanel } from "../components/ChatPanel";
 import { isChatToggleShortcut, ListingChatPopup, type ListingChatStatus } from "../components/ListingChatPopup";
 import { ListingSession } from "../components/listingSession";
 import { SetupChecklist } from "../components/SetupChecklist";
@@ -54,6 +53,9 @@ import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSess
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
 import { initialOpenListing, openListingReducer, type OpenListing } from "./openListing";
 
+const ChatPanel = lazy(() =>
+  import("../components/ChatPanel").then((module) => ({ default: module.ChatPanel })),
+);
 const ListingEditor = lazy(() =>
   import("../components/ListingEditor").then((module) => ({ default: module.ListingEditor })),
 );
@@ -202,7 +204,31 @@ export function App() {
   const inventoryLoaded = conversations !== undefined;
   useEffect(() => {
     if (!inventoryLoaded) return;
-    for (const load of PAGE_LOADERS) void load().catch(() => {});
+    let cancelled = false;
+    let idleId: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const remaining = [...PAGE_LOADERS];
+    const schedule = () => {
+      if (cancelled || !remaining.length) return;
+      const next = () => {
+        if (cancelled) return;
+        const load = remaining.shift()!;
+        void load().catch(() => {}).then(schedule);
+      };
+      // Warm one page per idle turn so parsing every page cannot crowd out
+      // the first interaction or compete with the page the seller opens.
+      if (typeof window.requestIdleCallback === "function") {
+        idleId = window.requestIdleCallback(next);
+      } else {
+        timer = setTimeout(next, 200);
+      }
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      if (idleId !== undefined) window.cancelIdleCallback(idleId);
+      if (timer !== undefined) clearTimeout(timer);
+    };
   }, [inventoryLoaded]);
   const previousQueueJobs = useRef<Map<string, string> | null>(null);
   useEffect(() => {
@@ -665,14 +691,16 @@ export function App() {
   });
 
   const renderChat = (listing: OpenListing) => (
-    <ChatPanel
-      convId={listing.id}
-      queuedMessage={listing.queuedMessage}
-      onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: listing.id, value: null })}
-      browser={browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
-      onBrowserFieldsChange={setBrowserFields}
-      onStatusChange={setChatStatus}
-    />
+    <Suspense fallback={pageLoading}>
+      <ChatPanel
+        convId={listing.id}
+        queuedMessage={listing.queuedMessage}
+        onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: listing.id, value: null })}
+        browser={browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
+        onBrowserFieldsChange={setBrowserFields}
+        onStatusChange={setChatStatus}
+      />
+    </Suspense>
   );
   const renderEditor = (listing: OpenListing, chat?: ReactNode) => (
     <Suspense fallback={null}>
