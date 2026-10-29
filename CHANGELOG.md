@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.495 — 2026-10-28
+
+- Marketplace forms show readable warnings without CLI commands, including shipping, photo and listing requirements across every marketplace.
+
 ## 0.1.494 — 2026-10-28
 
 - Depop listings that showed shipping filled in still failed to publish with “national shipping”. Two causes, both fixed. When Depop's parcel list named no price, the draft was saved without a national shipping cost, so Depop counted that as unanswered even though the package size was there; it now writes a cost every time, and free shipping is written as 0.00 rather than dropped as if it were blank. And a draft saved before that fix kept telling Depop it was missing shipping long after the form showed it; publishing now writes the draft once more and lets Depop recount before declining, instead of refusing an item whose shipping you already chose.
