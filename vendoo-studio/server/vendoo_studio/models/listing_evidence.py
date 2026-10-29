@@ -2,10 +2,11 @@
 from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class ListingCorrection(Base):
+class ListingCorrection(SellerOwned, Base):
     __tablename__ = "listing_corrections"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -18,7 +19,7 @@ class ListingCorrection(Base):
     created_at = Column(DateTime, nullable=False, default=utcnow)
 
 
-class SaleSnapshot(Base):
+class SaleSnapshot(SellerOwned, Base):
     __tablename__ = "sale_snapshots"
     __table_args__ = (UniqueConstraint("conversation_id", "sale_key"),)
 

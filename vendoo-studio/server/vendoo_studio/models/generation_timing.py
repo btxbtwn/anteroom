@@ -3,10 +3,11 @@
 from sqlalchemy import JSON, Column, DateTime, Float, String
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class GenerationTiming(Base):
+class GenerationTiming(SellerOwned, Base):
     """One generate run: seconds per stage, written when the chat stream ends
     and again when marketplace fields finish after it.
 

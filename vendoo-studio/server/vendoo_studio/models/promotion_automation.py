@@ -7,10 +7,11 @@ carrying its ``automation_id``; each round is a ``promotion_runs`` row.
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class PromotionAutomation(Base):
+class PromotionAutomation(SellerOwned, Base):
     __tablename__ = "promotion_automations"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -40,7 +41,7 @@ class PromotionAutomation(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
-class PromotionRun(Base):
+class PromotionRun(SellerOwned, Base):
     __tablename__ = "promotion_runs"
 
     id = Column(String, primary_key=True, default=new_id)

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.524 — 2026-10-29
+
+- Prepared existing drafts, photos, jobs, sales and shop history for seller accounts by recording their owner, while keeping your Mac’s data intact. Signing in and sharing listings across devices are still to come.
+
 ## 0.1.523 — 2026-10-29
 
 - Anteroom loads less code at startup, keeps listing search responsive while filtering, and reads inventory cover photos more efficiently.

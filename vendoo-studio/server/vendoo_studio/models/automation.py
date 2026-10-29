@@ -16,10 +16,11 @@ from __future__ import annotations
 from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class Automation(Base):
+class Automation(SellerOwned, Base):
     __tablename__ = "automations"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -42,7 +43,7 @@ class Automation(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow)
 
 
-class AutomationRun(Base):
+class AutomationRun(SellerOwned, Base):
     """One firing of a task.
 
     ``scheduled_for`` is the slot that was due. A schedule slot is claimed once;
@@ -71,7 +72,7 @@ class AutomationRun(Base):
     summary = Column(JSON, nullable=True)
 
 
-class AutomationApplication(Base):
+class AutomationApplication(SellerOwned, Base):
     """Last time an age rule acted on an item.
 
     The next pass waits until this is ``min_age_days`` old, so a daily check
@@ -89,7 +90,7 @@ class AutomationApplication(Base):
     applied_at = Column(DateTime, nullable=False, default=utcnow)
 
 
-class AutomationRelistGap(Base):
+class AutomationRelistGap(SellerOwned, Base):
     """A marketplace that stayed down after a relist retried it.
 
     ``state`` is the seller-facing words. An open row (``resolved_at`` empty)
@@ -110,7 +111,7 @@ class AutomationRelistGap(Base):
     resolved_at = Column(DateTime, nullable=True)
 
 
-class AutomationApproval(Base):
+class AutomationApproval(SellerOwned, Base):
     """A regenerated draft waiting for the seller to publish it."""
 
     __tablename__ = "automation_approvals"
@@ -131,7 +132,7 @@ class AutomationApproval(Base):
     decided_at = Column(DateTime, nullable=True)
 
 
-class ItemPriceBaseline(Base):
+class ItemPriceBaseline(SellerOwned, Base):
     """The asking price a drop is measured from. Set once, never replaced."""
 
     __tablename__ = "item_price_baselines"

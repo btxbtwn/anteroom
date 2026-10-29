@@ -7,6 +7,7 @@ from sqlalchemy import JSON, Column, String, Text, DateTime, Integer, ForeignKey
 from sqlalchemy.orm import relationship
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 
 
 def new_id():
@@ -17,7 +18,7 @@ def utcnow():
     return datetime.now(UTC)
 
 
-class Conversation(Base):
+class Conversation(SellerOwned, Base):
     __tablename__ = "conversations"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -37,7 +38,7 @@ class Conversation(Base):
     listing = relationship("Listing", back_populates="conversation", uselist=False, cascade="all, delete-orphan")
 
 
-class Message(Base):
+class Message(SellerOwned, Base):
     __tablename__ = "messages"
     # Chat history and the activity poll read one listing's messages by time.
     __table_args__ = (Index("ix_messages_conversation_id_created_at", "conversation_id", "created_at"),)
@@ -58,7 +59,7 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
 
 
-class Photo(Base):
+class Photo(SellerOwned, Base):
     __tablename__ = "photos"
 
     id = Column(String, primary_key=True, default=new_id)
