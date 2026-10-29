@@ -1531,6 +1531,39 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revisions[0].listing_json["title"], LISTING_JSON["title"])
         self.assertTrue(any("repaired" in (m.text or "").lower() for m in messages))
 
+    async def test_generate_reads_photos_added_after_the_previous_analysis(self):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            first = await client.post(f"/api/conversations/{self.conv_id}/generate")
+            self.assertNotIn("Error:", first.text)
+            db = self.Session()
+            ConversationRepo(db).add_photo(self.conv_id, "b.jpg", "b.jpg", "image/jpeg", 10)
+            db.close()
+            second = await client.post(f"/api/conversations/{self.conv_id}/generate")
+            self.assertNotIn("Error:", second.text)
+        self.assertEqual(self.provider.analyze_calls, 2)
+
+    async def test_generate_does_not_save_if_photos_change_during_the_model_reply(self):
+        provider = self.provider
+        original_chat = provider.chat
+
+        async def changing_reply(messages, stream=True):
+            if "Generate a complete listing" in str(messages[-1].get("content") or ""):
+                db = self.Session()
+                ConversationRepo(db).add_photo(self.conv_id, "new.jpg", "new.jpg", "image/jpeg", 10)
+                db.close()
+            async for chunk in original_chat(messages, stream=stream):
+                yield chunk
+
+        provider.chat = changing_reply
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(f"/api/conversations/{self.conv_id}/generate")
+        self.assertIn("Photos changed during generation", response.text)
+        db = self.Session()
+        self.assertFalse(any(revision.source == "model" for revision in ListingRepo(db).get_revisions(self.conv_id)))
+        db.close()
+
     async def test_generate_reanalyzes_when_prior_analysis_was_empty(self):
         db = self.Session()
         ConversationRepo(db).add_message(self.conv_id, "system", "Photo analysis:\n")
