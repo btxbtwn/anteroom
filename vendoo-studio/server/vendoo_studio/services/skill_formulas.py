@@ -122,16 +122,27 @@ def etsy_when_made_rules() -> str:
     return section[:end.start() if end else len(section)].strip()
 
 
-def with_pinned_formulas(skill_rules: str, *, max_chars: int = 10000) -> str:
-    """Put title/description formulas first, then other skill chunks."""
-    policy = etsy_when_made_rules()
-    pinned = f"{listing_formula_rules()}\n\n{policy}"
+@lru_cache(maxsize=1)
+def core_listing_rules() -> str:
+    """Mandatory evidence and input policy, read from the canonical skill."""
+    text = (skills_dir() / "list-this" / "SKILL.md").read_text(encoding="utf-8")
+    sections = []
+    for heading in ("## Input Requirements", "## Rules (VIOLATION = INCORRECT LISTING)"):
+        start = text.index(heading)
+        end = _SECTION_HEADING.search(text, start + len(heading))
+        sections.append(text[start:end.start() if end else len(text)].strip())
+    reference = (skills_dir() / "list-this" / "references" / "vendoo_listing_template.md").read_text(encoding="utf-8")
+    start = reference.index("### **JSON Field Reference**")
+    end = reference.index("\n# ", start)
+    sections.append(reference[start:end].strip())
+    return "\n\n".join(sections)
+
+
+def with_pinned_formulas(skill_rules: str, *, max_chars: int = 20000) -> str:
+    """Keep mandatory formulas and evidence policy ahead of complete retrieved sections."""
+    pinned = f"{listing_formula_rules()}\n\n{etsy_when_made_rules()}\n\n{core_listing_rules()}"
     rest = str(skill_rules or "").strip()
-    if not rest:
-        return pinned[:max_chars]
-    # A retrieved chunk may contain only the title formula. Only skip pinning
-    # when the complete current section is already present at the front.
     if rest.startswith(pinned):
-        return f"{policy}\n\n{rest}"[:max_chars]
-    combined = f"{pinned}\n\n--- Additional listing rules ---\n\n{rest}"
+        return rest[:max_chars]
+    combined = pinned + (f"\n\n--- Additional listing rules ---\n\n{rest}" if rest else "")
     return combined[:max_chars]

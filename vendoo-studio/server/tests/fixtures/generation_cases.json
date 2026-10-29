@@ -1,0 +1,82 @@
+[
+  {
+    "id": "tagged_tee",
+    "evidence": "Photo analysis:\n- brand: Fixture\n- size: M\n- material: Cotton\n- color: Blue",
+    "expected_fields": {
+      "brand": "Fixture",
+      "size": "M",
+      "primaryColor": "Blue",
+      "ebay_specifics.material": "Cotton"
+    }
+  },
+  {
+    "id": "seller_flaw_measurement",
+    "evidence": "Blue tee, tag Fixture M.",
+    "seller_notes": "Pit to pit: 20 inches. Small hole on left cuff.",
+    "expected_fields": {
+      "brand": "Fixture",
+      "size": "M"
+    },
+    "description_contains": [
+      "20 inches",
+      "Small hole on left cuff"
+    ]
+  },
+  {
+    "id": "unreadable_tags",
+    "evidence": "Brand, size, and material tags unreadable.",
+    "unsupported_fields": [
+      "brand",
+      "size",
+      "ebay_specifics.material"
+    ]
+  },
+  {
+    "id": "mens_bottoms",
+    "evidence": "Fixture mens jeans tag waist 34 inseam 32.",
+    "expected_fields": {
+      "size": "34",
+      "ebay_specifics.inseam": "32"
+    }
+  },
+  {
+    "id": "native_options",
+    "evidence": "Fixture M cotton blue floral tee. Native Pattern choices: Solid, Floral.",
+    "expected_fields": {
+      "ebay_specifics.Pattern": "Floral"
+    },
+    "allowed_options": {
+      "ebay_specifics.Pattern": [
+        "Solid",
+        "Floral"
+      ]
+    }
+  },
+  {
+    "id": "deliberate_clear",
+    "evidence": "Fixture M plain blue tee.",
+    "seller_notes": "Leave Depop style empty.",
+    "expected_fields": {
+      "depop_specifics.style": []
+    }
+  },
+  {
+    "id": "seller_price",
+    "evidence": "Fixture M tee. Sold comps $12-$18.",
+    "seller_notes": "Keep my price at 29.",
+    "expected_fields": {
+      "price": 29
+    },
+    "description_contains": [
+      "Measurements:"
+    ]
+  },
+  {
+    "id": "marketplace_category",
+    "evidence": "Fixture M womens blouse. Verified eBay and Poshmark category ids differ.",
+    "expected_fields": {
+      "direct_category_ids.ebay": "ebay-blouse",
+      "direct_category_ids.poshmark": "poshmark-blouse"
+    }
+  }
+]

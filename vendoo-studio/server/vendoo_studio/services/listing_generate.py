@@ -372,26 +372,14 @@ REPAIR_LISTING_PROMPT = (
 )
 
 FINALIZE_GAPS_PROMPT = (
-    "Finish this Vendoo listing so it can be sent. Infer only from the supplied photo analysis, "
-    "seller notes, and current listing JSON. Do not ask questions.\n\n"
-    "Return ONE fenced ```json block with the full updated listing object.\n"
-    "Fix every listed validation error you can support from evidence.\n"
-    "TITLE and DESCRIPTION follow list-this skill formulas exactly:\n"
-    "- Title order: Brand Size Vibe Item Color Fit (max 80 chars); the size shown is the size "
-    "field verbatim, and men's bottoms size is the waist alone (34), never waist x inseam.\n"
-    "- Physical description: one short trendy vibe/style keyword sentence, then a Flaws: block "
-    "only when the item has flaws (one flaw per line, each starting with \"- \"), then a "
-    "Measurements: line — with blank lines between blocks.\n"
-    "Preserve the current title and description unless a listed validation error is for title or "
-    "description. Never replace a formula-compliant title/description with freeform marketing copy.\n"
-    "Use exact marketplace dropdown values. Keep category_path and marketplace_categories unchanged.\n"
-    "Fill every marketplace field that pertains to the item. Leave out any that "
-    "does not — omitting a field is handled properly, while \"Does Not Apply\" "
-    "is rejected by every field that does not offer it as a choice.\n"
-    "Depop Parcel Size follows the packaged weight: under 4oz Extra extra small, "
-    "under 8oz Extra small, under 12oz Small, under 1lb Medium, under 2lb Large, "
-    "otherwise Extra large. Fill Material only from tag evidence.\n\n"
-    "{formulas}"
+    "Finish this Vendoo listing by repairing only the allowed field paths. "
+    "Use supplied photo evidence and seller notes; leave unsupported values unresolved. "
+    "Return only a JSON Patch array of add or replace operations. "
+    'Example: [{{"op":"add","path":"/weight_oz","value":8}}]. '
+    "Do not return a full listing. Do not change any path outside allowed_paths. "
+    "Never modify seller-owned values, categories, or internal metadata. "
+    "Use exact native form choices when provided. The supplied listing is context, "
+    "not independent evidence for product facts.\n\n{formulas}"
 )
 
 MAX_REPAIR_CHARS = 14000
@@ -998,58 +986,82 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
     """One model pass to clear remaining Send validation errors."""
     if provider is None or not isinstance(listing, dict):
         return None
-    blockers = _validation_blockers(listing)
-    if not blockers:
-        return None
+    import copy
+
+    from vendoo_studio.services.listing_patch import apply_json_patch, extract_json_patch
+    from vendoo_studio.services.seller_overrides import get_path, locked_paths
     from vendoo_studio.services.skill_formulas import listing_formula_rules
 
+    blockers = _validation_blockers(copy.deepcopy(listing))
+    locked = locked_paths(listing)
+    protected = {"category_path", "category_id", "marketplace_categories", "marketplace_category_ids",
+                 "marketplace_category_objects", "direct_category_ids", "sku", "seller_fields"}
+    allowed = {}
+    for error in blockers:
+        field = str(error.get("field") or "")
+        if not field or field.split(".")[0].startswith("_") or field.split(".")[0] in protected:
+            continue
+        if any(field == path or field.startswith(path + ".") or path.startswith(field + ".") for path in locked):
+            continue
+        # A container error does not authorize replacement of all its fields.
+        value = listing
+        for key in field.split("."):
+            value = value.get(key) if isinstance(value, dict) else None
+        if isinstance(value, dict):
+            continue
+        pointer = "/" + "/".join(part.replace("~", "~0").replace("/", "~1") for part in field.split("."))
+        allowed[pointer] = field
+    if not allowed:
+        return None
+    from vendoo_studio.services.fill_log import prompt_options
+
+    requirements = []
+    for contract in (listing.get("_native_forms") or {}).values():
+        for row in contract.get("fields") or []:
+            if row.get("path") not in allowed.values():
+                continue
+            options, complete = prompt_options(row.get("options") or [], analysis)
+            requirements.append({
+                "path": row["path"], "options": options, "options_complete": complete,
+                **{key: row[key] for key in ("input_type", "multi", "max_values", "min_value", "max_value", "max_length")
+                   if key in row},
+            })
     payload = {
         "validation_errors": blockers,
+        "native_requirements": requirements,
+        "allowed_paths": list(allowed),
         "photo_analysis": (analysis or "")[:8000],
         "seller_notes": (notes or "")[:4000],
-        "listing": listing,
+        # Exclude bulky native schemas and private inventory metadata. Bound
+        # evidence before JSON encoding; never cut a serialized JSON document.
+        "current_values": {path: get_path(listing, field) for path, field in allowed.items()},
+        "item": {field: listing.get(field) for field in (
+            "title", "description", "brand", "size", "condition", "department", "category_path",
+            "price", "weight_lb", "weight_oz", "package_dimensions_in")},
     }
     messages = [
-        {
-            "role": "system",
-            "content": FINALIZE_GAPS_PROMPT.format(formulas=listing_formula_rules()),
-        },
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)[:MAX_REPAIR_CHARS]},
+        {"role": "system", "content": FINALIZE_GAPS_PROMPT.format(formulas=listing_formula_rules())},
+        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
     try:
         text = await collect_provider_text(provider, messages)
     except Exception:
         log.exception("listing validation-gap fill failed")
         return None
-    updated = extract_listing_json(text)
-    if not isinstance(updated, dict):
+    patches = extract_json_patch(text)
+    if not patches:
         return None
-    return _preserve_formula_copy(listing, updated, blockers)
-
-
-def _preserve_formula_copy(original: dict, updated: dict, blockers: list[dict]) -> dict:
-    """Keep formula-compliant title/description unless those fields were the blockers."""
-    from vendoo_studio.models.validation import _description_follows_formula, _title_follows_formula
-
-    fields = {str(err.get("field") or "") for err in blockers or []}
-    out = dict(updated)
-    brand = str(original.get("brand") or out.get("brand") or "").strip()
-    size = str(original.get("size") or out.get("size") or "").strip()
-    orig_title = str(original.get("title") or "").strip()
-    new_title = str(out.get("title") or "").strip()
-    if "title" not in fields and orig_title:
-        if _title_follows_formula(orig_title, brand, size) or not new_title:
-            out["title"] = orig_title
-        elif brand and new_title and not _title_follows_formula(new_title, brand, size):
-            out["title"] = orig_title
-    orig_desc = str(original.get("description") or "").strip()
-    new_desc = str(out.get("description") or "").strip()
-    if "description" not in fields and orig_desc:
-        if _description_follows_formula(orig_desc) or not new_desc:
-            out["description"] = orig_desc
-        elif new_desc and not _description_follows_formula(new_desc):
-            out["description"] = orig_desc
-    return out
+    # Reject the complete reply if it attempts an unauthorized change.
+    if any(op.get("path") not in allowed or op.get("op") not in {"add", "replace"}
+           or "value" not in op for op in patches):
+        log.warning("discarding validation repair outside allowed fields")
+        return None
+    updated = apply_json_patch(listing, patches)
+    before = {(error["field"], error["message"]) for error in blockers}
+    after = {(error["field"], error["message"]) for error in _validation_blockers(copy.deepcopy(updated))}
+    if after - before or not before - after:
+        return None
+    return updated
 
 
 # Keys and labels mirror GARMENTS in src/components/garmentMeasurements.ts. Pants cover
@@ -1484,22 +1496,6 @@ async def persist_generated_listing_with_repair(
         updated = await fill_validation_gaps(provider, listing, analysis=analysis, notes=notes)
         if isinstance(updated, dict) and updated:
             check_photos()
-            if listing.get("category_path"):
-                updated["category_path"] = listing["category_path"]
-            if listing.get("marketplace_categories"):
-                updated["marketplace_categories"] = dict(listing["marketplace_categories"])
-            RegistryService(db).merge_learned_fields(updated)
-            apply_send_readiness_fixes(updated)
-            if conv:
-                from vendoo_studio.services.vendoo_import import parse_notes
-
-                apply_seller_description_facts(updated, parse_notes(conv.notes))
-            if listing.get("package_dimensions_in"):
-                updated["package_dimensions_in"] = listing["package_dimensions_in"]
-            from vendoo_studio.services.native_contract import constrain_generated
-
-            constrain_generated(updated, listing)
-            cap_listing_description(updated)
             listing = updated
             ListingRepo(db).save_revision(conv_id, listing, source="generation_finalize", expected_revision_id=expected_revision_id)
             finalized = True
