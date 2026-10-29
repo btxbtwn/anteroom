@@ -93,6 +93,30 @@ def test_a_multi_unit_item_is_partly_sold_until_every_unit_sells(env):
     assert status(env.db, "tees").status == "sold"
 
 
+def test_inventory_quantities_do_not_decode_historical_listing_bodies(env):
+    from sqlalchemy import event
+    from vendoo_studio.models.listing import ListingRevision
+    from vendoo_studio.services.item_status import _quantities
+
+    item(env.db, "tees", quantity=3)
+    ListingRepo(env.db).save_revision("tees", {"quantity": 1, "description": "x" * 100000}, "user")
+    item(env.db, "coat", quantity=2)
+
+    # Reject a full-body SELECT even when SQLAlchemy cached its JSON decoder.
+    def scalar_only(execution):
+        for column in execution.statement.selected_columns:
+            assert not (getattr(column, "table", None) is ListingRevision.__table__
+                        and column.key == "listing_json"), "Inventory loaded a complete historical listing"
+
+    event.listen(env.db, "do_orm_execute", scalar_only)
+    try:
+        assert _quantities(env.db, None) == {"tees": 3, "coat": 2}
+        assert _quantities(env.db, {"tees"}) == {"tees": 3}
+        assert _quantities(env.db, set()) == {}
+    finally:
+        event.remove(env.db, "do_orm_execute", scalar_only)
+
+
 def test_refunded_or_cancelled_orders_do_not_sell_the_item(env):
     item(env.db, "coat")
     sale = line(env.db, "coat")
