@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.518 — 2026-10-29
+
+- Mercari’s categories, brands, conditions and grouped sizes now load in Anteroom with Chrome closed. Shipping labels and current prices load directly from Mercari after you answer the package questions.
+
 ## 0.1.517 — 2026-10-29
 
 - Inventory refreshes use less memory and load faster by reading quantities without loading every saved version of every listing.
