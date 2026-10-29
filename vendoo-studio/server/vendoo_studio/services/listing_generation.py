@@ -34,7 +34,6 @@ from vendoo_studio.services.listing_generate import (
     require_photo_analysis,
 )
 from vendoo_studio.services.schema_probe import (
-    await_deferred_schema,
     prepare_generation_schema,
 )
 from vendoo_studio.services.streaming import (
@@ -270,7 +269,7 @@ async def run_listing_generation(
             _done, pending = await asyncio.wait(pending, timeout=10.0, return_when=asyncio.FIRST_COMPLETED)
             run.pulse()
         mark("categories_and_comps")
-        schema_seed = schema_task.result()
+        schema_task.result()
         from vendoo_studio.services.native_field_fill import prepare_generation_forms
 
         native_forms = await timed("native_forms", prepare_generation_forms(
@@ -335,16 +334,11 @@ async def run_listing_generation(
             evidence_text = "\n\n".join(
                 part for part in (prompt_analysis, item_details, comps_text) if part
             )
-            schema_meta = {
-                "_schema_source": (schema_seed or {}).get("_schema_source") if isinstance(schema_seed, dict) else None,
-                "_schema_probe_job_id": (schema_seed or {}).get("_schema_probe_job_id") if isinstance(schema_seed, dict) else None,
-            }
             # Registered before [DONE] reaches the client, so chat stays busy until it ends.
             activity.track_task(conv_id, "Preparing marketplace fields…", spawn(_finish_generation_background(
                 conv_id,
                 listing,
                 evidence=evidence_text,
-                schema_meta=schema_meta,
                 provider=provider,
                 repaired=needed_repair,
                 timing_id=timing_id,
@@ -382,13 +376,11 @@ async def run_listing_generation(
             stage = (run.last_status or "").strip()
             if stage:
                 message = (
-                    f"Timed out during “{stage}”. "
-                    "Retry generate. If Chrome is stuck on field discovery, Cancel discovery first."
+                    f"Timed out during “{stage}”. Retry generate."
                 )
             else:
                 message = (
-                    "Timed out while generating the listing. "
-                    "Retry generate. If Chrome was discovering fields, cancel discovery and retry."
+                    "Timed out while generating the listing. Retry generate."
                 )
         log.warning("listing generation failed for %s: %s", conv_id, message)
         try:
@@ -405,32 +397,11 @@ async def run_listing_generation(
         stream_db.close()
 
 
-async def _resolve_vendoo_fields(snapshot: dict):
-    """Leaf ids and field schemas, read while the gap fill runs. None on failure:
-    the field preparation after the gap fill then reads them itself."""
-    from types import SimpleNamespace
-
-    from vendoo_studio.services.vendoo_create import LOOKUP_TIMEOUT_SEC, resolve_listing_fields
-
-    async with live_trace.agent("vendoo-categories", "Marketplace categories") as agent:
-        try:
-            resolved = await resolve_listing_fields(
-                SimpleNamespace(id=None), snapshot, timeout=LOOKUP_TIMEOUT_SEC,
-            )
-        except Exception as exc:  # noqa: BLE001 - preparation retries and reports it
-            log.info("early Vendoo field resolution failed: %s", exc)
-            agent.result("Vendoo is not reachable right now")
-            return None
-        agent.result(f"Found fields for {len(resolved.specifics)} marketplaces")
-        return resolved
-
-
 async def _finish_generation_background(
     conv_id: str,
     listing: dict,
     *,
     evidence: str,
-    schema_meta: dict | None,
     provider,
     repaired: bool = False,
     timing_id: str | None = None,
@@ -453,7 +424,6 @@ async def _finish_generation_background(
     stages: dict[str, float] = {}
     db = SessionLocal()
     repo = ConversationRepo(db)
-    early: asyncio.Task | None = None
 
     async def timed(stage: str, coro):
         started = time.monotonic()
@@ -464,80 +434,6 @@ async def _finish_generation_background(
 
     try:
         current = dict(listing) if isinstance(listing, dict) else {}
-        if isinstance(schema_meta, dict) and schema_meta.get("_schema_source") in {
-            "deferred_probe",
-            "deferred_busy",
-        }:
-            seed = {
-                "_schema_source": schema_meta.get("_schema_source"),
-                "_schema_probe_job_id": schema_meta.get("_schema_probe_job_id"),
-            }
-            await await_deferred_schema(db, seed)
-
-        from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
-        from vendoo_studio.services.listing_field_gaps import fill_listing_field_gaps
-
-        conv = repo.get(conv_id)
-        if conv:
-            # Vendoo's leaf ids and schemas only depend on the categories, which
-            # the gap fill does not touch: read them while it runs.
-            early = asyncio.create_task(timed(
-                "vendoo_categories",
-                _resolve_vendoo_fields(prepare_listing_snapshot(db, conv, current)),
-            ))
-
-        async def fill_gaps():
-            async with live_trace.agent("gap-fill", "Missing fields") as agent, model_slots.slot():
-                filled = await fill_listing_field_gaps(
-                    db,
-                    conv_id,
-                    current,
-                    provider,
-                    evidence=evidence,
-                )
-                agent.result("Checked discovered fields")
-                return filled
-
-        current = await timed("gap_fill", fill_gaps())
-        from types import SimpleNamespace
-
-        from vendoo_studio.repositories.queries import ListingRepo
-        from vendoo_studio.services.vendoo_create import (
-            BrowserBridgeError,
-            LOOKUP_TIMEOUT_SEC,
-            VendooCreateError,
-            prepare_listing_fields_for_vendoo,
-        )
-
-        listing_repo = ListingRepo(db)
-        saved = listing_repo.get_current(conv_id)
-        revision_id = saved.current_revision_id if saved else None
-        conv = repo.get(conv_id)
-        if conv and saved:
-            snapshot = prepare_listing_snapshot(db, conv, current)
-            resolved = await early if early is not None else None
-            try:
-                prepared, _specifics, _schema, _unresolved, _unfilled = await timed(
-                    "vendoo_fields",
-                    prepare_listing_fields_for_vendoo(
-                        SimpleNamespace(id=None), snapshot, provider=provider, evidence=evidence,
-                        timeout=LOOKUP_TIMEOUT_SEC, resolved=resolved,
-                    ),
-                )
-            except (BrowserBridgeError, VendooCreateError):
-                # Keep the draft. Native form validation below holds it
-                # incomplete until its authoritative fields can be read.
-                log.info("Vendoo preparation unavailable for %s", conv_id)
-            else:
-                db.expire_all()
-                latest = listing_repo.get_current(conv_id)
-                if not latest or latest.current_revision_id != revision_id:
-                    # An edit, Clear or Regenerate happened while reads/AI ran.
-                    return
-                listing_repo.save_revision(
-                    conv_id, prepared, source="vendoo_prepare", parent_revision_id=revision_id,
-                )
-                current = prepared
 
         async def fill_native():
             from vendoo_studio.services.native_field_fill import fill_native_fields
@@ -572,8 +468,6 @@ async def _finish_generation_background(
         except Exception:
             log.exception("failed to report post-generate finish error for %s", conv_id)
     finally:
-        if early is not None and not early.done():
-            early.cancel()
         stages["finish"] = round(time.monotonic() - finish_started, 2)
         if run_started is not None:
             generation_timing.add_stages(timing_id, stages, total_sec=time.monotonic() - run_started)

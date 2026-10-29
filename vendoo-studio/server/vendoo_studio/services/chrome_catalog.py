@@ -350,18 +350,3 @@ async def ensure_catalogs() -> dict:
         _cache.update(fetched)
         _cache_at = time.monotonic()
     return dict(_cache)
-
-
-async def chrome_category_ids(listing: dict) -> dict[str, str]:
-    """The live category ids for this listing. Chrome wins when it answers."""
-    found = preview_categories(await live_preview(listing))
-    if set(CHROME_MARKETS).issubset(found):
-        return found
-    try:
-        catalogs = await ensure_catalogs()
-    except Exception as exc:  # noqa: BLE001 - the eBay and Etsy leaves still get stored
-        log.info("No public chrome catalogs: %s", exc)
-        catalogs = {}
-    for key, value in resolved_from_catalogs(listing, catalogs).items():
-        found.setdefault(key, value)
-    return found

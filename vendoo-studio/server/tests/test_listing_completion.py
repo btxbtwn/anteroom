@@ -1016,11 +1016,15 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         self.job.status = "completed"
         self.db.commit()
         provider = Provider({})
-        with patch("vendoo_studio.services.marketplaces.selected_fillable_platforms", return_value=["ebay"]), \
+        vendoo = AsyncMock(side_effect=AssertionError("Vendoo queried during category selection"))
+        with patch("vendoo_studio.services.vendoo_create._hits_by_mapping", new=vendoo), \
+             patch("vendoo_studio.services.vendoo_create.fetch_listing_specifics", new=vendoo), \
+             patch("vendoo_studio.services.marketplaces.selected_fillable_platforms", return_value=["ebay"]), \
              patch("vendoo_studio.services.category_selection.select_categories", new=AsyncMock(
                  return_value={"general": "Clothing > Tops", "ebay": "Clothing > Shirts"})):
             seed = await prepare_generation_schema(self.db, self.conv.id, provider, "Cotton tee", "")
         self.assertEqual(seed["category_path"], "Clothing > Tops")
+        vendoo.assert_not_awaited()
 
     async def test_unmapped_marketplace_without_a_tree_does_not_stop_generation(self):
         """Grailed has no local tree; when Vendoo cannot map it, create resolves it later."""
@@ -1029,10 +1033,11 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
         with patch("vendoo_studio.services.marketplaces.selected_fillable_platforms", return_value=["ebay", "grailed"]), \
              patch("vendoo_studio.services.category_selection.select_categories", new=select):
             seed = await prepare_generation_schema(self.db, self.conv.id, Provider({}), "Cotton tee", "")
-        self.assertEqual(select.await_args_list[1].args[4], ["ebay"])
-        self.assertNotIn("grailed", seed["marketplace_categories"])
+        self.assertEqual(select.await_args_list[0].args[4], [])
+        self.assertEqual(select.await_count, 1)
+        self.assertNotIn("grailed", seed.get("marketplace_categories", {}))
 
-    async def test_generation_uses_cached_schema_without_chrome(self):
+    async def test_generation_does_not_reuse_vendoo_schema_categories(self):
         self.manager.connected = False
         remember_schema(self.db, "Clothing > Tops", self.verification["schema"])
         statuses: list[str] = []
@@ -1048,88 +1053,47 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
                 on_status=statuses.append,
             )
         self.assertEqual(seed["category_path"], "Clothing > Tops")
-        # Prefer the marketplace leaf that produced the remembered fields.
-        self.assertEqual(seed["marketplace_categories"]["ebay"], "Clothing > Shirts")
-        self.assertEqual(seed["_schema_source"], "cache")
-        self.assertTrue(any("cached" in message.casefold() for message in statuses))
+        self.assertNotIn("ebay", seed.get("marketplace_categories", {}))
+        self.assertEqual(seed["_schema_source"], "native")
+        self.assertFalse(any("Vendoo" in message or "cached" in message for message in statuses))
         self.manager.register_wait.assert_not_called()
         self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [self.job])
 
-    async def test_generation_never_fills_the_vendoo_form(self):
-        """Send is the only push to Vendoo, and Send is a Vendoo API call.
-
-        Generation used to type its values straight onto the bound draft, so a
-        seller who regenerated after a Send watched the old form-filler run
-        without having asked for it.
-        """
-        from vendoo_studio.services.listing_generation import _finish_generation_background
-
-        self.job.status = "completed"
-        self.job.current_step = "vendoo_api_created"
-        self.db.commit()
-        gaps = AsyncMock(return_value=self.listing)
-        with patch("vendoo_studio.services.listing_generation.SessionLocal", return_value=self.db), \
-             patch("vendoo_studio.services.listing_field_gaps.fill_listing_field_gaps", new=gaps), \
-             patch("vendoo_studio.services.vendoo_create.prepare_listing_fields_for_vendoo", new=AsyncMock(
-                 return_value=(self.listing, {}, None, [], []))):
-            await _finish_generation_background(
-                self.conv.id, self.listing, evidence="tag says cotton", schema_meta=None, provider=None,
-            )
-        gaps.assert_awaited_once()
-        self.dispatch.assert_not_awaited()
-
-    async def test_generation_saves_prepared_categories_and_fields_before_send(self):
+    async def test_generation_finishes_from_native_forms_without_vendoo_reads(self):
         from vendoo_studio.services.listing_generation import _finish_generation_background
 
         conv_id = self.conv.id
-        prepared = {**self.listing, "category_id": "tops", "ebay_specifics": {"material": "Cotton"},
-                    "_vendoo_preparation": {"categories": {}, "field_signature": "prepared"}}
-        prepare = AsyncMock(return_value=(prepared, {}, None, [], []))
+        native = AsyncMock(return_value=self.listing)
+        vendoo = AsyncMock(side_effect=AssertionError("Vendoo used during generation"))
         with patch("vendoo_studio.services.listing_generation.SessionLocal", return_value=self.db), \
-             patch("vendoo_studio.services.listing_field_gaps.fill_listing_field_gaps", new=AsyncMock(return_value=self.listing)), \
-             patch("vendoo_studio.services.vendoo_create.prepare_listing_fields_for_vendoo", new=prepare):
+             patch("vendoo_studio.services.native_field_fill.fill_native_fields", new=native), \
+             patch("vendoo_studio.services.listing_field_gaps.fill_listing_field_gaps", new=vendoo), \
+             patch("vendoo_studio.services.vendoo_create.resolve_listing_fields", new=vendoo), \
+             patch("vendoo_studio.services.vendoo_create.prepare_listing_fields_for_vendoo", new=vendoo):
             await _finish_generation_background(
-                conv_id, self.listing, evidence="cotton tag", schema_meta=None, provider=None,
+                conv_id, self.listing, evidence="tag says cotton", provider=None,
             )
-            revisions = ListingRepo(self.db).get_revisions(conv_id)
-            self.assertEqual(revisions[0].listing_json, prepared)
-            self.assertEqual(revisions[0].source, "vendoo_prepare")
-            self.assertEqual(prepare.await_args.kwargs["timeout"], 10.0)
-            self.dispatch.assert_not_awaited()
+        native.assert_awaited_once()
+        vendoo.assert_not_awaited()
+        self.dispatch.assert_not_awaited()
+        self.assertEqual(ListingRepo(self.db).get_revisions(conv_id)[0].listing_json, self.listing)
 
-    async def test_generation_preparation_cannot_overwrite_a_newer_edit(self):
+    async def test_generation_native_finish_cannot_overwrite_a_newer_edit(self):
         from vendoo_studio.services.listing_generation import _finish_generation_background
 
         conv_id = self.conv.id
         edited = {**self.listing, "description": "Seller's newer edit"}
 
-        async def prepare(_job, listing, **kwargs):
+        async def fill_native(*args, **kwargs):
             ListingRepo(self.db).save_revision(conv_id, edited, source="manual")
-            return listing, {}, None, [], []
+            return self.listing
 
         with patch("vendoo_studio.services.listing_generation.SessionLocal", return_value=self.db), \
-             patch("vendoo_studio.services.listing_field_gaps.fill_listing_field_gaps", new=AsyncMock(return_value=self.listing)), \
-             patch("vendoo_studio.services.vendoo_create.prepare_listing_fields_for_vendoo", new=prepare):
+             patch("vendoo_studio.services.native_field_fill.fill_native_fields", new=fill_native):
             await _finish_generation_background(
-                conv_id, self.listing, evidence="cotton tag", schema_meta=None, provider=None,
+                conv_id, self.listing, evidence="cotton tag", provider=None,
             )
             self.assertEqual(ListingRepo(self.db).get_revisions(conv_id)[0].listing_json, edited)
-
-    async def test_offline_preparation_keeps_the_generated_listing(self):
-        from vendoo_studio.services.listing_generation import _finish_generation_background
-        from vendoo_studio.services.browser_bridge import BrowserBridgeError
-
-        conv_id = self.conv.id
-        with patch("vendoo_studio.services.listing_generation.SessionLocal", return_value=self.db), \
-             patch("vendoo_studio.services.listing_field_gaps.fill_listing_field_gaps", new=AsyncMock(return_value=self.listing)), \
-             patch("vendoo_studio.services.vendoo_create.prepare_listing_fields_for_vendoo", new=AsyncMock(
-                 side_effect=BrowserBridgeError("Chrome disconnected"))):
-            await _finish_generation_background(
-                conv_id, self.listing, evidence="cotton tag", schema_meta=None, provider=None,
-            )
-            self.assertEqual(ListingRepo(self.db).get_revisions(conv_id)[0].listing_json, self.listing)
-            self.assertFalse(any("finishing discovered fields failed" in message.text
-                                 for message in ConversationRepo(self.db).get_messages(conv_id)))
 
     async def test_generation_never_starts_a_chrome_probe(self):
         """Vendoo serves a category's fields, so nothing is discovered here.
@@ -1147,6 +1111,6 @@ class CompletionTest(unittest.IsolatedAsyncioTestCase):
                  return_value={"general": "Clothing > Tops", "ebay": "Clothing > Shirts"})):
             seed = await prepare_generation_schema(self.db, self.conv.id, Provider({}), "Cotton tee", "")
         self.assertEqual(seed["category_path"], "Clothing > Tops")
-        self.assertEqual(seed["_schema_source"], "deferred")
+        self.assertEqual(seed["_schema_source"], "native")
         self.assertIsNone(seed.get("_schema_probe_job_id"))
         dispatch.assert_not_called()
