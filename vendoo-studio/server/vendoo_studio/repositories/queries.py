@@ -604,6 +604,13 @@ class ListingRepo:
     def get_revisions(self, conv_id: str) -> list[ListingRevision]:
         return self.db.query(ListingRevision).filter(ListingRevision.conversation_id == conv_id).order_by(ListingRevision.created_at.desc()).all()
 
+    def latest_revision(self, conv_id: str) -> ListingRevision | None:
+        return (self.db.query(ListingRevision).filter(ListingRevision.conversation_id == conv_id)
+                .order_by(ListingRevision.created_at.desc()).first())
+
+    def revision_count(self, conv_id: str) -> int:
+        return self.db.query(func.count(ListingRevision.id)).filter(ListingRevision.conversation_id == conv_id).scalar()
+
 
 def _draft_cache_response(row: VendooDraftCache) -> dict:
     """A cache row in the shape the draft endpoints and the sidebar read."""

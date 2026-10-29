@@ -114,6 +114,9 @@ def paid_lines(db: Session, conv_ids: set[str] | None = None) -> dict[str, list[
 
 def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, ItemStatus]:
     """Status for each ``(conversation_id, parsed notes)``, with a few bulk reads."""
+    if not conversations:
+        return {}
+
     from vendoo_studio.services.marketplace_delist import removed_marketplaces
 
     ids = {conv_id for conv_id, _notes in conversations}
