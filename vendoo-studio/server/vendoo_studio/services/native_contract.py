@@ -19,7 +19,7 @@ MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
 SALE_FIELDS = re.compile(
     r"price|ship|parcel|package|quantity|sku|categor|worldwide|offer|format|duration|store|inventor"
     r"|variation|zip|location|condition|title|description|brand|hashtag|tags|charity|donation"
-    r"|availab|smartsell|boost|sellernotes"
+    r"|availab|smartsell|smartpricing|boost|sellernotes"
 )
 _SCHEMA_KEYS = ("path", "key", "label", "required", "multi", "selection_only", "options", "option_values",
                 "max_values", "max_length", "min_value", "max_value", "step", "input_type", "locked",
@@ -50,7 +50,7 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     paths.update(path_of(row) for row in fields if row.get("label") in parents)
     if market == "mercari":
         paths.update(("mercari_specifics.package", "mercari_specifics.shippingMethod", "weight_lb", "weight_oz",
-                      "package_dimensions_in"))
+                      "package_dimensions_in", "mercari_specifics.smartPricing.enabled"))
     if market == "ebay":
         paths.update(("ebay_specifics.listingFormat", "ebay_specifics.sizeType", "sizeType"))
     if market == "poshmark":
@@ -124,6 +124,14 @@ def prompt(contracts: dict) -> str:
     # Presentation metadata belongs to the editor, not the generation context.
     def schema(row, contract):
         definition = {key: value for key, value in row.items() if key in _SCHEMA_KEYS}
+        if (path_of(row).startswith("direct_category_ids.") or path_of(row) == "sellwild_specifics.nativeCategoryId") and contract.get("category_id"):
+            # Category selection already ran against the complete catalog.
+            # Copy generation needs its chosen leaf, not thousands of siblings.
+            category_id = str(contract["category_id"])
+            values = row.get("option_values") or {}
+            options = [label for label in row.get("options") or [] if str(values.get(label, label)) == category_id]
+            definition["options"] = options
+            definition["option_values"] = {label: values.get(label, label) for label in options}
         if path_of(row).endswith("_specifics.brand") and len(row.get("options") or []) > 300:
             # Brand catalogs contain tens of thousands of unrelated names. Keep
             # the complete editor/validation contract, but only offer the known

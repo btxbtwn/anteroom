@@ -184,7 +184,7 @@ async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS
 
     forms = {}
     for market in (market for market in MARKETS if market in set(markets)):
-        if market not in ("ebay", "sellwild", "depop", "poshmark") and not extension_manager.connected:
+        if market not in ("ebay", "sellwild", "depop", "poshmark", "mercari") and not extension_manager.connected:
             continue
         try:
             form = await editor_form(conv_id, market, None, db, refresh=True)

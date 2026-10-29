@@ -4,15 +4,28 @@
 // Exits 1 when anything differs.
 const fs = require('node:fs');
 const path = require('node:path');
-const { loadWorker, call } = require('../../../tests/worker-context');
+const { readForms } = require('../native-reader');
 
 const folder = process.argv[2];
 if (!folder) { console.error('Usage: compare.js <folder>'); process.exit(2); }
 const load = name => JSON.parse(fs.readFileSync(path.join(folder, name), 'utf8'));
-const master = load('mercari-catalog.json');
 const sweep = fs.readdirSync(folder).filter(name => /^mercari-sweep-.*\.json$/.test(name)).flatMap(load);
-const worker = loadWorker();
-const build = listing => JSON.parse(JSON.stringify(call(worker, 'mercariEditorForm', listing, master)));
+// The more detailed size capture records presentation headings separately.
+if (fs.existsSync(path.join(folder, 'mercari-sizes.json'))) {
+  for (const item of load('mercari-sizes.json')) {
+    let heading = '';
+    const sizes = [];
+    for (const row of item.items || []) {
+      if (row.role === 'presentation') heading = row.text.trim();
+      else if (row.role === 'option') sizes.push({ heading, option: row.text.trim() });
+    }
+    sweep.push({ kind: 'size', id: item.id, path: item.path, picked: item.chosen, size: item.size ? sizes : null });
+  }
+}
+const ids = [...new Set(sweep.filter(item => item.kind === 'size').map(item => String(item.id)))];
+const [empty, ...forms] = readForms('mercari', [{}, ...ids.map(id => ({ direct_category_ids: { mercari: id } }))]);
+const byId = Object.fromEntries(ids.map((id, index) => [id, forms[index]]));
+const build = listing => listing.direct_category_ids?.mercari ? byId[listing.direct_category_ids.mercari] : empty;
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const fold = value => String(value ?? '').toLowerCase();
 const problems = [];
@@ -39,9 +52,10 @@ for (const list of lists) {
 
 // Size for the sampled categories: presence, choices in order, and their headings.
 const sizes = sweep.filter(item => item.kind === 'size');
+const unverified = [];
 for (const item of sizes) {
   const key = item.path.join(' > ');
-  if (item.picked !== key) { problems.push({ category: key, problem: 'could not pick it on the page', shown: item.picked }); continue; }
+  if (item.picked !== key) { unverified.push({ category: key, problem: 'could not pick it on the page', shown: item.picked }); continue; }
   const field = build({ direct_category_ids: { mercari: String(item.id) } }).fields.find(row => row.label.replace(/\s*\*$/, '') === 'Size');
   if (!field !== !item.size) { problems.push({ category: key, problem: 'size field', anteroom: Boolean(field), mercari: Boolean(item.size) }); continue; }
   if (!field) continue;
@@ -51,5 +65,5 @@ for (const item of sizes) {
   if (!same(ours, theirs)) problems.push({ category: key, problem: 'size choices', anteroom: ours.slice(0, 8), mercari: theirs.slice(0, 8) });
 }
 
-console.log(JSON.stringify({ pickerLists: lists.length, sizeSamples: sizes.length, mismatches: problems.length, problems }, null, 1));
+console.log(JSON.stringify({ pickerLists: lists.length, sizeSamples: sizes.length, unverified, mismatches: problems.length, problems }, null, 1));
 process.exit(problems.length ? 1 : 0);

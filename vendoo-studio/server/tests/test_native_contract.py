@@ -29,6 +29,20 @@ def seed():
 
 
 class NativeContractTest(unittest.TestCase):
+    def test_copy_generation_receives_the_chosen_native_category_without_its_siblings(self):
+        from vendoo_studio.services import mercari_form
+
+        listing = {"direct_category_ids": {"mercari": "275"}}
+        contracts = contract.capture(listing, {"mercari": mercari_form.form(listing)}, ["mercari"])
+        before = copy.deepcopy(contracts)
+        text = contract.prompt(contracts)
+        projected = json.loads(text[text.index("{"):])
+        category = next(row for row in projected["mercari"]["fields"] if row["path"] == "direct_category_ids.mercari")
+        self.assertEqual(category["options"], ["Women > Maternity > Sweaters"])
+        self.assertEqual(category["option_values"], {"Women > Maternity > Sweaters": "275"})
+        self.assertLess(len(text), 20000)
+        self.assertEqual(contracts, before)
+
     def test_large_brand_catalog_stays_in_editor_but_only_known_brand_enters_prompt(self):
         from vendoo_studio.services import depop_form
 

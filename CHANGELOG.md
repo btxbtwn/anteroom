@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.514 — 2026-10-29
+
+- Mercari’s categories, brands, conditions and grouped sizes now load in Anteroom with Chrome closed. Shipping labels and current prices load directly from Mercari after you answer the package questions.
+
 ## 0.1.513 — 2026-10-29
 
 - Creating a listing uses the marketplaces’ own forms instead of fetching Vendoo category fields or preparing Vendoo fields in the background. Vendoo preparation runs only when you choose Send.
