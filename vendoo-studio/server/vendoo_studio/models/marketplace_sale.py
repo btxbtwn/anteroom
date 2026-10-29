@@ -4,6 +4,7 @@ from __future__ import annotations
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 SALE_STATES = ("new", "dismissed")
@@ -15,7 +16,7 @@ SALE_SOURCES = ("marketplace", "seller")
 OTHER_MARKETPLACE = "other"
 
 
-class MarketplaceSale(Base):
+class MarketplaceSale(SellerOwned, Base):
     __tablename__ = "marketplace_sales"
     __table_args__ = (
         # One row per order line, however often the marketplace repeats itself.

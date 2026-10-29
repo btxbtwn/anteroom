@@ -7,10 +7,11 @@ reply becomes ``unknown`` and is never repeated.
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class ListingPromotion(Base):
+class ListingPromotion(SellerOwned, Base):
     __tablename__ = "listing_promotions"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -42,7 +43,7 @@ class ListingPromotion(Base):
     finished_at = Column(DateTime, nullable=True)
 
 
-class MarketplaceOfferFloor(Base):
+class MarketplaceOfferFloor(SellerOwned, Base):
     """The lowest price the seller accepts for offers on one marketplace listing."""
 
     __tablename__ = "marketplace_offer_floors"

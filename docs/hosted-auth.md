@@ -58,8 +58,9 @@ by the generated-token tests. Keep access tokens out of shell history and logs.
 
 ## Next increments
 
-1. Add seller ownership through Alembic on SQLite and Postgres, including a safe
-   claim/import process for the existing Mac owner's records.
+1. The [seller ownership schema](seller-ownership.md) adds `user_id` through
+   Alembic on SQLite and Postgres. Safe account claim/import of the existing
+   Mac owner's records is still needed.
 2. Enforce ownership in database sessions and Supabase row-level security;
    prove cross-seller reads and writes fail, including background jobs.
 3. Scope photos, settings and other file-backed state to a seller, then expose

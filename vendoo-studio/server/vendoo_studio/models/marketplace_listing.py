@@ -11,6 +11,7 @@ from __future__ import annotations
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 # not_saved and draft are resting states the seller can List from; published
@@ -23,7 +24,7 @@ UNSETTLED_STATES = (*BUSY_STATES, "unknown")
 LIVE_STATES = ("published", "pending_review")
 
 
-class MarketplaceListing(Base):
+class MarketplaceListing(SellerOwned, Base):
     __tablename__ = "marketplace_listings"
     __table_args__ = (UniqueConstraint("conversation_id", "marketplace", name="uq_marketplace_listings_item"),)
 

@@ -3,10 +3,11 @@ from __future__ import annotations
 from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class ScoutCheck(Base):
+class ScoutCheck(SellerOwned, Base):
     """One "is this worth buying?" check from photos taken while sourcing.
 
     Kept after the decision, so a check that became a listing can later be set

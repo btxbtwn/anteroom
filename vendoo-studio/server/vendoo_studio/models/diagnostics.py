@@ -3,10 +3,11 @@ from __future__ import annotations
 from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Integer
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class DiagnosticRun(Base):
+class DiagnosticRun(SellerOwned, Base):
     __tablename__ = "diagnostic_runs"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -31,7 +32,7 @@ class DiagnosticRun(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
-class FieldObservation(Base):
+class FieldObservation(SellerOwned, Base):
     __tablename__ = "field_observations"
 
     id = Column(String, primary_key=True, default=new_id)

@@ -2,10 +2,11 @@
 from sqlalchemy import Column, DateTime, ForeignKey, String
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import utcnow
 
 
-class ListingCopyReceipt(Base):
+class ListingCopyReceipt(SellerOwned, Base):
     __tablename__ = "listing_copy_receipts"
 
     request_id = Column(String, primary_key=True)
