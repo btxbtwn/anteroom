@@ -12,6 +12,17 @@ from vendoo_studio.routes import desktop as desktop_routes
 
 
 class StudioWindowChromeTest(unittest.TestCase):
+    def test_startup_wait_allows_a_slow_database_snapshot(self):
+        with patch.object(desktop.time, "monotonic", side_effect=[0, 31, 90]), patch.object(
+            desktop.time, "sleep"
+        ), patch.object(desktop, "studio_is_up", side_effect=[False, True]):
+            desktop.wait_for_studio()
+
+    def test_startup_wait_still_times_out(self):
+        with patch.object(desktop.time, "monotonic", side_effect=[0, 301]):
+            with self.assertRaises(RuntimeError):
+                desktop.wait_for_studio()
+
     def test_enable_editable_context_menus_keeps_paste(self):
         class FakeMenu:
             def __init__(self, items):

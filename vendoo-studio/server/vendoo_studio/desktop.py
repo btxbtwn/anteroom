@@ -217,7 +217,7 @@ def port_is_open() -> bool:
         sock.close()
 
 
-def wait_for_studio(timeout_s: float = 30.0) -> None:
+def wait_for_studio(timeout_s: float = 300.0) -> None:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if studio_is_up():

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.533 — 2026-10-29
+
+- Give Anteroom more time to open while a large database is backed up during startup.
+
 ## 0.1.532 — 2026-10-29
 
 - Regeneration keeps your saved choices, including deliberately cleared fields, and preserves marketplace field names while preparing the draft.
