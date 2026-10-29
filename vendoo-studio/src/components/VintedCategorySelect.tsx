@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { CategoryTreeSelect } from "./ListingFormControls";
 import type { CategoryChoice } from "./categoryTree";
@@ -15,6 +15,7 @@ export function VintedCategorySelect({ convId, id, fieldKey, value, disabled, on
     staleTime: 6 * 60 * 60 * 1000,
     retry: false,
   });
+  const queryClient = useQueryClient();
   const signIn = useMutation({ mutationFn: () => api.nativeMarketplaces.vintedConnect(convId) });
   const choices = React.useMemo<CategoryChoice[]>(
     () => (categories.data?.options ?? [])
@@ -33,7 +34,10 @@ export function VintedCategorySelect({ convId, id, fieldKey, value, disabled, on
       {signIn.isSuccess && <p className="text-xs text-muted-foreground">Finish signing in in the Vinted window, then reload choices. This private sign-in lasts while Anteroom is open.</p>}
       {signIn.isError && <p role="alert" className="text-xs text-warning-foreground">{signIn.error.message}</p>}
       <button type="button" className="text-left text-xs text-primary underline" disabled={disabled || categories.isFetching}
-        onClick={() => void categories.refetch()}>Reload Vinted choices</button>
+        onClick={async () => {
+          const result = await categories.refetch();
+          if (result.isSuccess) void queryClient.invalidateQueries({ queryKey: ["vinted-brands", convId] });
+        }}>Reload Vinted choices</button>
       {value && <p className="text-xs text-muted-foreground">Saved category: {value}</p>}
     </div>;
   }

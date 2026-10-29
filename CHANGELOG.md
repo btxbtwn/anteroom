@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.524 — 2026-10-29
+
+- Vinted’s category picker can open a separate sign-in window in Anteroom to load categories and search brands without Chrome. This private sign-in ends when Anteroom closes.
+
 ## 0.1.523 — 2026-10-29
 
 - Anteroom loads less code at startup, keeps listing search responsive while filtering, and reads inventory cover photos more efficiently.
