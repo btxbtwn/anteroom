@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.516 — 2026-10-29
+
+- Inventory refreshes use less memory and load faster by reading quantities without loading every saved version of every listing.
+
 ## 0.1.515 — 2026-10-29
 
 - Added the first account foundation for using Anteroom across devices: a separate hosted API can verify a seller’s Supabase session. Sign-in screens and access to listings across devices are still to come.

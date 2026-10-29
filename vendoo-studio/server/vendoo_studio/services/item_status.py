@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from vendoo_studio.database import json_value
 from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
@@ -75,12 +76,13 @@ def _quantities(db: Session, conv_ids: set[str] | None) -> dict[str, int]:
         if number > best.get(conv_id, 0):
             best[conv_id] = number
 
-    every = db.query(ListingRevision.conversation_id, ListingRevision.listing_json)
+    # Inventory polls need one scalar, not every historical listing body.
+    # Extract it in SQL so large revisions never enter Python's JSON decoder.
+    every = db.query(ListingRevision.conversation_id, json_value(ListingRevision.listing_json, "quantity"))
     if conv_ids is not None:
         every = every.filter(ListingRevision.conversation_id.in_(conv_ids))
-    for conv_id, listing_json in every.all():
-        data = listing_json if isinstance(listing_json, dict) else {}
-        add(conv_id, data.get("quantity"))
+    for conv_id, quantity in every.all():
+        add(conv_id, quantity)
     return best
 
 
