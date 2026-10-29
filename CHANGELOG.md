@@ -6,6 +6,20 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.526 — 2026-10-29
+
+- Marketplace forms stop flagging fields that are already answered. A row the listing filled under another spelling, or that eBay fills from the listing's own brand, size, colour and department, no longer shows an error, so eBay, Poshmark, Mercari and Sellwild drafts that were ready to list stop being held back.
+- The start bid, the return policy and fields a marketplace form no longer has are no longer treated as blocking. They are shown as a note instead, like the other details the marketplace fills in when you list.
+
+## 0.1.525 — 2026-10-29
+
+- Listing repairs keep unrelated fields and your saved choices intact. Chat can recall relevant older item details, and generation follows the same canonical rules throughout.
+- Generation reports when fields are still incomplete instead of counting an unfinished draft as ready.
+
+## 0.1.524 — 2026-10-29
+
+- Prepared existing drafts, photos, jobs, sales and shop history for seller accounts by recording their owner, while keeping your Mac’s data intact. Signing in and sharing listings across devices are still to come.
+
 ## 0.1.523 — 2026-10-29
 
 - Anteroom loads less code at startup, keeps listing search responsive while filtering, and reads inventory cover photos more efficiently.

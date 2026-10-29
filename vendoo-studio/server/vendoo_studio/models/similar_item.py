@@ -8,10 +8,11 @@ suggested again.
 from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class PhotoFingerprint(Base):
+class PhotoFingerprint(SellerOwned, Base):
     __tablename__ = "photo_fingerprints"
 
     checksum = Column(String, primary_key=True)
@@ -20,7 +21,7 @@ class PhotoFingerprint(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
-class SimilarItemReview(Base):
+class SimilarItemReview(SellerOwned, Base):
     __tablename__ = "similar_item_reviews"
     __table_args__ = (UniqueConstraint("first_id", "second_id", name="uq_similar_item_reviews_pair"),)
 

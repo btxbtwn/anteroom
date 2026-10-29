@@ -3,10 +3,11 @@ from __future__ import annotations
 from sqlalchemy import Column, String, DateTime, JSON, Integer, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class FieldRegistry(Base):
+class FieldRegistry(SellerOwned, Base):
     __tablename__ = "field_registry"
 
     id = Column(String, primary_key=True, default=new_id)

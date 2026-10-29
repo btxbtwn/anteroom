@@ -3,10 +3,11 @@ from __future__ import annotations
 from sqlalchemy import Column, DateTime, Float, Integer, String
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class SourceBox(Base):
+class SourceBox(SellerOwned, Base):
     """A wholesale box the seller bought. Listings point at it through
     ``Conversation.box_id``, so what the box sold for can be set against what
     it cost."""

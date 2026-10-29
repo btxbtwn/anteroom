@@ -3,7 +3,9 @@
 Status: approved 2026-10-26, with Supabase and Fly.io. Building step 1.
 Postgres support and the photo-store interface have merged (#790, #787).
 The hosted session-verification foundation is described in
-[hosted-auth.md](hosted-auth.md); seller ownership and data isolation come next.
+[hosted-auth.md](hosted-auth.md). The
+[seller ownership schema](seller-ownership.md) assigns ownership to existing
+and new records; access isolation and account linking are next.
 
 ## Goal
 

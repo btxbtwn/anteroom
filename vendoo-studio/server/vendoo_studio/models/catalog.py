@@ -1,10 +1,11 @@
 from sqlalchemy import Boolean, Column, DateTime, JSON, String, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class CategorySchema(Base):
+class CategorySchema(SellerOwned, Base):
     __tablename__ = "category_schemas"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -16,7 +17,7 @@ class CategorySchema(Base):
     __table_args__ = (UniqueConstraint("general_path", "marketplace"),)
 
 
-class CategoryFieldSchema(Base):
+class CategoryFieldSchema(SellerOwned, Base):
     """Vendoo's own field list for one marketplace category, cached.
 
     Keyed by the marketplace's own leaf id rather than a Vendoo general path:
@@ -34,7 +35,7 @@ class CategoryFieldSchema(Base):
     __table_args__ = (UniqueConstraint("marketplace", "category_id"),)
 
 
-class CategoryNode(Base):
+class CategoryNode(SellerOwned, Base):
     __tablename__ = "category_nodes"
 
     id = Column(String, primary_key=True, default=new_id)
