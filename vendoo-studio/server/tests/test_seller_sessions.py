@@ -85,9 +85,9 @@ def test_seller_identity_is_per_request(client, signing_keys):
 
 
 @pytest.mark.parametrize("changes", [
-    {"exp": int(time.time()) - 60},
-    {"iat": int(time.time()) + 300},
-    {"nbf": int(time.time()) + 300},
+    {"exp": -60},
+    {"iat": 300},
+    {"nbf": 300},
     {"iss": "https://another-project.supabase.co/auth/v1"},
     {"aud": "anon"},
     {"role": "service_role"},
@@ -101,6 +101,12 @@ def test_seller_identity_is_per_request(client, signing_keys):
     {"is_anonymous": None},
 ])
 def test_invalid_claims_rejected(client, signing_keys, changes):
+    # Compute relative dates when the test runs, not during collection: a
+    # long backend suite can outlast a token's future-date offset.
+    changes = {
+        key: int(time.time()) + value if key in {"exp", "iat", "nbf"} else value
+        for key, value in changes.items()
+    }
     response = get_account(client, session_token(signing_keys, **changes))
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
