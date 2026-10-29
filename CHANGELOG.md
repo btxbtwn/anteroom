@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.508 — 2026-10-29
+
+- Vinted's Category field now opens Vinted's category picker. It had been showing the shared category path as a text box, so the picker never appeared.
+
 ## 0.1.507 — 2026-10-29
 
 - Marketplace fields stop showing warnings from an older revision, and refreshed dropdown choices appear after category fields refill. Warnings stay with the field they describe.
