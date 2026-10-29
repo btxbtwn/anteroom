@@ -271,7 +271,7 @@ export function CategoryDrilldown({
   const crumbs = ["All categories", ...drill];
   const choose = (item: CategoryItem) => {
     const choice = categoryChoiceAt(choices, item.path);
-    if (choice) {
+    if (choice && item.terminal) {
       onChange(choice);
       setOpen(false);
       return;

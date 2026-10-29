@@ -105,6 +105,18 @@ describe("category tree menus", () => {
 });
 
 describe("category search", () => {
+  it("keeps Mercari parents open in browse and search", () => {
+    const choices = [
+      { label: "Women > Pants", id: "pants" },
+      { label: "Women > Pants > Dress pants", id: "dress-pants" },
+    ];
+    expect(categoryMenu(choices, ["Women"])?.items[0].terminal).toBe(false);
+    expect(categorySearch(choices, "pants").find(item => item.path.length === 2)?.terminal).toBe(false);
+    expect(categoryMenu(choices, ["Women", "Pants"])?.items).toEqual([
+      { label: "Dress pants", path: ["Women", "Pants", "Dress pants"], terminal: true },
+    ]);
+    expect(categoryChoiceAt(choices, ["Women", "Pants", "Dress pants"])?.id).toBe("dress-pants");
+  });
   const choices = [
     { label: "Clothing, Shoes & Accessories > Women > Pants", id: "pants" },
     { label: "Clothing, Shoes & Accessories > Women > Jeans", id: "jeans" },
