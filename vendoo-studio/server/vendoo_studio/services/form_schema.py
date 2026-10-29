@@ -112,7 +112,7 @@ def _scale_matches(item: tuple[str, dict], bucket: str) -> bool:
     )
 
 
-def form_schema_prompt(listing: dict | None) -> str:
+def form_schema_prompt(listing: dict | None, *, exclude=()) -> str:
     """The same fields the form shows, for chat. Cached schemas only; nothing is fetched."""
     if not isinstance(listing, dict):
         return ""
@@ -120,6 +120,8 @@ def form_schema_prompt(listing: dict | None) -> str:
 
     lines: list[str] = []
     for marketplace, category_id in listing_category_ids(listing).items():
+        if marketplace in exclude:
+            continue
         rows = _cached_form_rows(marketplace, category_id, listing, load_fields, load_rows)
         if not rows:
             continue

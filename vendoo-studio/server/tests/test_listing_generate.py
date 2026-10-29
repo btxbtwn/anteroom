@@ -1479,7 +1479,10 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
                 async for _ in resp.aiter_text():
                     pass
         self.assertEqual(self.provider.analyze_calls, 1)
-        self.assertEqual(self.provider.chat_calls, 4)
+        # Two generation streams; schema, category and repair calls may also run.
+        initial = [messages for messages in self.provider.chat_history
+                   if "Generate a complete listing" in str(messages[-1].get("content") or "")]
+        self.assertEqual(len(initial), 2)
         prompt = _first_generate_prompt(self.provider)
         self.assertIn("already uploaded 1 product photo", prompt)
         self.assertIn("Never ask them to attach", prompt)
@@ -1783,7 +1786,9 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
                 body = "".join([chunk async for chunk in resp.aiter_text()])
             first_body = await first
         self.assertEqual(self.provider.analyze_calls, 1)
-        self.assertEqual(self.provider.chat_calls, 2)
+        initial = [messages for messages in self.provider.chat_history
+                   if "Generate a complete listing" in str(messages[-1].get("content") or "")]
+        self.assertEqual(len(initial), 1)
         self.assertIn(LISTING_JSON["title"], body)
         self.assertIn(LISTING_JSON["title"], first_body)
 

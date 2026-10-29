@@ -412,6 +412,7 @@ export function MarketplacesLayout({
     return preflight.data?.marketplaces?.[marketplace as NativeMarketplace]?.gaps ?? [];
   }
   function listBlocked(marketplace: Marketplace): boolean {
+    if (!preflight.data || preflight.isPlaceholderData || preflight.isError) return true;
     if (retryIn(marketplace) > 0) return true;
     if (preflightGaps(marketplace).some((gap) => gap.blocking)) return true;
     if (marketplace === "etsy" && !etsyEligible) return true;

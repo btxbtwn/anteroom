@@ -136,6 +136,9 @@ def gaps(snapshot: dict, marketplace: str, context: Context | None = None) -> li
     context = context or Context()
     found = [*(item for check in _REQUIREMENTS.get(marketplace, []) for item in check(snapshot, context)),
              *_unresolved(snapshot, marketplace)]
+    from vendoo_studio.services.native_contract import gaps as native_form_gaps
+
+    found.extend(native_form_gaps(snapshot, marketplace))
     seen: set[tuple[str, str]] = set()
     unique = []
     for item in sorted(found, key=lambda item: not item["blocking"]):
