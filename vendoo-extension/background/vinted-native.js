@@ -679,6 +679,40 @@ async function runVintedNative(msg, recovery = false) {
   }
 }
 
+// Read-only choices for the editor's category picker: every leaf Vinted's own
+// catalog offers, named by the breadcrumb its sell form stores. The catalog
+// changes rarely, so one read serves the editor for a few hours.
+const VINTED_CATALOG_TTL_MS = 6 * 60 * 60 * 1000;
+let vintedCatalogCache = null;
+
+// A row with categories under it is a step, not a saved choice, as in the
+// other marketplace pickers. Only Vinted's leaves are offered.
+function vintedCatalogChoices(nodes, trail = [], out = []) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (!node || typeof node !== 'object') continue;
+    const title = marketplaceText(node.title);
+    if (!title) continue;
+    const path = [...trail, title];
+    const children = Array.isArray(node.catalogs) ? node.catalogs
+      : Array.isArray(node.children) ? node.children : [];
+    if (children.length) vintedCatalogChoices(children, path, out);
+    else out.push(path.join(' > '));
+  }
+  return out;
+}
+
+async function vintedCategoryOptions() {
+  if (vintedCatalogCache && Date.now() - vintedCatalogCache.at < VINTED_CATALOG_TTL_MS) {
+    return vintedCatalogCache.options;
+  }
+  const { call } = await vintedSession(Date.now() + 20000);
+  const body = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/catalogs`, { step: 'category' });
+  const options = [...new Set(vintedCatalogChoices(body?.catalogs || body))];
+  if (!options.length) throw marketplaceError('Vinted sent no categories Anteroom recognises.', { code: 'schema_drift' });
+  vintedCatalogCache = { at: Date.now(), options };
+  return options;
+}
+
 // Read-only choices for the editor's brand picker.
 async function vintedBrandOptions({ query = '', category = '' }) {
   const { call } = await vintedSession(Date.now() + 20000);

@@ -6,6 +6,7 @@ import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, f
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
 import { VintedBrandSelect } from "./VintedBrandSelect";
+import { VintedCategorySelect } from "./VintedCategorySelect";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
 import { EbayVariationsEditor, normalizeVariations, variationTotal } from "./EbayVariationsEditor";
 import { MarketplaceMedia } from "./MarketplaceMedia";
@@ -1091,6 +1092,10 @@ export function StructuredEditor({
           ))}
         </RadioGroup>
       );
+    }
+    if (tab === "vinted" && f.key === "vinted_specifics.category") {
+      return <VintedCategorySelect convId={convId} id={id} fieldKey={f.key} value={text} disabled={f.locked}
+        onChange={(value) => commitField(f.key, value)} />;
     }
     if (tab === "vinted" && f.key === "vinted_specifics.brand") {
       return <VintedBrandSelect convId={convId} category={formFieldText(local["vinted_specifics.category"])}

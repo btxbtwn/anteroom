@@ -659,6 +659,11 @@ async function handleStudioMessage(msg) {
       break;
     }
 
+    case 'marketplace.vinted_categories': {
+      try { sendBrowserResult(msg, { ok: true, options: await vintedCategoryOptions() }); }
+      catch (error) { sendBrowserResult(msg, { ok: false, error: error.message }); }
+      break;
+    }
     case 'marketplace.vinted_brands': {
       try { sendBrowserResult(msg, { ok: true, options: await vintedBrandOptions(msg.payload || {}) }); }
       catch (error) { sendBrowserResult(msg, { ok: false, error: error.message }); }

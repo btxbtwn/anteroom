@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.504 — 2026-10-29
+
+- Reopen saved marketplace forms with Chrome closed, keeping their dropdown choices and layout. Changed categories still need fresh choices before listing.
+- Vinted's Category field is now a picker: drill through or search Vinted's own category list instead of typing a path.
+
 ## 0.1.503 — 2026-10-29
 
 - eBay listings no longer go out with the Condition blank while the form shows one. Wording like “Pre-Owned - Good” was understood by the row on screen but not when the listing was saved, so it sent no condition at all and warned “eBay needs condition, and it is empty” under a field that looked filled. What the form shows is now what is sent, and if eBay's list for that category has no matching grade, the warning says which wording could not be matched instead of claiming the field is empty.

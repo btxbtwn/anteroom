@@ -101,6 +101,13 @@ def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Sessio
     return _sync(native.reset, conv_id, marketplace, db)
 
 
+@router.get("/vinted/categories")
+async def vinted_categories(conv_id: str, db: Session = Depends(get_db)):
+    from vendoo_studio.services.native_editor import vinted_categories as read
+
+    return await _reply(read(conv_id, db))
+
+
 @router.get("/vinted/brands")
 async def vinted_brands(conv_id: str, q: str = Query(default="", max_length=100),
                         category: str = Query(default="", max_length=1000), db: Session = Depends(get_db)):
