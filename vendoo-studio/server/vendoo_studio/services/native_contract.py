@@ -115,6 +115,28 @@ def _condition_inputs(value: dict, market: str, fields: list[dict]) -> dict:
     return result
 
 
+def _answered(value):
+    """One spelling for "no answer", so the same choice compares equal either way.
+
+    A controlling choice is stored as ``""``, ``None``, ``[]`` or ``{}``
+    depending on which writer last touched it, and an unset boolean reaches the
+    listing as ``False``. None of those is a choice, so a form saved with one
+    spelling is not stale against the same no-answer in another.
+    """
+    if value is None or value is False or value == "" or value == [] or value == {}:
+        return None
+    return value
+
+
+def _same_answers(left: dict, right: dict) -> bool:
+    """Whether two input maps hold the same choices, comparing over their union.
+
+    A path one side never stored and the other stored empty is one no-answer.
+    """
+    return all(_answered(left.get(path)) == _answered(right.get(path))
+               for path in set(left) | set(right))
+
+
 def _stored_inputs(listing: dict, stored) -> dict | None:
     """A saved contract's inputs in the current terms, or None when it has none."""
     if not isinstance(stored, dict):
@@ -137,7 +159,7 @@ def inputs_match(listing: dict, market: str, fields: list[dict], stored) -> bool
     if saved is None:
         return False
     saved = _condition_inputs(saved, market, fields)
-    return any(_condition_inputs(candidate, market, fields) == saved
+    return any(_same_answers(_condition_inputs(candidate, market, fields), saved)
                for candidate in (inputs(listing, market, fields), _raw_inputs(listing, market, fields)))
 
 
@@ -145,9 +167,10 @@ def changed_inputs(listing: dict, market: str, fields: list[dict], stored) -> se
     """Controlling choices that differ from the saved contract's, in current terms."""
     current = _condition_inputs(inputs(listing, market, fields), market, fields)
     saved = _condition_inputs(_stored_inputs(listing, stored) or {}, market, fields)
-    if current == saved or _condition_inputs(_raw_inputs(listing, market, fields), market, fields) == saved:
+    if _same_answers(current, saved) or _same_answers(_condition_inputs(_raw_inputs(listing, market, fields), market, fields), saved):
         return set()
-    return {path for path, value in current.items() if saved.get(path) != value}
+    return {path for path in set(current) | set(saved)
+            if _answered(current.get(path)) != _answered(saved.get(path))}
 
 
 def capture(listing: dict, forms: dict[str, dict], markets) -> dict:
@@ -477,6 +500,11 @@ def gaps(listing: dict, market: str) -> list[dict]:
         if value in (None, "", [], {}):
             value = settings_answer(listing, path)
             borrowed = True
+        if account_resolved(row) and value in (None, "", [], {}):
+            # List picks this from the seller's account, so the row is not
+            # empty in any way that stops the listing.
+            found.append(gap(path, f"{row.get('label') or path}: Uses the account's own choice.", blocking=False))
+            continue
         error = value_error(applicable_row(row, listing, fields), value)
         if error:
             # A policy or location with no stored answer is chosen from the
@@ -484,8 +512,6 @@ def gaps(listing: dict, market: str) -> list[dict]:
             # is said, not refused.
             found.append(gap(path, f"{row.get('label') or path}: {error}",
                              blocking=not account_resolved(row)))
-        elif account_resolved(row) and value in (None, "", [], {}):
-            found.append(gap(path, f"{row.get('label') or path}: Uses the account's own choice.", blocking=False))
         elif (item_field(row, market) and not borrowed and value not in (None, "", [], {})
               and not is_locked(listing, path)):
             proof = _evidence(listing, path)
@@ -565,6 +591,16 @@ def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
         # Only the aspects posting itself fills from the listing's own fields.
         # A policy, price or category is never answered by a General value.
         from vendoo_studio.services.ebay_listings import _GENERAL_ASPECTS, _aspect_key
+
+        if _aspect_key(name) == "condition":
+            # ``ebay_condition`` reads the form's own grade and falls back to
+            # General, so the row is answered whenever General names one.
+            said = str(listing.get("condition") or "").strip()
+            if said:
+                for label, native_id in (row.get("option_values") or {}).items():
+                    if str(label).strip().casefold() == said.casefold():
+                        return str(native_id)
+                return said
 
         for aspect, keys in _GENERAL_ASPECTS.items():
             if _aspect_key(aspect) != _aspect_key(name):
