@@ -53,8 +53,8 @@ def _category_path(path, listing: dict):
         return path
 
 
-def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
-    """Choices that change the fields or options returned by the native builder."""
+def _input_paths(market: str, fields: list[dict]) -> set[str]:
+    """Paths whose value can change the fields or options the native builder returns."""
     paths = {"category_path", "brand", "condition"}
     paths.update(path_of(row) for row in fields if row.get("clears"))
     parents = {rule.get("parentName") for row in fields for rules in (row.get("value_constraints") or {}).values()
@@ -72,7 +72,23 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
         paths.add("depop_specifics.worldwideShipping.enabled")
     if market == "sellwild":
         paths.add("sellwild_specifics.nativeCategoryId")
-    result = {path: copy.deepcopy(get_path(listing, path)) for path in sorted(paths)}
+    return paths
+
+
+def _raw_inputs(listing: dict, market: str, fields: list[dict]) -> dict:
+    """The choices as the listing itself stores them, before posting preparation."""
+    result = {path: copy.deepcopy(get_path(listing, path)) for path in sorted(_input_paths(market, fields))}
+    result["category_id"] = str(get_path(listing, f"direct_category_ids.{market}")
+                                or get_path(listing, f"marketplace_category_ids.{market}") or "")
+    # Posting maps the shared path to the leaf its category picker names. Compare
+    # the mapped path, so a path recorded before preparation is not a change.
+    result["category_path"] = _category_path(result.get("category_path"), listing)
+    return result
+
+
+def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
+    """Choices that change the fields or options returned by the native builder."""
+    result = _raw_inputs(listing, market, fields)
     # Posting applies marketplace overrides before checking this contract. Compare
     # the same effective choices when capturing the unprepared listing revision.
     result["brand"] = marketplace_text(listing, market, "brand")
@@ -82,39 +98,40 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
 
     condition = followed_entry(listing, market, "condition")
     result["condition"] = condition[1] if condition is not None else ListingSchema.validate_condition(listing.get("condition"))
-    result["category_id"] = str(get_path(listing, f"direct_category_ids.{market}")
-                                or get_path(listing, f"marketplace_category_ids.{market}") or "")
-    # Posting maps the shared path to the leaf its category picker names. Compare
-    # the mapped path, so a path recorded before preparation is not a change.
-    result["category_path"] = _category_path(result.get("category_path"), listing)
     return result
+
+
+def _stored_inputs(listing: dict, stored) -> dict | None:
+    """A saved contract's inputs in the current terms, or None when it has none."""
+    if not isinstance(stored, dict):
+        return None
+    canonical = copy.deepcopy(stored)
+    if "category_path" in canonical:
+        canonical["category_path"] = _category_path(canonical.get("category_path"), listing)
+    return canonical
 
 
 def inputs_match(listing: dict, market: str, fields: list[dict], stored) -> bool:
     """True when ``stored`` still names this listing's current controlling choices.
 
-    A contract recorded before category paths were compared in their prepared
-    form keeps the raw shared path. Map that stored path too, so upgrading does
-    not make every saved form look stale.
+    A contract recorded before posting compared marketplace overrides stores
+    the General brand and condition, and one recorded before category paths
+    were mapped stores the raw shared path. Compare those raw choices too, so
+    upgrading does not make an unchanged saved form look stale.
     """
-    current = inputs(listing, market, fields)
-    if current == stored:
-        return True
-    if not isinstance(stored, dict):
+    saved = _stored_inputs(listing, stored)
+    if saved is None:
         return False
-    canonical = copy.deepcopy(stored)
-    if "category_path" in canonical:
-        canonical["category_path"] = _category_path(canonical.get("category_path"), listing)
-    return current == canonical
+    return inputs(listing, market, fields) == saved or _raw_inputs(listing, market, fields) == saved
 
 
 def changed_inputs(listing: dict, market: str, fields: list[dict], stored) -> set[str]:
     """Controlling choices that differ from the saved contract's, in current terms."""
     current = inputs(listing, market, fields)
-    previous = copy.deepcopy(stored) if isinstance(stored, dict) else {}
-    if "category_path" in previous:
-        previous["category_path"] = _category_path(previous.get("category_path"), listing)
-    return {path for path, value in current.items() if previous.get(path) != value}
+    saved = _stored_inputs(listing, stored) or {}
+    if current == saved or _raw_inputs(listing, market, fields) == saved:
+        return set()
+    return {path for path, value in current.items() if saved.get(path) != value}
 
 
 def capture(listing: dict, forms: dict[str, dict], markets) -> dict:

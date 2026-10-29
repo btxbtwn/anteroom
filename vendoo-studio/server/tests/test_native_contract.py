@@ -120,6 +120,23 @@ class NativeContractTest(unittest.TestCase):
         self.assertEqual(contract.gaps(listing, "ebay"), [])
         self.assertIsNotNone(contract.editor_form(listing, "ebay"))
 
+    def test_a_form_recorded_with_general_brand_and_condition_still_opens(self):
+        listing = ebay_tshirt()
+        # Before posting compared marketplace overrides, the contract stored the
+        # General answers even though the eBay form carried its own condition id.
+        listing[contract.KEY]["ebay"]["inputs"]["brand"] = listing["brand"]
+        listing[contract.KEY]["ebay"]["inputs"]["condition"] = listing["condition"]
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+        self.assertIsNotNone(contract.editor_form(listing, "ebay"))
+
+    def test_a_changed_condition_still_makes_a_legacy_form_stale(self):
+        listing = ebay_tshirt()
+        listing[contract.KEY]["ebay"]["inputs"]["condition"] = listing["condition"]
+        listing["condition"] = "Pre-Owned - Excellent"
+        listing["ebay_specifics"]["condition"] = "4000"
+        self.assertIn("changed", contract.gaps(listing, "ebay")[0]["message"])
+        self.assertIsNone(contract.editor_form(listing, "ebay"))
+
     def test_preparing_the_shared_category_does_not_clear_its_answers(self):
         from vendoo_studio.services.registry import map_vendoo_category_path
 
