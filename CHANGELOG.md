@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.519 — 2026-10-29
+
+- Opening a marketplace form checks its saved requirements in Anteroom without contacting Chrome or changing the listing’s categories. Live marketplace verification stays with the seller-confirmed List action.
+
 ## 0.1.518 — 2026-10-29
 
 - Mercari’s categories, brands, conditions and grouped sizes now load in Anteroom with Chrome closed. Shipping labels and current prices load directly from Mercari after you answer the package questions.

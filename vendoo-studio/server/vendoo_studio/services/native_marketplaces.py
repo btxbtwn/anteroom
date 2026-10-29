@@ -500,40 +500,22 @@ def _refuse(db: Session, conv_id: str, marketplace: str, result: dict) -> dict:
 
 async def preflight(conv_id: str, db: Session, sellwild_category_id: int | None = None,
                     sellwild_condition_id: int | None = None) -> dict:
-    """What each marketplace still needs before List. A resolved Poshmark or Depop category is saved."""
+    """Read saved listing requirements locally, without Chrome or category changes."""
     conv = _conversation(db, conv_id)
     listing = ListingRepo(db).get_current(conv_id)
     revision = ListingRepo(db).get_revision(listing.current_revision_id) if listing else None
     if not revision or not isinstance(revision.listing_json, dict):
         return {"revision_id": None, "marketplaces": {}}
-    from vendoo_studio.services.chrome_catalog import (
-        apply_direct_ids, apply_preview, ensure_catalogs, live_preview, preview_categories,
-        remember_direct_categories, resolved_from_catalogs,
-    )
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
     from vendoo_studio.services.native_form import attach_form
 
     prepared = prepare_listing_snapshot(db, conv, copy.deepcopy(revision.listing_json))
-    preview = await live_preview(prepared)
-    categories = preview_categories(preview)
-    if not {"poshmark", "depop"}.issubset(categories):
-        try:
-            offline = resolved_from_catalogs(prepared, await ensure_catalogs())
-        except Exception:  # noqa: BLE001 - the rest of the check still runs
-            offline = {}
-        for key, value in offline.items():
-            categories.setdefault(key, value)
-    if apply_direct_ids(prepared, categories):
-        remember_direct_categories(db, revision, prepared.get("direct_category_ids") or {})
     body = ListRequest(revision_id=revision.id, sellwild_category_id=sellwild_category_id,
                        sellwild_condition_id=sellwild_condition_id)
     out = {}
     for marketplace in NAMES:
-        found = apply_preview(
-            direct_preflight.gaps(attach_form(copy.deepcopy(prepared), marketplace), marketplace,
-                                  _context(db, conv_id, marketplace, body)),
-            preview, marketplace,
-        )
+        found = direct_preflight.gaps(attach_form(copy.deepcopy(prepared), marketplace), marketplace,
+                                      _context(db, conv_id, marketplace, body))
         left_off = _photos(db, conv_id, prepared, marketplace)[1]
         if left_off:
             found.append(direct_preflight.gap(f"marketplace_photos.{marketplace}", left_off, blocking=False))
