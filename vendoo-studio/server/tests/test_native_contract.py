@@ -28,6 +28,24 @@ def seed():
     return listing
 
 
+def ebay_tshirt():
+    listing = {"title": "Chase Authentics XL Y2K Tony Stewart #20 NASCAR T-Shirt Black Straight Cut",
+               "brand": "Chase Authentics", "condition": "Pre-Owned - Good",
+               "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts & T-Shirts",
+               "direct_category_ids": {"ebay": "15687"}, "ebay_specifics": {"condition": "3000"}}
+    form = {"marketplace": "ebay", "native": True, "known": True, "page_labels": True, "category_id": "15687",
+            "fields": [
+                {"path": "ebay_specifics.condition", "label": "Item condition", "options": ["Pre-Owned - Good"],
+                 "option_values": {"Pre-Owned - Good": "3000"}},
+                {"path": "ebay_specifics.brand", "label": "Brand", "options": ["Chase Authentics"],
+                 "option_values": {"Chase Authentics": "Chase Authentics"}},
+                {"path": "ebay_specifics.style", "label": "Style", "category_specific": True, "options": ["Graphic Tee"],
+                 "option_values": {"Graphic Tee": "Graphic Tee"}},
+            ]}
+    listing[contract.KEY] = contract.capture(listing, {"ebay": form}, ["ebay"])
+    return listing
+
+
 class NativeContractTest(unittest.TestCase):
     def test_large_brand_catalog_stays_in_editor_but_only_known_brand_enters_prompt(self):
         from vendoo_studio.services import depop_form
@@ -67,6 +85,36 @@ class NativeContractTest(unittest.TestCase):
         captured = contract.inputs(listing, "mercari", fields)
         listing["condition"] = "Pre-Owned - Good"
         self.assertEqual(captured, contract.inputs(listing, "mercari", fields))
+
+    def test_preparing_the_shared_category_does_not_make_the_saved_form_stale(self):
+        from vendoo_studio.services.registry import map_vendoo_category_path
+
+        listing = ebay_tshirt()
+        prepared = copy.deepcopy(listing)
+        prepared["category_path"] = map_vendoo_category_path(prepared["category_path"], prepared)
+        self.assertNotEqual(prepared["category_path"], listing["category_path"])
+        self.assertEqual(contract.gaps(prepared, "ebay"), [])
+        self.assertIsNotNone(contract.editor_form(prepared, "ebay"))
+
+    def test_a_form_recorded_with_the_raw_category_path_still_opens(self):
+        from vendoo_studio.services.registry import map_vendoo_category_path
+
+        listing = ebay_tshirt()
+        raw = listing["category_path"]
+        listing[contract.KEY]["ebay"]["inputs"]["category_path"] = raw
+        listing["category_path"] = map_vendoo_category_path(raw, listing)
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+        self.assertIsNotNone(contract.editor_form(listing, "ebay"))
+
+    def test_preparing_the_shared_category_does_not_clear_its_answers(self):
+        from vendoo_studio.services.registry import map_vendoo_category_path
+
+        previous = ebay_tshirt()
+        previous["ebay_specifics"]["style"] = "Graphic Tee"
+        updated = copy.deepcopy(previous)
+        updated["category_path"] = map_vendoo_category_path(updated["category_path"], updated)
+        contract.invalidate_dependents(previous, updated)
+        self.assertEqual(updated["ebay_specifics"]["style"], "Graphic Tee")
 
     def test_validation_only_contract_is_not_rendered_as_a_complete_editor(self):
         listing = seed()
