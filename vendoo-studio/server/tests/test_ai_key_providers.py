@@ -441,3 +441,19 @@ def test_native_refusal_is_not_returned_as_an_empty_success(fake_http):
         run(collect(provider.structured_chat([{"role": "user", "content": "JSON"}], {"type": "object"})))
     assert calls[0]["outcome"] == "failed"
     assert "private text" not in json.dumps(calls)
+
+
+def test_responses_search_requests_are_included_in_call_metrics(fake_http):
+    from vendoo_studio.services import model_usage
+    fake_http(lambda request: httpx.Response(200, content=sse(
+        {"type": "response.output_item.done", "item": {"type": "message", "content": [
+            {"type": "output_text", "text": "Synthetic sold comparable found."}]}},
+        {"type": "response.completed", "response": {"usage": {"input_tokens": 12, "output_tokens": 3}}},
+    )))
+    provider = OpenAIAPIProvider("test-key", "fixture", "fixture")
+    with model_usage.capture() as calls:
+        result = run(provider.web_search([{"role": "user", "content": "Synthetic sold comps"}]))
+    assert result["answer"] == "Synthetic sold comparable found."
+    assert len(calls) == 1
+    assert calls[0]["input_tokens"] == 12
+    assert calls[0]["output_tokens"] == 3

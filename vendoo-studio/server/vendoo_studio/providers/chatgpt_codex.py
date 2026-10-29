@@ -638,36 +638,39 @@ class ChatGPTCodexProvider:
         return {"answer": text, "sources": sources}
 
     async def _stream_search(self, messages: list[dict], **payload_kwargs):
-        headers = await self._headers()
-        async with _http_client() as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/responses",
-                headers=headers,
-                timeout=120,
-                json=self._payload(messages, self.listing_model, True, **payload_kwargs),
-            ) as resp:
-                if resp.status_code >= 400:
-                    await resp.aread()
-                    raise RuntimeError(self._http_error(resp))
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    data_str = line[5:].strip() if line.startswith("data:") else line.strip()
-                    if not data_str or data_str == "[DONE]":
-                        if data_str == "[DONE]":
-                            break
-                        continue
-                    try:
-                        payload = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    text = _responses_text(payload)
-                    if text:
-                        yield StreamChunk(text, "content")
-                    items = _output_items(payload)
-                    if items:
-                        yield StreamChunk(json.dumps(items), "output")
+        with model_usage.observe(self.name, self.listing_model) as call:
+            headers = await self._headers()
+            async with _http_client() as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/responses",
+                    headers=headers,
+                    timeout=120,
+                    json=self._payload(messages, self.listing_model, True, **payload_kwargs),
+                ) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise RuntimeError(self._http_error(resp))
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        data_str = line[5:].strip() if line.startswith("data:") else line.strip()
+                        if not data_str or data_str == "[DONE]":
+                            if data_str == "[DONE]":
+                                break
+                            continue
+                        try:
+                            payload = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        response = payload.get("response") or {}
+                        call.usage(response.get("usage") or payload.get("usage"))
+                        text = _responses_text(payload)
+                        if text:
+                            yield StreamChunk(text, "content")
+                        items = _output_items(payload)
+                        if items:
+                            yield StreamChunk(json.dumps(items), "output")
 
     def _parse_json_response(self, content: str) -> dict:
         import re

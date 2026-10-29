@@ -60,7 +60,9 @@ It writes `outputs.json`, `report.json`, and the isolated draft database. It nev
 calls a Send, List, Update, or Delist route. These artifacts are private and must
 stay outside the repository. The provider's normal model/subscription usage applies.
 
-The report includes per-case observed latency and per-request input, output,
+A Claude SDK query is one Anteroom model call; its reported usage can include
+several internal model turns. The report includes per-case observed latency and
+input, output,
 cache-read, cache-write and reasoning token counts when the provider reports them.
 Unknown counters and costs remain `null`. Anthropic's uncached input, cache-read
 and cache-write counts are combined into total input once; OpenAI's input already
