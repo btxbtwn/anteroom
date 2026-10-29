@@ -398,7 +398,7 @@ def changed_categories(before: dict, after: dict) -> set[str]:
     changed = {market for market in MARKETS
                if _category(after, market) and _category(after, market) != _category(before, market)}
     for market, contract in (before.get(native_contract.KEY) or {}).items():
-        if native_contract.inputs(after, market, contract.get("fields") or []) != contract.get("inputs"):
+        if native_contract.changed_inputs(after, market, contract.get("fields") or [], contract.get("inputs")):
             changed.add(market)
         if any(native_contract.item_field(row, market) and get_path(before, _path(row)) != get_path(after, _path(row))
                for row in contract.get("fields") or []):
