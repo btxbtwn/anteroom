@@ -22,6 +22,14 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     if revision_id and revision.id != revision_id:
         raise NativeMarketplaceError(409, "The listing changed. Refresh its category choices.")
     snapshot = direct_preflight.prepare(db, conv, revision.listing_json, marketplace)
+    if marketplace == "poshmark":
+        from vendoo_studio.services.poshmark_form import form
+
+        return form(snapshot)
+    if marketplace == "depop":
+        from vendoo_studio.services.depop_form import form
+
+        return form(snapshot)
     if not refresh:
         from vendoo_studio.services import native_contract
 

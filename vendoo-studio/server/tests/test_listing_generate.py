@@ -85,7 +85,8 @@ def _first_generate_prompt(provider) -> str:
     """Prompt from the initial generate call (before repair/finalize passes)."""
     for messages in getattr(provider, "chat_history", []) or []:
         content = str((messages[0] or {}).get("content") or "")
-        if "Finish this Vendoo listing" in content or "malformed" in content.lower():
+        if ("Finish this Vendoo listing" in content or "malformed" in content.lower()
+                or content.startswith("You fill a resale listing's marketplace form fields.")):
             continue
         return content
     messages = provider.chat_messages or []

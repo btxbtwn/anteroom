@@ -1102,13 +1102,13 @@ export function StructuredEditor({
         id={id} fieldKey={f.key} value={text} disabled={f.locked}
         onChange={(value) => commitField(f.key, value)} />;
     }
-    if (f.options?.length) {
+    if (f.options?.length || f.selectionOnly) {
       return (
         <SearchableSelect
           id={id}
           fieldKey={f.key}
           value={text}
-          options={f.options}
+          options={f.options ?? []}
           disabled={f.locked}
           selectionOnly={f.selectionOnly}
           choicesVerified={f.optionsSource === "marketplace"}
