@@ -89,27 +89,35 @@ class NativeMarketplacesTest(unittest.TestCase):
     def status(self):
         return self.client.get(self.base).json()
 
-    def test_a_poshmark_size_and_a_saved_category_are_settled_before_list(self):
-        preview = {
-            "ok": True,
-            "categories": {"poshmark": "dept/shirts/tees", "depop": "menswear_tshirts"},
-            "gaps": {
-                "poshmark": [{"field": "size", "message": "Poshmark needs a size Poshmark offers in this category.", "blocking": True}],
-                "depop": [{"field": "depop_specifics.parcelSize", "message": 'Depop does not offer "Medium" as a parcel size.', "blocking": True}],
-            },
-            "parcels_checked": True,
-        }
-        with patch("vendoo_studio.services.chrome_catalog.live_preview", new=AsyncMock(return_value=preview)), \
-             patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=AsyncMock(return_value={})):
-            body = self.client.get(f"{self.base}/preflight").json()
-        self.assertFalse(body["marketplaces"]["poshmark"]["ready"])
-        self.assertFalse(body["marketplaces"]["depop"]["ready"])
+    def test_editor_preflight_uses_saved_native_requirements_without_chrome_or_category_writes(self):
+        import copy
+        from vendoo_studio.services import native_contract
+
+        snapshot = copy.deepcopy(LISTING)
+        snapshot["direct_category_ids"] = {"depop": "menswear_tshirts"}
+        snapshot = native.direct_preflight.prepare(self.db, self.conv, snapshot, "depop")
+        form = {"category_id": "menswear_tshirts", "page_labels": True, "fields": [
+            {"path": "depop_specifics.size", "label": "Size", "required": True,
+             "selection_only": True, "options": ["M", "L"]}]}
+        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"depop": form}, ["depop"])
+        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        before = copy.deepcopy(revision.listing_json)
+        read = AsyncMock(side_effect=AssertionError("Chrome or remote catalog used during editor preflight"))
+        with patch("vendoo_studio.services.chrome_catalog.live_preview", new=read), \
+             patch("vendoo_studio.services.chrome_catalog.ensure_catalogs", new=read):
+            for connected in (False, True):
+                self.manager.connected = connected
+                response = self.client.get(f"{self.base}/preflight")
+                self.assertEqual(response.status_code, 200, response.text)
+                result = response.json()["marketplaces"]["depop"]
+                self.assertFalse(result["ready"])
+                self.assertTrue(any(gap["field"] == "depop_specifics.size" for gap in result["gaps"]), result)
+        read.assert_not_awaited()
+        self.bridge.assert_not_awaited()
         self.db.expire_all()
-        saved = ListingRepo(self.db).get_revision(self.rev.id).listing_json
-        self.assertEqual(saved["direct_category_ids"]["poshmark"], "dept/shirts/tees")
-        self.assertEqual(saved["direct_category_ids"]["depop"], "menswear_tshirts")
-        self.assertEqual(saved["marketplace_category_ids"]["poshmark"], LISTING["marketplace_category_ids"]["poshmark"])
-        self.assertEqual(saved["marketplace_category_ids"]["depop"], LISTING["marketplace_category_ids"]["depop"])
+        self.assertEqual(ListingRepo(self.db).get_revision(revision.id).listing_json, before)
+        self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
 
     def record(self, platform):
         return MarketplaceListingRepo(self.db).get(self.conv.id, platform)

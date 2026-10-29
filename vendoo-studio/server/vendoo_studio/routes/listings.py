@@ -63,21 +63,20 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Conversation not found")
 
     listing_repo = ListingRepo(db)
-    revisions = listing_repo.get_revisions(conv_id)
+    latest = listing_repo.latest_revision(conv_id)
 
     current = listing_repo.get_current(conv_id)
     revision_id = current.current_revision_id if current else None
 
     listing_data = {}
-    if revisions:
-        latest = revisions[0]
+    if latest:
         listing_data = copy.deepcopy(latest.listing_json)
 
     changed = False
-    if revisions:
+    if latest:
         from vendoo_studio.services.chat_listing import recover_saved_chat_clears
 
-        recovered = recover_saved_chat_clears(db, conv_id, revisions[0])
+        recovered = recover_saved_chat_clears(db, conv_id, latest)
         if recovered != listing_data:
             listing_data = recovered
             changed = True
@@ -114,7 +113,6 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
             parent_revision_id=revision_id,
         )
         revision_id = revision.id
-        revisions = listing_repo.get_revisions(conv_id)
 
     from vendoo_studio.services.seller_overrides import capture_locked, restore_locked
 
@@ -127,7 +125,7 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
         conversation_id=conv_id,
         current_revision_id=revision_id,
         listing=listing_data,
-        revision_count=len(revisions),
+        revision_count=listing_repo.revision_count(conv_id),
         can_send=validation.can_send,
         errors=validation.errors,
         warnings=validation.warnings,
@@ -153,8 +151,8 @@ def validate(conv_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Conversation not found")
 
     listing_repo = ListingRepo(db)
-    revisions = listing_repo.get_revisions(conv_id)
-    listing_data = copy.deepcopy(revisions[0].listing_json) if revisions else {}
+    latest = listing_repo.latest_revision(conv_id)
+    listing_data = copy.deepcopy(latest.listing_json) if latest else {}
     normalize_listing_dropdowns(listing_data)
 
     photo_count = len(conv_repo.get_photos(conv_id))

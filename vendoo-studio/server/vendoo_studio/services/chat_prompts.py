@@ -6,7 +6,6 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.config import skills_dir
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.chat_citations import (
     citations_to_plain_text,
@@ -15,7 +14,7 @@ from vendoo_studio.services.chat_citations import (
 from vendoo_studio.services.comp_research import research_sold_comps
 from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.generation_history import seller_history_prompt
-from vendoo_studio.services.listing_evidence import generation_evidence_prompt
+from vendoo_studio.services.item_context import item_decisions_prompt
 from vendoo_studio.services.listing_generate import (
     analysis_with_photo_count,
     analyze_photos_with_tag_retry,
@@ -31,28 +30,9 @@ log = logging.getLogger("vendoo_studio.chat")
 
 
 def load_skill_rules(query: str = "", db: Session | None = None) -> str:
-    from vendoo_studio.services.skill_formulas import with_pinned_formulas
+    from vendoo_studio.services.catalog_index import relevant_skill_rules
 
-    skill_md = skills_dir() / "list-this" / "SKILL.md"
-    template_md = skills_dir() / "list-this" / "references" / "vendoo_listing_template.md"
-
-    def _file_rules() -> str:
-        parts = []
-        if skill_md.exists():
-            parts.append(skill_md.read_text())
-        if template_md.exists():
-            parts.append(template_md.read_text())
-        return with_pinned_formulas("\n\n---\n\n".join(parts) if parts else "")
-
-    if db is not None and str(query or "").strip():
-        try:
-            from vendoo_studio.services.catalog_index import relevant_skill_rules
-            rules = relevant_skill_rules(db, query)
-            if str(rules or "").strip():
-                return with_pinned_formulas(rules)
-        except Exception:
-            log.exception("catalog skill rules unavailable; falling back to SKILL.md")
-    return _file_rules()
+    return relevant_skill_rules(db, query)
 
 
 def learned_fields_prompt(db: Session, conv_id: str) -> str:
@@ -214,31 +194,9 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             "If you are not changing the listing, reply in plain English only. "
             "If asked whether the listing was updated, say yes only when a system message in this "
             "conversation confirms the listing JSON was saved; otherwise say no.\n\n"
-            "Key rules:\n"
-            "- Never publish. Stop at saved drafts.\n"
-            "- Never ask the seller clarifying questions. Infer from the photos and notes already provided.\n"
-            "- Never ask the seller to upload or attach photos when product photos are already present.\n"
-            "- Be conservative with brand and size: use photo/tag/logo evidence and seller notes only; leave unsupported facts empty — never invent, never ask.\n"
-            "- A category is the last choice in its branch, written Department > Category > Last category, such as Men > Shirts > Tees. "
-            "A group that still has a narrower choice is not saved. "
-            "On Poshmark, finish with None when you want a category that still has narrower choices.\n"
-            "- Title MUST follow Brand Size Vibe Item Color Fit exactly (max 80 chars) from the Formula Reference below.\n"
-            "- The size in the title must be the size field verbatim. Men's bottoms size is the waist alone (34), never waist x inseam (34x34). "
-            "Each marketplace form then gets the bottoms size it accepts (eBay waist and inseam, Poshmark Waist 32, women's 0-24, Petite/Plus/Tall).\n"
-            "- eBay Best Offer is ebay_specifics.bestOffer.enabled (Yes or No), autoAcceptPrice, and minimumOfferPrice. "
-            "The minimum must be below the auto-accept price, and that must be below the item price.\n"
-            "- Condition is required on every physical listing: an exact Vendoo general value such as \"Pre-Owned - Good\". Never leave it blank.\n"
-            "- Description MUST follow the physical-item formula exactly (line breaks; trendy keyword sentence, Flaws: only when the item has flaws with one flaw per line starting with \"- \", Measurements:) unless this is an Etsy digital download.\n"
-            "- NEVER put pricing details in the description: no prices, dollar amounts, comps, sold-listing counts, market/resale value, MSRP, discounts, offers, or pricing uncertainty. Pricing lives in the price field only.\n"
-            "- NEVER put uncertainties in the description: no notes about what you could not verify or read, no \"approximate\", \"estimated\", \"photo estimates\", \"uncertain\" or \"unclear\" hedges. The description is buyer-facing; uncertainties are internal and belong in your reply only.\n"
-            "- Do not invent catchy titles or prose that break those formulas.\n"
-            "- Resolve every applicable discovered field with a real value. Leave a field out when it does not apply to the item; never write \"Does Not Apply\".\n"
-            "- Fill every discovered category/marketplace field in the JSON. Do not leave applicable fields empty.\n"
-            "- Never tell the seller the listing is complete, ready, or done while any discovered field is still empty.\n"
-            "- Estimate packaged shipping weight and mailer dimensions from the item type; do not ask the seller for those.\n"
-            "- Depop style is up to 3 tags. Leave it empty when the seller cleared it. Do not invent tags to fill three.\n"
-            "- A marketplace price follows the item price unless the seller set that marketplace's own price.\n"
-            "- Depop measurements use the inches already stored for the garment. Do not invent measurements.\n"
+            "Never publish. Stop at saved drafts. Sending to Vendoo requires seller approval.\n"
+            "Follow the canonical rules and the native form paths and choices below. "
+            "Saved seller decisions and newer seller requests take precedence over historical messages.\n"
             + (f"\n{photo_analysis_text}\n\n" if photo_analysis_text else "") +
             comps_block +
             (f"\n--- Listing Rules ---\n\n{skill_rules}" if skill_rules else "")
@@ -249,8 +207,21 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
 
     system_prompt["content"] += chat_field_context(db, conv_id)
     system_prompt["content"] += _item_form_prompt(db, conv_id)
+    from vendoo_studio.services.item_context import seller_messages
+
+    system_prompt["content"] += item_decisions_prompt(db, conv_id)
+    selected = {message.id for message in seller_messages(history, user_message_text)}
+    # Assistant replies and save confirmations provide recent conversational
+    # continuity; they cannot crowd old seller evidence out of its own budget.
+    used = 0
+    for message in reversed(history[-20:]):
+        if message.role != "user" and used + len(message.text) <= 10000:
+            selected.add(message.id)
+            used += len(message.text)
     messages = [system_prompt]
-    for msg in history[-20:]:
+    for msg in history:
+        if msg.id not in selected:
+            continue
         if photo_analysis_usable(msg.text) and getattr(msg, "photo_fingerprint", None) != fingerprint:
             continue
         role = msg.role
@@ -266,44 +237,15 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
 
 
 LISTING_INSTRUCTIONS = (
-    "You are a product listing generator. Generate an evidence-backed Vendoo listing JSON "
-    "from the photo analysis and listing rules below.\n\n"
-    "Preserve category_path and marketplace_categories from the verified category selections below. "
-    "Each marketplace uses its own category tree; do not substitute another form's breadcrumb.\n\n"
-    "Never make up a sku: leave it out unless the seller notes give one. "
-    "Always include primaryColor, and secondaryColor "
-    "when a second color is visible. Colors must be exact Vendoo General dropdown values from "
-    "the listing rules below. Use Blue for navy; Navy is only a Depop option. "
-    "Use Vendoo general condition values such as "
-    '"Pre-Owned - Good". Keep tags to 5 or fewer. Depop needs source and age. '
-    "Mercari shippingLabel must be USPS Ground Advantage.\n\n"
-    "TITLE and DESCRIPTION are non-negotiable skill formulas — copy the structure from "
-    "Formula Reference below. Title order is Brand Size Vibe Item Color Fit (max 80 chars), "
-    "and the title's size is the size field verbatim — men's bottoms size is the waist alone (34), never 34x34. "
-    "Always set condition to an exact Vendoo general value; never omit it. "
-    "Physical descriptions must keep the mandatory blank lines and the Flaws:/Measurements: "
-    "blocks after a short trendy keyword sentence. Do not write freeform marketing copy that breaks those formulas. "
-    "When the item has flaws, put each one on its own line starting with \"- \". "
-    "When the item has no flaws, leave the Flaws: block out entirely — never write \"none noted\".\n\n"
-    "If seller-provided measurements (Pit to pit, Length, Sleeve) are given, use them exactly as-is in the description.\n"
-    "Do not modify, estimate, or replace seller-provided measurements.\n"
-    "If the seller lists known flaws, repeat every one of them in the Flaws: block, "
-    "one per line starting with \"- \", in the seller's own words. Never drop a flaw or soften it to \"none noted\".\n"
-    "Use the discovered category fields below. Fill every applicable field with a real value, and leave out any that does not apply — never write \"Does Not Apply\". "
-    "Only leave a field empty when you must ask the seller a precise question in prose — and never claim the listing is complete while any applicable discovered field is still empty. "
-    "Always infer and include packaged shipping weight_lb and weight_oz from the item type, size, materials, "
-    "photos, seller notes, and research evidence. Pounds may be 0, but both fields must be present and their "
-    "combined weight must be greater than 0. Do not ask the seller for routine shipping weight. "
-    "Anteroom supplies package_dimensions_in from the seller's saved Settings default. "
-    "Never invent brand, size, material, age, or other product facts without photo or seller evidence. "
-    "Prefer verbatim tag text from the photo analysis for brand, size, and material. "
-    "Anteroom applies generated values onto the bound Vendoo draft automatically when Chrome is connected. "
-    "Choose the pricing baseline from current sold comps and relevant seller history using the "
-    "canonical PRICING Formula below. Follow its evidence thresholds and live asking ceiling. "
-    "Never mention pricing in the description.\n"
-    "The description is buyer-facing copy about the item: never include prices, dollar amounts, comps, "
-    "sold-listing counts, market or resale value, MSRP, discounts, offers, or any note about pricing "
-    "confidence. Those belong in the price field only.\n\n"
+    "You are a product listing generator. Generate an evidence-backed listing from the supplied "
+    "photo analysis, seller decisions, canonical listing rules, and native marketplace forms. "
+    "The canonical skill defines the formulas and product-evidence requirements. "
+    "Use each native form's supplied paths, choices, types and limits. "
+    "Preserve verified category selections and server-owned metadata. "
+    "Unsupported fields remain blockers; do not invent facts or interview the seller. "
+    "Anteroom supplies saved package dimensions and inventory location. "
+    "Generation saves a local draft only. Never publish or send without seller approval. "
+    "For this application, return the JSON contract below, including for digital items.\n\n"
     "Return ONLY one fenced ```json code block with the full listing object. "
     "No prose before or after the fence. Valid JSON only (no trailing commas).\n\n"
     "```json\n"
@@ -420,7 +362,7 @@ def listing_generation_messages(
         f"{analysis_text}"
         f"{comps_block}"
         f"{seller_history_prompt(db, conv_id, analysis_text)}"
-        f"{generation_evidence_prompt(db, conv_id)}"
+        f"{item_decisions_prompt(db, conv_id)}"
         f"{current_listing_prompt(db, conv_id, include_native_forms=native_forms is None)}"
         f"{_empty_discovered_fields_prompt(db, conv_id, field_evidence) if native_forms is None else ''}"
         f"{_live_category_fields_prompt(db, conv_id) if native_forms is None else ''}"

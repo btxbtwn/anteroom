@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from copy import deepcopy
 from typing import Any
@@ -29,59 +28,6 @@ PROBE_STEPS = frozenset({
 # Vendoo keeps Save disabled on new drafts until a few general fields exist.
 # First-generate probes often have category only — seed the rest from notes.
 _PROBE_DEFAULT_CONDITION = "Good"
-
-
-async def api_category_schemas(listing: dict) -> dict[str, dict]:
-    """Field schemas for this listing's leaves, straight from Vendoo.
-
-    Empty when nothing could be resolved or fetched, which is the signal to
-    fall back to discovering them through a browser. A marketplace Vendoo has
-    no schema for is not a reason to probe the ones it does.
-    """
-    from types import SimpleNamespace
-
-    from vendoo_studio.services.category_fields import listing_category_ids
-    from vendoo_studio.services.vendoo_create import fetch_listing_specifics
-
-    if not listing_category_ids(listing):
-        return {}
-    try:
-        specifics = await fetch_listing_specifics(SimpleNamespace(id=None), listing)
-    except Exception:  # noqa: BLE001 - a probe is the fallback, not a failure
-        log.info("category specifics unavailable; falling back to discovery", exc_info=True)
-        return {}
-    return {mp: fields for mp, fields in (specifics or {}).items() if fields}
-
-
-async def mapped_marketplace_paths(general_path: str, platforms: list[str]) -> dict[str, str]:
-    """Ask Vendoo which category each marketplace uses for this general one.
-
-    Breadcrumbs, because that is what the form filler selects in Vendoo's UI.
-    Empty when the general category is not in the local tree or the browser is
-    not there to ask, so the caller can fall back.
-    """
-    from types import SimpleNamespace
-
-    from vendoo_studio.services.vendoo_categories import category_from_hit
-    from vendoo_studio.services.vendoo_create import _hits_by_mapping, tree_leaf
-
-    if not general_path or not platforms:
-        return {}
-    general = category_from_hit(tree_leaf("general", general_path), general_path)
-    if not (general and general.get("id")):
-        return {}
-    targets = [(mp, mp, "") for mp in platforms]
-    try:
-        hits = await _hits_by_mapping(SimpleNamespace(id=None), general, targets)
-    except Exception:  # noqa: BLE001 - generation should not fail over this
-        log.info("category mapping unavailable during generate", exc_info=True)
-        return {}
-    out: dict[str, str] = {}
-    for marketplace, hit in hits.items():
-        labels = hit.get("all_category_label") or hit.get("displayPath") or []
-        if isinstance(labels, list) and labels:
-            out[marketplace] = " > ".join(str(part) for part in labels)
-    return out
 
 
 def is_schema_probe_job(job: Job | None) -> bool:
@@ -330,56 +276,6 @@ def _validate_schema_paths(schema: dict, paths: dict, platforms: list[str]) -> N
             )
 
 
-def _fitting_mapped_paths(mapped: dict[str, str], general: str, analysis: str, notes: str) -> dict[str, str]:
-    """Mapper answers that fit the general category, remapped to the right leaf."""
-    if not mapped:
-        return {}
-    from vendoo_studio.services.category_lookup import marketplace_path_fits_general
-    from vendoo_studio.services.registry import map_marketplace_category_path
-
-    mapped = {
-        mp: path
-        for mp, path in mapped.items()
-        if marketplace_path_fits_general(general, path)
-    }
-    listing_cues = {
-        "category_path": general,
-        "title": analysis,
-        "description": notes,
-    }
-    # Vendoo's mapper often returns Tank Tops / Tunics / Blouse for a bare
-    # Women's Tops general because every top maps to the same leaf. Remap
-    # with photo/seller text so a tee reaches the T-shirts leaf.
-    return {
-        mp: map_marketplace_category_path(mp, path, listing_cues) or path
-        for mp, path in mapped.items()
-    }
-
-
-async def _select_tree_categories(
-    provider, analysis: str, notes: str, platforms: list[str], locked_general: str,
-) -> dict:
-    """Model picks for these marketplace trees, on a session of its own."""
-    from vendoo_studio.database import SessionLocal
-    from vendoo_studio.services.category_selection import select_categories
-
-    db = SessionLocal()
-    try:
-        return await select_categories(db, provider, analysis, notes, platforms, locked_general)
-    finally:
-        db.close()
-
-
-def _drop_task(task: asyncio.Task | None) -> None:
-    """Cancel a speculative task, or consume the error it ended with."""
-    if task is None:
-        return
-    if not task.done():
-        task.cancel()
-    elif not task.cancelled():
-        task.exception()
-
-
 async def prepare_generation_schema(
     db: Session,
     conv_id: str,
@@ -389,159 +285,26 @@ async def prepare_generation_schema(
     *,
     on_status=None,
 ) -> dict:
-    """Resolve a category; reuse cached schemas or kick Chrome discovery without blocking generate."""
-    from vendoo_studio.services.category_catalog import cached_schema_payload
+    """Choose the shared category; native form builders own marketplace fields."""
     from vendoo_studio.services.category_selection import select_categories
-    from vendoo_studio.services.marketplaces import selected_fillable_platforms
-    from vendoo_studio.services.vendoo_import import parse_notes
+    from vendoo_studio.services.direct_categories import attach_direct_categories
 
-    def status(message: str) -> None:
-        if on_status:
-            on_status(message)
-
+    if on_status:
+        on_status("Choosing a category…")
     override = str(parse_notes(notes).get("categoryOverride") or "").strip()
     revisions = ListingRepo(db).get_revisions(conv_id)
     seed = deepcopy(revisions[0].listing_json) if revisions else {}
-    platforms = selected_fillable_platforms()
-    status("Choosing a category…")
-    # One question, not six: the model settles the general category and Vendoo
-    # maps it to each marketplace. Asking it to pick for every tree at once put
-    # ~90 candidates in one prompt, which is what kept timing out and falling
-    # back to keyword ranking — the fallback that chose Fastener Nuts.
     paths = await select_categories(db, provider, analysis, notes, [], override)
     seed["category_path"] = paths["general"]
-    status("Matching marketplace categories…")
-    # Only marketplaces with a local tree can be chosen without Vendoo's mapper;
-    # the rest stay unmapped here and resolve when the draft is created.
-    from vendoo_studio.services.category_tree import MARKETPLACES as TREE_MARKETPLACES
-
-    # When the mapper cannot answer (no Chrome, say) or maps into a hardware
-    # collision, the model picks those trees. Ask it now, beside the mapper,
-    # rather than after it; the answer is dropped if the mapper covers them.
-    fallback_task = None
-    tree_platforms = [mp for mp in platforms if mp in TREE_MARKETPLACES]
-    if tree_platforms:
-        fallback_task = asyncio.create_task(_select_tree_categories(
-            provider, analysis, notes, tree_platforms, override or paths["general"],
-        ))
-    try:
-        mapped = _fitting_mapped_paths(
-            await mapped_marketplace_paths(paths["general"], platforms),
-            paths["general"],
-            analysis,
-            notes,
-        )
-        missing = [mp for mp in tree_platforms if mp not in mapped]
-        if missing and fallback_task is not None:
-            # Lock the general leaf we already chose.
-            fallback = await fallback_task
-            seed["category_path"] = fallback.get("general") or paths["general"]
-            for marketplace in missing:
-                path = fallback.get(marketplace)
-                if path:
-                    mapped[marketplace] = path
-    finally:
-        _drop_task(fallback_task)
-    seed["marketplace_categories"] = mapped
     conv = ConversationRepo(db).get(conv_id)
     seed_probe_general_fields(seed, conv.notes if conv else notes)
-    from vendoo_studio.services.direct_categories import attach_direct_categories
-
+    if on_status:
+        on_status("Loading marketplace categories and fields…")
     await attach_direct_categories(seed, f"{analysis}\n{notes}")
-    selected_revision = ListingRepo(db).save_revision(
-        conv_id,
-        seed,
-        source="category_analysis",
+    ListingRepo(db).save_revision(
+        conv_id, seed, source="category_analysis",
         parent_revision_id=revisions[0].id if revisions else None,
         expected_revision_id=revisions[0].id if revisions else "",
     )
-
-    category_path = str(seed.get("category_path") or "").strip()
-    required = ["general", *platforms]
-    cached = cached_schema_payload(db, category_path, required)
-    if cached:
-        # Prefer marketplace leaves that produced the remembered field schemas.
-        from vendoo_studio.services.registry import map_marketplace_category_path
-
-        seed["marketplace_categories"] = {
-            mp: str((cached.get(mp) or {}).get("category", {}).get("path") or "").strip()
-            for mp in platforms
-            if str((cached.get(mp) or {}).get("category", {}).get("path") or "").strip()
-        }
-        listing_cues = {
-            **seed,
-            "title": seed.get("title") or analysis,
-            "description": seed.get("description") or notes,
-        }
-        seed["marketplace_categories"] = {
-            mp: map_marketplace_category_path(mp, path, listing_cues) or path
-            for mp, path in seed["marketplace_categories"].items()
-        }
-        ListingRepo(db).save_revision(
-            conv_id,
-            seed,
-            source="category_schema_cache",
-            parent_revision_id=selected_revision.id,
-            expected_revision_id=selected_revision.id,
-        )
-        status("Using cached category fields…")
-        log.info("generation schema cache hit conv=%s category=%s", conv_id, category_path)
-        seed["_schema_source"] = "cache"
-        return seed
-
-    # Vendoo answers what a probe used to discover. A probe drives a real
-    # draft through Chrome and leaves it in the seller's account; asking the
-    # category-specifics endpoint costs one request and no draft at all.
-    api_specs = await api_category_schemas(seed)
-    if api_specs:
-        seed["_schema_source"] = "api"
-        status("Using Vendoo's category fields…")
-        log.info(
-            "generation schema from the API for %s: %s",
-            conv_id,
-            ", ".join(f"{mp}:{len(fields)}" for mp, fields in sorted(api_specs.items())),
-        )
-        return seed
-
-    # Vendoo answers what a browser tour used to discover, so there is nothing
-    # left to discover. Generating without a schema is fine: create resolves
-    # each leaf and fetches its fields then, and the gap filler works from
-    # whatever is cached by that point. Driving Chrome here only ever cost a
-    # throwaway draft in the seller's account and a failure mode when it broke.
-    seed["_schema_source"] = "deferred"
-    status("Generating with the category's own fields…")
+    seed["_schema_source"] = "native"
     return seed
-
-
-async def await_deferred_schema(db: Session, seed: dict, *, timeout: float = 300.0) -> dict | None:
-    """Wait for a deferred Chrome schema probe started during generation."""
-    import asyncio
-    from vendoo_studio.routes.extension import extension_manager
-
-    job_id = str((seed or {}).get("_schema_probe_job_id") or "").strip()
-    source = str((seed or {}).get("_schema_source") or "")
-    if not job_id or source not in {"deferred_probe", "deferred_busy"}:
-        return None
-    if source == "deferred_busy":
-        return None
-
-    waiter_id = "schema:" + job_id
-    waiter = extension_manager.register_wait(waiter_id)
-    try:
-        try:
-            response = await asyncio.wait_for(waiter, timeout=timeout)
-        except TimeoutError:
-            log.warning("deferred schema probe timed out for job %s", job_id)
-            return None
-        if not response.get("ok"):
-            log.warning(
-                "deferred schema probe failed for job %s: %s",
-                job_id,
-                response.get("error") or "unknown",
-            )
-            return None
-    finally:
-        extension_manager.cancel_wait(waiter_id)
-
-    db.expire_all()
-    return _schema_from_probe_job(db, job_id)

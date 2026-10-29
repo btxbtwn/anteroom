@@ -3,10 +3,11 @@ from __future__ import annotations
 from sqlalchemy import Column, String, DateTime, ForeignKey, Index
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class FillLogEntry(Base):
+class FillLogEntry(SellerOwned, Base):
     __tablename__ = "fill_log_entries"
 
     id = Column(String, primary_key=True, default=new_id)

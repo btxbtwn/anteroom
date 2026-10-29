@@ -3,10 +3,11 @@ from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class ListingVideo(Base):
+class ListingVideo(SellerOwned, Base):
     __tablename__ = "listing_videos"
 
     id = Column(String, primary_key=True, default=new_id)

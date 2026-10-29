@@ -365,7 +365,9 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
     repo.update_status(conv_id, "in_progress")
     notes = conv.notes or ""
     item_details = seller_item_details(notes)
-    seller_answers = "\n".join(message.text for message in repo.get_messages(conv_id) if message.role == "user")
+    from vendoo_studio.services.item_context import seller_answers as stored_seller_answers
+
+    seller_answers = stored_seller_answers(repo, conv_id, item_details)
     if seller_answers:
         item_details += "\nSeller answers:\n" + seller_answers
     paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]

@@ -2,10 +2,11 @@
 from sqlalchemy import Column, DateTime, Index, String, text
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class EbayAction(Base):
+class EbayAction(SellerOwned, Base):
     __tablename__ = "ebay_actions"
     __table_args__ = (
         Index("ix_ebay_actions_fingerprint", "account_id", "fingerprint"),

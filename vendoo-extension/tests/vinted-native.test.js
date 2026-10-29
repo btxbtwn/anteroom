@@ -56,7 +56,7 @@ function worker({ read, attributes = ATTRIBUTES, accessToken = token(3600), curr
   c.fetch = async (url, options = {}) => {
     const method = options.method || 'GET';
     const parsed = new URL(url);
-    requests.push({ method, url, pathname: parsed.pathname, headers: options.headers, credentials: options.credentials, body: options.body });
+    requests.push({ method, url, pathname: parsed.pathname, headers: options.headers, credentials: options.credentials, body: options.body, cache: options.cache });
     if (parsed.pathname === '/items/new') return reply(200, PAGE);
     if (parsed.pathname === '/web/api/auth/refresh') return reply(200, { access_token: token(3600) });
     if (parsed.pathname === '/api/v2/users/current') {
@@ -170,6 +170,112 @@ test('a Vinted listing that is already live is not published again', async () =>
   assert.equal(result.listing_url, 'https://www.vinted.com/items/42');
   assert.equal(sent('POST', '/api/v2/item_upload/drafts/42/completion').length, 0);
 });
+
+for (const failure of ['disconnect', 'server', 'invalid-response', 'refusal', 'cancelled']) {
+  test(`Vinted recovers a lost completion reply safely: ${failure}`, async () => {
+    const { c, sent, journal } = worker({ read: n => n === 1 ? DRAFT : { ...DRAFT, is_draft: false } });
+    c.marketplaceSleep = async () => {};
+    const fetch = c.fetch;
+    c.fetch = async (url, options) => {
+      const response = await fetch(url, options);
+      if (!new URL(url).pathname.endsWith('/completion')) return response;
+      if (failure === 'disconnect') throw new TypeError('Failed to fetch');
+      if (failure === 'server') return reply(503, { message: 'Unavailable' });
+      if (failure === 'invalid-response') return reply(200, '<html>Unavailable</html>');
+      if (failure === 'refusal') return reply(400, { message: 'Invalid draft' });
+      throw c.marketplaceError('Cancelled', { code: 'uncertain', rejected: false });
+    };
+    // Cancellation reaches the runner as a flagged transport error.
+    if (failure === 'cancelled') {
+      const session = c.vintedSession;
+      c.vintedSession = async deadline => {
+        const connected = await session(deadline);
+        const call = connected.call;
+        connected.call = async (method, url, options) => {
+          if (url.endsWith('/completion')) {
+            throw Object.assign(c.marketplaceError('Cancelled', { code: 'uncertain', rejected: false }), { cancelled: true });
+          }
+          return call(method, url, options);
+        };
+        return connected;
+      };
+    }
+    const result = await c.runVintedNative(message({ action: 'publish', confirm: true, draft_url: DRAFT_URL }));
+    const recovered = !['refusal', 'cancelled'].includes(failure);
+    assert.equal(result.ok, recovered);
+    assert.equal(sent('GET', '/api/v2/item_upload/items/42').length, recovered ? 2 : 1);
+    assert.equal(sent('POST', '/api/v2/item_upload/drafts/42/completion').length, failure === 'cancelled' ? 0 : 1);
+    if (recovered) assert.equal(journal['native_operation_op-1'].listing_url, 'https://www.vinted.com/items/42');
+  });
+}
+
+test('Vinted read requests bypass cached listing and session responses', async () => {
+  const { c, requests } = worker();
+  assert.equal((await c.runVintedNative(message())).ok, true);
+  const reads = requests.filter(request => request.method === 'GET' && request.pathname.startsWith('/api/'));
+  assert.ok(reads.length > 0);
+  assert.ok(reads.every(request => request.cache === 'no-store'));
+});
+
+test('a dropped publish reply that cannot be confirmed stays uncertain and is never resent', async () => {
+  const { c, sent } = worker();
+  c.marketplaceSleep = async () => {};
+  const fetch = c.fetch;
+  c.fetch = async (url, options) => {
+    const response = await fetch(url, options);
+    if (new URL(url).pathname.endsWith('/completion')) throw new TypeError('Failed to fetch');
+    return response;
+  };
+  const result = await c.runVintedNative(message({ action: 'publish', confirm: true, draft_url: DRAFT_URL }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, 'uncertain');
+  assert.equal(result.safe_to_retry, false);
+  assert.equal(sent('GET', '/api/v2/item_upload/items/42').length, 4);
+  assert.equal(sent('POST', '/api/v2/item_upload/drafts/42/completion').length, 1);
+});
+
+test('confirmation recovers when a read exhausts its connection retries', async () => {
+  const { c } = worker();
+  c.marketplaceSleep = async () => {};
+  let reads = 0;
+  c.vintedRead = async () => {
+    reads += 1;
+    if (reads === 1) throw c.marketplaceError('Connection dropped', { code: 'network', rejected: false });
+    return { ...DRAFT, is_draft: false };
+  };
+  assert.equal((await c.vintedConfirmLive(null, '42')).is_draft, false);
+  assert.equal(reads, 2);
+});
+
+for (const recovery of [false, true]) {
+  for (const outcome of ['delayed', 'draft', 'missing']) {
+    test(`Vinted checks publication three times before reporting ${outcome}, recovery=${recovery}`, async () => {
+      let checks = 0;
+      const { c, sent } = worker({ read: () => {
+        // A normal publish first reads and validates the saved draft.
+        if (!recovery && checks++ === 0) return DRAFT;
+        if (recovery) checks += 1;
+        const attempt = checks - (recovery ? 0 : 1);
+        if (outcome === 'delayed' && attempt === 3) return { ...DRAFT, is_draft: false };
+        return outcome === 'missing' && (recovery || checks > 1) ? null : DRAFT;
+      } });
+      const waits = [];
+      c.marketplaceSleep = async ms => { waits.push(ms); };
+      const result = await c.runVintedNative(message({ action: 'publish', confirm: true, draft_url: DRAFT_URL }), recovery);
+      assert.deepEqual(waits, [700, 1500]);
+      // A missing item checks both read endpoints on each attempt.
+      assert.equal(sent('GET', '/api/v2/item_upload/items/42').length, recovery ? 3 : 4);
+      assert.equal(result.ok, outcome === 'delayed');
+      if (outcome === 'delayed') assert.equal(result.state, 'published');
+      else {
+        assert.equal(result.error_code, 'uncertain');
+        assert.equal(result.safe_to_retry, false);
+      }
+      assert.equal(sent('POST', '/api/v2/item_upload/drafts/42/completion').length, recovery ? 0 : 1);
+      assert.equal(sent('POST', '/api/v2/item_upload/drafts').length, 0);
+    });
+  }
+}
 
 test('checking a lost Vinted draft reads it and does not create another', async () => {
   const { c, sent } = worker();

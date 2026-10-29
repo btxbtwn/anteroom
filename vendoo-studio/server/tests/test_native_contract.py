@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import unittest
 from unittest.mock import patch
 
@@ -27,7 +28,55 @@ def seed():
     return listing
 
 
+def ebay_tshirt():
+    listing = {"title": "Chase Authentics XL Y2K Tony Stewart #20 NASCAR T-Shirt Black Straight Cut",
+               "brand": "Chase Authentics", "condition": "Pre-Owned - Good",
+               "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts & T-Shirts",
+               "direct_category_ids": {"ebay": "15687"}, "ebay_specifics": {"condition": "3000"}}
+    form = {"marketplace": "ebay", "native": True, "known": True, "page_labels": True, "category_id": "15687",
+            "fields": [
+                {"path": "ebay_specifics.condition", "label": "Item condition", "options": ["Pre-Owned - Good"],
+                 "option_values": {"Pre-Owned - Good": "3000"}},
+                {"path": "ebay_specifics.brand", "label": "Brand", "options": ["Chase Authentics"],
+                 "option_values": {"Chase Authentics": "Chase Authentics"}},
+                {"path": "ebay_specifics.style", "label": "Style", "category_specific": True, "options": ["Graphic Tee"],
+                 "option_values": {"Graphic Tee": "Graphic Tee"}},
+            ]}
+    listing[contract.KEY] = contract.capture(listing, {"ebay": form}, ["ebay"])
+    return listing
+
+
 class NativeContractTest(unittest.TestCase):
+    def test_copy_generation_receives_the_chosen_native_category_without_its_siblings(self):
+        from vendoo_studio.services import mercari_form
+
+        listing = {"direct_category_ids": {"mercari": "275"}}
+        contracts = contract.capture(listing, {"mercari": mercari_form.form(listing)}, ["mercari"])
+        before = copy.deepcopy(contracts)
+        text = contract.prompt(contracts)
+        projected = json.loads(text[text.index("{"):])
+        category = next(row for row in projected["mercari"]["fields"] if row["path"] == "direct_category_ids.mercari")
+        self.assertEqual(category["options"], ["Women > Maternity > Sweaters"])
+        self.assertEqual(category["option_values"], {"Women > Maternity > Sweaters": "275"})
+        self.assertLess(len(text), 20000)
+        self.assertEqual(contracts, before)
+
+    def test_large_brand_catalog_stays_in_editor_but_only_known_brand_enters_prompt(self):
+        from vendoo_studio.services import depop_form
+
+        for brand in ("nike", "", "Not a native brand"):
+            listing = {"brand": brand}
+            contracts = contract.capture(listing, {"depop": depop_form.form(listing)}, ["depop"])
+            before = copy.deepcopy(contracts)
+            text = contract.prompt(contracts)
+            projected = json.loads(text[text.index("{"):])
+            field = next(row for row in projected["depop"]["fields"] if row["path"] == "depop_specifics.brand")
+            self.assertEqual(field["options"], ["Nike"] if brand == "nike" else [])
+            self.assertEqual(contracts, before)
+            self.assertLess(len(json.dumps(field)), 500)
+            self.assertEqual(len(next(row for row in contracts["depop"]["fields"]
+                                      if row["path"] == "depop_specifics.brand")["options"]), 21697)
+
     def test_marketplace_overrides_do_not_make_the_saved_form_stale(self):
         from vendoo_studio.services.seller_overrides import apply_marketplace_overrides
 
@@ -50,6 +99,86 @@ class NativeContractTest(unittest.TestCase):
         captured = contract.inputs(listing, "mercari", fields)
         listing["condition"] = "Pre-Owned - Good"
         self.assertEqual(captured, contract.inputs(listing, "mercari", fields))
+
+    def test_preparing_the_shared_category_does_not_make_the_saved_form_stale(self):
+        from vendoo_studio.services.registry import map_vendoo_category_path
+
+        listing = ebay_tshirt()
+        prepared = copy.deepcopy(listing)
+        prepared["category_path"] = map_vendoo_category_path(prepared["category_path"], prepared)
+        self.assertNotEqual(prepared["category_path"], listing["category_path"])
+        self.assertEqual(contract.gaps(prepared, "ebay"), [])
+        self.assertIsNotNone(contract.editor_form(prepared, "ebay"))
+
+    def test_a_form_saved_with_another_spelling_of_no_answer_still_opens(self):
+        # One writer stores the unset choice as "", another leaves the key out,
+        # and an unset boolean arrives as False. None is a choice the seller made.
+        for spelling in ("", None, False):
+            with self.subTest(spelling=spelling):
+                listing = ebay_tshirt()
+                inputs = listing[contract.KEY]["ebay"]["inputs"]
+                inputs["ebay_specifics.Size Type"] = spelling
+                listing["ebay_specifics"].pop("sizeType", None)
+                self.assertTrue(contract.inputs_match(
+                    listing, "ebay", listing[contract.KEY]["ebay"]["fields"], inputs))
+                self.assertEqual(contract.gaps(listing, "ebay"), [])
+
+    def test_a_changed_answer_still_makes_a_no_answer_form_stale(self):
+        listing = ebay_tshirt()
+        listing[contract.KEY]["ebay"]["inputs"]["ebay_specifics.Size Type"] = ""
+        listing["sizeType"] = "Petite"
+        listing[contract.KEY]["ebay"]["fields"].append(
+            {"path": "ebay_specifics.Size Type", "label": "Size Type", "required": True,
+             "options": ["Regular", "Petite"], "option_values": {"Regular": "Regular", "Petite": "Petite"}})
+        self.assertFalse(contract.inputs_match(
+            listing, "ebay", listing[contract.KEY]["ebay"]["fields"], listing[contract.KEY]["ebay"]["inputs"]))
+
+    def test_a_form_recorded_with_the_raw_category_path_still_opens(self):
+        from vendoo_studio.services.registry import map_vendoo_category_path
+
+        listing = ebay_tshirt()
+        raw = listing["category_path"]
+        listing[contract.KEY]["ebay"]["inputs"]["category_path"] = raw
+        listing["category_path"] = map_vendoo_category_path(raw, listing)
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+        self.assertIsNotNone(contract.editor_form(listing, "ebay"))
+
+    def test_a_form_recorded_with_general_brand_and_condition_still_opens(self):
+        listing = ebay_tshirt()
+        # Before posting compared marketplace overrides, the contract stored the
+        # General answers even though the eBay form carried its own condition id.
+        listing[contract.KEY]["ebay"]["inputs"]["brand"] = listing["brand"]
+        listing[contract.KEY]["ebay"]["inputs"]["condition"] = listing["condition"]
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+        self.assertIsNotNone(contract.editor_form(listing, "ebay"))
+
+    def test_ebay_condition_label_and_id_are_the_same_controlling_choice(self):
+        listing = ebay_tshirt()
+        listing["ebay_specifics"].pop("condition")
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+        self.assertEqual(contract.changed_inputs(listing, "ebay", listing[contract.KEY]["ebay"]["fields"],
+                                                 listing[contract.KEY]["ebay"]["inputs"]), set())
+        self.assertIsNotNone(contract.editor_form(listing, "ebay"))
+        listing["condition"] = "Pre-Owned - Excellent"
+        self.assertIsNone(contract.editor_form(listing, "ebay"))
+
+    def test_a_changed_condition_still_makes_a_legacy_form_stale(self):
+        listing = ebay_tshirt()
+        listing[contract.KEY]["ebay"]["inputs"]["condition"] = listing["condition"]
+        listing["condition"] = "Pre-Owned - Excellent"
+        listing["ebay_specifics"]["condition"] = "4000"
+        self.assertIn("changed", contract.gaps(listing, "ebay")[0]["message"])
+        self.assertIsNone(contract.editor_form(listing, "ebay"))
+
+    def test_preparing_the_shared_category_does_not_clear_its_answers(self):
+        from vendoo_studio.services.registry import map_vendoo_category_path
+
+        previous = ebay_tshirt()
+        previous["ebay_specifics"]["style"] = "Graphic Tee"
+        updated = copy.deepcopy(previous)
+        updated["category_path"] = map_vendoo_category_path(updated["category_path"], updated)
+        contract.invalidate_dependents(previous, updated)
+        self.assertEqual(updated["ebay_specifics"]["style"], "Graphic Tee")
 
     def test_validation_only_contract_is_not_rendered_as_a_complete_editor(self):
         listing = seed()
@@ -103,6 +232,61 @@ class NativeContractTest(unittest.TestCase):
         self.assertIn("evidence", contract.gaps(listing, "mercari")[0]["message"])
         listing[contract.EVIDENCE_KEY] = {"mercari_specifics.material": {"value": "wool", "quote": "100% wool"}}
         self.assertIn("evidence", contract.gaps(listing, "mercari")[0]["message"])
+
+    def test_an_aspect_stored_under_another_spelling_answers_its_row(self):
+        listing = ebay_tshirt()
+        # The listing JSON keeps the aspect lowercase; the form names the row Style.
+        row = next(row for row in listing[contract.KEY]["ebay"]["fields"] if row["path"] == "ebay_specifics.style")
+        row["path"] = "ebay_specifics.Style"
+        row["required"] = True
+        listing[contract.KEY]["ebay"]["inputs"] = contract.inputs(
+            listing, "ebay", listing[contract.KEY]["ebay"]["fields"])
+        listing["ebay_specifics"]["style"] = "Graphic Tee"
+        listing[contract.EVIDENCE_KEY] = {"ebay_specifics.style": {"value": "Graphic Tee", "quote": "graphic tee"}}
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+
+    def test_a_required_aspect_general_already_answers_is_not_reported_empty(self):
+        listing = {"title": "Beige pants", "brand": "Anne Klein", "size": "M", "department": "Women",
+                   "condition": "Pre-Owned - Good", "direct_category_ids": {"ebay": "63863"},
+                   "ebay_specifics": {"condition": "3000"}}
+        form = {"marketplace": "ebay", "native": True, "known": True, "page_labels": True, "category_id": "63863",
+                "fields": [
+                    {"path": "ebay_specifics.condition", "label": "Item condition", "options": ["Pre-Owned - Good"],
+                     "option_values": {"Pre-Owned - Good": "3000"}},
+                    {"path": "ebay_specifics.Brand", "label": "Brand", "required": True,
+                     "options": ["Anne Klein"], "option_values": {"Anne Klein": "Anne Klein"}},
+                    {"path": "ebay_specifics.Size", "label": "Size", "required": True,
+                     "selection_only": True, "options": ["S", "M", "L"],
+                     "option_values": {"S": "S", "M": "M", "L": "L"}},
+                    {"path": "ebay_specifics.Department", "label": "Department", "required": True,
+                     "options": ["Women"], "option_values": {"Women": "Women"}},
+                ]}
+        listing[contract.KEY] = contract.capture(listing, {"ebay": form}, ["ebay"])
+        # eBay's posting path fills these aspects from the listing's own fields.
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+
+    def test_a_start_bid_is_not_required_for_a_fixed_price_listing(self):
+        row = {"path": "ebay_specifics.auctionStartPrice", "required": True}
+        fixed = {"ebay_specifics": {"listingFormat": "FIXED_PRICE"}}
+        auction = {"ebay_specifics": {"listingFormat": "AUCTION"}}
+        self.assertFalse(contract.required_for_this_listing(row, fixed, row["path"]))
+        self.assertTrue(contract.required_for_this_listing(row, auction, row["path"]))
+
+    def test_a_missing_account_policy_is_noted_not_refused(self):
+        listing = ebay_tshirt()
+        listing[contract.KEY]["ebay"]["fields"].append(
+            {"path": "ebay_specifics.returnPolicyId", "label": "Return policy", "required": True})
+        listing["ebay_specifics"].pop("returnPolicyId", None)
+        found = [item for item in contract.gaps(listing, "ebay") if item["field"] == "ebay_specifics.returnPolicyId"]
+        self.assertTrue(found)
+        self.assertFalse(found[0]["blocking"])
+
+    def test_a_field_the_form_no_longer_has_is_noted_not_refused(self):
+        listing = ebay_tshirt()
+        listing["ebay_specifics"]["obsoleteAspect"] = "Something"
+        found = contract.gaps(listing, "ebay")
+        self.assertTrue(found)
+        self.assertTrue(all(not item["blocking"] for item in found))
 
     def test_a_missing_form_blocks_instead_of_using_reference_fields(self):
         listing = seed()

@@ -14,6 +14,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { UpdateButton } from "../UpdateButton";
 import type { WorkspaceView } from "../workspaceCrumbs";
 import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebarStyles";
+import { pageLoaders } from "../../app/pageLoaders";
+import { useNavigationIntent } from "../../lib/useNavigationIntent";
 
 /** Footer geometry: SIDEBAR_ICON_BUTTON is size-8, the row is gap-0.5, padded by --sidebar-content-inset. */
 const FOOTER_BUTTON_PX = 32;
@@ -51,17 +53,22 @@ export const SIDEBAR_FOOTER_WIDTH =
 
 function FooterButton({
   label,
+  page,
   icon: Icon,
   active,
   onClick,
   children,
 }: {
   label: string;
+  page?: keyof typeof pageLoaders;
   icon: ComponentType<{ className?: string }>;
   active?: boolean;
   onClick: () => void;
   children?: ReactNode;
 }) {
+  const intent = useNavigationIntent(() => {
+    if (page) void pageLoaders[page]().catch(() => {});
+  });
   return (
     <Tooltip>
       <TooltipTrigger
@@ -73,6 +80,7 @@ function FooterButton({
             aria-pressed={active === undefined ? undefined : active}
             data-active={active}
             onClick={onClick}
+            {...intent}
           />
         }
       >
@@ -110,16 +118,16 @@ export function SidebarFooter({
 }) {
   const buttons: Record<FooterButtonId, ReactNode> = {
     assistant: (
-      <FooterButton label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
+      <FooterButton page="assistant" label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
     ),
-    sourcing: <FooterButton label="Sourcing" icon={BoxIcon} active={activeView === "sourcing"} onClick={onOpenSourcing} />,
+    sourcing: <FooterButton page="sourcing" label="Sourcing" icon={BoxIcon} active={activeView === "sourcing"} onClick={onOpenSourcing} />,
     analytics: (
-      <FooterButton label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} onClick={onOpenAnalytics} />
+      <FooterButton page="analytics" label="Analytics" icon={ChartColumnIcon} active={activeView === "analytics"} onClick={onOpenAnalytics} />
     ),
-    marketplaces: <FooterButton label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />,
-    automations: <FooterButton label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} onClick={onOpenAutomations} />,
-    usage: <FooterButton label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
-    settings: <FooterButton label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
+    marketplaces: <FooterButton page="marketplaces" label="Marketplaces" icon={StoreIcon} active={activeView === "marketplaces"} onClick={onOpenMarketplaces} />,
+    automations: <FooterButton page="automations" label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} onClick={onOpenAutomations} />,
+    usage: <FooterButton page="usage" label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
+    settings: <FooterButton page="settings" label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
     update: <UpdateButton />,
   };
 

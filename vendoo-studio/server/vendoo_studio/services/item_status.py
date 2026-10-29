@@ -76,8 +76,8 @@ def _quantities(db: Session, conv_ids: set[str] | None) -> dict[str, int]:
         if number > best.get(conv_id, 0):
             best[conv_id] = number
 
-    # Inventory refreshes need one scalar, not every revision's full listing
-    # body (including descriptions and marketplace fields).
+    # Inventory polls need one scalar, not every historical listing body.
+    # Extract it in SQL so large revisions never enter Python's JSON decoder.
     every = db.query(ListingRevision.conversation_id, json_value(ListingRevision.listing_json, "quantity"))
     if conv_ids is not None:
         every = every.filter(ListingRevision.conversation_id.in_(conv_ids))
@@ -114,6 +114,9 @@ def paid_lines(db: Session, conv_ids: set[str] | None = None) -> dict[str, list[
 
 def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, ItemStatus]:
     """Status for each ``(conversation_id, parsed notes)``, with a few bulk reads."""
+    if not conversations:
+        return {}
+
     from vendoo_studio.services.marketplace_delist import removed_marketplaces
 
     ids = {conv_id for conv_id, _notes in conversations}

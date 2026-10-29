@@ -260,17 +260,6 @@ async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[st
         if hit:
             chosen["etsy"] = hit["id"]
             chosen["etsy_path"] = hit["path"]
-    if not str(chosen.get("poshmark") or "").strip() or not str(chosen.get("depop") or "").strip():
-        from vendoo_studio.services.chrome_catalog import chrome_category_ids
-
-        try:
-            chrome = await chrome_category_ids(listing)
-        except Exception as exc:  # noqa: BLE001 - eBay and Etsy leaves are already chosen
-            log.info("No live Poshmark or Depop category: %s", exc)
-            chrome = {}
-        for key in ("poshmark", "depop"):
-            if chrome.get(key) and not str(chosen.get(key) or "").strip():
-                chosen[key] = chrome[key]
     if chosen.get("ebay") or chosen.get("etsy") or chosen.get("poshmark") or chosen.get("depop"):
         chosen["query"] = cache_query
         listing["direct_category_ids"] = chosen

@@ -3,10 +3,11 @@
 from sqlalchemy import JSON, Column, Date, DateTime, Float, String, Text
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class SaleEvent(Base):
+class SaleEvent(SellerOwned, Base):
     __tablename__ = "sale_events"
 
     id = Column(String, primary_key=True, default=new_id)

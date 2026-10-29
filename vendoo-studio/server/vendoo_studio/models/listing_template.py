@@ -2,10 +2,11 @@
 from sqlalchemy import Column, DateTime, Integer, JSON, String
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class ListingTemplate(Base):
+class ListingTemplate(SellerOwned, Base):
     __tablename__ = "listing_templates"
 
     id = Column(String, primary_key=True, default=new_id)

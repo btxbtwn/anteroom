@@ -53,7 +53,7 @@ def record_run(conv_id: str, stages: dict[str, float], *, total_sec: float, outc
         db.close()
 
 
-def add_stages(timing_id: str | None, stages: dict[str, float], *, total_sec: float) -> None:
+def add_stages(timing_id: str | None, stages: dict[str, float], *, total_sec: float, outcome: str | None = None) -> None:
     """Append the stages that finished after the chat stream ended."""
     if not timing_id or not stages:
         return
@@ -63,6 +63,8 @@ def add_stages(timing_id: str | None, stages: dict[str, float], *, total_sec: fl
         if row is None:
             return
         row.stages = {**(row.stages or {}), **_rounded(stages)}
+        if outcome is not None:
+            row.outcome = outcome
         row.total_sec = round(max(row.total_sec or 0.0, total_sec), 2)
         db.commit()
     except Exception:

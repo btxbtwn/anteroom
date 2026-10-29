@@ -148,7 +148,6 @@ def test_category_selection_cannot_overwrite_a_newer_seller_edit(draft, monkeypa
 
     monkeypatch.setattr("vendoo_studio.services.category_selection.select_categories", choose)
     monkeypatch.setattr("vendoo_studio.services.marketplaces.selected_fillable_platforms", lambda: [])
-    monkeypatch.setattr(schema_probe, "mapped_marketplace_paths", AsyncMock(return_value={}))
     monkeypatch.setattr("vendoo_studio.services.direct_categories.attach_direct_categories", AsyncMock())
     with pytest.raises(RevisionConflict):
         asyncio.run(schema_probe.prepare_generation_schema(db, conv_id, object(), "Cotton tee", ""))

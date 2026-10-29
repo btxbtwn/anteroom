@@ -495,7 +495,13 @@ class ChatGPTCodexProvider:
         if payload["reasoning"]["effort"] != "none":
             payload["reasoning"]["summary"] = "auto"
         if instructions:
-            payload["instructions"] = instructions
+            # The instructions parameter becomes a system message, which
+            # ChatGPT plan models reject. Send application rules explicitly.
+            payload["input"].insert(0, {
+                "role": "developer",
+                "content": [{"type": "input_text", "text": instructions}],
+                "type": "message",
+            })
         if tools:
             payload["tools"] = tools
         if tool_choice:

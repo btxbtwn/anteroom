@@ -15,7 +15,6 @@ from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo, ListingRepo
 from vendoo_studio.services import native_editor, marketplace_schemas, ebay_listings
-from vendoo_studio.services.browser_bridge import BrowserBridgeError
 from vendoo_studio.services.listing_result import ListingProblem
 from vendoo_studio.services.vendoo_import import merge_notes
 
@@ -34,7 +33,8 @@ class NativeEditorTest(unittest.TestCase):
         revision = ListingRepo(self.db).save_revision(self.conv.id, listing, "native_schema")
         answer = self.client.get(f"{self.url}/mercari/form?revision_id={revision.id}")
         self.assertEqual(answer.status_code, 200, answer.text)
-        self.assertEqual(answer.json()["fields"][0]["value"], "Anne Klein")
+        self.assertEqual(next(row for row in answer.json()["fields"]
+                              if row["path"] == "mercari_specifics.brand")["value"], "Anne Klein")
         snapshot = direct_preflight.prepare(self.db, self.conv, listing, "mercari")
         self.assertEqual(native_contract.gaps(snapshot, "mercari"), [])
         self.bridge.assert_not_called()
@@ -66,7 +66,7 @@ class NativeEditorTest(unittest.TestCase):
             generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"depop"}))
         self.assertEqual(answer.status_code, 200, answer.text)
         fields = {row["path"]: row for row in answer.json()["fields"]}
-        self.assertEqual(len(fields["direct_category_ids.depop"]["option_values"]), 247)
+        self.assertEqual(len(fields["direct_category_ids.depop"]["option_values"]), 281)
         self.assertIn("Cotton", fields["depop_specifics.attributes.material"]["options"])
         self.assertIn('32"', fields["depop_specifics.size"]["options"])
         self.assertEqual(generation_forms["depop"]["category_id"], "menswear_jeans")
@@ -77,7 +77,7 @@ class NativeEditorTest(unittest.TestCase):
     def test_saved_forms_load_with_chrome_closed_and_current_values(self):
         from vendoo_studio.services import native_contract
 
-        for market in ("mercari", "sellwild", "ebay"):
+        for market in ("sellwild", "ebay"):
             with self.subTest(market=market):
                 snapshot = copy.deepcopy(self.listing)
                 snapshot[f"{market}_specifics"] = {"material": "cotton", "description": "Edited description"}
@@ -107,6 +107,48 @@ class NativeEditorTest(unittest.TestCase):
                 self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
                 self.bridge.assert_not_called()
 
+    def test_saved_form_survives_the_category_path_posting_prepares(self):
+        from vendoo_studio.services import native_contract
+
+        snapshot = copy.deepcopy(self.listing)
+        snapshot.update(title="Chase Authentics XL Y2K Tony Stewart #20 NASCAR T-Shirt Black Straight Cut",
+                        category_path="Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts & T-Shirts",
+                        ebay_specifics={"condition": "3000"})
+        form = {"marketplace": "ebay", "native": True, "known": True, "page_labels": True, "category_id": "15687",
+                "fields": [
+                    {"path": "ebay_specifics.condition", "label": "Item condition", "options": ["Pre-Owned - Good"],
+                     "option_values": {"Pre-Owned - Good": "3000"}},
+                    {"path": "ebay_specifics.brand", "label": "Brand", "options": ["Nike"],
+                     "option_values": {"Nike": "Nike"}},
+                ]}
+        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"ebay": form}, ["ebay"])
+        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        answer = self.client.get(f"{self.url}/ebay/form?revision_id={revision.id}")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(answer.json()["marketplace"], "ebay")
+        self.bridge.assert_not_called()
+
+    def test_ebay_form_opens_when_general_condition_matches_its_saved_native_id(self):
+        from vendoo_studio.services import native_contract
+
+        snapshot = copy.deepcopy(self.listing)
+        snapshot["ebay_specifics"] = {"Condition": "3000"}
+        form = {"marketplace": "ebay", "native": True, "known": True, "page_labels": True,
+                "category_id": "15687", "fields": [
+                    {"path": "ebay_specifics.Condition", "label": "Item condition",
+                     "options": ["Pre-owned - Good", "Pre-owned - Excellent"],
+                     "option_values": {"Pre-owned - Good": "3000", "Pre-owned - Excellent": "2990"}},
+                ]}
+        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"ebay": form}, ["ebay"])
+        snapshot["ebay_specifics"].pop("Condition")
+        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        answer = self.client.get(f"{self.url}/ebay/form?revision_id={revision.id}")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(answer.json()["marketplace"], "ebay")
+        self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+        self.bridge.assert_not_called()
+
     def test_saved_form_with_changed_category_does_not_show_old_choices_or_contact_chrome(self):
         from vendoo_studio.services import native_contract
 
@@ -117,8 +159,10 @@ class NativeEditorTest(unittest.TestCase):
         snapshot["direct_category_ids"]["mercari"] = "men/shoes"
         ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
         answer = self.client.get(f"{self.url}/mercari/form")
-        self.assertEqual(answer.status_code, 409)
-        self.assertIn("dependent choices", answer.json()["detail"])
+        self.assertEqual(answer.status_code, 200)
+        self.assertFalse(answer.json()["known"])
+        self.assertNotIn("L", [choice for row in answer.json()["fields"]
+                               if row["path"] == "mercari_specifics.nativeSizeId" for choice in row["options"]])
         self.bridge.assert_not_called()
 
     def setUp(self):
@@ -173,31 +217,24 @@ class NativeEditorTest(unittest.TestCase):
         self.bridge.assert_not_called()
         with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
             answer = self.client.get(f"{self.url}/mercari/form")
-        self.assertEqual(answer.status_code, 409)
-        self.assertIn("Connect Chrome", answer.json()["detail"])
+        self.assertEqual(answer.status_code, 200)
+        self.assertTrue(answer.json()["known"])
         self.bridge.assert_not_called()
 
-    def test_a_lost_form_reply_is_asked_for_once_more(self):
-        self.bridge.side_effect = [BrowserBridgeError("Chrome did not answer in time."),
-                                   {"ok": True, "form": {"marketplace": "mercari", "native": True, "fields": []}}]
-        answer = self.client.get(f"{self.url}/mercari/form")
+    def test_fresh_mercari_form_and_generation_choices_work_with_chrome_closed(self):
+        import asyncio
+        from vendoo_studio.services.native_field_fill import load_forms
+
+        with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
+            answer = self.client.get(f"{self.url}/mercari/form")
+            generation_forms = asyncio.run(load_forms(self.db, self.conv.id, {"mercari"}))
         self.assertEqual(answer.status_code, 200, answer.text)
-        self.assertEqual(self.bridge.await_count, 2)
-
-    def test_a_lost_form_reply_names_why_chrome_did_not_answer(self):
-        self.bridge.side_effect = BrowserBridgeError("Chrome did not answer in time.")
-        answer = self.client.get(f"{self.url}/mercari/form")
-        self.assertEqual(answer.status_code, 502)
-        self.assertIn("did not answer in time", answer.json()["detail"])
-        self.assertIn("Reopen the listing", answer.json()["detail"])
-
-    def test_catalog_refusal_is_visible_and_never_returns_a_different_form(self):
-        self.bridge.return_value = {"ok": False, "error": "Mercari’s category list changed."}
-        answer = self.client.get(f"{self.url}/mercari/form")
-        self.assertEqual(answer.status_code, 502)
-        self.assertEqual(answer.json()["detail"], "Mercari’s category list changed.")
-        self.bridge.return_value = {"ok": True, "form": {"marketplace": "poshmark", "native": True}}
-        self.assertEqual(self.client.get(f"{self.url}/mercari/form").status_code, 502)
+        fields = {row["path"]: row for row in answer.json()["fields"]}
+        self.assertIn("Nike", fields["mercari_specifics.brand"]["options"])
+        self.assertIn("Women > Maternity > Sweaters", fields["direct_category_ids.mercari"]["options"])
+        self.assertIn("mercari", generation_forms)
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+        self.bridge.assert_not_called()
 
     def test_native_choices_survive_form_save_and_posting_preparation(self):
         submitted = {**self.listing, "poshmark_specifics": {"sizeSetId": "native-group", "nativeSizeId": "XL", "smartSell": {"enabled": False}},

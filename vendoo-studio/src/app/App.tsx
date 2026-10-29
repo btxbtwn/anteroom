@@ -4,11 +4,9 @@ import { api } from "../api/client";
 import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, jobsPollMs, pollMs } from "../api/polling";
 import type { BrowserField } from "../api/client";
 import { useReloadStaleFrontend } from "../components/BuildVersion";
-import { ChatPanel } from "../components/ChatPanel";
 import { isChatToggleShortcut, ListingChatPopup, type ListingChatStatus } from "../components/ListingChatPopup";
 import { ListingSession } from "../components/listingSession";
 import { SetupChecklist } from "../components/SetupChecklist";
-import { BrowserPreview } from "../components/BrowserPreview";
 import { ListingSidebar } from "../components/ListingSidebar";
 import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
 import { SIDEBAR_FOOTER_WIDTH } from "../components/sidebar/SidebarFooter";
@@ -53,34 +51,24 @@ import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSess
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
 import { initialOpenListing, openListingReducer, type OpenListing } from "./openListing";
+import { loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode } from "./pageLoaders";
+import { prefetchListingReads } from "../api/navigationQueries";
 
-const ListingEditor = lazy(() =>
-  import("../components/ListingEditor").then((module) => ({ default: module.ListingEditor })),
+const ChatPanel = lazy(loadChatPanel);
+const BrowserPreview = lazy(() =>
+  import("../components/BrowserPreview").then((module) => ({ default: module.BrowserPreview })),
 );
-const loadSettingsPage = () =>
-  import("../components/SettingsPage").then((module) => ({ default: module.SettingsPage }));
-const SettingsPage = lazy(loadSettingsPage);
-const loadAnalyticsPage = () =>
-  import("../components/AnalyticsPage").then((module) => ({ default: module.AnalyticsPage }));
-const AnalyticsPage = lazy(loadAnalyticsPage);
-const loadAssistantPage = () =>
-  import("../components/AssistantPage").then((module) => ({ default: module.AssistantPage }));
-const AssistantPage = lazy(loadAssistantPage);
-const loadMarketplacesPage = () =>
-  import("../components/MarketplacesPage").then((module) => ({ default: module.MarketplacesPage }));
-const MarketplacesPage = lazy(loadMarketplacesPage);
-const loadUsagePage = () =>
-  import("../components/UsagePage").then((module) => ({ default: module.UsagePage }));
-const UsagePage = lazy(loadUsagePage);
-const loadAutomationsPage = () =>
-  import("../components/AutomationsPage").then((module) => ({ default: module.AutomationsPage }));
-const AutomationsPage = lazy(loadAutomationsPage);
-const loadSourcingPage = () =>
-  import("../components/SourcingPage").then((module) => ({ default: module.SourcingPage }));
-const SourcingPage = lazy(loadSourcingPage);
+const ListingEditor = lazy(loadListingEditor);
+const SettingsPage = lazy(pageLoaders.settings);
+const AnalyticsPage = lazy(pageLoaders.analytics);
+const AssistantPage = lazy(pageLoaders.assistant);
+const MarketplacesPage = lazy(pageLoaders.marketplaces);
+const UsagePage = lazy(pageLoaders.usage);
+const AutomationsPage = lazy(pageLoaders.automations);
+const SourcingPage = lazy(pageLoaders.sourcing);
 // A page's code is fetched the first time it is opened. Fetching it once the
 // app has settled means a tap does not wait on the network for it.
-const PAGE_LOADERS = [loadSettingsPage, loadAnalyticsPage, loadAssistantPage, loadMarketplacesPage, loadUsagePage, loadSourcingPage, loadAutomationsPage];
+const PAGE_LOADERS = [...Object.values(pageLoaders), loadListingEditor, loadChatPanel];
 const pageLoading = (
   <div className="flex flex-1 items-center justify-center" role="status" aria-label="Loading">
     <Spinner className="size-5 text-muted-foreground" />
@@ -120,7 +108,7 @@ export function App() {
     initialOpenListing,
   );
   const selectedConvId = openListingState?.id ?? null;
-  const setSelectedConvId = (id: string) => dispatchOpenListing({ type: "open", id });
+  const setSelectedConvId = useCallback((id: string) => dispatchOpenListing({ type: "open", id }), []);
   const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
   const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
@@ -202,7 +190,31 @@ export function App() {
   const inventoryLoaded = conversations !== undefined;
   useEffect(() => {
     if (!inventoryLoaded) return;
-    for (const load of PAGE_LOADERS) void load().catch(() => {});
+    let cancelled = false;
+    let idleId: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const remaining = [...PAGE_LOADERS];
+    const schedule = () => {
+      if (cancelled || !remaining.length) return;
+      const next = () => {
+        if (cancelled) return;
+        const load = remaining.shift()!;
+        void load().catch(() => {}).then(schedule);
+      };
+      // Warm one page per idle turn so parsing every page cannot crowd out
+      // the first interaction or compete with the page the seller opens.
+      if (typeof window.requestIdleCallback === "function") {
+        idleId = window.requestIdleCallback(next);
+      } else {
+        timer = setTimeout(next, 200);
+      }
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      if (idleId !== undefined) window.cancelIdleCallback(idleId);
+      if (timer !== undefined) clearTimeout(timer);
+    };
   }, [inventoryLoaded]);
   const previousQueueJobs = useRef<Map<string, string> | null>(null);
   useEffect(() => {
@@ -314,12 +326,12 @@ export function App() {
   const sidebarHidden = !isMobile && sidebarCollapsed;
   const threadsHidden = !isMobile && threadsCollapsed;
 
-  const closeMobileSidebar = () => setMobileSidebarOpen(false);
+  const closeMobileSidebar = useCallback(() => setMobileSidebarOpen(false), []);
 
-  const goListings = () => {
+  const goListings = useCallback(() => {
     shell.current = "listings";
     setActiveView("listings");
-  };
+  }, []);
   const goAssistant = () => {
     shell.current = "assistant";
     setActiveView("assistant");
@@ -378,12 +390,15 @@ export function App() {
   const openAutomations = () => togglePage("automations");
   const openSourcing = () => togglePage("sourcing");
 
-  const openListing = (id: string) => {
+  const openListing = useCallback((id: string) => {
+    preloadListingCode();
+    void prefetchListingReads(queryClient, id);
+    void queryClient.prefetchQuery({ queryKey: ["listing", id], queryFn: () => api.listings.get(id) });
     setSelectedConvId(id);
     goListings();
     setMobilePane("workspace");
     closeMobileSidebar();
-  };
+  }, [setSelectedConvId, goListings, closeMobileSidebar, queryClient]);
 
   const handleSettingsSectionChange = (section: SettingsSectionId) => {
     setSettingsSection(section);
@@ -651,7 +666,7 @@ export function App() {
     },
   });
 
-  const deleteConv = useMutation({
+  const { mutate: deleteConversation } = useMutation({
     mutationFn: (convId: string) => api.conversations.delete(convId),
     onSuccess: (_data, convId) => {
       dispatchOpenListing({ type: "close", id: convId });
@@ -664,15 +679,19 @@ export function App() {
     },
   });
 
+  const deleteListing = useCallback((id: string) => deleteConversation(id), [deleteConversation]);
+
   const renderChat = (listing: OpenListing) => (
-    <ChatPanel
-      convId={listing.id}
-      queuedMessage={listing.queuedMessage}
-      onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: listing.id, value: null })}
-      browser={browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
-      onBrowserFieldsChange={setBrowserFields}
-      onStatusChange={setChatStatus}
-    />
+    <Suspense fallback={pageLoading}>
+      <ChatPanel
+        convId={listing.id}
+        queuedMessage={listing.queuedMessage}
+        onQueuedMessageConsumed={() => dispatchOpenListing({ type: "message", id: listing.id, value: null })}
+        browser={browserOpen && browserJobId ? { jobId: browserJobId, fields: browserFields } : null}
+        onBrowserFieldsChange={setBrowserFields}
+        onStatusChange={setChatStatus}
+      />
+    </Suspense>
   );
   const renderEditor = (listing: OpenListing, chat?: ReactNode) => (
     <Suspense fallback={null}>
@@ -736,7 +755,7 @@ export function App() {
             listingQuery={listingQuery}
             onSearchQueryChange={handleListingSearch}
             onSelect={openListing}
-            onDelete={(id) => deleteConv.mutate(id)}
+            onDelete={deleteListing}
             onCreate={createListing}
             creating={createConv.isPending}
             onOpenSettings={openSettings}
@@ -907,24 +926,26 @@ export function App() {
               {selectedConvId && (
                 <div hidden={activeView !== "listings"} className={`listing-workspace${browserOpen && browserExpanded ? " is-browser-expanded" : ""}`}>
                   {browserOpen && (
-                    <BrowserPreview
-                      jobId={listingJob?.id ?? null}
-                      step={listingJob?.current_step}
-                      status={listingJob?.status}
-                      vendooItemId={listingJob?.vendoo_item_id}
-                      vendooUrl={listingJob?.vendoo_url}
-                      cancelling={cancelJob.isPending}
-                      onCancel={listingJob?.id ? () => cancelJob.mutate(listingJob.id) : undefined}
-                      interactive={browserOpen}
-                      mobile={isMobile}
-                      automationRunning={automationRunning}
-                      onClose={closeBrowser}
-                      expanded={browserExpanded}
-                      onToggleExpanded={isMobile ? undefined : () => setBrowserExpanded((value) => !value)}
-                      selected={browserFields}
-                      onSelectedChange={setBrowserFields}
-                      onGoToChat={isMobile ? () => setMobilePane("workspace") : undefined}
-                    />
+                    <Suspense fallback={pageLoading}>
+                      <BrowserPreview
+                        jobId={listingJob?.id ?? null}
+                        step={listingJob?.current_step}
+                        status={listingJob?.status}
+                        vendooItemId={listingJob?.vendoo_item_id}
+                        vendooUrl={listingJob?.vendoo_url}
+                        cancelling={cancelJob.isPending}
+                        onCancel={listingJob?.id ? () => cancelJob.mutate(listingJob.id) : undefined}
+                        interactive={browserOpen}
+                        mobile={isMobile}
+                        automationRunning={automationRunning}
+                        onClose={closeBrowser}
+                        expanded={browserExpanded}
+                        onToggleExpanded={isMobile ? undefined : () => setBrowserExpanded((value) => !value)}
+                        selected={browserFields}
+                        onSelectedChange={setBrowserFields}
+                        onGoToChat={isMobile ? () => setMobilePane("workspace") : undefined}
+                      />
+                    </Suspense>
                   )}
                   {openListingState && (
                     <div className="listing-workspace-main listing-session" key={`${openListingState.id}:${openListingState.nonce}`}>

@@ -272,34 +272,6 @@ class ListingGenerateHelpersTest(unittest.TestCase):
         self.assertIn("## Etsy When Made Estimation", full_rules)
 
 
-    def test_preserve_formula_copy_keeps_good_title_and_description(self):
-        from vendoo_studio.services.listing_generate import _preserve_formula_copy
-
-        original = {
-            "brand": "Notations",
-            "size": "XL",
-            "title": "Notations XL Floral Tunic Top Black Relaxed",
-            "description": (
-                "Black floral tunic blouse, relaxed woven fit.\n\n"
-                "Flaws: none noted. See photos for details.\n\n"
-                "Measurements: Pit to pit: 21\""
-            ),
-        }
-        updated = {
-            **original,
-            "title": "Beautiful Black Floral Tunic - Must See!",
-            "description": "Gorgeous top, offers welcome!",
-            "ebay_specifics": {"season": "Summer"},
-        }
-        kept = _preserve_formula_copy(
-            original,
-            updated,
-            [{"field": "ebay_specifics.season", "message": "bad season"}],
-        )
-        self.assertEqual(kept["title"], original["title"])
-        self.assertEqual(kept["description"], original["description"])
-        self.assertEqual(kept["ebay_specifics"]["season"], "Summer")
-
     def test_chunk_text_reads_delta_content(self):
         self.assertEqual(chunk_text({"choices": [{"delta": {"content": "Hello"}}]}), "Hello")
 
@@ -1041,36 +1013,16 @@ class PersistListingTest(unittest.TestCase):
                 "whenWasItMade": "2010 - 2019 (Recently)",
             },
         }
-        fixed = {
-            **incomplete,
-            "brand": "Notations",
-            "size": "XL",
-            "sku": "notations-XL",
-            "condition": "Pre-Owned - Good",
-            "description": (
-                "Black floral tunic blouse, relaxed woven fit.\n\n"
-                "Flaws: none noted. See photos for details.\n\n"
-                "Measurements: Pit to pit: 21\""
-            ),
-            "weight_lb": 0,
-            "weight_oz": 8,
-            "package_dimensions_in": "13x10x3",
-            "ebay_specifics": {"season": "Summer"},
-            "depop_specifics": {"source": "Preloved", "age": "Modern", "style": ["Casual", "Retro"]},
-            "etsy_specifics": {
-                "who_made": "Another company or person",
-                "what_is": "A finished product",
-                "when_made": "2010 - 2019 (Recently)",
-            },
-        }
-
         class Provider:
             def __init__(self):
                 self.chat_calls = 0
 
             async def chat(self, messages, stream=True):
                 self.chat_calls += 1
-                yield "```json\n" + json.dumps(fixed) + "\n```"
+                yield json.dumps([
+                    {"op": "add", "path": "/brand", "value": "Notations"},
+                    {"op": "add", "path": "/size", "value": "XL"},
+                ])
 
         provider = Provider()
 
@@ -1371,7 +1323,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
             [timing] = for_conversation(db, self.conv_id)
         finally:
             db.close()
-        self.assertEqual(timing["outcome"], "done")
+        self.assertEqual(timing["outcome"], "incomplete")
         self.assertTrue({"photo_analysis", "categories", "listing_stream"} <= set(timing["stages"]))
 
     async def test_a_failure_after_the_run_finished_records_one_timing(self):
@@ -1394,7 +1346,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
             timings = for_conversation(db, self.conv_id)
         finally:
             db.close()
-        self.assertEqual([timing["outcome"] for timing in timings], ["done"])
+        self.assertEqual([timing["outcome"] for timing in timings], ["failed"])
 
     async def test_quick_identity_starts_comps_before_the_photo_analysis_ends(self):
         from vendoo_studio.services import listing_generation

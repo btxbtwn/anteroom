@@ -6,15 +6,80 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.528 — 2026-10-29
+
+- A saved marketplace form stops asking you to reload its fields when nothing about the listing changed. An answer the listing left empty, a setting switched off, and an untouched dropdown were each being read as a change, which held back drafts on eBay, Mercari, Poshmark and Depop.
+- An empty answer is reported once. A marketplace's own check and its form no longer both explain the same missing price, description or condition, and a policy taken from your account says so instead of reading as an empty required field.
+
+## 0.1.527 — 2026-10-29
+
+- Listings, chats and page buttons prepare their next screen as you hover, focus or touch them, so opening a saved conversation can show it immediately. Listing search and selection redraw fewer rows, and opening an item no longer reads all its saved revisions.
+
+## 0.1.526 — 2026-10-29
+
+- Marketplace forms stop flagging fields that are already answered. A row the listing filled under another spelling, or that eBay fills from the listing's own brand, size, colour and department, no longer shows an error, so eBay, Poshmark, Mercari and Sellwild drafts that were ready to list stop being held back.
+- The start bid, the return policy and fields a marketplace form no longer has are no longer treated as blocking. They are shown as a note instead, like the other details the marketplace fills in when you list.
+
+## 0.1.525 — 2026-10-29
+
+- Listing repairs keep unrelated fields and your saved choices intact. Chat can recall relevant older item details, and generation follows the same canonical rules throughout.
+- Generation reports when fields are still incomplete instead of counting an unfinished draft as ready.
+
+## 0.1.524 — 2026-10-29
+
+- Prepared existing drafts, photos, jobs, sales and shop history for seller accounts by recording their owner, while keeping your Mac’s data intact. Signing in and sharing listings across devices are still to come.
+
+## 0.1.523 — 2026-10-29
+
+- Anteroom loads less code at startup, keeps listing search responsive while filtering, and reads inventory cover photos more efficiently.
+
+## 0.1.522 — 2026-10-29
+
+- eBay forms open when the saved condition ID and the condition name mean the same thing, instead of getting stuck asking you to reload their fields.
+
+## 0.1.521 — 2026-10-29
+
+- Listing generation reads every uploaded photo, refreshes its analysis when photos change, and keeps newer seller edits safe while background fields finish.
+
+## 0.1.520 — 2026-10-29
+
+- Opening a marketplace form checks its saved requirements in Anteroom without contacting Chrome or changing the listing’s categories. Live marketplace verification stays with the seller-confirmed List action.
+
+## 0.1.519 — 2026-10-29
+
+- Older drafts open their marketplace forms again. Forms saved before posting compared marketplace brand and condition stored the General answers, so they looked changed even when nothing had changed.
+
+## 0.1.518 — 2026-10-29
+
+- Mercari’s categories, brands, conditions and grouped sizes now load in Anteroom with Chrome closed. Shipping labels and current prices load directly from Mercari after you answer the package questions.
+
+## 0.1.517 — 2026-10-29
+
+- Inventory refreshes use less memory and load faster by reading quantities without loading every saved version of every listing.
+
+## 0.1.516 — 2026-10-29
+
+- Marketplace forms open again for drafts whose category path was saved before posting normalizes it. Saved forms no longer look stale, and their fields are not cleared by that normalization.
+
+## 0.1.515 — 2026-10-29
+
+- Added the first account foundation for using Anteroom across devices: a separate hosted API can verify a seller’s Supabase session. Sign-in screens and access to listings across devices are still to come.
+
+## 0.1.514 — 2026-10-29
+
+- ChatGPT can now generate listings with long rule sets without the “System messages are not allowed” error.
+
+## 0.1.513 — 2026-10-29
+
+- Creating a listing uses the marketplaces’ own forms instead of fetching Vendoo category fields or preparing Vendoo fields in the background. Vendoo preparation runs only when you choose Send.
+
+## 0.1.512 — 2026-10-29
+
+- ChatGPT generation now sends listing rules as developer messages, fixing the “System messages are not allowed” error.
+
 ## 0.1.511 — 2026-10-29
 
-- Anteroom rejects requests from untrusted websites, hides secrets in terminal errors, and checks that updates come from the installed app's publisher.
-- Marketplace sign-in tokens expire automatically in the relay, and security checks now cover Python dependencies and relay test failures.
-- Listing edits no longer overwrite newer changes from another open editor, and direct marketplace actions keep the photos you approved even if you edit them afterward.
-- Database upgrades stop safely if Anteroom cannot save a recovery backup first.
-- Listing generation reads every uploaded photo, refreshes its analysis when photos change, and keeps newer seller edits safe while background fields finish.
-- Large ChatGPT listing requests no longer fail with “System messages are not allowed.”
-- Inventory refreshes read less listing history data, reducing background work as your inventory grows.
+- Depop now includes the missing Tops categories, including T-shirts, with their department-specific sizes and fields available while Chrome is closed. Brand choices are available locally, and style, age and source choices use Depop’s own values.
 
 ## 0.1.510 — 2026-10-29
 

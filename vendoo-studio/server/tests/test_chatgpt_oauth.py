@@ -77,20 +77,16 @@ class ChatGPTOAuthTest(unittest.TestCase):
         self.assertTrue(all(item["role"] == "developer" for item in items[:-1]))
         self.assertEqual(items[-1]["role"], "user")
 
-    def test_oversized_payload_never_sends_system_input_messages(self):
-        from vendoo_studio.providers.chatgpt_codex import MAX_INSTRUCTION_CHARS
-
         with patch("vendoo_studio.providers.chatgpt_codex.get_chatgpt_models", return_value={}):
             provider = ChatGPTCodexProvider()
-        rules = "x" * (MAX_INSTRUCTION_CHARS + 1)
-        for stream in (True, False):
-            with self.subTest(stream=stream):
-                payload = provider._payload([
-                    {"role": "system", "content": rules},
-                    {"role": "user", "content": "Generate a draft."},
-                ], provider.listing_model, stream)
-                self.assertEqual([item["role"] for item in payload["input"]], ["developer", "user"])
-                self.assertEqual(payload["instructions"] + payload["input"][0]["content"][0]["text"], rules)
+        payload = provider._payload([
+            {"role": "system", "content": text},
+            {"role": "system", "content": "Never publish."},
+            {"role": "user", "content": "Generate a draft."},
+        ], "gpt-6.1-sol", True)
+        self.assertNotIn("instructions", payload)
+        self.assertEqual([item["role"] for item in payload["input"]], ["developer"] * len(chunks) + ["user"])
+        self.assertEqual("".join(item["content"][0]["text"] for item in payload["input"][:-1]), text + "\n\nNever publish.")
 
     def test_messages_to_input_uses_output_text_for_assistant(self):
         instructions, items = _messages_to_input([
@@ -181,6 +177,8 @@ class ChatGPTQuickChatTest(unittest.IsolatedAsyncioTestCase):
 
                 def respond(request, captured=captured):
                     captured.update(json.loads(request.content))
+                    if "instructions" in captured or any(item["role"] == "system" for item in captured["input"]):
+                        return httpx.Response(400, json={"error": {"message": "System messages are not allowed"}})
                     return httpx.Response(200, text=(
                         'data: {"type":"response.output_text.delta","delta":"{}"}\n\n'
                         'data: [DONE]\n\n'
@@ -195,10 +193,15 @@ class ChatGPTQuickChatTest(unittest.IsolatedAsyncioTestCase):
                     patch.object(ChatGPTCodexProvider, "_headers", new=AsyncMock(return_value={})),
                 ):
                     result = [text async for text in ChatGPTCodexProvider().quick_chat([
+                        {"role": "system", "content": "Preserve listing facts."},
                         {"role": "user", "content": "Repair JSON"},
                     ])]
                 self.assertEqual(result, ["{}"])
                 self.assertEqual(captured["model"], model)
+                self.assertEqual(captured["input"][0], {
+                    "role": "developer", "type": "message",
+                    "content": [{"type": "input_text", "text": "Preserve listing facts."}],
+                })
                 self.assertEqual(captured["reasoning"]["effort"], expected_effort)
 
 

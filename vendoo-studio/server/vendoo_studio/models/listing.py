@@ -5,10 +5,11 @@ from sqlalchemy import Column, String, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class Listing(Base):
+class Listing(SellerOwned, Base):
     __tablename__ = "listings"
 
     conversation_id = Column(String, ForeignKey("conversations.id"), primary_key=True)
@@ -20,7 +21,7 @@ class Listing(Base):
     conversation = relationship("Conversation", back_populates="listing")
 
 
-class ListingRevision(Base):
+class ListingRevision(SellerOwned, Base):
     __tablename__ = "listing_revisions"
 
     id = Column(String, primary_key=True, default=new_id)

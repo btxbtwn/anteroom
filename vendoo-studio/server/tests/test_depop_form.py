@@ -9,6 +9,38 @@ from vendoo_studio.services import depop_form
 
 
 class DepopFormTest(unittest.TestCase):
+    def test_brand_picker_uses_local_native_choices_and_preserves_the_seller_brand(self):
+        for listing in ({"brand": "Nike"}, {"brand": "Nike", "depop_specifics": {"brand": ""}}):
+            fields = {row["path"]: row for row in depop_form.form(listing)["fields"]}
+            brand = fields["depop_specifics.brand"]
+            self.assertTrue(brand["selection_only"])
+            self.assertIn("Nike", brand["options"])
+            self.assertIn("Other", brand["options"])
+            self.assertEqual(len(brand["options"]), 21697)
+            self.assertEqual(brand["value"], listing.get("depop_specifics", {}).get("brand", "Nike"))
+
+    def test_previously_missing_tshirts_have_department_sizes_without_chrome(self):
+        for department, size, count in (("menswear", "3XS", 14), ("womenswear", "00", 39),
+                                        ("kidswear", "0-3 months", 23)):
+            with self.subTest(department=department), patch(
+                "vendoo_studio.services.browser_bridge.request", side_effect=AssertionError("Chrome used")
+            ):
+                result = depop_form.form({"direct_category_ids": {"depop": department + "_tshirts"}})
+                fields = {row["path"]: row for row in result["fields"]}
+                self.assertTrue(result["known"])
+                self.assertEqual(len(fields["depop_specifics.size"]["options"]), count)
+                self.assertIn(size, fields["depop_specifics.size"]["options"])
+                self.assertIn("Cotton", fields["depop_specifics.attributes.material"]["options"])
+                self.assertEqual(fields["depop_specifics.attributes.occasion"]["max_values"], 3)
+
+    def test_fixed_choices_keep_native_ids_that_differ_from_the_labels(self):
+        fields = {row["path"]: row for row in depop_form.form({})["fields"]}
+        for name, label, native_id in (("style", "Utility", "techwear"), ("style", "Y2K", "y2_k"),
+                                       ("age", "00s", "y2k"), ("source", "Reworked / Upcycled", "reworked")):
+            row = fields["depop_specifics." + name]
+            self.assertIn(label, row["options"])
+            self.assertEqual(row["option_values"][label], native_id)
+
     def test_worldwide_fee_is_required_only_when_worldwide_shipping_is_enabled(self):
         for enabled in (False, True):
             form = depop_form.form({"depop_specifics": {"worldwideShipping": {"enabled": enabled}}})
@@ -17,7 +49,7 @@ class DepopFormTest(unittest.TestCase):
 
     def test_every_captured_category_preserves_fields_choices_limits_and_order(self):
         categories = depop_form.catalog()["categories"]
-        self.assertEqual(len(categories), 247)
+        self.assertEqual(len(categories), 281)
         with patch("vendoo_studio.services.browser_bridge.request", side_effect=AssertionError("Chrome used")):
             for category in categories:
                 with self.subTest(category=category["id"]):
@@ -42,7 +74,7 @@ class DepopFormTest(unittest.TestCase):
             result = depop_form.form({"direct_category_ids": {"depop": category}})
             fields = {row["path"]: row for row in result["fields"]}
             choices = fields["direct_category_ids.depop"]["option_values"]
-            self.assertEqual(len(choices), 247)
+            self.assertEqual(len(choices), 281)
             self.assertNotIn("menswear_necklace", choices.values())
             self.assertEqual(result["category_id"], "")
             self.assertEqual(result["known"], not category)

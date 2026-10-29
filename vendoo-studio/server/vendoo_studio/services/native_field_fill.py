@@ -184,7 +184,7 @@ async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS
 
     forms = {}
     for market in (market for market in MARKETS if market in set(markets)):
-        if market not in ("ebay", "sellwild", "depop", "poshmark") and not extension_manager.connected:
+        if market not in ("ebay", "sellwild", "depop", "poshmark", "mercari") and not extension_manager.connected:
             continue
         try:
             form = await editor_form(conv_id, market, None, db, refresh=True)
@@ -401,7 +401,7 @@ def changed_categories(before: dict, after: dict) -> set[str]:
     changed = {market for market in MARKETS
                if _category(after, market) and _category(after, market) != _category(before, market)}
     for market, contract in (before.get(native_contract.KEY) or {}).items():
-        if native_contract.inputs(after, market, contract.get("fields") or []) != contract.get("inputs"):
+        if native_contract.changed_inputs(after, market, contract.get("fields") or [], contract.get("inputs")):
             changed.add(market)
         if any(native_contract.item_field(row, market) and get_path(before, _path(row)) != get_path(after, _path(row))
                for row in contract.get("fields") or []):

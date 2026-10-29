@@ -214,7 +214,11 @@ def test_openai_key_calls_the_public_responses_api(fake_http):
     assert calls[0].headers["authorization"] == "Bearer sk-test"
     body = json.loads(calls[0].content)
     assert body["model"] == "gpt-6.1-sol"
-    assert body["instructions"] == "rules"
+    assert "instructions" not in body
+    assert body["input"][0] == {
+        "role": "developer", "type": "message",
+        "content": [{"type": "input_text", "text": "rules"}],
+    }
     assert "summary" not in body["reasoning"]
 
 

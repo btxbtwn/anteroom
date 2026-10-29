@@ -22,6 +22,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.util.exc import CommandError
@@ -123,6 +124,14 @@ def _adopt_legacy(engine: Engine, config: Config) -> str:
     load_models()
     Base.metadata.create_all(bind=engine)
     _ensure_sqlite_columns(engine)
+
+    # A pre-Alembic table cannot gain ownership through create_all. Run the
+    # same additive revision used by versioned databases before verifying and
+    # stamping it. Newly created tables already have ownership; the revision
+    # handles that mixed schema without recreating tables or losing rows.
+    ownership = ScriptDirectory.from_config(config).get_revision("d8b6f2a19c40")
+    with engine.begin() as connection, Operations.context(MigrationContext.configure(connection)):
+        ownership.module.upgrade()
 
     drift = inspect_database(database_path(engine))
     if not drift.clean:

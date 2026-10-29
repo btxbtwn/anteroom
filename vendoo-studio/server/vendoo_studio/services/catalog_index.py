@@ -925,71 +925,39 @@ def search_catalog(
     return results[:top_k]
 
 
-def relevant_skill_rules(db: Session, query: str, *, max_chars: int = 8000, top_k: int = 8) -> str:
-    """Return the most relevant list-this skill/reference chunks for a listing query."""
-    from vendoo_studio.services.skill_formulas import listing_formula_rules, with_pinned_formulas
+def relevant_skill_rules(db: Session | None, query: str, *, max_chars: int = 20000, top_k: int = 8) -> str:
+    """Pack complete canonical sections after always-on policies and formulas."""
+    from vendoo_studio.services.skill_formulas import with_pinned_formulas
+    from vendoo_studio.services.text_retrieval import rank_texts
 
-    query = str(query or "").strip()
-    if not query:
-        parts = []
-        for path in _skill_files():
-            try:
-                parts.append(path.read_text(encoding="utf-8"))
-            except OSError:
-                continue
-        return with_pinned_formulas("\n\n---\n\n".join(parts), max_chars=max_chars)
-
-    # Chat only needs the small canonical skill corpus. Building the full
-    # category index here blocks the first prompt while tens of thousands of
-    # category documents are materialized and indexed.
-    tokens = [token.casefold() for token in re.findall(r"[a-z0-9']+", query.casefold()) if len(token) > 1]
-    hits = []
+    documents = []
+    seen = set()
+    pinned = with_pinned_formulas("", max_chars=max_chars)
     for path in _skill_files():
-        try:
-            chunks = _chunk_markdown(path.read_text(encoding="utf-8"))
-        except OSError:
-            continue
-        for title, body in chunks:
-            score = sum(body.casefold().count(token) for token in tokens)
-            if tokens and score == 0:
+        for title, body in _chunk_markdown(path.read_text(encoding="utf-8")):
+            if body in seen or body in pinned:
                 continue
-            hits.append({"title": title, "path": str(path), "snippet": body[:4000], "score": score})
-    hits.sort(key=lambda hit: (-hit["score"], hit["path"], hit["title"]))
-    hits = hits[:top_k]
-    if not hits:
-        skill_md = skills_dir() / "list-this" / "SKILL.md"
-        raw = skill_md.read_text(encoding="utf-8")[:max_chars] if skill_md.is_file() else ""
-        return with_pinned_formulas(raw, max_chars=max_chars)
-
-    parts: list[str] = []
-    used = 0
-    # Reserve room for always-on title/description formulas.
-    pinned = listing_formula_rules()
-    budget = max(1200, max_chars - len(pinned) - 80)
-    for hit in hits:
-        title = hit.get("title") or hit.get("path") or "Rule"
-        snippet = str(hit.get("snippet") or "").strip()
-        if not snippet:
-            continue
-        # Formulas are pinned separately — skip duplicate formula chunks.
-        if "TITLE Formula" in snippet and "DESCRIPTION Formula" in snippet:
-            continue
-        if str(title).casefold() in {
-            "formula reference (non-negotiable)",
-            "title formula",
-            "description formula (line breaks mandatory)",
-            "pricing formula",
-        }:
-            continue
-        block = f"### {title}\n{snippet}"
-        if used + len(block) + 2 > budget:
-            remain = budget - used - 2
-            if remain > 200:
-                parts.append(block[:remain])
+            # Formula children and mandatory policies are already pinned from
+            # their canonical source. Do not spend retrieval slots on them.
+            if str(title).casefold() in {
+                "formula reference (non-negotiable)", "title formula",
+                "description formula (line breaks mandatory)", "pricing formula",
+                "etsy when made estimation", "input requirements", "rules (violation = incorrect listing)",
+            }:
+                continue
+            seen.add(body)
+            documents.append((title, body))
+    ranked = rank_texts(query, [f"{title}\n{body}" for title, body in documents])
+    chosen = []
+    used = len(with_pinned_formulas("x", max_chars=max_chars)) - 1
+    for index, _score in ranked:
+        body = documents[index][1]
+        if used + len(body) + 4 <= max_chars:
+            chosen.append(body)
+            used += len(body) + 4
+        if len(chosen) >= top_k:
             break
-        parts.append(block)
-        used += len(block) + 2
-    return with_pinned_formulas("\n\n".join(parts), max_chars=max_chars)
+    return with_pinned_formulas("\n\n".join(chosen), max_chars=max_chars)
 
 
 def enrich_gaps_with_catalog_options(db: Session, gaps: list[dict], *, top_k: int = 3) -> list[dict]:
