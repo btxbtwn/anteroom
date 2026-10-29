@@ -64,6 +64,25 @@ describe("multi-value form fields", () => {
 });
 
 describe("marketplace copies of general fields", () => {
+  it("keeps saved nested offer edits instead of the cached native form values", () => {
+    const listing = { price: 19.99, ebay_specifics: {} };
+    const path = "ebay_specifics.bestOffer.minimumOfferPrice";
+    const form = { tab: "ebay", native: true, defaultValue: "16.00" };
+    expect(marketplaceDisplayValue(listing, path, form)).toBe("16.00");
+    for (const value of [14, 16, ""]) {
+      setListingEditorValue(listing, path, value);
+      expect(marketplaceDisplayValue(cloneListing(listing), path, form)).toBe(value);
+    }
+    setListingEditorValue(listing, "ebay_specifics.bestOffer.autoAcceptPrice", 17);
+    expect(marketplaceDisplayValue(listing, "ebay_specifics.bestOffer.autoAcceptPrice", {
+      ...form, defaultValue: "18.00",
+    })).toBe(17);
+    setListingEditorValue(listing, "ebay_specifics.bestOffer.enabled", false);
+    expect(marketplaceDisplayValue(listing, "ebay_specifics.bestOffer.enabled", {
+      ...form, defaultValue: true,
+    })).toBe(false);
+  });
+
   it("reads a blank marketplace title as that form's own value", () => {
     const listing = { title: "General title", size: "L", ebay_specifics: { title: "" } };
     expect(ownedSpecificsValue(listing, "ebay_specifics.title")).toEqual({ owned: true, value: "" });
