@@ -6,13 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.504 — 2026-10-29
+
+- Reopen saved marketplace forms with Chrome closed, keeping their dropdown choices and layout. Changed categories still need fresh choices before listing.
+- Vinted's Category field is now a picker: drill through or search Vinted's own category list instead of typing a path.
+
+## 0.1.503 — 2026-10-29
+
+- eBay listings no longer go out with the Condition blank while the form shows one. Wording like “Pre-Owned - Good” was understood by the row on screen but not when the listing was saved, so it sent no condition at all and warned “eBay needs condition, and it is empty” under a field that looked filled. What the form shows is now what is sent, and if eBay's list for that category has no matching grade, the warning says which wording could not be matched instead of claiming the field is empty.
+
 ## 0.1.502 — 2026-10-29
 
-- Vinted's Category field is now a picker: drill through or search Vinted's own category list instead of typing a path.
+- Mercari's category picker now opens the subcategories under Pants and other parent categories, including when searching.
 
 ## 0.1.501 — 2026-10-29
 
-- Reopen saved marketplace forms with Chrome closed, keeping their dropdown choices and layout. Changed categories still need fresh choices before listing.
+- Mercari's Size picker now shows the size the listing will actually send. A tag that reads “S” where Mercari only lists “S (4-6)” left the Size box looking filled with a value Mercari has no id for, so listing refused it while the form seemed answered. The picker now shows Mercari's own “S (4-6)”, and leaving it untouched saves that size. A stale size left from another category still shows as a problem instead of being swapped for a different one.
 
 ## 0.1.500 — 2026-10-29
 

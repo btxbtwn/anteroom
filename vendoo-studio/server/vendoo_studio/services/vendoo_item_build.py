@@ -160,6 +160,12 @@ def _general_details(
             known = GENERAL_COLORS.get(_norm(text))
             if known:
                 return known
+        if not ok and text and name == "condition" and _ebay_grade(text):
+            # Words eBay itself reads as a grade but Vendoo has not taught us a
+            # code for are kept as a label, not reported: each marketplace's
+            # condition is encoded from it (eBay's grade included). A word no
+            # one knows, such as "Salvage", still names a field left empty.
+            return text
         if not ok:
             unresolved.append({"field": name, "value": str(label)})
         return value if value is not None else ""
@@ -305,6 +311,41 @@ def _category_specifics(
         if weight_spec is not None:
             _force_numeric_fabric_weight(out, specifics_key(category_id, weight_spec.key))
     return out
+
+
+def _ebay_grade(wording: str) -> str | None:
+    """eBay's grade for this wording when eBay's own table names one, else None."""
+    from vendoo_studio.services.ebay_listings import _CONDITION
+
+    hay = str(wording or "").lower()
+    return next((code for pattern, code in _CONDITION if re.search(pattern, hay)), None)
+
+
+def _condition_code(spec: FieldSpec, marketplace: str, candidate: Any) -> Any:
+    """The leaf's own condition id for the seller's wording, or None.
+
+    The seller writes the condition in Studio's words (``Pre-Owned - Good``),
+    which the leaf's option list spells its own way. ``encode_specific`` only
+    knows an exact spelling, so a plain label reached the form as nothing and
+    the listing went to the marketplace with its condition empty while the
+    editor showed the grade eBay would have used. eBay's grade comes from the
+    same table the editor reads (``ebay_condition``), so both end up the same.
+    """
+    code, ok = encode_specific(spec, candidate)
+    if ok and code not in (None, "", []):
+        return code
+    if marketplace != "ebay":
+        return None
+    from vendoo_studio.services.ebay_listings import CONDITION_IDS, ebay_condition
+    from vendoo_studio.services.vendoo_specifics import is_not_applicable
+
+    if is_not_applicable(candidate):
+        return None
+    native = CONDITION_IDS.get(ebay_condition({"condition": candidate}))
+    # eBay numbers its conditions (1000, 3000…), which ``encode_specific``
+    # deliberately refuses to read as an id. Here the number is eBay's own
+    # grade, so the leaf's option for it is the answer.
+    return native if native in spec.options else None
 
 
 def _learned_category_specifics(
@@ -482,8 +523,8 @@ def _listing_section(
             condition_spec = specs.get("condition") or specs.get("Condition")
             if condition_spec is not None and candidate_conditions:
                 for candidate in candidate_conditions:
-                    code, ok = encode_specific(condition_spec, candidate)
-                    if ok and code not in (None, "", []):
+                    code = _condition_code(condition_spec, marketplace, candidate)
+                    if code not in (None, "", []):
                         # The leaf keeps its condition in both places, as its id.
                         section["overrides"]["condition"] = code
                         section["categorySpecifics"][specifics_key(leaf_id, condition_spec.key)] = code

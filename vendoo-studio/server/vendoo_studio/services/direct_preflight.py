@@ -125,6 +125,11 @@ def _unresolved(snapshot: dict, marketplace: str) -> list[dict]:
             if not any(existing["field"] == field for existing in found):
                 found.append(gap(field, f"{name} needs {aspect}, and it is empty.", blocking=False))
             continue
+        if aspect == "condition":
+            # The row shows the grade it would send; say that, not that the row is unfilled.
+            found.append(gap(field, f"“{value}” could not be matched to one of {name}'s conditions, so this listing "
+                                   "would send none. Pick the condition above.", blocking=False))
+            continue
         found.append(gap(field, f"{aspect} “{value}” is not one of {name}'s choices, so it is left empty.", blocking=False))
     return found
 

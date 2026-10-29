@@ -43,7 +43,7 @@ function matchesPrefix(parts: readonly string[], prefix: readonly string[]): boo
  * The next dropdown for a path already chosen: one level of the tree, as the
  * marketplaces' own sell pages show it (Men / Women / Kids, then the group,
  * then the item). A row with categories under it is not terminal, so the
- * seller keeps going; a row that is itself a choice still saves when picked.
+ * seller keeps going, even when the parent is also listed as a choice.
  * One pass: eBay's leaf list is large, and each keystroke must not rescan it.
  */
 export function categoryMenu(choices: readonly CategoryChoice[], prefix: readonly string[]): CategoryMenu | null {
@@ -78,6 +78,13 @@ export function categorySearch(choices: readonly CategoryChoice[], query: string
   // Drop a plural “s” so “womens”, “jeans” and “shoes” find the singular names.
   const terms = query.split(/\s+/).map((term) => compact(term).replace(/s$/, "")).filter(Boolean);
   if (!terms.length) return [];
+  const parents = new Set<string>();
+  for (const choice of choices) {
+    const path = categorySegments(choice.label);
+    for (let depth = 1; depth < path.length; depth += 1) {
+      parents.add(categoryPathKey(path.slice(0, depth)));
+    }
+  }
   const matches: (CategoryItem & { score: number })[] = [];
   for (const choice of choices) {
     const path = categorySegments(choice.label);
@@ -86,7 +93,7 @@ export function categorySearch(choices: readonly CategoryChoice[], query: string
     const last = searchable[searchable.length - 1] ?? "";
     const childMatch = terms.every((term) => last.startsWith(term));
     const segmentMatch = terms.every((term) => searchable.some((part) => part.startsWith(term)));
-    matches.push({ label: categoryPathKey(path), path, terminal: true, score: childMatch ? 0 : segmentMatch ? 1 : 2 });
+    matches.push({ label: categoryPathKey(path), path, terminal: !parents.has(categoryPathKey(path)), score: childMatch ? 0 : segmentMatch ? 1 : 2 });
   }
   matches.sort((a, b) => a.score - b.score || a.label.localeCompare(b.label));
   return matches.slice(0, limit).map(({ score: _score, ...item }) => item);

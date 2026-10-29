@@ -136,6 +136,8 @@ interface EditorField {
   controlWidth?: "half";
   cascade?: CascadeDepartment[];
   optionAmounts?: Record<string, number>;
+  /** A saved value the picker cannot show, and the choice it stands for. */
+  optionAliases?: Record<string, string>;
   group?: string;
   groupHelp?: string;
   sectionHelp?: string;
@@ -912,6 +914,15 @@ export function StructuredEditor({
     if (field?.locked) return;
     const text = formFieldText(local[key]);
     if (text.trim() === "[object Object]") return;
+    const alias = field?.optionAliases?.[text.trim()];
+    // A saved value the picker cannot hold ("S" where Mercari lists "S (4-6)")
+    // is saved as the choice it stands for, even when nothing else changed.
+    if (alias) {
+      const updated = cloneListing(listing);
+      setListingEditorValue(updated, key, alias);
+      onChange(updated);
+      return;
+    }
     // Compare with the labeled value the control was showing. The form's original
     // value stays in defaultValue and must not block a later edit that matches it.
     const labelOf = (value: string) => Object.entries(field?.optionValues || {}).find(([, id]) => id === value)?.[0] ?? value;
@@ -1631,6 +1642,7 @@ function schemaFieldsForTab(
     step: field.step,
     locked: field.locked,
     optionValues: field.option_values,
+    ...(field.option_aliases ? { optionAliases: field.option_aliases } : {}),
     clears: field.clears,
     help: field.help,
     valueConstraints: field.value_constraints,
