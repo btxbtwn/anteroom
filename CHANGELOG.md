@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.512 — 2026-10-29
+
+- ChatGPT generation now sends listing rules as developer messages, fixing the “System messages are not allowed” error.
+
 ## 0.1.511 — 2026-10-29
 
 - Depop now includes the missing Tops categories, including T-shirts, with their department-specific sizes and fields available while Chrome is closed. Brand choices are available locally, and style, age and source choices use Depop’s own values.
