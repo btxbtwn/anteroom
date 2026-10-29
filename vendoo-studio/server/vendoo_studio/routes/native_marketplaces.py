@@ -101,6 +101,20 @@ def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Sessio
     return _sync(native.reset, conv_id, marketplace, db)
 
 
+@router.post("/vinted/connect")
+async def connect_vinted(conv_id: str, db: Session = Depends(get_db)):
+    import asyncio
+    from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services import vinted_browser
+
+    if not ConversationRepo(db).get(conv_id):
+        raise HTTPException(404, "Conversation not found")
+    try:
+        return await asyncio.to_thread(vinted_browser.connect)
+    except vinted_browser.VintedConnectionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.get("/vinted/categories")
 async def vinted_categories(conv_id: str, db: Session = Depends(get_db)):
     from vendoo_studio.services.native_editor import vinted_categories as read

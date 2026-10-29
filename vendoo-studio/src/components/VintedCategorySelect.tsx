@@ -1,10 +1,10 @@
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { CategoryTreeSelect } from "./ListingFormControls";
 import type { CategoryChoice } from "./categoryTree";
 
-/** Vinted's own category tree, read through the signed-in Chrome session. */
+/** Vinted's own category tree, read through Anteroom’s own private sign-in window. */
 export function VintedCategorySelect({ convId, id, fieldKey, value, disabled, onChange }: {
   convId: string; id: string; fieldKey: string; value: string;
   disabled?: boolean; onChange: (value: string) => void;
@@ -15,6 +15,7 @@ export function VintedCategorySelect({ convId, id, fieldKey, value, disabled, on
     staleTime: 6 * 60 * 60 * 1000,
     retry: false,
   });
+  const signIn = useMutation({ mutationFn: () => api.nativeMarketplaces.vintedConnect(convId) });
   const choices = React.useMemo<CategoryChoice[]>(
     () => (categories.data?.options ?? [])
       .filter((label) => typeof label === "string" && label.trim())
@@ -27,6 +28,12 @@ export function VintedCategorySelect({ convId, id, fieldKey, value, disabled, on
   if (categories.isError) {
     return <div className="flex min-w-0 flex-col gap-2">
       <p role="alert" className="text-xs text-warning-foreground">{categories.error.message}</p>
+      <button type="button" className="text-left text-xs text-primary underline" disabled={disabled || signIn.isPending}
+        onClick={() => signIn.mutate()}>Sign in to Vinted in Anteroom</button>
+      {signIn.isSuccess && <p className="text-xs text-muted-foreground">Finish signing in in the Vinted window, then reload choices. This private sign-in lasts while Anteroom is open.</p>}
+      {signIn.isError && <p role="alert" className="text-xs text-warning-foreground">{signIn.error.message}</p>}
+      <button type="button" className="text-left text-xs text-primary underline" disabled={disabled || categories.isFetching}
+        onClick={() => void categories.refetch()}>Reload Vinted choices</button>
       {value && <p className="text-xs text-muted-foreground">Saved category: {value}</p>}
     </div>;
   }

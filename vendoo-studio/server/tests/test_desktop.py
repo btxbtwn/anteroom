@@ -52,6 +52,7 @@ class StudioWindowChromeTest(unittest.TestCase):
         self.assertEqual(kwargs["icon"], str(icon))
         self.assertEqual(icon.name, "AppIcon.png")
         self.assertEqual(kwargs["menu"], ["menu"])
+        self.assertTrue(kwargs["private_mode"])
 
     def test_studio_app_menu_includes_update_actions(self):
         menu_mod = SimpleNamespace(
