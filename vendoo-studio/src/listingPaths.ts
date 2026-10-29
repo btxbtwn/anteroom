@@ -142,12 +142,18 @@ export function nextFieldDraft(
   return { local, dirty: kept };
 }
 
-/** True when this marketplace form stores its own copy of a shared field, even if that copy is blank. */
+/** True when this marketplace form stores its own field value, even if it is blank. */
 export function ownedSpecificsValue(
   listing: ListingData | undefined,
   path: string,
 ): { owned: boolean; value: unknown } {
   const parts = path.split(".");
+  // Nested native fields (offer prices, shipping, scheduling) are seller-owned
+  // too. Their saved value must win over the form cached when the tab opened.
+  if (parts.length > 2 && parts[0].endsWith("_specifics")) {
+    const value = getNestedValue(listing, path);
+    return { owned: value !== undefined, value };
+  }
   if (parts.length !== 2 || !parts[0].endsWith("_specifics")) return { owned: false, value: undefined };
   const bucket = listing?.[parts[0]];
   if (!bucket || typeof bucket !== "object" || Array.isArray(bucket)) return { owned: false, value: undefined };
