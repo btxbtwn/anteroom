@@ -99,3 +99,11 @@ def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Sessio
     if body.confirm is not True:
         raise HTTPException(400, "Confirm that you checked the marketplace yourself.")
     return _sync(native.reset, conv_id, marketplace, db)
+
+
+@router.get("/vinted/brands")
+async def vinted_brands(conv_id: str, q: str = Query(default="", max_length=100),
+                        category: str = Query(default="", max_length=1000), db: Session = Depends(get_db)):
+    from vendoo_studio.services.native_editor import vinted_brands as search
+
+    return await _reply(search(conv_id, q, category, db))

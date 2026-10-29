@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.496 — 2026-10-29
+
+- Search Vinted brands directly in the listing form and choose a matching brand.
+
 ## 0.1.495 — 2026-10-28
 
 - Marketplace forms show readable warnings without CLI commands, including shipping, photo and listing requirements across every marketplace.

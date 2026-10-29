@@ -539,3 +539,17 @@ def sellwild_form(snapshot: dict, conv_id: str, db: Session, ship_from: str | No
                   for key, label, value in measured)
     return {"marketplace": "sellwild", "native": True, "known": True, "page_labels": True,
             "category_id": str(picks["category_id"] or ""), "fields": fields}
+
+
+async def vinted_brands(conv_id: str, query: str, category: str, db: Session) -> dict:
+    """Read brand choices through the signed-in Chrome session."""
+    if not ConversationRepo(db).get(conv_id):
+        raise NativeMarketplaceError(404, "Conversation not found")
+    try:
+        answer = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.vinted_brands",
+                                              {"query": query, "category": category}, timeout=25)
+    except browser_bridge.BrowserBridgeError as exc:
+        raise NativeMarketplaceError(502, str(exc)) from exc
+    if not answer.get("ok"):
+        raise NativeMarketplaceError(502, answer.get("error") or "Vinted brand search failed.")
+    return {"options": answer.get("options", [])}
