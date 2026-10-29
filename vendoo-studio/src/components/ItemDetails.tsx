@@ -35,7 +35,6 @@ interface ItemDetailsData {
 type TextKey = Exclude<keyof ItemDetailsData, "garment" | "measurements">;
 
 const RECENT_LABELS_KEY = "vendoo-studio.recent-labels";
-const MAX_RECENT_LABELS = 12;
 
 function readLegacyStoredLabels(): string[] {
   try {
@@ -194,7 +193,7 @@ export function ItemDetails({ convId }: Props) {
       seen.add(key);
       ordered.push(label);
     }
-    return ordered.slice(0, MAX_RECENT_LABELS);
+    return ordered;
   }, [conversations, uiPrefs?.recent_vendoo_labels, hiddenLabelKeys]);
 
   const [details, setDetails] = useState<ItemDetailsData>({ ...DEFAULTS });
@@ -399,8 +398,9 @@ export function ItemDetails({ convId }: Props) {
                 <span className="truncate">{label}</span>
                 <button
                   type="button"
-                  className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
-                  aria-label={`Remove ${label}`}
+                  className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label={`Remove ${label} from this item`}
+                  title="Remove from this item"
                   onClick={(e) => {
                     e.stopPropagation();
                     removeCommittedLabel(label);
@@ -500,14 +500,14 @@ export function ItemDetails({ convId }: Props) {
                   </button>
                   <Button
                     variant="ghost-muted"
-                    size="icon-micro"
-                    className={cn("me-0.5 opacity-0 focus-visible:opacity-100", i === activeSuggestion && "opacity-100")}
-                    aria-label={`Remove "${label}" from label history`}
-                    title="Remove from history"
+                    size="sm"
+                    className="me-0.5 shrink-0"
+                    aria-label={`Delete "${label}" from saved labels`}
+                    title="Delete saved suggestion; labels on items are kept"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => forgetLabel(label)}
                   >
-                    <XIcon />
+                    Delete
                   </Button>
                 </div>
               ))}
