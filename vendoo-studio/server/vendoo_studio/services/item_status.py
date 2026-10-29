@@ -60,29 +60,36 @@ def _time(value) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _quantities(db: Session, conv_ids: set[str] | None) -> dict[str, int]:
-    """The most units each item was offered with, across every saved revision.
+def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, datetime] | None = None) -> dict[str, int]:
+    """Use the last correction before sales, then retain the established stock.
 
-    The highest figure wins: a seller who lowers the quantity after a sale must
-    not make that one sale read as the last unit.
+    Before the first recorded sale, quantity edits correct the stock baseline.
+    Afterward, a lower remaining quantity cannot erase stock already accounted
+    for; an increase can raise the total. Marketplace stock observations remain
+    separate and can establish that the remaining units have actually sold out.
     """
+    first_sales = first_sales or {}
     best: dict[str, int] = {}
 
-    def add(conv_id, value):
+    def add(conv_id, value, created_at):
         try:
             number = int(value)
         except (TypeError, ValueError):
             return
-        if number > best.get(conv_id, 0):
+        if number < 1:
+            return
+        first_sale = first_sales.get(conv_id)
+        if first_sale is None or _time(created_at) <= first_sale or number > best.get(conv_id, 0):
             best[conv_id] = number
 
     # Inventory polls need one scalar, not every historical listing body.
     # Extract it in SQL so large revisions never enter Python's JSON decoder.
-    every = db.query(ListingRevision.conversation_id, json_value(ListingRevision.listing_json, "quantity"))
+    every = db.query(ListingRevision.conversation_id, json_value(ListingRevision.listing_json, "quantity"),
+                     ListingRevision.created_at).order_by(ListingRevision.created_at)
     if conv_ids is not None:
         every = every.filter(ListingRevision.conversation_id.in_(conv_ids))
-    for conv_id, quantity in every.all():
-        add(conv_id, quantity)
+    for conv_id, quantity, created_at in every.all():
+        add(conv_id, quantity, created_at)
     return best
 
 
@@ -124,7 +131,21 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
         return {}
     scoped = ids if len(ids) <= 500 else None
     lines = paid_lines(db, scoped)
-    quantities = _quantities(db, scoped)
+    first_sales = {}
+    for conv_id, notes in conversations:
+        own_lines = lines.get(conv_id, [])
+        # Use when Anteroom first learned about a sale: imported/backdated orders
+        # must not turn corrections made before their arrival into restocks.
+        moments = [_time(line.received_at or line.sold_at) for line in own_lines]
+        marks = notes.get("marketplaceMarks")
+        if isinstance(marks, dict):
+            moments.extend(_time(mark.get("at")) for market, mark in marks.items()
+                           if isinstance(mark, dict) and mark.get("state") == "sold"
+                           and market not in {line.marketplace for line in own_lines})
+        first = min(filter(None, moments), default=None)
+        if first:
+            first_sales[conv_id] = first
+    quantities = _quantities(db, scoped, first_sales)
     live_query = db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace, MarketplaceListing.listing_url).filter(
         MarketplaceListing.state.in_(LIVE_STATES))
     if scoped is not None:

@@ -99,10 +99,10 @@ def test_empty_inventory_status_does_not_query_history(env):
 @pytest.mark.parametrize("quantity", [3, "3", 3.0])
 def test_quantity_history_survives_large_unrelated_listing_fields(env, quantity):
     item(env.db, "tees", quantity=quantity)
+    line(env.db, "tees")
     ListingRepo(env.db).save_revision("tees", {
         "title": "Coat", "quantity": 1, "description": "Long description " * 10000,
     }, "user")
-    line(env.db, "tees")
     partial = status(env.db, "tees")
     assert (partial.status, partial.quantity, partial.units_sold) == ("active", 3, 1)
 
@@ -117,6 +117,48 @@ def test_a_multi_unit_item_is_partly_sold_until_every_unit_sells(env):
     assert status(env.db, "tees").status == "active"
     line(env.db, "tees", quantity=2, order="b")
     assert status(env.db, "tees").status == "sold"
+
+
+def test_quantity_correction_before_a_direct_sale_removes_fictitious_stock(env):
+    item(env.db, "corrected", quantity=10, notes={"vendooStatus": "draft"})
+    MarketplaceListingRepo(env.db).save("corrected", "ebay", {"state": "published", "listing_url": EBAY_URL})
+    ListingRepo(env.db).save_revision("corrected", {"title": "Coat", "quantity": 1}, "user")
+    assert status(env.db, "corrected").quantity == 1
+    line(env.db, "corrected", when=datetime.now(UTC) - timedelta(days=2))
+    result = status(env.db, "corrected")
+    assert (result.status, result.quantity, result.units_sold) == ("sold", 1, 1)
+
+
+def test_stock_increases_after_a_partial_sale_do_not_restore_an_old_mistake(env):
+    item(env.db, "restocked", quantity=10)
+    ListingRepo(env.db).save_revision("restocked", {"quantity": 3}, "user")
+    line(env.db, "restocked", order="first")
+    ListingRepo(env.db).save_revision("restocked", {"quantity": 5}, "user")
+    ListingRepo(env.db).save_revision("restocked", {"quantity": 1}, "user")
+    assert (status(env.db, "restocked").quantity, status(env.db, "restocked").units_sold) == (5, 1)
+    line(env.db, "restocked", quantity=4, order="last")
+    assert status(env.db, "restocked").status == "sold"
+
+
+def test_cancelled_sales_do_not_freeze_an_incorrect_stock_baseline(env):
+    item(env.db, "cancelled", quantity=10)
+    sale = line(env.db, "cancelled")
+    sale.order_status = "cancelled"
+    env.db.commit()
+    ListingRepo(env.db).save_revision("cancelled", {"quantity": 1}, "user")
+    assert status(env.db, "cancelled").quantity == 1
+
+
+def test_legacy_sold_mark_keeps_the_corrected_pre_sale_baseline(env):
+    item(env.db, "legacy", quantity=10)
+    ListingRepo(env.db).save_revision("legacy", {"quantity": 3}, "user")
+    conv = env.db.get(Conversation, "legacy")
+    conv.notes = json.dumps({"marketplaceMarks": {"ebay": {"state": "sold", "at": datetime.now(UTC).isoformat()}},
+                             "vendooStatus": "active"})
+    env.db.commit()
+    ListingRepo(env.db).save_revision("legacy", {"quantity": 1}, "user")
+    result = status(env.db, "legacy")
+    assert (result.status, result.quantity, result.units_sold) == ("active", 3, 1)
 
 
 def test_inventory_quantities_do_not_decode_historical_listing_bodies(env):
@@ -136,8 +178,8 @@ def test_inventory_quantities_do_not_decode_historical_listing_bodies(env):
 
     event.listen(env.db, "do_orm_execute", scalar_only)
     try:
-        assert _quantities(env.db, None) == {"tees": 3, "coat": 2}
-        assert _quantities(env.db, {"tees"}) == {"tees": 3}
+        assert _quantities(env.db, None) == {"tees": 1, "coat": 2}
+        assert _quantities(env.db, {"tees"}) == {"tees": 1}
         assert _quantities(env.db, set()) == {}
     finally:
         event.remove(env.db, "do_orm_execute", scalar_only)

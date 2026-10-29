@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.529 — 2026-10-29
+
+- Listing edits reject stale saves, and direct marketplace actions keep the exact photos you approved even if you change them later.
+- Correcting an inventory quantity before a sale removes the mistaken stock count. Reducing a quantity after a partial sale keeps the established stock history safe.
+- Marketplace forms follow their supplied row widths and disable editing consistently while saving or generating. Typed answers stay in the editor during refreshes.
+- Merging duplicate items creates a new listing revision and preserves the earlier listing history.
+- Anteroom rejects requests from untrusted websites, masks secrets in terminal errors, and checks that updates match the installed app's signing identity.
+- Database upgrades stop safely if Anteroom cannot save a recovery backup first. Marketplace sign-in tokens expire automatically in the relay, and CI checks Python dependencies and relay failures.
+- Vinted category and brand choices can use a private sign-in window in the Anteroom Mac app without opening Chrome.
+
 ## 0.1.528 — 2026-10-29
 
 - A saved marketplace form stops asking you to reload its fields when nothing about the listing changed. An answer the listing left empty, a setting switched off, and an untouched dropdown were each being read as a change, which held back drafts on eBay, Mercari, Poshmark and Depop.

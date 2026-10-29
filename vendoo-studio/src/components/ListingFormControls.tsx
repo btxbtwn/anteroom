@@ -20,12 +20,14 @@ export function SegmentedTabs<T extends string>({
   onChange,
   label,
   className,
+  disabled,
 }: {
   tabs: readonly { id: T; label: React.ReactNode }[];
   value: T;
   onChange: (id: T) => void;
   label: string;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <div
@@ -38,10 +40,11 @@ export function SegmentedTabs<T extends string>({
           key={tab.id}
           type="button"
           role="tab"
+          disabled={disabled}
           aria-selected={value === tab.id}
           data-pressed={value === tab.id ? "" : undefined}
           className={cn(toggleVariants({ variant: "segmented", size: "segmented" }))}
-          onClick={() => onChange(tab.id)}
+          onClick={() => { if (!disabled) onChange(tab.id); }}
         >
           {tab.label}
         </button>
@@ -422,8 +425,8 @@ export function CategoryTreeSelect({
 }
 
 /** eBay categories from the synced tree. Search stays available until that tree is complete. */
-export function EbayCategorySelect({ id, value, onChange }: {
-  id: string; value: string; onChange: (id: string, path: string) => void;
+export function EbayCategorySelect({ id, value, onChange, disabled }: {
+  id: string; value: string; disabled?: boolean; onChange: (id: string, path: string) => void;
 }) {
   const tree = useQuery({
     queryKey: ["catalog-categories", "ebay"],
@@ -448,7 +451,7 @@ export function EbayCategorySelect({ id, value, onChange }: {
   const searchPanel = (
     <>
       {leaves.length > 0 && <p className="mt-2 text-xs text-muted-foreground">Search if the category is not in the list yet.</p>}
-      <SearchableSelect id={leaves.length ? `${id}-search` : id} fieldKey="direct_category_ids.ebay" value={value}
+      <SearchableSelect id={leaves.length ? `${id}-search` : id} fieldKey="direct_category_ids.ebay" value={value} disabled={disabled}
         options={[...new Set([value, ...choices.map((row) => row.path)].filter(Boolean))]} onSearch={setQuery}
         onChange={(label) => { const choice = choices.find((row) => row.path === label); if (choice) onChange(choice.id, choice.path); }} />
       <p role="status" className="mt-1 text-xs text-muted-foreground">{result.isError ? "eBay category search failed. Check its connection and try again."
@@ -457,7 +460,7 @@ export function EbayCategorySelect({ id, value, onChange }: {
     </>
   );
   return <div>
-    {leaves.length > 0 && <CategoryTreeSelect key={value} id={id} fieldKey="direct_category_ids.ebay" value={value} choices={leaves}
+    {leaves.length > 0 && <CategoryTreeSelect key={value} id={id} fieldKey="direct_category_ids.ebay" value={value} disabled={disabled} choices={leaves}
       onChange={(choice) => onChange(choice.id, choice.label.split(" > ").join(" › "))} />}
     {searchFallback ? searchPanel : null}
   </div>;

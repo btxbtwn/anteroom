@@ -708,7 +708,12 @@ export function StructuredEditor({
   disabled?: boolean;
   onAskChat?: (text: string) => void;
 }) {
-  const formRef = React.useRef<HTMLDivElement>(null);
+  const formRef = React.useRef<HTMLFieldSetElement>(null);
+  const editingDisabled = React.useRef(Boolean(disabled));
+  editingDisabled.current = Boolean(disabled);
+  const emitChange = (updated: ListingData) => {
+    if (!editingDisabled.current) onChange(updated);
+  };
   const nativeTab = DIRECT_FORM_MARKETS.has(tab);
   // The form's rows come from the category. A price, brand, format, or shipping
   // edit must not start a new read: that used to drop every row until the form
@@ -885,7 +890,7 @@ export function StructuredEditor({
     const shown = formFieldText(local[field.key]);
     const stored = field.optionValues?.[shown] ?? shown;
     const saved = savedDefaultFor(savedDefaults?.defaults, field.key, stored, shown);
-    const busy = (saveDefault.isPending && saveDefault.variables?.path === field.key)
+    const busy = Boolean(disabled) || (saveDefault.isPending && saveDefault.variables?.path === field.key)
       || (clearDefault.isPending && clearDefault.variables?.path === field.key);
     return (
       <FieldDefaultControl
@@ -894,7 +899,7 @@ export function StructuredEditor({
         saved={Boolean(saved)}
         busy={busy}
         onSave={() => {
-          if (!shown.trim()) return;
+          if (editingDisabled.current || !shown.trim()) return;
           // The click keeps the input's focus, so a typed answer is saved here
           // rather than waiting for a blur that will not come. A closed choice
           // already saves itself when selected, and writing its id now would pin
@@ -905,13 +910,13 @@ export function StructuredEditor({
           }
           saveDefault.mutate({ path: field.key, value: String(stored), label: shown, fieldLabel: field.label });
         }}
-        onClear={() => clearDefault.mutate({ path: field.key, fieldLabel: field.label })}
+        onClear={() => { if (!editingDisabled.current) clearDefault.mutate({ path: field.key, fieldLabel: field.label }); }}
       />
     );
   };
 
   const handleBlur = (key: string) => {
-    if (local[key] == null) return;
+    if (editingDisabled.current || local[key] == null) return;
     const field = fields.find((entry) => entry.key === key);
     if (field?.locked) return;
     const text = formFieldText(local[key]);
@@ -922,7 +927,7 @@ export function StructuredEditor({
     if (alias) {
       const updated = cloneListing(listing);
       setListingEditorValue(updated, key, alias);
-      onChange(updated);
+      emitChange(updated);
       return;
     }
     // Compare with the labeled value the control was showing. The form's original
@@ -934,10 +939,11 @@ export function StructuredEditor({
     if (text === current) return;
     const updated = cloneListing(listing);
     setListingEditorValue(updated, key, field?.type === "number" ? coerce(text) : text);
-    onChange(updated);
+    emitChange(updated);
   };
 
   const commitField = (key: string, value: string | string[] | boolean) => {
+    if (editingDisabled.current || fields.find((field) => field.key === key)?.locked) return;
     if (typeof value === "string" && value.trim() === "[object Object]") return;
     const shown = typeof value === "boolean" ? String(value) : value;
     const nextLocal = { ...local, [key]: shown };
@@ -953,7 +959,13 @@ export function StructuredEditor({
     }
     for (const dependent of field?.clears || []) setListingEditorValue(updated, dependent,
       dependent.endsWith(".attributes") ? {} : dependent.endsWith(".inventoryRows") ? [] : "");
-    onChange(updated);
+    emitChange(updated);
+  };
+
+  const setFieldDraft = (key: string, value: string) => {
+    if (editingDisabled.current || fields.find((field) => field.key === key)?.locked) return;
+    dirty.current = { ...dirty.current, [key]: value };
+    setLocal((current) => ({ ...current, [key]: value }));
   };
 
   const viewContext = { tab, listing, local, fields, categoryStale };
@@ -998,6 +1010,7 @@ export function StructuredEditor({
     && fieldLeaf(f.key) !== "description";
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
+    const locked = Boolean(disabled || f.locked);
     // A format or shipping change narrows the choices. Show the choice that fits
     // now when the typed value belonged to the previous set.
     const typed = formFieldText(local[f.key]);
@@ -1009,7 +1022,7 @@ export function StructuredEditor({
       : typed;
     // The marketplace's own photo area, where its page has it: this form's pick, order and limit.
     if (f.type === "photos") {
-      return <MarketplaceMedia convId={convId} marketplace={tab} listing={listing} disabled={disabled} onChange={onChange}
+      return <MarketplaceMedia convId={convId} marketplace={tab} listing={listing} disabled={locked} onChange={emitChange}
         warnings={uniqueMarketplaceMessages(photoWarnings, shownMessages)} page={{ hint: f.help, slots: f.slotLabels, accept: f.accept }} />;
     }
     if (f.type === "inventory") {
@@ -1021,68 +1034,68 @@ export function StructuredEditor({
       const sizeSystem = formFieldText(getListingEditorValue(listing, "poshmark_specifics.sizeSystem")) || "us";
       return <NativeInventoryEditor
         value={rows}
-        groups={f.inventoryGroups || []} disabled={f.locked} multi={multi} sizeSystem={sizeSystem}
+        groups={f.inventoryGroups || []} disabled={locked} multi={multi} sizeSystem={sizeSystem}
         onSizeSystem={(system, next) => {
           const updated = cloneListing(listing);
           setListingEditorValue(updated, "poshmark_specifics.sizeSystem", system);
           setListingEditorValue(updated, f.key, next);
-          onChange(updated);
+          emitChange(updated);
         }}
         onChange={(next) => {
           const updated = cloneListing(listing);
           setListingEditorValue(updated, f.key, next);
-          onChange(updated);
+          emitChange(updated);
         }} />;
     }
     if (f.type === "cascade") {
       // The draft stores the id. The control's text is that id's label until it is chosen again.
       const stored = f.optionValues?.[text] ?? text;
-      return <DependentSelectPair id={id} value={stored} departments={f.cascade || []} disabled={f.locked}
+      return <DependentSelectPair id={id} value={stored} departments={f.cascade || []} disabled={locked}
         onChange={next => commitField(f.key, next)} />;
     }
     if (f.type === "segmented") return <SegmentedTabs label={f.label} value={text}
-      tabs={(f.options || []).map(label => ({ id: label, label }))} onChange={next => commitField(f.key, next)} />;
+      disabled={locked} tabs={(f.options || []).map(label => ({ id: label, label }))} onChange={next => commitField(f.key, next)} />;
     if (f.type === "badge") return null;
     if (f.type === "variations") return <EbayVariationsEditor convId={convId} listing={listing}
-      value={normalizeVariations(resolvedEditorValue(f, listing))} aspects={f.variationAspects || []} disabled={f.locked} onChange={value => {
+      value={normalizeVariations(resolvedEditorValue(f, listing))} aspects={f.variationAspects || []} disabled={locked} onChange={value => {
         const updated = cloneListing(listing);
         setListingEditorValue(updated, f.key, value);
         // The listing's quantity is the stock across its variations.
         if (value.rows.length) setListingEditorValue(updated, "quantity", variationTotal(value));
-        onChange(updated);
+        emitChange(updated);
       }} />;
-    if (f.native && f.key === "direct_category_ids.ebay") return <EbayCategorySelect id={id} value={text} onChange={(categoryId, path) => {
+    if (f.native && f.key === "direct_category_ids.ebay") return <EbayCategorySelect id={id} value={text} disabled={locked} onChange={(categoryId, path) => {
       const updated = cloneListing(listing);
       setListingEditorValue(updated, f.key, categoryId);
       setListingEditorValue(updated, "direct_category_ids.ebay_path", path);
-      onChange(updated);
+      emitChange(updated);
     }} />;
-    if (f.native && f.key === "ebay_specifics.secondaryCategoryId") return <EbayCategorySelect id={id} value={text} onChange={(categoryId, path) => {
+    if (f.native && f.key === "ebay_specifics.secondaryCategoryId") return <EbayCategorySelect id={id} value={text} disabled={locked} onChange={(categoryId, path) => {
       const updated = cloneListing(listing);
       setListingEditorValue(updated, f.key, categoryId);
       setListingEditorValue(updated, "ebay_specifics.secondaryCategoryPath", path);
-      onChange(updated);
+      emitChange(updated);
     }} />;
     const categoryChoices = f.native && !f.multi ? pathCategoryChoices(f) : null;
     if (categoryChoices) return <CategoryTreeSelect key={text} id={id} fieldKey={f.key} value={text} choices={categoryChoices}
-      disabled={f.locked} onChange={(choice) => commitField(f.key, choice.label)} />;
+      disabled={locked} onChange={(choice) => commitField(f.key, choice.label)} />;
     if (f.type === "boolean" && f.presentation === "button") return <Toggle id={id} data-listing-field={f.key} variant="outline"
-      className="w-full" pressed={text === "true"} disabled={f.locked} onPressedChange={(pressed) => commitField(f.key, pressed)}>{f.label}</Toggle>;
+      className="w-full" pressed={text === "true"} disabled={locked} onPressedChange={(pressed) => commitField(f.key, pressed)}>{f.label}</Toggle>;
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
-      disabled={f.locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
+      disabled={locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
     if (f.type === "note") return null;
     if (fieldLeaf(f.key) === "description" || f.type === "textarea") {
-      return <Textarea id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25 [&_textarea]:py-2 [&_textarea]:leading-relaxed" placeholder={f.placeholder} value={text} readOnly={f.locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+      return <Textarea disabled={locked} id={id} data-listing-field={f.key} className="[&_textarea]:min-h-25 [&_textarea]:py-2 [&_textarea]:leading-relaxed" placeholder={f.placeholder} value={text} readOnly={locked} maxLength={f.maxLength ?? undefined} onChange={(e) => { setFieldDraft(f.key, e.target.value); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (multiSelectControl(f)) return <SearchableMultiSelect id={id} fieldKey={f.key}
       value={expandJoinedChoices(local[f.key], f.options)} options={f.options ?? []}
-      selectionOnly={f.selectionOnly ?? Boolean(f.options?.length)} disabled={f.locked}
+      selectionOnly={f.selectionOnly ?? Boolean(f.options?.length)} disabled={locked}
       choicesVerified={f.optionsSource === "marketplace"}
       maxValues={f.maxValues ?? undefined} maxLength={f.maxLength ?? undefined} help={f.help ?? undefined}
       onChange={(value) => commitField(f.key, value)} />;
     if (f.options?.length && (f.presentation === "radio" || f.presentation === "radio-row")) {
       return (
-        <RadioGroup id={id} data-listing-field={f.key} value={text} disabled={f.locked}
+        <RadioGroup id={id} data-listing-field={f.key} value={text} disabled={locked}
           className={f.presentation === "radio-row" ? "grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-3" : undefined}
           onValueChange={(value) => commitField(f.key, String(value))}>
           {f.options.map((option) => (
@@ -1098,12 +1111,12 @@ export function StructuredEditor({
       );
     }
     if (tab === "vinted" && f.key === "vinted_specifics.category") {
-      return <VintedCategorySelect convId={convId} id={id} fieldKey={f.key} value={text} disabled={f.locked}
+      return <VintedCategorySelect convId={convId} id={id} fieldKey={f.key} value={text} disabled={locked}
         onChange={(value) => commitField(f.key, value)} />;
     }
     if (tab === "vinted" && f.key === "vinted_specifics.brand") {
       return <VintedBrandSelect convId={convId} category={formFieldText(local["vinted_specifics.category"])}
-        id={id} fieldKey={f.key} value={text} disabled={f.locked}
+        id={id} fieldKey={f.key} value={text} disabled={locked}
         onChange={(value) => commitField(f.key, value)} />;
     }
     if (f.options?.length || f.selectionOnly) {
@@ -1113,7 +1126,7 @@ export function StructuredEditor({
           fieldKey={f.key}
           value={text}
           options={f.options ?? []}
-          disabled={f.locked}
+          disabled={locked}
           selectionOnly={f.selectionOnly}
           choicesVerified={f.optionsSource === "marketplace"}
           maxLength={f.maxLength ?? undefined}
@@ -1123,8 +1136,8 @@ export function StructuredEditor({
       );
     }
     if (f.type === "datetime-local") {
-      return <Input nativeInput id={id} data-listing-field={f.key} type="datetime-local" readOnly={f.locked} disabled={f.locked}
-        value={text ? text.slice(0, 16) : ""} onChange={(e) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); }} onBlur={() => handleBlur(f.key)} />;
+      return <Input nativeInput id={id} data-listing-field={f.key} type="datetime-local" readOnly={locked} disabled={locked}
+        value={text ? text.slice(0, 16) : ""} onChange={(e) => { setFieldDraft(f.key, e.target.value); }} onBlur={() => handleBlur(f.key)} />;
     }
     if (f.key === "poshmark_specifics.earnings") {
       return <Input nativeInput id={id} data-listing-field={f.key} readOnly value={formFieldText(f.defaultValue)} />;
@@ -1138,11 +1151,11 @@ export function StructuredEditor({
       max: f.maxValue,
       step: f.type === "number" ? f.step ?? "any" : undefined,
       readOnly: f.locked,
-      disabled: f.selectionOnly && !f.options?.length,
+      disabled: locked || (f.selectionOnly && !f.options?.length),
       maxLength: f.maxLength ?? undefined,
       placeholder: f.placeholder,
       value: text,
-      onChange: (e: React.ChangeEvent<HTMLInputElement>) => { if (!f.locked) setLocal({ ...local, [f.key]: e.target.value }); },
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => { setFieldDraft(f.key, e.target.value); },
       onBlur: () => handleBlur(f.key),
     };
     if (f.prefix || f.suffix) {
@@ -1168,17 +1181,18 @@ export function StructuredEditor({
       const id = `${tab}|${title}|${reveal}`;
       const open = revealed.has(id);
       return (
-        <InlineButton key={reveal} type="button" className="mt-2 text-xs" aria-expanded={open} onClick={() => setRevealOverride((current) => {
+        <InlineButton key={reveal} type="button" disabled={disabled} className="mt-2 text-xs" aria-expanded={open} onClick={() => { if (editingDisabled.current) return; setRevealOverride((current) => {
           const next = new Map(current);
           next.set(id, !open);
           return next;
-        })}>{open && reveal === "Show more" ? "Show less" : reveal}</InlineButton>
+        }); }}>{open && reveal === "Show more" ? "Show less" : reveal}</InlineButton>
       );
     });
 
   return (
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
-    <div ref={formRef} key={tab} className="@container flex flex-col">
+    <fieldset ref={formRef} key={tab} disabled={disabled} aria-busy={disabled || undefined}
+      aria-label={`${marketplaceName(tab)} listing fields`} className="@container flex min-w-0 flex-col border-0 p-0">
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {formNotes.length > 0 && onAskChat && <div className="pb-2">
@@ -1209,7 +1223,7 @@ export function StructuredEditor({
             {/* "See … options" sits at the top of eBay's section; "Show more" sits under the fields. */}
             {revealButtons(section.title, section.fields, (name) => name.startsWith("See "))}
             {/* Pair short fields when the editor itself has room, including beside a sidebar. */}
-            <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 @xl:grid-cols-2">
+            <div className={cn("grid min-w-0 grid-cols-1 gap-x-4 gap-y-3", nativeTab ? "@xl:grid-cols-12" : "@xl:grid-cols-2")}>
               {pageLayout && section.fields[0]?.sectionHelp && <p className="col-span-full text-muted-foreground text-xs">{section.fields[0].sectionHelp}</p>}
               {visible.map((f, index) => {
                 const badge = section.fields.find((row) => row.type === "badge" && (f.key === "price" || f.key === "poshmark_specifics.poshmarkPrice"));
@@ -1222,7 +1236,10 @@ export function StructuredEditor({
                     {f.groupHelp && <p className="mt-0.5 text-muted-foreground text-xs">{f.groupHelp}</p>}
                   </div>
                 )}
-                <div className={cn("min-w-0", fullWidth(f) && "col-span-full")}>
+                <div data-listing-row={f.key} className={cn("min-w-0", nativeTab
+                  ? f.width === "half" ? "@xl:col-span-6" : f.width === "third" ? "@xl:col-span-4"
+                    : f.width === "quarter" ? "@xl:col-span-3" : "col-span-full"
+                  : fullWidth(f) && "col-span-full")}>
                   {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.hashtagMax != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-1.5">
@@ -1246,11 +1263,11 @@ export function StructuredEditor({
                     <div className="mb-1.5 flex items-center gap-2">
                       <FieldLabel htmlFor={`listing-field-${f.key}`} className={cn("mb-0", f.labelHidden && "sr-only")}>{f.label}</FieldLabel>
                       {fieldDefault(f)}
-                      {badge && <button type="button" aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
+                      {badge && <button type="button" disabled={disabled || badge.locked} aria-pressed={badgeOn} className="rounded-full border px-2 py-0.5 text-xs font-medium"
                         onClick={() => commitField(badge.key, !badgeOn)}>{badgeOn ? "Smart Sell ON" : "Smart Sell OFF"}</button>}
                     </div>
                   ))}
-                  {control(f)}
+                  <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f)}</div>
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {uniqueMarketplaceMessages(f.type === "photos" ? [] : fieldWarnings.get(f.key) ?? [], shownMessages).map((message) =>
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
@@ -1282,7 +1299,7 @@ export function StructuredEditor({
           </InspectorSection>
         );
       })}
-    </div>
+    </fieldset>
   );
 }
 
@@ -1541,6 +1558,7 @@ function limitToCategoryForm(
 ): EditorField[] {
   if (tab === "general") return rows;
   const form = forms?.find((entry) => entry.marketplace === tab);
+  if (form?.native) return rows;
   const core = new Set((CATEGORY_FORM_LABELS[tab] ?? []).map(foldFieldName));
   const listed = (field: EditorField) => {
     if (field.key.includes(".measurements.")) return true;
