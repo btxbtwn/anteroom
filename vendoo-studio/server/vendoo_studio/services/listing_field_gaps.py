@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.models.catalog import CategorySchema
 from vendoo_studio.services.category_fields import listing_category_ids, load_fields
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
 from vendoo_studio.services.fill_log import (
     MAX_PATCH_FIELDS,
     FillLogService,
@@ -295,6 +295,12 @@ async def fill_listing_field_gaps(
     listing_repo = ListingRepo(db)
     fill_log = FillLogService(db)
     current = dict(listing)
+    from vendoo_studio.services.listing_generate import photo_fingerprint
+
+    fingerprint = photo_fingerprint(repo.get_photos(conv_id))
+    expected_revision_id = repo.current_revision_id(conv_id)
+    if expected_revision_id is None:
+        return current
     total_filled = 0
 
     for round_index in range(MAX_GAP_ROUNDS):
@@ -320,13 +326,18 @@ async def fill_listing_field_gaps(
             break
 
         updated = write_values_into_listing(current, patches[:MAX_PATCH_FIELDS])
-        revisions = listing_repo.get_revisions(conv_id)
-        listing_repo.save_revision(
-            conv_id,
-            updated,
-            source="gap_fill",
-            parent_revision_id=revisions[0].id if revisions else None,
-        )
+        db.expire_all()
+        if photo_fingerprint(repo.get_photos(conv_id)) != fingerprint:
+            raise RevisionConflict("Photos changed while filling fields")
+        try:
+            revision = listing_repo.save_revision(
+                conv_id, updated, source="gap_fill",
+                parent_revision_id=expected_revision_id, expected_revision_id=expected_revision_id,
+            )
+        except RevisionConflict:
+            log.info("discarding stale gap fill for %s", conv_id)
+            raise
+        expected_revision_id = revision.id
         fill_log.record_generated_values(conv_id, patches[:MAX_PATCH_FIELDS])
         repo.add_message(
             conv_id,
@@ -340,6 +351,8 @@ async def fill_listing_field_gaps(
 
     if total_filled:
         log.info("filled %s discovered listing field(s) across gap rounds for %s", total_filled, conv_id)
+    if repo.current_revision_id(conv_id) != expected_revision_id:
+        raise RevisionConflict("This listing changed while filling fields")
     return current
 
 

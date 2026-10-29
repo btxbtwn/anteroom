@@ -465,7 +465,7 @@ async def save_to_vendoo(conv_id: str, db: Session = Depends(get_db)):
     """
     from vendoo_studio.services.api_job_lock import claim_api_job, start_gate
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
-    from vendoo_studio.services.listing_generate import latest_photo_analysis
+    from vendoo_studio.services.listing_generate import current_photo_analysis
     from vendoo_studio.services.listing_provider import get_listing_provider, provider_is_configured
     from vendoo_studio.services.vendoo_import import vendoo_binding
 
@@ -483,7 +483,7 @@ async def save_to_vendoo(conv_id: str, db: Session = Depends(get_db)):
     job_repo = JobRepo(db)
     snapshot = prepare_listing_snapshot(db, conv, revisions[0].listing_json)
     provider = get_listing_provider() if provider_is_configured() else None
-    evidence = latest_photo_analysis(conv_repo.get_messages(conv_id)) or str(conv.notes or "")
+    evidence = current_photo_analysis(conv_repo, conv_id) or str(conv.notes or "")
     with start_gate():
         _reject_if_chrome_busy(db, conv_id)
         job = job_repo.create(
@@ -984,7 +984,7 @@ async def create(conv_id: str, db: Session = Depends(get_db)):
     """Create this conversation's latest listing as a Vendoo draft."""
     from vendoo_studio.services.api_job_lock import claim_api_job, start_gate
     from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
-    from vendoo_studio.services.listing_generate import latest_photo_analysis
+    from vendoo_studio.services.listing_generate import current_photo_analysis
     from vendoo_studio.services.listing_provider import get_listing_provider, provider_is_configured
     from vendoo_studio.services.vendoo_import import vendoo_binding
 
@@ -1010,7 +1010,7 @@ async def create(conv_id: str, db: Session = Depends(get_db)):
     # The vision pass already ran during generation and its result is still on
     # the conversation, so reuse it rather than paying for it again. Seller
     # notes stand in when there is none.
-    evidence = latest_photo_analysis(conv_repo.get_messages(conv_id)) or str(conv.notes or "")
+    evidence = current_photo_analysis(conv_repo, conv_id) or str(conv.notes or "")
     with start_gate():
         _reject_if_chrome_busy(db, conv_id)
         job = job_repo.create(

@@ -51,6 +51,8 @@ class Message(Base):
     # Images the seller attached: [{id, name, mime_type, size_bytes, width, height}];
     # the files live under the data folder, see services/chat_attachments.py.
     attachments = Column(JSON, nullable=True)
+    # Identifies the exact ordered photo files used for a vision reading.
+    photo_fingerprint = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
     conversation = relationship("Conversation", back_populates="messages")

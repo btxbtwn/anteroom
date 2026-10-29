@@ -76,15 +76,14 @@ def apply_department(listing: dict, department: str) -> dict:
 
 async def review_department(db: Session, conv_id: str, *, apply: bool = False) -> dict[str, Any]:
     from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-    from vendoo_studio.services.listing_generate import analyze_photos_with_tag_retry, latest_photo_analysis
+    from vendoo_studio.services.listing_generate import analyze_photos_with_tag_retry, current_photo_analysis
     from vendoo_studio.services.listing_provider import get_listing_provider
 
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if not conv:
         return {"ok": False, "error": "Conversation not found"}
-    messages = repo.get_messages(conv_id)
-    text = latest_photo_analysis(messages) or ""
+    text = current_photo_analysis(repo, conv_id) or ""
     if not text:
         provider = get_listing_provider()
         if provider is None or not callable(getattr(provider, "analyze_photos", None)):
