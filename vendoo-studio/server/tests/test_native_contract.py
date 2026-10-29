@@ -110,6 +110,29 @@ class NativeContractTest(unittest.TestCase):
         self.assertEqual(contract.gaps(prepared, "ebay"), [])
         self.assertIsNotNone(contract.editor_form(prepared, "ebay"))
 
+    def test_a_form_saved_with_another_spelling_of_no_answer_still_opens(self):
+        # One writer stores the unset choice as "", another leaves the key out,
+        # and an unset boolean arrives as False. None is a choice the seller made.
+        for spelling in ("", None, False):
+            with self.subTest(spelling=spelling):
+                listing = ebay_tshirt()
+                inputs = listing[contract.KEY]["ebay"]["inputs"]
+                inputs["ebay_specifics.Size Type"] = spelling
+                listing["ebay_specifics"].pop("sizeType", None)
+                self.assertTrue(contract.inputs_match(
+                    listing, "ebay", listing[contract.KEY]["ebay"]["fields"], inputs))
+                self.assertEqual(contract.gaps(listing, "ebay"), [])
+
+    def test_a_changed_answer_still_makes_a_no_answer_form_stale(self):
+        listing = ebay_tshirt()
+        listing[contract.KEY]["ebay"]["inputs"]["ebay_specifics.Size Type"] = ""
+        listing["sizeType"] = "Petite"
+        listing[contract.KEY]["ebay"]["fields"].append(
+            {"path": "ebay_specifics.Size Type", "label": "Size Type", "required": True,
+             "options": ["Regular", "Petite"], "option_values": {"Regular": "Regular", "Petite": "Petite"}})
+        self.assertFalse(contract.inputs_match(
+            listing, "ebay", listing[contract.KEY]["ebay"]["fields"], listing[contract.KEY]["ebay"]["inputs"]))
+
     def test_a_form_recorded_with_the_raw_category_path_still_opens(self):
         from vendoo_studio.services.registry import map_vendoo_category_path
 

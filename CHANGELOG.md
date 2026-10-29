@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.528 — 2026-10-29
+
+- A saved marketplace form stops asking you to reload its fields when nothing about the listing changed. An answer the listing left empty, a setting switched off, and an untouched dropdown were each being read as a change, which held back drafts on eBay, Mercari, Poshmark and Depop.
+- An empty answer is reported once. A marketplace's own check and its form no longer both explain the same missing price, description or condition, and a policy taken from your account says so instead of reading as an empty required field.
+
 ## 0.1.527 — 2026-10-29
 
 - Listings, chats and page buttons prepare their next screen as you hover, focus or touch them, so opening a saved conversation can show it immediately. Listing search and selection redraw fewer rows, and opening an item no longer reads all its saved revisions.
