@@ -534,6 +534,8 @@ export const api = {
       request<FacebookCheck>(`/conversations/${convId}/marketplace-listings/facebook/check`, { method: "POST" }),
   },
   nativeMarketplaces: {
+    vintedConnect: (convId: string) =>
+      request<OkResponse>(`/conversations/${convId}/native-marketplaces/vinted/connect`, { method: "POST" }),
     vintedCategories: (convId: string) =>
       request<{ options: string[] }>(`/conversations/${convId}/native-marketplaces/vinted/categories`),
     vintedBrands: (convId: string, q: string, category: string) =>
