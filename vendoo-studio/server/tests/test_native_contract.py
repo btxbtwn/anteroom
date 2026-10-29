@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import unittest
 from unittest.mock import patch
 
@@ -28,6 +29,22 @@ def seed():
 
 
 class NativeContractTest(unittest.TestCase):
+    def test_large_brand_catalog_stays_in_editor_but_only_known_brand_enters_prompt(self):
+        from vendoo_studio.services import depop_form
+
+        for brand in ("nike", "", "Not a native brand"):
+            listing = {"brand": brand}
+            contracts = contract.capture(listing, {"depop": depop_form.form(listing)}, ["depop"])
+            before = copy.deepcopy(contracts)
+            text = contract.prompt(contracts)
+            projected = json.loads(text[text.index("{"):])
+            field = next(row for row in projected["depop"]["fields"] if row["path"] == "depop_specifics.brand")
+            self.assertEqual(field["options"], ["Nike"] if brand == "nike" else [])
+            self.assertEqual(contracts, before)
+            self.assertLess(len(json.dumps(field)), 500)
+            self.assertEqual(len(next(row for row in contracts["depop"]["fields"]
+                                      if row["path"] == "depop_specifics.brand")["options"]), 21697)
+
     def test_marketplace_overrides_do_not_make_the_saved_form_stale(self):
         from vendoo_studio.services.seller_overrides import apply_marketplace_overrides
 

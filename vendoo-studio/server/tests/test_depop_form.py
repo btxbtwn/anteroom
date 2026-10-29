@@ -9,6 +9,16 @@ from vendoo_studio.services import depop_form
 
 
 class DepopFormTest(unittest.TestCase):
+    def test_brand_picker_uses_local_native_choices_and_preserves_the_seller_brand(self):
+        for listing in ({"brand": "Nike"}, {"brand": "Nike", "depop_specifics": {"brand": ""}}):
+            fields = {row["path"]: row for row in depop_form.form(listing)["fields"]}
+            brand = fields["depop_specifics.brand"]
+            self.assertTrue(brand["selection_only"])
+            self.assertIn("Nike", brand["options"])
+            self.assertIn("Other", brand["options"])
+            self.assertEqual(len(brand["options"]), 21697)
+            self.assertEqual(brand["value"], listing.get("depop_specifics", {}).get("brand", "Nike"))
+
     def test_previously_missing_tshirts_have_department_sizes_without_chrome(self):
         for department, size, count in (("menswear", "3XS", 14), ("womenswear", "00", 39),
                                         ("kidswear", "0-3 months", 23)):

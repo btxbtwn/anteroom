@@ -61,7 +61,9 @@ def form(listing: dict) -> dict:
             rows.append(choice(path, label, captured["options"], multi=True, max_values=maximum,
                                category_specific=True, help=f"Select up to {maximum}"))
         elif key == "brand":
-            rows.append(field("depop_specifics.brand", label, text("brand"), section="Info"))
+            row = choice("depop_specifics.brand", label, catalog()["brands"])
+            row["value"] = text("brand")
+            rows.append(row)
         elif key in fixed_keys:
             enhance = key in {"source", "age", "style"}
             extra = {"multi": True, "max_values": captured.get("max_values") or 1} if key != "condition" else {"required": True}
