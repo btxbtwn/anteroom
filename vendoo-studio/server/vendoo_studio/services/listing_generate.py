@@ -1057,6 +1057,10 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
         log.warning("discarding validation repair outside allowed fields")
         return None
     updated = apply_json_patch(listing, patches)
+    if "/description" in allowed:
+        from vendoo_studio.services.vendoo_import import parse_notes
+
+        apply_seller_description_facts(updated, parse_notes(notes))
     before = {(error["field"], error["message"]) for error in blockers}
     after = {(error["field"], error["message"]) for error in _validation_blockers(copy.deepcopy(updated))}
     if after - before or not before - after:

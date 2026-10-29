@@ -178,3 +178,17 @@ def test_timing_preparation_updates_outcome_and_excludes_incomplete_runs(db, mon
     assert generation_timing.recent_summary(db)["finished"] == 0
     generation_timing.add_stages(timing_id, {"finish": 2}, total_sec=3, outcome="done")
     assert generation_timing.recent_summary(db)["finished"] == 1
+
+
+def test_description_repair_keeps_exact_seller_flaws_and_measurements(monkeypatch):
+    original = {**BASE, "description": "Broken description"}
+    monkeypatch.setattr(listing_generate, "collect_provider_text", AsyncMock(return_value=json.dumps([
+        {"op": "replace", "path": "/description", "value": BASE["description"]},
+    ])))
+    result = asyncio.run(listing_generate.fill_validation_gaps(
+        object(), original, notes=json.dumps({"knownFlaws": "Small hole on left cuff",
+                                              "descriptionMeasurements": "Pit to pit: 20 inches"})))
+    assert "Small hole on left cuff" in result["description"]
+    assert "Pit to pit: 20 inches" in result["description"]
+    assert {key: value for key, value in result.items() if key != "description"} == {
+        key: value for key, value in original.items() if key != "description"}
