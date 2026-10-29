@@ -685,7 +685,7 @@ export function FirstRunGuide({
                 </p>
                 <ul className="setup-guide-points">
                   <li>
-                    <strong>1. Regenerate here.</strong> The listing wears a blue <em>unsent</em> chip until you press <strong>Update Vendoo</strong> — until then even the Vendoo form is on the old copy.
+                    <strong>1. Regenerate here.</strong> Find your edits in <strong>Filters → Unsent edits</strong> until you press <strong>Update Vendoo</strong> — until then even the Vendoo form is on the old copy.
                   </li>
                   <li>
                     <strong>2. Update Vendoo, then open the item there.</strong> The Vendoo form now matches Anteroom; the live listings still do not. The ⋮ menu beside Vendoo Form → Delist Item takes it off every marketplace at once.
@@ -694,7 +694,7 @@ export function FirstRunGuide({
                     <strong>3. List it again from Vendoo.</strong> The new listing carries the updated copy, and its listing date resets.
                   </li>
                   <li>
-                    <strong>Anteroom tracks every step for you.</strong> A blue <em>unsent</em> chip until the edit reaches Vendoo, then an amber <em>relist</em> chip until the listing is back up — and Filters collects each set. The relist chip stays through the middle, where the item reads as a draft because it really is live nowhere, and clears itself once Vendoo reports the new listing date.
+                    <strong>Anteroom tracks every step for you.</strong> <strong>Filters → Unsent edits</strong> collects edits waiting to reach Vendoo, then an amber <em>relist</em> chip marks the listing until it is back up — and Filters collects that set too. The relist chip stays through the middle, where the item reads as a draft because it really is live nowhere, and clears itself once Vendoo reports the new listing date.
                   </li>
                 </ul>
               </>

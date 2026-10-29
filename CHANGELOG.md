@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.498 — 2026-10-29
+
+- Removed the Unsent chips from listing rows and the filter bar; find pending edits under Filters → Unsent edits.
+
 ## 0.1.497 — 2026-10-29
 
 - Search Vinted brands directly in the listing form and choose a matching brand.
