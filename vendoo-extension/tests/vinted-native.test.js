@@ -323,3 +323,11 @@ test('brand search uses the category and keyword and makes only read requests', 
   assert.equal(search.searchParams.get('category_id'), '1904');
   assert.ok(requests.every(row => row.method === 'GET'));
 });
+
+test('the category picker offers Vinted\'s leaf breadcrumbs and keeps the read for a few hours', async () => {
+  const { c, requests } = worker();
+  assert.deepEqual(Array.from(await c.vintedCategoryOptions()), ['Women > Clothing > Jeans > Straight jeans']);
+  assert.deepEqual(Array.from(await c.vintedCategoryOptions()), ['Women > Clothing > Jeans > Straight jeans']);
+  assert.equal(requests.filter(row => row.pathname === '/api/v2/item_upload/catalogs').length, 1);
+  assert.ok(requests.every(row => row.method === 'GET'));
+});

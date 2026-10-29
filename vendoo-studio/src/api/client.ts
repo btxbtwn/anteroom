@@ -534,6 +534,8 @@ export const api = {
       request<FacebookCheck>(`/conversations/${convId}/marketplace-listings/facebook/check`, { method: "POST" }),
   },
   nativeMarketplaces: {
+    vintedCategories: (convId: string) =>
+      request<{ options: string[] }>(`/conversations/${convId}/native-marketplaces/vinted/categories`),
     vintedBrands: (convId: string, q: string, category: string) =>
       request<{ options: string[] }>(`/conversations/${convId}/native-marketplaces/vinted/brands?${new URLSearchParams({ q, category })}`),
     form: (convId: string, marketplace: string, revisionId?: string | null) =>

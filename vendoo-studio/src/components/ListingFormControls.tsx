@@ -284,7 +284,13 @@ export function CategoryDrilldown({
       setOpen(next);
       setQuery("");
       // Open where the saved category lives so its siblings are in view.
-      if (next) setDrill(value.length > 1 ? value.slice(0, -1) : []);
+      // A saved path this catalog does not know, such as the shared category
+      // path copied onto a marketplace, starts at the top instead of an empty
+      // level the seller cannot back out of.
+      if (next) {
+        const prefix = value.length > 1 ? value.slice(0, -1) : [];
+        setDrill(value.length && categoryMenu(choices, prefix) ? prefix : []);
+      }
     }}>
       <PopoverTrigger id={id} data-listing-field={fieldKey} disabled={disabled}
         aria-label={value.length ? `Category: ${value.join(" → ")}` : placeholder}

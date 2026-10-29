@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.502 — 2026-10-29
+
+- Vinted's Category field is now a picker: drill through or search Vinted's own category list instead of typing a path.
+
 ## 0.1.501 — 2026-10-29
 
 - Reopen saved marketplace forms with Chrome closed, keeping their dropdown choices and layout. Changed categories still need fresh choices before listing.
