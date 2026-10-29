@@ -1,8 +1,8 @@
 """Fill each direct marketplace's category fields from the form its tab shows.
 
-After generation has chosen every marketplace's category, the listing agent
-gets those exact forms (the rows, labels, choices and limits the seller sees)
-and picks values for the empty item fields it can tell from the evidence.
+The listing agent first completes missing or nonterminal categories from the
+native forms, then reloads those forms (the rows, labels, choices and limits
+the seller sees) and fills the empty item fields supported by the evidence.
 Every value is checked against the row's choices before it is written, the
 seller's own and locked values are left alone, and nothing is sent to a
 marketplace: this only saves a listing revision.
@@ -21,20 +21,16 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-from vendoo_studio.services.seller_overrides import field_locked, fold_key, is_locked, set_path
+from vendoo_studio.services.seller_overrides import field_locked, fold_key, get_path, is_locked, set_path
+from vendoo_studio.services import native_contract
 
 log = logging.getLogger("vendoo_studio.native_field_fill")
 
 MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
 NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild"}
-# Rows about the sale rather than the item, or ones generation already decides.
-# Charity is the seller's choice to donate, not a fact about the item.
-_NOT_ITEM = re.compile(
-    r"price|ship|parcel|package|quantity|sku|categor|worldwide|offer|format|duration|store|inventor"
-    r"|variation|zip|location|condition|title|description|brand|hashtag|tags|charity|donation"
-)
-# A row with more choices than this (eBay brands, for one) is not something to pick from a list.
+# Limit optional item-field choices; required categories use the native catalog.
 MAX_CHOICES = 300
+CATEGORY_PATHS = {f"direct_category_ids.{market}" for market in MARKETS} | {"sellwild_specifics.nativeCategoryId"}
 
 FILL_RULES = (
     "You fill a resale listing's marketplace form fields. For each field below, choose values only "
@@ -57,17 +53,38 @@ def _path(row: dict) -> str:
 def fillable_rows(form: dict, market: str, listing: dict) -> list[dict]:
     """Empty item fields on this form that the agent may choose values for."""
     prefix = f"{market}_specifics."
+    strict = native_contract.KEY in listing
     rows = []
     for row in form.get("fields") or []:
+        row = native_contract.applicable_row(row, listing, form.get("fields") or [])
         path = _path(row)
         options = row.get("options") or []
-        if not path.startswith(prefix) or row.get("locked") or not options or len(options) > MAX_CHOICES:
+        if not path.startswith(prefix) or row.get("locked") or (not options and not strict) or len(options) > MAX_CHOICES:
             continue
-        if _NOT_ITEM.search(path[len(prefix):].casefold()) or not _empty(row.get("value")):
+        if not native_contract.item_field(row, market) or (not strict and not _empty(row.get("value"))):
+            continue
+        if row.get("input_type") in {"note", "badge", "photos", "inventory", "variations"}:
             continue
         if is_locked(listing, path) or field_locked(listing, market, path.rsplit(".", 1)[-1]):
             continue
         rows.append(row)
+    return rows
+
+
+def category_rows(form: dict, listing: dict) -> list[dict]:
+    """Unselected categories, using only terminal choices from the native form."""
+    rows = []
+    for row in form.get("fields") or []:
+        path = _path(row)
+        if path not in CATEGORY_PATHS or row.get("locked") or is_locked(listing, path):
+            continue
+        options = row.get("options") or []
+        leaves = [label for label in options if not any(other.startswith(label + " > ") for other in options)]
+        values = row.get("option_values") or {}
+        current = str(row.get("value") or "").strip()
+        if not leaves or current and any(current in (label, str(values.get(label, label))) for label in leaves):
+            continue
+        rows.append({**row, "options": leaves, "required": True})
     return rows
 
 
@@ -89,7 +106,8 @@ def forms_prompt(rows_by_market: dict[str, list[dict]], forms: dict[str, dict]) 
             limit = _limit(row)
             pick = f"pick up to {limit}" if row.get("multi") else "pick one"
             label = str(row.get("label") or "").removesuffix(" *")
-            lines.append(f"- {_path(row)} | {label} | {pick} | choices: " + "; ".join(row.get("options") or []))
+            choices = "; ".join(row.get("options") or []) or f"{row.get('input_type') or 'text'}; max length {row.get('max_length') or 'unspecified'}"
+            lines.append(f"- {_path(row)} | {label} | {pick} | choices: " + choices)
         blocks.append(f"### {NAMES[market]} (category {category})\n" + "\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -108,7 +126,7 @@ def _json_object(text: str) -> dict | None:
     return None
 
 
-def validated_values(reply: dict, rows: dict[str, dict]) -> dict[str, tuple[Any, list[str]]]:
+def validated_values(reply: dict, rows: dict[str, dict], *, evidence: str | None = None) -> dict[str, tuple[Any, list[str]]]:
     """Each answered path's stored value and chosen labels, keeping only listed choices."""
     answers = reply.get("fields") if isinstance(reply.get("fields"), dict) else {}
     accepted: dict[str, tuple[Any, list[str]]] = {}
@@ -116,10 +134,26 @@ def validated_values(reply: dict, rows: dict[str, dict]) -> dict[str, tuple[Any,
         row = rows.get(str(path))
         if row is None:
             continue
+        if evidence is not None:
+            if not isinstance(raw, dict):
+                continue
+            quote = raw.get("evidence")
+            if not isinstance(quote, str) or len(quote.strip()) < 3 or quote not in evidence:
+                continue
+            raw = raw.get("value")
+            if not row.get("selection_only"):
+                if raw not in (None, "", [], {}) and not native_contract.value_error(row, raw):
+                    accepted[str(path)] = (raw, [str(raw)])
+                continue
         by_fold = {fold_key(option): option for option in row.get("options") or []}
+        for label, stored in (row.get("option_values") or {}).items():
+            if label in (row.get("options") or []):
+                by_fold[fold_key(str(stored))] = label
         picked = raw if isinstance(raw, list) else [raw]
         labels = list(dict.fromkeys(by_fold[fold_key(item)] for item in picked
                                     if isinstance(item, (str, int, float)) and fold_key(str(item)) in by_fold))
+        if evidence is not None and (len(labels) > _limit(row) or len(labels) != len(picked)):
+            continue
         labels = labels[:_limit(row)]
         if not labels:
             continue
@@ -164,6 +198,79 @@ async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS
 
 async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: str,
                              markets: Iterable[str] = MARKETS) -> dict | None:
+    """Choose required categories first, then read their forms again to fill item fields."""
+    markets = set(markets)
+    repo = ListingRepo(db)
+    saved = repo.get_current(conv_id)
+    revision = repo.get_revision(saved.current_revision_id) if saved else None
+    strict = bool(revision and native_contract.KEY in revision.listing_json)
+    if strict:
+        markets &= set(revision.listing_json[native_contract.KEY])
+    categories = await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets, categories=True)
+    if strict:
+        await record_forms(db, conv_id, markets)
+    fields = None
+    for _round in range(3 if strict else 1):
+        saved = repo.get_current(conv_id)
+        before = repo.get_revision(saved.current_revision_id).listing_json if saved else {}
+        fields = await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets, categories=False)
+        dependencies_changed = fields is not None and any(
+            native_contract.inputs(before, market, contract.get("fields") or [])
+            != native_contract.inputs(fields, market, contract.get("fields") or [])
+            for market, contract in (before.get(native_contract.KEY) or {}).items())
+        if not strict or fields is None or not dependencies_changed:
+            break
+        await record_forms(db, conv_id, markets)
+    if strict:
+        await record_forms(db, conv_id, markets)
+        saved = repo.get_current(conv_id)
+        return repo.get_revision(saved.current_revision_id).listing_json if saved else None
+    return fields if fields is not None else categories
+
+
+async def prepare_generation_forms(db: Session, conv_id: str, provider, *, evidence: str) -> dict:
+    """Select categories and capture the exact native forms before listing prose is generated."""
+    from vendoo_studio.services.marketplaces import get_selected_marketplaces
+
+    markets = set(MARKETS) & set(get_selected_marketplaces())
+    await _fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets, categories=True)
+    return await record_forms(db, conv_id, markets, reset_evidence=True)
+
+
+async def record_forms(db: Session, conv_id: str, markets, *, reset_evidence: bool = False) -> dict:
+    """Save current form definitions and their effective values onto the same revision snapshot."""
+    repo = ListingRepo(db)
+    current = repo.get_current(conv_id)
+    revision = repo.get_revision(current.current_revision_id) if current else None
+    if not revision:
+        return {}
+    forms = await load_forms(db, conv_id, markets)
+    db.expire_all()
+    latest = repo.get_current(conv_id)
+    if not latest or latest.current_revision_id != revision.id:
+        return {}
+    listing = copy.deepcopy(revision.listing_json)
+    if reset_evidence:
+        listing[native_contract.EVIDENCE_KEY] = {}
+    for market, form in forms.items():
+        for row in form.get("fields") or []:
+            path = _path(row)
+            value = row.get("value")
+            if path in CATEGORY_PATHS and form.get("category_id") and not get_path(listing, path) and not _empty(value):
+                write_value(listing, path, str(form["category_id"]))
+            sale_field = row.get("locked") or native_contract.SALE_FIELDS.search(path.split("_specifics.", 1)[-1].casefold())
+            if (path.startswith(f"{market}_specifics.") and ".package." not in path and sale_field
+                    and path not in CATEGORY_PATHS and not _empty(value) and not native_contract.value_error(row, value)):
+                write_value(listing, path, value)
+    listing[native_contract.KEY] = {**(listing.get(native_contract.KEY) or {}),
+                                    **native_contract.capture(listing, forms, markets)}
+    native_contract.constrain_generated(listing, listing, freeze_categories=False)
+    repo.save_revision(conv_id, listing, source="native_schema", parent_revision_id=revision.id)
+    return listing[native_contract.KEY]
+
+
+async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: str,
+                              markets: Iterable[str], categories: bool) -> dict | None:
     """Save the agent's picks for empty category fields. None when nothing was filled."""
     if provider is None:
         return None
@@ -173,8 +280,10 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
     if revision is None or not isinstance(revision.listing_json, dict):
         return None
     listing = revision.listing_json
+    strict = native_contract.KEY in listing and not categories
     forms = await load_forms(db, conv_id, markets)
-    rows_by_market = {market: rows for market, form in forms.items() if (rows := fillable_rows(form, market, listing))}
+    rows_by_market = {market: rows for market, form in forms.items()
+                      if (rows := category_rows(form, listing) if categories else fillable_rows(form, market, listing))}
     if not rows_by_market:
         return None
     rows = {_path(row): row for market_rows in rows_by_market.values() for row in market_rows}
@@ -182,7 +291,14 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
         "title", "description", "brand", "category_path", "department", "size", "primaryColor",
         "secondaryColor", "material", "condition") if not _empty(listing.get(key))}
     messages = [
-        {"role": "system", "content": FILL_RULES},
+        {"role": "system", "content": FILL_RULES + (
+            " Category is required on every form. Choose the most specific supported category for each item "
+            "from the listed choices; do not skip it or ask the seller to choose. If none fits, leave it "
+            "unresolved so listing remains blocked." if categories else "") + (
+            ' For every answered field, return {"value": <value or list>, "evidence": "<exact quote from Evidence>"}. '
+            "Recheck every listed field, including existing values. Omit unsupported answers; they will be cleared. "
+            "Use only the Evidence block as factual support. The existing listing is context, not evidence. "
+            "Sold comps support price only, never this item's product facts." if strict else "")},
         {"role": "user", "content": (
             f"--- Fields to fill ---\n{forms_prompt(rows_by_market, forms)}\n\n"
             f"--- Evidence ---\n{evidence}\n\n"
@@ -196,8 +312,8 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
     except Exception:
         log.exception("marketplace field fill request failed for %s", conv_id)
         return None
-    accepted = validated_values(_json_object(text) or {}, rows)
-    if not accepted:
+    accepted = validated_values(_json_object(text) or {}, rows, evidence=evidence if strict else None)
+    if not accepted and not strict:
         return None
     db.expire_all()
     latest = listing_repo.get_current(conv_id)
@@ -205,9 +321,27 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
         # The seller edited, cleared or regenerated while the forms were read.
         return None
     updated = copy.deepcopy(listing)
+    changed_parents = {path for path, (value, _labels) in accepted.items() if get_path(listing, path) != value}
+    changed_labels = {rows[path].get("label") for path in changed_parents}
+    dependent_paths = {dependent for path in changed_parents for dependent in rows[path].get("clears") or []}
+    dependent_paths.update(path for path, row in rows.items() for rules in (row.get("value_constraints") or {}).values()
+                           for rule in rules if rule.get("parentName") in changed_labels)
+    accepted = {path: answer for path, answer in accepted.items() if path not in dependent_paths}
+    for dependent in dependent_paths:
+        if not is_locked(updated, dependent):
+            empty = {} if dependent.endswith(".attributes") else [] if dependent.endswith(".inventoryRows") else ""
+            write_value(updated, dependent, empty)
+    if strict:
+        # An omitted or unsupported earlier guess must not survive the evidence check.
+        for path in rows:
+            write_value(updated, path, "")
+            (updated.get(native_contract.EVIDENCE_KEY) or {}).pop(path, None)
     for path, (value, _labels) in accepted.items():
         write_value(updated, path, value)
-    listing_repo.save_revision(conv_id, updated, source="native_fields", parent_revision_id=revision.id)
+        if strict:
+            updated.setdefault(native_contract.EVIDENCE_KEY, {})[path] = {
+                "value": copy.deepcopy(value), "quote": (_json_object(text) or {})["fields"][path]["evidence"]}
+    listing_repo.save_revision(conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision.id)
     ConversationRepo(db).add_message(conv_id, "system", filled_message(accepted, rows), provider="system", model="")
     return updated
 
@@ -215,7 +349,7 @@ async def fill_native_fields(db: Session, conv_id: str, provider, *, evidence: s
 def filled_message(accepted: dict[str, tuple[Any, list[str]]], rows: dict[str, dict]) -> str:
     by_market: dict[str, list[str]] = {}
     for path, (_value, labels) in accepted.items():
-        market = path.split("_specifics.", 1)[0]
+        market = path.rsplit(".", 1)[-1] if path.startswith("direct_category_ids.") else path.split("_specifics.", 1)[0]
         label = str(rows[path].get("label") or path).removesuffix(" *")
         by_market.setdefault(NAMES.get(market, market), []).append(f"{label}: {', '.join(labels)}")
     count = len(accepted)
@@ -261,8 +395,15 @@ def _category(listing: dict, market: str) -> str:
 
 def changed_categories(before: dict, after: dict) -> set[str]:
     """Marketplaces whose chosen category is new in this save."""
-    return {market for market in MARKETS
-            if _category(after, market) and _category(after, market) != _category(before, market)}
+    changed = {market for market in MARKETS
+               if _category(after, market) and _category(after, market) != _category(before, market)}
+    for market, contract in (before.get(native_contract.KEY) or {}).items():
+        if native_contract.inputs(after, market, contract.get("fields") or []) != contract.get("inputs"):
+            changed.add(market)
+        if any(native_contract.item_field(row, market) and get_path(before, _path(row)) != get_path(after, _path(row))
+               for row in contract.get("fields") or []):
+            changed.add(market)
+    return changed
 
 
 def category_saved(conv_id: str, before: dict, after: dict, source: str) -> None:
@@ -317,7 +458,9 @@ async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
         if conv is None:
             return
         evidence = "\n\n".join(part for part in (
-            latest_photo_analysis(repo.get_messages(conv_id)) or "", seller_item_details(conv.notes)) if part)
+            latest_photo_analysis(repo.get_messages(conv_id)) or "", seller_item_details(conv.notes),
+            "Seller messages:\n" + "\n".join(message.text for message in repo.get_messages(conv_id)
+                                                if message.role == "user" and message.text)) if part)
         await fill_native_fields(db, conv_id, provider, evidence=evidence, markets=markets)
     except Exception:
         log.exception("category field fill failed for %s", conv_id)

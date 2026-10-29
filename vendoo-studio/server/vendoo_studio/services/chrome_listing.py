@@ -81,9 +81,7 @@ def poshmark_requirements(snapshot: dict, context: Context) -> list[dict]:
         found.append(gap("primaryColor", f"Poshmark does not list {listed}, so that color is left off.", blocking=False))
     direct = snapshot.get("direct_category_ids") if isinstance(snapshot.get("direct_category_ids"), dict) else {}
     vendoo = snapshot.get("marketplace_category_ids") if isinstance(snapshot.get("marketplace_category_ids"), dict) else {}
-    objects = snapshot.get("marketplace_category_objects") if isinstance(snapshot.get("marketplace_category_objects"), dict) else {}
-    if not str(direct.get("poshmark") or "").strip() and not str(vendoo.get("poshmark") or "").strip() \
-            and not (isinstance(objects.get("poshmark"), dict) and objects["poshmark"].get("path")):
+    if not str(direct.get("poshmark") or "").strip() and not str(vendoo.get("poshmark") or "").strip():
         found.append(gap("direct_category_ids.poshmark", "Poshmark needs a category from its own list."))
     return found
 

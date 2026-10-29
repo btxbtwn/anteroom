@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 from functools import lru_cache
 
@@ -515,7 +516,11 @@ def validate_listing(
 ) -> ValidationResult:
     result = ValidationResult(valid=True)
     payload = data if isinstance(data, dict) else {}
+    native_blocks = {market: copy.deepcopy(payload.get(f"{market}_specifics") or {})
+                     for market in payload.get("_native_forms") or {}}
     normalize_listing_dropdowns(payload)
+    for market, block in native_blocks.items():
+        payload[f"{market}_specifics"] = block
     selected = list(selected_marketplaces) if selected_marketplaces is not None else get_selected_marketplaces()
     selected_set = {item.lower() for item in selected}
     digital_listing = is_etsy_digital_listing(payload)
@@ -601,7 +606,9 @@ def validate_listing(
             add_issue(result, "package_dimensions_in", "Package dimensions must use LxWxH inches, such as 13x10x3")
 
     category_path = text_value(payload.get("category_path"))
-    if category_path and not _category_is_terminal(category_path):
+    if not category_path:
+        add_issue(result, "category_path", "Category is required")
+    elif not _category_is_terminal(category_path):
         add_issue(result, "category_path", "Category must be a terminal Vendoo path")
     department = text_value(payload.get("department"))
     if department and category_path and not _department_matches_category(department, category_path):
@@ -615,7 +622,7 @@ def validate_listing(
         add_issue(result, "ebay_specifics", "eBay specifics must be an object")
         ebay = {}
     ebay = ebay or {}
-    if "ebay" in selected_set:
+    if "ebay" in selected_set and "ebay" not in native_blocks:
         for key in REQUIRED_EBAY_KEYS:
             if not text_value(ebay.get(key)):
                 add_issue(result, f"ebay_specifics.{key}", f"eBay field '{key}' is required")
@@ -709,7 +716,7 @@ def validate_listing(
         add_issue(result, "depop_specifics", "Depop specifics must be an object")
         depop = {}
     depop = depop or {}
-    if "depop" in selected_set:
+    if "depop" in selected_set and "depop" not in native_blocks:
         source = text_value(depop.get("source"))
         if source and not allowed_match(source, VALID_DEPOP_SOURCE):
             add_issue(result, "depop_specifics.source", "Depop source is not a current dropdown value")
@@ -838,4 +845,12 @@ def validate_listing(
                         f"Etsy '{key}' applies to this item — use a real value",
                     )
 
+    from vendoo_studio.services.native_contract import gaps as native_form_gaps
+
+    for market in payload.get("_native_forms") or {}:
+        if market not in selected_set:
+            continue
+        for item in native_form_gaps(payload, market):
+            if not any(error["field"] == item["field"] for error in result.errors):
+                add_issue(result, item["field"], item["message"])
     return result

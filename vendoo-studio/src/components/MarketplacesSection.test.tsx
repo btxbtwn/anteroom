@@ -14,12 +14,13 @@ const live = { url: "https://www.mercari.com/us/item/m70565754838", listing_id: 
 function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { error = null as Error | null, pending = false, etsyEligible = true,
   etsyReady = false, selected = "",
   onAskChat = undefined as ((text: string) => void) | undefined, onEditField = undefined as ((field: string) => void) | undefined,
-  preflight = undefined as { marketplaces: Record<string, { ready: boolean; gaps: { field: string; message: string; blocking: boolean }[] }> } | undefined } = {}) {
+  preflight = { marketplaces: {} } as { marketplaces: Record<string, { ready: boolean; gaps: { field: string; message: string; blocking: boolean }[] }> } | undefined,
+  preflightMissing = false, preflightPlaceholder = false, preflightError = false } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
     : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2", return_policy_id: "3" } : {}, isSuccess: true, isPending: false }
-    : queryKey[0] === "native-preflight" ? { data: preflight, isPending: false }
+    : queryKey[0] === "native-preflight" ? { data: preflightMissing ? undefined : preflight, isPending: preflightMissing, isPlaceholderData: preflightPlaceholder, isError: preflightError }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, error: null, variables: { marketplace: "depop", kind: "draft" } });
   return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
@@ -35,6 +36,13 @@ const enabledButton = (html: string, label: string) => new RegExp(`<button(?![^>
 
 describe("marketplaces section", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("holds List until the current revision has passed preflight", () => {
+    for (const state of [{ preflightMissing: true }, { preflightPlaceholder: true }, { preflightError: true }]) {
+      const html = render({}, {}, { selected: "mercari", ...state });
+      expect(disabledButton(html, "List…")).toBe(true);
+    }
+  });
 
   it("shows one row per marketplace in a fixed order with a status", () => {
     const html = render({});

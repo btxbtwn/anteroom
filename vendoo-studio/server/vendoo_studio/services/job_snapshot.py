@@ -128,6 +128,11 @@ def prepare_listing_snapshot(
         registry.validate_dropdown_fields(
             listing_snapshot, marketplace, listing_snapshot.get("category_path"),
         )
+    # A native generation contract uses the marketplace's own field paths.
+    # Vendoo defaults/learned aliases must not rewrite those answers.
+    for marketplace in (listing_json or {}).get("_native_forms") or {}:
+        listing_snapshot[f"{marketplace}_specifics"] = copy.deepcopy(
+            (listing_json or {}).get(f"{marketplace}_specifics") or {})
     return listing_snapshot
 
 

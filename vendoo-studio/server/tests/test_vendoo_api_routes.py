@@ -414,6 +414,9 @@ class ListRouteTest(_RouteTest):
 
     def test_confirmed_list_sends_only_the_named_marketplaces(self):
         self.bind()
+        ListingRepo(self.db).save_revision(self.conv.id, {
+            **LISTING, "marketplace_category_ids": {"ebay": "15687", "poshmark": "shirts"},
+        }, "model")
         sent = {}
 
         async def fake_run_ops(job, ops, **_kwargs):
@@ -429,6 +432,29 @@ class ListRouteTest(_RouteTest):
         self.assertEqual(sent["op"], "list_item")
         self.assertEqual(sent["marketplaces"], ["ebay", "poshmark"])
         self.assertEqual(res.json()["action"], "list")
+
+    def test_confirmed_list_without_categories_never_reaches_vendoo(self):
+        self.bind()
+        with patch("vendoo_studio.services.vendoo_create.run_ops", new_callable=AsyncMock) as run:
+            res = self.client.post(
+                f"/api/conversations/{self.conv.id}/vendoo-api/list",
+                json={"marketplaces": ["ebay"], "confirm": True},
+            )
+        self.assertEqual(res.status_code, 400, res.text)
+        self.assertIn("category", res.json()["detail"])
+        run.assert_not_called()
+
+    def test_confirmed_list_with_an_unavailable_native_form_never_reaches_vendoo(self):
+        self.bind()
+        ListingRepo(self.db).save_revision(self.conv.id, {
+            **LISTING, "marketplace_category_ids": {"ebay": "15687"}, "_native_forms": {"ebay": {"unavailable": True}},
+        }, "native_schema")
+        with patch("vendoo_studio.services.vendoo_create.run_ops", new_callable=AsyncMock) as run:
+            response = self.client.post(f"/api/conversations/{self.conv.id}/vendoo-api/list",
+                                        json={"marketplaces": ["ebay"], "confirm": True})
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("form", response.json()["detail"])
+        run.assert_not_called()
 
     def test_delist_uses_the_delist_op(self):
         self.bind()

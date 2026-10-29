@@ -44,6 +44,16 @@ EBAY = {"marketplace": "ebay", "native": True, "known": True, "category_id": "11
 
 
 class FillableRowsTest(unittest.TestCase):
+    def test_category_pass_uses_leaves_and_respects_saved_and_locked_choices(self):
+        category = row("direct_category_ids.mercari", "Category", ["Women > Pants", "Women > Pants > Dress pants"],
+                       value="1", option_values={"Women > Pants": "1", "Women > Pants > Dress pants": "2"})
+        form = {"fields": [category]}
+        choices = native_field_fill.category_rows(form, {})
+        self.assertEqual(choices[0]["options"], ["Women > Pants > Dress pants"])
+        self.assertEqual(native_field_fill.category_rows(form, {"seller_fields": ["direct_category_ids.mercari"]}), [])
+        category["value"] = "2"
+        self.assertEqual(native_field_fill.category_rows(form, {}), [])
+
     def test_only_empty_item_choices_the_seller_has_not_set(self):
         listing = {"seller_fields": ["depop_specifics.attributes.bottom-style"]}
         paths = [r["path"] for r in fillable_rows(DEPOP, "depop", listing)]
@@ -103,6 +113,48 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         saved = self.repo.get_current(self.conv.id)
         return self.repo.get_revision(saved.current_revision_id)
 
+    async def test_an_earlier_guess_is_cleared_and_form_defaults_cannot_restore_it(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "12", "fields": [row("mercari_specifics.material", "Material", ["Cotton", "Wool"],
+            value="Wool", required=True, category_specific=True)]}
+        listing = {"title": "Pants", "direct_category_ids": {"mercari": "12"},
+                   "mercari_specifics": {"material": "Wool"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"mercari": form}, ["mercari"])
+        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        reply = json.dumps({"fields": {"mercari_specifics.material": {"value": "Wool", "evidence": "100% wool"}}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"mercari": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag reads 100% cotton.")
+        self.assertEqual(updated["mercari_specifics"]["material"], "")
+        self.assertTrue(any(item["field"] == "mercari_specifics.material" for item in native_contract.gaps(updated, "mercari")))
+
+    async def test_parent_selection_reloads_choices_before_filling_the_dependent_size(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "12", "fields": [
+            row("ebay_specifics.Size Type", "Size Type", ["Regular", "Petites"], value="Regular"),
+            row("ebay_specifics.Size", "Size", ["S", "M"], required=True, value_constraints={
+                "S": [{"parentName": "Size Type", "parentValues": ["Regular"]}],
+                "M": [{"parentName": "Size Type", "parentValues": ["Petites"]}],
+            }),
+        ]}
+        listing = {"title": "Pants", "ebay_specifics": {"Size Type": "Regular"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        replies = [json.dumps({"fields": {"ebay_specifics.Size Type": {"value": "Petites", "evidence": "Petites"}}}),
+                   json.dumps({"fields": {"ebay_specifics.Size Type": {"value": "Petites", "evidence": "Petites"},
+                                          "ebay_specifics.Size": {"value": "M", "evidence": "size M"}}})]
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)) as ask:
+            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag: Petites, size M.")
+        self.assertEqual(updated["ebay_specifics"]["Size"], "M")
+        self.assertEqual(ask.await_count, 2)
+        first_prompt = ask.call_args_list[0].args[1][1]["content"]
+        second_prompt = ask.call_args_list[1].args[1][1]["content"]
+        self.assertIn("Size | pick one | choices: S", first_prompt)
+        self.assertIn("Size | pick one | choices: M", second_prompt)
+
     async def test_saves_valid_picks_and_reports_them(self):
         reply = json.dumps({"fields": {"depop_specifics.attributes.bottom-fit": ["Ripped", "Torn"], "ebay_specifics.Rise": "High"}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": DEPOP, "ebay": EBAY})), \
@@ -118,6 +170,26 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current.listing_json["ebay_specifics"]["Rise"], "High")
         messages = [m.text for m in ConversationRepo(self.db).get_messages(self.conv.id)]
         self.assertTrue(any("Depop: Type: Ripped" in text and "eBay: Rise: High" in text for text in messages))
+
+    async def test_category_is_saved_before_its_dependent_fields_are_loaded(self):
+        form = {"marketplace": "mercari", "fields": [
+            row("direct_category_ids.mercari", "Category", ["Women > Pants > Dress pants"],
+                option_values={"Women > Pants > Dress pants": "12"}, required=True),
+        ]}
+
+        async def forms(*_args):
+            listing = self._current().listing_json
+            if (listing.get("direct_category_ids") or {}).get("mercari") == "12":
+                return {"mercari": {"fields": [row("mercari_specifics.nativeSizeId", "Size", ["4"])]}}
+            return {"mercari": form}
+
+        replies = [json.dumps({"fields": {"direct_category_ids.mercari": "Women > Pants > Dress pants"}}),
+                   json.dumps({"fields": {"mercari_specifics.nativeSizeId": "4"}})]
+        with patch.object(native_field_fill, "load_forms", forms), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)):
+            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Women's dress pants, size 4")
+        self.assertEqual(updated["direct_category_ids"]["mercari"], "12")
+        self.assertEqual(updated["mercari_specifics"]["nativeSizeId"], "4")
 
     async def test_nothing_is_saved_without_a_form_or_a_valid_pick(self):
         before = self._current().id
