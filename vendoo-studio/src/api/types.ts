@@ -585,6 +585,12 @@ export interface MarketplaceFormField {
   on_form?: boolean;
   /** Choice label → the heading the marketplace lists it under (Mercari's size groups). */
   option_groups?: Record<string, string>;
+  /**
+   * A stored value the picker cannot show → the choice it stands for. Mercari
+   * lists "S (4-6)" where a tag says just "S", so a saved "S" reads as that
+   * size and saving the row unchanged sends Mercari's own id.
+   */
+  option_aliases?: Record<string, string>;
   /** The button the marketplace's page hides this field behind ("Show more", "See title options"). */
   reveal?: string;
   /** A photos row: the page's caption under each photo slot, in order (Depop: Cover photo, Front, …). */

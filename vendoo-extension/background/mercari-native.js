@@ -357,6 +357,25 @@ function mercariPickGroup(found, fit) {
   return best ? ranked.filter(row => row.rank === best).map(row => row.entry) : [];
 }
 
+// What the Mercari Size row shows: the size the listing will send. A letter the
+// picker cannot hold (a tag reading "S" beside Mercari's "S (4-6)") is stored
+// as that size, so the row agrees with List instead of showing a value that
+// fails when pressed.
+function mercariSizeValue(size) {
+  return size?.id ?? '';
+}
+
+// The text the row used to hold, and the choice it stands for. The row shows
+// "S (4-6)" for a tag that said "S", and leaving it untouched still saves the
+// size Mercari can use. Text that is not the item's own size is no alias, so it
+// cannot turn an untouched row into a different size.
+function mercariSizeAlias(listing, size) {
+  const stored = String(listing?.mercari_specifics?.nativeSizeId ?? '').trim();
+  if (!size?.id || !stored || stored === String(size.id)) return {};
+  if (stored.toLowerCase() !== mercariWantedSize(listing).toLowerCase()) return {};
+  return { [stored]: String(size.id) };
+}
+
 // Mercari's size id: the seller's label among the category's own sizes first
 // (Studio sends them as form.sizes, in
 // Mercari's order), its numbers before its letters. The same label in several
@@ -365,15 +384,39 @@ function mercariPickGroup(found, fit) {
 function mercariSize(listing, categoryId) {
   const sizes = listing.form?.sizes;
   if (!Array.isArray(sizes) || !sizes.length) return { none: !Array.isArray(sizes) ? 'unknown' : 'none' };
-  if (Object.hasOwn(listing.mercari_specifics || {}, 'nativeSizeId')) {
-    const id = Number(listing.mercari_specifics.nativeSizeId);
-    return sizes.some(size => Number(size.id) === id) ? { id } : { problem: 'a size Mercari offers in this category' };
-  }
+  // A size picked from this list is exact. Any other stored text is stale: a
+  // letter where Mercari stores a number (a tag reading "S" beside its
+  // "S (4-6)"), or a size left over from another category. It counts only when
+  // it is the item's own size, so the list resolves that label; anything else
+  // is a problem, never a silent substitution.
+  const specifics = listing.mercari_specifics || {};
   const wanted = mercariWantedSize(listing);
+  const stored = String(specifics.nativeSizeId ?? '').trim();
+  const picked = mercariPickedSize(specifics);
+  if (picked != null) {
+    if (sizes.some(size => Number(size.id) === picked)) return { id: picked };
+    return { problem: 'a size Mercari offers in this category' };
+  }
+  const stale = Object.hasOwn(specifics, 'nativeSizeId');
+  if (stale && (!wanted || stored.toLowerCase() !== wanted.toLowerCase())) {
+    return { problem: 'a size Mercari offers in this category' };
+  }
   if (!wanted) {
     const coded = Number(listing.form?.aspects?.[`${categoryId}_Size`]);
     return coded && sizes.some(size => Number(size.id) === coded) ? { id: coded } : { problem: 'a size' };
   }
+  return mercariSizeFromLabel(listing, sizes, wanted);
+}
+
+// Mercari's picked size id. A cleared size keeps the key with no value, and
+// that is no pick at all.
+function mercariPickedSize(specifics) {
+  const text = String(specifics?.nativeSizeId ?? '').trim();
+  return /^\d{1,9}$/.test(text) ? Number(text) : null;
+}
+
+// The category's own size for the seller's label.
+function mercariSizeFromLabel(listing, sizes, wanted) {
   const entries = sizes.map(size => ({ size, keys: sizeEntryKeys([size.name, size.title]) }));
   const numbered = mercariNumberedSizes(wanted, sizes);
   const found = numbered.length ? entries.filter(entry => numbered.includes(entry.size)) : matchSize(wanted, entries);
@@ -433,6 +476,11 @@ function mercariCommon(listing) {
   if (categoryId != null) {
     const size = mercariSize(listing, categoryId);
     if (size.id) common.sizeId = size.id;
+  } else {
+    // Without a category there is no size list to read, so a stored id is the
+    // only size this item has.
+    const held = Number(listing.mercari_specifics?.nativeSizeId);
+    if (Number.isInteger(held) && held > 0) common.sizeId = held;
   }
   const zip = mercariShipsFrom(listing);
   const weight = mercariWeightOz(listing);

@@ -368,6 +368,23 @@ test('Mercari form and request share category-specific native size and condition
   assert.ok(call(c, 'mercariSize', listing, 1).problem);
 });
 
+test('Mercari Size row shows a size the picker can hold, and an untouched row saves it', () => {
+  const c = loadWorker();
+  const master = { itemCategories: [{ id: 1, name: 'Tees', parentId: 0, itemSizeGroupId: 1 }],
+    itemSizeGroups: [{ id: 1, sizeIds: [1, 2], subGroupIds: [] }], itemSizeSubGroups: [],
+    itemSizes: [{ id: 1, title: 'S' }, { id: 2, title: 'M' }], itemBrands: [] };
+  const listing = { title: 'Tee', size: 'S', direct_category_ids: { mercari: '1' },
+    mercari_specifics: { size: 'S', nativeSizeId: 'S' }, form: {} };
+  const size = () => clean(call(c, 'mercariEditorForm', listing, master)).fields.find(row => row.label === 'Size');
+  // The stored letter is not a choice, so the row shows the size it stands for.
+  assert.equal(size().value, 1);
+  assert.deepEqual(size().option_aliases, { S: '1' });
+  // A stored id that is not the item's size neither shows nor aliases.
+  listing.mercari_specifics.nativeSizeId = '2';
+  assert.equal(size().value, 2);
+  assert.equal(size().option_aliases, undefined);
+});
+
 test('form reader makes no marketplace writes and reports catalog failures', async () => {
   const c = loadWorker();
   const sent = [];
