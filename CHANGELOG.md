@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.532 — 2026-10-29
+
+- Regeneration keeps your saved choices, including deliberately cleared fields, and preserves marketplace field names while preparing the draft.
+- Generation records model-call timing and reported token usage, with cost estimates clearly labelled. Repairs use provider-supported structured responses, and live quality checks save only isolated local drafts.
+
 ## 0.1.531 — 2026-10-29
 
 - Prepare Sellwild listings with Chrome closed: sign in inside Anteroom to load your shipping address, discounts, and default package, then reload those choices after signing in.

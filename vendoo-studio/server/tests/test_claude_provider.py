@@ -368,3 +368,25 @@ class ClaudeModelSettingsTest(unittest.TestCase):
         claude_auth.forget_status()
         self.assertEqual(body["provider"], "claude")
         self.assertEqual(body["photo_provider"], "chatgpt")
+
+
+class StructuredClaudeTest(unittest.TestCase):
+    def test_uses_sdk_structured_output_and_captures_estimated_usage(self):
+        from vendoo_studio.services import model_usage
+        from vendoo_studio.services.listing_generate import collect_provider_text
+
+        schema = {"type": "object", "properties": {"patches": {"type": "array", "items": {"type": "string"}}},
+                  "required": ["patches"], "additionalProperties": False}
+        result = _result("This narration must not become the JSON result")
+        result.structured_output = {"patches": []}
+        result.usage = {"input_tokens": 5, "cache_read_input_tokens": 10, "output_tokens": 4}
+        result.total_cost_usd = 0.001
+        captured = {}
+        with patch("vendoo_studio.services.claude_auth.claude_cli_path", return_value="/fake/claude"), \
+             patch("vendoo_studio.providers.claude_sessions._connect", new=_fake_query(
+                 [_text_delta("narration"), result], captured)), model_usage.capture() as calls:
+            text = asyncio.run(collect_provider_text(ClaudeProvider(), [{"role": "user", "content": "JSON"}], output_schema=schema))
+        self.assertEqual(json.loads(text), {"patches": []})
+        self.assertEqual(captured["options"].output_format, {"type": "json_schema", "schema": schema})
+        self.assertEqual(calls[0]["input_tokens"], 15)
+        self.assertEqual(calls[0]["cost_source"], "sdk_estimate")

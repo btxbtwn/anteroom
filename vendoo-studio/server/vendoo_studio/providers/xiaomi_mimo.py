@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from vendoo_studio.services import model_usage
+
 import asyncio
 import base64
 import functools
@@ -273,46 +275,48 @@ class MiMoProvider:
         listing_rules: str = "",
         max_side: int | None = VISION_MAX_SIDE,
     ) -> dict:
-        messages = [
-            {
-                "role": "system",
-                "content": PHOTO_ANALYSIS_SYSTEM,
-            },
-        ]
+        with model_usage.observe(self.name, self.vision_model) as call:
+            messages = [
+                {
+                    "role": "system",
+                    "content": PHOTO_ANALYSIS_SYSTEM,
+                },
+            ]
 
-        if notes:
-            messages[0]["content"] += f"\n\nUser notes: {notes}"
+            if notes:
+                messages[0]["content"] += f"\n\nUser notes: {notes}"
 
-        if listing_rules:
-            messages[0]["content"] += f"\n\nAdditional rules:\n{listing_rules}"
+            if listing_rules:
+                messages[0]["content"] += f"\n\nAdditional rules:\n{listing_rules}"
 
-        content_parts = [{"type": "text", "text": "Analyze these product photos:"}]
-        for url in await encode_images(photo_paths, max_side):
-            content_parts.append({
-                "type": "image_url",
-                "image_url": {"url": url},
-            })
+            content_parts = [{"type": "text", "text": "Analyze these product photos:"}]
+            for url in await encode_images(photo_paths, max_side):
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": url},
+                })
 
-        messages.append({"role": "user", "content": content_parts})
+            messages.append({"role": "user", "content": content_parts})
 
-        try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=self._headers(),
-                    json={
-                        "model": "mimo-v2.5",
-                        "messages": messages,
-                        "max_tokens": 4096,
-                        "temperature": 0.3,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"]
-                return self._parse_json_response(content)
-        except Exception as e:
-            return {"error": str(e), "evidence": {}}
+            try:
+                async with httpx.AsyncClient(timeout=120) as client:
+                    resp = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=self._headers(),
+                        json={
+                            "model": "mimo-v2.5",
+                            "messages": messages,
+                            "max_tokens": 4096,
+                            "temperature": 0.3,
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    call.usage(data.get("usage"))
+                    content = data["choices"][0]["message"]["content"]
+                    return self._parse_json_response(content)
+            except Exception as e:
+                return {"error": str(e), "evidence": {}}
 
     async def chat(
         self,
@@ -347,105 +351,112 @@ class MiMoProvider:
 
     async def quick_chat(self, messages: list[dict]):
         """Mechanical rewrites (JSON repair): thinking off so temperature applies and replies come fast."""
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json={
-                    "model": self.listing_model,
-                    "messages": messages,
-                    "max_tokens": 8192,
-                    "temperature": 0.2,
-                    "thinking": {"type": "disabled"},
-                },
-            )
-            if resp.status_code >= 400:
-                raise RuntimeError(f"MiMo HTTP {resp.status_code}: {resp.text[:500]}")
-            text = chunk_text(resp.json())
-            if not text:
-                raise RuntimeError("MiMo returned an empty repair response")
-            yield text
+        with model_usage.observe(self.name, self.listing_model) as call:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json={
+                        "model": self.listing_model,
+                        "messages": messages,
+                        "max_tokens": 8192,
+                        "temperature": 0.2,
+                        "thinking": {"type": "disabled"},
+                    },
+                )
+                if resp.status_code >= 400:
+                    raise RuntimeError(f"MiMo HTTP {resp.status_code}: {resp.text[:500]}")
+                payload = resp.json()
+                call.usage(payload.get("usage"))
+                text = chunk_text(payload)
+                if not text:
+                    raise RuntimeError("MiMo returned an empty repair response")
+                yield text
 
     async def _stream_chat(self, messages: list[dict]):
-        async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json={
-                    "model": "mimo-v2.5-pro",
-                    "messages": messages,
-                    "max_tokens": 8192,
-                    "temperature": 0.7,
-                    "stream": True,
-                },
-            ) as resp:
-                if resp.status_code >= 400:
-                    await resp.aread()
-                    raise RuntimeError(f"MiMo HTTP {resp.status_code}: {resp.text[:500]}")
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    if line.startswith("data:"):
-                        data_str = line[5:].strip()
-                    else:
-                        data_str = line.strip()
-                    if not data_str or data_str == "[DONE]":
-                        if data_str == "[DONE]":
-                            break
-                        continue
-                    try:
-                        payload = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    thinking = chunk_thinking(payload)
-                    if thinking:
-                        yield StreamChunk(thinking, "thinking")
-                    text = chunk_text(payload)
-                    if text:
-                        yield StreamChunk(text, "content")
+        with model_usage.observe(self.name, self.listing_model) as call:
+            async with httpx.AsyncClient(timeout=300) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json={
+                        "model": "mimo-v2.5-pro",
+                        "messages": messages,
+                        "max_tokens": 8192,
+                        "temperature": 0.7,
+                        "stream": True,
+                    },
+                ) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise RuntimeError(f"MiMo HTTP {resp.status_code}: {resp.text[:500]}")
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith("data:"):
+                            data_str = line[5:].strip()
+                        else:
+                            data_str = line.strip()
+                        if not data_str or data_str == "[DONE]":
+                            if data_str == "[DONE]":
+                                break
+                            continue
+                        try:
+                            payload = json.loads(data_str)
+                            call.usage(payload.get("usage"))
+                        except json.JSONDecodeError:
+                            continue
+                        thinking = chunk_thinking(payload)
+                        if thinking:
+                            yield StreamChunk(thinking, "thinking")
+                        text = chunk_text(payload)
+                        if text:
+                            yield StreamChunk(text, "content")
 
     async def web_search(self, messages: list[dict]) -> dict:
         """Run ``messages`` with MiMo's web search tool: ``{"answer", "sources"}``."""
-        from vendoo_studio.services import live_trace
+        with model_usage.observe(self.name, self.listing_model) as call:
+            from vendoo_studio.services import live_trace
 
-        answer = ""
-        sources: list[dict] = []
-        async with httpx.AsyncClient(timeout=180) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json={
-                    "model": self.listing_model,
-                    "messages": messages,
-                    "max_tokens": 8192,
-                    "temperature": 0.2,
-                    "stream": True,
-                    "tools": [WEB_SEARCH_TOOL],
-                },
-            ) as resp:
-                if resp.status_code >= 400:
-                    await resp.aread()
-                    raise RuntimeError(_mimo_http_error(resp))
-                async for line in resp.aiter_lines():
-                    data_str = line[5:].strip() if line.startswith("data:") else line.strip()
-                    if not data_str:
-                        continue
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        payload = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    citations = chunk_citations(payload)
-                    if citations:
-                        sources.extend(citations)
-                        live_trace.emit("step", f"MiMo searched the web ({len(sources)} pages)")
-                    answer += chunk_text(payload)
-        if not answer.strip() and not sources:
-            raise RuntimeError("MiMo web search returned no results")
-        return {"answer": answer.strip(), "sources": sources}
+            answer = ""
+            sources: list[dict] = []
+            async with httpx.AsyncClient(timeout=180) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json={
+                        "model": self.listing_model,
+                        "messages": messages,
+                        "max_tokens": 8192,
+                        "temperature": 0.2,
+                        "stream": True,
+                        "tools": [WEB_SEARCH_TOOL],
+                    },
+                ) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise RuntimeError(_mimo_http_error(resp))
+                    async for line in resp.aiter_lines():
+                        data_str = line[5:].strip() if line.startswith("data:") else line.strip()
+                        if not data_str:
+                            continue
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            payload = json.loads(data_str)
+                            call.usage(payload.get("usage"))
+                        except json.JSONDecodeError:
+                            continue
+                        citations = chunk_citations(payload)
+                        if citations:
+                            sources.extend(citations)
+                            live_trace.emit("step", f"MiMo searched the web ({len(sources)} pages)")
+                        answer += chunk_text(payload)
+            if not answer.strip() and not sources:
+                raise RuntimeError("MiMo web search returned no results")
+            return {"answer": answer.strip(), "sources": sources}
 
     async def vision_chat(self, messages: list[dict]):
         """Chat whose user turns carry photos; the pro listing model is text-only."""
@@ -453,24 +464,26 @@ class MiMoProvider:
             yield content
 
     async def _complete_chat(self, messages: list[dict], model: str = "mimo-v2.5-pro"):
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "max_tokens": 8192,
-                    "temperature": 0.7,
-                },
-            )
-            if resp.status_code >= 400:
-                raise RuntimeError(f"MiMo HTTP {resp.status_code}: {resp.text[:500]}")
-            data = resp.json()
-            text = chunk_text(data)
-            if not text:
-                raise RuntimeError("MiMo returned an empty listing response")
-            yield text
+        with model_usage.observe(self.name, model) as call:
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "max_tokens": 8192,
+                        "temperature": 0.7,
+                    },
+                )
+                if resp.status_code >= 400:
+                    raise RuntimeError(f"MiMo HTTP {resp.status_code}: {resp.text[:500]}")
+                data = resp.json()
+                call.usage(data.get("usage"))
+                text = chunk_text(data)
+                if not text:
+                    raise RuntimeError("MiMo returned an empty listing response")
+                yield text
 
     def _parse_json_response(self, content: str) -> dict:
         import re

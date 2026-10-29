@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from vendoo_studio.services import model_usage
+
 from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
 
 import asyncio
@@ -529,175 +531,176 @@ class CursorProvider:
         preamble: str = TEXT_ONLY_PREAMBLE,
         lowest: bool = False,
     ):
-        from cursor_sdk import CursorAgentError, UserMessage
+        with model_usage.observe(self.name, model or self.listing_model) as _call:
+            from cursor_sdk import CursorAgentError, UserMessage
 
-        selected = (model or self.listing_model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-        prompt, images = _flatten_messages(messages, preamble)
-        if not prompt:
-            prompt = preamble
-        scratch = str(listing_scratch_dir())
-        message = UserMessage(text=prompt, images=images or None)
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[object] = asyncio.Queue()
+            selected = (model or self.listing_model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+            prompt, images = _flatten_messages(messages, preamble)
+            if not prompt:
+                prompt = preamble
+            scratch = str(listing_scratch_dir())
+            message = UserMessage(text=prompt, images=images or None)
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue[object] = asyncio.Queue()
 
-        def _emit(item: object) -> None:
-            # A worker left behind may outlive the loop it reports to.
-            with contextlib.suppress(RuntimeError):
-                loop.call_soon_threadsafe(queue.put_nowait, item)
+            def _emit(item: object) -> None:
+                # A worker left behind may outlive the loop it reports to.
+                with contextlib.suppress(RuntimeError):
+                    loop.call_soon_threadsafe(queue.put_nowait, item)
 
-        handles: dict[str, object] = {}
+            handles: dict[str, object] = {}
 
-        def _worker() -> None:
-            client = None
-            try:
-                client = _acquire_bridge(scratch)
-                handles["client"] = client
-                if lowest:
-                    with _bridge_pool_lock:
-                        known = selected in _reasoning_floor
-                    if not known:
-                        try:
-                            remember_reasoning_floor(client.list_models(api_key=self.api_key))
-                        except Exception:
-                            log.warning("Cursor model catalog unavailable for a quick reply", exc_info=True)
-                            with _bridge_pool_lock:
-                                _reasoning_floor.setdefault(selected, None)
-                with client.agents.create(
-                    {"tools": list(tools or ())},
-                    model=model_selection(selected, lowest=lowest),
-                    api_key=self.api_key,
-                    local=_bridge_local(client, scratch),
-                ) as agent:
-                    status_notes: list[str] = []
-
-                    def drain(run, *, stop_after_tools: int | None = None) -> bool:
-                        """Relay thinking and (when streaming) text; True if text went out.
-
-                        Always reads the stream: a failed run's result
-                        carries only its id, and the reason arrives as
-                        a status message.
-                        """
-                        yielded = False
-                        tool_calls = 0
-                        for sdk_message in run.stream():
-                            kind = getattr(sdk_message, "type", "")
-                            if kind == "status":
-                                note = str(getattr(sdk_message, "message", "") or "").strip()
-                                if note:
-                                    status_notes.append(note)
-                            elif kind == "tool_call" and stop_after_tools:
-                                if getattr(sdk_message, "status", "") in {"completed", "error"}:
-                                    tool_calls += 1
-                                    if tool_calls >= stop_after_tools and not wrapped.is_set():
-                                        wrapped.set()
-                                        with contextlib.suppress(Exception):
-                                            run.cancel()
-                            elif kind == "thinking" and on_thinking is not None:
-                                _emit(_Thinking(
-                                    text=str(getattr(sdk_message, "text", "") or ""),
-                                    finished=getattr(sdk_message, "thinking_duration_ms", None) is not None,
-                                ))
-                            elif kind == "assistant" and stream:
-                                content = getattr(getattr(sdk_message, "message", None), "content", ())
-                                for block in content:
-                                    chunk = getattr(block, "text", "")
-                                    if chunk:
-                                        yielded = True
-                                        _emit(chunk)
-                        return yielded
-
-                    run = agent.send(message)
-                    handles["run"] = run
-                    wrapped = threading.Event()
-                    timer = None
-                    if wrap_up is not None:
-                        def _stop_searching() -> None:
-                            wrapped.set()
-                            with contextlib.suppress(Exception):
-                                run.cancel()
-
-                        timer = threading.Timer(wrap_up[0], _stop_searching)
-                        timer.daemon = True
-                        timer.start()
-                    try:
-                        yielded = drain(
-                            run,
-                            stop_after_tools=WEB_SEARCH_MAX_CALLS if wrap_up is not None else None,
-                        )
-                        result = run.wait()
-                    finally:
-                        if timer is not None:
-                            timer.cancel()
-                    if wrap_up is not None and wrapped.is_set() and result.status == "cancelled":
-                        run = agent.send(UserMessage(text=wrap_up[1]))
-                        handles["run"] = run
-                        yielded = drain(run)
-                        result = run.wait()
-                    if result.status == "error":
-                        reason = status_notes[-1] if status_notes else (result.result or "").strip()
-                        if reason:
-                            raise RuntimeError(f"Cursor run failed: {reason[:300]}")
-                        raise RuntimeError(f"Cursor run failed: {result.id}")
-                    if stream:
-                        if not yielded and result.result:
-                            _emit(result.result)
-                        return
-                    text = (result.result or "").strip()
-                    if not text:
-                        raise RuntimeError("Cursor returned an empty listing response")
-                    _emit(text)
-            except CursorAgentError as exc:
-                handles["discard"] = True
-                _emit(RuntimeError(f"Cursor agent error: {exc}"))
-            except Exception as exc:
-                handles["discard"] = True
-                _emit(exc)
-            finally:
-                if client is not None:
-                    _settle_bridge(client, handles)
-                _emit(_STREAM_DONE)
-
-        def _abort() -> None:
-            # Cancelling the run and closing its bridge ends the worker's
-            # blocking wait. The bridge is not reused: close is what unblocks it.
-            _abort_bridge(handles)
-
-        worker_done = threading.Event()
-
-        def _worker_thread() -> None:
-            try:
-                _worker()
-            finally:
-                worker_done.set()
-
-        # A daemon thread, not the shared executor: a worker the SDK never frees
-        # must not take an executor slot or hold up quitting the app.
-        threading.Thread(target=_worker_thread, name="cursor-run", daemon=True).start()
-        finished = False
-        try:
-            while True:
+            def _worker() -> None:
+                client = None
                 try:
-                    item = await asyncio.wait_for(queue.get(), timeout=IDLE_TIMEOUT_SEC)
-                except TimeoutError:
-                    raise RuntimeError(
-                        f"Cursor stopped responding for {int(IDLE_TIMEOUT_SEC // 60)} minutes. Retry."
-                    ) from None
-                if item is _STREAM_DONE:
-                    finished = True
-                    break
-                if isinstance(item, BaseException):
-                    finished = True
-                    raise item
-                if isinstance(item, _Thinking):
-                    if on_thinking is not None:
-                        on_thinking(item)
-                    continue
-                yield item  # type: ignore[misc]
-        finally:
-            if not finished:
-                threading.Thread(target=_abort, name="cursor-abort", daemon=True).start()
-            if not await asyncio.to_thread(worker_done.wait, WORKER_EXIT_GRACE_SEC):
-                log.warning("Cursor run did not stop after %.0fs; leaving its worker behind", WORKER_EXIT_GRACE_SEC)
+                    client = _acquire_bridge(scratch)
+                    handles["client"] = client
+                    if lowest:
+                        with _bridge_pool_lock:
+                            known = selected in _reasoning_floor
+                        if not known:
+                            try:
+                                remember_reasoning_floor(client.list_models(api_key=self.api_key))
+                            except Exception:
+                                log.warning("Cursor model catalog unavailable for a quick reply", exc_info=True)
+                                with _bridge_pool_lock:
+                                    _reasoning_floor.setdefault(selected, None)
+                    with client.agents.create(
+                        {"tools": list(tools or ())},
+                        model=model_selection(selected, lowest=lowest),
+                        api_key=self.api_key,
+                        local=_bridge_local(client, scratch),
+                    ) as agent:
+                        status_notes: list[str] = []
+
+                        def drain(run, *, stop_after_tools: int | None = None) -> bool:
+                            """Relay thinking and (when streaming) text; True if text went out.
+
+                            Always reads the stream: a failed run's result
+                            carries only its id, and the reason arrives as
+                            a status message.
+                            """
+                            yielded = False
+                            tool_calls = 0
+                            for sdk_message in run.stream():
+                                kind = getattr(sdk_message, "type", "")
+                                if kind == "status":
+                                    note = str(getattr(sdk_message, "message", "") or "").strip()
+                                    if note:
+                                        status_notes.append(note)
+                                elif kind == "tool_call" and stop_after_tools:
+                                    if getattr(sdk_message, "status", "") in {"completed", "error"}:
+                                        tool_calls += 1
+                                        if tool_calls >= stop_after_tools and not wrapped.is_set():
+                                            wrapped.set()
+                                            with contextlib.suppress(Exception):
+                                                run.cancel()
+                                elif kind == "thinking" and on_thinking is not None:
+                                    _emit(_Thinking(
+                                        text=str(getattr(sdk_message, "text", "") or ""),
+                                        finished=getattr(sdk_message, "thinking_duration_ms", None) is not None,
+                                    ))
+                                elif kind == "assistant" and stream:
+                                    content = getattr(getattr(sdk_message, "message", None), "content", ())
+                                    for block in content:
+                                        chunk = getattr(block, "text", "")
+                                        if chunk:
+                                            yielded = True
+                                            _emit(chunk)
+                            return yielded
+
+                        run = agent.send(message)
+                        handles["run"] = run
+                        wrapped = threading.Event()
+                        timer = None
+                        if wrap_up is not None:
+                            def _stop_searching() -> None:
+                                wrapped.set()
+                                with contextlib.suppress(Exception):
+                                    run.cancel()
+
+                            timer = threading.Timer(wrap_up[0], _stop_searching)
+                            timer.daemon = True
+                            timer.start()
+                        try:
+                            yielded = drain(
+                                run,
+                                stop_after_tools=WEB_SEARCH_MAX_CALLS if wrap_up is not None else None,
+                            )
+                            result = run.wait()
+                        finally:
+                            if timer is not None:
+                                timer.cancel()
+                        if wrap_up is not None and wrapped.is_set() and result.status == "cancelled":
+                            run = agent.send(UserMessage(text=wrap_up[1]))
+                            handles["run"] = run
+                            yielded = drain(run)
+                            result = run.wait()
+                        if result.status == "error":
+                            reason = status_notes[-1] if status_notes else (result.result or "").strip()
+                            if reason:
+                                raise RuntimeError(f"Cursor run failed: {reason[:300]}")
+                            raise RuntimeError(f"Cursor run failed: {result.id}")
+                        if stream:
+                            if not yielded and result.result:
+                                _emit(result.result)
+                            return
+                        text = (result.result or "").strip()
+                        if not text:
+                            raise RuntimeError("Cursor returned an empty listing response")
+                        _emit(text)
+                except CursorAgentError as exc:
+                    handles["discard"] = True
+                    _emit(RuntimeError(f"Cursor agent error: {exc}"))
+                except Exception as exc:
+                    handles["discard"] = True
+                    _emit(exc)
+                finally:
+                    if client is not None:
+                        _settle_bridge(client, handles)
+                    _emit(_STREAM_DONE)
+
+            def _abort() -> None:
+                # Cancelling the run and closing its bridge ends the worker's
+                # blocking wait. The bridge is not reused: close is what unblocks it.
+                _abort_bridge(handles)
+
+            worker_done = threading.Event()
+
+            def _worker_thread() -> None:
+                try:
+                    _worker()
+                finally:
+                    worker_done.set()
+
+            # A daemon thread, not the shared executor: a worker the SDK never frees
+            # must not take an executor slot or hold up quitting the app.
+            threading.Thread(target=_worker_thread, name="cursor-run", daemon=True).start()
+            finished = False
+            try:
+                while True:
+                    try:
+                        item = await asyncio.wait_for(queue.get(), timeout=IDLE_TIMEOUT_SEC)
+                    except TimeoutError:
+                        raise RuntimeError(
+                            f"Cursor stopped responding for {int(IDLE_TIMEOUT_SEC // 60)} minutes. Retry."
+                        ) from None
+                    if item is _STREAM_DONE:
+                        finished = True
+                        break
+                    if isinstance(item, BaseException):
+                        finished = True
+                        raise item
+                    if isinstance(item, _Thinking):
+                        if on_thinking is not None:
+                            on_thinking(item)
+                        continue
+                    yield item  # type: ignore[misc]
+            finally:
+                if not finished:
+                    threading.Thread(target=_abort, name="cursor-abort", daemon=True).start()
+                if not await asyncio.to_thread(worker_done.wait, WORKER_EXIT_GRACE_SEC):
+                    log.warning("Cursor run did not stop after %.0fs; leaving its worker behind", WORKER_EXIT_GRACE_SEC)
 
     def _parse_json_response(self, content: str) -> dict:
         try:

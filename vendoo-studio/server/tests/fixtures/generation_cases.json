@@ -7,6 +7,9 @@
       "size": "M",
       "primaryColor": "Blue",
       "ebay_specifics.material": "Cotton"
+    },
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops"
     }
   },
   {
@@ -20,16 +23,26 @@
     "description_contains": [
       "20 inches",
       "Small hole on left cuff"
-    ]
+    ],
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops"
+    },
+    "item_details": {
+      "knownFlaws": "Small hole on left cuff",
+      "descriptionMeasurements": "Pit to pit: 20 inches"
+    }
   },
   {
     "id": "unreadable_tags",
-    "evidence": "Brand, size, and material tags unreadable.",
+    "evidence": "Blue plain crewneck short-sleeve tee with a regular fit. Brand, size, and material tags unreadable.",
     "unsupported_fields": [
       "brand",
       "size",
       "ebay_specifics.material"
-    ]
+    ],
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops"
+    }
   },
   {
     "id": "mens_bottoms",
@@ -37,6 +50,9 @@
     "expected_fields": {
       "size": "34",
       "ebay_specifics.inseam": "32"
+    },
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Jeans"
     }
   },
   {
@@ -50,6 +66,36 @@
         "Solid",
         "Floral"
       ]
+    },
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops"
+    },
+    "native_forms": {
+      "ebay": {
+        "marketplace": "ebay",
+        "known": true,
+        "native": true,
+        "category_id": "pattern-fixture",
+        "fields": [
+          {
+            "path": "ebay_specifics.Pattern",
+            "key": "ebay_specifics.Pattern",
+            "label": "Pattern",
+            "required": true,
+            "selection_only": true,
+            "input_type": "select",
+            "options": [
+              "Solid",
+              "Floral"
+            ],
+            "option_values": {
+              "Solid": "Solid",
+              "Floral": "Floral"
+            },
+            "category_specific": true
+          }
+        ]
+      }
     }
   },
   {
@@ -58,6 +104,15 @@
     "seller_notes": "Leave Depop style empty.",
     "expected_fields": {
       "depop_specifics.style": []
+    },
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
+      "depop_specifics": {
+        "style": []
+      },
+      "seller_fields": [
+        "depop_specifics.style"
+      ]
     }
   },
   {
@@ -69,7 +124,14 @@
     },
     "description_contains": [
       "Measurements:"
-    ]
+    ],
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
+      "price": 29,
+      "seller_fields": [
+        "price"
+      ]
+    }
   },
   {
     "id": "marketplace_category",
@@ -77,6 +139,13 @@
     "expected_fields": {
       "direct_category_ids.ebay": "ebay-blouse",
       "direct_category_ids.poshmark": "poshmark-blouse"
+    },
+    "seed_listing": {
+      "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
+      "direct_category_ids": {
+        "ebay": "ebay-blouse",
+        "poshmark": "poshmark-blouse"
+      }
     }
   }
 ]

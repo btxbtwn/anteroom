@@ -1398,6 +1398,31 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
             [streaming.sse_event("status", "Identifying category…")],
         )
 
+    async def test_generation_persists_reported_model_usage(self):
+        from vendoo_studio.services import model_usage
+        from vendoo_studio.services.generation_timing import for_conversation
+        from vendoo_studio.database import SessionLocal as AppSession
+
+        original = self.provider.chat
+        async def measured(messages, stream=True):
+            with model_usage.observe("fixture", "fixture") as call:
+                call.usage({"input_tokens": 100, "output_tokens": 10})
+                async for chunk in original(messages, stream=stream):
+                    yield chunk
+        self.provider.chat = measured
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client:
+            response = await client.post(f"/api/conversations/{self.conv_id}/generate")
+        self.assertEqual(response.status_code, 200)
+        db = AppSession()
+        try:
+            [timing] = for_conversation(db, self.conv_id)
+            self.assertTrue(timing["calls"])
+            self.assertEqual(timing["calls"][0]["input_tokens"], 100)
+            self.assertEqual(timing["calls"][0]["output_tokens"], 10)
+            self.assertIsNone(timing["calls"][0]["cost_usd"])
+        finally:
+            db.close()
+
     async def test_generate_stream_forwards_thinking_without_persisting(self):
         self.provider.chunks = [
             StreamChunk("looking at the photos", "thinking"),

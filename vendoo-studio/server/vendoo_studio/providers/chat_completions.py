@@ -9,6 +9,8 @@ own models.
 
 from __future__ import annotations
 
+from vendoo_studio.services import model_usage
+
 import json
 import re
 from dataclasses import dataclass
@@ -237,6 +239,18 @@ class ChatCompletionsProvider:
         except Exception as exc:
             raise RuntimeError(f"{first} Retrying with reasoning off failed: {exc}") from exc
 
+    async def structured_chat(self, messages: list[dict], schema: dict):
+        payload = await self._post(self._body(messages, self.listing_model,
+            response_format={"type": "json_schema", "json_schema": {
+                "name": "listing_result", "strict": True, "schema": schema,
+            }}))
+        if finish_reason(payload) in {"length", "content_filter"}:
+            raise RuntimeError(f"{self.spec.label} did not complete the structured response")
+        text = chunk_text(payload)
+        if not text:
+            raise EmptyCompletionError(self.spec.label, self.listing_model, finish_reason(payload))
+        yield text
+
     async def vision_chat(self, messages: list[dict]):
         yield await self._complete(messages, self.vision_model)
 
@@ -254,11 +268,14 @@ class ChatCompletionsProvider:
         return body
 
     async def _post(self, body: dict, timeout: float = 300) -> dict:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(f"{self.base_url}/chat/completions", headers=self._headers(), json=body)
-        if resp.status_code >= 400:
-            raise RuntimeError(self._http_error(resp))
-        return resp.json()
+        with model_usage.observe(self.name, str(body.get("model") or "")) as call:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(f"{self.base_url}/chat/completions", headers=self._headers(), json=body)
+            if resp.status_code >= 400:
+                raise RuntimeError(self._http_error(resp))
+            payload = resp.json()
+            call.usage(payload.get("usage"), anthropic=False)
+            return payload
 
     async def _complete(self, messages: list[dict], model: str) -> str:
         payload = await self._post(self._body(messages, model))
@@ -270,38 +287,40 @@ class ChatCompletionsProvider:
         return text
 
     async def _stream(self, messages: list[dict], model: str, *, reasoning: bool = True):
-        body = self._body(messages, model, reasoning=reasoning, stream=True)
-        async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream(
-                "POST", f"{self.base_url}/chat/completions", headers=self._headers(), json=body
-            ) as resp:
-                if resp.status_code >= 400:
-                    await resp.aread()
-                    raise RuntimeError(self._http_error(resp))
-                content_chars = 0
-                reasoning_chars = 0
-                finish = ""
-                async for line in resp.aiter_lines():
-                    data = line[5:].strip() if line.startswith("data:") else line.strip()
-                    if not data or data.startswith(":"):
-                        continue
-                    if data == "[DONE]":
-                        break
-                    try:
-                        payload = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    finish = finish_reason(payload) or finish
-                    thinking = chunk_thinking(payload)
-                    if thinking:
-                        reasoning_chars += len(thinking)
-                        yield StreamChunk(thinking, "thinking")
-                    text = chunk_text(payload)
-                    if text:
-                        content_chars += len(text.strip())
-                        yield StreamChunk(text, "content")
-                if not content_chars:
-                    raise EmptyCompletionError(self.spec.label, model, finish, reasoning_chars)
+        with model_usage.observe(self.name, model) as call:
+            body = self._body(messages, model, reasoning=reasoning, stream=True, stream_options={"include_usage": True})
+            async with httpx.AsyncClient(timeout=300) as client:
+                async with client.stream(
+                    "POST", f"{self.base_url}/chat/completions", headers=self._headers(), json=body
+                ) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise RuntimeError(self._http_error(resp))
+                    content_chars = 0
+                    reasoning_chars = 0
+                    finish = ""
+                    async for line in resp.aiter_lines():
+                        data = line[5:].strip() if line.startswith("data:") else line.strip()
+                        if not data or data.startswith(":"):
+                            continue
+                        if data == "[DONE]":
+                            break
+                        try:
+                            payload = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        call.usage(payload.get("usage"))
+                        finish = finish_reason(payload) or finish
+                        thinking = chunk_thinking(payload)
+                        if thinking:
+                            reasoning_chars += len(thinking)
+                            yield StreamChunk(thinking, "thinking")
+                        text = chunk_text(payload)
+                        if text:
+                            content_chars += len(text.strip())
+                            yield StreamChunk(text, "content")
+                    if not content_chars:
+                        raise EmptyCompletionError(self.spec.label, model, finish, reasoning_chars)
 
 
 def openrouter_sources(payload: dict) -> list[dict]:

@@ -44,3 +44,60 @@ a repair must remove validation errors without introducing new ones. Unsupported
 facts and invalid seller-owned values remain blockers. Generation timing reports
 `preparing` until marketplace fields finish, then `done`, `incomplete`, `failed`,
 or `superseded`. Cancelled streams report `cancelled`.
+
+## Live runs and request metrics
+
+Run the cases with the listing provider already connected in Anteroom:
+
+```bash
+python scripts/evaluate-generation.py --run --output-dir /path/to/new-evaluation-directory
+```
+
+The output directory must be new. The runner creates an isolated, migrated SQLite
+store there, supplies each case's curated evidence and authoritative form inputs,
+and runs the application's listing prompts, repair, and local draft-save logic.
+It writes `outputs.json`, `report.json`, and the isolated draft database. It never
+calls a Send, List, Update, or Delist route. These artifacts are private and must
+stay outside the repository. The provider's normal model/subscription usage applies.
+
+A Claude SDK query is one Anteroom model call; its reported usage can include
+several internal model turns. The report includes per-case observed latency and
+input, output,
+cache-read, cache-write and reasoning token counts when the provider reports them.
+Unknown counters and costs remain `null`. Anthropic's uncached input, cache-read
+and cache-write counts are combined into total input once; OpenAI's input already
+includes cache reads and is not added twice. `cost_source: sdk_estimate` labels
+Claude SDK estimates; `provider_reported` labels a cost returned in an API usage
+response. Subscription estimates are not charges or authoritative billing data.
+Prompts, responses, account IDs, headers, credentials and provider error text are
+never included in the request metrics.
+
+Normal generation also stores these call records with its timing row. Read them
+through the existing generation-timing API; background field completion appends
+the final call records. Existing timing rows receive an empty calls list through
+an additive Alembic migration, on both SQLite and Postgres.
+
+Scoped validation repairs use native schemas for the Responses API, Anthropic
+Messages, Claude Agent SDK and compatible Chat Completions providers. The schema
+restricts add/replace operations to the failed, unlocked paths. An API rejection
+or refusal leaves the draft unresolved; it does not retry without the schema.
+Providers without a native structured-output method retain server-validated text
+patches. These schemas cover repair responses; open-ended chat and the initial
+listing-writing response still use the normal generation contract and validation.
+
+On 2026-10-29, all eight synthetic cases passed a live run on the configured Claude
+`sonnet` provider after the input fixtures supplied their native form and verified
+category context. This is a small regression sample, not a general accuracy claim.
+A separate private smoke test read five real product photos and saved a draft in
+an isolated database, recovered an older seller instruction, preserved a price and
+deliberate clear, invalidated analysis after photo reordering, and saved fresh
+analysis. It made zero marketplace actions and opened the source inventory only
+through a read-only connection. No photos, source listings or model outputs are
+part of the checked-in evidence.
+
+References:
+
+- [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [Anthropic structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
+- [Claude SDK structured outputs](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
+- [Claude SDK cost and usage accounting](https://code.claude.com/docs/en/agent-sdk/cost-tracking)

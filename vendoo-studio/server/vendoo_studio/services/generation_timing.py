@@ -32,7 +32,7 @@ def _rounded(stages: dict[str, float]) -> dict[str, float]:
     return {stage: round(float(seconds), 2) for stage, seconds in stages.items()}
 
 
-def record_run(conv_id: str, stages: dict[str, float], *, total_sec: float, outcome: str) -> str | None:
+def record_run(conv_id: str, stages: dict[str, float], *, total_sec: float, outcome: str, calls: list[dict] | None = None) -> str | None:
     """Save one run's stream stages; returns the row id for ``add_stages``."""
     db = SessionLocal()
     try:
@@ -40,6 +40,7 @@ def record_run(conv_id: str, stages: dict[str, float], *, total_sec: float, outc
             conversation_id=conv_id,
             outcome=outcome,
             stages=_rounded(stages),
+            calls=list(calls or []),
             total_sec=round(total_sec, 2),
         )
         db.add(row)
@@ -53,7 +54,7 @@ def record_run(conv_id: str, stages: dict[str, float], *, total_sec: float, outc
         db.close()
 
 
-def add_stages(timing_id: str | None, stages: dict[str, float], *, total_sec: float, outcome: str | None = None) -> None:
+def add_stages(timing_id: str | None, stages: dict[str, float], *, total_sec: float, outcome: str | None = None, calls: list[dict] | None = None) -> None:
     """Append the stages that finished after the chat stream ended."""
     if not timing_id or not stages:
         return
@@ -65,6 +66,8 @@ def add_stages(timing_id: str | None, stages: dict[str, float], *, total_sec: fl
         row.stages = {**(row.stages or {}), **_rounded(stages)}
         if outcome is not None:
             row.outcome = outcome
+        if calls is not None:
+            row.calls = list(calls)
         row.total_sec = round(max(row.total_sec or 0.0, total_sec), 2)
         db.commit()
     except Exception:
@@ -80,6 +83,7 @@ def _as_dict(row: GenerationTiming) -> dict[str, Any]:
         "conversation_id": row.conversation_id,
         "outcome": row.outcome,
         "stages": dict(row.stages or {}),
+        "calls": list(row.calls or []),
         "total_sec": row.total_sec,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }

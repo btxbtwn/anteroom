@@ -129,9 +129,16 @@ def _adopt_legacy(engine: Engine, config: Config) -> str:
     # same additive revision used by versioned databases before verifying and
     # stamping it. Newly created tables already have ownership; the revision
     # handles that mixed schema without recreating tables or losing rows.
-    ownership = ScriptDirectory.from_config(config).get_revision("d8b6f2a19c40")
+    scripts = ScriptDirectory.from_config(config)
+    ownership = scripts.get_revision("d8b6f2a19c40")
     with engine.begin() as connection, Operations.context(MigrationContext.configure(connection)):
         ownership.module.upgrade()
+        # Adoption used to stamp head after ownership, silently skipping later
+        # revisions on pre-existing tables. Apply those revisions too, before
+        # drift verification and the final stamp. Their mixed-schema handling
+        # belongs to Alembic, never to BACKFILLED_COLUMNS.
+        for revision in reversed(list(scripts.iterate_revisions("head", ownership.revision))):
+            revision.module.upgrade()
 
     drift = inspect_database(database_path(engine))
     if not drift.clean:

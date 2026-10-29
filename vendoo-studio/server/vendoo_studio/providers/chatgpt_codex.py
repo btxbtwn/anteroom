@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from vendoo_studio.services import model_usage
+
 from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
 
 import asyncio
@@ -470,6 +472,10 @@ class ChatGPTCodexProvider:
         async for content in self._complete(messages, model=self.listing_model):
             yield content
 
+    async def structured_chat(self, messages: list[dict], schema: dict):
+        async for chunk in self._stream(messages, self.listing_model, output_schema=schema):
+            yield chunk
+
     def _payload(
         self,
         messages: list[dict],
@@ -480,6 +486,7 @@ class ChatGPTCodexProvider:
         tool_choice: str | None = None,
         include: list[str] | None = None,
         reasoning_effort: str | None = None,
+        output_schema: dict | None = None,
     ) -> dict:
         instructions, items = _messages_to_input(messages)
         effort = clamp_reasoning_effort(reasoning_effort or self.reasoning_effort, model)
@@ -502,6 +509,8 @@ class ChatGPTCodexProvider:
                 "content": [{"type": "input_text", "text": instructions}],
                 "type": "message",
             })
+        if output_schema is not None:
+            payload["text"] = {"format": {"type": "json_schema", "name": "listing_result", "strict": True, "schema": output_schema}}
         if tools:
             payload["tools"] = tools
         if tool_choice:
@@ -511,36 +520,41 @@ class ChatGPTCodexProvider:
         return payload
 
     async def _stream(self, messages: list[dict], model: str, **payload_kwargs):
-        headers = await self._headers()
-        async with _http_client() as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/responses",
-                headers=headers,
-                timeout=300,
-                json=self._payload(messages, model, True, **payload_kwargs),
-            ) as resp:
-                if resp.status_code >= 400:
-                    await resp.aread()
-                    raise RuntimeError(self._http_error(resp))
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    data_str = line[5:].strip() if line.startswith("data:") else line.strip()
-                    if not data_str or data_str == "[DONE]":
-                        if data_str == "[DONE]":
-                            break
-                        continue
-                    try:
-                        payload = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    thinking = _responses_thinking(payload)
-                    if thinking:
-                        yield StreamChunk(thinking, "thinking")
-                    text = _responses_text(payload)
-                    if text:
-                        yield StreamChunk(text, "content")
+        with model_usage.observe(self.name, model) as call:
+            headers = await self._headers()
+            async with _http_client() as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/responses",
+                    headers=headers,
+                    timeout=300,
+                    json=self._payload(messages, model, True, **payload_kwargs),
+                ) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise RuntimeError(self._http_error(resp))
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        data_str = line[5:].strip() if line.startswith("data:") else line.strip()
+                        if not data_str or data_str == "[DONE]":
+                            if data_str == "[DONE]":
+                                break
+                            continue
+                        try:
+                            payload = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        response = payload.get("response") or {}
+                        call.usage(response.get("usage") or payload.get("usage"))
+                        if payload.get("type") in {"response.failed", "response.incomplete", "response.refusal.done"}:
+                            raise RuntimeError("Model did not complete the requested response")
+                        thinking = _responses_thinking(payload)
+                        if thinking:
+                            yield StreamChunk(thinking, "thinking")
+                        text = _responses_text(payload)
+                        if text:
+                            yield StreamChunk(text, "content")
 
     async def quick_chat(self, messages: list[dict]):
         """Use the model's lowest supported effort for mechanical JSON repair."""
@@ -624,36 +638,39 @@ class ChatGPTCodexProvider:
         return {"answer": text, "sources": sources}
 
     async def _stream_search(self, messages: list[dict], **payload_kwargs):
-        headers = await self._headers()
-        async with _http_client() as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/responses",
-                headers=headers,
-                timeout=120,
-                json=self._payload(messages, self.listing_model, True, **payload_kwargs),
-            ) as resp:
-                if resp.status_code >= 400:
-                    await resp.aread()
-                    raise RuntimeError(self._http_error(resp))
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    data_str = line[5:].strip() if line.startswith("data:") else line.strip()
-                    if not data_str or data_str == "[DONE]":
-                        if data_str == "[DONE]":
-                            break
-                        continue
-                    try:
-                        payload = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    text = _responses_text(payload)
-                    if text:
-                        yield StreamChunk(text, "content")
-                    items = _output_items(payload)
-                    if items:
-                        yield StreamChunk(json.dumps(items), "output")
+        with model_usage.observe(self.name, self.listing_model) as call:
+            headers = await self._headers()
+            async with _http_client() as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/responses",
+                    headers=headers,
+                    timeout=120,
+                    json=self._payload(messages, self.listing_model, True, **payload_kwargs),
+                ) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise RuntimeError(self._http_error(resp))
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        data_str = line[5:].strip() if line.startswith("data:") else line.strip()
+                        if not data_str or data_str == "[DONE]":
+                            if data_str == "[DONE]":
+                                break
+                            continue
+                        try:
+                            payload = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        response = payload.get("response") or {}
+                        call.usage(response.get("usage") or payload.get("usage"))
+                        text = _responses_text(payload)
+                        if text:
+                            yield StreamChunk(text, "content")
+                        items = _output_items(payload)
+                        if items:
+                            yield StreamChunk(json.dumps(items), "output")
 
     def _parse_json_response(self, content: str) -> dict:
         import re
