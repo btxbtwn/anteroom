@@ -1281,11 +1281,13 @@ def run_window() -> None:
 
     enable_editable_context_menus()
     enable_webcontent_crash_recovery()
-    from vendoo_studio.services import vinted_browser
+    from vendoo_studio.services import sellwild_browser, vinted_browser
 
     vinted_browser.install(webview.create_window)
+    sellwild_browser.install(webview.create_window)
     window = create_studio_window(webview)
     window.events.closed += vinted_browser.shutdown
+    window.events.closed += sellwild_browser.shutdown
     webview.start(lambda: _boot_window(window), **studio_start_kwargs())
     stop_owned_server()
 

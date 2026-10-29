@@ -179,13 +179,10 @@ def write_value(listing: dict, path: str, value: Any) -> None:
 
 async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str, dict]:
     """Each named direct marketplace's current form. One that cannot be read is skipped."""
-    from vendoo_studio.routes.extension import extension_manager
     from vendoo_studio.services.native_editor import editor_form
 
     forms = {}
     for market in (market for market in MARKETS if market in set(markets)):
-        if market not in ("ebay", "sellwild", "depop", "poshmark", "mercari") and not extension_manager.connected:
-            continue
         try:
             form = await editor_form(conv_id, market, None, db, refresh=True)
         except Exception as exc:  # noqa: BLE001 - one marketplace's form never stops the others

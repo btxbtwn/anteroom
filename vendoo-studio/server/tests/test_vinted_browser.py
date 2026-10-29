@@ -8,7 +8,7 @@ from vendoo_studio.services import vinted_browser as browser
 
 @pytest.fixture(autouse=True)
 def isolated_browser():
-    with patch.object(browser, '_factory', None), patch.object(browser, '_window', None):
+    with patch.object(browser._session, '_factory', None), patch.object(browser._session, '_window', None):
         yield
 
 
@@ -47,7 +47,7 @@ def test_connection_opens_anteroom_window_without_exposing_python_api():
     browser.shutdown()
     assert item.events.closing.fire() is True
     item.destroy.assert_called_once()
-    assert browser._window is None
+    assert browser._session._window is None
 
 
 def test_headless_server_does_not_open_chrome_or_fabricate_a_connection():
@@ -57,7 +57,7 @@ def test_headless_server_does_not_open_chrome_or_fabricate_a_connection():
 
 def test_catalog_read_is_same_origin_get_and_hides_the_signed_in_window():
     item = window([{'id': 1, 'title': 'Women', 'catalogs': [{'id': 2, 'title': 'Jeans'}]}])
-    browser._window = item
+    browser._session._window = item
     assert browser.category_options(browser.category_rows()) == ['Women > Jeans']
     script = item.evaluate_js.call_args.args[0]
     assert 'method:\'GET\'' in script
@@ -71,7 +71,7 @@ def test_catalog_read_is_same_origin_get_and_hides_the_signed_in_window():
 def test_redirected_sign_in_window_cannot_be_used_as_a_cross_origin_reader(url):
     item = window([])
     item.get_current_url.return_value = url
-    browser._window = item
+    browser._session._window = item
     with pytest.raises(browser.VintedConnectionError):
         browser.category_rows()
     item.evaluate_js.assert_not_called()
@@ -86,22 +86,32 @@ def test_read_refuses_listing_and_account_endpoints():
 def test_browser_errors_are_generic_and_never_return_credentials_or_raw_errors():
     item = window([])
     item.evaluate_js.side_effect = RuntimeError('private-session-value')
-    browser._window = item
+    browser._session._window = item
     with pytest.raises(browser.VintedConnectionError) as error:
         browser.category_rows()
     assert 'private-session-value' not in str(error.value)
 
 
 def test_brand_search_resolves_exact_native_category_and_encodes_the_query():
-    browser._window = window([{'id': 9, 'title': 'Nike'}])
+    browser._session._window = window([{'id': 9, 'title': 'Nike'}])
     with patch.object(browser, 'category_rows', return_value=[{'id': 4, 'title': 'Women', 'catalogs': [{'id': 8, 'title': 'Shoes'}]}]):
         assert browser.brands('Ni & co', 'Women > Shoes') == ['Nike']
-    script = browser._window.evaluate_js.call_args.args[0]
+    script = browser._session._window.evaluate_js.call_args.args[0]
     assert 'keyword=Ni+%26+co&category_id=8' in script
 
 
 def test_unrecognised_category_does_not_issue_an_unscoped_brand_search():
-    browser._window = window([])
+    browser._session._window = window([])
     with patch.object(browser, 'category_rows', return_value=[]), pytest.raises(browser.VintedConnectionError):
         browser.brands('Ni', 'Invented > Shoes')
-    browser._window.evaluate_js.assert_not_called()
+    browser._session._window.evaluate_js.assert_not_called()
+
+
+def test_closed_window_errors_do_not_leak_native_browser_details():
+    item = window([])
+    item.get_current_url.side_effect = RuntimeError('private-native-browser-details')
+    browser._session._window = item
+    with pytest.raises(browser.VintedConnectionError) as error:
+        browser.category_rows()
+    assert 'private-native-browser-details' not in str(error.value)
+    item.evaluate_js.assert_not_called()

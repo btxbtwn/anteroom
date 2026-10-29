@@ -77,7 +77,7 @@ class NativeEditorTest(unittest.TestCase):
     def test_saved_forms_load_with_chrome_closed_and_current_values(self):
         from vendoo_studio.services import native_contract
 
-        for market in ("sellwild", "ebay"):
+        for market in ("ebay",):
             with self.subTest(market=market):
                 snapshot = copy.deepcopy(self.listing)
                 snapshot[f"{market}_specifics"] = {"material": "cotton", "description": "Edited description"}
@@ -178,8 +178,9 @@ class NativeEditorTest(unittest.TestCase):
         self.client = TestClient(app)
         self.url = f"/api/conversations/{self.conv.id}/native-marketplaces"
         self.enterContext(patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=True)))
-        self.bridge = self.enterContext(patch("vendoo_studio.services.native_editor.browser_bridge.request", new_callable=AsyncMock))
+        self.bridge = self.enterContext(patch("vendoo_studio.services.browser_bridge.request", new_callable=AsyncMock))
         self.bridge.return_value = {"ok": True, "form": {"marketplace": "poshmark", "native": True, "known": True, "fields": []}}
+        self.sellwild = self.enterContext(patch("vendoo_studio.services.sellwild_browser.account_choices", return_value={"ship_from": None, "coupons": [], "default_parcel": ""}))
         self.prepared = []
         prepare = native_editor.direct_preflight.prepare
 
@@ -265,8 +266,9 @@ class NativeEditorTest(unittest.TestCase):
         self.assertFalse(fields["sellwild_specifics.description"]["required"])
         self.assertEqual(fields["sellwild_specifics.title"]["value"], "Nike L Tee")
         self.assertEqual(fields["sellwild_specifics.description"]["value"], "Details")
-        # Chrome is asked only for the Shipping From address.
-        self.assertEqual(self.bridge.await_args.args[2]["marketplace"], "sellwild")
+        # Account metadata comes from Anteroom, even with Chrome connected.
+        self.sellwild.assert_called_once()
+        self.bridge.assert_not_called()
 
     def test_sellwild_form_follows_the_sell_page_sections_and_order(self):
         answer = self.client.get(f"{self.url}/sellwild/form")
@@ -298,8 +300,36 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(fields["Sellwild Fee"]["help"], "$2.00. Sellwild fee is 10% of sold price.")
         self.assertTrue(answer.json()["page_labels"])
 
+    def test_sellwild_sign_in_is_explicit_and_never_starts_a_listing_job(self):
+        with patch("vendoo_studio.services.sellwild_browser.connect", return_value={"ok": True}) as connect:
+            self.assertEqual(self.client.post(f"{self.url}/sellwild/connect").json(), {"ok": True})
+            connect.assert_called_once()
+            answer = self.client.post("/api/conversations/missing/native-marketplaces/sellwild/connect")
+            self.assertEqual(answer.status_code, 404)
+            connect.assert_called_once()
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+        self.bridge.assert_not_called()
+
+    def test_sellwild_reloads_account_choices_instead_of_reusing_a_saved_form(self):
+        from vendoo_studio.services import native_contract
+
+        form = native_editor.sellwild_form(self.listing, self.conv.id, self.db, coupons=[])
+        snapshot = copy.deepcopy(self.listing)
+        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"sellwild": form}, ["sellwild"])
+        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        self.sellwild.return_value = {"ship_from": "Seller address", "default_parcel": "USPS_SoftPack",
+                                     "coupons": [{"id": 117, "name": "25OFF", "discountType": "percentage", "discountValue": 25}]}
+        with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
+            answer = self.client.get(f"{self.url}/sellwild/form?revision_id={revision.id}")
+        fields = {row["label"]: row for row in answer.json()["fields"]}
+        self.assertEqual(fields["Shipping From"]["value"], "Seller address")
+        self.assertEqual(fields["Sell it faster with a discount"]["options"], ["25% 25OFF"])
+        self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+        self.bridge.assert_not_called()
+
     def test_sellwild_discount_and_profile_package_follow_the_sell_page(self):
-        self.bridge.return_value = {"ok": True, "ship_from": "Pat Seller", "default_parcel": "USPS_SoftPack",
+        self.sellwild.return_value = {"ship_from": "Pat Seller", "default_parcel": "USPS_SoftPack",
                                     "coupons": [{"id": 117, "name": "25OFF", "discountType": "percentage", "discountValue": 25}]}
         fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
         discount = fields["Sell it faster with a discount"]
@@ -316,17 +346,18 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual({fields[label].get("width") for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")},
                          {"quarter"})
 
-    def test_sellwild_shipping_from_shows_the_address_card_read_through_chrome(self):
+    def test_sellwild_shipping_from_shows_the_address_card_without_chrome(self):
         card = "Pat Seller\n12 Example St\nSpringfield, IL, 62701\nUnited States of America"
-        self.bridge.return_value = {"ok": True, "ship_from": card}
+        self.sellwild.return_value = {"ship_from": card, "coupons": [], "default_parcel": ""}
         row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
         self.assertEqual((row["value"], row["locked"], row["section"], row.get("help")), (card, True, "Item Shipping", None))
-        self.bridge.return_value = {"ok": True, "ship_from": ""}
+        self.sellwild.return_value = {"ship_from": "", "coupons": [], "default_parcel": ""}
         row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
         self.assertEqual((row["value"], row["help"]), ("", "Add a Shipping From address in Sellwild's Address Book."))
+        self.sellwild.return_value = {"ship_from": None, "coupons": [], "default_parcel": ""}
         with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
             row = next(row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"] if row["label"] == "Shipping From")
-        self.assertEqual(row["help"], "Connect Chrome to show your Sellwild address.")
+        self.assertEqual(row["help"], "Sign in to Sellwild in Anteroom, then reload choices to show your address.")
 
     def test_sellwild_weight_and_sides_are_typed_on_the_sellwild_tab(self):
         from vendoo_studio.services.sellwild_listing import package_pounds, package_sides

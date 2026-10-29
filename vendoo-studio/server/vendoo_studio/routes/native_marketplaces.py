@@ -101,17 +101,19 @@ def reset(conv_id: str, marketplace: Marketplace, body: ResetRequest, db: Sessio
     return _sync(native.reset, conv_id, marketplace, db)
 
 
-@router.post("/vinted/connect")
-async def connect_vinted(conv_id: str, db: Session = Depends(get_db)):
+@router.post("/{marketplace}/connect")
+async def connect_account(conv_id: str, marketplace: Literal["vinted", "sellwild"], db: Session = Depends(get_db)):
     import asyncio
     from vendoo_studio.repositories.queries import ConversationRepo
-    from vendoo_studio.services import vinted_browser
+    from vendoo_studio.services import sellwild_browser, vinted_browser
+    from vendoo_studio.services.account_browser import AccountConnectionError
 
     if not ConversationRepo(db).get(conv_id):
         raise HTTPException(404, "Conversation not found")
+    reader = vinted_browser if marketplace == "vinted" else sellwild_browser
     try:
-        return await asyncio.to_thread(vinted_browser.connect)
-    except vinted_browser.VintedConnectionError as exc:
+        return await asyncio.to_thread(reader.connect)
+    except AccountConnectionError as exc:
         raise HTTPException(409, str(exc)) from exc
 
 

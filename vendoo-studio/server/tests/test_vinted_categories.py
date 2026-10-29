@@ -11,7 +11,7 @@ from vendoo_studio.services.vinted_browser import VintedConnectionError
 def test_categories_use_anteroom_reader_without_chrome():
     with patch('vendoo_studio.services.native_editor.ConversationRepo'), \
          patch('vendoo_studio.services.vinted_browser.category_rows', return_value=[{'title': 'Women', 'catalogs': [{'title': 'Jeans'}]}]) as read, \
-         patch('vendoo_studio.services.native_editor.browser_bridge.request', new_callable=AsyncMock) as chrome:
+         patch('vendoo_studio.services.browser_bridge.request', new_callable=AsyncMock) as chrome:
         result = asyncio.run(vinted_categories('conversation', Mock()))
         assert result == {'options': ['Women > Jeans']}
         read.assert_called_once()
