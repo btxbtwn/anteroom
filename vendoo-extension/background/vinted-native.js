@@ -678,3 +678,17 @@ async function runVintedNative(msg, recovery = false) {
     return fail(error?.code ? error : marketplaceError(String(error?.message || error), { code: 'rejected' }));
   }
 }
+
+// Read-only choices for the editor's brand picker.
+async function vintedBrandOptions({ query = '', category = '' }) {
+  const { call } = await vintedSession(Date.now() + 20000);
+  const params = new URLSearchParams({ keyword: String(query).slice(0, 100) });
+  const parts = String(category).split('>').map(part => marketplaceText(part).toLowerCase()).filter(Boolean);
+  if (parts.length) {
+    const catalogs = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/catalogs`, { step: 'category' });
+    const id = vintedFindCatalog(catalogs?.catalogs || catalogs, parts);
+    if (id) params.set('category_id', String(id));
+  }
+  const found = await call('GET', `${VINTED_ORIGIN}/api/v2/item_upload/brands?${params}`, { step: 'brand' });
+  return [...new Set((found?.brands || []).map(row => row.title).filter(Boolean))];
+}
