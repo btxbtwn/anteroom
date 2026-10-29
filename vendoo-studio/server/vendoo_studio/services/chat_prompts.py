@@ -21,6 +21,7 @@ from vendoo_studio.services.listing_generate import (
     analyze_photos_with_tag_retry,
     latest_photo_analysis,
     photo_analysis_failure,
+    photo_fingerprint,
     photo_analysis_usable,
     require_photo_analysis,
     seller_item_details,
@@ -108,7 +109,8 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
     photo_analysis_text = ""
     comps_text = ""
     evidence: dict = {}
-    existing_analysis = latest_photo_analysis(history)
+    fingerprint = photo_fingerprint(photos)
+    existing_analysis = latest_photo_analysis(history, fingerprint=fingerprint)
     if photos and existing_analysis and photo_analysis_usable(existing_analysis):
         photo_analysis_text = analysis_with_photo_count(len(photos), existing_analysis)
         skill_rules = load_skill_rules(
@@ -132,7 +134,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
                 "Photo analysis of the uploaded product images:",
                 1,
             )
-            repo.add_message(conv_id, "system", analysis_note)
+            repo.add_message(conv_id, "system", analysis_note, photo_fingerprint=fingerprint)
             photo_analysis_text = analysis_with_photo_count(len(photos), analysis_note)
             skill_rules = load_skill_rules(
                 f"{user_message_text}\n{photo_analysis_text}\n{seller_item_details(notes)}",
@@ -249,6 +251,8 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
     system_prompt["content"] += _item_form_prompt(db, conv_id)
     messages = [system_prompt]
     for msg in history[-20:]:
+        if photo_analysis_usable(msg.text) and getattr(msg, "photo_fingerprint", None) != fingerprint:
+            continue
         role = msg.role
         if role == "model":
             role = "assistant"
