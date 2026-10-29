@@ -442,6 +442,20 @@ test('Mercari sizes come from the category and never cross a fit the listing nam
   assert.deepEqual(JSON.parse(JSON.stringify(c.mercariSize({ size: 'M', form: { aspects: {} } }, 1934))), { none: 'unknown' });
 });
 
+test('a letter saved where Mercari lists its own size resolves to that size, and never to another', () => {
+  const { c } = worker();
+  const size = (extra, sizes = BOYS_SIZES) => JSON.parse(JSON.stringify(c.mercariSize({ ...extra, form: { aspects: {}, sizes } }, 1934)));
+  // The seller's plaid trousers: tag "S", Mercari only lists "S (6-7)".
+  assert.deepEqual(size({ size: 'S', mercari_specifics: { size: 'S', nativeSizeId: 'S' } }), { id: 102 });
+  // A size picked from the list is still exact.
+  assert.deepEqual(size({ size: 'S', mercari_specifics: { size: 'S', nativeSizeId: '104' } }), { id: 104 });
+  // A stale id that is not the item's own size is refused, never substituted.
+  assert.match(size({ size: 'S', mercari_specifics: { size: 'S', nativeSizeId: 'M' } }).problem, /Mercari offers/);
+  assert.match(size({ size: 'S', mercari_specifics: { size: 'S', nativeSizeId: 'nonsense' } }).problem, /Mercari offers/);
+  // Clearing the row keeps the marketplaces' answer rather than guessing from the tag.
+  assert.match(size({ size: 'S', mercari_specifics: { size: 'S', nativeSizeId: '' } }).problem, /Mercari offers/);
+});
+
 test('Mercari ships from current Settings instead of a cached Vendoo ZIP', () => {
   const { c } = worker();
   const listing = clothing();

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.501 — 2026-10-29
+
+- Mercari's Size picker now shows the size the listing will actually send. A tag that reads “S” where Mercari only lists “S (4-6)” left the Size box looking filled with a value Mercari has no id for, so listing refused it while the form seemed answered. The picker now shows Mercari's own “S (4-6)”, and leaving it untouched saves that size. A stale size left from another category still shows as a problem instead of being swapped for a different one.
+
 ## 0.1.500 — 2026-10-29
 
 - Show each marketplace error once, with an Ask chat option to fix category and form issues without listing the item.
