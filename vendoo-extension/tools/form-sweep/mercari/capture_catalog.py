@@ -30,8 +30,8 @@ schema = descriptor_pb2.FileDescriptorProto(name='mercari_catalog.proto', packag
 
 def message(name, fields):
     definition = schema.message_type.add(name=name)
-    for number, key, kind, repeated in fields:
-        field = definition.field.add(number=number, name=key, label=F.LABEL_REPEATED if repeated else F.LABEL_OPTIONAL)
+    for number, field_name, kind, repeated in fields:
+        field = definition.field.add(number=number, name=field_name, label=F.LABEL_REPEATED if repeated else F.LABEL_OPTIONAL)
         if isinstance(kind, str):
             field.type, field.type_name = F.TYPE_MESSAGE, '.mercari.' + kind
         else:
