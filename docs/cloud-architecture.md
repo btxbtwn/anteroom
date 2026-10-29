@@ -1,6 +1,9 @@
 # Anteroom in the cloud: Mac, web and iPhone in sync
 
 Status: approved 2026-10-26, with Supabase and Fly.io. Building step 1.
+Postgres support and the photo-store interface have merged (#790, #787).
+The hosted session-verification foundation is described in
+[hosted-auth.md](hosted-auth.md); seller ownership and data isolation come next.
 
 ## Goal
 
