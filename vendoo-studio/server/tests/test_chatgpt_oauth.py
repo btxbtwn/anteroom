@@ -166,6 +166,8 @@ class ChatGPTQuickChatTest(unittest.IsolatedAsyncioTestCase):
 
                 def respond(request, captured=captured):
                     captured.update(json.loads(request.content))
+                    if "instructions" in captured or any(item["role"] == "system" for item in captured["input"]):
+                        return httpx.Response(400, json={"error": {"message": "System messages are not allowed"}})
                     return httpx.Response(200, text=(
                         'data: {"type":"response.output_text.delta","delta":"{}"}\n\n'
                         'data: [DONE]\n\n'
@@ -180,10 +182,15 @@ class ChatGPTQuickChatTest(unittest.IsolatedAsyncioTestCase):
                     patch.object(ChatGPTCodexProvider, "_headers", new=AsyncMock(return_value={})),
                 ):
                     result = [text async for text in ChatGPTCodexProvider().quick_chat([
+                        {"role": "system", "content": "Preserve listing facts."},
                         {"role": "user", "content": "Repair JSON"},
                     ])]
                 self.assertEqual(result, ["{}"])
                 self.assertEqual(captured["model"], model)
+                self.assertEqual(captured["input"][0], {
+                    "role": "developer", "type": "message",
+                    "content": [{"type": "input_text", "text": "Preserve listing facts."}],
+                })
                 self.assertEqual(captured["reasoning"]["effort"], expected_effort)
 
 
