@@ -62,6 +62,21 @@ class ChatGPTOAuthTest(unittest.TestCase):
         self.assertEqual(items[0]["content"][0]["type"], "input_text")
         self.assertEqual(items[0]["content"][1]["type"], "input_image")
 
+    def test_oversized_instructions_preserve_all_context_in_order(self):
+        from vendoo_studio.providers.chatgpt_codex import MAX_INSTRUCTION_CHARS
+
+        text = "rule\n" * (MAX_INSTRUCTION_CHARS // 5 * 3)
+        instructions, items = _messages_to_input([
+            {"role": "system", "content": text},
+            {"role": "system", "content": "Never publish."},
+            {"role": "user", "content": "Generate a draft."},
+        ])
+        chunks = [instructions] + [item["content"][0]["text"] for item in items[:-1]]
+        self.assertTrue(all(len(chunk) <= MAX_INSTRUCTION_CHARS for chunk in chunks))
+        self.assertEqual("".join(chunks), text + "\n\nNever publish.")
+        self.assertTrue(all(item["role"] == "system" for item in items[:-1]))
+        self.assertEqual(items[-1]["role"], "user")
+
     def test_messages_to_input_uses_output_text_for_assistant(self):
         instructions, items = _messages_to_input([
             {"role": "system", "content": "Be careful."},

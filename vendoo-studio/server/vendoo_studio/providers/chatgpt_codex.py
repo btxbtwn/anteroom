@@ -29,6 +29,8 @@ DEFAULT_REASONING_EFFORT = "low"
 PROMPT_CACHE_KEY = "vendoo-studio-listing"
 REASONING_LADDER = ("none", "low", "medium", "high", "xhigh", "max")
 CATALOG_TTL_S = 60
+# Responses limits each text string, including the top-level instructions.
+MAX_INSTRUCTION_CHARS = 1_048_576
 
 _catalog_cached_at = 0.0
 _catalog_slugs: list[str] = []
@@ -311,7 +313,19 @@ def _messages_to_input(messages: list[dict]) -> tuple[str, list[dict]]:
         if not parts:
             continue
         items.append({"role": mapped_role, "content": parts, "type": "message"})
-    return "\n\n".join(instructions), items
+    combined = "\n\n".join(instructions)
+    if len(combined) > MAX_INSTRUCTION_CHARS:
+        # Keep the complete context and its instruction priority. Each message
+        # stays within the text-string limit; never truncate marketplace rules.
+        context = [
+            {"role": "system", "type": "message", "content": [
+                {"type": "input_text", "text": combined[start:start + MAX_INSTRUCTION_CHARS]},
+            ]}
+            for start in range(MAX_INSTRUCTION_CHARS, len(combined), MAX_INSTRUCTION_CHARS)
+        ]
+        items = context + items
+        combined = combined[:MAX_INSTRUCTION_CHARS]
+    return combined, items
 
 
 _shared_http: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None

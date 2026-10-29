@@ -15,8 +15,12 @@ function streamErrorHint(activeProbe: Job | undefined, streamText: string): stri
         ? "The listing model or Chrome step stalled. Retry generate. Cancel discovery only if the Listing tab shows a stuck probe."
       : /HTTP 5\d\d/i.test(streamText || "")
         ? "Anteroom hit an internal error before the model answered. Retry; if it keeps failing, check Anteroom logs or restart Anteroom."
+        : /string too long|context[_ ]length|maximum context|request too large|HTTP 413/i.test(streamText || "")
+          ? "The listing context exceeds the provider’s request limit. Signing in again will not fix this. Update Anteroom before retrying; if it persists, report this error."
+        : /HTTP (401|403)\b|not signed in/i.test(streamText || "")
+          ? "Check Settings (provider sign-in / API key), then retry."
         : /HTTP \d+/i.test(streamText || "")
-          ? "The generate request was rejected before streaming started. Check Settings (provider sign-in / API key), then retry."
+          ? "The provider rejected the generate request. See the error above for details; if it persists, report it."
           : "";
 }
 

@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.508 — 2026-10-29
+## 0.1.509 — 2026-10-29
 
 - Vinted's Category field now opens Vinted's category picker. It had been showing the shared category path as a text box, so the picker never appeared.
+
+## 0.1.508 — 2026-10-29
+
+- Large listing requests no longer exceed ChatGPT’s instructions-string limit. Request errors now distinguish oversized context from sign-in problems.
 
 ## 0.1.507 — 2026-10-29
 
