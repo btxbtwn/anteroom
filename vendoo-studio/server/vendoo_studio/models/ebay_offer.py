@@ -2,10 +2,11 @@
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class EbayOfferRule(Base):
+class EbayOfferRule(SellerOwned, Base):
     __tablename__ = "ebay_offer_rules"
     __table_args__ = (UniqueConstraint("account_id", "listing_id", name="uq_ebay_offer_rule_listing"),)
 
@@ -21,7 +22,7 @@ class EbayOfferRule(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
 
-class EbayOfferAttempt(Base):
+class EbayOfferAttempt(SellerOwned, Base):
     __tablename__ = "ebay_offer_attempts"
 
     id = Column(String, primary_key=True, default=new_id)

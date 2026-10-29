@@ -3,10 +3,11 @@
 from sqlalchemy import Column, Date, DateTime, Float, Integer, String, Text
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
-class AdSpend(Base):
+class AdSpend(SellerOwned, Base):
     """What one ads programme cost over a stretch of days, and what its own
     dashboard says it sold. Poshmark Promoted Closet and Etsy Ads have no API
     Studio can read, so these figures are typed in, never fetched."""

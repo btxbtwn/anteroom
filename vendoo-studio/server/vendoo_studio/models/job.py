@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON, Integer
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 ACTIVE_JOB_STATUSES = ("queued", "awaiting_extension", "dispatched")
@@ -28,7 +29,7 @@ def is_vendoo_api_step(step: str | None) -> bool:
     return str(step or "").startswith("vendoo_api")
 
 
-class Job(Base):
+class Job(SellerOwned, Base):
     __tablename__ = "jobs"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -45,7 +46,7 @@ class Job(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
 
-class JobEvent(Base):
+class JobEvent(SellerOwned, Base):
     __tablename__ = "job_events"
 
     id = Column(String, primary_key=True, default=new_id)
@@ -57,7 +58,7 @@ class JobEvent(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
-class VendooDraftCache(Base):
+class VendooDraftCache(SellerOwned, Base):
     """The last Vendoo status Studio saw for a job — one row, status only.
 
     This used to be an appended ``job_events`` row carrying the whole Vendoo

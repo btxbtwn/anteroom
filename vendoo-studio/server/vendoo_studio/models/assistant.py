@@ -3,12 +3,13 @@
 from sqlalchemy import JSON, Column, DateTime, String, Text
 
 from vendoo_studio.database import Base
+from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 NEW_THREAD_TITLE = "New thread"
 
 
-class AssistantThread(Base):
+class AssistantThread(SellerOwned, Base):
     """One conversation with the business assistant.
 
     The seller can keep several of these. A listing's chat is never one of them.
@@ -22,7 +23,7 @@ class AssistantThread(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow, index=True)
 
 
-class AssistantMemory(Base):
+class AssistantMemory(SellerOwned, Base):
     """One fact the business assistant keeps about how the seller runs the shop.
 
     A conversation can be cleared. These stay, and a later turn can rewrite or
@@ -37,7 +38,7 @@ class AssistantMemory(Base):
     updated_at = Column(DateTime, nullable=False, default=utcnow)
 
 
-class AssistantMessage(Base):
+class AssistantMessage(SellerOwned, Base):
     """One turn of a conversation about the business.
 
     Only the question and the answer are kept. The figures an answer was built
