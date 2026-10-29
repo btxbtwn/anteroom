@@ -11,6 +11,9 @@ const ROW_ALIASES: Record<string, Record<string, string>> = Object.fromEntries(
   ["ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"].map((marketplace) => [marketplace, { photos: `marketplace_photos.${marketplace}` }]),
 ) as Record<string, Record<string, string>>;
 
+Object.assign(ROW_ALIASES.ebay, {
+  "ebay_specifics.category_specifics.condition": "ebay_specifics.condition",
+});
 Object.assign(ROW_ALIASES.poshmark, {
   primaryColor: "poshmark_specifics.colors",
   secondaryColor: "poshmark_specifics.colors",

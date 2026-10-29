@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.503 — 2026-10-29
+
+- eBay listings no longer go out with the Condition blank while the form shows one. Wording like “Pre-Owned - Good” was understood by the row on screen but not when the listing was saved, so it sent no condition at all and warned “eBay needs condition, and it is empty” under a field that looked filled. What the form shows is now what is sent, and if eBay's list for that category has no matching grade, the warning says which wording could not be matched instead of claiming the field is empty.
+
 ## 0.1.502 — 2026-10-29
 
 - Mercari's category picker now opens the subcategories under Pants and other parent categories, including when searching.

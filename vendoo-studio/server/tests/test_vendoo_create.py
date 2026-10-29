@@ -398,7 +398,9 @@ class CreateTest(_NoExtraMapping):
         fake = FakeBridge(replies)
         with mock.patch.object(vendoo_create.browser_bridge, "request", fake.request):
             out = run(create_item(JOB, LISTING, PHOTOS))
-        self.assertEqual([u["field"] for u in out["unresolved"]], ["condition"])
+        # No schema file here, but the condition is still encoded: eBay's own
+        # grade table reads "Pre-Owned - Good", so nothing is left unresolved.
+        self.assertEqual([u["field"] for u in out["unresolved"]], [])
         # Vendoo turning our plain label into its coded object is not a mismatch;
         # the changed price is.
         self.assertEqual([d["field"] for d in out["diff"]], ["price"])
