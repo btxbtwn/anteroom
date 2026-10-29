@@ -10,7 +10,7 @@ from vendoo_studio.services import browser_bridge, direct_preflight
 from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
 
-async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, db: Session) -> dict:
+async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, db: Session, *, refresh: bool = False) -> dict:
     """Never start a job or save a draft just to display the form."""
     conv = ConversationRepo(db).get(conv_id)
     if not conv:
@@ -22,6 +22,15 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     if revision_id and revision.id != revision_id:
         raise NativeMarketplaceError(409, "The listing changed. Refresh its category choices.")
     snapshot = direct_preflight.prepare(db, conv, revision.listing_json, marketplace)
+    if not refresh:
+        from vendoo_studio.services import native_contract
+
+        saved_form = native_contract.editor_form(revision.listing_json, marketplace, values=snapshot)
+        if saved_form is not None:
+            return saved_form
+        contract = (revision.listing_json.get(native_contract.KEY) or {}).get(marketplace)
+        if isinstance(contract, dict) and not contract.get("unavailable") and "page_labels" in contract:
+            raise NativeMarketplaceError(409, "The category or dependent choices changed. Reload this form's choices before continuing.")
     if marketplace == "ebay":
         return await ebay_form(snapshot)
     from vendoo_studio.routes.extension import extension_manager

@@ -187,7 +187,7 @@ async def load_forms(db: Session, conv_id: str, markets: Iterable[str] = MARKETS
         if market not in ("ebay", "sellwild") and not extension_manager.connected:
             continue
         try:
-            form = await editor_form(conv_id, market, None, db)
+            form = await editor_form(conv_id, market, None, db, refresh=True)
         except Exception as exc:  # noqa: BLE001 - one marketplace's form never stops the others
             log.info("No %s form to fill for %s: %s", market, conv_id, exc)
             continue

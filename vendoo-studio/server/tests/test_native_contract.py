@@ -28,6 +28,28 @@ def seed():
 
 
 class NativeContractTest(unittest.TestCase):
+    def test_validation_only_contract_is_not_rendered_as_a_complete_editor(self):
+        listing = seed()
+        listing[contract.KEY]["mercari"].pop("page_labels")
+        self.assertIsNone(contract.editor_form(listing, "mercari"))
+
+    def test_editor_metadata_is_preserved_without_bloating_the_generation_prompt(self):
+        listing = seed()
+        form = {"category_id": "12", "page_labels": True, "fields": [{
+            "path": "mercari_specifics.material", "label": "Material", "section": "Product info",
+            "width": "half", "options": ["Cotton"], "option_values": {"Cotton": "cotton"},
+            "cascade": [{"label": "editor-only category tree"}],
+        }]}
+        listing[contract.KEY] = contract.capture(listing, {"mercari": form}, ["mercari"])
+        listing["mercari_specifics"]["material"] = "cotton"
+        rendered = contract.editor_form(listing, "mercari")
+        self.assertEqual(rendered["fields"][0]["section"], "Product info")
+        self.assertTrue(rendered["page_labels"])
+        rendered["fields"][0]["options"].append("Wool")
+        self.assertEqual(listing[contract.KEY]["mercari"]["fields"][0]["options"], ["Cotton"])
+        self.assertNotIn("editor-only category tree", contract.prompt(listing[contract.KEY]))
+        self.assertIn("Cotton", contract.prompt(listing[contract.KEY]))
+
     def test_generated_unknown_fields_and_invalid_choices_do_not_survive(self):
         original = seed()
         generated = {**copy.deepcopy(original), "direct_category_ids": {"mercari": "invented"},

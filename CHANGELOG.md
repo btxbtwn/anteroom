@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.501 — 2026-10-29
+
+- Reopen saved marketplace forms with Chrome closed, keeping their dropdown choices and layout. Changed categories still need fresh choices before listing.
+
 ## 0.1.500 — 2026-10-29
 
 - Show each marketplace error once, with an Ask chat option to fix category and form issues without listing the item.

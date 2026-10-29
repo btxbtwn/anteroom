@@ -21,6 +21,53 @@ from vendoo_studio.services.vendoo_import import merge_notes
 
 
 class NativeEditorTest(unittest.TestCase):
+    def test_saved_forms_load_with_chrome_closed_and_current_values(self):
+        from vendoo_studio.services import native_contract
+
+        for market in ("poshmark", "mercari", "depop", "sellwild", "ebay"):
+            with self.subTest(market=market):
+                snapshot = copy.deepcopy(self.listing)
+                snapshot[f"{market}_specifics"] = {"material": "cotton", "description": "Edited description"}
+                form = {"marketplace": market, "native": True, "known": True, "page_labels": True,
+                        "category_id": snapshot["direct_category_ids"].get(market, ""), "fields": [
+                    {"path": f"{market}_specifics.material", "label": "Material", "section": "Details",
+                     "width": "half", "selection_only": True, "options": ["Cotton"],
+                     "option_values": {"Cotton": "cotton"}, "value": "old"},
+                    {"path": f"{market}_specifics.description", "label": "Description", "section": "Details"},
+                    {"path": "price", "label": "Price", "section": "Pricing", "input_type": "number"},
+                ]}
+                snapshot[native_contract.KEY] = native_contract.capture(snapshot, {market: form}, [market])
+                revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+                before = copy.deepcopy(revision.listing_json)
+                with patch("vendoo_studio.routes.extension.extension_manager", SimpleNamespace(connected=False)):
+                    answer = self.client.get(f"{self.url}/{market}/form?revision_id={revision.id}")
+                self.assertEqual(answer.status_code, 200, answer.text)
+                result = answer.json()
+                self.assertTrue(result["page_labels"])
+                rows = result["fields"]
+                self.assertEqual([row["value"] for row in rows], ["cotton", "Edited description", 20])
+                self.assertEqual(rows[0]["section"], "Details")
+                self.assertEqual(rows[0]["width"], "half")
+                self.assertEqual(rows[0]["option_values"], {"Cotton": "cotton"})
+                self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
+                self.assertEqual(revision.listing_json, before)
+                self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+                self.bridge.assert_not_called()
+
+    def test_saved_form_with_changed_category_does_not_show_old_choices_or_contact_chrome(self):
+        from vendoo_studio.services import native_contract
+
+        snapshot = copy.deepcopy(self.listing)
+        form = {"category_id": "men/shirts", "fields": [
+            {"path": "poshmark_specifics.nativeSizeId", "label": "Size", "options": ["L"]}]}
+        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"poshmark": form}, ["poshmark"])
+        snapshot["direct_category_ids"]["poshmark"] = "men/shoes"
+        ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        answer = self.client.get(f"{self.url}/poshmark/form")
+        self.assertEqual(answer.status_code, 409)
+        self.assertIn("dependent choices", answer.json()["detail"])
+        self.bridge.assert_not_called()
+
     def setUp(self):
         load_models()
         self.engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)

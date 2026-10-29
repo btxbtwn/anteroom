@@ -23,6 +23,10 @@ SALE_FIELDS = re.compile(
 _SCHEMA_KEYS = ("path", "key", "label", "required", "multi", "selection_only", "options", "option_values",
                 "max_values", "max_length", "min_value", "max_value", "step", "input_type", "locked",
                 "category_specific", "clears", "value_constraints", "help")
+_EDITOR_KEYS = ("section", "section_help", "width", "control_width", "presentation", "placeholder", "prefix", "suffix", "counter",
+                "label_hidden", "group", "group_help", "reveal", "cascade", "inventory_groups",
+                "option_groups", "option_help", "option_amounts", "slot_labels", "accept", "hashtag_max",
+                "save_as_default")
 
 
 def path_of(row: dict) -> str:
@@ -65,14 +69,49 @@ def capture(listing: dict, forms: dict[str, dict], markets) -> dict:
         if not form or form.get("known") is False or not form.get("fields"):
             contracts[market] = {"unavailable": True}
             continue
-        fields = [{key: copy.deepcopy(row[key]) for key in _SCHEMA_KEYS if key in row}
+        fields = [{key: copy.deepcopy(row[key]) for key in (*_SCHEMA_KEYS, *_EDITOR_KEYS) if key in row}
                   for row in form.get("fields") or [] if path_of(row)]
         contracts[market] = {"category_id": form.get("category_id"), "fields": fields,
+                             "page_labels": bool(form.get("page_labels")),
                              "inputs": inputs(listing, market, fields)}
     return contracts
 
 
+def editor_form(listing: dict, market: str, *, values: dict | None = None) -> dict | None:
+    """Render a saved definition using this revision's values, without a network read.
+
+    A changed controlling choice needs a new definition; never show the old
+    category's dropdowns as if they belonged to the new category.
+    """
+    contract = (listing.get(KEY) or {}).get(market)
+    if not isinstance(contract, dict) or contract.get("unavailable") or "page_labels" not in contract:
+        return None
+    fields = contract.get("fields") or []
+    if not fields or inputs(listing, market, fields) != contract.get("inputs"):
+        return None
+    values = listing if values is None else values
+    rows = []
+    for definition in fields:
+        row = copy.deepcopy(definition)
+        path = path_of(row)
+        value = get_path(values, path)
+        if path == "price":
+            value = price_for(values, market)
+        name = path.rsplit(".", 1)[-1]
+        if value is None and path.startswith(f"{market}_specifics.") and name in {"title", "description", "brand"}:
+            value = marketplace_text(values, market, name)
+        row["value"] = copy.deepcopy(value) if value is not None else ""
+        rows.append(row)
+    return {"marketplace": market, "native": True, "known": True,
+            "category_id": contract.get("category_id"), "page_labels": contract["page_labels"],
+            "fields": rows}
+
+
 def prompt(contracts: dict) -> str:
+    # Presentation metadata belongs to the editor, not the generation context.
+    contracts = {market: {**contract, "fields": [
+        {key: value for key, value in row.items() if key in _SCHEMA_KEYS}
+        for row in contract.get("fields") or []]} for market, contract in contracts.items()}
     return (
         "\n\n--- Authoritative native marketplace forms ---\n"
         "For these marketplaces, only the paths below may be generated. These native forms override "
