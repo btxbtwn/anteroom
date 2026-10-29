@@ -118,6 +118,8 @@ ensure_user_data_dirs()
 RELAY_URL = os.environ.get("VENDOO_STUDIO_RELAY_URL", "https://relay.anteroom.workers.dev").rstrip("/")
 
 HOST = os.environ.get("VENDOO_STUDIO_HOST", "127.0.0.1")
+if HOST != "127.0.0.1":
+    raise ValueError("The local Anteroom app must bind to 127.0.0.1. Use private Tailscale Serve for remote access.")
 PORT = int(os.environ.get("VENDOO_STUDIO_PORT", "4318"))
 
 MAX_PHOTO_COUNT = 20
@@ -127,4 +129,6 @@ ALLOWED_PHOTO_MIME = {"image/jpeg", "image/png", "image/webp", "image/heic", "im
 CORS_ORIGINS = [
     f"http://{HOST}:{PORT}",
     f"http://{HOST}:5173",
+    f"http://localhost:{PORT}",
+    "http://localhost:5173",
 ]

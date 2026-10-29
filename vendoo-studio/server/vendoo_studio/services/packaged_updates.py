@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from vendoo_studio.config import APP_NAME, is_frozen, resource_root, user_data_root
+from vendoo_studio.config import APP_NAME, BUNDLE_ID, is_frozen, resource_root, user_data_root
 from vendoo_studio.version import app_version
 
 GITHUB_API = os.environ.get("VENDOO_STUDIO_GITHUB_API", "https://api.github.com")
@@ -256,15 +256,26 @@ def _verify_app_signature(app_path: Path) -> None:
         raise PackagedUpdateError("The update is not signed by a trusted identity.")
     if "Signature=adhoc" in detail:
         raise PackagedUpdateError("The update is not signed with Anteroom's certificate.")
+    installed = subprocess.run(
+        ["/usr/bin/codesign", "-dr", "-", str(installed_app_path())],
+        capture_output=True,
+        text=True,
+    )
+    requirement = next((line.split("designated =>", 1)[1].strip()
+                        for line in (raw.lstrip("# ") for raw in (installed.stderr + "\n" + installed.stdout).splitlines())
+                        if line.startswith("designated =>")), "")
+    if installed.returncode != 0 or not requirement:
+        raise PackagedUpdateError("The installed app's signing identity could not be verified. Reinstall a trusted signed copy.")
     verify = subprocess.run(
-        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app_path)],
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", "-R",
+         f'({requirement}) and identifier "{BUNDLE_ID}"', str(app_path)],
         capture_output=True,
         text=True,
     )
     if verify.returncode != 0:
         reason = (verify.stderr or verify.stdout or "").strip().splitlines()
         raise PackagedUpdateError(
-            "The update's code signature is damaged"
+            "The update's code signature is damaged or does not match Anteroom's signing identity"
             + (f": {reason[-1]}" if reason else ".")
         )
 

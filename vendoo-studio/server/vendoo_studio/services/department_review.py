@@ -75,16 +75,15 @@ def apply_department(listing: dict, department: str) -> dict:
 
 
 async def review_department(db: Session, conv_id: str, *, apply: bool = False) -> dict[str, Any]:
-    from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-    from vendoo_studio.services.listing_generate import analyze_photos_with_tag_retry, latest_photo_analysis
+    from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
+    from vendoo_studio.services.listing_generate import analyze_photos_with_tag_retry, current_photo_analysis
     from vendoo_studio.services.listing_provider import get_listing_provider
 
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if not conv:
         return {"ok": False, "error": "Conversation not found"}
-    messages = repo.get_messages(conv_id)
-    text = latest_photo_analysis(messages) or ""
+    text = current_photo_analysis(repo, conv_id) or ""
     if not text:
         provider = get_listing_provider()
         if provider is None or not callable(getattr(provider, "analyze_photos", None)):
@@ -107,12 +106,15 @@ async def review_department(db: Session, conv_id: str, *, apply: bool = False) -
         return {"ok": False, "error": "The photos did not show whether this is men's, women's, or unisex.", **found}
     applied = False
     if apply:
-        from vendoo_studio.routes.listings import ListingUpdate, update_listing
+        from vendoo_studio.services.listing_editor import save_listing_edit
 
         current = ListingRepo(db).get_current(conv_id)
         revision = ListingRepo(db).get_revision(current.current_revision_id) if current and current.current_revision_id else None
         listing = dict(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
         apply_department(listing, found["department"])
-        update_listing(conv_id, ListingUpdate(listing=listing), db)
+        try:
+            save_listing_edit(conv_id, listing, db, expected_revision_id=revision.id if revision else "")
+        except RevisionConflict as exc:
+            return {"ok": False, "error": str(exc), **found}
         applied = True
     return {"ok": True, "applied": applied, **found}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -67,10 +68,21 @@ def photo_analysis_usable(text: str | None) -> bool:
     return bool(_FIELD_LINE_RE.search(stripped))
 
 
-def latest_photo_analysis(messages: list[Any]) -> str | None:
+def photo_fingerprint(photos: list[Any]) -> str:
+    """Bind a reading to the ordered photo contents, including rendered edits."""
+    payload = [(p.id, p.stored_filename, p.checksum) for p in photos]
+    return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
+
+
+def current_photo_analysis(repo: ConversationRepo, conv_id: str) -> str | None:
+    return latest_photo_analysis(repo.get_messages(conv_id), fingerprint=photo_fingerprint(repo.get_photos(conv_id)))
+
+
+def latest_photo_analysis(messages: list[Any], *, fingerprint: str | None = None) -> str | None:
     for msg in reversed(messages):
         text = (getattr(msg, "text", None) or "").strip()
-        if getattr(msg, "role", None) == "system" and photo_analysis_usable(text):
+        if (getattr(msg, "role", None) == "system" and photo_analysis_usable(text)
+                and (fingerprint is None or getattr(msg, "photo_fingerprint", None) == fingerprint)):
             return text
     return None
 
@@ -193,7 +205,7 @@ async def analyze_photos_with_tag_retry(provider, paths: list[str], **kwargs) ->
         return result
     evidence = normalize_evidence(result.get("evidence") or {})
     flagged = unreadable_tag_fields(evidence)
-    if not flagged or not any(image_exceeds(path, VISION_MAX_SIDE) for path in paths[:10]):
+    if not flagged or not any(image_exceeds(path, VISION_MAX_SIDE) for path in paths):
         return result
 
     log.info("photo analysis could not read %s; retrying at full resolution", ", ".join(flagged))
@@ -1330,6 +1342,7 @@ def persist_generated_listing(
     provider_name: str = "xiaomi-mimo",
     model_name: str = "mimo-v2.5-pro",
     announce: bool = True,
+    expected_revision_id: str | None = None,
 ) -> dict | None:
     repo = ConversationRepo(db)
     if full_text:
@@ -1402,7 +1415,7 @@ def persist_generated_listing(
 
     constrain_generated(listing, revisions[0].listing_json if revisions else {})
     cap_listing_description(listing)
-    ListingRepo(db).save_revision(conv_id, listing, source=source)
+    ListingRepo(db).save_revision(conv_id, listing, source=source, expected_revision_id=expected_revision_id)
 
     if announce:
         repo.add_message(
@@ -1423,10 +1436,14 @@ async def persist_generated_listing_with_repair(
     *,
     source: str = "model",
     final_announce: bool = True,
+    expected_revision_id: str | None = None,
+    expected_photo_fingerprint: str | None = None,
 ) -> dict | None:
     """Persist listing JSON, repairing parse errors and clearing Send validation gaps."""
     provider_name = getattr(provider, "name", "xiaomi-mimo")
     model_name = getattr(provider, "listing_model", "mimo-v2.5-pro")
+    if expected_revision_id is None:
+        expected_revision_id = ConversationRepo(db).current_revision_id(conv_id) or ""
     parsed = extract_listing_json(full_text)
     repaired = False
     if not parsed:
@@ -1436,6 +1453,13 @@ async def persist_generated_listing_with_repair(
             parsed = repaired_json
             repaired = True
 
+    def check_photos() -> None:
+        if expected_photo_fingerprint is not None:
+            db.expire_all()
+            if photo_fingerprint(ConversationRepo(db).get_photos(conv_id)) != expected_photo_fingerprint:
+                raise RuntimeError("Photos changed during generation. Generate again to read the current photos.")
+
+    check_photos()
     listing = persist_generated_listing(
         db,
         conv_id,
@@ -1446,17 +1470,20 @@ async def persist_generated_listing_with_repair(
         provider_name=provider_name,
         model_name=model_name,
         announce=False,
+        expected_revision_id=expected_revision_id,
     )
     if not listing:
         return None
 
+    expected_revision_id = ConversationRepo(db).current_revision_id(conv_id)
     conv = ConversationRepo(db).get(conv_id)
-    analysis = latest_photo_analysis(ConversationRepo(db).get_messages(conv_id)) or ""
+    analysis = current_photo_analysis(ConversationRepo(db), conv_id) or ""
     notes = str(getattr(conv, "notes", "") or "")
     finalized = False
     if _validation_blockers(listing):
         updated = await fill_validation_gaps(provider, listing, analysis=analysis, notes=notes)
         if isinstance(updated, dict) and updated:
+            check_photos()
             if listing.get("category_path"):
                 updated["category_path"] = listing["category_path"]
             if listing.get("marketplace_categories"):
@@ -1474,7 +1501,7 @@ async def persist_generated_listing_with_repair(
             constrain_generated(updated, listing)
             cap_listing_description(updated)
             listing = updated
-            ListingRepo(db).save_revision(conv_id, listing, source="generation_finalize")
+            ListingRepo(db).save_revision(conv_id, listing, source="generation_finalize", expected_revision_id=expected_revision_id)
             finalized = True
 
     if final_announce:

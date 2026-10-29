@@ -1234,7 +1234,7 @@ class PersistListingTest(unittest.TestCase):
 
             app.dependency_overrides[get_db] = override_db
             try:
-                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client:
                     response = await client.get(f"/api/conversations/{self.conv.id}/listing")
                     self.assertEqual(response.status_code, 200)
                     payload = response.json()
@@ -1346,7 +1346,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_generate_stream_includes_keepalive_and_listing(self):
         transport = ASGITransport(app=app)
         body = ""
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 self.assertEqual(resp.status_code, 200)
                 body = "".join([chunk async for chunk in resp.aiter_text()])
@@ -1385,7 +1385,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(listing_generation, "spawn", new=broken_spawn):
             transport = ASGITransport(app=app)
-            async with AsyncClient(transport=transport, base_url="http://test") as client:
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
                 async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                     async for _ in resp.aiter_text():
                         pass
@@ -1420,7 +1420,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
             with patch.object(listing_generation, "quick_identity_read", new=AsyncMock(return_value=identity)), \
                     patch.object(listing_generation, "research_comps_for_fields", new=early_comps):
                 transport = ASGITransport(app=app)
-                async with AsyncClient(transport=transport, base_url="http://test") as client:
+                async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
                     async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                         body = "".join([chunk async for chunk in resp.aiter_text()])
         finally:
@@ -1455,7 +1455,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         ]
         transport = ASGITransport(app=app)
         body = ""
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 self.assertEqual(resp.status_code, 200)
                 body = "".join([chunk async for chunk in resp.aiter_text()])
@@ -1471,7 +1471,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_generate_persists_listing_and_skips_repeat_analysis(self):
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 async for _ in resp.aiter_text():
                     pass
@@ -1516,7 +1516,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
 
         transport = ASGITransport(app=app)
         body = ""
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 self.assertEqual(resp.status_code, 200)
                 body = "".join([chunk async for chunk in resp.aiter_text()])
@@ -1531,12 +1531,45 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(revisions[0].listing_json["title"], LISTING_JSON["title"])
         self.assertTrue(any("repaired" in (m.text or "").lower() for m in messages))
 
+    async def test_generate_reads_photos_added_after_the_previous_analysis(self):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            first = await client.post(f"/api/conversations/{self.conv_id}/generate")
+            self.assertNotIn("Error:", first.text)
+            db = self.Session()
+            ConversationRepo(db).add_photo(self.conv_id, "b.jpg", "b.jpg", "image/jpeg", 10)
+            db.close()
+            second = await client.post(f"/api/conversations/{self.conv_id}/generate")
+            self.assertNotIn("Error:", second.text)
+        self.assertEqual(self.provider.analyze_calls, 2)
+
+    async def test_generate_does_not_save_if_photos_change_during_the_model_reply(self):
+        provider = self.provider
+        original_chat = provider.chat
+
+        async def changing_reply(messages, stream=True):
+            if "Generate a complete listing" in str(messages[-1].get("content") or ""):
+                db = self.Session()
+                ConversationRepo(db).add_photo(self.conv_id, "new.jpg", "new.jpg", "image/jpeg", 10)
+                db.close()
+            async for chunk in original_chat(messages, stream=stream):
+                yield chunk
+
+        provider.chat = changing_reply
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            response = await client.post(f"/api/conversations/{self.conv_id}/generate")
+        self.assertIn("Photos changed during generation", response.text)
+        db = self.Session()
+        self.assertFalse(any(revision.source == "model" for revision in ListingRepo(db).get_revisions(self.conv_id)))
+        db.close()
+
     async def test_generate_reanalyzes_when_prior_analysis_was_empty(self):
         db = self.Session()
         ConversationRepo(db).add_message(self.conv_id, "system", "Photo analysis:\n")
         db.close()
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 async for _ in resp.aiter_text():
                     pass
@@ -1561,7 +1594,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.patches[2] = comps_patch
         self.patches[3] = key_patch
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 body = "".join([chunk async for chunk in resp.aiter_text()])
         self.assertIn("Identifying category and looking up comps", body)
@@ -1577,7 +1610,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         from vendoo_studio.services.comp_research import COMPS_SETUP_NOTE
 
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 async for _ in resp.aiter_text():
                     pass
@@ -1613,7 +1646,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
                     "title": prior.title, "brand": "M&O Gold", "quantity": 1,
                     "category_path": MEN_TSHIRT_PATH, "price": 100,
                 }, source="vendoo_import")
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client:
             response = await client.post(f"/api/conversations/{self.conv_id}/generate")
         self.assertEqual(response.status_code, 200)
         prompt = _first_generate_prompt(self.provider)
@@ -1645,7 +1678,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         self.provider.chunks = []
         transport = ASGITransport(app=app)
         body = ""
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 body = "".join([chunk async for chunk in resp.aiter_text()])
         self.assertIn("Error:", body)
@@ -1658,7 +1691,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_generate_stops_and_offers_retry_when_photo_analysis_fails(self):
         self.provider.analysis = {"error": "TLS connection failed", "evidence": {}}
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 body = "".join([chunk async for chunk in resp.aiter_text()])
         self.assertIn("Error: Photo analysis failed: TLS connection failed. Retry to analyze the photos again.", body)
@@ -1675,7 +1708,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_message_stops_and_offers_retry_when_photo_analysis_fails(self):
         self.provider.analysis = {"error": "TLS connection failed", "evidence": {}}
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             resp = await client.post(
                 f"/api/conversations/{self.conv_id}/messages",
                 json={"text": "Make the listing"},
@@ -1696,7 +1729,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_analyze_photos_endpoint_offers_retry_on_failure(self):
         self.provider.analysis = {"error": "TLS connection failed", "evidence": {}}
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             resp = await client.post(f"/api/conversations/{self.conv_id}/analyze-photos")
         self.assertEqual(resp.status_code, 502)
         self.assertEqual(
@@ -1707,7 +1740,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_analyze_photos_endpoint_quotes_a_reply_without_details(self):
         self.provider.analysis = {"evidence": {}, "raw": "I can't view images in this conversation."}
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             with self.assertLogs("vendoo_studio.listing_generate", "WARNING") as logs:
                 resp = await client.post(f"/api/conversations/{self.conv_id}/analyze-photos")
         self.assertEqual(resp.status_code, 502)
@@ -1724,7 +1757,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
 
         self.provider.analyze_photos = fail
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             resp = await client.post(f"/api/conversations/{self.conv_id}/analyze-photos")
         self.assertEqual(resp.status_code, 502)
         self.assertEqual(
@@ -1742,7 +1775,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_generate_finishes_after_client_disconnect(self):
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async def read_stream():
                 async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                     self.assertEqual(resp.status_code, 200)
@@ -1772,8 +1805,8 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         body = ""
         first_body = ""
         async with (
-            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client1,
-            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client2,
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client1,
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client2,
         ):
             async def first_stream():
                 async with client1.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
@@ -1797,7 +1830,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         gate = asyncio.Event()
         self.provider.analyze_gate = gate
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async def read_stream():
                 async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                     async for _ in resp.aiter_text():
@@ -1825,7 +1858,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
     async def test_resume_after_run_finished_does_not_start_a_second_run(self):
         """A dropped connection reconnects; it must not generate the listing twice."""
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                 async for _ in resp.aiter_text():
                     pass
@@ -1845,7 +1878,7 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         gate = asyncio.Event()
         self.provider.analyze_gate = gate
         transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
             async def read_stream():
                 async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
                     async for _ in resp.aiter_text():

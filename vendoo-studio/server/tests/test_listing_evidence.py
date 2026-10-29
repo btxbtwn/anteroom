@@ -54,7 +54,7 @@ def sold_item(title="Nike L Original Tee"):
 def test_form_records_only_raw_changes_before_automatic_normalization(workspace):
     db, conv, revision, client = workspace
     submitted = {**revision.listing_json, "size": "M"}
-    reply = client.put(f"/api/conversations/{conv.id}/listing", json={"listing": submitted})
+    reply = client.put(f"/api/conversations/{conv.id}/listing", json={"expected_revision_id": ConversationRepo(db).current_revision_id(conv.id) or "", "listing": submitted})
     assert reply.status_code == 200
     correction = db.query(ListingCorrection).one()
     assert correction.changes == {"size": {"before": "L", "after": "M"}}
@@ -64,19 +64,19 @@ def test_form_records_only_raw_changes_before_automatic_normalization(workspace)
 
 
 def test_multi_value_form_edits_survive_save_reload_and_clear(workspace):
-    _db, conv, revision, client = workspace
+    db, conv, revision, client = workspace
     url = f"/api/conversations/{conv.id}/listing"
     submitted = {**revision.listing_json, "ebay_specifics": {
         "season": ["Spring", "Summer", "Fall"], "material": ["Cotton", "Polyester"],
     }}
-    assert client.put(url, json={"listing": submitted}).status_code == 200
+    assert client.put(url, json={"expected_revision_id": ConversationRepo(db).current_revision_id(conv.id) or "", "listing": submitted}).status_code == 200
     saved = client.get(url).json()["listing"]
     assert saved["ebay_specifics"]["season"] == ["Spring", "Summer", "Fall"]
     assert saved["ebay_specifics"]["material"] == ["Cotton", "Polyester"]
     assert saved["ebay_specifics"]["fabricType"] == "Cotton"
     saved["ebay_specifics"]["season"].remove("Summer")
     saved["ebay_specifics"]["material"] = []
-    assert client.put(url, json={"listing": saved}).status_code == 200
+    assert client.put(url, json={"expected_revision_id": ConversationRepo(db).current_revision_id(conv.id) or "", "listing": saved}).status_code == 200
     reloaded = client.get(url).json()["listing"]
     assert reloaded["ebay_specifics"]["season"] == ["Spring", "Fall"]
     assert reloaded["ebay_specifics"]["material"] == []
@@ -180,7 +180,7 @@ def test_evidence_survives_regeneration_and_is_deleted_with_listing(workspace):
 
 def test_revision_restore_supersedes_current_corrections_without_teaching_related_preferences(workspace):
     db, conv, original, client = workspace
-    changed = client.put(f"/api/conversations/{conv.id}/listing", json={"listing": {**original.listing_json, "size": "M"}}).json()
+    changed = client.put(f"/api/conversations/{conv.id}/listing", json={"expected_revision_id": ConversationRepo(db).current_revision_id(conv.id) or "", "listing": {**original.listing_json, "size": "M"}}).json()
     response = client.post(f"/api/conversations/{conv.id}/revisions/{original.id}/restore", json={"expected_revision_id": changed["revision_id"]})
     assert response.status_code == 200
     context = corrections_context(db, conv.id, original.listing_json)
@@ -192,7 +192,7 @@ def test_corrections_reach_initial_generation_with_canonical_rules(workspace):
     from vendoo_studio.services.chat_prompts import listing_generation_messages
     from vendoo_studio.services.skill_formulas import with_pinned_formulas
     db, conv, original, client = workspace
-    client.put(f"/api/conversations/{conv.id}/listing", json={"listing": {**original.listing_json, "size": "M"}})
+    client.put(f"/api/conversations/{conv.id}/listing", json={"expected_revision_id": ConversationRepo(db).current_revision_id(conv.id) or "", "listing": {**original.listing_json, "size": "M"}})
     prompt = listing_generation_messages(with_pinned_formulas(""), "", "- brand: Nike", db, conv.id)[0]["content"]
     assert "--- Seller corrections ---" in prompt
     assert '"size": {"value": "M"' in prompt

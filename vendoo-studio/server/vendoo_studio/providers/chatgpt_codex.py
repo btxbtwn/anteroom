@@ -315,10 +315,11 @@ def _messages_to_input(messages: list[dict]) -> tuple[str, list[dict]]:
         items.append({"role": mapped_role, "content": parts, "type": "message"})
     combined = "\n\n".join(instructions)
     if len(combined) > MAX_INSTRUCTION_CHARS:
-        # Keep the complete context and its instruction priority. Each message
-        # stays within the text-string limit; never truncate marketplace rules.
+        # The ChatGPT endpoint rejects system-role input messages. Developer
+        # messages carry overflow instructions without demoting them to user
+        # content or truncating marketplace rules. Each text stays in limit.
         context = [
-            {"role": "system", "type": "message", "content": [
+            {"role": "developer", "type": "message", "content": [
                 {"type": "input_text", "text": combined[start:start + MAX_INSTRUCTION_CHARS]},
             ]}
             for start in range(MAX_INSTRUCTION_CHARS, len(combined), MAX_INSTRUCTION_CHARS)
@@ -420,7 +421,7 @@ class ChatGPTCodexProvider:
             system += f"\n\nAdditional rules:\n{listing_rules}"
 
         content_parts: list[dict] = [{"type": "text", "text": "Analyze these product photos:"}]
-        for url in await encode_images(photo_paths[:10], max_side):
+        for url in await encode_images(photo_paths, max_side):
             content_parts.append({
                 "type": "image_url",
                 "image_url": {"url": url},

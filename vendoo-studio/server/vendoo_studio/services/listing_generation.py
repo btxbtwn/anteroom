@@ -8,7 +8,7 @@ import logging
 import time
 
 from vendoo_studio.database import SessionLocal
-from vendoo_studio.repositories.queries import ConversationRepo
+from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
 from vendoo_studio.services import activity, generation_timing, live_trace, model_slots
 from vendoo_studio.services.brave_search import item_fields
 from vendoo_studio.services.chat_prompts import (
@@ -30,6 +30,7 @@ from vendoo_studio.services.listing_generate import (
     listing_save_summary,
     persist_generated_listing_with_repair,
     photo_analysis_failure,
+    photo_fingerprint,
     quick_identity_read,
     require_photo_analysis,
 )
@@ -92,6 +93,7 @@ async def run_listing_generation(
     seller_answers: str,
     paths: list[str],
     photo_count: int,
+    analysis_fingerprint: str,
 ) -> None:
     """Analyze photos, pick categories, stream the listing, and save it."""
     agents_run = activity.begin_agents(conv_id)
@@ -160,7 +162,7 @@ async def run_listing_generation(
 
     try:
         evidence: dict = {}
-        existing = latest_photo_analysis(stream_repo.get_messages(conv_id))
+        existing = latest_photo_analysis(stream_repo.get_messages(conv_id), fingerprint=analysis_fingerprint)
         listing_rules = skill_rules
         if existing:
             analysis_text = existing
@@ -207,6 +209,7 @@ async def run_listing_generation(
             still_current()
             analysis_message = stream_repo.add_message(
                 conv_id, "system", analysis_text, provider=vision_name, model=vision_model,
+                photo_fingerprint=analysis_fingerprint,
             )
             run.publish(sse_event("posted", str(analysis_message.id)))
 
@@ -294,6 +297,7 @@ async def run_listing_generation(
             photo_count=photo_count,
             native_forms=native_forms,
         )
+        expected_revision_id = ConversationRepo(stream_db).current_revision_id(conv_id) or ""
         run.publish(sse_event("status", "thinking"))
 
         async for item in iter_with_keepalives(provider.chat(messages, stream=True)):
@@ -313,11 +317,16 @@ async def run_listing_generation(
             run.publish(sse_event("status", "Repairing listing JSON…"))
         needed_repair = not extract_listing_json(full_text)
         still_current()
+        stream_db.expire_all()
+        if photo_fingerprint(stream_repo.get_photos(conv_id)) != analysis_fingerprint:
+            raise RuntimeError("Photos changed during generation. Generate again to read the current photos.")
         run.publish(sse_event("status", "Filling required fields…"))
         listing = await await_with_pulses(
             run,
             persist_generated_listing_with_repair(
                 stream_db, conv_id, full_text, provider, final_announce=False,
+                expected_revision_id=expected_revision_id,
+                expected_photo_fingerprint=analysis_fingerprint,
             ),
             child_tasks,
         )
@@ -350,6 +359,8 @@ async def run_listing_generation(
                 timing_id=timing_id,
                 run_started=run_started,
                 agents_run=agents_run,
+                expected_revision_id=ConversationRepo(stream_db).current_revision_id(conv_id),
+                expected_photo_fingerprint=analysis_fingerprint,
             )))
     except asyncio.CancelledError:
         log.warning("listing generation cancelled for %s; saving any completed text", conv_id)
@@ -366,7 +377,9 @@ async def run_listing_generation(
         ):
             try:
                 await persist_generated_listing_with_repair(
-                    stream_db, conv_id, full_text, provider
+                    stream_db, conv_id, full_text, provider,
+                    expected_revision_id=expected_revision_id,
+                    expected_photo_fingerprint=analysis_fingerprint,
                 )
             except Exception:
                 log.exception("failed to persist cancelled listing for %s", conv_id)
@@ -436,6 +449,8 @@ async def _finish_generation_background(
     timing_id: str | None = None,
     run_started: float | None = None,
     agents_run: int = 0,
+    expected_revision_id: str | None = None,
+    expected_photo_fingerprint: str | None = None,
 ) -> None:
     """Fill remaining discovered fields after the generate stream ends.
 
@@ -463,6 +478,8 @@ async def _finish_generation_background(
             stages[stage] = round(time.monotonic() - started, 2)
 
     try:
+        if expected_revision_id is not None and ConversationRepo(db).current_revision_id(conv_id) != expected_revision_id:
+            return
         current = dict(listing) if isinstance(listing, dict) else {}
         if isinstance(schema_meta, dict) and schema_meta.get("_schema_source") in {
             "deferred_probe",
@@ -473,6 +490,19 @@ async def _finish_generation_background(
                 "_schema_probe_job_id": schema_meta.get("_schema_probe_job_id"),
             }
             await await_deferred_schema(db, seed)
+
+        db.expire_all()
+        if expected_revision_id is not None and repo.current_revision_id(conv_id) != expected_revision_id:
+            return
+        if expected_photo_fingerprint is None:
+            expected_photo_fingerprint = photo_fingerprint(repo.get_photos(conv_id))
+
+        def check_photos() -> None:
+            db.expire_all()
+            if photo_fingerprint(repo.get_photos(conv_id)) != expected_photo_fingerprint:
+                raise RevisionConflict("Photos changed while preparing marketplace fields")
+
+        check_photos()
 
         from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
         from vendoo_studio.services.listing_field_gaps import fill_listing_field_gaps
@@ -501,7 +531,6 @@ async def _finish_generation_background(
         current = await timed("gap_fill", fill_gaps())
         from types import SimpleNamespace
 
-        from vendoo_studio.repositories.queries import ListingRepo
         from vendoo_studio.services.vendoo_create import (
             BrowserBridgeError,
             LOOKUP_TIMEOUT_SEC,
@@ -529,6 +558,7 @@ async def _finish_generation_background(
                 # incomplete until its authoritative fields can be read.
                 log.info("Vendoo preparation unavailable for %s", conv_id)
             else:
+                check_photos()
                 db.expire_all()
                 latest = listing_repo.get_current(conv_id)
                 if not latest or latest.current_revision_id != revision_id:
@@ -536,6 +566,7 @@ async def _finish_generation_background(
                     return
                 listing_repo.save_revision(
                     conv_id, prepared, source="vendoo_prepare", parent_revision_id=revision_id,
+                    expected_revision_id=revision_id,
                 )
                 current = prepared
 
@@ -547,6 +578,7 @@ async def _finish_generation_background(
                 agent.result("Filled category fields" if filled else "No category fields to fill")
                 return filled
 
+        check_photos()
         native = await timed("native_fields", fill_native())
         if native is not None:
             current = native
@@ -559,6 +591,8 @@ async def _finish_generation_background(
             provider="system",
             model="",
         )
+    except RevisionConflict:
+        log.info("discarding stale generation finish for %s", conv_id)
     except Exception:
         log.exception("post-generate finish failed for %s", conv_id)
         try:

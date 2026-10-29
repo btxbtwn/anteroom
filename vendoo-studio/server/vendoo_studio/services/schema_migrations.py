@@ -90,14 +90,17 @@ def database_path(engine: Engine) -> Path:
 
 
 def _snapshot(reason: str, engine: Engine) -> None:
-    from vendoo_studio.services.backups import snapshot_quietly
+    from vendoo_studio.services.backups import BackupError, take_snapshot
 
     if engine.dialect.name != "sqlite":
         return  # The host's point-in-time backups cover a hosted Postgres.
 
     path = database_path(engine)
     if path.exists():
-        snapshot_quietly(reason, source=path)
+        try:
+            take_snapshot(reason, source=path)
+        except (BackupError, OSError) as exc:
+            raise SchemaError(f"Database unchanged: a recovery snapshot could not be created. {exc}") from exc
 
 
 def _adopt_legacy(engine: Engine, config: Config) -> str:

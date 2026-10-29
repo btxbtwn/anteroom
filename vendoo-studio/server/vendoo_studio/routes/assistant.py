@@ -296,8 +296,8 @@ def _proposal(message_id: str, db: Session) -> AssistantMessage:
 def _apply_to_listing(item: dict, db: Session) -> str | None:
     """Write one listing's proposed values. Returns why it was skipped, or None once it is saved."""
     from vendoo_studio.models.listing_evidence import ListingCorrection
-    from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-    from vendoo_studio.routes.listings import ListingUpdate, update_listing
+    from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
+    from vendoo_studio.services.listing_editor import save_listing_edit
     from vendoo_studio.services.price_markdown import listing_busy
     from vendoo_studio.services import boxes
 
@@ -316,7 +316,9 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
             return "It has no listing to change yet."
         updated = assistant_changes.apply_fields(revisions[0].listing_json, to_set)
         try:
-            saved = update_listing(conv_id, ListingUpdate(listing=updated), db)
+            saved = save_listing_edit(conv_id, updated, db, expected_revision_id=revisions[0].id)
+        except RevisionConflict as refused:
+            return str(refused)
         except HTTPException as refused:
             return str(refused.detail)
         ListingRepo(db).get_revision(saved["revision_id"]).source = REVISION_SOURCE

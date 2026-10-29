@@ -214,10 +214,14 @@ def apply_listing_payload(db: Session, conv_id: str, full_text: str) -> tuple[li
             return None, False
         updated = copy.deepcopy(revisions[0].listing_json)
         apply_field_updates(updated, commands)
-        from vendoo_studio.routes.listings import ListingUpdate, update_listing
+        from vendoo_studio.services.listing_editor import save_listing_edit
+        from vendoo_studio.repositories.queries import RevisionConflict
 
         try:
-            update_listing(conv_id, ListingUpdate(listing=updated), db)
+            save_listing_edit(conv_id, updated, db, expected_revision_id=revisions[0].id)
+        except RevisionConflict as exc:
+            ConversationRepo(db).add_message(conv_id, "system", str(exc), provider="system", model="")
+            return commands, False
         except HTTPException as exc:
             ConversationRepo(db).add_message(conv_id, "system", str(exc.detail), provider="system", model="")
             return commands, False

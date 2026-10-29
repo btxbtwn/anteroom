@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.511 — 2026-10-29
+
+- Anteroom rejects requests from untrusted websites, hides secrets in terminal errors, and checks that updates come from the installed app's publisher.
+- Marketplace sign-in tokens expire automatically in the relay, and security checks now cover Python dependencies and relay test failures.
+- Listing edits no longer overwrite newer changes from another open editor, and direct marketplace actions keep the photos you approved even if you edit them afterward.
+- Database upgrades stop safely if Anteroom cannot save a recovery backup first.
+- Listing generation reads every uploaded photo, refreshes its analysis when photos change, and keeps newer seller edits safe while background fields finish.
+- Large ChatGPT listing requests no longer fail with “System messages are not allowed.”
+- Inventory refreshes read less listing history data, reducing background work as your inventory grows.
+
 ## 0.1.510 — 2026-10-29
 
 - Vinted's Category field now opens Vinted's category picker. It had been showing the shared category path as a text box, so the picker never appeared.

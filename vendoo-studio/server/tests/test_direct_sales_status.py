@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -19,7 +19,7 @@ from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRe
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import marketplace_delist
 from vendoo_studio.services.inventory_analytics import inventory_analytics, load_rows
-from vendoo_studio.services.item_status import status_for
+from vendoo_studio.services.item_status import status_for, statuses
 from vendoo_studio.services.vendoo_import import parse_notes
 
 EBAY_URL = "https://www.ebay.com/itm/123456789012"
@@ -79,6 +79,32 @@ def test_a_direct_sale_turns_a_vendoo_active_item_sold(env):
     assert status(env.db, "coat").status == "sold"
     ConversationRepo(env.db).reconcile_job_statuses()
     assert env.db.get(Conversation, "coat").status == "sold"
+
+
+def test_empty_inventory_status_does_not_query_history(env):
+    queries = []
+
+    def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+        queries.append(statement)
+
+    engine = env.db.get_bind()
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        assert statuses(env.db, []) == {}
+        assert queries == []
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+
+
+@pytest.mark.parametrize("quantity", [3, "3", 3.0])
+def test_quantity_history_survives_large_unrelated_listing_fields(env, quantity):
+    item(env.db, "tees", quantity=quantity)
+    ListingRepo(env.db).save_revision("tees", {
+        "title": "Coat", "quantity": 1, "description": "Long description " * 10000,
+    }, "user")
+    line(env.db, "tees")
+    partial = status(env.db, "tees")
+    assert (partial.status, partial.quantity, partial.units_sold) == ("active", 3, 1)
 
 
 def test_a_multi_unit_item_is_partly_sold_until_every_unit_sells(env):

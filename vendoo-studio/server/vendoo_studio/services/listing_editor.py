@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
-from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
 
 CORRUPT_SPECIFIC_KEYS = (
     "ebay_specifics",
@@ -60,6 +60,12 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
 
     listing_repo = ListingRepo(db)
     current = listing_repo.get_current(conv_id)
+    if current:
+        db.refresh(current)
+    current_id = (current.current_revision_id or "") if current else ""
+    if expected_revision_id is not None and expected_revision_id != current_id:
+        raise RevisionConflict("This listing changed since you reviewed it")
+    expected_revision_id = current_id
 
     photo_count = len(conv_repo.get_photos(conv_id))
     reject_corrupt_listing(listing_data)

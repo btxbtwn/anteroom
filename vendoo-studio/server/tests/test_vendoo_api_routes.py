@@ -178,8 +178,11 @@ class CreateRouteTest(_RouteTest):
             "Photo analysis:\n- brand: Carol Rose\n- size: M\n"
             "- color: Red\n- material: Polyester\n- condition: Pre-Owned - Good"
         )
+        from vendoo_studio.services.listing_generate import photo_fingerprint
+
         ConversationRepo(self.db).add_message(
             self.conv.id, "system", analysis, provider="system", model="",
+            photo_fingerprint=photo_fingerprint(ConversationRepo(self.db).get_photos(self.conv.id)),
         )
         seen: dict = {}
 

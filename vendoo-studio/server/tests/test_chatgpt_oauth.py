@@ -74,8 +74,23 @@ class ChatGPTOAuthTest(unittest.TestCase):
         chunks = [instructions] + [item["content"][0]["text"] for item in items[:-1]]
         self.assertTrue(all(len(chunk) <= MAX_INSTRUCTION_CHARS for chunk in chunks))
         self.assertEqual("".join(chunks), text + "\n\nNever publish.")
-        self.assertTrue(all(item["role"] == "system" for item in items[:-1]))
+        self.assertTrue(all(item["role"] == "developer" for item in items[:-1]))
         self.assertEqual(items[-1]["role"], "user")
+
+    def test_oversized_payload_never_sends_system_input_messages(self):
+        from vendoo_studio.providers.chatgpt_codex import MAX_INSTRUCTION_CHARS
+
+        with patch("vendoo_studio.providers.chatgpt_codex.get_chatgpt_models", return_value={}):
+            provider = ChatGPTCodexProvider()
+        rules = "x" * (MAX_INSTRUCTION_CHARS + 1)
+        for stream in (True, False):
+            with self.subTest(stream=stream):
+                payload = provider._payload([
+                    {"role": "system", "content": rules},
+                    {"role": "user", "content": "Generate a draft."},
+                ], provider.listing_model, stream)
+                self.assertEqual([item["role"] for item in payload["input"]], ["developer", "user"])
+                self.assertEqual(payload["instructions"] + payload["input"][0]["content"][0]["text"], rules)
 
     def test_messages_to_input_uses_output_text_for_assistant(self):
         instructions, items = _messages_to_input([

@@ -203,7 +203,7 @@ class NativeEditorTest(unittest.TestCase):
         submitted = {**self.listing, "poshmark_specifics": {"sizeSetId": "native-group", "nativeSizeId": "XL", "smartSell": {"enabled": False}},
                      "depop_specifics": {"nativeSizeId": "123", "attributes": {"bottom-fit": ["straight"]}},
                      "mercari_specifics": {"nativeSizeId": "168"}}
-        answer = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
+        answer = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted})
         self.assertEqual(answer.status_code, 200, answer.text)
         self.client.get(f"{self.url}/poshmark/form")
         snapshot = self.prepared[-1]
@@ -271,7 +271,7 @@ class NativeEditorTest(unittest.TestCase):
         self.assertTrue(discount["multi"])
         self.assertEqual(fields["Package"]["value"], "USPS_SoftPack")
         saved = {**self.listing, "sellwild_specifics": {"parcelTemplate": "", "couponIds": ["117"]}}
-        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": saved}).status_code, 200)
+        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": saved}).status_code, 200)
         fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
         self.assertEqual(fields["Package"]["value"], "")
         self.assertEqual(fields["Sell it faster with a discount"]["value"], ["117"])
@@ -296,7 +296,7 @@ class NativeEditorTest(unittest.TestCase):
 
         submitted = {**self.listing, "weight_lb": 1, "weight_oz": 8, "package_dimensions_in": "10x8x4",
                      "sellwild_specifics": {"nativeCategoryId": "1", "parcelTemplate": ""}}
-        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted}).status_code, 200)
+        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted}).status_code, 200)
         fields = {row["label"]: row for row in self.client.get(f"{self.url}/sellwild/form").json()["fields"]}
         # They start from Item Details and can be changed here, as on Sellwild's page.
         self.assertEqual([fields[label]["value"] for label in ("Weight (lbs)", "Height (in)", "Width (in)", "Depth (in)")],
@@ -311,7 +311,7 @@ class NativeEditorTest(unittest.TestCase):
 
     def test_sellwild_vehicle_form_has_vehicle_information_and_no_package(self):
         submitted = {**self.listing, "sellwild_specifics": {"nativeCategoryId": "43", "vin": "1HGCM82633A004352"}}
-        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted}).status_code, 200)
+        self.assertEqual(self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted}).status_code, 200)
         rows = self.client.get(f"{self.url}/sellwild/form").json()["fields"]
         self.assertEqual([(row.get("section"), row["label"]) for row in rows][-3:], [
             ("Vehicle Information", "Vehicle Identification Number"), ("Vehicle Information", "Mileage"),
@@ -323,7 +323,7 @@ class NativeEditorTest(unittest.TestCase):
         submitted = {**self.listing, "depop_specifics": {
             "style": ["cute"], "age": [], "source": [],
         }}
-        answer = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
+        answer = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted})
         self.assertEqual(answer.status_code, 200, answer.text)
         response = self.client.get(f"{self.url}/depop/form")
         self.assertEqual(response.status_code, 200, response.text)
@@ -335,7 +335,7 @@ class NativeEditorTest(unittest.TestCase):
 
     def test_seller_original_price_survives_snapshot_defaults(self):
         submitted = {**self.listing, "poshmark_specifics": {"originalPrice": 55}}
-        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
+        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted})
         self.assertEqual(response.status_code, 200, response.text)
         self.client.get(f"{self.url}/poshmark/form")
         self.assertEqual(self.prepared[-1]["poshmark_specifics"]["originalPrice"], 55)
@@ -344,7 +344,7 @@ class NativeEditorTest(unittest.TestCase):
         previous = {**self.listing, "depop_specifics": {"style": ["Casual", "Retro", "Minimalist"], "age": "Modern", "source": "Preloved"}}
         ListingRepo(self.db).save_revision(self.conv.id, previous, "test")
         submitted = {**previous, "quantity": 3, "depop_specifics": {"style": ["casual", "retro"], "age": [], "source": []}}
-        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": submitted})
+        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": submitted})
         self.assertEqual(response.status_code, 200, response.text)
         revision = ListingRepo(self.db).get_revision(ListingRepo(self.db).get_current(self.conv.id).current_revision_id)
         self.assertEqual(revision.listing_json["depop_specifics"]["age"], [])

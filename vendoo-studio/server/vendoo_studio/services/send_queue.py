@@ -16,7 +16,7 @@ async def run_send(job_id: str) -> None:
     from vendoo_studio.routes.vendoo_api import (
         _create_claimed_draft, _finish_api_send, _save_claimed_draft,
     )
-    from vendoo_studio.services.listing_generate import latest_photo_analysis
+    from vendoo_studio.services.listing_generate import current_photo_analysis
     from vendoo_studio.services.listing_provider import get_listing_provider, provider_is_configured
 
     db = SessionLocal()
@@ -39,7 +39,7 @@ async def run_send(job_id: str) -> None:
                                      current[0].listing_json if current else None) != review.payload.get("photo_versions"):
             raise ValueError("Photos changed after approval. Review the listing again before sending.")
         provider = get_listing_provider() if provider_is_configured() else None
-        evidence = latest_photo_analysis(conv_repo.get_messages(conv.id)) or str(conv.notes or "")
+        evidence = current_photo_analysis(conv_repo, conv.id) or str(conv.notes or "")
         if job.vendoo_item_id:
             await _save_claimed_draft(
                 db, conv, conv.id, job.vendoo_item_id, revisions, snapshot,

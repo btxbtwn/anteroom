@@ -296,7 +296,7 @@ export function ListingEditor({
 
   const savedCategories = listingCategorySignature(data?.listing);
   const updateMutation = useMutation({
-    mutationFn: (listing: ListingData) => api.listings.update(convId, listing),
+    mutationFn: (listing: ListingData) => api.listings.update(convId, listing, data?.current_revision_id || ""),
     onSuccess: async (_result, listing) => {
       await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
       // The category schema is the field list. Other edits leave it alone.

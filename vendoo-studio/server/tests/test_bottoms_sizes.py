@@ -16,7 +16,7 @@ from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.fill_log import FillLogEntry  # noqa: F401
 from vendoo_studio.models.job import Job  # noqa: F401
 from vendoo_studio.models.registry import FieldRegistry  # noqa: F401
-from vendoo_studio.repositories.queries import ListingRepo
+from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.bottoms_sizes import apply_bottoms_sizes
 from vendoo_studio.services.listing_generate import align_size_fields
 from vendoo_studio.services.vendoo_marketplace_fields import best_offer_error
@@ -147,7 +147,7 @@ class BottomsAndOfferRouteTest(unittest.TestCase):
         self.assertEqual(listing["ebay_specifics"]["inseam"], "30")
         saved = self.client.put(
             f"/api/conversations/{self.conv.id}/listing",
-            json={"listing": {**listing, "title": listing["title"]}},
+            json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": {**listing, "title": listing["title"]}},
         )
         self.assertEqual(saved.status_code, 200, saved.text)
         again = self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]
@@ -157,7 +157,7 @@ class BottomsAndOfferRouteTest(unittest.TestCase):
         listing = copy.deepcopy(JEANS)
         listing["price"] = 17
         listing["ebay_specifics"]["bestOffer"] = {"enabled": "Yes", "autoAcceptPrice": 12, "minimumOfferPrice": 15}
-        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": listing})
+        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": listing})
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("minimum", response.json()["detail"])
         kept = self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]
@@ -166,7 +166,7 @@ class BottomsAndOfferRouteTest(unittest.TestCase):
         valid = copy.deepcopy(JEANS)
         valid["price"] = 17
         valid["ebay_specifics"]["bestOffer"] = {"enabled": "Yes", "autoAcceptPrice": 15, "minimumOfferPrice": 12}
-        saved = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"listing": valid})
+        saved = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={"expected_revision_id": ConversationRepo(self.db).current_revision_id(self.conv.id) or "", "listing": valid})
         self.assertEqual(saved.status_code, 200, saved.text)
         bad = self.client.post(
             f"/api/conversations/{self.conv.id}/fields",

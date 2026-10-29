@@ -136,6 +136,8 @@ jobs:
           python -m pip install -U pip
           python -m pip install -e ".[dev]"
       - run: ruff check server
+      - name: Audit installed Python dependencies
+        run: python -m pip_audit
       - run: python -m pytest -q -n auto
         env:
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
@@ -262,6 +264,7 @@ jobs:
       - studio-backend-postgres
       - studio-update-zip
       - extension
+      - webhook-relay
       - skills
     runs-on: ubuntu-latest
     steps:

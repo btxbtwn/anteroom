@@ -765,11 +765,12 @@ async def claude_login_terminal(ws: WebSocket):
     ``{"type": "input", "data"}`` and ``{"type": "resize", "cols", "rows"}``.
     The last frame is ``{"type": "exit", "code"}``, or ``{"type": "error"}``.
     """
-    from vendoo_studio.config import CORS_ORIGINS
     from vendoo_studio.services.claude_auth import LoginTerminal
 
     # Only Studio's own window on this Mac: the login opens a browser here.
-    if ws.headers.get("origin") not in CORS_ORIGINS:
+    from vendoo_studio.services.local_requests import origin_allowed
+
+    if not origin_allowed(ws.headers.get("origin") or ""):
         await ws.close(code=1008)
         return
     await ws.accept()

@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value
@@ -401,10 +402,12 @@ class ConversationRepo:
         provider: str | None = None,
         model: str | None = None,
         attachments: list[dict] | None = None,
+        photo_fingerprint: str | None = None,
     ) -> Message:
         msg = Message(
             conversation_id=conv_id, role=role, text=text, provider=provider, model=model,
             attachments=attachments or None,
+            photo_fingerprint=photo_fingerprint,
         )
         self.db.add(msg)
         # ``created_at`` is a column default, so it exists only once the INSERT
@@ -517,6 +520,7 @@ class ListingRepo:
         return self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
 
     def save_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None) -> ListingRevision:
+        """Save atomically; an empty expected id means no listing may exist yet."""
         from vendoo_studio.services.native_field_fill import FILL_ON_SOURCES, category_saved
 
         before: dict = {}
@@ -547,7 +551,26 @@ class ListingRepo:
         self.db.flush()
 
         listing = self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
-        if expected_revision_id is not None:
+        if expected_revision_id == "":
+            if listing is not None and listing.current_revision_id is not None:
+                self.db.rollback()
+                raise RevisionConflict("This listing changed since you reviewed it")
+            if listing is None:
+                listing = Listing(conversation_id=conv_id, current_revision_id=revision.id)
+                self.db.add(listing)
+                try:
+                    self.db.flush()
+                except IntegrityError as exc:
+                    self.db.rollback()
+                    raise RevisionConflict("This listing changed since you reviewed it") from exc
+            else:
+                result = self.db.execute(update(Listing).where(
+                    Listing.conversation_id == conv_id, Listing.current_revision_id.is_(None),
+                ).values(current_revision_id=revision.id))
+                if result.rowcount != 1:
+                    self.db.rollback()
+                    raise RevisionConflict("This listing changed since you reviewed it")
+        elif expected_revision_id is not None:
             result = self.db.execute(update(Listing).where(
                 Listing.conversation_id == conv_id, Listing.current_revision_id == expected_revision_id,
             ).values(current_revision_id=revision.id))

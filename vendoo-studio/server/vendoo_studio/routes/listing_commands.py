@@ -49,20 +49,24 @@ class DepartmentBody(BaseModel):
     apply: bool = False
 
 
-def _listing(db: Session, conv_id: str) -> dict:
+def _listing(db: Session, conv_id: str) -> tuple[dict, str]:
     if not ConversationRepo(db).get(conv_id):
         raise HTTPException(404, "Conversation not found")
     current = ListingRepo(db).get_current(conv_id)
     revision = ListingRepo(db).get_revision(current.current_revision_id) if current and current.current_revision_id else None
     if not revision or not isinstance(revision.listing_json, dict):
         raise HTTPException(404, "Generate a listing before editing it.")
-    return copy.deepcopy(revision.listing_json)
+    return copy.deepcopy(revision.listing_json), revision.id
 
 
-def _save(conv_id: str, listing: dict, db: Session) -> dict:
-    from vendoo_studio.routes.listings import ListingUpdate, update_listing
+def _save(conv_id: str, listing: dict, revision_id: str, db: Session) -> dict:
+    from vendoo_studio.repositories.queries import RevisionConflict
+    from vendoo_studio.services.listing_editor import save_listing_edit
 
-    return update_listing(conv_id, ListingUpdate(listing=listing), db)
+    try:
+        return save_listing_edit(conv_id, listing, db, expected_revision_id=revision_id)
+    except RevisionConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.post("/api/conversations/{conv_id}/set-price")
@@ -74,7 +78,7 @@ async def set_price(conv_id: str, body: SetPriceBody, db: Session = Depends(get_
         raise HTTPException(400, "Enter a price greater than zero.")
     if body.push and not body.confirmed:
         raise HTTPException(400, "Pushing a price onto a live listing needs confirmed=true.")
-    listing = _listing(db, conv_id)
+    listing, revision_id = _listing(db, conv_id)
     listing["price"] = price_number(body.price)
     locks = locked_paths(listing)
     if body.all_marketplaces:
@@ -90,7 +94,7 @@ async def set_price(conv_id: str, body: SetPriceBody, db: Session = Depends(get_
         else:
             locks.discard(CANONICAL_PRICE[market])
     listing["seller_fields"] = sorted(locks)
-    saved = _save(conv_id, listing, db)
+    saved = _save(conv_id, listing, revision_id, db)
     pushed: list[str] = []
     waiting: list[str] = []
     if body.push:
@@ -122,9 +126,9 @@ def set_field(conv_id: str, body: FieldBody, db: Session = Depends(get_db)):
 
     if not str(body.path or "").strip():
         raise HTTPException(400, "Name the field path to change.")
-    listing = _listing(db, conv_id)
+    listing, revision_id = _listing(db, conv_id)
     apply_field_updates(listing, [{"path": body.path, "value": body.value, "clear": body.clear}])
-    saved = _save(conv_id, listing, db)
+    saved = _save(conv_id, listing, revision_id, db)
     return {"ok": True, "revision_id": saved.get("revision_id"), "path": body.path}
 
 
@@ -135,7 +139,7 @@ def set_depop_measurements(conv_id: str, body: DepopMeasurementsBody, db: Sessio
     from vendoo_studio.services.seller_overrides import locked_paths
     from vendoo_studio.services.vendoo_import import parse_notes
 
-    listing = _listing(db, conv_id)
+    listing, revision_id = _listing(db, conv_id)
     locks = locked_paths(listing)
     depop = dict(listing.get("depop_specifics") or {})
     if body.clear or not body.values:
@@ -152,7 +156,7 @@ def set_depop_measurements(conv_id: str, body: DepopMeasurementsBody, db: Sessio
         listing["depop_specifics"] = depop
         locks.add("depop_specifics.measurements")
         listing["seller_fields"] = sorted(locks)
-    saved = _save(conv_id, listing, db)
+    saved = _save(conv_id, listing, revision_id, db)
     return {"ok": True, "revision_id": saved.get("revision_id"), "measurements": listing.get("depop_specifics", {}).get("measurements")}
 
 

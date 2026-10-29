@@ -448,11 +448,12 @@ async def prepare_generation_schema(
     from vendoo_studio.services.direct_categories import attach_direct_categories
 
     await attach_direct_categories(seed, f"{analysis}\n{notes}")
-    ListingRepo(db).save_revision(
+    selected_revision = ListingRepo(db).save_revision(
         conv_id,
         seed,
         source="category_analysis",
         parent_revision_id=revisions[0].id if revisions else None,
+        expected_revision_id=revisions[0].id if revisions else "",
     )
 
     category_path = str(seed.get("category_path") or "").strip()
@@ -480,7 +481,8 @@ async def prepare_generation_schema(
             conv_id,
             seed,
             source="category_schema_cache",
-            parent_revision_id=revisions[0].id if revisions else None,
+            parent_revision_id=selected_revision.id,
+            expected_revision_id=selected_revision.id,
         )
         status("Using cached category fields…")
         log.info("generation schema cache hit conv=%s category=%s", conv_id, category_path)

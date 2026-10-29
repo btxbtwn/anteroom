@@ -74,15 +74,12 @@ def durable_vendoo_item_id(value: object) -> str | None:
 
 
 def _ws_origin_allowed(origin: str) -> bool:
-    from vendoo_studio.config import CORS_ORIGINS
+    from vendoo_studio.services.local_requests import origin_allowed
 
     value = (origin or "").strip()
     if not value:
         return False
-    lowered = value.lower()
-    if lowered.startswith("chrome-extension://"):
-        return True
-    return value in CORS_ORIGINS
+    return origin_allowed(value, extension=True)
 
 
 def _websocket_allowed(ws: WebSocket) -> bool:
