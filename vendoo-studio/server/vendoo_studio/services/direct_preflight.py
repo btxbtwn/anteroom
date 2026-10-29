@@ -88,10 +88,7 @@ def with_fix(item: dict) -> dict:
     command = _GAP_FIXES.get(str(item.get("field") or ""))
     if not command:
         return item
-    message = str(item.get("message") or "")
-    if command not in message:
-        message = f"{message} Fix: {command}".strip()
-    return {**item, "message": message, "fix": {"field": item.get("field"), "command": command}}
+    return {**item, "fix": {"field": item.get("field"), "command": command}}
 
 
 def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:

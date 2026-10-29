@@ -231,7 +231,28 @@ class DepopPhotoCapTest(unittest.TestCase):
         item = with_fix(gap("marketplace_photos.depop", "Depop keeps 8 photos.", blocking=False))
         self.assertFalse(item["blocking"])
         self.assertIn("anteroom conversations fields", item["fix"]["command"])
-        self.assertIn(item["fix"]["command"], item["message"])
+        self.assertEqual(item["message"], "Depop keeps 8 photos.")
+
+
+class GapMessageTest(unittest.TestCase):
+    def test_every_command_backed_gap_preserves_its_visible_message(self):
+        from vendoo_studio.services.direct_preflight import _GAP_FIXES
+
+        for field, command in _GAP_FIXES.items():
+            for blocking in (True, False):
+                with self.subTest(field=field, blocking=blocking):
+                    original = gap(field, "Choose a value on this form.", blocking=blocking)
+                    item = with_fix(original)
+                    self.assertEqual(item, {**original, "fix": {"field": field, "command": command}})
+                    self.assertEqual(with_fix(item), item)
+                    self.assertNotIn("fix", original)
+
+    def test_shipping_warning_keeps_cli_command_out_of_visible_message(self):
+        message = "Mercari needs a prepaid shipping label."
+        item = with_fix(gap("mercari_specifics.shippingClassId", message))
+        self.assertEqual(item["message"], message)
+        self.assertIn("--path mercari_specifics.shippingClassId", item["fix"]["command"])
+        self.assertTrue(item["blocking"])
 
 
 class DepartmentAndLogsTest(unittest.TestCase):

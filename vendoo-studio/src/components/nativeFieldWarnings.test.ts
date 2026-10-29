@@ -23,6 +23,24 @@ const mercariRows = [
 ];
 
 describe("direct List gaps on the form", () => {
+  it.each(["ebay", "etsy", "poshmark", "mercari", "depop", "vinted", "sellwild"])(
+    "%s displays field and photo messages without command metadata",
+    (marketplace) => {
+      const field = `${marketplace}_specifics.title`;
+      const photos = `marketplace_photos.${marketplace}`;
+      const gaps = [
+        { field, message: "Enter a title.", blocking: true,
+          fix: { field, command: "anteroom conversations fields --conv-id CONV --path title --value TITLE" } },
+        { field: photos, message: "Choose photos.", blocking: false,
+          fix: { field: photos, command: `anteroom conversations fields --conv-id CONV --path ${photos} --value []` } },
+      ];
+      expect([...gapsByField(marketplace, gaps, [{ key: field }, { key: photos }])]).toEqual([
+        [field, ["Enter a title."]],
+        [photos, ["Choose photos."]],
+      ]);
+    },
+  );
+
   it("puts Poshmark's color answer under its Color row", () => {
     const found = gapsByField("poshmark", [{
       field: "primaryColor",
