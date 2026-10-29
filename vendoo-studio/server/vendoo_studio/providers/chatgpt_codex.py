@@ -318,7 +318,7 @@ def _messages_to_input(messages: list[dict]) -> tuple[str, list[dict]]:
         # Keep the complete context and its instruction priority. Each message
         # stays within the text-string limit; never truncate marketplace rules.
         context = [
-            {"role": "system", "type": "message", "content": [
+            {"role": "developer", "type": "message", "content": [
                 {"type": "input_text", "text": combined[start:start + MAX_INSTRUCTION_CHARS]},
             ]}
             for start in range(MAX_INSTRUCTION_CHARS, len(combined), MAX_INSTRUCTION_CHARS)

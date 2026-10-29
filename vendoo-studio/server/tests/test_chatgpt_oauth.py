@@ -74,8 +74,19 @@ class ChatGPTOAuthTest(unittest.TestCase):
         chunks = [instructions] + [item["content"][0]["text"] for item in items[:-1]]
         self.assertTrue(all(len(chunk) <= MAX_INSTRUCTION_CHARS for chunk in chunks))
         self.assertEqual("".join(chunks), text + "\n\nNever publish.")
-        self.assertTrue(all(item["role"] == "system" for item in items[:-1]))
+        self.assertTrue(all(item["role"] == "developer" for item in items[:-1]))
         self.assertEqual(items[-1]["role"], "user")
+
+        with patch("vendoo_studio.providers.chatgpt_codex.get_chatgpt_models", return_value={}):
+            provider = ChatGPTCodexProvider()
+        payload = provider._payload([
+            {"role": "system", "content": text},
+            {"role": "system", "content": "Never publish."},
+            {"role": "user", "content": "Generate a draft."},
+        ], "gpt-6.1-sol", True)
+        self.assertNotIn("instructions", payload)
+        self.assertEqual([item["role"] for item in payload["input"]], ["developer"] * len(chunks) + ["user"])
+        self.assertEqual("".join(item["content"][0]["text"] for item in payload["input"][:-1]), text + "\n\nNever publish.")
 
     def test_messages_to_input_uses_output_text_for_assistant(self):
         instructions, items = _messages_to_input([
