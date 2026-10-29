@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.500 — 2026-10-29
+
+- Show each marketplace error once, with an Ask chat option to fix category and form issues without listing the item.
+
 ## 0.1.499 — 2026-10-29
 
 - Listing forms pair shorter fields in two columns so you can review more at once. All sections stay visible, descriptions and photos keep the full row, and narrow editors use one column.

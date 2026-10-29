@@ -14,6 +14,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { Spinner } from "./ui/spinner";
+import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
 
 type Marketplace = DelistMarketplace;
 const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop", "sellwild", "vinted", "facebook"];
@@ -503,7 +504,6 @@ export function MarketplacesLayout({
     // A gap is said once. One the editor draws a row for is said under that row,
     // where the seller fixes it; the rest are said here, beside List.
     const gaps = saidBesideList(all, [...(fieldsShown[marketplace] ?? [])]);
-    if (!gaps.length) return null;
     const blocking = all.some((gap) => gap.blocking);
     const fields = [...new Set(gaps.map((gap) => gap.field))];
     const prompt = [
@@ -517,7 +517,7 @@ export function MarketplacesLayout({
     ].join("\n");
     return (
       <>
-        {gaps.map((gap) => <p key={`${gap.field}:${gap.message}`} className="text-muted-foreground">{gap.message}</p>)}
+        {uniqueMarketplaceMessages(gaps.map((gap) => gap.message), headerMessages).map((message) => <p key={message} className="text-muted-foreground">{message}</p>)}
         <div className="flex flex-wrap items-center gap-1.5">
           {onEditField && fields.map((field) => (
             <Button key={field} size="xs" variant="ghost" onClick={() => onEditField(field, marketplace)}>
@@ -555,7 +555,7 @@ export function MarketplacesLayout({
           onClick={() => onEditField(item.field, marketplace)}>Edit {fieldLabel(item.field)}</Button>);
       }
     }
-    if ((code === "missing_fields" || code === "rejected") && onAskChat) {
+    if ((code === "missing_fields" || code === "rejected" || code === "schema_drift" || !code) && onAskChat) {
       buttons.push(<Button key="ask" size="xs" variant="outline"
         title="Chat fixes the fields in this listing. It does not list it; press List again after."
         onClick={() => onAskChat(askChatPrompt(marketplace, draft))}>Ask chat</Button>);
@@ -626,6 +626,18 @@ export function MarketplacesLayout({
   const notReady = unlisted.filter((marketplace) => listBlocked(marketplace));
   const selectedMarketplace = MANAGED.has(selected) ? selected as Marketplace : null;
   const selectedStatus = selectedMarketplace ? statusById.get(selectedMarketplace) : undefined;
+  const paneError = mark.error?.message || actionError || (delist.error || native.error || live.error)?.message;
+  const [detail] = uniqueMarketplaceMessages([selectedStatus?.detail], paneError ? [paneError] : []);
+  const [said] = uniqueMarketplaceMessages([selectedStatus?.said], [paneError, detail].filter((message): message is string => Boolean(message)));
+  const headerMessages = uniqueMarketplaceMessages([paneError, detail, said]);
+  function visiblePreflightGaps(marketplace: Marketplace): PreflightGap[] {
+    const draft = NATIVE.has(marketplace) ? drafts[marketplace as NativeMarketplace] : undefined;
+    return draft?.error || isRunning(draft) || unconfirmed(marketplace) ? [] : saidBesideList(preflightGaps(marketplace), [...(fieldsShown[marketplace] ?? [])]);
+  }
+  const shownMessages = uniqueMarketplaceMessages([
+    ...headerMessages,
+    ...(selectedMarketplace ? visiblePreflightGaps(selectedMarketplace).map((gap) => gap.message) : []),
+  ]);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -689,8 +701,8 @@ export function MarketplacesLayout({
       </nav>
       {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
       <div className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
-        {(native.error || live.error || actionError || delist.error || mark.error) && (
-          <p role="alert" className="text-destructive-foreground text-xs">{mark.error?.message || actionError || (delist.error || native.error || live.error)?.message}</p>
+        {paneError && (
+          <p role="alert" className="text-destructive-foreground text-xs">{paneError}</p>
         )}
         {selling && <MarkSoldForm key={selling.key} initial={selling.marketplace} pending={recordSale.isPending}
           error={recordSale.error?.message} onSubmit={(sale) => recordSale.mutate(sale)} onCancel={() => setSelling(null)} />}
@@ -719,9 +731,9 @@ export function MarketplacesLayout({
                 {actions(selectedMarketplace, selectedStatus)}
               </span>
             </div>
-            {selectedStatus.detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
-              role={selectedStatus.tone === "failed" ? "alert" : undefined}>{selectedStatus.detail}</p>}
-            {selectedStatus.said && <p className="whitespace-pre-wrap break-words text-muted-foreground" data-marketplace-message>{selectedStatus.said}</p>}
+            {detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
+              role={selectedStatus.tone === "failed" ? "alert" : undefined}>{detail}</p>}
+            {said && <p className="whitespace-pre-wrap break-words text-muted-foreground" data-marketplace-message>{said}</p>}
             {reconnectNotice(selectedMarketplace)}
             {errorActions(selectedMarketplace)}
             {preflightNotice(selectedMarketplace)}
@@ -743,7 +755,9 @@ export function MarketplacesLayout({
             })()}
           </section>
         )}
-        <FieldsShownContext.Provider value={reportFields}>{children}</FieldsShownContext.Provider>
+        <FieldsShownContext.Provider value={reportFields}>
+          <MarketplaceMessagesContext value={shownMessages}>{children}</MarketplaceMessagesContext>
+        </FieldsShownContext.Provider>
       </div>
     </div>
   );

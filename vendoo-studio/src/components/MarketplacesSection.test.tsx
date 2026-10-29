@@ -2,7 +2,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts } from "../api/nativeMarketplaces";
-import { MarketplacesSection, askChatPrompt, deletable, facebookCheckText, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, facebookCheckText, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+
+import { StructuredEditor } from "./ListingEditor";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
@@ -12,17 +14,24 @@ vi.mock("@tanstack/react-query", () => ({
 const live = { url: "https://www.mercari.com/us/item/m70565754838", listing_id: "m70565754838", source: "vendoo", sold_here: false, state: "live" } as const;
 
 function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { error = null as Error | null, pending = false, etsyEligible = true,
-  etsyReady = false, selected = "",
+  etsyReady = false, selected = "", notes = undefined as string[] | undefined,
   onAskChat = undefined as ((text: string) => void) | undefined, onEditField = undefined as ((field: string) => void) | undefined,
   preflight = { marketplaces: {} } as { marketplaces: Record<string, { ready: boolean; gaps: { field: string; message: string; blocking: boolean }[] }> } | undefined,
   preflightMissing = false, preflightPlaceholder = false, preflightError = false } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
+    : queryKey[0] === "native-editor-form" ? { data: { marketplace: selected, fields: [], notes: notes ?? [] } }
     : queryKey[0] === "marketplace-listings" ? { data: listings, error: null, isPending: false }
     : queryKey[0] === "etsy-listing-defaults" ? { data: etsyReady ? { shipping_profile_id: "1", readiness_state_id: "2", return_policy_id: "3" } : {}, isSuccess: true, isPending: false }
     : queryKey[0] === "native-preflight" ? { data: preflightMissing ? undefined : preflight, isPending: preflightMissing, isPlaceholderData: preflightPlaceholder, isError: preflightError }
     : { data: { shipping: [], processing: [] }, isPending: false, error: null });
   useMutation.mockReturnValue({ mutate: vi.fn(), isPending: pending, error: null, variables: { marketplace: "depop", kind: "draft" } });
+  if (notes) return renderToStaticMarkup(
+    <MarketplacesLayout convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
+      ids={["general", "mercari"]} selected={selected} onSelect={() => {}} onEditField={onEditField} onAskChat={onAskChat}>
+      <StructuredEditor convId="item" listing={{}} tab={selected} target={null} onChange={() => {}} onAskChat={onAskChat} />
+    </MarketplacesLayout>,
+  );
   return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
     selected={selected} onAskChat={onAskChat} onEditField={onEditField} />);
 }
@@ -36,6 +45,53 @@ const enabledButton = (html: string, label: string) => new RegExp(`<button(?![^>
 
 describe("marketplaces section", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("shows a repeated category error once across preflight gaps and form notes, keeping each repair action", () => {
+    const message = "That Mercari category has subcategories. Choose the most specific one.";
+    const html = render({}, {}, { selected: "mercari", notes: [message, `  ${message}  `, "A separate form note."],
+      onEditField: vi.fn(), preflight: { marketplaces: { mercari: { ready: false, gaps: [
+        { field: "marketplace_category_ids.mercari", message, blocking: true },
+        { field: "direct_category_ids.mercari", message, blocking: true },
+        { field: "title", message: "Mercari needs a title.", blocking: true },
+      ] } } },
+    });
+    expect(html.split(message)).toHaveLength(2);
+    expect(html).toContain("Mercari needs a title.");
+    expect(html).toContain("A separate form note.");
+    expect(html).toContain("Edit Title");
+    expect(disabledButton(html, "List…")).toBe(true);
+    const standalone = render({}, {}, { selected: "mercari", notes: [message, message] });
+    expect(standalone.split(message)).toHaveLength(2);
+  });
+
+  it("offers Ask chat once for a category error reported by checks and form notes", () => {
+    const message = "That Mercari category has subcategories. Choose the most specific one.";
+    const options = { selected: "mercari", notes: [message, message], onAskChat: vi.fn() };
+    for (const preflight of [
+      { marketplaces: { mercari: { ready: true, gaps: [] } } },
+      { marketplaces: { mercari: { ready: false, gaps: [{ field: "marketplace_category_ids.mercari", message, blocking: true }] } } },
+    ]) {
+      const html = render({}, {}, { ...options, preflight });
+      expect(html.split(message)).toHaveLength(2);
+      expect(enabledButton(html, "Ask chat")).toBe(true);
+      expect(html.match(/>Ask chat<\/button>/g)).toHaveLength(1);
+    }
+  });
+
+  it("offers Ask chat for category refusals without an error code and changed form schemas", () => {
+    for (const error_code of [undefined, "schema_drift"] as const) {
+      const html = render({ mercari: { state: "draft", error: "Choose a more specific category.", error_code } }, {},
+        { selected: "mercari", onAskChat: vi.fn() });
+      expect(enabledButton(html, "Ask chat")).toBe(true);
+    }
+  });
+
+  it("does not repeat a query error as the selected draft error or a form note", () => {
+    const message = "Mercari refused this category.";
+    const html = render({ mercari: { state: "draft", error: message, marketplace_message: message } }, {},
+      { selected: "mercari", error: new Error(message), notes: [message] });
+    expect(html.split(message)).toHaveLength(2);
+  });
 
   it("holds List until the current revision has passed preflight", () => {
     for (const state of [{ preflightMissing: true }, { preflightPlaceholder: true }, { preflightError: true }]) {
