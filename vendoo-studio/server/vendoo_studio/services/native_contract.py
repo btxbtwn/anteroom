@@ -10,6 +10,7 @@ import copy
 import json
 import re
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from vendoo_studio.services.seller_overrides import get_path, is_locked, locked_paths, marketplace_text, price_for, set_path
 
@@ -19,7 +20,7 @@ MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
 SALE_FIELDS = re.compile(
     r"price|ship|parcel|package|quantity|sku|categor|worldwide|offer|format|duration|store|inventor"
     r"|variation|zip|location|condition|title|description|brand|hashtag|tags|charity|donation"
-    r"|availab|smartsell|smartpricing|boost|sellernotes"
+    r"|availab|smartsell|smartpricing|boost|sellernotes|polic"
 )
 _SCHEMA_KEYS = ("path", "key", "label", "required", "multi", "selection_only", "options", "option_values",
                 "max_values", "max_length", "min_value", "max_value", "step", "input_type", "locked",
@@ -306,8 +307,14 @@ def applicable_row(row: dict, listing: dict, fields: list[dict]) -> dict:
     from vendoo_studio.services.marketplace_schemas import aspect_options
 
     answers = {}
+    rows = {path_of(item): item for item in fields}
     for parent in fields:
-        value = get_path(listing, path_of(parent))
+        path = path_of(parent)
+        # The parent is answered under whichever spelling this listing uses,
+        # and by General when this form leaves the row empty.
+        value = _first_answer(_row_values(listing, _market_of(path, rows), path, rows))
+        if value in (None, "", [], {}):
+            value = shared_answer(listing, parent, _market_of(path, rows), path)
         if value is not None:
             values = value if isinstance(value, list) else [value]
             labels = {str(stored): label for label, stored in (parent.get("option_values") or {}).items()}
@@ -326,6 +333,56 @@ def _leaves(value: dict, prefix: str, allowed: set[str]):
             yield from _leaves(item, path, allowed)
         else:
             yield path, item
+
+
+def _fold(path: str) -> str:
+    """One key for two spellings of the same path.
+
+    The form names its rows the way the marketplace's page does ("Size Type",
+    "Brand") while the listing JSON stores aspects under their own keys
+    ("sizeType", "brand"). Both spellings reach the same control, so a value
+    written under either one answers that row.
+    """
+    return re.sub(r"[^a-z0-9]", "", str(path or "").casefold())
+
+
+def _market_of(path: str, rows: dict[str, dict]) -> str:
+    """The marketplace a form path belongs to."""
+    head = str(path).split(".", 1)[0]
+    if head.endswith("_specifics"):
+        return head[: -len("_specifics")]
+    for candidate in ("ebay", "poshmark", "mercari", "depop", "sellwild", "vinted", "etsy"):
+        if any(str(row).startswith(f"{candidate}_specifics.") for row in rows):
+            return candidate
+    return ""
+
+
+def _row_values(listing: dict, market: str, path: str, rows: dict[str, dict]) -> list:
+    """Every value this listing stores for ``path``, whatever its spelling.
+
+    Only spellings the form does not itself name are folded in: a row keeps the
+    value stored at its own path first, and a differently-spelled key is read
+    only when that row would otherwise look empty.
+    """
+    found = [get_path(listing, path)]
+    want = _fold(path)
+    prefix = f"{market}_specifics."
+    block = listing.get(f"{market}_specifics")
+    if not isinstance(block, dict):
+        return found
+    for stored, value in _leaves(block, prefix, set(rows)):
+        if stored in rows or _fold(stored) != want:
+            continue
+        found.append(value)
+    return found
+
+
+def _first_answer(values: list) -> Any:
+    """The first spelling that carries an answer, so an empty one does not hide it."""
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return values[0] if values else None
 
 
 def _remove(listing: dict, path: str) -> None:
@@ -377,8 +434,8 @@ def gaps(listing: dict, market: str) -> list[dict]:
     contract = (listing.get(KEY) or {}).get(market)
     if not isinstance(contract, dict):
         return []
-    def gap(path, message):
-        return {"field": path, "message": message, "blocking": True}
+    def gap(path, message, *, blocking=True):
+        return {"field": path, "message": message, "blocking": blocking}
     if contract.get("unavailable"):
         return [gap(f"{market}_specifics", "The marketplace form could not be loaded. Reload its fields before listing.")]
     fields = contract.get("fields") or []
@@ -386,27 +443,139 @@ def gaps(listing: dict, market: str) -> list[dict]:
         return [gap(f"direct_category_ids.{market}", "The form's category or dependent choices changed. Reload its fields before listing.")]
     found = []
     rows = {path_of(row): row for row in fields}
+    folded = {_fold(path) for path in rows}
     for path, value in _leaves(listing.get(f"{market}_specifics") or {}, f"{market}_specifics", set(rows)):
-        if path not in rows and value not in (None, "", [], {}):
-            found.append(gap(path, "This field is not provided by the selected marketplace form."))
+        if path in rows or _fold(path) in folded or value in (None, "", [], {}):
+            continue
+        # A value this form no longer has a row for is left out of the send; it
+        # does not stop the listing. The seller reads it, and can clear it.
+        found.append(gap(path, "This field is not provided by the selected marketplace form.", blocking=False))
     for path, row in rows.items():
         if row.get("locked") or row.get("input_type") in {"note", "badge", "photos", "inventory", "variations"}:
             continue
+        if not required_for_this_listing(row, listing, path):
+            continue
         value = get_path(listing, path)
+        # A value read from General or Settings is not the model's claim, so it
+        # needs no photo evidence of its own.
+        borrowed = False
         if path == "price":
             value = price_for(listing, market)
         # Shared prose and price are explicitly offered by the form, but may follow General.
         name = path.rsplit(".", 1)[-1]
         if value is None and name in {"title", "description", "brand"}:
             value = marketplace_text(listing, market, name)
+            borrowed = True
+        if value in (None, "", [], {}):
+            value = _first_answer(_row_values(listing, market, path, rows))
+            # An answer stored under another spelling of this path was written
+            # before this form knew the row; it is not a new model claim.
+            borrowed = value not in (None, "", [], {})
+        if value in (None, "", [], {}):
+            value = shared_answer(listing, row, market, path)
+            borrowed = True
+        if value in (None, "", [], {}):
+            value = settings_answer(listing, path)
+            borrowed = True
         error = value_error(applicable_row(row, listing, fields), value)
         if error:
-            found.append(gap(path, f"{row.get('label') or path}: {error}"))
-        elif item_field(row, market) and value not in (None, "", [], {}) and not is_locked(listing, path):
-            proof = (listing.get(EVIDENCE_KEY) or {}).get(path) or {}
+            # A policy or location with no stored answer is chosen from the
+            # account at List. Missing one here does not stop the listing, so it
+            # is said, not refused.
+            found.append(gap(path, f"{row.get('label') or path}: {error}",
+                             blocking=not account_resolved(row)))
+        elif account_resolved(row) and value in (None, "", [], {}):
+            found.append(gap(path, f"{row.get('label') or path}: Uses the account's own choice.", blocking=False))
+        elif (item_field(row, market) and not borrowed and value not in (None, "", [], {})
+              and not is_locked(listing, path)):
+            proof = _evidence(listing, path)
             if proof.get("value") != value or not proof.get("quote"):
-                found.append(gap(path, f"{row.get('label') or path}: Check this answer against photo or seller evidence before listing."))
+                # A required answer with no proof would be sent on the model's
+                # word alone, so it holds the listing. An optional one is only
+                # noted: dropping it changes nothing the marketplace demands.
+                found.append(gap(path, f"{row.get('label') or path}: Check this answer against photo or seller evidence before listing.",
+                                 blocking=bool(row.get("required"))))
     return found
+
+
+def account_resolved(row: dict) -> bool:
+    """A row List fills from the seller's marketplace account rather than the listing."""
+    return path_of(row).rsplit(".", 1)[-1] in {"fulfillmentPolicyId", "paymentPolicyId", "returnPolicyId",
+                                               "merchantLocationKey"}
+
+
+def required_for_this_listing(row: dict, listing: dict, path: str) -> bool:
+    """Whether this row's requirement applies to the listing as it is set up.
+
+    eBay's start bid is required only for an auction. The form marks it required
+    unconditionally, which would block every Buy It Now listing.
+    """
+    if not row.get("required") or path != "ebay_specifics.auctionStartPrice":
+        return True
+    from vendoo_studio.services.marketplace_schemas import _ebay_listing_type
+
+    ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
+    return _ebay_listing_type(ebay.get("listingFormat")) == "AUCTION"
+
+
+# eBay policies and the item location are chosen in Settings, not on the form.
+_SETTINGS_CHOICES = {"ebay_specifics.fulfillmentPolicyId": "fulfillment_policy_id",
+                     "ebay_specifics.paymentPolicyId": "payment_policy_id",
+                     "ebay_specifics.returnPolicyId": "return_policy_id",
+                     "ebay_specifics.merchantLocationKey": "merchant_location_key"}
+
+
+def settings_answer(listing: dict, path: str) -> str | None:
+    """The value Settings holds for a row the form leaves to the seller's account.
+
+    List already falls back to these defaults; pre-flight reads the same choice
+    so a policy set once in Settings is not reported as an empty row.
+    """
+    setting = _SETTINGS_CHOICES.get(path)
+    if not setting:
+        return None
+    from vendoo_studio.services.user_settings import get_ebay_listing_defaults
+
+    return str(get_ebay_listing_defaults().get(setting) or "").strip() or None
+
+
+def _evidence(listing: dict, path: str) -> dict:
+    """The proof recorded for this row, under whichever spelling it was written."""
+    recorded = listing.get(EVIDENCE_KEY) or {}
+    proof = recorded.get(path)
+    if isinstance(proof, dict):
+        return proof
+    want = _fold(path)
+    for stored, value in recorded.items():
+        if _fold(stored) == want and isinstance(value, dict):
+            return value
+    return {}
+
+
+def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
+    """The General answer a marketplace takes for a row the listing leaves empty.
+
+    eBay's posting path already fills these aspects from the listing's own
+    fields (``ebay_listings._GENERAL_ASPECTS``). Pre-flight reads the same
+    answers, so a row that will be sent filled is not reported as empty. A
+    marketplace override on this form still wins, through ``marketplace_text``.
+    """
+    name = path.rsplit(".", 1)[-1]
+    if market == "ebay":
+        # Only the aspects posting itself fills from the listing's own fields.
+        # A policy, price or category is never answered by a General value.
+        from vendoo_studio.services.ebay_listings import _GENERAL_ASPECTS, _aspect_key
+
+        for aspect, keys in _GENERAL_ASPECTS.items():
+            if _aspect_key(aspect) != _aspect_key(name):
+                continue
+            for key in keys:
+                value = listing.get(key)
+                if value not in (None, "", [], {}):
+                    return value
+    # No other marketplace fills its item-specific rows from General at send:
+    # their forms keep the seller's own answer, so an empty row stays empty.
+    return None
 
 
 def invalidate_dependents(previous: dict, listing: dict) -> None:
