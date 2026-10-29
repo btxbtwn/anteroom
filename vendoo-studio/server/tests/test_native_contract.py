@@ -129,6 +129,16 @@ class NativeContractTest(unittest.TestCase):
         self.assertEqual(contract.gaps(listing, "ebay"), [])
         self.assertIsNotNone(contract.editor_form(listing, "ebay"))
 
+    def test_ebay_condition_label_and_id_are_the_same_controlling_choice(self):
+        listing = ebay_tshirt()
+        listing["ebay_specifics"].pop("condition")
+        self.assertEqual(contract.gaps(listing, "ebay"), [])
+        self.assertEqual(contract.changed_inputs(listing, "ebay", listing[contract.KEY]["ebay"]["fields"],
+                                                 listing[contract.KEY]["ebay"]["inputs"]), set())
+        self.assertIsNotNone(contract.editor_form(listing, "ebay"))
+        listing["condition"] = "Pre-Owned - Excellent"
+        self.assertIsNone(contract.editor_form(listing, "ebay"))
+
     def test_a_changed_condition_still_makes_a_legacy_form_stale(self):
         listing = ebay_tshirt()
         listing[contract.KEY]["ebay"]["inputs"]["condition"] = listing["condition"]

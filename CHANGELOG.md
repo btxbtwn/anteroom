@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.520 — 2026-10-29
+
+- eBay forms open when the saved condition ID and the condition name mean the same thing, instead of getting stuck asking you to reload their fields.
+
 ## 0.1.519 — 2026-10-29
 
 - Older drafts open their marketplace forms again. Forms saved before posting compared marketplace brand and condition stored the General answers, so they looked changed even when nothing had changed.

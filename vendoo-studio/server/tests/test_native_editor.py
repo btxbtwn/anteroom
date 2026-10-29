@@ -128,6 +128,27 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(answer.json()["marketplace"], "ebay")
         self.bridge.assert_not_called()
 
+    def test_ebay_form_opens_when_general_condition_matches_its_saved_native_id(self):
+        from vendoo_studio.services import native_contract
+
+        snapshot = copy.deepcopy(self.listing)
+        snapshot["ebay_specifics"] = {"Condition": "3000"}
+        form = {"marketplace": "ebay", "native": True, "known": True, "page_labels": True,
+                "category_id": "15687", "fields": [
+                    {"path": "ebay_specifics.Condition", "label": "Item condition",
+                     "options": ["Pre-owned - Good", "Pre-owned - Excellent"],
+                     "option_values": {"Pre-owned - Good": "3000", "Pre-owned - Excellent": "2990"}},
+                ]}
+        snapshot[native_contract.KEY] = native_contract.capture(snapshot, {"ebay": form}, ["ebay"])
+        snapshot["ebay_specifics"].pop("Condition")
+        revision = ListingRepo(self.db).save_revision(self.conv.id, snapshot, "native_schema")
+        answer = self.client.get(f"{self.url}/ebay/form?revision_id={revision.id}")
+        self.assertEqual(answer.status_code, 200, answer.text)
+        self.assertEqual(answer.json()["marketplace"], "ebay")
+        self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, revision.id)
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+        self.bridge.assert_not_called()
+
     def test_saved_form_with_changed_category_does_not_show_old_choices_or_contact_chrome(self):
         from vendoo_studio.services import native_contract
 
