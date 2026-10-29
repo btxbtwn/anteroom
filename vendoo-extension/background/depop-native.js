@@ -402,6 +402,12 @@ function depopSize(listing, category, attributes) {
   const set = attributes.size_sets.find(entry => String(entry.id) === String(setId));
   if (!set) return { problem: 'a size Depop offers for this category' };
   const sizes = set.sizes || [];
+  if (Object.hasOwn(listing.depop_specifics || {}, 'size')) {
+    const wanted = marketplaceNameKey(listing.depop_specifics.size);
+    const matches = sizes.filter(size => marketplaceNameKey(depopName(size)) === wanted);
+    return matches.length === 1 ? { set: Number(set.id), id: Number(matches[0].id) }
+      : { problem: 'a size Depop offers for this category' };
+  }
   if (Object.hasOwn(listing.depop_specifics || {}, 'nativeSizeId')) {
     const id = String(listing.depop_specifics.nativeSizeId);
     return sizes.some(size => String(size.id) === id) ? { set: Number(set.id), id: Number(id) }

@@ -883,10 +883,10 @@ test('a kids jacket takes Depop\'s age size, its jacket type, and the ship-from 
   assert.deepEqual(JSON.parse(JSON.stringify(fields.attributes['jacket-type'])), ['windbreaker']);
   assert.equal(fields.address, 'New Orleans, LA');
   assert.equal(fields.geo_lat, undefined);
-  // Other on the Depop form is never chosen for a tag size; the tag stays the fallback.
+  // An explicit choice in Anteroom wins over the shared tag size, including Other.
   const other = await c.depopResolvedFields({ listing: { ...KIDS_JACKET, size: '14 years',
     depop_specifics: { ...KIDS_JACKET.depop_specifics, size: 'Other' } }, deadline: Date.now() + 30000 });
-  assert.deepEqual(JSON.parse(JSON.stringify(other.variants)), { 20: 1 });
+  assert.deepEqual(JSON.parse(JSON.stringify(other.variants)), { 21: 1 });
   assert.deepEqual(JSON.parse(JSON.stringify(call(c, 'depopLocation', KIDS_JACKET, { id: 1, latitude: '29.95', longitude: '-90.07' }))),
     { address: 'New Orleans, LA, United States', geo_lat: 29.95, geo_lng: -90.07 });
 });
@@ -1454,4 +1454,16 @@ test('a draft missing a category is not repaired at publish; it names what the s
   });
   assert.equal(puts, 0);
   assert.match(result.error, /category/);
+});
+
+test('a locally chosen Depop size label resolves at publication and wins over an older size id', () => {
+  const c = loadWorker();
+  const attributes = { category_size_mapping: [{ department: 'menswear', product_type: 'jeans', size_set_by_region: { US: 10 } }],
+    size_sets: [{ id: 10, sizes: [{ id: 1, name: '30' }, { id: 2, name: '32' }, { id: 3, name: 'Other' }] }] };
+  const category = { department: 'menswear', productType: 'jeans' };
+  const read = specifics => JSON.parse(JSON.stringify(call(c, 'depopSize', { depop_specifics: specifics }, category, attributes)));
+  assert.deepEqual(read({ size: '32', nativeSizeId: 1 }), { set: 10, id: 2 });
+  assert.deepEqual(read({ size: 'Other' }), { set: 10, id: 3 });
+  assert.ok(read({ size: 'not offered', nativeSizeId: 1 }).problem);
+  assert.ok(read({ size: '', nativeSizeId: 1 }).problem);
 });
