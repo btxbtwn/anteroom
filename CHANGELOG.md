@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.507 — 2026-10-29
+
+- Large listing requests no longer exceed ChatGPT’s instructions-string limit. Request errors now distinguish oversized context from sign-in problems.
+
 ## 0.1.506 — 2026-10-29
 
 - Poshmark's categories and size groups load in Anteroom with Chrome closed. Saved shipping-discount choices are retained; unavailable account choices are identified rather than guessed.
