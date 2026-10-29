@@ -63,6 +63,7 @@ function worker({ read, attributes = ATTRIBUTES, accessToken = token(3600), curr
       current += 1;
       return currentUser ? currentUser(current) : reply(200, USER);
     }
+    if (parsed.pathname === '/api/v2/item_upload/brands') return reply(200, { brands: [{ id: 1, title: 'Nike' }, { id: 2, title: 'Nike' }] });
     if (parsed.pathname === '/api/v2/item_upload/catalogs') return reply(200, CATALOGS);
     if (parsed.pathname === '/api/v2/item_upload/attributes') return reply(200, attributes);
     if (parsed.pathname === '/api/v2/item_upload/size_groups') return reply(200, { size_groups: [] });
@@ -310,4 +311,15 @@ test('Good does not match Very good, and that refusal writes nothing', async () 
   assert.match(result.error, /condition/);
   assert.equal(sent('POST', '/api/v2/item_upload/drafts').length, 0);
   assert.equal(sent('POST', '/api/v2/photos').length, 0);
+});
+
+
+test('brand search uses the category and keyword and makes only read requests', async () => {
+  const { c, requests } = worker();
+  const options = await c.vintedBrandOptions({ query: 'Ni &', category: listing.vinted_specifics.category });
+  assert.deepEqual(Array.from(options), ['Nike']);
+  const search = new URL(requests.find(row => row.pathname.endsWith('/brands')).url);
+  assert.equal(search.searchParams.get('keyword'), 'Ni &');
+  assert.equal(search.searchParams.get('category_id'), '1904');
+  assert.ok(requests.every(row => row.method === 'GET'));
 });
