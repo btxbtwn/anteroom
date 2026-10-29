@@ -9,7 +9,7 @@ import time
 
 from vendoo_studio.database import SessionLocal
 from vendoo_studio.repositories.queries import ConversationRepo, RevisionConflict
-from vendoo_studio.services import activity, generation_timing, live_trace, model_slots
+from vendoo_studio.services import activity, generation_timing, live_trace, model_slots, model_usage
 from vendoo_studio.services.brave_search import item_fields
 from vendoo_studio.services.chat_prompts import (
     listing_generation_messages,
@@ -95,6 +95,7 @@ async def run_listing_generation(
     analysis_fingerprint: str,
 ) -> None:
     """Analyze photos, pick categories, stream the listing, and save it."""
+    calls = model_usage.bind()
     agents_run = activity.begin_agents(conv_id)
 
     def trace(kind: str, text: str) -> None:
@@ -139,7 +140,7 @@ async def run_listing_generation(
             return None
         timing_saved = True
         return generation_timing.record_run(
-            conv_id, timings, total_sec=time.monotonic() - run_started, outcome=outcome,
+            conv_id, timings, total_sec=time.monotonic() - run_started, outcome=outcome, calls=calls,
         )
 
     async def timed(stage: str, coro):
@@ -364,7 +365,7 @@ async def run_listing_generation(
                 task.cancel()
         save_timings("cancelled")
         if timing_id is not None:
-            generation_timing.add_stages(timing_id, timings, total_sec=time.monotonic() - run_started, outcome="cancelled")
+            generation_timing.add_stages(timing_id, timings, total_sec=time.monotonic() - run_started, outcome="cancelled", calls=calls)
         # Clear/Regenerate discarded this run; saving now would write the old
         # listing into the wiped conversation.
         if (
@@ -388,7 +389,7 @@ async def run_listing_generation(
     except Exception as e:
         save_timings("failed")
         if timing_id is not None:
-            generation_timing.add_stages(timing_id, timings, total_sec=time.monotonic() - run_started, outcome="failed")
+            generation_timing.add_stages(timing_id, timings, total_sec=time.monotonic() - run_started, outcome="failed", calls=calls)
         message = str(e).strip() or type(e).__name__
         if isinstance(e, TimeoutError) and not str(e).strip():
             stage = (run.last_status or "").strip()
@@ -509,5 +510,5 @@ async def _finish_generation_background(
     finally:
         stages["finish"] = round(time.monotonic() - finish_started, 2)
         if run_started is not None:
-            generation_timing.add_stages(timing_id, stages, total_sec=time.monotonic() - run_started, outcome=outcome)
+            generation_timing.add_stages(timing_id, stages, total_sec=time.monotonic() - run_started, outcome=outcome, calls=model_usage.current())
         db.close()

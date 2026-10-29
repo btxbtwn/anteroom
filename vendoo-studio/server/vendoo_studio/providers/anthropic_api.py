@@ -6,6 +6,8 @@ straight to api.anthropic.com.
 
 from __future__ import annotations
 
+from vendoo_studio.services import model_usage
+
 import json
 
 import httpx
@@ -138,11 +140,14 @@ class AnthropicAPIProvider:
         return True
 
     async def _post(self, body: dict, timeout: float = 300) -> dict:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(f"{self.base_url}/messages", headers=self._headers(), json=body)
-        if resp.status_code >= 400:
-            raise RuntimeError(self._http_error(resp))
-        return resp.json()
+        with model_usage.observe(self.name, str(body.get("model") or "")) as call:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(f"{self.base_url}/messages", headers=self._headers(), json=body)
+            if resp.status_code >= 400:
+                raise RuntimeError(self._http_error(resp))
+            payload = resp.json()
+            call.usage(payload.get("usage"), anthropic=True)
+            return payload
 
     async def _complete(self, messages: list[dict], model: str) -> str:
         text = reply_text(await self._post(self._body(messages, model)))
@@ -151,33 +156,46 @@ class AnthropicAPIProvider:
         return text
 
     async def _stream(self, messages: list[dict], model: str):
-        async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/messages",
-                headers=self._headers(),
-                json=self._body(messages, model, stream=True),
-            ) as resp:
-                if resp.status_code >= 400:
-                    await resp.aread()
-                    raise RuntimeError(self._http_error(resp))
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data:"):
-                        continue
-                    try:
-                        event = json.loads(line[5:].strip())
-                    except json.JSONDecodeError:
-                        continue
-                    if event.get("type") == "error":
-                        error = event.get("error") or {}
-                        raise RuntimeError(f"Anthropic: {error.get('message') or error}")
-                    if event.get("type") != "content_block_delta":
-                        continue
-                    delta = event.get("delta") or {}
-                    if delta.get("type") == "text_delta" and delta.get("text"):
-                        yield StreamChunk(str(delta["text"]), "content")
-                    elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
-                        yield StreamChunk(str(delta["thinking"]), "thinking")
+        with model_usage.observe(self.name, model) as call:
+            async with httpx.AsyncClient(timeout=300) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/messages",
+                    headers=self._headers(),
+                    json=self._body(messages, model, stream=True),
+                ) as resp:
+                    if resp.status_code >= 400:
+                        await resp.aread()
+                        raise RuntimeError(self._http_error(resp))
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        try:
+                            event = json.loads(line[5:].strip())
+                        except json.JSONDecodeError:
+                            continue
+                        message = event.get("message") or {}
+                        call.usage(message.get("usage") or event.get("usage"), anthropic=True)
+                        if event.get("type") == "error":
+                            error = event.get("error") or {}
+                            raise RuntimeError(f"Anthropic: {error.get('message') or error}")
+                        if event.get("type") != "content_block_delta":
+                            continue
+                        delta = event.get("delta") or {}
+                        if delta.get("type") == "text_delta" and delta.get("text"):
+                            yield StreamChunk(str(delta["text"]), "content")
+                        elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                            yield StreamChunk(str(delta["thinking"]), "thinking")
+
+    async def structured_chat(self, messages: list[dict], schema: dict):
+        payload = await self._post(self._body(messages, self.listing_model,
+            output_config={"format": {"type": "json_schema", "schema": schema}}))
+        if payload.get("stop_reason") in {"max_tokens", "refusal"}:
+            raise RuntimeError("Anthropic did not complete the structured response")
+        text = reply_text(payload)
+        if not text:
+            raise RuntimeError("Anthropic returned no structured response")
+        yield text
 
     async def analyze_photos(
         self,

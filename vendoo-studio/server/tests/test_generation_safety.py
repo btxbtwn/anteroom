@@ -166,7 +166,7 @@ def test_category_selection_cannot_overwrite_a_newer_seller_edit(draft, monkeypa
 def test_every_provider_encodes_photos_after_the_tenth(monkeypatch, module, class_name):
     module = importlib.import_module(f"vendoo_studio.providers.{module}")
     provider_type = getattr(module, class_name)
-    provider = SimpleNamespace(vision_model="fixture")
+    provider = SimpleNamespace(name=module.__name__, vision_model="fixture")
     paths = [f"photo-{i}.jpg" for i in range(20)]
 
     class Encoded(Exception):
@@ -190,3 +190,32 @@ def test_full_resolution_retry_includes_a_late_unreadable_tag(monkeypatch):
     assert result["evidence"]["size"]["value"] == "XL"
     assert provider.analyze_photos.await_args.args[0] == paths
     assert provider.analyze_photos.await_args.kwargs["max_side"] is None
+
+
+def test_regeneration_restores_seller_clears_and_owned_root_values(draft):
+    db, conv_id = draft
+    previous = {"title": "Seller chosen title", "price": 29, "depop_specifics": {"style": []},
+                "seller_fields": ["title", "price", "depop_specifics.style"]}
+    ListingRepo(db).save_revision(conv_id, previous, source="user_form")
+    generated = {"title": "Model replacement title", "price": 12, "depop_specifics": {"style": ["Vintage"]}}
+    saved = listing_generate.persist_generated_listing(db, conv_id, "", parsed=generated)
+    assert saved["title"] == previous["title"]
+    assert saved["price"] == 29
+    assert saved["depop_specifics"]["style"] == []
+
+
+def test_general_normalization_keeps_native_form_spelling(draft):
+    from vendoo_studio.services.native_contract import capture
+
+    db, conv_id = draft
+    form = {"known": True, "category_id": "fixture", "fields": [
+        {"path": "ebay_specifics.Pattern", "key": "ebay_specifics.Pattern", "label": "Pattern",
+         "input_type": "select", "selection_only": True, "options": ["Solid", "Floral"]}]}
+    seed = {"brand": "Fixture", "size": "M"}
+    seed["_native_forms"] = capture(seed, {"ebay": form}, ["ebay"])
+    ListingRepo(db).save_revision(conv_id, seed, source="native_schema")
+    result = listing_generate.persist_generated_listing(db, conv_id, "", parsed={
+        "title": "Fixture M Casual Tee Blue Regular", "brand": "Fixture", "size": "M",
+        "price": 20, "ebay_specifics": {"Pattern": "Floral"}})
+    assert result["ebay_specifics"]["Pattern"] == "Floral"
+    assert "pattern" not in result["ebay_specifics"]

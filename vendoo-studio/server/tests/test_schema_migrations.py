@@ -658,3 +658,20 @@ def test_similar_items_upgrade_keeps_previous_release_items_and_photos(engine, s
         assert connection.execute("SELECT count(*) FROM similar_item_reviews").fetchone() == (0,)
     assert recorded_revision(engine) == head_revision()
     assert inspect_database(engine.url.database).clean
+
+
+def test_generation_usage_upgrade_preserves_existing_timings(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "f1c84a9d7b32")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO generation_timings (id, conversation_id, outcome, stages, total_sec, created_at, updated_at) "
+            "VALUES ('prior-run', 'c1', 'done', '{}', 12, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+    ensure_schema(engine)
+    with engine.connect() as connection:
+        row = connection.execute(text("SELECT outcome, total_sec, calls FROM generation_timings WHERE id='prior-run'")).one()
+        assert row[0] == "done"
+        assert row[1] == 12
+        assert row[2] in ("[]", [])

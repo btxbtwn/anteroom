@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from vendoo_studio.services import model_usage
+
 from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
 
 import json
@@ -219,6 +221,10 @@ class ClaudeProvider:
             raise RuntimeError("Claude returned an empty listing response")
         yield text
 
+    async def structured_chat(self, messages: list[dict], schema: dict):
+        async for chunk in self._run(messages, model=self.listing_model, output_schema=schema, max_turns=3):
+            yield chunk
+
     async def web_search(self, messages: list[dict]) -> dict:
         """Run ``messages`` with web search and fetch only: ``{"answer", "sources"}``."""
         answer = ""
@@ -242,72 +248,81 @@ class ClaudeProvider:
         tools: list[str] | None = None,
         preamble: str = TEXT_ONLY_PREAMBLE,
         max_turns: int = 1,
+        output_schema: dict | None = None,
     ):
         """Stream one answer as StreamChunks.
 
         With tools the text between searches is narration, so only the final
         answer is yielded, once the run ends.
         """
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeSDKError,
-            ResultMessage,
-            StreamEvent,
-            ToolUseBlock,
-        )
-
-        blocks = to_claude_turn(messages)
-        tool_list = list(tools or [])
-        effort = self.effort
-
-        def make_options(start_model: str | None):
-            return _isolated_options(
-                model=start_model,
-                effort=effort,
-                system_prompt=preamble,
-                tools=tool_list,
-                allowed_tools=tool_list,
-                max_turns=max_turns,
-                include_partial_messages=True,
+        with model_usage.observe(self.name, model) as call:
+            from claude_agent_sdk import (
+                AssistantMessage,
+                ClaudeSDKError,
+                ResultMessage,
+                StreamEvent,
+                ToolUseBlock,
             )
 
-        key = (preamble, tuple(tool_list), max_turns, effort)
-        stream_text = not tools
-        streamed = False
-        try:
-            async with claude_sessions.session(key, make_options, model) as client:
-                await client.query(_single_turn(blocks))
-                async for message in client.receive_response():
-                    if isinstance(message, StreamEvent):
-                        delta = message.event.get("delta") or {}
-                        if message.event.get("type") != "content_block_delta":
-                            continue
-                        if delta.get("type") == "text_delta" and delta.get("text") and stream_text:
-                            streamed = True
-                            yield StreamChunk(delta["text"], "content")
-                        elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
-                            yield StreamChunk(delta["thinking"], "thinking")
-                    elif isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, ToolUseBlock) and block.name == "WebSearch":
-                                searched = str(block.input.get("query") or "")
-                                if searched:
-                                    live_trace.emit("step", f"Claude searched: {searched}")
-                    elif isinstance(message, ResultMessage):
-                        if message.is_error:
-                            detail = (message.result or "").strip() or f"Claude run failed ({message.subtype})"
-                            if _signed_out(detail):
-                                claude_auth.forget_status()
-                                raise RuntimeError(SIGNED_OUT)
-                            raise RuntimeError(detail)
-                        if not streamed and message.result:
-                            yield StreamChunk(message.result, "content")
-        except ClaudeSDKError as exc:
-            detail = str(exc).strip()
-            if _signed_out(detail):
-                claude_auth.forget_status()
-                raise RuntimeError(SIGNED_OUT) from exc
-            raise RuntimeError(f"Claude error: {detail}") from exc
+            blocks = to_claude_turn(messages)
+            tool_list = list(tools or [])
+            effort = self.effort
+
+            def make_options(start_model: str | None):
+                return _isolated_options(
+                    model=start_model,
+                    effort=effort,
+                    system_prompt=preamble,
+                    tools=tool_list,
+                    allowed_tools=tool_list,
+                    max_turns=max_turns,
+                    include_partial_messages=True,
+                    output_format={"type": "json_schema", "schema": output_schema} if output_schema else None,
+                )
+
+            schema_key = json.dumps(output_schema, sort_keys=True) if output_schema else None
+            key = (preamble, tuple(tool_list), max_turns, effort, schema_key)
+            stream_text = not tools and output_schema is None
+            streamed = False
+            try:
+                async with claude_sessions.session(key, make_options, model) as client:
+                    await client.query(_single_turn(blocks))
+                    async for message in client.receive_response():
+                        if isinstance(message, StreamEvent):
+                            delta = message.event.get("delta") or {}
+                            if message.event.get("type") != "content_block_delta":
+                                continue
+                            if delta.get("type") == "text_delta" and delta.get("text") and stream_text:
+                                streamed = True
+                                yield StreamChunk(delta["text"], "content")
+                            elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                                yield StreamChunk(delta["thinking"], "thinking")
+                        elif isinstance(message, AssistantMessage):
+                            for block in message.content:
+                                if isinstance(block, ToolUseBlock) and block.name == "WebSearch":
+                                    searched = str(block.input.get("query") or "")
+                                    if searched:
+                                        live_trace.emit("step", f"Claude searched: {searched}")
+                        elif isinstance(message, ResultMessage):
+                            call.usage(message.usage, anthropic=True, sdk_cost=message.total_cost_usd)
+                            if message.is_error:
+                                detail = (message.result or "").strip() or f"Claude run failed ({message.subtype})"
+                                if _signed_out(detail):
+                                    claude_auth.forget_status()
+                                    raise RuntimeError(SIGNED_OUT)
+                                raise RuntimeError(detail)
+                            if output_schema is not None:
+                                if message.structured_output is None:
+                                    raise RuntimeError("Claude returned no structured output")
+                                yield StreamChunk(json.dumps(message.structured_output), "content")
+                            elif not streamed and message.result:
+                                yield StreamChunk(message.result, "content")
+            except ClaudeSDKError as exc:
+                detail = str(exc).strip()
+                if _signed_out(detail):
+                    claude_auth.forget_status()
+                    raise RuntimeError(SIGNED_OUT) from exc
+                raise RuntimeError(f"Claude error: {detail}") from exc
 
     def _parse_json_response(self, content: str) -> dict:
         try:

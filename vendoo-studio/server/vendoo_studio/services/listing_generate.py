@@ -374,7 +374,7 @@ REPAIR_LISTING_PROMPT = (
 FINALIZE_GAPS_PROMPT = (
     "Finish this Vendoo listing by repairing only the allowed field paths. "
     "Use supplied photo evidence and seller notes; leave unsupported values unresolved. "
-    "Return only a JSON Patch array of add or replace operations. "
+    "{output_instruction} "
     'Example: [{{"op":"add","path":"/weight_oz","value":8}}]. '
     "Do not return a full listing. Do not change any path outside allowed_paths. "
     "Never modify seller-owned values, categories, or internal metadata. "
@@ -385,12 +385,16 @@ FINALIZE_GAPS_PROMPT = (
 MAX_REPAIR_CHARS = 14000
 
 
-async def collect_provider_text(provider, messages: list[dict], *, quick: bool = False) -> str:
+async def collect_provider_text(provider, messages: list[dict], *, quick: bool = False, output_schema: dict | None = None) -> str:
     """Collect visible reply text. quick=True uses the provider's no-reasoning path when it has one."""
     from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
 
     quick_chat = getattr(provider, "quick_chat", None) if quick else None
-    stream = quick_chat(messages) if callable(quick_chat) else provider.chat(messages, stream=False)
+    structured_chat = getattr(provider, "structured_chat", None)
+    if output_schema is not None and callable(structured_chat):
+        stream = structured_chat(messages, output_schema)
+    else:
+        stream = quick_chat(messages) if callable(quick_chat) else provider.chat(messages, stream=False)
     parts: list[str] = []
     async for item in stream:
         kind, text = unpack_stream_item(item)
@@ -1039,12 +1043,20 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
             "title", "description", "brand", "size", "condition", "department", "category_path",
             "price", "weight_lb", "weight_oz", "package_dimensions_in")},
     }
+    from vendoo_studio.providers.structured import repair_schema
+
+    native = callable(getattr(provider, "structured_chat", None))
+    instruction = ("Return only a JSON object with a patches array of add or replace operations."
+                   if native else "Return only a JSON Patch array of add or replace operations.")
     messages = [
-        {"role": "system", "content": FINALIZE_GAPS_PROMPT.format(formulas=listing_formula_rules())},
+        {"role": "system", "content": FINALIZE_GAPS_PROMPT.format(formulas=listing_formula_rules(), output_instruction=instruction)},
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
     try:
-        text = await collect_provider_text(provider, messages)
+        if native:
+            text = await collect_provider_text(provider, messages, output_schema=repair_schema(list(allowed)))
+        else:
+            text = await collect_provider_text(provider, messages)
     except Exception:
         log.exception("listing validation-gap fill failed")
         return None
@@ -1369,6 +1381,12 @@ def persist_generated_listing(
         log.warning("listing generation produced no JSON for %s", conv_id)
         return None
 
+    import copy
+
+    revisions = ListingRepo(db).get_revisions(conv_id)
+    seed = revisions[0].listing_json if revisions else {}
+    native_blocks = {market: copy.deepcopy(listing.get(f"{market}_specifics") or {})
+                     for market in seed.get("_native_forms") or {}}
     RegistryService(db).merge_learned_fields(listing)
     # Dimensions are a seller preference, not a model inference. Start every
     # generated listing from the saved default; an explicit per-listing value
@@ -1385,7 +1403,6 @@ def persist_generated_listing(
     from vendoo_studio.services.vinted_listing import apply_vinted_listing
 
     apply_vinted_listing(listing)
-    revisions = ListingRepo(db).get_revisions(conv_id)
     if revisions:
         selected = revisions[0].listing_json
         if selected.get("marketplace_categories"):
@@ -1429,8 +1446,15 @@ def persist_generated_listing(
         listing["poshmark_specifics"] = specifics
     from vendoo_studio.services.native_contract import constrain_generated
 
-    constrain_generated(listing, revisions[0].listing_json if revisions else {})
+    for market, block in native_blocks.items():
+        listing[f"{market}_specifics"] = block
+    constrain_generated(listing, seed)
     cap_listing_description(listing)
+    if revisions:
+        from vendoo_studio.services.seller_overrides import capture_locked, restore_locked, materialize_prices
+
+        restore_locked(listing, capture_locked(revisions[0].listing_json))
+        materialize_prices(listing)
     ListingRepo(db).save_revision(conv_id, listing, source=source, expected_revision_id=expected_revision_id)
 
     if announce:

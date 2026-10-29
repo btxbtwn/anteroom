@@ -1,6 +1,6 @@
 """How long each stage of one listing generation took."""
 
-from sqlalchemy import JSON, Column, DateTime, Float, String
+from sqlalchemy import JSON, Column, DateTime, Float, String, text
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -22,10 +22,10 @@ class GenerationTiming(SellerOwned, Base):
 
     id = Column(String, primary_key=True, default=new_id)
     conversation_id = Column(String, nullable=False, index=True)
-    # done | failed | cancelled — how the chat stream ended. The field fill
-    # after it adds stages but does not change this.
+    # The stream starts preparing; background field work supplies its final outcome.
     outcome = Column(String, nullable=False)
     stages = Column(JSON, nullable=False)
+    calls = Column(JSON, nullable=False, default=list, server_default=text("'[]'"))
     total_sec = Column(Float, nullable=False)
     created_at = Column(DateTime, nullable=False, default=utcnow)
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)

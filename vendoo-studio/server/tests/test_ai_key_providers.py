@@ -378,3 +378,66 @@ def test_openrouter_reasoning_is_sent_only_for_the_listing_model(fake_http):
     assert run(collect(provider.chat(IMAGE_TURN, stream=False))) == ["ok"]
     body = json.loads(calls[0].content)
     assert body["model"] == "vision-m" and "reasoning" not in body
+
+
+def test_responses_native_schema_and_usage_are_forwarded(fake_http):
+    from vendoo_studio.services import model_usage
+    schema = {"type": "object", "properties": {"patches": {"type": "array", "items": {"type": "string"}}},
+              "required": ["patches"], "additionalProperties": False}
+    def handler(request):
+        return httpx.Response(200, content=sse(
+            {"type": "response.output_text.delta", "delta": '{"patches":[]}'},
+            {"type": "response.completed", "response": {"usage": {
+                "input_tokens": 100, "input_tokens_details": {"cached_tokens": 60}, "output_tokens": 10}}},
+        ))
+    requests = fake_http(handler)
+    provider = OpenAIAPIProvider("test-key", "fixture", "fixture")
+    with model_usage.capture() as calls:
+        result = run(collect(provider.structured_chat([{"role": "user", "content": "JSON"}], schema)))
+    assert result
+    body = json.loads(requests[0].content)
+    assert body["text"]["format"] == {"type": "json_schema", "name": "listing_result", "strict": True, "schema": schema}
+    assert calls[0]["input_tokens"] == 100
+    assert calls[0]["cached_input_tokens"] == 60
+    assert calls[0]["output_tokens"] == 10
+
+
+def test_messages_native_schema_and_anthropic_usage(fake_http):
+    from vendoo_studio.services import model_usage
+    schema = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
+    def handler(request):
+        return httpx.Response(200, json={"content": [{"type": "text", "text": "{}"}],
+            "stop_reason": "end_turn", "usage": {"input_tokens": 5, "cache_read_input_tokens": 8,
+            "cache_creation_input_tokens": 7, "output_tokens": 9}})
+    requests = fake_http(handler)
+    provider = AnthropicAPIProvider("test-key", "fixture", "fixture")
+    with model_usage.capture() as calls:
+        assert run(collect(provider.structured_chat([{"role": "user", "content": "JSON"}], schema))) == ["{}"]
+    assert json.loads(requests[0].content)["output_config"]["format"]["schema"] == schema
+    assert calls[0]["input_tokens"] == 20
+    assert calls[0]["output_tokens"] == 9
+    assert calls[0]["cost_usd"] is None
+
+
+def test_chat_native_schema_and_reported_cost(fake_http):
+    from vendoo_studio.services import model_usage
+    schema = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
+    requests = fake_http(lambda request: httpx.Response(200, json={
+        "choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 20, "completion_tokens": 5, "cost": 0.01}}))
+    provider = ChatCompletionsProvider(KEY_PROVIDERS["gemini"], "test-key", "fixture", "fixture")
+    with model_usage.capture() as calls:
+        assert run(collect(provider.structured_chat([{"role": "user", "content": "JSON"}], schema))) == ["{}"]
+    assert json.loads(requests[0].content)["response_format"]["json_schema"]["strict"] is True
+    assert calls[0]["cost_source"] == "provider_reported"
+    assert calls[0]["cost_usd"] == 0.01
+
+
+def test_native_refusal_is_not_returned_as_an_empty_success(fake_http):
+    from vendoo_studio.services import model_usage
+    fake_http(lambda request: httpx.Response(200, content=sse({"type": "response.refusal.done", "refusal": "private text"})))
+    provider = OpenAIAPIProvider("test-key", "fixture", "fixture")
+    with model_usage.capture() as calls, pytest.raises(RuntimeError, match="did not complete"):
+        run(collect(provider.structured_chat([{"role": "user", "content": "JSON"}], {"type": "object"})))
+    assert calls[0]["outcome"] == "failed"
+    assert "private text" not in json.dumps(calls)
