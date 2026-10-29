@@ -521,21 +521,22 @@ async function handleNativeMarketplaceForm(msg) {
         poshmarkStyleTags(deadline), poshmarkShippingDiscounts(deadline)]);
       reply({ ok: true, form: poshmarkEditorForm(listing, catalog, display, tags, discounts) });
     } else if (marketplace === 'depop') {
-      const attributes = await depopAttributes(deadline);
-      let parcels = [];
-      let shipFrom = '';
-      try {
+      // Address does not depend on taxonomy; parcel rates do. Start independent
+      // reads together and bound optional account reads so they cannot consume
+      // the entire form deadline.
+      const attributesRead = depopAttributes(deadline);
+      const addressRead = depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', deadline, 5000)
+        .then(data => depopShipFromLine(depopAddress(listing, data))).catch(() => '');
+      const parcelsRead = attributesRead.then(async attributes => {
         const params = depopShippingParams(depopCategory(listing, attributes));
         const price = Number(listing.price);
         if (Number.isFinite(price) && price > 0) {
           params.set('item_cost', price.toFixed(2));
           params.set('item_currency', 'USD');
         }
-        parcels = depopParcelRows(await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline));
-      } catch { /* Catalog fields remain usable without an account shipping read. */ }
-      try {
-        shipFrom = depopShipFromLine(depopAddress(listing, await depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', deadline)));
-      } catch { /* The address card stays empty until Depop answers. */ }
+        return depopParcelRows(await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline, 5000));
+      }).catch(() => []);
+      const [attributes, parcels, shipFrom] = await Promise.all([attributesRead, parcelsRead, addressRead]);
       reply({ ok: true, form: depopEditorForm(listing, attributes, parcels, shipFrom) });
     } else if (marketplace === 'mercari') {
       const master = await mercariCatalogData(deadline);

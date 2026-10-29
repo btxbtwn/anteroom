@@ -384,6 +384,48 @@ test('form reader makes no marketplace writes and reports catalog failures', asy
   assert.equal(sent[1].form.marketplace, 'mercari');
 });
 
+test('Depop optional account reads bound the total retry deadline', async () => {
+  const c = loadWorker();
+  c.depopBearer = async () => 'test-session';
+  let options;
+  c.marketplaceFetch = async (_url, value) => { options = value; return { data: [] }; };
+  const started = Date.now();
+  await c.depopAccountRead('/test', 'test', started + 20000, 5000);
+  assert.equal(options.timeoutMs, 5000);
+  assert.ok(options.deadline >= started + 5000);
+  assert.ok(options.deadline <= Date.now() + 5000);
+  assert.ok(options.deadline < started + 20000);
+});
+
+test('Depop overlaps address and taxonomy reads, then reads parcels without waiting for address', async () => {
+  const c = loadWorker();
+  const sent = [];
+  let finishCatalog;
+  let finishAddress;
+  const reads = [];
+  c.sendBrowserResult = (_msg, result) => sent.push(clean(result));
+  c.depopAttributes = () => new Promise(resolve => { finishCatalog = resolve; });
+  c.depopAccountRead = (path, _what, _deadline, timeoutMs) => {
+    assert.equal(timeoutMs, 5000);
+    reads.push(path);
+    if (path.includes('addresses')) return new Promise(resolve => { finishAddress = resolve; });
+    return Promise.reject(new Error('Shipping unavailable'));
+  };
+  const pending = c.handleNativeMarketplaceForm({ payload: { marketplace: 'depop', listing: {} } });
+  assert.equal(reads.length, 1);
+  assert.match(reads[0], /addresses/);
+  finishCatalog(DEPOP);
+  await Promise.resolve();
+  assert.equal(reads.length, 2);
+  assert.match(reads[1], /shipping\/providers/);
+  finishAddress([]);
+  await pending;
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].ok, true);
+  assert.equal(sent[0].form.marketplace, 'depop');
+  assert.ok(sent[0].form.fields.some(row => row.path === 'depop_specifics.description'));
+});
+
 test('form reader answers a stalled catalog once and ignores its late completion', async () => {
   const c = loadWorker();
   const sent = [];
