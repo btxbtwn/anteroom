@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.573 — 2026-10-30
+
+- Connect your own AI API keys in the web app’s Providers settings, choose models and listing order, and keep credentials encrypted in your account.
+
 ## 0.1.572 — 2026-10-30
 
 - Depop offers to likers send again. Depop stopped including the price on its listing details, so every listing was skipped with "Depop's listing price changed"; Anteroom now reads the price from Depop's own offer screen.

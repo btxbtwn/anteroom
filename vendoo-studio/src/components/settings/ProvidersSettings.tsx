@@ -6,6 +6,7 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, ExternalLinkIcon, KeyRoundIcon, LogInIcon, PlugZapIcon, TerminalIcon, Trash2Icon } from "lucide-react";
+import { useWorkspaceRuntime } from "../../app/runtime";
 import { api } from "../../api/client";
 import type { AIKeyProvider, KeyProviderId, ListingProviderId, PhotoProviderChoice, ProviderStatus } from "../../api/types";
 import { cn } from "../../lib/utils";
@@ -457,6 +458,7 @@ function KeyProviderEditor({
   role: string;
   onChanged: () => void;
 }) {
+  const { hosted } = useWorkspaceRuntime();
   const queryClient = useQueryClient();
   const label = KEY_PROVIDER_LABELS[id];
   const configured = Boolean(entry?.masked_key);
@@ -502,12 +504,12 @@ function KeyProviderEditor({
   const error = setKey.error ?? deleteKey.error ?? signIn.error;
   const searchNote = entry?.web_search
     ? ` When ${label} writes your listings it also searches the web for sold comps.`
-    : " Sold comps need a Brave Search key, since this provider does not search the web here.";
+    : hosted ? " Sold comps require a provider with web search." : " Sold comps need a Brave Search key, since this provider does not search the web here.";
 
   return (
     <>
       <SettingsSection title="Setup">
-        {entry?.sign_in ? (
+        {entry?.sign_in && !hosted ? (
           <SettingsRow
             title={`Sign in with ${label}`}
             description={`Approve Anteroom in your browser and ${label} hands it a key that bills your own account.`}
@@ -535,7 +537,7 @@ function KeyProviderEditor({
           title="API key"
           description={
             <>
-              Stored in macOS Keychain and never sent to the browser. Usage is billed by {label} to your account, apart
+              {hosted ? "Encrypted in your account’s private vault." : "Stored in macOS Keychain and never sent to the browser."} Usage is billed by {label} to your account, apart
               from any chat subscription.{searchNote}{" "}
               <a className="inline-flex items-center gap-0.5 underline" href={entry?.key_url} target="_blank" rel="noreferrer">
                 Get a key
@@ -614,6 +616,8 @@ function KeyProviderEditor({
 }
 
 export function ProvidersSettings() {
+  const { hosted } = useWorkspaceRuntime();
+  const providerIds = hosted ? PROVIDER_IDS.filter((id) => isKeyProviderId(id) || id === "mimo") : PROVIDER_IDS;
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<ListingProviderId | null>(null);
   const [claudeTerminalOpen, setClaudeTerminalOpen] = useState(false);
@@ -1006,7 +1010,7 @@ export function ProvidersSettings() {
         <SettingsSection title="Setup">
           <SettingsRow
             title="API key"
-            description="Stored in macOS Keychain and never sent to the browser. When MiMo is your listing model, sold comps use its web search, which needs the Web Search plugin turned on in the MiMo console (Plugin Management)."
+            description={hosted ? "Encrypted in your account’s private vault. Usage is billed to your MiMo account." : "Stored in macOS Keychain and never sent to the browser. When MiMo is your listing model, sold comps use its web search, which needs the Web Search plugin turned on in the MiMo console (Plugin Management)."}
             status={
               mimoTest.result ? (
                 <TestResult result={mimoTest.result} />
@@ -1133,7 +1137,8 @@ export function ProvidersSettings() {
 
   const fallbackOptions: SettingsSelectOption<ListingFallbackId>[] = [
     { value: "none", label: "None" },
-    ...PROVIDER_IDS.filter((id) => id !== primary).map((id) => providerOption<ListingFallbackId>(id, id)),
+    ...(fallback !== "none" && !providerIds.includes(fallback) ? [providerOption<ListingFallbackId>(fallback, fallback)] : []),
+    ...providerIds.filter((id) => id !== primary).map((id) => providerOption<ListingFallbackId>(id, id)),
   ];
 
   return (
@@ -1152,7 +1157,7 @@ export function ProvidersSettings() {
               value={primary}
               disabled={setPreferredMutation.isPending}
               onChange={(value) => saveOrder(value, fallback)}
-              options={PROVIDER_IDS.map((id) => providerOption(id, id))}
+              options={[...(!providerIds.includes(primary) ? [providerOption(primary, primary)] : []), ...providerIds.map((id) => providerOption(id, id))]}
             />
           }
         />
@@ -1186,7 +1191,7 @@ export function ProvidersSettings() {
               value={photoProvider}
               disabled={setPhotoProviderMutation.isPending}
               onChange={(value) => setPhotoProviderMutation.mutate(value)}
-              options={[{ value: "same", label: "Same as listing AI" }, ...PROVIDER_IDS.map((id) => providerOption(id, id))]}
+              options={[{ value: "same", label: "Same as listing AI" }, ...(photoProvider !== "same" && !providerIds.includes(photoProvider) ? [providerOption(photoProvider, photoProvider)] : []), ...providerIds.map((id) => providerOption(id, id))]}
             />
           }
         />
@@ -1203,7 +1208,7 @@ export function ProvidersSettings() {
           <div className="border-b border-border/60 bg-muted/10 @min-[48rem]/providers:flex @min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-col @min-[48rem]/providers:border-r @min-[48rem]/providers:border-b-0">
             <ScrollArea scrollFade chainVerticalScroll className="@min-[48rem]/providers:min-h-0 @min-[48rem]/providers:flex-1">
               <div className="divide-y divide-border/50" role="group" aria-label="Providers">
-                {PROVIDER_IDS.map((id) => (
+                {providerIds.map((id) => (
                   <ProviderListRow
                     key={id}
                     id={id}
@@ -1228,14 +1233,14 @@ export function ProvidersSettings() {
                     <RoleBadges id={selected} primary={primary} fallback={fallback} photoProvider={photoProvider} />
                   </span>
                 </div>
-                {editors[selected]}
+                {hosted && !providerIds.includes(selected) ? <SettingsNote>This sign-in requires a connected Mac worker. Choose an API-key provider below and select it as your primary listing AI to run in the web app.</SettingsNote> : editors[selected]}
               </div>
             </ScrollArea>
           </div>
         </SettingsGroup>
       </SettingsSection>
 
-      <BraveSearchSection chatgptSignedIn={chatgptSignedIn} />
+      {!hosted && <BraveSearchSection chatgptSignedIn={chatgptSignedIn} />}
     </>
   );
 }
