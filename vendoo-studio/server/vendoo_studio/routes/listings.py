@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.models.etsy_fields import etsy_eligible
-from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
+from vendoo_studio.models.validation import validate_listing
 from vendoo_studio.repositories.queries import ListingRepo, ConversationRepo
 from vendoo_studio.services import price_markdown
 from vendoo_studio.services.price_drop import build_preview
@@ -107,8 +107,6 @@ def validate(conv_id: str, db: Session = Depends(get_db)):
     listing_repo = ListingRepo(db)
     latest = listing_repo.latest_revision(conv_id)
     listing_data = copy.deepcopy(latest.listing_json) if latest else {}
-    normalize_listing_dropdowns(listing_data)
-
     photo_count = len(conv_repo.get_photos(conv_id))
     result = validate_listing(listing_data, photo_count, require_photos=True)
 

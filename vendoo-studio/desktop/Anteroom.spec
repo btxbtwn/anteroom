@@ -5,7 +5,7 @@ from pathlib import Path
 from PyInstaller.building.api import COLLECT, EXE, PYZ
 from PyInstaller.building.build_main import Analysis
 from PyInstaller.building.osx import BUNDLE
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
 
 SPECDIR = Path(SPECPATH)
 STUDIO = SPECDIR.parent
@@ -48,6 +48,9 @@ def tree(src: Path, dest_root: str) -> list[tuple[str, str]]:
 
 
 datas = [
+    # These HTTP clients read their versions through importlib.metadata at import time.
+    *copy_metadata("httpx2"),
+    *copy_metadata("httpcore2"),
     *tree(STUDIO / "dist", "dist"),
     # Revision scripts are read from disk at startup, so they have to be in
     # the bundle beside the package rather than only inside the archive.
@@ -159,8 +162,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "Anteroom",
         "CFBundleDisplayName": "Anteroom",
-        "CFBundleShortVersionString": "0.1.0",
-        "CFBundleVersion": "0.1.0",
+        "CFBundleShortVersionString": VERSION_FILE.read_text(encoding="utf-8").strip(),
+        "CFBundleVersion": VERSION_FILE.read_text(encoding="utf-8").strip(),
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
         "NSApplicationCategoryType": "public.app-category.productivity",

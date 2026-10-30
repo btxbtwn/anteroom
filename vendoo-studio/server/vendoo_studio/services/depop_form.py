@@ -87,6 +87,8 @@ def form(listing: dict) -> dict:
         elif key == "brand":
             row = choice("depop_specifics.brand", label, catalog()["brands"])
             row["value"] = text("brand")
+            if str(row["value"]).strip().casefold() in {"unbranded", "no brand"}:
+                row["value"] = "Other"
             rows.append(row)
         elif key in fixed_keys:
             enhance = key in {"source", "age", "style"}

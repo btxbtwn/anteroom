@@ -303,8 +303,12 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
     summary = {key: listing.get(key) for key in (
         "title", "description", "brand", "category_path", "department", "size", "primaryColor",
         "secondaryColor", "material", "condition") if not _empty(listing.get(key))}
+    from vendoo_studio.services.catalog_index import relevant_skill_rules
+
+    rules = relevant_skill_rules(db, " ".join([*rows, str(summary.get("category_path") or "")]), max_chars=40000)
     messages = [
-        {"role": "system", "content": FILL_RULES + (
+        {"role": "system", "content": f"--- Canonical listing rules ---\n{rules}\n\n"
+            "The native fields and choices below override generic marketplace templates. " + FILL_RULES + (
             " Category is required on every form. Choose the most specific supported category for each item "
             "from the listed choices; do not skip it or ask the seller to choose. If none fits, leave it "
             "unresolved so listing remains blocked." if categories else "") + (
@@ -326,16 +330,37 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         from vendoo_studio.services.option_lookup import OptionCatalog
 
         catalog = OptionCatalog({market: {"fields": rows} for market, rows in rows_by_market.items()})
-        text = await collect_provider_text(provider, messages, option_catalog=catalog)
+        for attempt in range(2):
+            text = await collect_provider_text(provider, messages, option_catalog=catalog)
+            reply = _json_object(text)
+            if isinstance(reply, dict) and isinstance(reply.get("fields"), dict):
+                break
+            if not attempt:
+                shape = ('{"fields":{"<field path>":{"value":"<choice>","evidence":"<exact quote>"}}}'
+                         if strict else '{"fields":{"<field path>":"<choice>"}}')
+                messages = [*messages, {"role": "assistant", "content": text}, {"role": "user", "content": (
+                    f"Return only valid JSON in this format: {shape}. "
+                    'Use {"fields":{}} if no answer is supported. Do not invent facts or choices.'
+                )}]
     except Exception:
         log.exception("marketplace field fill request failed for %s", conv_id)
+        ConversationRepo(db).add_message(
+            conv_id, "system",
+            "Could not fill marketplace category fields. Your saved listing is unchanged. "
+            "Ask chat to fill the remaining fields, or review them in each marketplace tab.",
+            provider="system", model="",
+        )
         return None
     finally:
         activity.end(work)
-    reply = _json_object(text)
     if reply is None or not isinstance(reply.get("fields"), dict):
         # A failed/truncated response is not an evidence check that rejected
         # every existing answer. Leave the revision untouched.
+        log.warning("unreadable marketplace field response for %s (%s characters)", conv_id, len(text))
+        ConversationRepo(db).add_message(
+            conv_id, "system", "The agent returned an unreadable marketplace field response. "
+            "Your saved listing is unchanged. Ask chat to fill the remaining fields.", provider="system", model="",
+        )
         return None
     accepted = validated_values(reply, rows, evidence=evidence if strict else None)
     if not accepted and not strict:
@@ -442,6 +467,18 @@ def category_saved(conv_id: str, before: dict, after: dict, source: str) -> None
     if source not in FILL_ON_SOURCES or _loop is None or _loop.is_closed():
         return
     markets = changed_categories(before, after)
+    if source == "model_refinement":
+        proofs = after.get(native_contract.EVIDENCE_KEY) or {}
+        for market, contract in (after.get(native_contract.KEY) or {}).items():
+            for row in contract.get("fields") or []:
+                path = _path(row)
+                value = get_path(after, path)
+                proof = proofs.get(path) or {}
+                if (row.get("required") and native_contract.item_field(row, market)
+                        and not _empty(value) and not is_locked(after, path)
+                        and (proof.get("value") != value or not proof.get("quote"))):
+                    markets.add(market)
+                    break
     if markets:
         _loop.call_soon_threadsafe(_queue, conv_id, markets)
 

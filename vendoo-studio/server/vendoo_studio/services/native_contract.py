@@ -12,7 +12,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from vendoo_studio.services.seller_overrides import get_path, is_locked, locked_paths, marketplace_text, price_for, set_path
+from vendoo_studio.services.seller_overrides import CANONICAL_PRICE, get_path, is_locked, locked_paths, marketplace_text, price_for, set_path
 
 KEY = "_native_forms"
 EVIDENCE_KEY = "_native_field_evidence"
@@ -213,6 +213,7 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
         return None
     values = listing if values is None else values
     rows = []
+    definitions = {path_of(row): row for row in fields}
     for definition in fields:
         row = copy.deepcopy(definition)
         path = path_of(row)
@@ -222,6 +223,12 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
         name = path.rsplit(".", 1)[-1]
         if value is None and path.startswith(f"{market}_specifics.") and name in {"title", "description", "brand"}:
             value = marketplace_text(values, market, name)
+        if value in (None, "", [], {}) and not is_locked(listing, path):
+            value = _first_answer(_row_values(values, market, path, definitions))
+            if value in (None, "", [], {}):
+                value = shared_answer(values, row, market, path)
+            if value in (None, "", [], {}):
+                value = settings_answer(values, path)
         row["value"] = copy.deepcopy(value) if value is not None else ""
         rows.append(row)
     return {"marketplace": market, "native": True, "known": True,
@@ -508,6 +515,8 @@ def gaps(listing: dict, market: str) -> list[dict]:
     rows = {path_of(row): row for row in fields}
     folded = {_fold(path) for path in rows}
     for path, value in _leaves(listing.get(f"{market}_specifics") or {}, f"{market}_specifics", set(rows)):
+        if path == CANONICAL_PRICE.get(market) and "price" in rows:
+            continue
         if path in rows or _fold(path) in folded or value in (None, "", [], {}):
             continue
         # A value this form no longer has a row for is left out of the send; it
@@ -529,15 +538,15 @@ def gaps(listing: dict, market: str) -> list[dict]:
         if value is None and name in {"title", "description", "brand"}:
             value = marketplace_text(listing, market, name)
             borrowed = True
-        if value in (None, "", [], {}):
+        if value in (None, "", [], {}) and not is_locked(listing, path):
             value = _first_answer(_row_values(listing, market, path, rows))
             # An answer stored under another spelling of this path was written
             # before this form knew the row; it is not a new model claim.
             borrowed = value not in (None, "", [], {})
-        if value in (None, "", [], {}):
+        if value in (None, "", [], {}) and not is_locked(listing, path):
             value = shared_answer(listing, row, market, path)
             borrowed = True
-        if value in (None, "", [], {}):
+        if value in (None, "", [], {}) and not is_locked(listing, path):
             value = settings_answer(listing, path)
             borrowed = True
         if account_resolved(row) and value in (None, "", [], {}):
@@ -628,7 +637,12 @@ def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
     if market == "ebay":
         # Only the aspects posting itself fills from the listing's own fields.
         # A policy, price or category is never answered by a General value.
-        from vendoo_studio.services.ebay_listings import _GENERAL_ASPECTS, _aspect_key
+        from vendoo_studio.services.ebay_listings import _GENERAL_ASPECTS, _aspect_key, _specifics
+
+        # Posting preserves an explicitly stored blank aspect. General only
+        # supplies an aspect the marketplace section does not define at all.
+        if any(_aspect_key(str(key)) == _aspect_key(name) for key in _specifics(listing)):
+            return None
 
         if _aspect_key(name) == "condition":
             # ``ebay_condition`` reads the form's own grade and falls back to

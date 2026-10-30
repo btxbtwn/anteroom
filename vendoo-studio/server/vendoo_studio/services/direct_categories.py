@@ -19,16 +19,19 @@ _ID = re.compile(r"[1-9]\d{0,14}")
 def search_text(listing: dict, evidence: str = "") -> str:
     """The few words eBay and Etsy can match a category from."""
     title = " ".join(str(listing.get("title") or "").split())
+    if title.casefold() in {"draft listing", "new listing"}:
+        title = ""
     paths = listing.get("marketplace_categories") if isinstance(listing.get("marketplace_categories"), dict) else {}
-    leaf = ""
+    path = ""
     for key in ("ebay", "etsy"):
         path = str(paths.get(key) or "")
         if path:
-            leaf = path.split(">")[-1].strip()
             break
-    if not leaf:
-        leaf = str(listing.get("category_path") or "").split(">")[-1].strip()
-    text = " ".join(part for part in (title, leaf) if part)
+    if not path:
+        path = str(listing.get("category_path") or "")
+    parts = [part.strip() for part in path.split(">") if part.strip()]
+    context = " ".join(parts[1:] if len(parts) > 1 else parts)
+    text = " ".join(part for part in (context, title) if part)
     if not text:
         text = " ".join(str(evidence or "").split())
     return text[:80]
@@ -78,18 +81,20 @@ def pick_etsy_leaf(leaves: list[dict], query: str) -> dict[str, str] | None:
     tokens = {word.rstrip("s") for word in _tokens(query)}
     if not tokens:
         return None
-    ranked: list[tuple[int, int, int, dict]] = []
+    product_tokens = {word.rstrip("s") for word in _tokens(query.split(">")[-1])}
+    ranked: list[tuple[int, int, int, int, dict]] = []
     for leaf in leaves:
         path = str(leaf.get("path") or "")
         words = {word.rstrip("s") for word in _tokens(path)}
         leaf_words = {word.rstrip("s") for word in _tokens(path.split(">")[-1])}
         score = len(tokens & words)
-        if score:
-            ranked.append((len(tokens & leaf_words), score, len(path), leaf))
+        product_score = len(product_tokens & words)
+        if product_score:
+            ranked.append((len(product_tokens & leaf_words), product_score, score, len(path), leaf))
     if not ranked:
         return None
-    ranked.sort(key=lambda item: item[:3], reverse=True)
-    leaf = ranked[0][3]
+    ranked.sort(key=lambda item: item[:4], reverse=True)
+    leaf = ranked[0][4]
     return {"id": str(leaf["id"]), "path": str(leaf.get("path") or leaf["id"])}
 
 
@@ -228,7 +233,7 @@ async def _etsy_leaf(query: str) -> dict[str, str] | None:
     return hit
 
 
-async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[str, Any]:
+async def attach_direct_categories(db, listing: dict, evidence: str = "") -> dict[str, Any]:
     """Choose the live leaves and remember them on the listing. Vendoo's category ids stay as they are."""
     current = listing.get("direct_category_ids")
     current = dict(current) if isinstance(current, dict) else {}
@@ -242,6 +247,13 @@ async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[st
     if chosen.get("query") != cache_query:
         for key in ("ebay", "ebay_path", "etsy", "etsy_path", "poshmark", "depop"):
             chosen.pop(key, None)
+    if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
+        from vendoo_studio.services.agent_categories import apply_agent_categories, ebay_tree_leaves
+
+        # Use the same verified leaf/path match as the editor before asking
+        # the suggestion service. A known category needs no network search.
+        apply_agent_categories({**listing, "direct_category_ids": chosen},
+                               {"ebay": ebay_tree_leaves(db)}, markets={"ebay"})
     if not direct_category_id({"direct_category_ids": chosen}, "ebay"):
         try:
             hit = await _ebay_leaf(query)

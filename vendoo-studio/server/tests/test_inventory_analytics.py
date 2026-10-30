@@ -536,6 +536,8 @@ class LoadAnalyticsTest(unittest.TestCase):
         rows = load_rows(self.db)
         sale = next(row for row in rows if row.conversation_id == merged.id)
         self.assertFalse(sale.stock)
+        # Other tests share this worker's database; count only this fixture's stock.
+        rows = [row for row in rows if row.conversation_id in {self.sold.id, self.busy.id, merged.id}]
         inventory = summarize(rows, range_id="all", now=NOW)["inventory"]
         # The partial sale counts in Sales; its stock belongs to the item it joined.
         self.assertEqual((inventory["sold"], inventory["active"]), (1, 0))
