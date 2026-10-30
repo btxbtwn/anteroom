@@ -1840,15 +1840,19 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
                 async for _ in resp.aiter_text():
                     pass
             analyze_calls = self.provider.analyze_calls
-            chat_calls = self.provider.chat_calls
-            async with client.stream(
-                "POST", f"/api/conversations/{self.conv_id}/generate?resume=1"
-            ) as resp:
-                self.assertEqual(resp.status_code, 200)
-                body = "".join([chunk async for chunk in resp.aiter_text()])
+            # Native-field preparation may still call the model after the stream
+            # closes. Only starting a fresh generation would duplicate this run.
+            with patch.object(chat_routes, "start_generation", side_effect=AssertionError("Resume started another generation")):
+                async with client.stream(
+                    "POST", f"/api/conversations/{self.conv_id}/generate?resume=1"
+                ) as resp:
+                    self.assertEqual(resp.status_code, 200)
+                    body = "".join([chunk async for chunk in resp.aiter_text()])
         self.assertIn("[DONE]", body)
         self.assertEqual(self.provider.analyze_calls, analyze_calls)
-        self.assertEqual(self.provider.chat_calls, chat_calls)
+        initial = [messages for messages in self.provider.chat_history
+                   if "Generate a complete listing" in str(messages[-1].get("content") or "")]
+        self.assertEqual(len(initial), 1)
 
     async def test_discarded_run_stops_writing_into_the_wiped_chat(self):
         """Regenerate wipes the chat; the old run must not post cards into it."""
