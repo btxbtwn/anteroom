@@ -242,6 +242,10 @@ class UiInput(BaseModel):
     settled_shelf_expanded: bool | None = None
     stale_listing_days: int | None = Field(None, ge=15, le=120)
     recent_vendoo_labels: list[str] | None = Field(None, max_length=12)
+    remember_labels: str | list[str] | None = None
+    restore_labels: list[str] | None = None
+    forget_label: str | None = None
+    model_favorites: list[dict] | None = None
     label_colors: dict[str, Literal["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]] | None = Field(None, max_length=200)
     vendoo_enabled: Literal[False] | None = None
 
@@ -253,7 +257,8 @@ def ui(db=Depends(get_seller_db)):
 
 @router.put('/settings/ui')
 def save_ui(body: UiInput, db=Depends(get_seller_db)):
-    user_settings.set_ui_prefs(**body.model_dump(exclude_unset=True, exclude_none=True))
+    from vendoo_studio.routes.settings import UiPrefsConfig, put_ui_prefs
+    put_ui_prefs(UiPrefsConfig(**body.model_dump(exclude_unset=True, exclude_none=True)))
     return ui(db)
 
 

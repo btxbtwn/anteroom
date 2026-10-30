@@ -163,3 +163,10 @@ selection, package/ZIP/location defaults, formulas and hide/restore controls use
 the seller-owned settings store. Listing-specific changes verify ownership before
 calling the shared service. Other settings sections and account actions remain
 pending their reviewed integrations.
+
+The Listings settings page is connected on `feat/hosted-listings-settings`. It
+uses the shared template/default/formula controls and label-management handlers.
+The similar-item finder reads private account photos, stores owner-scoped hashes
+and reviews, and merges only explicitly chosen owned items. Active draft tasks
+block merges under the submission row locks. Vendoo controls remain unavailable
+in hosted mode until their approved browser actions are connected.
