@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.570 — 2026-10-30
+
+- Continue bringing desktop tools into the web workspace, with private account settings, photos, reports, CSV exports and independent draft copies.
+- Keep cloud AI keys encrypted and draft work separate for each seller, including work that continues after a browser disconnects.
+
 ## 0.1.569 — 2026-10-30
 
 - Depop keeps the size that its own form spells differently, so a 36 waist is shown and sent as 36" instead of leaving the size blank.
