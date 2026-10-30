@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.557 — 2026-10-30
+## 0.1.558 — 2026-10-30
 
 - Fix Mercari offer checks failing with HTTP 400 on every listing by supplying the required item ID type.
+
+## 0.1.557 — 2026-10-30
+
+- Listing chat can read every enabled marketplace form's current fields and complete choices, including optional fields, categories, brands and dependent options. Repairs save to that marketplace's own fields and explain when a connection is needed to load choices.
 
 ## 0.1.556 — 2026-10-30
 

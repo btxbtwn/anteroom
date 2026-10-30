@@ -20,6 +20,33 @@ from vendoo_studio.services.vendoo_import import merge_notes
 
 
 class NativeEditorTest(unittest.TestCase):
+    def test_chat_reads_real_native_catalogs_and_saves_an_optional_field_without_a_job(self):
+        import asyncio
+        import json
+
+        from vendoo_studio.services.chat_forms import forms_prompt
+        from vendoo_studio.services.chat_listing import apply_listing_payload
+
+        snapshot = {**self.listing, "direct_category_ids": {"depop": "menswear_jeans"}}
+        ListingRepo(self.db).save_revision(self.conv.id, snapshot, "category_analysis")
+        before = len(JobRepo(self.db).list_by_conversation(self.conv.id))
+        with patch("vendoo_studio.services.chat_forms.get_selected_marketplaces", return_value=["poshmark", "depop"]), \
+             patch("vendoo_studio.services.chat_forms.vinted_browser.category_rows", return_value=[{"title": "Jeans"}]):
+            data = json.loads(asyncio.run(forms_prompt(self.db, self.conv.id)).split('\n')[-1])
+        posh = {row["path"]: row for row in data["poshmark"]["fields"]}
+        depop = {row["path"]: row for row in data["depop"]["fields"]}
+        self.assertEqual(len(posh["direct_category_ids.poshmark"]["options"]), 747)
+        self.assertEqual(len(depop["direct_category_ids.depop"]["option_values"]), 281)
+        self.assertIn("Cotton", depop["depop_specifics.attributes.material"]["options"])
+        _, saved = apply_listing_payload(self.db, self.conv.id, json.dumps({"fields": [
+            {"path": "depop_specifics.attributes.material", "value": ["Cotton"]},
+        ]}))
+        self.assertTrue(saved)
+        latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertEqual(latest["depop_specifics"]["attributes"]["material"], ["Cotton"])
+        self.assertEqual(len(JobRepo(self.db).list_by_conversation(self.conv.id)), before)
+        self.bridge.assert_not_called()
+
     def test_mercari_override_keeps_the_saved_form_valid_through_posting_preparation(self):
         from vendoo_studio.services import direct_preflight, native_contract
 
