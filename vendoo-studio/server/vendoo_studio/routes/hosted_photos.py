@@ -1,5 +1,6 @@
 """Bounded photo uploads and authenticated reads; no filesystem-backed routes."""
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from typing import Literal
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from starlette.concurrency import run_in_threadpool
@@ -45,7 +46,7 @@ def list_photos(draft_id: str, db=Depends(get_seller_db)):
                       .order_by(Photo.display_order, Photo.id)).all()
 
 
-def upload(db, draft_id, token, data):
+def upload(db, draft_id, token, data, marketplace=None):
     require_draft(db, draft_id, lock=True)
     count = db.scalar(select(func.count()).select_from(Photo).where(Photo.conversation_id == draft_id))
     if count >= photos.MAX_PHOTOS:
@@ -53,7 +54,7 @@ def upload(db, draft_id, token, data):
     data, width, height = photos.normalize(data)
     key = photos.new_key(db.user_id, draft_id)
     photo = Photo(conversation_id=draft_id, original_filename='photo.jpg', stored_filename=key,
-                  mime_type='image/jpeg', size_bytes=len(data), width=width, height=height, display_order=count)
+                  mime_type='image/jpeg', size_bytes=len(data), width=width, height=height, display_order=count, marketplace=marketplace)
     db.add(photo)
     db.flush()
     photos.storage_call('POST', key, token, data)
@@ -73,7 +74,7 @@ def upload(db, draft_id, token, data):
 
 
 @router.post('', response_model=PhotoResponse, status_code=201)
-async def upload_photo(draft_id: str, request: Request, db=Depends(get_seller_db)):
+async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy', 'vinted', 'sellwild'] | None = None, db=Depends(get_seller_db)):
     # Check ownership before reading bytes. Read a raw body, avoiding an unbounded
     # multipart spool before the handler has an opportunity to enforce the limit.
     await run_in_threadpool(require_draft, db, draft_id)
@@ -83,7 +84,7 @@ async def upload_photo(draft_id: str, request: Request, db=Depends(get_seller_db
             raise HTTPException(413, 'Choose a photo smaller than 10 MB')
         data.extend(chunk)
     token = request.headers['authorization'].partition(' ')[2]
-    return await run_in_threadpool(upload, db, draft_id, token, bytes(data))
+    return await run_in_threadpool(upload, db, draft_id, token, bytes(data), marketplace)
 
 
 @router.get('/{photo_id}')

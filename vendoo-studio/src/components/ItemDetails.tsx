@@ -95,10 +95,11 @@ function parseMeasurements(raw: unknown): Measurements {
   return out;
 }
 
-function parseNotes(notes: string | null, defaultPackageDimensions = DEFAULTS.packageDimensions): ItemDetailsData {
+export function parseNotes(notes: string | null, defaultPackageDimensions = DEFAULTS.packageDimensions): ItemDetailsData {
   if (!notes) return { ...DEFAULTS, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null) };
   try {
-    const parsed = JSON.parse(notes);
+    const value: unknown = JSON.parse(notes);
+    const parsed = value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).some(key => key in DEFAULTS) ? value as Omit<Partial<ItemDetailsData>, "garment"> & { garment?: string } : { sellerNotes: notes };
     return {
       sku: parsed.sku || "",
       sellerNotes: parsed.sellerNotes || "",
@@ -109,11 +110,11 @@ function parseNotes(notes: string | null, defaultPackageDimensions = DEFAULTS.pa
       vendooLabels: parsed.vendooLabels ?? DEFAULTS.vendooLabels,
       garment: parsed.garment === "shorts"
         ? "pants"
-        : GARMENTS.some((g) => g.id === parsed.garment) ? parsed.garment : DEFAULTS.garment,
+        : GARMENTS.some((g) => g.id === parsed.garment) ? parsed.garment as Garment : DEFAULTS.garment,
       measurements: parseMeasurements(parsed.measurements),
     };
   } catch {
-    return { ...DEFAULTS, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null) };
+    return { ...DEFAULTS, sellerNotes: notes, packageDimensions: defaultPackageDimensions, measurements: parseMeasurements(null) };
   }
 }
 

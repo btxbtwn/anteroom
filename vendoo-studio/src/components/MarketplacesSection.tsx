@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../app/runtime";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -195,6 +196,8 @@ export function MarketplacesLayout({
   onPrepare?: (id: string) => void;
   children?: ReactNode;
 }) {
+  const runtime = useWorkspaceRuntime();
+  disabled = disabled || !runtime.features.has("marketplace_actions");
   const queryClient = useQueryClient();
   const paneRef = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
@@ -234,7 +237,7 @@ export function MarketplacesLayout({
   });
   const checkedSalesFor = useRef<string | null>(null);
   useEffect(() => {
-    if (checkedSalesFor.current === convId) return;
+    if (!runtime.features.has("marketplace_actions") || checkedSalesFor.current === convId) return;
     checkedSalesFor.current = convId;
     salesCheck.mutate();
     // Only the item decides when this runs; the check itself is a read.
@@ -268,12 +271,12 @@ export function MarketplacesLayout({
 
   const etsyCreating = !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
   const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
-    enabled: etsyCreating, staleTime: 60_000, retry: false });
+    enabled: runtime.features.has("marketplace_actions") && etsyCreating, staleTime: 60_000, retry: false });
   const etsyReady = Boolean(etsyDefaults.data?.shipping_profile_id && etsyDefaults.data?.readiness_state_id && etsyDefaults.data?.return_policy_id);
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.preflight(convId),
-    enabled: Boolean(revisionId),
+    enabled: runtime.features.has("marketplace_actions") && Boolean(revisionId),
     staleTime: 15_000,
     // Every save is a new revision. Keep the last answer on screen until the new one
     // arrives, so the pane above the form does not collapse and shift the form.
@@ -465,6 +468,7 @@ export function MarketplacesLayout({
   }
 
   function actions(marketplace: Marketplace, status: Status): ReactNode {
+    if (!runtime.features.has("marketplace_actions")) return <span className="text-xs text-muted-foreground">Preview</span>;
     const m = marketplace as NativeMarketplace;
     if (running(marketplace)) {
       return <Button size="xs" variant="outline" disabled={startingOn(m)} onClick={() => action.mutate({ marketplace: m, kind: "cancel" })}>Cancel</Button>;
@@ -495,6 +499,7 @@ export function MarketplacesLayout({
   }
 
   function rowMenu(marketplace: Marketplace, status: Status): ReactNode {
+    if (!runtime.features.has("marketplace_actions")) return null;
     const name = marketplaceName(marketplace);
     const m = marketplace as NativeMarketplace;
     const entry = listings[marketplace];

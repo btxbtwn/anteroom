@@ -1,3 +1,4 @@
+import { studioFetch } from "../../api/transport";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
@@ -93,7 +94,7 @@ export function useChatStream({
       // A reconnect only follows the run it lost; if that run already ended,
       // the server answers [DONE] instead of starting a second generation.
       const target = resume ? `${url}${url.includes("?") ? "&" : "?"}resume=1` : url;
-      const res = await fetch(target, { ...SSE_FETCH, signal: controller.signal });
+      const res = await studioFetch(target, { ...SSE_FETCH, signal: controller.signal });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Request failed" }));
         throw Object.assign(new Error(detailFromResponseBody(err) || "Request failed"), {
@@ -281,7 +282,7 @@ export function useChatStream({
       lastStatus: getLive(convId).streamStatus || "",
     });
     try {
-      const res = await fetch(`/api/conversations/${convId}/messages`, {
+      const res = await studioFetch(`/api/conversations/${convId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify({
@@ -414,7 +415,7 @@ export function useChatStream({
     });
     getLive(convId).controller?.abort();
     await Promise.allSettled([
-      fetch(`/api/conversations/${convId}/generate/cancel`, { method: "POST" }),
+      studioFetch(`/api/conversations/${convId}/generate/cancel`, { method: "POST" }),
       probeId ? api.jobs.cancel(probeId) : Promise.resolve(),
     ]);
     await Promise.all([

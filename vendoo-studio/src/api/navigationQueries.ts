@@ -1,3 +1,4 @@
+import { hasHostedApiSession } from "./transport";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { photoThumbUrl } from "../photoThumb";
@@ -7,6 +8,7 @@ const warmingPhotos = new Map<string, HTMLImageElement>();
 const warmedPhotos = new Set<string>();
 
 function warmPhotoThumbnails(photos: Photo[]) {
+  if (hasHostedApiSession()) return;
   if (typeof Image === "undefined") return;
   for (const photo of photos.slice(0, 4)) {
     const src = photoThumbUrl(photo);

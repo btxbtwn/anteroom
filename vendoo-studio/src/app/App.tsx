@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "./runtime";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useReducer, type CSSProperties, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -99,6 +100,7 @@ function useMobileLayout() {
 }
 
 export function App() {
+  const runtime = useWorkspaceRuntime();
   const queryClient = useQueryClient();
   const vendooOn = useVendooEnabled();
   const isMobile = useMobileLayout();
@@ -111,15 +113,15 @@ export function App() {
   const setSelectedConvId = useCallback((id: string) => dispatchOpenListing({ type: "open", id }), []);
   const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
-  const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
+  const [activeView, setActiveView] = useState<WorkspaceView>(listingFromUrl || runtime.hosted ? "listings" : "assistant");
   const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
   /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
-  const shell = useRef<"listings" | "assistant">(listingFromUrl ? "listings" : "assistant");
-  const viewBeforeSettings = useRef<WorkspaceView>(listingFromUrl ? "listings" : "assistant");
+  const shell = useRef<"listings" | "assistant">(listingFromUrl || runtime.hosted ? "listings" : "assistant");
+  const viewBeforeSettings = useRef<WorkspaceView>(listingFromUrl || runtime.hosted ? "listings" : "assistant");
   const [pickedThreadId, setPickedThreadId] = useState<string | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>(DEFAULT_SETTINGS_SECTION);
   const [settingsTargetId, setSettingsTargetId] = useState<string | null>(null);
-  const [mobilePane, setMobilePane] = useState<"workspace" | "editor" | "browser">("workspace");
+  const [mobilePane, setMobilePane] = useState<"workspace" | "editor" | "browser">(runtime.hosted ? "editor" : "workspace");
   // On mobile the listings start open only when a listing link opened the app; home is the assistant.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(() => listingFromUrl && window.matchMedia(MOBILE_LAYOUT_QUERY).matches);
   const [mobileThreadsOpen, setMobileThreadsOpen] = useState(false);
@@ -174,6 +176,7 @@ export function App() {
   const assistantThreads = useQuery({
     queryKey: ["assistant", "threads"],
     queryFn: api.assistant.threads,
+    enabled: runtime.features.has("assistant"),
   });
   // A blank chat is the home screen. A thread opens only when the seller picks one or sends the first message.
   const assistantThreadId = pickedThreadId && (
@@ -264,7 +267,7 @@ export function App() {
   }, [extensionConnected, vendooOn]);
 
   const providerConfigured = Boolean(status?.provider_configured);
-  const needsSetup = !status || !status.provider_configured || !status.extension_connected;
+  const needsSetup = !runtime.hosted && (!status || !status.provider_configured || !status.extension_connected);
   const createListingTitle = "New listing";
   const listingJob = jobs?.find((job) => job.conversation_id === selectedConvId && job.status !== "cancelled");
   const automationRunning = ACTIVE_JOB_STATUSES.has(String(listingJob?.status));
@@ -333,19 +336,21 @@ export function App() {
     setActiveView("listings");
   }, []);
   const goAssistant = () => {
+    if (!runtime.views.has("assistant")) return;
     shell.current = "assistant";
     setActiveView("assistant");
-    setMobilePane("workspace");
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
     setMobileThreadsOpen(false);
     closeMobileSidebar();
   };
 
   const openSettings = () => {
+    if (!runtime.views.has("settings")) return;
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
     setSettingsSection(DEFAULT_SETTINGS_SECTION);
     setSettingsTargetId(null);
     setActiveView("settings");
-    setMobilePane("workspace");
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
     // On mobile, land on the settings section list first so Providers etc. are reachable.
     setMobileSidebarOpen(isMobile);
   };
@@ -359,7 +364,8 @@ export function App() {
 
   // Analytics, Marketplaces, Usage and Sourcing toggle back to whichever of home or inventory was open.
   const togglePage = (view: "analytics" | "marketplaces" | "usage" | "sourcing" | "automations") => {
-    setMobilePane("workspace");
+    if (!runtime.views.has(view)) return;
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
     if (activeView === view) {
       setActiveView(shell.current);
       return;
@@ -375,15 +381,16 @@ export function App() {
     setSettingsSection("connections");
     setSettingsTargetId("ebay-inventory-location");
     setActiveView("settings");
-    setMobilePane("workspace");
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
     closeMobileSidebar();
   };
   const openProviders = () => {
+    if (!runtime.views.has("settings")) return;
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
     setSettingsSection("providers");
     setSettingsTargetId(null);
     setActiveView("settings");
-    setMobilePane("workspace");
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
     closeMobileSidebar();
   };
   const openUsage = () => togglePage("usage");
@@ -395,9 +402,9 @@ export function App() {
     void prefetchListingReads(queryClient, id);
     setSelectedConvId(id);
     goListings();
-    setMobilePane("workspace");
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
     closeMobileSidebar();
-  }, [setSelectedConvId, goListings, closeMobileSidebar, queryClient]);
+  }, [setSelectedConvId, goListings, closeMobileSidebar, queryClient, runtime.hosted]);
 
   const handleSettingsSectionChange = (section: SettingsSectionId) => {
     setSettingsSection(section);
@@ -413,10 +420,10 @@ export function App() {
 
   useEffect(() => {
     if (wasBrowserOpen.current && !browserOpen && mobilePane === "browser") {
-      setMobilePane("workspace");
+      setMobilePane(runtime.hosted ? "editor" : "workspace");
     }
     wasBrowserOpen.current = browserOpen;
-  }, [browserOpen, mobilePane]);
+  }, [browserOpen, mobilePane, runtime.hosted]);
 
   const openBrowser = useMutation({
     mutationFn: (jobId: string) => api.jobs.browser.open(jobId),
@@ -516,7 +523,8 @@ export function App() {
 
   /** Phone pages open from the navigation drawer; a listing and a settings section step back to their list. */
   const navigateMobile = (target: MobileNavTarget) => {
-    setMobilePane("workspace");
+    if (!runtime.views.has(target)) return;
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
     setMobileThreadsOpen(false);
     if (target === "assistant") goAssistant();
     else if (target === "settings") openSettings();
@@ -545,7 +553,7 @@ export function App() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       setSelectedConvId(conv.id);
       goListings();
-      setMobilePane("workspace");
+      setMobilePane(runtime.hosted ? "editor" : "workspace");
       setMobileSidebarOpen(false);
     },
   });
@@ -558,6 +566,7 @@ export function App() {
   const bulk = useBulkRegenerate((id) => activeView === "listings" && selectedConvId === id);
   // Bulk-uploaded drafts already carry their SKUs and measurements, so they generate straight away.
   const generateBatch = async (uploaded: BulkListingUploadResult[]) => {
+    if (!runtime.features.has("generation")) return;
     const listings = uploaded
       .filter((listing) => listing.count > 0)
       .map((listing) => ({ convId: listing.convId, title: listingTitleForFolder(listing.folder) }));
@@ -620,7 +629,7 @@ export function App() {
           setSelectedConvId(first.convId);
           setMobileSidebarOpen(false);
           goListings();
-          setMobilePane("workspace");
+          setMobilePane(runtime.hosted ? "editor" : "workspace");
         }
         const totalPhotos = result.listings.reduce((sum, row) => sum + row.count, 0);
         const errors = result.listings.flatMap((row) => row.errors);
@@ -643,7 +652,7 @@ export function App() {
       }
       if (created || activeView !== "listings") {
         goListings();
-        setMobilePane("workspace");
+        setMobilePane(runtime.hosted ? "editor" : "workspace");
       }
       const title = `Added ${count} photo${count === 1 ? "" : "s"}`;
       if (errors.length) {
@@ -670,7 +679,7 @@ export function App() {
     onSuccess: (_data, convId) => {
       dispatchOpenListing({ type: "close", id: convId });
       if (selectedConvId === convId) {
-        setMobilePane("workspace");
+        setMobilePane(runtime.hosted ? "editor" : "workspace");
         if (isMobile) setMobileSidebarOpen(true);
       }
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -680,7 +689,7 @@ export function App() {
 
   const deleteListing = useCallback((id: string) => deleteConversation(id), [deleteConversation]);
 
-  const renderChat = (listing: OpenListing) => (
+  const renderChat = (listing: OpenListing) => !runtime.features.has("generation") ? null : (
     <Suspense fallback={pageLoading}>
       <ChatPanel
         convId={listing.id}
@@ -702,7 +711,7 @@ export function App() {
         browserOpen={browserOpen}
         onAskChat={(text) => {
           dispatchOpenListing({ type: "message", id: listing.id, value: text });
-          setMobilePane("workspace");
+          setMobilePane(runtime.hosted ? "editor" : "workspace");
           setChatOpen(true);
         }}
         onCleared={() => {
@@ -715,18 +724,19 @@ export function App() {
           if (!first) return;
           setSelectedConvId(first);
           goListings();
-          setMobilePane("workspace");
+          setMobilePane(runtime.hosted ? "editor" : "workspace");
           setMobileSidebarOpen(false);
         }}
-        chat={chat}
+        chat={runtime.features.has("generation") ? chat : undefined}
       />
     </Suspense>
   );
 
   return (
     <div className="app-shell" style={panelWidthStyle}>
-      <MarketplaceSessionNotice />
+      {runtime.features.has("marketplace_sessions") && <MarketplaceSessionNotice />}
       <WorkspaceTopbar
+        accountControls={isMobile ? undefined : runtime.accountControls}
         crumbs={crumbs}
         sidebarOpen={!sidebarHidden}
         onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -741,6 +751,7 @@ export function App() {
             : null
         }
       />
+      {runtime.hosted && isMobile && <div className="cloud-mobile-account">{runtime.accountControls}</div>}
       <div
         className={`app-content mobile-pane-${mobilePane}${mobileSidebarOpen ? " mobile-sidebar-open" : ""}${sidebarHidden ? " sidebar-collapsed" : ""}`}
       >
@@ -814,6 +825,7 @@ export function App() {
             ) : null}
             {activeView === "listings" && selectedConvId ? (
               <div className="mobile-workspace-panes" role="tablist" aria-label="Listing views">
+                {runtime.features.has("generation") && <>
                 <button
                   type="button"
                   role="tab"
@@ -822,7 +834,7 @@ export function App() {
                   onClick={() => setMobilePane("workspace")}
                 >
                   Chat
-                </button>
+                </button></>}
                 <button
                   type="button"
                   role="tab"
@@ -904,11 +916,11 @@ export function App() {
                     <EmptyDescription>Pick up where Anteroom suggests, or start a new listing.</EmptyDescription>
                   </EmptyHeader>
                   <EmptyContent className="max-w-md">
-                    <SuggestionsPanel
+                    {runtime.features.has("generation") && <SuggestionsPanel
                       variant="workspace"
                       selectedConvId={selectedConvId}
                       onSelect={openListing}
-                    />
+                    />}
                     <Button
                       type="button"
                       size="sm"

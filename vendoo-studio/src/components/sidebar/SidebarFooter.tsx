@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../../app/runtime";
 import { Fragment, type ComponentType, type ReactNode } from "react";
 import {
   ArrowLeftIcon,
@@ -66,6 +67,8 @@ function FooterButton({
   onClick: () => void;
   children?: ReactNode;
 }) {
+  const runtime = useWorkspaceRuntime();
+  const disabled = Boolean(page && !runtime.views.has(page));
   const intent = useNavigationIntent(() => {
     if (page) void pageLoaders[page]().catch(() => {});
   });
@@ -80,6 +83,7 @@ function FooterButton({
             aria-pressed={active === undefined ? undefined : active}
             data-active={active}
             onClick={onClick}
+            disabled={disabled}
             {...intent}
           />
         }
@@ -116,6 +120,7 @@ export function SidebarFooter({
   onOpenSettings: () => void;
   onOpenUsage: () => void;
 }) {
+  const runtime = useWorkspaceRuntime();
   const buttons: Record<FooterButtonId, ReactNode> = {
     assistant: (
       <FooterButton page="assistant" label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
@@ -128,7 +133,7 @@ export function SidebarFooter({
     automations: <FooterButton page="automations" label="Automations" icon={CalendarClockIcon} active={activeView === "automations"} onClick={onOpenAutomations} />,
     usage: <FooterButton page="usage" label="Usage" icon={GaugeIcon} active={activeView === "usage"} onClick={onOpenUsage} />,
     settings: <FooterButton page="settings" label="Settings" icon={SettingsIcon} onClick={onOpenSettings} />,
-    update: <UpdateButton />,
+    update: runtime.hosted ? null : <UpdateButton />,
   };
 
   return (
@@ -140,7 +145,7 @@ export function SidebarFooter({
               <ArrowLeftIcon />
               <span>Back</span>
             </button>
-            <UpdateButton />
+            {!runtime.hosted && <UpdateButton />}
           </>
         ) : (
           SIDEBAR_FOOTER_BUTTONS.map((id) => <Fragment key={id}>{buttons[id]}</Fragment>)

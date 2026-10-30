@@ -1,3 +1,4 @@
+import { StudioImage } from "./StudioImage";
 /**
  * Photo editor: crop, turn and straighten, tone, and background removal.
  *
@@ -158,7 +159,7 @@ export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
           <div className="relative flex min-h-0 items-center justify-center overflow-hidden bg-neutral-900 p-6">
             {previewUrl ? (
               <div className="relative max-w-full leading-none">
-                <img
+                <StudioImage
                   src={previewUrl}
                   alt={`Photo ${index + 1} with edits`}
                   draggable={false}
