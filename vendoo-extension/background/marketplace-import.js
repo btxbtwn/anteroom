@@ -265,6 +265,23 @@ function depopImportVariants(product) {
   return variants ? Object.entries(variants).map(([key, value]) => ({ id: key, quantity: importCount(value?.quantity ?? value), name: value?.name })) : [];
 }
 
+// Depop's product document (2026-10-30) no longer carries a price; its shop
+// list still does. Page through the shop until this listing turns up.
+async function depopShopRow(shop, slug, deadline) {
+  let token = '';
+  for (let page = 0; page < 50; page += 1) {
+    const body = await importGet('depop', `${DEPOP_WEBAPI}/api/v1/shop/${shop}/products/?limit=${IMPORT_PAGE_SIZE}${token ? `&offset_id=${token}` : ''}`,
+      deadline, { Authorization: await depopBearer() });
+    const rows = depopProductRows(body);
+    const row = rows.find(product => String(product?.slug ?? '') === slug);
+    if (row) return row;
+    const next = body?.meta?.end === true ? '' : depopCursorToken(body?.meta?.last_offset_id);
+    if (!rows.length || !next || next === token) return null;
+    token = next;
+  }
+  return null;
+}
+
 async function depopImportListing(slug, deadline) {
   const account = await depopImportAccount(deadline);
   const product = await importGet('depop', `${DEPOP_WEBAPI}/presentation/api/v1/products/by-slug/${slug}/`, deadline,
@@ -272,7 +289,14 @@ async function depopImportListing(slug, deadline) {
   if (String(product?.slug ?? '') !== slug) throw importError('Depop did not return this listing.');
   if (!importSame(product.user_id ?? product.seller?.id ?? product.user?.id, account)) throw importError('This listing does not belong to the signed-in Depop account.');
   if (product.status !== 'STATUS_ONSALE' || product.sold === true) throw importError('This Depop listing is not on sale.');
-  const currency = String(product.price_currency ?? product.pricing?.currency_name ?? product.currency ?? 'USD').toUpperCase();
+  let listed = depopProductPrice(product);
+  let shopCurrency = null;
+  if (listed == null) {
+    const row = await depopShopRow(account, slug, deadline);
+    listed = row ? depopProductPrice(row) : null;
+    shopCurrency = row?.price?.currency_name ?? row?.price_currency ?? null;
+  }
+  const currency = String(product.price_currency ?? product.pricing?.currency_name ?? product.currency ?? shopCurrency ?? 'USD').toUpperCase();
   if (currency !== 'USD') throw importError('This import supports listings priced in USD.');
   const variants = depopImportVariants(product);
   if (variants.length > 1) throw importError('Listings with several sizes are not supported by this import yet.');
@@ -292,7 +316,7 @@ async function depopImportListing(slug, deadline) {
   const pictures = depopPictureRows(product.pictures ?? product.pictures_data ?? product);
   return {
     id: slug, url: depopListingUrl(slug), title: importTitleFromText(product.description), description: importText(product.description),
-    price: importMoney(depopProductPrice(product)), currency: 'USD',
+    price: importMoney(listed), currency: 'USD',
     quantity: variant ? variant.quantity : importCount(product.quantity),
     brand: brand && !/^other$/i.test(brand) ? importText(brand, 120) : null, size,
     condition: importText(typeof product.condition === 'object' ? product.condition?.id : product.condition, 40) || null,

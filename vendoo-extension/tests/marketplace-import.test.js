@@ -205,6 +205,22 @@ test('Depop returns the product with names from its attribute list', async () =>
   readOnly(requests);
 });
 
+test('Depop takes the price from the shop list when its product document has none', async () => {
+  // Live shape (2026-10-30): by-slug has no price; the shop list carries price.price_amount.
+  const bare = { ...DEPOP_PRODUCT, price_amount: undefined, price_currency: undefined };
+  const shopRow = { slug: DEPOP_PRODUCT.slug, status: 'STATUS_ONSALE', description: 'Denim jacket',
+    price: { price_amount: '45.00', currency_name: 'USD', discounted_price_amount: '33.75' } };
+  const found = depop(bare, { products: [{ slug: 'other-tee-136d', price: { price_amount: '9.00', currency_name: 'USD' } }, shopRow],
+    meta: { end: true } });
+  const result = await listing(found.c, 'depop', DEPOP_PRODUCT.slug);
+  assert.equal(result.listing.price, 45);
+  readOnly(found.requests);
+  const gbp = depop(bare, { products: [{ ...shopRow, price: { price_amount: '45.00', currency_name: 'GBP' } }], meta: { end: true } });
+  assert.match((await listing(gbp.c, 'depop', DEPOP_PRODUCT.slug)).error, /USD/);
+  const missing = depop(bare, { products: [], meta: { end: true } });
+  assert.equal((await listing(missing.c, 'depop', DEPOP_PRODUCT.slug)).listing.price, null);
+});
+
 test('Depop refuses another shop, several sizes and other currencies', async () => {
   assert.match((await listing(depop({ ...DEPOP_PRODUCT, user_id: 6 }).c, 'depop', DEPOP_PRODUCT.slug)).error, /does not belong/);
   assert.match((await listing(depop({ ...DEPOP_PRODUCT, variants: { 4: 1, 5: 1 } }).c, 'depop', DEPOP_PRODUCT.slug)).error, /several sizes/);
