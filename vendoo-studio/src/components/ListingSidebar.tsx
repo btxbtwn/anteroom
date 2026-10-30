@@ -163,7 +163,7 @@ export function ListingSidebar({
   const { data: suggestionData } = useQuery({
     queryKey: ["suggestions"],
     queryFn: api.suggestions.list,
-    enabled: runtime.features.has("generation"),
+    enabled: runtime.features.has("suggestions"),
   });
   const suggestions = suggestionData?.suggestions ?? NO_SUGGESTIONS;
   const listingsById = useMemo(
@@ -394,7 +394,7 @@ export function ListingSidebar({
             </button>
           </div>
 
-          {runtime.features.has("generation") && <SuggestionsPanel
+          {runtime.features.has("suggestions") && <SuggestionsPanel
             variant="sidebar"
             selectedConvId={selectedConvId}
             onSelect={onSelect}

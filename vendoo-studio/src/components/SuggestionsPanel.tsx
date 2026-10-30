@@ -5,6 +5,7 @@ import { IDLE_POLL_MS, pollMs } from "../api/polling";
 import type { Suggestion, SuggestionKind } from "../api/types";
 import { staleSuggestionIds } from "../bulkPriceDrop";
 import { BulkPriceDropDialog } from "./BulkPriceDropDialog";
+import { useWorkspaceRuntime } from "../app/runtime";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { useVendooEnabled } from "../vendooMode";
@@ -74,7 +75,8 @@ export function SuggestionsPanel({
   onToggleSelect?: (id: string, shift: boolean) => void;
 }) {
   const vendooOn = useVendooEnabled();
-  const { data, isFetched } = useQuery({
+  const { features } = useWorkspaceRuntime();
+  const { data, isFetched, error } = useQuery({
     queryKey: ["suggestions"],
     queryFn: api.suggestions.list,
     refetchInterval: () => pollMs(IDLE_POLL_MS),
@@ -84,7 +86,7 @@ export function SuggestionsPanel({
   const [showAll, setShowAll] = useState(false);
   const [markdownIds, setMarkdownIds] = useState<string[] | null>(null);
   const staleIds = staleSuggestionIds(suggestions);
-  const markdown = staleIds.length > 0 && !selecting ? (
+  const markdown = features.has("bulk_markdowns") && staleIds.length > 0 && !selecting ? (
     <Button
       type="button"
       variant="ghost"
@@ -102,9 +104,14 @@ export function SuggestionsPanel({
   const markdownDialog = markdownIds ? (
     <BulkPriceDropDialog conversationIds={markdownIds} onClose={() => setMarkdownIds(null)} />
   ) : null;
+  const failure = error ? (
+    <p role="alert" className="mx-2 my-1 text-xs text-destructive-foreground">
+      Could not load suggestions: {error.message}
+    </p>
+  ) : null;
 
   if (variant === "sidebar") {
-    if (!suggestions.length) return markdownDialog;
+    if (!suggestions.length) return <>{failure}{markdownDialog}</>;
     // A few at a time so the inventory list stays in view. Selecting needs every
     // row, and the open listing stays visible even when it is further down.
     const selectedIndex = suggestions.findIndex((item) => item.conversation_id === selectedConvId);
@@ -122,6 +129,7 @@ export function SuggestionsPanel({
             expanded={expanded}
             onToggle={() => setExpanded((value) => !value)}
           />
+          {failure}
           {expanded ? (
             <div className="flex min-h-0 flex-col gap-px overflow-y-auto overscroll-contain max-[900px]:overflow-visible">
               {shown.map((item) => (
@@ -158,7 +166,8 @@ export function SuggestionsPanel({
       className="flex max-h-[min(52vh,28rem)] w-[min(100%,28rem)] flex-col gap-1 overflow-y-auto text-left"
       aria-label="Suggestions"
     >
-      {isFetched && suggestions.length === 0 ? (
+      {failure}
+      {isFetched && suggestions.length === 0 && !error ? (
         <p className="mt-1 text-center text-xs text-muted-foreground">No suggestions right now</p>
       ) : (
         suggestions.map((item) => (

@@ -916,7 +916,7 @@ export function App() {
                     <EmptyDescription>Pick up where Anteroom suggests, or start a new listing.</EmptyDescription>
                   </EmptyHeader>
                   <EmptyContent className="max-w-md">
-                    {runtime.features.has("assistant") && <SuggestionsPanel
+                    {runtime.features.has("suggestions") && <SuggestionsPanel
                       variant="workspace"
                       selectedConvId={selectedConvId}
                       onSelect={openListing}

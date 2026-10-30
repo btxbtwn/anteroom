@@ -16,7 +16,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value
@@ -114,10 +114,14 @@ def list_suggestions(
     from vendoo_studio.services.user_settings import get_stale_listing_days
 
     stale_days = get_stale_listing_days()
+    from vendoo_studio.models.background_task import BackgroundTask
+
+    busy = set(db.scalars(select(BackgroundTask.conversation_id).where(
+        BackgroundTask.status.in_(("queued", "running")))))
 
     cards: list[dict[str, Any]] = []
     for conv in conversations:
-        if conv.settled_at is not None:
+        if conv.settled_at is not None or conv.id in busy:
             continue
         status = str(conv.status or "draft")
         if status == "sold" or status in BUSY_LISTING_STATUSES:
@@ -322,7 +326,7 @@ def _card_for(
             )
     elif status == "draft" and has_revision and not marketplaces:
         kind = KIND_READY_TO_REVIEW
-        reason = "Draft is ready to review and send"
+        reason = "Draft is ready to review"
         score = KIND_BASE_SCORE[KIND_READY_TO_REVIEW]
 
     if not kind:
