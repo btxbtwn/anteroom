@@ -135,6 +135,19 @@ test('offer to likers sends Poshmark’s own body and refuses below the floor or
   }
 });
 
+test('an offer without an extra discount keeps the listing’s own shipping discount', async () => {
+  const LISTED = 'd'.repeat(24);
+  const discounted = worker({ [`GET ${posh}`]: [200, { data: { ...livePost.data, seller_shipping_discount_id: LISTED } }],
+    [`POST ${offer}`]: [200, { data: {} }] });
+  await promote(discounted.c, { action: 'offer', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3500 });
+  assert.equal(discounted.results[0].ok, true);
+  assert.deepEqual(discounted.bodies[`POST ${offer}`].seller_shipping_discount, { id: LISTED });
+  const plain = worker({ [`POST ${offer}`]: [200, { data: {} }] });
+  await promote(plain.c, { action: 'offer', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3500 });
+  assert.equal(plain.results[0].ok, true);
+  assert.equal(plain.bodies[`POST ${offer}`].seller_shipping_discount, undefined);
+});
+
 test('no likers means no offer, and an unconfirmed action is refused', async () => {
   const none = worker({ [`GET ${posh}`]: [200, { data: { ...livePost.data, like_count: 0 } }] });
   await promote(none.c, { action: 'offer', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000 });

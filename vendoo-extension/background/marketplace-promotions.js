@@ -122,9 +122,12 @@ async function offerPoshmark(payload, deadline) {
     throw marketplaceError(`Poshmark needs offers to likers at least ${rules.minimum}% below the price. Review the offer again.`);
   }
   const body = { offer_amount: { val: String(offer / 100), currency_code: 'USD' }, offer_api_version: 3 };
-  if (payload.shipping_discount_id) {
-    if (!/^[a-f0-9]{24}$/.test(String(payload.shipping_discount_id))) throw marketplaceError('Choose the shipping discount again.');
-    body.seller_shipping_discount = { id: String(payload.shipping_discount_id) };
+  // No extra discount keeps the listing's own shipping discount, as Poshmark's
+  // offer form does; leaving it out makes Poshmark refuse the offer.
+  const discount = payload.shipping_discount_id || post.seller_shipping_discount_id;
+  if (discount) {
+    if (!/^[a-f0-9]{24}$/.test(String(discount))) throw marketplaceError('Choose the shipping discount again.');
+    body.seller_shipping_discount = { id: String(discount) };
   }
   await client.call('POST', `/vm-rest/posts/${payload.listing_id}/likes/users/offers`, body, { step: 'offer', what: 'the offer to likers' });
   return { ok: true, state: 'done', recipient_count: Number(post.like_count) || 0 };
