@@ -6,6 +6,7 @@ import copy
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from vendoo_studio.models.etsy_fields import etsy_eligible
 from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
 
@@ -149,6 +150,8 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     return {
         "ok": True,
         "revision_id": revision.id,
+        "listing": revision.listing_json,
+        "etsy_eligible": etsy_eligible(revision.listing_json),
         "validation": validation.model_dump(),
     }
 

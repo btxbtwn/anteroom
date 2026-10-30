@@ -3,7 +3,9 @@ import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { EbayVariationAspect, EbayVariations, Job, ListingData, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
-import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, nextFieldDraft, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
+import { listingEdits } from "../api/listingEdits";
+import { DIRECT_FORM_MARKETS, nativeFormOptions, prefetchListingForm } from "../api/listingForms";
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
 import { VintedBrandSelect } from "./VintedBrandSelect";
@@ -68,7 +70,7 @@ import { cn } from "../lib/utils";
 import { pathCategoryChoices } from "./categoryTree";
 import { CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, FieldLabel, InspectorSection, SearchableSelect, SearchableMultiSelect, SegmentedTabs, type CascadeDepartment } from "./ListingFormControls";
 import { groupFieldsIntoSections } from "./listingFieldSections";
-import { categorySpecificFieldsStale, listingCategorySignature, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, nativeFormStructureKey, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
+import { categorySpecificFieldsStale, nativeFieldVisible, nativeFormCategoryKey, nativeFormNotes, presentNativeField, resolvedEditorValue } from "./nativeFormStability";
 import { gapsByField, rowForField } from "./nativeFieldWarnings";
 import type { NativeMarketplace } from "../api/nativeMarketplaces";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
@@ -95,8 +97,6 @@ interface Props {
   /** The listing's chat, floated over the form's corner on desktop. */
   chat?: React.ReactNode;
 }
-
-const DIRECT_FORM_MARKETS = new Set(["ebay", "poshmark", "mercari", "depop", "sellwild"]);
 
 interface EditorField {
   key: string;
@@ -166,6 +166,9 @@ export function ListingEditor({
   chat,
 }: Props) {
   const queryClient = useQueryClient();
+  const edits = React.useMemo(() => listingEdits(queryClient, convId), [queryClient, convId]);
+  const editState = React.useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
+  const unsaved = editState.saving || Boolean(editState.draft);
   const [editTab, setEditTab] = React.useState("general");
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [fieldTarget, setFieldTarget] = React.useState<{ field: string; sequence: number } | null>(null);
@@ -277,6 +280,7 @@ export function ListingEditor({
   const { data } = useQuery({
     queryKey: ["listing", convId],
     queryFn: () => api.listings.get(convId),
+    enabled: !unsaved,
     refetchInterval: sessionActive && schemaProbeActive ? 3000 : false,
   });
 
@@ -294,25 +298,6 @@ export function ListingEditor({
     queryFn: () => api.conversations.get(convId),
   });
   const directMarketplaces = conversation?.direct_marketplaces ?? [];
-
-  const savedCategories = listingCategorySignature(data?.listing);
-  const updateMutation = useMutation({
-    mutationFn: (listing: ListingData) => api.listings.update(convId, listing, data?.current_revision_id || ""),
-    onSuccess: async (_result, listing) => {
-      await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
-      // The category schema is the field list. Other edits leave it alone.
-      if (listingCategorySignature(listing) !== savedCategories) {
-        queryClient.invalidateQueries({ queryKey: ["listing-fields", convId] });
-      }
-      // A SKU edit is copied into Item Details.
-      if ((listing.sku || "") !== (data?.listing?.sku || "")) {
-        queryClient.invalidateQueries({ queryKey: ["conversation", convId] });
-      }
-    },
-    onError: (err: Error) => {
-      toastManager.add({ type: "error", title: "Could not save", description: err.message || "Try that field again." });
-    },
-  });
 
   React.useEffect(() => {
     if (listingJob?.mode === "schema_probe" && listingJob.status === "completed") {
@@ -336,6 +321,21 @@ export function ListingEditor({
       ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => id === "vinted" || selected.has(id)),
     ];
   }, [marketplaceSettings?.selected, onFacebook]);
+
+  React.useEffect(() => {
+    if (!data?.current_revision_id || unsaved || !sessionActive) return;
+    let cancelled = false;
+    const remaining = tabs.filter(tab => tab !== "general");
+    const warm = async () => {
+      while (!cancelled && remaining.length) {
+        const tab = remaining.shift()!;
+        await prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id!);
+      }
+    };
+    // Leave connections available for the selected form and the seller's edits.
+    void Promise.all([warm(), warm()]);
+    return () => { cancelled = true; };
+  }, [queryClient, convId, data, tabs, unsaved, sessionActive]);
 
   React.useEffect(() => {
     if (!tabs.includes(editTab)) setEditTab("general");
@@ -372,7 +372,7 @@ export function ListingEditor({
   const generating = chatBusy || Boolean(activity?.busy) || schemaProbeActive;
   const askChat = generating ? undefined : onAskChat;
 
-  const listing = data?.listing || {};
+  const listing = editState.draft ?? data?.listing ?? {};
   const listingTitle = String(listing.title || "Listing");
   const importedItemId = listingJob?.vendoo_item_id || notesVendooItemId(conversation?.notes);
   const importedUrl = listingJob?.vendoo_url || notesVendooUrl(conversation?.notes);
@@ -561,10 +561,14 @@ export function ListingEditor({
 
       <div className={cn("listing-form-area", chat && "has-chat")}>
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
-        disabled={generating || updateMutation.isPending} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
+        disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
+        onPrepare={(tab) => {
+          if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
+        }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
         railActions={<RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} />}
         railStatus={<>
+          {editState.saving && <span role="status" className="text-xs text-muted-foreground">Saving…</span>}
           <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>
         </>}
         onSelect={(id) => {
@@ -574,6 +578,13 @@ export function ListingEditor({
           setEditTab(id);
         }}>
         <>
+          {editState.error && <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-destructive-foreground">
+            <span>Edits not saved: {editState.error}</span>
+            <InlineButton onClick={edits.retry}>Retry save</InlineButton>
+            <InlineButton onClick={async () => {
+              if (await confirmDialog("Reload the saved listing and discard your unsaved edits?", { confirmLabel: "Discard and reload", variant: "destructive" })) edits.discard();
+            }}>Discard and reload</InlineButton>
+          </div>}
           {(reviewTab !== "forms" || editTab === "general") && (
             <>
               <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
@@ -583,7 +594,7 @@ export function ListingEditor({
           {/* A direct marketplace's form shows its photos where its own page has them. */}
           {reviewTab === "forms" && MEDIA_MARKETPLACES.has(editTab) && !DIRECT_FORM_MARKETS.has(editTab) && listing && (
             <MarketplaceMedia key={editTab} convId={convId} marketplace={editTab} listing={listing}
-              disabled={generating || updateMutation.isPending} onChange={(updated) => updateMutation.mutate(updated)} />
+              disabled={generating} onChange={edits.save} />
           )}
           <StructuredEditor
             convId={convId}
@@ -592,8 +603,9 @@ export function ListingEditor({
             tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
             target={fieldTarget}
             onAskChat={askChat}
-            disabled={generating || updateMutation.isPending}
-            onChange={(updated) => updateMutation.mutate(updated)}
+            disabled={generating}
+            saving={unsaved}
+            onChange={edits.save}
           />
           {/* Past versions are a look-back, so they close the form instead of crowding its header. */}
           <div className="flex border-t pt-2">
@@ -612,6 +624,7 @@ export function ListingEditor({
           convId={convId}
           canSend={data?.can_send ?? false}
           generating={generating}
+          saving={unsaved}
           sendBlockers={data?.errors || []}
           listing={listing}
           listingTitle={listingTitle}
@@ -623,7 +636,7 @@ export function ListingEditor({
         />
       </div>}
       {historyOpen && data?.current_revision_id && <ListingHistory convId={convId} listing={listing} revisionId={data.current_revision_id}
-        busy={generating || Boolean(jobs?.some((job) => ACTIVE_SEND_STATUSES.has(job.status)))} onClose={() => setHistoryOpen(false)} />}
+        busy={generating || unsaved || Boolean(jobs?.some((job) => ACTIVE_SEND_STATUSES.has(job.status)))} onClose={() => setHistoryOpen(false)} />}
     </div>
   );
 }
@@ -698,6 +711,7 @@ export function StructuredEditor({
   onChange,
   target,
   disabled,
+  saving = false,
   onAskChat,
 }: {
   convId: string;
@@ -707,6 +721,7 @@ export function StructuredEditor({
   onChange: (v: ListingData) => void;
   target: { field: string; sequence: number } | null;
   disabled?: boolean;
+  saving?: boolean;
   onAskChat?: (text: string) => void;
 }) {
   const formRef = React.useRef<HTMLFieldSetElement>(null);
@@ -722,14 +737,9 @@ export function StructuredEditor({
   // chosen here or written onto the listing, is what loads a new set of rows.
   // A refill can replace the saved definition without changing the category;
   // include it so its refreshed dependent choices reach the editor too.
-  const formStructureKey = nativeFormStructureKey(listing, tab);
   const nativeQuery = useQuery({
-    queryKey: ["native-editor-form", convId, tab, formStructureKey, getListingEditorValue(listing, `_native_forms.${tab}`)],
-    queryFn: () => api.nativeMarketplaces.form(convId, tab),
-    enabled: nativeTab,
-    staleTime: Infinity,
-    refetchOnWindowFocus: false,
-    retry: false,
+    ...nativeFormOptions(convId, tab, listing, revisionId),
+    enabled: nativeTab && !saving,
     placeholderData: (previous, previousQuery) => {
       const key = previousQuery?.queryKey;
       if (!previous || previous.marketplace !== tab || key?.[1] !== convId || key?.[2] !== tab) return undefined;
@@ -741,7 +751,7 @@ export function StructuredEditor({
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.preflight(convId),
-    enabled: nativeTab && Boolean(revisionId),
+    enabled: nativeTab && Boolean(revisionId) && !saving,
     staleTime: 15_000,
     placeholderData: (previous) => previous,
   });
@@ -834,7 +844,7 @@ export function StructuredEditor({
     },
     [nativeTab, nativeQuery.data, forms, listing, tab, dropdownOptions?.forms, inventoryLocation?.location],
   );
-  const [local, setLocal] = React.useState<Record<string, string | string[]>>({});
+  const [drafts, setDrafts] = React.useState<Record<string, string>>({});
   // The seller's open or closed choice for "Show more" and "See … options". A saved value starts open.
   const [revealOverride, setRevealOverride] = React.useState<ReadonlyMap<string, boolean>>(new Map());
   const revealed = React.useMemo(() => {
@@ -851,7 +861,6 @@ export function StructuredEditor({
     }
     return open;
   }, [fields, listing, tab, revealOverride]);
-  const dirty = React.useRef<Record<string, string | string[]>>({});
   // Go to an "Edit …" target once. The rows rebuild on every save, and
   // following the target again then pulled the seller back from whatever they were editing.
   const reachedTarget = React.useRef<number | null>(null);
@@ -867,7 +876,8 @@ export function StructuredEditor({
     input.focus();
   }, [target, fields, tab]);
 
-  React.useEffect(() => {
+  // Derive saved values during render: a cached form is filled on its first frame.
+  const local = React.useMemo(() => {
     const init: Record<string, string | string[]> = {};
     fields.forEach((f) => {
       if (f.type === "inventory" || f.type === "variations" || f.type === "photos") return;
@@ -880,11 +890,11 @@ export function StructuredEditor({
       init[f.key] = f.type !== "boolean" && f.key === "ebay_specifics.bestOffer.enabled"
         ? (/^(no|false|0|off)$/i.test(formFieldText(shown)) ? "No" : "Yes")
         : shown;
+      const draft = drafts[`${tab}|${f.key}`];
+      if (draft !== undefined) init[f.key] = draft;
     });
-    const next = nextFieldDraft(init, dirty.current);
-    dirty.current = next.dirty;
-    setLocal(next.local);
-  }, [listing, revisionId, tab, fields]);
+    return init;
+  }, [listing, tab, fields, drafts]);
 
   const fieldDefault = (field: EditorField) => {
     if (!field.saveAsDefault || field.locked) return null;
@@ -918,6 +928,11 @@ export function StructuredEditor({
 
   const handleBlur = (key: string) => {
     if (editingDisabled.current || local[key] == null) return;
+    setDrafts(current => {
+      const next = { ...current };
+      delete next[`${tab}|${key}`];
+      return next;
+    });
     const field = fields.find((entry) => entry.key === key);
     if (field?.locked) return;
     const text = formFieldText(local[key]);
@@ -946,10 +961,6 @@ export function StructuredEditor({
   const commitField = (key: string, value: string | string[] | boolean) => {
     if (editingDisabled.current || fields.find((field) => field.key === key)?.locked) return;
     if (typeof value === "string" && value.trim() === "[object Object]") return;
-    const shown = typeof value === "boolean" ? String(value) : value;
-    const nextLocal = { ...local, [key]: shown };
-    dirty.current = { ...dirty.current, [key]: shown };
-    setLocal(nextLocal);
     const updated = cloneListing(listing);
     const field = fields.find((entry) => entry.key === key);
     const stored = typeof value === "string" ? field?.optionValues?.[value] ?? (field?.type === "number" ? coerce(value) : value)
@@ -965,8 +976,7 @@ export function StructuredEditor({
 
   const setFieldDraft = (key: string, value: string) => {
     if (editingDisabled.current || fields.find((field) => field.key === key)?.locked) return;
-    dirty.current = { ...dirty.current, [key]: value };
-    setLocal((current) => ({ ...current, [key]: value }));
+    setDrafts((current) => ({ ...current, [`${tab}|${key}`]: value }));
   };
 
   const viewContext = { tab, listing, local, fields, categoryStale };
@@ -2050,6 +2060,7 @@ function SendToVendooButton({
   convId,
   canSend,
   generating,
+  saving,
   sendBlockers,
   listing,
   listingTitle,
@@ -2062,6 +2073,7 @@ function SendToVendooButton({
   convId: string;
   canSend: boolean;
   generating: boolean;
+  saving: boolean;
   sendBlockers: { field?: string; message?: string }[];
   listing?: Record<string, unknown>;
   listingTitle?: string;
@@ -2248,7 +2260,7 @@ function SendToVendooButton({
   const live = liveMarketplaces || [];
   // Mid-generation Send would ship a half-written listing; otherwise the hint
   // says what Send does — and for a live item, what it deliberately does not.
-  const sendEnabled = sendToVendooEnabled(canSend, generating, sendMutation.isPending) && !apiCreateActive && !formFillActive;
+  const sendEnabled = sendToVendooEnabled(canSend, generating, sendMutation.isPending || saving) && !apiCreateActive && !formFillActive;
   const sendHint = generating
     ? "Wait for generation to finish before sending."
     : !bound
@@ -2263,6 +2275,7 @@ function SendToVendooButton({
 
   const startSend = () => {
     if (sendLock.current || sendMutation.isPending) return;
+    if (saving) return;
     if (generating) {
       setError("Wait for generation to finish before sending.");
       return;
@@ -2369,7 +2382,8 @@ function SendToVendooButton({
   );
   // The grouped list below already names these issues. The red dump would repeat them.
   const blockersListed = !error && !canSend && uniqueBlockers.length > 0;
-  const statusLine = sendEnabled
+  const statusLine = saving ? "Save your edits before sending."
+    : sendEnabled
     ? sendHint
     : generating
       ? "Wait for generation to finish before sending."

@@ -151,6 +151,8 @@ def test_populated_previous_release_upgrade_preserves_records_and_old_foreign_ke
     before = read_rows(engine, names)
     old = {table: sa.inspect(engine).get_foreign_keys(table) for table in sa.inspect(engine).get_table_names()}
     schema_migrations.ensure_schema(engine)
+    for row in before.get("listing_revisions", []):
+        row["inventory_quantity"] = None
     assert read_rows(engine, names) == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []

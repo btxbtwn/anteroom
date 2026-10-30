@@ -178,6 +178,8 @@ export interface ValidationResult {
 
 export interface ListingUpdateResult extends OkResponse {
   revision_id: string;
+  listing: ListingData;
+  etsy_eligible: boolean;
   validation: ValidationResult;
 }
 

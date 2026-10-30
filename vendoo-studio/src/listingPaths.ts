@@ -127,21 +127,6 @@ export function expandJoinedChoices(value: unknown, options: readonly string[] =
   return values;
 }
 
-/** Keep a field the seller just cleared when a refresh reloads the old server value. */
-export function nextFieldDraft(
-  server: Record<string, string | string[]>,
-  dirty: Record<string, string | string[]>,
-): { local: Record<string, string | string[]>; dirty: Record<string, string | string[]> } {
-  const local = { ...server };
-  const kept: Record<string, string | string[]> = {};
-  for (const [key, value] of Object.entries(dirty)) {
-    if (formFieldText(server[key]) === formFieldText(value)) continue;
-    local[key] = value;
-    kept[key] = value;
-  }
-  return { local, dirty: kept };
-}
-
 /** True when this marketplace form stores its own field value, even if it is blank. */
 export function ownedSpecificsValue(
   listing: ListingData | undefined,

@@ -103,11 +103,7 @@ def listing_content_fingerprint(listing: dict[str, Any] | None) -> str:
 
 
 def listings_match(a: dict[str, Any] | None, b: dict[str, Any] | None) -> bool:
-    """Same listing once both are in the shape reading a listing leaves them in.
-
-    Reading normalizes sizes and dropdowns and saves the result as a revision,
-    so two revisions can differ only in that shape. Neither is an edit.
-    """
+    """Compare content after normalizing sizes and dropdowns, as revision saves do."""
     from vendoo_studio.models.validation import normalize_listing_dropdowns
     from vendoo_studio.services.listing_generate import align_size_fields
 

@@ -552,6 +552,12 @@ class ListingRepo:
         self.db.add(revision)
         self.db.flush()
 
+        if source == "model_refinement":
+            from vendoo_studio.services.chat_listing import recover_saved_chat_clears
+
+            revision.listing_json = recover_saved_chat_clears(self.db, conv_id, revision)
+            listing_json = revision.listing_json
+
         listing = self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
         if expected_revision_id == "":
             if listing is not None and listing.current_revision_id is not None:

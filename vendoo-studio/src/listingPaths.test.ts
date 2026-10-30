@@ -7,7 +7,6 @@ import {
   formFieldText,
   formFieldValues,
   getListingEditorValue,
-  nextFieldDraft,
   getNestedValue,
   labelToJsonKey,
   ownedSpecificsValue,
@@ -49,18 +48,6 @@ describe("multi-value form fields", () => {
     expect(expandJoinedChoices(["Casual"], choices)).toEqual(["Casual"]);
   });
 
-  it("keeps a cleared style when a refresh reloads the saved value", () => {
-    const server = { "depop_specifics.style": ["Casual, Minimalist, Indie"] as string[] };
-    const cleared = nextFieldDraft(server, { "depop_specifics.style": [] });
-    expect(cleared.local["depop_specifics.style"]).toEqual([]);
-    expect(cleared.dirty["depop_specifics.style"]).toEqual([]);
-    const echoed = nextFieldDraft(
-      { "depop_specifics.style": [] },
-      cleared.dirty,
-    );
-    expect(echoed.local["depop_specifics.style"]).toEqual([]);
-    expect(echoed.dirty).toEqual({});
-  });
 });
 
 describe("marketplace copies of general fields", () => {
