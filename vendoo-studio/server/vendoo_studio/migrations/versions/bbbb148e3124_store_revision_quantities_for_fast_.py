@@ -52,4 +52,3 @@ def downgrade() -> None:
     op.drop_index("ix_listing_revisions_quantity_history", table_name="listing_revisions")
     with op.batch_alter_table('listing_revisions', schema=None) as batch_op:
         batch_op.drop_column('inventory_quantity')
-
