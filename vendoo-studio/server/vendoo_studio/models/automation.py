@@ -13,7 +13,7 @@ a specific item and action. A failed relist is recorded for manual recovery.
 """
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -22,6 +22,9 @@ from vendoo_studio.models.conversation import new_id, utcnow
 
 class Automation(SellerOwned, Base):
     __tablename__ = "automations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_automations_seller_id"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     name = Column(String, nullable=False)
@@ -54,7 +57,11 @@ class AutomationRun(SellerOwned, Base):
     """
 
     __tablename__ = "automation_runs"
-    __table_args__ = (UniqueConstraint("automation_id", "scheduled_for", name="uq_automation_runs_slot"),)
+    __table_args__ = (
+        UniqueConstraint("automation_id", "scheduled_for", name="uq_automation_runs_slot"),
+        ForeignKeyConstraint(["user_id", "automation_id"], ["automations.user_id", "automations.id"],
+            name="fk_automation_runs_seller_automation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -81,7 +88,13 @@ class AutomationApplication(SellerOwned, Base):
     """
 
     __tablename__ = "automation_applications"
-    __table_args__ = (UniqueConstraint("automation_id", "conversation_id", name="uq_automation_applications_item"),)
+    __table_args__ = (
+        UniqueConstraint("automation_id", "conversation_id", name="uq_automation_applications_item"),
+        ForeignKeyConstraint(["user_id", "automation_id"], ["automations.user_id", "automations.id"],
+            name="fk_automation_applications_seller_automation_id", deferrable=True, initially="DEFERRED"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_automation_applications_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -98,6 +111,12 @@ class AutomationRelistGap(SellerOwned, Base):
     """
 
     __tablename__ = "automation_relist_gaps"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "automation_id"], ["automations.user_id", "automations.id"],
+            name="fk_automation_relist_gaps_seller_automation_id", deferrable=True, initially="DEFERRED"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_automation_relist_gaps_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -115,6 +134,12 @@ class AutomationApproval(SellerOwned, Base):
     """A regenerated draft waiting for the seller to publish it."""
 
     __tablename__ = "automation_approvals"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "automation_id"], ["automations.user_id", "automations.id"],
+            name="fk_automation_approvals_seller_automation_id", deferrable=True, initially="DEFERRED"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_automation_approvals_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     automation_id = Column(String, ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -136,6 +161,10 @@ class ItemPriceBaseline(SellerOwned, Base):
     """The asking price a drop is measured from. Set once, never replaced."""
 
     __tablename__ = "item_price_baselines"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_item_price_baselines_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True)
     original_price = Column(Float, nullable=False)

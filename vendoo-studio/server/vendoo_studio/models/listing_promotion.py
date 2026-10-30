@@ -4,7 +4,7 @@ Each row is one action on one listing. A row is reviewed (``preview``), then
 sent at most once: ``sending`` is committed before Chrome is asked, so a lost
 reply becomes ``unknown`` and is never repeated.
 """
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, JSON, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -13,6 +13,12 @@ from vendoo_studio.models.conversation import new_id, utcnow
 
 class ListingPromotion(SellerOwned, Base):
     __tablename__ = "listing_promotions"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_listing_promotions_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+        ForeignKeyConstraint(["user_id", "automation_id"], ["promotion_automations.user_id", "promotion_automations.id"],
+            name="fk_listing_promotions_seller_automation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     batch_id = Column(String, nullable=False, index=True)
@@ -47,7 +53,11 @@ class MarketplaceOfferFloor(SellerOwned, Base):
     """The lowest price the seller accepts for offers on one marketplace listing."""
 
     __tablename__ = "marketplace_offer_floors"
-    __table_args__ = (UniqueConstraint("user_id", "marketplace", "listing_id", name="uq_marketplace_offer_floor_listing"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "marketplace", "listing_id", name="uq_marketplace_offer_floor_listing"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_marketplace_offer_floors_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     marketplace = Column(String, nullable=False)

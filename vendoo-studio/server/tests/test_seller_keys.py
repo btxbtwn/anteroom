@@ -39,13 +39,20 @@ CASES = [
 ]
 
 
+def owned_values(values, seller):
+    return values | ({"job_id": f"job-{seller}"} if "job_id" in values else {})
+
+
 def prepare(engine, revision="head"):
     load_models()
     command.upgrade(migration_config(engine), revision)
     with engine.begin() as connection:
-        connection.execute(sa.text("INSERT INTO conversations (id) VALUES ('item')"))
-        connection.execute(sa.text("INSERT INTO jobs (id, conversation_id, approved_revision_id, listing_snapshot) "
-                                   "VALUES ('job', 'item', 'revision', '{}')"))
+        for seller in (ALICE, BOB):
+            connection.execute(sa.text("INSERT INTO conversations (id, user_id) VALUES (:item, :seller)"),
+                               {"item": f"item-{seller}", "seller": seller})
+            connection.execute(sa.text("INSERT INTO jobs (id, conversation_id, user_id, approved_revision_id, listing_snapshot) "
+                                       "VALUES (:job, :item, :seller, 'revision', '{}')"),
+                               {"job": f"job-{seller}", "item": f"item-{seller}", "seller": seller})
 
 
 @pytest.mark.parametrize("table_name,values", CASES, ids=[case[0] for case in CASES])
@@ -55,9 +62,9 @@ def test_independent_shops_can_reuse_keys_but_same_shop_cannot(migration_engine,
     table = Base.metadata.tables[table_name]
     for seller in [ALICE, BOB]:
         with engine.begin() as connection:
-            connection.execute(table.insert().values(**values, user_id=seller))
+            connection.execute(table.insert().values(**owned_values(values, seller), user_id=seller))
     with pytest.raises(IntegrityError), engine.begin() as connection:
-        connection.execute(table.insert().values(**values, user_id=ALICE))
+        connection.execute(table.insert().values(**owned_values(values, ALICE), user_id=ALICE))
     with engine.connect() as connection:
         assert connection.scalar(sa.select(sa.func.count()).select_from(table)) == 2
 
@@ -68,7 +75,7 @@ def test_upgrade_keeps_all_keyed_records_and_matches_models(migration_engine):  
     with engine.begin() as connection:
         for name, values in CASES:
             table = Base.metadata.tables[name]
-            connection.execute(table.insert().values(**values, user_id=ALICE))
+            connection.execute(table.insert().values(**owned_values(values, ALICE), user_id=ALICE))
     names = [name for name, _ in CASES]
     before = read_rows(engine, names)
     schema_migrations.ensure_schema(engine)
@@ -77,9 +84,9 @@ def test_upgrade_keeps_all_keyed_records_and_matches_models(migration_engine):  
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
     for name, values in CASES:
         with pytest.raises(IntegrityError), engine.begin() as connection:
-            connection.execute(Base.metadata.tables[name].insert().values(**values, user_id=ALICE))
+            connection.execute(Base.metadata.tables[name].insert().values(**owned_values(values, ALICE), user_id=ALICE))
         with engine.begin() as connection:
-            connection.execute(Base.metadata.tables[name].insert().values(**values, user_id=BOB))
+            connection.execute(Base.metadata.tables[name].insert().values(**owned_values(values, BOB), user_id=BOB))
 
 
 def test_hosted_copy_receipts_and_photo_identity_are_separate_per_seller(migration_engine):  # noqa: F811
@@ -127,8 +134,8 @@ def test_pre_alembic_key_upgrade_preserves_diagnostic_children(migration_engine)
     with engine.begin() as connection:
         run = Base.metadata.tables["diagnostic_runs"]
         observation = Base.metadata.tables["field_observations"]
-        connection.execute(run.insert().values(id="run", **CASES[3][1]))
-        connection.execute(observation.insert().values(id="field", diagnostic_run_id="run", observation_id="field-id"))
+        connection.execute(run.insert().values(id="run", **(CASES[3][1] | {"job_id": f"job-{ALICE}", "user_id": ALICE})))
+        connection.execute(observation.insert().values(id="field", diagnostic_run_id="run", observation_id="field-id", user_id=ALICE))
         connection.execute(sa.text("DROP TABLE alembic_version"))
     before = read_rows(engine, ["diagnostic_runs", "field_observations"])
     schema_migrations.ensure_schema(engine)

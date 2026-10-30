@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, Integer, String
+from sqlalchemy import UniqueConstraint, Column, DateTime, Float, Integer, String
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -13,6 +13,9 @@ class SourceBox(SellerOwned, Base):
     it cost."""
 
     __tablename__ = "source_boxes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_source_boxes_seller_id"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     store = Column(String, nullable=False)

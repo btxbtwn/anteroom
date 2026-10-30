@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Integer, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, Column, String, DateTime, ForeignKey, JSON, Integer, UniqueConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -11,7 +11,12 @@ class DiagnosticRun(SellerOwned, Base):
     __tablename__ = "diagnostic_runs"
 
     id = Column(String, primary_key=True, default=new_id)
-    __table_args__ = (UniqueConstraint("user_id", "observation_id", name="uq_diagnostic_runs_seller_observation"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "observation_id", name="uq_diagnostic_runs_seller_observation"),
+        UniqueConstraint("user_id", "id", name="uq_diagnostic_runs_seller_id"),
+        ForeignKeyConstraint(["user_id", "job_id"], ["jobs.user_id", "jobs.id"],
+            name="fk_diagnostic_runs_seller_job_id", deferrable=True, initially="DEFERRED"),
+    )
     observation_id = Column(String, nullable=False)
     job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
     step = Column(String, nullable=False)
@@ -32,6 +37,10 @@ class DiagnosticRun(SellerOwned, Base):
 
 class FieldObservation(SellerOwned, Base):
     __tablename__ = "field_observations"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "diagnostic_run_id"], ["diagnostic_runs.user_id", "diagnostic_runs.id"],
+            name="fk_field_observations_seller_diagnostic_run_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     diagnostic_run_id = Column(String, ForeignKey("diagnostic_runs.id"), nullable=False, index=True)

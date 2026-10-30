@@ -5,7 +5,7 @@ items is hashed once and an edited photo gets a fingerprint of its own. Reviews
 are the seller's decisions on a pair, so a dismissed or merged pair is not
 suggested again.
 """
-from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint, PrimaryKeyConstraint
+from sqlalchemy import ForeignKeyConstraint, Column, DateTime, ForeignKey, String, UniqueConstraint, PrimaryKeyConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -25,7 +25,13 @@ class PhotoFingerprint(SellerOwned, Base):
 
 class SimilarItemReview(SellerOwned, Base):
     __tablename__ = "similar_item_reviews"
-    __table_args__ = (UniqueConstraint("first_id", "second_id", name="uq_similar_item_reviews_pair"),)
+    __table_args__ = (
+        UniqueConstraint("first_id", "second_id", name="uq_similar_item_reviews_pair"),
+        ForeignKeyConstraint(["user_id", "first_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_similar_item_reviews_seller_first_id", deferrable=True, initially="DEFERRED"),
+        ForeignKeyConstraint(["user_id", "second_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_similar_item_reviews_seller_second_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     # The pair in sorted order, so either way round finds the same row.

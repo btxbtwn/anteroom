@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, UTC
 
-from sqlalchemy import JSON, Column, String, Text, DateTime, Integer, ForeignKey, Index
+from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, JSON, Column, String, Text, DateTime, Integer, ForeignKey, Index
 from sqlalchemy.orm import relationship
 
 from vendoo_studio.database import Base
@@ -20,6 +20,11 @@ def utcnow():
 
 class Conversation(SellerOwned, Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_conversations_seller_id"),
+        ForeignKeyConstraint(["user_id", "box_id"], ["source_boxes.user_id", "source_boxes.id"],
+            name="fk_conversations_seller_box_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     title = Column(String, nullable=True)
@@ -32,16 +37,20 @@ class Conversation(SellerOwned, Base):
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
-    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
-    photos = relationship("Photo", back_populates="conversation", cascade="all, delete-orphan")
-    videos = relationship("ListingVideo", back_populates="conversation", cascade="all, delete-orphan")
-    listing = relationship("Listing", back_populates="conversation", uselist=False, cascade="all, delete-orphan")
+    messages = relationship("Message", primaryjoin="and_(Conversation.id == foreign(Message.conversation_id), Conversation.user_id == Message.user_id)", back_populates="conversation", cascade="all, delete-orphan")
+    photos = relationship("Photo", primaryjoin="and_(Conversation.id == foreign(Photo.conversation_id), Conversation.user_id == Photo.user_id)", back_populates="conversation", cascade="all, delete-orphan")
+    videos = relationship("ListingVideo", primaryjoin="and_(Conversation.id == foreign(ListingVideo.conversation_id), Conversation.user_id == ListingVideo.user_id)", back_populates="conversation", cascade="all, delete-orphan")
+    listing = relationship("Listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)", back_populates="conversation", uselist=False, cascade="all, delete-orphan")
 
 
 class Message(SellerOwned, Base):
     __tablename__ = "messages"
     # Chat history and the activity poll read one listing's messages by time.
-    __table_args__ = (Index("ix_messages_conversation_id_created_at", "conversation_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_messages_conversation_id_created_at", "conversation_id", "created_at"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_messages_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False)
@@ -56,11 +65,15 @@ class Message(SellerOwned, Base):
     photo_fingerprint = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
-    conversation = relationship("Conversation", back_populates="messages")
+    conversation = relationship("Conversation", back_populates="messages", primaryjoin="and_(Conversation.id == foreign(Message.conversation_id), Conversation.user_id == Message.user_id)")
 
 
 class Photo(SellerOwned, Base):
     __tablename__ = "photos"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_photos_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
@@ -80,4 +93,4 @@ class Photo(SellerOwned, Base):
     marketplace = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
 
-    conversation = relationship("Conversation", back_populates="photos")
+    conversation = relationship("Conversation", back_populates="photos", primaryjoin="and_(Conversation.id == foreign(Photo.conversation_id), Conversation.user_id == Photo.user_id)")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, JSON, Integer
+from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, Column, String, Text, DateTime, ForeignKey, JSON, Integer
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -31,6 +31,11 @@ def is_vendoo_api_step(step: str | None) -> bool:
 
 class Job(SellerOwned, Base):
     __tablename__ = "jobs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_jobs_seller_id"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_jobs_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
@@ -48,6 +53,10 @@ class Job(SellerOwned, Base):
 
 class JobEvent(SellerOwned, Base):
     __tablename__ = "job_events"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "job_id"], ["jobs.user_id", "jobs.id"],
+            name="fk_job_events_seller_job_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     job_id = Column(String, ForeignKey("jobs.id"), nullable=False, index=True)
@@ -68,6 +77,10 @@ class VendooDraftCache(SellerOwned, Base):
     """
 
     __tablename__ = "vendoo_draft_cache"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "job_id"], ["jobs.user_id", "jobs.id"],
+            name="fk_vendoo_draft_cache_seller_job_id", deferrable=True, initially="DEFERRED"),
+    )
 
     job_id = Column(String, ForeignKey("jobs.id"), primary_key=True)
     item_id = Column(String, nullable=True)

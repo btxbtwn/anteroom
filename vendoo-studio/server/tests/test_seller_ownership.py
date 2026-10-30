@@ -120,7 +120,7 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
         columns = {column["name"]: column for column in inspector.get_columns(table.name)}
         indexes = {index["name"] for index in inspector.get_indexes(table.name)}
         assert old_indexes[table.name] <= indexes
-        assert inspector.get_foreign_keys(table.name) == foreign_keys[table.name]
+        assert all(key in inspector.get_foreign_keys(table.name) for key in foreign_keys[table.name])
         if table.name in SHARED_TABLES:
             assert "user_id" not in columns
         else:
