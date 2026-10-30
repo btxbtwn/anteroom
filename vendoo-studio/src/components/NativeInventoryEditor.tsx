@@ -61,13 +61,18 @@ export function NativeInventoryEditor({ value, groups, disabled, onChange, multi
       onChange={switchSystem} label="Sizing" />
   ) : null;
   const sizeFields = (row: NativeInventoryRow, index: number) => {
-    const group = groups.find(entry => entry.id === row.sizeSetId);
+    // A row stores the set's id, but older drafts and imported rows store the
+    // set's label. Match either so the picker shows the group the seller chose
+    // instead of its raw id, and so it can still be replaced or cleared.
+    const group = groups.find(entry => entry.id === row.sizeSetId)
+      || groups.find(entry => entry.label === row.sizeSetId);
     const choices = sizesFor(group, system);
     const prefix = `inventory-row-${index}`;
     return <>
       <div className="min-w-0"><label className="mb-1 block text-xs text-muted-foreground" htmlFor={`${prefix}-group`}>Size group</label><SearchableSelect id={`${prefix}-group`} fieldKey={`${prefix}-group`} value={group?.label || row.sizeSetId} options={groups.map(entry => entry.label)}
         selectionOnly disabled={disabled} choicesVerified onChange={label => update(index, {
-          sizeSetId: groups.find(entry => entry.label === label)?.id || "", sizeId: "",
+          // Clearing the group leaves it empty and drops the size with it.
+          sizeSetId: label ? groups.find(entry => entry.label === label)?.id || "" : "", sizeId: "",
         }, true)} /></div>
       <div className="min-w-0"><label className="mb-1 block text-xs text-muted-foreground" htmlFor={`${prefix}-size`}>Size</label>{row.sizeSetId === "custom"
         ? <Input nativeInput id={`${prefix}-size`} aria-label={`Custom size ${index + 1}`} value={row.sizeId} disabled={disabled}
