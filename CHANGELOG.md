@@ -6,9 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.551 — 2026-10-30
+## 0.1.552 — 2026-10-30
 
 - Preview a cloud draft with Poshmark’s live fields and choices through your connected Chrome browser, using the same form as the Mac app.
+
+## 0.1.551 — 2026-10-29
+
+- Depop styles saved through chat stay selected instead of being replaced by another automatic field fill.
+
 
 ## 0.1.550 — 2026-10-29
 
