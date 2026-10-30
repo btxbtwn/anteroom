@@ -48,8 +48,8 @@ def _path(row: dict) -> str:
     return str(row.get("path") or row.get("key") or "")
 
 
-def fillable_rows(form: dict, market: str, listing: dict) -> list[dict]:
-    """Empty item fields on this form that the agent may choose values for."""
+def fillable_rows(form: dict, market: str, listing: dict, *, evidence: str = "") -> list[dict]:
+    """Empty or unverified item fields the agent may choose values for."""
     prefix = f"{market}_specifics."
     strict = native_contract.KEY in listing
     rows = []
@@ -65,6 +65,16 @@ def fillable_rows(form: dict, market: str, listing: dict) -> list[dict]:
             continue
         if is_locked(listing, path) or field_locked(listing, market, path.rsplit(".", 1)[-1]):
             continue
+        if strict:
+            value = get_path(listing, path)
+            proof = (listing.get(native_contract.EVIDENCE_KEY) or {}).get(path) or {}
+            quote = proof.get("quote")
+            # Refilling dependent fields must not re-roll answers already
+            # verified against the same evidence and still valid on this form.
+            if (not _empty(value) and proof.get("value") == value
+                    and isinstance(quote, str) and len(quote.strip()) >= 3 and quote in evidence
+                    and not native_contract.value_error(row, value)):
+                continue
         rows.append(row)
     return rows
 
@@ -264,7 +274,8 @@ async def record_forms(db: Session, conv_id: str, markets, *, reset_evidence: bo
     listing[native_contract.KEY] = {**(listing.get(native_contract.KEY) or {}),
                                     **native_contract.capture(listing, forms, markets)}
     native_contract.constrain_generated(listing, listing, freeze_categories=False)
-    repo.save_revision(conv_id, listing, source="native_schema", parent_revision_id=revision.id, expected_revision_id=revision.id)
+    if listing != revision.listing_json:
+        repo.save_revision(conv_id, listing, source="native_schema", parent_revision_id=revision.id, expected_revision_id=revision.id)
     return listing[native_contract.KEY]
 
 
@@ -285,7 +296,7 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
     strict = native_contract.KEY in listing and not categories
     forms = await load_forms(db, conv_id, markets)
     rows_by_market = {market: rows for market, form in forms.items()
-                      if (rows := category_rows(form, listing) if categories else fillable_rows(form, market, listing))}
+                      if (rows := category_rows(form, listing) if categories else fillable_rows(form, market, listing, evidence=evidence))}
     if not rows_by_market:
         return None
     rows = {_path(row): row for market_rows in rows_by_market.values() for row in market_rows}
@@ -315,7 +326,12 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
     except Exception:
         log.exception("marketplace field fill request failed for %s", conv_id)
         return None
-    accepted = validated_values(_json_object(text) or {}, rows, evidence=evidence if strict else None)
+    reply = _json_object(text)
+    if reply is None or not isinstance(reply.get("fields"), dict):
+        # A failed/truncated response is not an evidence check that rejected
+        # every existing answer. Leave the revision untouched.
+        return None
+    accepted = validated_values(reply, rows, evidence=evidence if strict else None)
     if not accepted and not strict:
         return None
     db.expire_all()
@@ -329,13 +345,15 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
     changed_parents = {path for path, (value, _labels) in accepted.items() if get_path(listing, path) != value}
     changed_labels = {rows[path].get("label") for path in changed_parents}
     dependent_paths = {dependent for path in changed_parents for dependent in rows[path].get("clears") or []}
-    dependent_paths.update(path for path, row in rows.items() for rules in (row.get("value_constraints") or {}).values()
+    form_rows = {_path(row): row for form in forms.values() for row in form.get("fields") or []}
+    dependent_paths.update(path for path, row in form_rows.items() for rules in (row.get("value_constraints") or {}).values()
                            for rule in rules if rule.get("parentName") in changed_labels)
     accepted = {path: answer for path, answer in accepted.items() if path not in dependent_paths}
     for dependent in dependent_paths:
         if not is_locked(updated, dependent):
             empty = {} if dependent.endswith(".attributes") else [] if dependent.endswith(".inventoryRows") else ""
             write_value(updated, dependent, empty)
+            (updated.get(native_contract.EVIDENCE_KEY) or {}).pop(dependent, None)
     if strict:
         # An omitted or unsupported earlier guess must not survive the evidence check.
         for path in rows:
@@ -345,7 +363,9 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         write_value(updated, path, value)
         if strict:
             updated.setdefault(native_contract.EVIDENCE_KEY, {})[path] = {
-                "value": copy.deepcopy(value), "quote": (_json_object(text) or {})["fields"][path]["evidence"]}
+                "value": copy.deepcopy(value), "quote": reply["fields"][path]["evidence"]}
+    if updated == listing:
+        return None
     listing_repo.save_revision(conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision.id, expected_revision_id=revision.id)
     ConversationRepo(db).add_message(conv_id, "system", filled_message(accepted, rows), provider="system", model="")
     return updated
