@@ -41,9 +41,10 @@ def size_choice(size: Any, choices: Iterable[Any]) -> str | None:
 
     Tried in order, each only when the earlier ones find nothing: the same
     text; the same text ignoring case, spaces, dots and dashes (``one-size``);
-    One Size under any of its names (``OS``); and the same letter size
+    One Size under any of its names (``OS``); the same letter size
     (``XXL`` is ``2XL``), reading a kids ``XL (18/20)`` as ``XL`` only when the
-    choices do not offer the range itself. A step that matches more than one
+    choices do not offer the range itself; and the same measurement, which is
+    Depop's ``36"`` for a tag that reads 36. A step that matches more than one
     choice is ambiguous and matches none.
     """
     text = str(size or "").strip()
@@ -53,7 +54,7 @@ def size_choice(size: Any, choices: Iterable[Any]) -> str | None:
     if text in labels:
         return text
     steps = ((_squashed, _squashed), (_one_size, _one_size), (letter_size, letter_size),
-             (_letters_without_range, letter_size))
+             (_letters_without_range, letter_size), (_measured, _measured))
     for read_size, read_choice in steps:
         wanted = read_size(text)
         if not wanted:
@@ -76,6 +77,17 @@ def _letters_without_range(text: str) -> str | None:
     return letter_size(_TAG_RANGE.sub("", text))
 
 
+def _measured(text: str) -> str | None:
+    """One measurement, with or without its label and unit: 36, 36", Waist 36 in."""
+    value = _MEASUREMENT_LABEL.sub("", str(text or "").strip())
+    value = _MEASUREMENT_UNIT.sub("", value).strip()
+    return value if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value) else None
+
+
+# A measurement's label and unit are how a marketplace writes the size, not a
+# different size: Depop's men's 36" is the 36 a tag reads.
+_MEASUREMENT_LABEL = re.compile(r"^(?:WAIST|NECK|CHEST|INSEAM|LENGTH|US)\s+", re.IGNORECASE)
+_MEASUREMENT_UNIT = re.compile(r'\s*(?:IN\.?|["”″])$', re.IGNORECASE)
 # The range a tag gives after the size, like ``M (8-10)``, is not the size.
 _TAG_RANGE = re.compile(r"(?<=\S)\s*\([^)]*\)\s*$")
 _SIZE_WORDS = {

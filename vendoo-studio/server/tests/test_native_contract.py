@@ -343,6 +343,21 @@ class NativeContractTest(unittest.TestCase):
         contract.constrain_generated(listing, copy.deepcopy(listing))
         self.assertEqual(listing["ebay_specifics"], {"Size Type": "Regular", "Size": "36", "Waist Size": "36 in"})
 
+    def test_a_size_the_form_spells_with_inches_survives_as_that_choice(self):
+        listing = {"title": "Wrangler jeans", "brand": "Wrangler", "size": "36",
+                   "direct_category_ids": {"depop": "menswear_jeans"}, "depop_specifics": {"size": "36"}}
+        form = {"category_id": "menswear_jeans", "fields": [
+            {"path": "depop_specifics.size", "label": "Size", "required": True, "selection_only": True,
+             "options": ['26"', '36"', '38"'], "category_specific": True}]}
+        listing[contract.KEY] = contract.capture(listing, {"depop": form}, ["depop"])
+        original = copy.deepcopy(listing)
+        contract.constrain_generated(listing, original)
+        self.assertEqual(listing["depop_specifics"]["size"], '36"')
+        wrong = copy.deepcopy(original)
+        wrong["depop_specifics"] = {"size": "Huge"}
+        contract.constrain_generated(wrong, original)
+        self.assertEqual(wrong["depop_specifics"], {})
+
     def test_quote_must_come_from_original_evidence_not_the_generated_listing(self):
         rows = {row["path"]: row for row in seed()[contract.KEY]["mercari"]["fields"]}
         path = "mercari_specifics.material"

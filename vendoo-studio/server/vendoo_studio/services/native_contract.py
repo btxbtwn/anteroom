@@ -420,6 +420,26 @@ def _remove(listing: dict, path: str) -> None:
         parent.pop(parts[-1], None)
 
 
+def _size_spelling(row: dict, value) -> str | None:
+    """The field's own spelling of the size ``value`` names, when its list offers it.
+
+    Depop's men's waist is the label 36" where the tag reads 36, and a listing
+    save compares the answer with the form's choices. The same size written a
+    different way is an answer, not a refused choice, so it keeps its row.
+    """
+    if isinstance(value, (list, dict)) or not row.get("selection_only"):
+        return None
+    if "size" not in str(row.get("label") or "").casefold().split() \
+            and "size" not in path_of(row).casefold().split("."):
+        return None
+    options = [str(option) for option in row.get("options") or []]
+    if not options or str(value) in options:
+        return None
+    from vendoo_studio.models.sizes import size_choice
+
+    return size_choice(value, options)
+
+
 def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = True, keep_evidence: bool = False) -> dict:
     """Discard model-invented paths and invalid answers; preserve server-owned contracts."""
     contracts = seed.get(KEY)
@@ -456,6 +476,11 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
                         set_path(listing, native_path, value)
                     path = native_path
                     value = get_path(listing, path)
+            if path in rows:
+                spelling = _size_spelling(rows[path], value)
+                if spelling is not None:
+                    set_path(listing, path, spelling)
+                    value = spelling
             if is_locked(seed, path):
                 set_path(listing, path, copy.deepcopy(get_path(seed, path)))
             elif path not in rows or value_error({**applicable_row(rows[path], listing, list(rows.values())), "required": False}, value):
