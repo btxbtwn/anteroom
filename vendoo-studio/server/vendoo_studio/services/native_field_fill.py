@@ -31,9 +31,10 @@ NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": 
 CATEGORY_PATHS = {f"direct_category_ids.{market}" for market in MARKETS} | {"sellwild_specifics.nativeCategoryId"}
 
 FILL_RULES = (
-    "You fill a resale listing's marketplace form fields. For each field below, choose values only "
-    "from that field's listed choices, spelled exactly as listed, and only when the photos analysis, "
-    "listing or notes show it. Leave out any field you cannot tell. Never guess a measurement, material "
+    "You fill a resale listing's marketplace form fields. For selection-only fields, choose values only "
+    "from that field's listed choices, spelled exactly as listed. For free-text fields, the listed "
+    "choices are suggestions: custom text is allowed within the field's limits. Answer only when "
+    "the photos analysis, listing or notes show it. Leave out any field you cannot tell. Never guess a measurement, material "
     "or fit that the evidence does not show. Reply with one JSON object and nothing else: "
     '{"fields": {"<field path>": "<choice>" or ["<choice>", ...]}}. '
     "Use a list only where a field allows more than one choice, and never more than its limit."
@@ -113,13 +114,16 @@ def forms_prompt(rows_by_market: dict[str, list[dict]], forms: dict[str, dict]) 
         for row in rows:
             limit = _limit(row)
             pick = f"pick up to {limit}" if row.get("multi") else "pick one"
+            mode = "selection-only" if row.get("selection_only") else "free-text; custom text allowed"
+            if row.get("max_length") is not None:
+                mode += f"; max length {row['max_length']}"
             label = str(row.get("label") or "").removesuffix(" *")
             from vendoo_studio.services.option_lookup import project_row
 
             projected = project_row(row)
             choices = (json.dumps({"options_lookup": projected["options_lookup"]}) if projected.get("options_lookup")
                        else "; ".join(row.get("options") or []) or f"{row.get('input_type') or 'text'}; max length {row.get('max_length') or 'unspecified'}")
-            lines.append(f"- {_path(row)} | {label} | {pick} | choices: " + choices)
+            lines.append(f"- {_path(row)} | {label} | {mode} | {pick} | choices: " + choices)
         blocks.append(f"### {NAMES[market]} (category {category})\n" + "\n".join(lines))
     return "\n\n".join(blocks)
 
@@ -139,7 +143,7 @@ def _json_object(text: str) -> dict | None:
 
 
 def validated_values(reply: dict, rows: dict[str, dict], *, evidence: str | None = None) -> dict[str, tuple[Any, list[str]]]:
-    """Each answered path's stored value and chosen labels, keeping only listed choices."""
+    """Validate choices, or evidence-backed custom text when the native field allows it."""
     answers = reply.get("fields") if isinstance(reply.get("fields"), dict) else {}
     accepted: dict[str, tuple[Any, list[str]]] = {}
     for path, raw in answers.items():
