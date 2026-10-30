@@ -4,6 +4,7 @@ import { createClient, type Session, type SupabaseClient } from "@supabase/supab
 import { cloudDrafts, type CloudDraft } from "../api/cloudDrafts";
 import { GeneralFields, type GeneralValues } from "./GeneralFields";
 import { Photos } from "./Photos";
+import { MarketplacePreview } from "./MarketplacePreview";
 import { ChromeConnection } from "./ChromeConnection";
 import { cloudExtension } from "../api/cloudExtension";
 import "./style.css";
@@ -48,7 +49,7 @@ function App() {
   }
   return <div className="cloud"><header><a href="/" aria-label="Anteroom home">Anteroom</a>{session && <div><span>{session.user.email}</span><ChromeConnection key={session.user.id} account={{ id: session.user.id, email: session.user.email || "" }}/><button onClick={() => void signOut()}>Sign out</button></div>}</header>
     {error && <p className="message" role="alert">{error}</p>}
-    {!ready ? <main><p>Loading…</p></main> : session ? <Workspace key={session.user.id} client={supabase} dirty={dirty} onDirtyChange={setDirty}/> : <SignIn client={supabase}/>}
+    {!ready ? <main><p>Loading…</p></main> : session ? <Workspace key={session.user.id} client={supabase} account={{ id: session.user.id, email: session.user.email || "" }} dirty={dirty} onDirtyChange={setDirty}/> : <SignIn client={supabase}/>}
   </div>;
 }
 
@@ -70,7 +71,7 @@ function SignIn({ client }: { client: SupabaseClient }) {
   </main>;
 }
 
-function Workspace({ client, dirty, onDirtyChange: setDirty }: { client: SupabaseClient; dirty: boolean; onDirtyChange: (dirty: boolean) => void }) {
+function Workspace({ client, account, dirty, onDirtyChange: setDirty }: { client: SupabaseClient; account: { id: string; email: string }; dirty: boolean; onDirtyChange: (dirty: boolean) => void }) {
   const [api] = useState(() => cloudDrafts(client));
   const [query, setQuery] = useState("");
   const [more, setMore] = useState(false);
@@ -117,11 +118,12 @@ function Workspace({ client, dirty, onDirtyChange: setDirty }: { client: Supabas
     {loading && <p role="status">Loading inventory…</p>}
     {!loading && rows.length === 0 && <p>Your next listing starts here.</p>}
     <nav aria-label="Drafts">{rows.map(row => <button key={row.id} aria-current={selected?.id === row.id ? "page" : undefined} disabled={busy} onClick={() => void open(row.id)}><span>{row.title || "Untitled draft"}</span><small>Draft</small></button>)}</nav>{more && <button disabled={busy || loading} onClick={() => void loadMore()}>Load more listings</button>}</aside>
-    <section>{error && <p role="alert" className="message">{error}</p>}{selected ? <Editor key={`${selected.id}:${selected.updated_at}`} draft={selected} api={api} client={client} onSaved={saved} onDirty={setDirty} onBusy={setBusy}/> : <div className="empty"><h2>Room for your next idea.</h2><p>Create a listing to add photos, edit its fields, and save your draft. Your work is private to your account.</p></div>}</section>
+    <section>{error && <p role="alert" className="message">{error}</p>}{selected ? <Editor key={`${selected.id}:${selected.updated_at}`} draft={selected} api={api} client={client} account={account} onSaved={saved} onDirty={setDirty} onBusy={setBusy}/> : <div className="empty"><h2>Room for your next idea.</h2><p>Create a listing to add photos, edit its fields, and save your draft. Your work is private to your account.</p></div>}</section>
   </main>;
 }
 
-function Editor({ draft, api, client, onSaved, onDirty, onBusy }: { draft: CloudDraft; client: SupabaseClient; api: ReturnType<typeof cloudDrafts>; onSaved: (draft: CloudDraft) => void; onDirty: (dirty: boolean) => void; onBusy: (busy: boolean) => void }) {
+function Editor({ draft, api, client, account, onSaved, onDirty, onBusy }: { draft: CloudDraft; client: SupabaseClient; account: { id: string; email: string }; api: ReturnType<typeof cloudDrafts>; onSaved: (draft: CloudDraft) => void; onDirty: (dirty: boolean) => void; onBusy: (busy: boolean) => void }) {
+  const [tab, setTab] = useState<"general" | "poshmark">("general");
   const [fields, setFields] = useState<GeneralValues>(draft.fields || {});
   const [photoBusy, setPhotoBusy] = useState(false);
   const [title, setTitle] = useState(draft.title || "");
@@ -145,11 +147,12 @@ function Editor({ draft, api, client, onSaved, onDirty, onBusy }: { draft: Cloud
     try { onSaved(await api.get(draft.id)); } catch (error) { setMessage((error as Error).message); }
     finally { setSaving(false); onBusy(false); }
   }
-  return <form className="editor" onSubmit={event => void submit(event)}><p className="eyebrow">INVENTORY / GENERAL</p><Photos client={client} draftId={draft.id} disabled={saving || photoBusy} onBusy={value => { setPhotoBusy(value); onBusy(value); }}/><label htmlFor="title">Title</label><input id="title" required maxLength={200} value={title} onChange={event => setTitle(event.target.value)} disabled={saving || photoBusy}/>
+  return <form className="editor" onSubmit={event => void submit(event)}><div className="editor-tabs" role="tablist" aria-label="Listing forms"><button type="button" role="tab" aria-selected={tab === "general"} disabled={saving || photoBusy} onClick={() => setTab("general")}>General</button><button type="button" role="tab" aria-selected={tab === "poshmark"} disabled={saving || photoBusy} onClick={() => setTab("poshmark")}>Poshmark preview</button></div>
+    {tab === "poshmark" ? <MarketplacePreview key={draft.id} account={account} listing={{ ...fields, title }} client={client} draftId={draft.id}/> : <><p className="eyebrow">INVENTORY / GENERAL</p><Photos client={client} draftId={draft.id} disabled={saving || photoBusy} onBusy={value => { setPhotoBusy(value); onBusy(value); }}/><label htmlFor="title">Title</label><input id="title" required maxLength={200} value={title} onChange={event => setTitle(event.target.value)} disabled={saving || photoBusy}/>
     <GeneralFields values={fields} disabled={saving || photoBusy} onChange={(key, value) => setFields(previous => ({ ...previous, [key]: value }))}/>
     <label htmlFor="notes">Notes</label><textarea id="notes" maxLength={20000} rows={12} value={notes} onChange={event => setNotes(event.target.value)} disabled={saving || photoBusy}/>
     <div className="editor-actions"><button className="primary" disabled={saving || photoBusy || !dirty || conflict}>{saving ? "Saving…" : "Save draft"}</button><button type="button" disabled={saving || photoBusy} onClick={() => void reload()}>Reload draft</button><span role="status">{dirty ? "Unsaved changes" : "Saved"}</span></div>
-    {message && <p role="alert" className="message">{message}</p>}
+    {message && <p role="alert" className="message">{message}</p>}</>}
   </form>;
 }
 

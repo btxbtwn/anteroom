@@ -127,7 +127,8 @@ async function inspectMarketplaceDocument(origin, requestedScript) {
 
 async function handleMarketplaceInspection(msg) {
   const page = MARKETPLACE_INSPECTION_PAGES[msg.payload?.marketplace];
-  if (!page || nativeOperationsRunning() || activeJob || activePatch) {
+  const operation = page ? claimNativeOperation('*', `inspection-${Date.now()}`) : null;
+  if (!operation) {
     sendBrowserResult(msg, { ok: false, error: page ? 'Another automation job is running.' : 'Unsupported marketplace.' });
     return;
   }
@@ -183,4 +184,5 @@ async function handleMarketplaceInspection(msg) {
     } while (Date.now() < deadline);
     sendBrowserResult(msg, result || { ok: false, error: 'Chrome did not return the marketplace document.' });
   } catch (error) { sendBrowserResult(msg, { ok: false, error: String(error.message || error) }); }
+  finally { releaseNativeOperation(operation); }
 }
