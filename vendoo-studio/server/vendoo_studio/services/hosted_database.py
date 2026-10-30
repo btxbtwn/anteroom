@@ -82,6 +82,9 @@ def _scope_transaction(session, transaction, connection):
 
 @event.listens_for(SellerDatabaseSession, "before_flush")
 def _assign_owner(session, flush_context, instances):
+    if (lease := session.info.get('background_lease')) is not None:
+        from vendoo_studio.services.background_tasks import check_write_lease
+        check_write_lease(session, *lease)
     for obj in session.new:
         if isinstance(obj, SellerOwned) and obj.user_id is None:
             obj.user_id = session.user_id

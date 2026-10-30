@@ -159,7 +159,8 @@ def create_draft(db: Session, template_id: str, body: TemplateDraft) -> str:
         if fields.get("cost") is not None:
             notes["cog"] = str(fields["cost"])
         try:
-            target = add_draft(db, body.title, notes, fields, [], "template")
+            from vendoo_studio.models.conversation import new_id
+            target = add_draft(db, body.title, notes, fields, [], "template", identity=new_id())
             db.add(ListingCopyReceipt(request_id=body.request_id, fingerprint=fingerprint, source_kind="template", source_id=template_id, conversation_id=target))
             db.commit()
             return target

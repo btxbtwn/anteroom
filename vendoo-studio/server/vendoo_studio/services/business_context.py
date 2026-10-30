@@ -46,7 +46,7 @@ def cached(db: Session, day: date, build: Callable[[], Any]) -> Any:
     global _entry
     bind = db.get_bind()
     with _lock:
-        key = (id(bind), str(bind.url), day, _generation)
+        key = (id(bind), str(bind.url), day, _generation, getattr(db, 'user_id', None))
         if _entry is not None and _entry[0] == key and time.monotonic() - _entry[1] < TTL_SECONDS:
             return _entry[2]
     value = build()

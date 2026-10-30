@@ -29,14 +29,14 @@ def owner(db: Session, marketplace: str, listing_id: str):
     return matches[0] if matches else None
 
 
-async def download_photos(urls: list[str]) -> list[dict]:
+async def download_photos(urls: list[str], collection_id: str) -> list[dict]:
     limit = asyncio.Semaphore(4)
     async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT_SEC, follow_redirects=False, trust_env=False) as client:
         async def download(index: int, url: str):
             async with limit:
                 try:
                     content, content_type, _ = await fetch_public(client, url, accept=is_image_type)
-                    return await asyncio.to_thread(photos.process_bytes, content, f"import-{index + 1}.jpg", content_type)
+                    return await asyncio.to_thread(photos.process_bytes, content, f"import-{index + 1}.jpg", content_type, collection_id=collection_id)
                 except (httpx.HTTPError, ValueError, OSError):
                     return None
         result = await asyncio.gather(*(download(index, url) for index, url in enumerate(urls[:MAX_PHOTO_COUNT])))
@@ -56,7 +56,9 @@ async def save_owned_listing(db: Session, marketplace: str, listing_id: str, sna
     if existing:
         return _result(db, existing.id, listing_id, reused=True, warnings=["Already in Anteroom. Existing edits and photos were kept."])
     urls = list(dict.fromkeys(url for url in urls if isinstance(url, str) and url))
-    downloaded = await download_photos(urls)
+    from vendoo_studio.models.conversation import new_id
+    target_id = new_id()
+    downloaded = await download_photos(urls, target_id)
     retained = False
     try:
         verify_connection()
@@ -64,7 +66,7 @@ async def save_owned_listing(db: Session, marketplace: str, listing_id: str, sna
             existing = owner(db, marketplace, listing_id)
             if existing:
                 return _result(db, existing.id, listing_id, reused=True, warnings=["Already in Anteroom. Existing edits and photos were kept."])
-            conv = inventory_imports.create_import(db, marketplace, snapshot, listing_id, downloaded, binding)
+            conv = inventory_imports.create_import(db, marketplace, snapshot, listing_id, downloaded, binding, identity=target_id)
             retained = True
         warnings = []
         if len(downloaded) < len(urls):

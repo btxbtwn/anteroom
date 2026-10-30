@@ -57,7 +57,7 @@ function CloudApp() {
 
 function HostedWorkspace({ session }: { session: Session }) {
   const [queryClient] = useState(createStudioQueryClient);
-  const [runtime, setRuntime] = useState<{ features: WorkspaceFeature[]; marketplace_forms: string[] } | null>(null);
+  const [runtime, setRuntime] = useState<{ features: WorkspaceFeature[]; views: string[]; marketplace_forms: string[] } | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
@@ -93,7 +93,7 @@ function HostedWorkspace({ session }: { session: Session }) {
   }, [session.user.id, session.user.email, queryClient]);
   const controls = <div className="cloud-account"><ChromeConnection account={{ id: session.user.id, email: session.user.email || "" }}/><button type="button" onClick={() => void supabase.auth.signOut({ scope: "local" }).then(({ error }) => { if (error) setError("Could not sign out. Please try again."); })}>Sign out</button></div>;
   if (!runtime) return <main className="cloud-auth" role={error ? "alert" : "status"}>{error || "Opening your workspace…"}</main>;
-  return <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(runtime.features), views: new Set(["listings"]), marketplaceForms: new Set(runtime.marketplace_forms), accountControls: controls }}>
+  return <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(runtime.features), views: new Set(runtime.views), marketplaceForms: new Set(runtime.marketplace_forms), accountControls: controls }}>
     <QueryClientProvider client={queryClient}><ToastProvider><AnchoredToastProvider>
       {error && <div role="alert">{error}</div>}<App/>
     </AnchoredToastProvider></ToastProvider></QueryClientProvider>

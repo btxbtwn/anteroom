@@ -248,7 +248,7 @@ def test_import_matches_previously_received_sales_without_delisting(imported):
 
 def test_invalid_photo_does_not_leave_an_orphan_file(imported):
     with pytest.raises(ValueError):
-        photos.process_bytes(b"not an image", "bad.jpg", "image/jpeg")
+        photos.process_bytes(b"not an image", "bad.jpg", "image/jpeg", collection_id="test-photo")
     assert list(imported.directory.iterdir()) == []
 
 
@@ -258,7 +258,7 @@ def test_import_database_write_is_atomic(imported):
 
     event.listen(imported.db, "before_commit", fail, once=True)
     with pytest.raises(RuntimeError, match="Simulated"):
-        inventory_imports.create_import(imported.db, "ebay", {"title": "Coat"}, ITEM_ID, [])
+        inventory_imports.create_import(imported.db, "ebay", {"title": "Coat"}, ITEM_ID, [], identity="winning-import")
     assert imported.db.query(Conversation).count() == 0
     assert imported.db.query(ListingRevision).count() == 0
 
@@ -266,9 +266,9 @@ def test_import_database_write_is_atomic(imported):
 def test_two_requests_finishing_the_same_import_reuse_one_item_and_clean_unused_photos(imported, monkeypatch):
     original = inventory_import.download_photos
 
-    async def other_request_finishes(urls):
-        meta = await original(urls)
-        inventory_imports.create_import(imported.db, "ebay", {"title": "First request won"}, ITEM_ID, [])
+    async def other_request_finishes(urls, collection_id):
+        meta = await original(urls, collection_id)
+        inventory_imports.create_import(imported.db, "ebay", {"title": "First request won"}, ITEM_ID, [], identity="winning-import")
         return meta
 
     monkeypatch.setattr(inventory_import, "download_photos", other_request_finishes)

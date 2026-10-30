@@ -18,6 +18,7 @@ from vendoo_studio.services.photos import (
 from vendoo_studio.services.photo_store import photo_store
 
 router = APIRouter(tags=["photos"])
+edit_router = APIRouter(tags=["photos"])
 
 
 @router.get("/api/marketplace-media")
@@ -105,6 +106,10 @@ class RotateRequest(BaseModel):
 
 
 def _photo(repo: ConversationRepo, conv_id: str, photo_id: str):
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        from vendoo_studio.services.background_tasks import require_idle
+        require_idle(repo.db, conv_id)
     photo = next((p for p in repo.get_all_photos(conv_id) if p.id == photo_id), None)
     if not photo:
         raise HTTPException(404, "Photo not found")
@@ -120,7 +125,7 @@ def _save(repo: ConversationRepo, photo, edits: PhotoEdits):
         raise HTTPException(400, str(e)) from None
 
 
-@router.post("/api/conversations/{conv_id}/photos/{photo_id}/rotate")
+@edit_router.post("/api/conversations/{conv_id}/photos/{photo_id}/rotate")
 def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session = Depends(get_db)):
     if body.degrees not in (90, -90, 180):
         raise HTTPException(400, "Rotate by 90, -90 or 180 degrees")
@@ -129,14 +134,14 @@ def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session =
     return _save(repo, photo, photo_edits.current_edits(photo).turned(body.degrees))
 
 
-@router.put("/api/conversations/{conv_id}/photos/{photo_id}/edits")
+@edit_router.put("/api/conversations/{conv_id}/photos/{photo_id}/edits")
 def edit_photo(conv_id: str, photo_id: str, body: PhotoEdits, db: Session = Depends(get_db)):
     """Replace the photo's edits; they render from the original upload, which is kept."""
     repo = ConversationRepo(db)
     return _save(repo, _photo(repo, conv_id, photo_id), body)
 
 
-@router.delete("/api/conversations/{conv_id}/photos/{photo_id}/edits")
+@edit_router.delete("/api/conversations/{conv_id}/photos/{photo_id}/edits")
 def reset_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
     repo = ConversationRepo(db)
     try:
@@ -145,7 +150,7 @@ def reset_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "The original photo file is missing") from None
 
 
-@router.post("/api/conversations/{conv_id}/photos/{photo_id}/edits/preview")
+@edit_router.post("/api/conversations/{conv_id}/photos/{photo_id}/edits/preview")
 def preview_photo_edits(conv_id: str, photo_id: str, body: PhotoEdits, crop: bool = True, db: Session = Depends(get_db)):
     """A smaller JPEG of the edits, for the editor; ``crop=false`` leaves the frame whole to draw the crop on."""
     from fastapi.responses import Response
@@ -229,3 +234,6 @@ async def cover_thumb(url: str):
         media_type="image/jpeg",
         headers={"Cache-Control": "private, max-age=86400"},
     )
+
+
+router.include_router(edit_router)

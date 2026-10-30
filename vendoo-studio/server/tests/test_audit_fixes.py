@@ -1334,7 +1334,7 @@ class PhotoMimeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(tmp)):
                 with self.assertRaises(ValueError):
-                    process_bytes(b"not-an-image", "fake.jpg", "image/jpeg")
+                    process_bytes(b"not-an-image", "fake.jpg", "image/jpeg", collection_id="test-photo")
 
 
     def test_heic_upload_is_stored_as_an_upright_jpeg(self):
@@ -1351,7 +1351,7 @@ class PhotoMimeTest(unittest.TestCase):
         Image.new("RGB", (40, 20), "red").save(buf, format="HEIF", exif=exif.tobytes())
         with tempfile.TemporaryDirectory() as tmp:
             with patch("vendoo_studio.services.photo_store._store", LocalPhotoStore(tmp)):
-                info = process_bytes(buf.getvalue(), "IMG_0001.HEIC", "image/heic")
+                info = process_bytes(buf.getvalue(), "IMG_0001.HEIC", "image/heic", collection_id="test-photo")
                 stored = Path(tmp) / info["stored_filename"]
                 self.assertEqual(stored.suffix, ".jpg")
                 self.assertEqual(info["mime_type"], "image/jpeg")

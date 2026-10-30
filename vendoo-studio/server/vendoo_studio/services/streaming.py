@@ -116,6 +116,10 @@ def spawn(coro) -> asyncio.Task:
     task = asyncio.get_running_loop().create_task(coro)
     _generation_tasks.add(task)
     task.add_done_callback(_generation_tasks.discard)
+    from vendoo_studio.services.service_context import current
+    if (context := current()) is not None:
+        context.spawned_tasks.add(task)
+        task.add_done_callback(context.spawned_tasks.discard)
     return task
 
 

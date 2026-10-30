@@ -1,7 +1,7 @@
 """Where photo files live, addressed by key.
 
-A photo's key is its ``stored_filename``: a bare file name such as
-``3f2a….jpg``, which is what the database already records. Everything that
+A photo's key is its ``stored_filename``: a bare file name on the Mac and
+an owner/conversation/object key in hosted Storage. Everything that
 reads, writes or deletes a photo goes through the store, so the hosted API can
 later keep photos in Supabase Storage (``docs/cloud-architecture.md``, step 1)
 without touching the code that uses them.
@@ -39,6 +39,12 @@ class LocalPhotoStore:
 
     def _file(self, key: str) -> Path:
         return self.root / _check_key(key)
+
+    def edited_key(self, source: str) -> str:
+        return f'{uuid.uuid4().hex}{Path(_check_key(source)).suffix}'
+
+    def new_key(self, collection_id: str, suffix: str) -> str:
+        return _check_key(f'{uuid.uuid4().hex}{suffix}')
 
     def put(self, key: str, data: bytes) -> None:
         """Save ``data`` under ``key``. Readers never see a half-written file."""
@@ -91,5 +97,7 @@ class LocalPhotoStore:
 _store = LocalPhotoStore(PHOTOS_DIR)
 
 
-def photo_store() -> LocalPhotoStore:
-    return _store
+def photo_store():
+    from vendoo_studio.services.service_context import current
+    context = current()
+    return context.photos if context is not None else _store

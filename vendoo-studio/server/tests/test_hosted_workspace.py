@@ -118,6 +118,52 @@ def test_shared_photo_contract_remains_private(cloud, signing_keys, monkeypatch)
     assert stored == {}
 
 
+def test_photo_edits_preserve_private_original_and_reset_after_reload(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Photo editing'}).json()['id']
+    stored = {}
+
+    def storage(method, key, token, data=None):
+        assert key.startswith(f'{USER_ID}/{identity}/')
+        assert token == alice['Authorization'].partition(' ')[2]
+        if method == 'POST':
+            stored[key] = data
+        if method == 'DELETE':
+            stored.pop(key, None)
+        return stored.get(key, b'')
+
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    image = io.BytesIO()
+    Image.new('RGB', (200, 100), 'red').save(image, 'JPEG')
+    uploaded = client.post(f'/api/drafts/{identity}/photos', headers=alice, content=image.getvalue()).json()
+    photo_id = uploaded['id']
+    path = f'/api/conversations/{identity}/photos/{photo_id}'
+    original_key = next(iter(stored))
+    assert client.post(path + '/rotate', headers=bob, json={'degrees': 90}).status_code == 404
+    rotated = client.post(path + '/rotate', headers=alice, json={'degrees': 90})
+    assert rotated.status_code == 200, rotated.text
+    assert (rotated.json()['width'], rotated.json()['height']) == (100, 200)
+    assert len(stored) == 2
+    assert original_key in stored
+    url = client.get(f'/api/conversations/{identity}/photos', headers=alice).json()[0]['url']
+    assert '?v=' in url
+    with Image.open(io.BytesIO(client.get(url, headers=alice).content)) as result:
+        assert result.size == (100, 200)
+    assert client.get(rotated.json()['url'], headers=bob).status_code == 404
+    assert client.post(path + '/edits/preview', headers=bob, json={'brightness': 10}).status_code == 404
+    preview = client.post(path + '/edits/preview', headers=alice, json={'brightness': 10})
+    assert preview.status_code == 200, preview.text
+    reset = client.delete(path + '/edits', headers=alice)
+    assert reset.status_code == 200, reset.text
+    assert (reset.json()['width'], reset.json()['height']) == (200, 100)
+    assert list(stored) == [original_key]
+    with Session(engine) as db:
+        photo = db.get(Photo, photo_id)
+        assert photo.source_filename is None
+        assert photo.stored_filename == original_key
+
+
 def test_delete_only_removes_the_sellers_unsent_draft(cloud, signing_keys):  # noqa: F811
     client, _ = cloud
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)

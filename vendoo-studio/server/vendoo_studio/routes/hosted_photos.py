@@ -27,6 +27,9 @@ def require_draft(db, draft_id, *, lock=False):
     draft = db.scalar(statement)
     if draft is None:
         raise HTTPException(404, 'Draft not found')
+    if lock:
+        from vendoo_studio.services.background_tasks import require_idle
+        require_idle(db, draft_id)
     return draft
 
 

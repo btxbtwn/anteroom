@@ -6,6 +6,7 @@ Unlike the desktop app, this starts no Chrome, Keychain or automation services.
 from __future__ import annotations
 
 import os
+import asyncio
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -64,7 +65,10 @@ class SellerSessionMiddleware:
             )
         else:
             scope.setdefault("state", {})["seller"] = identity
-            await self.app(scope, receive, send)
+            from vendoo_studio.services.hosted_context import for_seller
+            from vendoo_studio.services.service_context import use
+            with use(for_seller(identity.user_id, token)):
+                await self.app(scope, receive, send)
             return
         await response(scope, receive, send)
 
@@ -87,13 +91,25 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
         app.state.session_verifier = SessionVerifier(
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
-        yield
+        worker = None
+        if app.state.background_worker_enabled:
+            from vendoo_studio.database import engine
+            from vendoo_studio.services.background_worker import serve
+            worker = asyncio.create_task(serve(engine))
+        app.state.background_worker = worker
+        try:
+            yield
+        finally:
+            if worker is not None:
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
         docs_url=None, redoc_url=None, openapi_url=None,
     )
     app.state.web_dir = web_dir
+    app.state.background_worker_enabled = os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1'
     app.add_middleware(SellerSessionMiddleware)
 
     @app.middleware("http")
@@ -109,12 +125,42 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
         )
         return response
 
+    from fastapi.exceptions import RequestValidationError
+    from vendoo_studio.services.hosted_context import CredentialStorageUnavailable
+
+    @app.exception_handler(CredentialStorageUnavailable)
+    async def unavailable_credentials(_request, _error):
+        return JSONResponse({'detail': 'Secure credential storage is temporarily unavailable'}, status_code=503)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_input(_request, _error):
+        # Pydantic's default response echoes rejected values, including secret
+        # fields and unknown extra keys. The hosted boundary never reflects them.
+        return JSONResponse({'detail': 'Check the supplied values and try again'}, status_code=422)
+
     from vendoo_studio.routes.hosted_drafts import router
     app.include_router(router)
     from vendoo_studio.routes.hosted_workspace import router as workspace_router
     app.include_router(workspace_router)
     from vendoo_studio.routes.hosted_photos import router as photo_router
     app.include_router(photo_router)
+    from vendoo_studio.routes.hosted_settings import router as settings_router, keys_router
+    app.include_router(settings_router)
+    app.include_router(keys_router)
+    from vendoo_studio.routes.hosted_tasks import router as task_router
+    app.include_router(task_router)
+    from vendoo_studio.routes import analytics, boxes, sale_calendar, sales_ledger
+    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router):
+        app.include_router(shared_router)
+    from vendoo_studio.routes.photos import edit_router
+    app.include_router(edit_router)
+    from vendoo_studio.routes import listing_templates, listing_copies
+    app.include_router(listing_templates.router)
+    app.include_router(listing_copies.router)
+    from vendoo_studio.routes.conversations import preview_copy, copy_conversation, copy_result, ConversationResponse
+    app.add_api_route('/api/conversations/{conv_id}/copy-preview', preview_copy, methods=['GET'])
+    app.add_api_route('/api/conversations/{conv_id}/copy', copy_conversation, methods=['POST'], response_model=ConversationResponse)
+    app.add_api_route('/api/conversations/{conv_id}/copy-result/{request_id}', copy_result, methods=['GET'], response_model=ConversationResponse)
     if web_dir is not None:
         app.mount("/assets", StaticFiles(directory=web_dir / "assets"), name="cloud-assets")
 

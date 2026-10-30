@@ -510,7 +510,7 @@ class CatalogIndexTest(unittest.TestCase):
 
             load.return_value = FakeIndex()
             from vendoo_studio.services import catalog_index as mod
-            mod._INDEX = FakeIndex()
-            mod._STALE = False
+            mod._state().index = FakeIndex()
+            mod._state().stale = False
             hits = search_catalog(self.db, "fake path", kind="category", top_k=5, ensure=False)
         self.assertEqual(hits, [])

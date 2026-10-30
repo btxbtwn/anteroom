@@ -18,7 +18,8 @@ from vendoo_studio.models.job import ACTIVE_JOB_STATUSES, Job
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from vendoo_studio.models.validation import etsy_eligible, validate_listing
-from vendoo_studio.repositories import hosted_drafts, hosted_preferences
+from vendoo_studio.repositories import hosted_drafts
+from vendoo_studio.services import user_settings
 from vendoo_studio.services.hosted_database import get_seller_db
 from vendoo_studio.services.hosted_listing_contract import editable_listing
 from vendoo_studio.version import app_version
@@ -35,6 +36,8 @@ def conversation(db, identity, *, lock=False):
 
 
 def assert_idle(db, identity):
+    from vendoo_studio.services.background_tasks import require_idle
+    require_idle(db, identity)
     if db.scalar(select(Job.id).where(Job.conversation_id == identity, Job.status.in_(ACTIVE_JOB_STATUSES)).limit(1)):
         raise HTTPException(409, 'Wait for the current listing action to finish')
 
@@ -76,7 +79,7 @@ def listing_response(db, identity):
 @router.get('/runtime')
 def runtime():
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences'],
-            'marketplace_forms': ['poshmark']}
+            'views': ['listings', 'analytics'], 'marketplace_forms': ['poshmark']}
 
 
 @router.get('/status')
@@ -143,6 +146,7 @@ def get_conversation(identity: str, db=Depends(get_seller_db)):
 @router.patch('/conversations/{identity}')
 def edit_conversation(identity: str, body: ConversationInput, db=Depends(get_seller_db)):
     row = conversation(db, identity, lock=True)
+    assert_idle(db, identity)
     if "box_id" in body.model_fields_set:
         check_box(db, body.box_id)
     for key, value in body.model_dump(exclude_unset=True).items():
@@ -214,13 +218,12 @@ def activity(identity: str, db=Depends(get_seller_db)):
     jobs = db.scalars(select(Job).where(Job.conversation_id == identity, Job.status.in_(ACTIVE_JOB_STATUSES))).all()
     count = db.scalar(select(func.count()).select_from(Message).where(Message.conversation_id == identity))
     last = db.scalar(select(Message.id).where(Message.conversation_id == identity).order_by(Message.created_at.desc()).limit(1))
-    return {'busy': bool(jobs), 'items': [row.current_step or row.status for row in jobs],
+    from vendoo_studio.models.background_task import BackgroundTask
+    tasks = db.scalars(select(BackgroundTask).where(
+        BackgroundTask.conversation_id == identity, BackgroundTask.status.in_(('queued', 'running')))).all()
+    labels = [f'{row.kind}: {row.status}' for row in tasks]
+    return {'busy': bool(jobs or tasks), 'items': [row.current_step or row.status for row in jobs] + labels,
             'message_count': count, 'last_message_id': last, 'agents': []}
-
-
-UI_DEFAULTS = {'recent_vendoo_labels': [], 'settled_shelf_expanded': True, 'hidden_vendoo_labels': [],
-               'theme': 'dark', 'listing_names': 'title', 'model_favorites': [], 'vendoo_enabled': False,
-               'stale_listing_days': 60, 'label_colors': {}}
 
 
 class UiInput(BaseModel):
@@ -236,12 +239,12 @@ class UiInput(BaseModel):
 
 @router.get('/settings/ui')
 def ui(db=Depends(get_seller_db)):
-    return {'ok': True, **UI_DEFAULTS, **hosted_preferences.read(db, 'ui')}
+    return {'ok': True, **user_settings.get_ui_prefs(), 'vendoo_enabled': False}
 
 
 @router.put('/settings/ui')
 def save_ui(body: UiInput, db=Depends(get_seller_db)):
-    hosted_preferences.patch(db, 'ui', body.model_dump(exclude_unset=True, exclude_none=True))
+    user_settings.set_ui_prefs(**body.model_dump(exclude_unset=True, exclude_none=True))
     return ui(db)
 
 
@@ -252,25 +255,25 @@ def markets():
 
 @router.get('/settings/listing-defaults')
 def listing_defaults(db=Depends(get_seller_db)):
-    return {'defaults': hosted_preferences.read(db, 'listing-defaults')}
+    return {'defaults': user_settings.get_listing_field_defaults()}
 
 
 @router.get('/settings/ebay-inventory-location')
 def inventory_location(db=Depends(get_seller_db)):
-    return {'location': hosted_preferences.read(db, 'inventory-location').get('location', '')}
+    return {'location': user_settings.get_ebay_inventory_location()}
 
 
 @router.get('/settings/package-dimensions')
 def package_dimensions(db=Depends(get_seller_db)):
-    return {'length': 13, 'width': 10, 'height': 3, **hosted_preferences.read(db, 'package-dimensions')}
+    return user_settings.get_package_dimensions()
 
 
 @router.get('/settings/hidden-fields')
 def hidden_fields(conversation_id: str | None = None, db=Depends(get_seller_db)):
     if conversation_id:
         conversation(db, conversation_id)
-    return {'always': hosted_preferences.read(db, 'hidden-fields').get('fields', []),
-            'listing': hosted_preferences.read(db, 'hidden:' + conversation_id).get('fields', []) if conversation_id else []}
+    from vendoo_studio.services.hidden_fields import hidden_fields as read_hidden_fields
+    return read_hidden_fields(conversation_id)
 
 
 def job_response(row):
@@ -306,7 +309,8 @@ def photo_response(row):
             'mime_type': row.mime_type, 'size_bytes': row.size_bytes, 'display_order': row.display_order,
             'width': row.width, 'height': row.height, 'created_at': row.created_at, 'edits': row.edits,
             'marketplace': row.marketplace,
-            'url': f'/api/conversations/{row.conversation_id}/photos/{row.id}/bytes'}
+            'url': f'/api/conversations/{row.conversation_id}/photos/{row.id}/bytes'
+                + (f'?v={row.checksum[:12]}' if row.checksum else '')}
 
 
 def owned_photo(db, identity, photo_id):
@@ -333,6 +337,14 @@ def photo_bytes(identity: str, photo_id: str, request: Request, db=Depends(get_s
     row = owned_photo(db, identity, photo_id)
     data = storage_call('GET', row.stored_filename, request.headers['authorization'].partition(' ')[2])
     return Response(data, media_type='image/jpeg')
+
+
+@router.get('/photos/{photo_id}')
+def photo_by_id(photo_id: str, request: Request, db=Depends(get_seller_db)):
+    row = db.get(Photo, photo_id)
+    if row is None:
+        raise HTTPException(404, 'Photo not found')
+    return photo_bytes(row.conversation_id, photo_id, request, db)
 
 
 @router.delete('/conversations/{identity}/photos/{photo_id}')
@@ -442,12 +454,6 @@ def restore_revision(identity: str, revision_id: str, body: RestoreInput, db=Dep
     return {'ok': True, 'revision_id': result['revision_id']}
 
 
-@router.get('/boxes')
-def boxes(db=Depends(get_seller_db)):
-    from vendoo_studio.services.boxes import results
-    return results(db)
-
-
 @router.delete('/conversations/{identity}')
 def delete_conversation(identity: str, request: Request, db=Depends(get_seller_db)):
     from sqlalchemy import delete
@@ -465,6 +471,8 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
             if key:
                 check_key(key, db.user_id, identity)
                 keys.add(key)
+    from vendoo_studio.services.background_tasks import delete_history
+    delete_history(db, identity)
     for model in (Listing, ListingRevision, Photo, Message):
         db.execute(delete(model).where(model.conversation_id == identity))
     db.execute(delete(Conversation).where(Conversation.id == identity))

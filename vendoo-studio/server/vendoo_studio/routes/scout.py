@@ -85,9 +85,11 @@ async def create_check(
     if len(files) > scout.MAX_PHOTOS:
         raise HTTPException(400, f"Up to {scout.MAX_PHOTOS} photos per check")
     photos = []
+    from vendoo_studio.models.conversation import new_id
+    collection_id = 'scout-' + new_id()
     for upload in files:
         try:
-            photos.append(process_bytes(await upload.read(), upload.filename, upload.content_type))
+            photos.append(process_bytes(await upload.read(), upload.filename, upload.content_type, collection_id=collection_id))
         except ValueError as exc:
             raise HTTPException(400, f"{upload.filename or 'Photo'}: {exc}") from exc
     check = scout.create_check(db, photos, asking_price)

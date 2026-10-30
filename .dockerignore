@@ -20,14 +20,16 @@ vendoo-studio/server/*
 !vendoo-studio/tsconfig.json
 !vendoo-studio/src/
 !vendoo-studio/src/**
-# The shared editor reads its canonical field contract from skills.
+# Hosted generation and native forms use the same canonical public rules.
 !skills/
 skills/*
 !skills/list-this/
 skills/list-this/*
+!skills/list-this/SKILL.md
 !skills/list-this/references/
 skills/list-this/references/*
-!skills/list-this/references/listing-editor-fields.json
+!skills/list-this/references/*.md
+!skills/list-this/references/*.json
 # Keep private/runtime files excluded after every source allow rule.
 **/__pycache__/
 **/*.pyc

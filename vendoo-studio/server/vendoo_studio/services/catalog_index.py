@@ -9,6 +9,8 @@ import re
 import shutil
 import threading
 import time
+from dataclasses import dataclass
+from contextvars import copy_context
 from pathlib import Path
 from typing import Any
 
@@ -28,23 +30,42 @@ _INDEX_LOCK = threading.RLock()
 # lock across that freezes the event loop (Regenerate sits on "Clearing…").
 _REBUILD_LOCK = threading.Lock()
 _rebuild_gate = threading.Lock()
-_rebuild_running = False
-_INDEX = None
-_INDEX_FINGERPRINT: str | None = None
-_STALE = False
-# When the fingerprint last matched the published index. Every search checks
-# it, and computing it counts 48k category rows, so a match is trusted for a
-# little while. Writers that change the catalog mark it stale, which forces
-# the next search to check again.
-_FINGERPRINT_CHECKED_AT = 0.0
+# Index contents can include seller-observed schemas, so hosted executions
+# own their in-memory state as well as their materialized files.
+@dataclass
+class CatalogIndexState:
+    index: Any = None
+    fingerprint: str | None = None
+    stale: bool = False
+    checked_at: float = 0.0
+    categories: Any = None
+    category_fingerprint: str | None = None
+    rebuilding: bool = False
+
+
+_LOCAL_STATE = CatalogIndexState()
 FINGERPRINT_RECHECK_SEC = 30.0
-# The category leaves are most of the index (tens of thousands of docs) and
-# change only when a category tree syncs. They get an index of their own, kept
-# in memory and saved to disk, so a learned schema or a restart does not pay to
-# re-embed every leaf. Schemas, options, skills and fill helpers are small and
-# are rebuilt and merged in on every rebuild.
-_CATEGORY_INDEX = None
-_CATEGORY_FINGERPRINT: str | None = None
+
+
+def _state() -> CatalogIndexState:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        if context.catalog is None:
+            raise RuntimeError('Seller execution has no catalog state')
+        return context.catalog
+    return _LOCAL_STATE
+
+
+def _catalog_root() -> Path:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    root = user_data_root()
+    if context is not None:
+        from uuid import UUID
+        root = root / 'sellers' / str(UUID(context.seller_id))
+    return root / 'catalog-index'
+
 
 _META_RE = re.compile(
     r"^kind:\s*(?P<kind>\S+)\s*$"
@@ -76,40 +97,40 @@ _FORM_MARKETPLACE = {
 
 def catalog_docs_dir() -> Path:
     """Schema, option, skill and fill docs."""
-    return user_data_root() / "catalog-index" / "docs"
+    return _catalog_root() / "docs"
 
 
 def category_docs_dir() -> Path:
     """One doc per category leaf, kept apart so it can be indexed once."""
-    return user_data_root() / "catalog-index" / "category-docs"
+    return _catalog_root() / "category-docs"
 
 
 def category_index_dir() -> Path:
     """The saved Semble index of ``category_docs_dir``."""
-    return user_data_root() / "catalog-index" / "categories.semble"
+    return _catalog_root() / "categories.semble"
 
 
 def catalog_meta_path() -> Path:
-    return user_data_root() / "catalog-index" / "fingerprint.json"
+    return _catalog_root() / "fingerprint.json"
 
 
 def mark_catalog_index_stale() -> None:
-    global _STALE, _FINGERPRINT_CHECKED_AT
+
     with _INDEX_LOCK:
-        _STALE = True
-        _FINGERPRINT_CHECKED_AT = 0.0
+        _state().stale = True
+        _state().checked_at = 0.0
 
 
 def reset_catalog_index_cache() -> None:
     """Drop the in-memory index (tests and forced rebuilds)."""
-    global _INDEX, _INDEX_FINGERPRINT, _STALE, _CATEGORY_INDEX, _CATEGORY_FINGERPRINT, _FINGERPRINT_CHECKED_AT
+
     with _INDEX_LOCK:
-        _FINGERPRINT_CHECKED_AT = 0.0
-        _INDEX = None
-        _INDEX_FINGERPRINT = None
-        _STALE = True
-        _CATEGORY_INDEX = None
-        _CATEGORY_FINGERPRINT = None
+        _state().checked_at = 0.0
+        _state().index = None
+        _state().fingerprint = None
+        _state().stale = True
+        _state().categories = None
+        _state().category_fingerprint = None
 
 
 def _safe_stem(value: str) -> str:
@@ -436,15 +457,15 @@ def _index_needs_rebuild(fp_text: str) -> bool:
     """Caller holds ``_INDEX_LOCK``."""
     meta = catalog_meta_path()
     cached = meta.read_text(encoding="utf-8") if meta.is_file() else None
-    return _STALE or _INDEX is None or _INDEX_FINGERPRINT != fp_text or cached != fp_text
+    return _state().stale or _state().index is None or _state().fingerprint != fp_text or cached != fp_text
 
 
 def _publish_index(index, fp_text: str) -> None:
-    global _INDEX, _INDEX_FINGERPRINT, _STALE
+
     with _INDEX_LOCK:
-        _INDEX = index
-        _INDEX_FINGERPRINT = fp_text
-        _STALE = False
+        _state().index = index
+        _state().fingerprint = fp_text
+        _state().stale = False
         catalog_meta_path().parent.mkdir(parents=True, exist_ok=True)
         catalog_meta_path().write_text(fp_text, encoding="utf-8")
 
@@ -464,9 +485,9 @@ def _category_index(db: Session, trees_text: str):
 
     Caller holds ``_REBUILD_LOCK``.
     """
-    global _CATEGORY_INDEX, _CATEGORY_FINGERPRINT
-    if _CATEGORY_FINGERPRINT == trees_text:
-        return _CATEGORY_INDEX
+
+    if _state().category_fingerprint == trees_text:
+        return _state().categories
     saved = category_index_dir()
     stamp = saved / "studio-fingerprint.json"
     index = None
@@ -486,7 +507,7 @@ def _category_index(db: Session, trees_text: str):
                 stamp.write_text(trees_text, encoding="utf-8")
             except Exception:
                 log.warning("could not save category index", exc_info=True)
-    _CATEGORY_INDEX, _CATEGORY_FINGERPRINT = index, trees_text
+    _state().categories, _state().category_fingerprint = index, trees_text
     return index
 
 
@@ -539,14 +560,14 @@ def rebuild_catalog_index(db: Session) -> dict[str, Any]:
 
 def _kick_rebuild() -> None:
     """Rebuild on a daemon thread so the event loop can keep serving requests."""
-    global _rebuild_running
+
     with _rebuild_gate:
-        if _rebuild_running:
+        if _state().rebuilding:
             return
-        _rebuild_running = True
+        _state().rebuilding = True
 
     def run() -> None:
-        global _rebuild_running
+
         try:
             from vendoo_studio.database import SessionLocal
 
@@ -556,9 +577,10 @@ def _kick_rebuild() -> None:
             log.exception("catalog index rebuild failed")
         finally:
             with _rebuild_gate:
-                _rebuild_running = False
+                _state().rebuilding = False
 
-    threading.Thread(target=run, name="catalog-index-rebuild", daemon=True).start()
+    execution = copy_context()
+    threading.Thread(target=lambda: execution.run(run), name="catalog-index-rebuild", daemon=True).start()
 
 
 def ensure_catalog_index(db: Session) -> dict[str, Any]:
@@ -569,12 +591,12 @@ def ensure_catalog_index(db: Session) -> dict[str, Any]:
     for as long as that build took. Search uses the previous index, or the
     lexical fallback, until the background rebuild publishes.
     """
-    global _FINGERPRINT_CHECKED_AT
+
     with _INDEX_LOCK:
         recently_matched = (
-            not _STALE
-            and _INDEX is not None
-            and time.monotonic() - _FINGERPRINT_CHECKED_AT < FINGERPRINT_RECHECK_SEC
+            not _state().stale
+            and _state().index is not None
+            and time.monotonic() - _state().checked_at < FINGERPRINT_RECHECK_SEC
         )
     if recently_matched:
         return {"ok": True, "rebuilt": False}
@@ -583,7 +605,7 @@ def ensure_catalog_index(db: Session) -> dict[str, Any]:
     with _INDEX_LOCK:
         needs = _index_needs_rebuild(fp_text)
         if not needs:
-            _FINGERPRINT_CHECKED_AT = time.monotonic()
+            _state().checked_at = time.monotonic()
     if not needs:
         return {"ok": True, "rebuilt": False, "fingerprint": fp}
     try:
@@ -886,7 +908,7 @@ def search_catalog(
         ensure_catalog_index(db)
 
     with _INDEX_LOCK:
-        index = _INDEX
+        index = _state().index
     results: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
 

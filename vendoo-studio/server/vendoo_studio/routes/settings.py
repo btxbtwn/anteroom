@@ -117,6 +117,9 @@ class PreferredProviderConfig(BaseModel):
 
 
 def _chatgpt_status() -> ChatGPTStatus:
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        return ChatGPTStatus(signed_in=False)
     from vendoo_studio.services import chatgpt_oauth
     from vendoo_studio.services.keychain import get_chatgpt_tokens
 
@@ -140,7 +143,9 @@ def get_provider():
     from vendoo_studio.services import claude_auth
 
     chatgpt = _chatgpt_status()
-    claude = ClaudeStatus(**claude_auth.status())
+    from vendoo_studio.services.service_context import current
+    claude = (ClaudeStatus(installed=False, signed_in=False, install_command="")
+              if current() is not None else ClaudeStatus(**claude_auth.status()))
     photo_provider = get_photo_provider_choice()
     key = get_api_key()
     masked = mask_secret(key)
@@ -302,6 +307,10 @@ async def test_mimo():
     if not key:
         raise HTTPException(400, "Add a MiMo API key in Settings.")
     provider = MiMoProvider(api_key=key)
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        from vendoo_studio.services.hosted_provider import HostedProvider
+        provider = HostedProvider(provider)
     try:
         ok = await provider.test_connection()
     except Exception as exc:

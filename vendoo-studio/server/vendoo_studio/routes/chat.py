@@ -309,7 +309,9 @@ async def analyze_photos(conv_id: str, db: Session = Depends(get_db)):
     if not photos:
         raise HTTPException(400, "No photos to analyze")
 
-    paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]
+    paths = [str(path) for path in await asyncio.to_thread(
+        photo_store().local_paths, [p.stored_filename for p in photos],
+    )]
     analysis_fingerprint = photo_fingerprint(photos)
 
     try:
@@ -370,7 +372,9 @@ async def generate_listing(conv_id: str, resume: bool = False, db: Session = Dep
     seller_answers = stored_seller_answers(repo, conv_id, item_details)
     if seller_answers:
         item_details += "\nSeller answers:\n" + seller_answers
-    paths = [str(path) for path in photo_store().local_paths([p.stored_filename for p in photos])]
+    paths = [str(path) for path in await asyncio.to_thread(
+        photo_store().local_paths, [p.stored_filename for p in photos],
+    )]
     analysis_fingerprint = photo_fingerprint(photos)
     photo_count = len(photos)
     # Release the request-scoped session before background work opens its own.

@@ -299,6 +299,10 @@ def _write_unlocked(payload: dict) -> None:
 
 
 def read_settings() -> dict:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        return context.settings.read()
     with _lock:
         return _read_unlocked()
 
@@ -317,11 +321,20 @@ def record_vendoo_inventory_sync(finished_at: str) -> None:
 
 
 def write_settings(payload: dict) -> None:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        context.settings.write(payload)
+        return
     with _lock:
         _write_unlocked(payload)
 
 
 def update_settings(mutator) -> dict:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        return context.settings.update(mutator)
     with _lock:
         payload = _read_unlocked()
         mutator(payload)
@@ -825,6 +838,10 @@ def normalize_theme(value: object) -> ThemeChoice:
 
 def vendoo_enabled() -> bool:
     """Settings → Listings → Send to Vendoo. Missing means on."""
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None and not context.vendoo_available:
+        return False
     return bool(get_ui_prefs()[VENDOO_ENABLED_KEY])
 
 

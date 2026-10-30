@@ -182,8 +182,8 @@ def test_account_change_during_read_is_rejected(imported):
 def test_account_change_after_photos_cleans_files(imported, monkeypatch):
     original = inventory_import.download_photos
 
-    async def change(urls):
-        result = await original(urls)
+    async def change(urls, collection_id):
+        result = await original(urls, collection_id)
         imported.remote.accounts["etsy"]["connectedAt"] = 2
         return result
 
