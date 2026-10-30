@@ -56,8 +56,6 @@ class ValidationResponse(BaseModel):
 
 @router.get("/api/conversations/{conv_id}/listing")
 def get_listing(conv_id: str, db: Session = Depends(get_db)):
-    from vendoo_studio.services.listing_generate import align_size_fields
-
     conv_repo = ConversationRepo(db)
     if not conv_repo.get(conv_id):
         raise HTTPException(404, "Conversation not found")
@@ -72,54 +70,10 @@ def get_listing(conv_id: str, db: Session = Depends(get_db)):
     if latest:
         listing_data = copy.deepcopy(latest.listing_json)
 
-    changed = False
-    if latest:
-        from vendoo_studio.services.chat_listing import recover_saved_chat_clears
-
-        recovered = recover_saved_chat_clears(db, conv_id, latest)
-        if recovered != listing_data:
-            listing_data = recovered
-            changed = True
-    if isinstance(listing_data, dict):
-        from vendoo_studio.services.depop_measurements import sync_depop_measurements
-        from vendoo_studio.services.seller_overrides import (
-            expand_depop_multi,
-            preserving_locks,
-            sync_unlocked_prices,
-        )
-        from vendoo_studio.services.vendoo_import import parse_notes
-
-        notes = parse_notes(conv_repo.get(conv_id).notes)
-
-        def _normalize(listing: dict) -> None:
-            align_size_fields(listing)
-            normalize_listing_dropdowns(listing)
-
-        if expand_depop_multi(listing_data):
-            changed = True
-        if sync_depop_measurements(listing_data, notes):
-            changed = True
-        before = copy.deepcopy(listing_data)
-        preserving_locks(listing_data, _normalize)
-        if listing_data != before:
-            changed = True
-        if sync_unlocked_prices(listing_data):
-            changed = True
-    if changed:
-        revision = listing_repo.save_revision(
-            conv_id,
-            listing_data,
-            source="dropdown_normalize",
-            parent_revision_id=revision_id,
-        )
-        revision_id = revision.id
-
-    from vendoo_studio.services.seller_overrides import capture_locked, restore_locked
-
     photo_count = len(conv_repo.get_photos(conv_id))
-    locked = capture_locked(listing_data)
-    validation = validate_listing(listing_data, photo_count, require_photos=True)
-    restore_locked(listing_data, locked)
+    # Validation can normalize its input. Return the saved values unchanged;
+    # opening a listing must not look like a seller edit on the next save.
+    validation = validate_listing(copy.deepcopy(listing_data), photo_count, require_photos=True)
 
     return ListingResponse(
         conversation_id=conv_id,

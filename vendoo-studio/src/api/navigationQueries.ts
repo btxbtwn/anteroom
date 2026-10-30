@@ -27,11 +27,11 @@ function warmPhotoThumbnails(photos: Photo[]) {
   }
 }
 
-// Only reads without side effects belong here. In particular, GET listing
-// normalizes saved fields, so it starts on click, never on hover or focus.
+// Only reads without side effects belong here.
 export function prefetchListingReads(client: QueryClient, id: string) {
   return Promise.all([
     client.prefetchQuery({ queryKey: ["conversation", id], queryFn: () => api.conversations.get(id), retry: false }),
+    client.prefetchQuery({ queryKey: ["listing", id], queryFn: () => api.listings.get(id), retry: false }),
     client.prefetchQuery({ queryKey: ["photos", id], queryFn: () => api.conversations.photos(id), retry: false })
       .then(() => warmPhotoThumbnails(client.getQueryData<Photo[]>(["photos", id]) ?? [])),
     client.prefetchQuery({ queryKey: ["messages", id], queryFn: () => api.conversations.messages(id), retry: false }),

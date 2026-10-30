@@ -213,6 +213,7 @@ def test_inventory_quantities_do_not_decode_historical_listing_bodies(env):
 
     # Reject a full-body SELECT even when SQLAlchemy cached its JSON decoder.
     def scalar_only(execution):
+        assert "json_extract" not in str(execution.statement.compile(dialect=env.db.bind.dialect)).lower()
         for column in execution.statement.selected_columns:
             assert not (getattr(column, "table", None) is ListingRevision.__table__
                         and column.key == "listing_json"), "Inventory loaded a complete historical listing"
@@ -224,6 +225,13 @@ def test_inventory_quantities_do_not_decode_historical_listing_bodies(env):
         assert _quantities(env.db, set()) == {}
     finally:
         event.remove(env.db, "do_orm_execute", scalar_only)
+
+    if env.db.bind.dialect.name == "sqlite":
+        from sqlalchemy import text
+
+        plan = env.db.execute(text("EXPLAIN QUERY PLAN SELECT conversation_id, inventory_quantity, created_at "
+                                   "FROM listing_revisions ORDER BY created_at")).all()
+        assert any("COVERING INDEX ix_listing_revisions_quantity_history" in row[-1] for row in plan)
 
 
 def test_refunded_or_cancelled_orders_do_not_sell_the_item(env):
