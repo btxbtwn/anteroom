@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-Branch: `feat/hosted-desktop-parity`. The public release remains 0.1.561 until
+Branch: `feat/hosted-desktop-parity`, PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The public release remains 0.1.561 until
 this work is verified. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
@@ -94,3 +94,11 @@ project verified both Vault and private worker claims under the restricted
 roles. The transaction rolled back test credentials, tables, functions, grants
 and migration stamps; production stays at `c93392ae8c16`. These are intermediate
 checks. Full media, worker and UI parity remain unfinished.
+
+The 0.1.570 integration passed 828 frontend tests, lint, both desktop and hosted
+frontend builds, version/changelog checks and gitleaks. The complete SQLite
+backend run passed 3,823 tests and 1,424 subtests (52 platform/feature skips).
+The complete Postgres run passed 3,826 tests and 1,424 subtests (49 skips).
+Import test fixtures now pass the destination conversation ID required by
+owned photo storage. No production migration, deployment or plan upgrade was
+performed during this verification.
