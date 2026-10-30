@@ -27,7 +27,7 @@ def test_reviewed_bulk_prices_and_copies_are_owned_stale_checked_and_draft_only(
     endpoint = '/api/price-drop/batch'
     runtime = client.get('/api/runtime', headers=alice).json()['features']
     assert {'bulk_actions', 'bulk_copy', 'bulk_markdowns'} <= set(runtime)
-    assert not {'bulk_delete', 'bulk_regenerate', 'bulk_edit', 'marketplace_actions'} & set(runtime)
+    assert not {'bulk_delete', 'bulk_regenerate', 'marketplace_actions'} & set(runtime)
     assert client.post(endpoint + '/preview', json={'conversation_ids': [first]}).status_code == 401
     assert client.post(endpoint + '/preview', headers=alice, json={'conversation_ids': [foreign]}).status_code == 404
     preview = client.post(endpoint + '/preview', headers=alice, json={'conversation_ids': [first, second]})

@@ -165,6 +165,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
     app.include_router(suggestions.router)
     from vendoo_studio.routes.hosted_prices import router as prices_router
     app.include_router(prices_router)
+    from vendoo_studio.routes.hosted_bulk_edit import router as bulk_edit_router
+    app.include_router(bulk_edit_router)
+    from vendoo_studio.routes.catalog import dropdown_options
+    app.add_api_route('/api/catalog/dropdown-options', dropdown_options, methods=['GET'])
     from vendoo_studio.routes.conversations import preview_copy, copy_conversation, copy_result, ConversationResponse
     app.add_api_route('/api/conversations/{conv_id}/copy-preview', preview_copy, methods=['GET'])
     app.add_api_route('/api/conversations/{conv_id}/copy', copy_conversation, methods=['POST'], response_model=ConversationResponse)

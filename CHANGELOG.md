@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.589 — 2026-10-30
+
+- Review and save field, tag and label changes across multiple items on the web, with stale-review and queued-work checks before each save.
+
 ## 0.1.588 — 2026-10-30
 
 - The listing agent can use photo-supported custom answers when a marketplace field allows text, instead of leaving required fields blank because its suggestions do not fit.

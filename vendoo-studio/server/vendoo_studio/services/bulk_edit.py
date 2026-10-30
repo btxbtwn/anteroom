@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from contextlib import nullcontext
 from typing import Literal
 
 from fastapi import HTTPException
@@ -262,6 +263,10 @@ def preview(db: Session, body: PreviewRequest) -> dict:
 
 
 def apply(db: Session, body: ApplyRequest) -> dict:
+    from vendoo_studio.services.service_context import current
+    from vendoo_studio.services.background_tasks import require_idle
+
+    hosted = current() is not None
     categories = resolve_categories(db, body.edits)
     applied, skipped, seen = [], [], set()
     for reviewed in body.rows:
@@ -270,8 +275,12 @@ def apply(db: Session, body: ApplyRequest) -> dict:
             continue
         seen.add(conv_id)
         try:
-            with start_gate():
+            # Hosted edits serialize on the owned row, rather than holding the
+            # desktop browser's process-wide send gate across other accounts.
+            with (nullcontext() if hosted else start_gate()):
                 db.expire_all()
+                if hosted:
+                    require_idle(db, conv_id)
                 conv, revision = _read(db, conv_id)
                 if revision.id != reviewed.expected_revision_id or basis(conv, revision.id) != reviewed.expected_basis:
                     raise ValueError(CHANGED)

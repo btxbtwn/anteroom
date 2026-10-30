@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.584. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.587. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
@@ -198,3 +198,14 @@ bulk-price rejection checks passed. The Suggestions feed is being connected on
 generation. The canonical rules use owned inventory, photos, sales and stale-day
 preferences; queued/running draft tasks stay out of the feed. Cards open existing
 listing controls or the reviewed markdown dialog. The assistant remains gated.
+
+PR #999 is merged. Release 0.1.587 is deployed, including Suggestions and the
+newer eBay offers UI fix. Its final image passed private startup/isolation checks
+and public health/version and unsigned Suggestions rejection checks. The brief
+unmerged 0.1.585 deployment was restored to 0.1.584 before this merged release.
+
+On `feat/hosted-bulk-edits`, the shared bulk editor reviews and saves owned
+fields, tags and labels with row locks, draft-task checks and revision/basis/result
+fences. Static dropdown choices use the canonical catalog handler. Bulk category
+pickers and category writes stay gated until the verified browser-backed catalog
+is connected. Desktop retains its existing category pickers and send gate.
