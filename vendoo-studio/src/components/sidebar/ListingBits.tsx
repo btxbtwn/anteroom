@@ -1,3 +1,4 @@
+import { StudioImage } from "../StudioImage";
 import { useState, type ReactNode } from "react";
 import { CheckIcon, ChevronDownIcon, ImageIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -15,7 +16,7 @@ export function ListingThumb({ src, dimmed = false, className }: { src?: string 
       )}
     >
       {showImage ? (
-        <img
+        <StudioImage
           className={cn("block size-full object-cover transition-opacity", dimmed && "opacity-55")}
           src={src ?? undefined}
           alt=""

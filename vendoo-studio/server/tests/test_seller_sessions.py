@@ -197,7 +197,7 @@ def test_outage_fails_closed_without_exposing_diagnostics(client, signing_keys, 
 def test_only_health_is_public_and_desktop_routes_are_absent(client, signing_keys, jwks):
     assert client.get("/api/health").json()["status"] == "ok"
     assert jwks["requests"] == []
-    for path in ["/api/status", "/api/listings", "/docs", "/openapi.json"]:
+    for path in ["/api/desktop/chrome", "/api/extension/pairing-token", "/api/listings", "/docs", "/openapi.json"]:
         assert client.get(path, follow_redirects=False).status_code == 401
         assert client.get(path, headers={"Authorization": "Bearer " + session_token(signing_keys)},
                           follow_redirects=False).status_code == 404

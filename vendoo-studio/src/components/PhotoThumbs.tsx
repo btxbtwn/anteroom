@@ -1,3 +1,4 @@
+import { StudioImage } from "./StudioImage";
 /**
  * Photo thumbnails and the enlarged photo view, shared by the photo tray and
  * the regenerate review. The lightbox follows T3 Code's ExpandedImageDialog
@@ -25,7 +26,7 @@ export function LazyImage({ src, alt = "", className, imgClassName }: {
   return (
     <span className={cn("relative block overflow-hidden", className)}>
       {!loaded ? <Skeleton className="absolute inset-0 rounded-none" aria-hidden="true" /> : null}
-      <img
+      <StudioImage
         src={src}
         alt={alt}
         loading="lazy"
@@ -203,7 +204,7 @@ export function PhotoLightbox({
   /** Quarter turns to show a photo by when the turn is not in the file yet. */
   turns?: number;
   rotating?: boolean;
-  onRotate: (degrees: 90 | -90) => void;
+  onRotate?: (degrees: 90 | -90) => void;
   /** Opens the photo editor for the photo shown. */
   onEdit?: () => void;
   /** The photo shown is an edit of a kept original. */
@@ -263,7 +264,7 @@ export function PhotoLightbox({
           </Button>
         )}
         <div className="relative isolate z-10 flex max-h-full max-w-[calc(92vw-96px)] flex-col items-center">
-          <img
+          <StudioImage
             src={urls[index]}
             alt={`Photo ${index + 1}`}
             className={cn(
@@ -274,15 +275,15 @@ export function PhotoLightbox({
             onClick={onClose}
           />
           <div className="mt-2 flex items-center gap-1.5 text-white/80 text-xs">
-            <Button variant="overlay" size="icon-micro" onClick={() => onRotate(-90)} disabled={rotating} aria-label="Rotate left" title="Rotate left">
+            {onRotate && <Button variant="overlay" size="icon-micro" onClick={() => onRotate(-90)} disabled={rotating} aria-label="Rotate left" title="Rotate left">
               <RotateCcwIcon />
-            </Button>
+            </Button>}
             <span className="font-mono tabular-nums" aria-live="polite">
               {String(index + 1).padStart(2, "0")} / {String(urls.length).padStart(2, "0")}
             </span>
-            <Button variant="overlay" size="icon-micro" onClick={() => onRotate(90)} disabled={rotating} aria-label="Rotate right" title="Rotate right">
+            {onRotate && <Button variant="overlay" size="icon-micro" onClick={() => onRotate(90)} disabled={rotating} aria-label="Rotate right" title="Rotate right">
               <RotateCwIcon />
-            </Button>
+            </Button>}
             {onEdit ? (
               <Button variant="overlay" size="micro" className="ms-1" onClick={onEdit} disabled={rotating} title="Crop, adjust or remove the background">
                 <SlidersHorizontalIcon />

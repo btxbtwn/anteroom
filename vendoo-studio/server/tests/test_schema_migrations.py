@@ -725,3 +725,17 @@ def test_generation_usage_upgrade_preserves_existing_timings(engine, snapshots):
         assert row[0] == "done"
         assert row[1] == 12
         assert row[2] in ("[]", [])
+
+
+def test_hosted_preferences_upgrade_preserves_previous_release_database(engine, snapshots):
+    from alembic import command
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, 'b87e924216cb')
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO conversations (id, title, notes) VALUES ('before-cloud-workspace', 'Coat', 'Keep all notes')"))
+    command.upgrade(config, 'head')
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT title, notes FROM conversations WHERE id='before-cloud-workspace'")).one() == ('Coat', 'Keep all notes')
+        assert connection.scalar(text('SELECT count(*) FROM user_preferences')) == 0
+    from sqlalchemy import inspect
+    assert any(constraint['column_names'] == ['user_id', 'key'] for constraint in inspect(engine).get_unique_constraints('user_preferences'))

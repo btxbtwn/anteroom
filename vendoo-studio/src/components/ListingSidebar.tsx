@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../app/runtime";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -104,6 +105,7 @@ export function ListingSidebar({
   onSettingsSearchResult,
   bulk,
 }: Props) {
+  const runtime = useWorkspaceRuntime();
   const [filters, setFilters] = useState<Filters>(DEFAULT_LISTING_FILTERS);
   const settingsMode = activeView === "settings";
 
@@ -161,6 +163,7 @@ export function ListingSidebar({
   const { data: suggestionData } = useQuery({
     queryKey: ["suggestions"],
     queryFn: api.suggestions.list,
+    enabled: runtime.features.has("generation"),
   });
   const suggestions = suggestionData?.suggestions ?? NO_SUGGESTIONS;
   const listingsById = useMemo(
@@ -286,7 +289,7 @@ export function ListingSidebar({
             data-active={selecting}
             aria-pressed={selecting}
             aria-label={selecting ? "Stop selecting" : "Select listings to regenerate"}
-            disabled={bulk.running}
+            disabled={bulk.running || !runtime.features.has("bulk_actions")}
             onClick={() => {
               if (selecting) exitSelecting();
               else setSelecting(true);
@@ -370,6 +373,7 @@ export function ListingSidebar({
               title={selecting ? "Stop selecting" : "Select listings to regenerate"}
               aria-label={selecting ? "Stop selecting" : "Select listings to regenerate"}
               aria-pressed={selecting}
+              disabled={bulk.running || !runtime.features.has("bulk_actions")}
               onClick={() => {
                 if (bulk.running) return;
                 if (selecting) exitSelecting();
@@ -390,7 +394,7 @@ export function ListingSidebar({
             </button>
           </div>
 
-          <SuggestionsPanel
+          {runtime.features.has("generation") && <SuggestionsPanel
             variant="sidebar"
             selectedConvId={selectedConvId}
             onSelect={onSelect}
@@ -399,7 +403,7 @@ export function ListingSidebar({
             selectLocked={bulk.running}
             canSelect={(suggestion) => suggestionEligibleIds.includes(suggestion.conversation_id)}
             onToggleSelect={(id, shift) => toggleSelect(id, shift, suggestionEligibleIds)}
-          />
+          />}
 
           <ListingFilters
             filters={filters}

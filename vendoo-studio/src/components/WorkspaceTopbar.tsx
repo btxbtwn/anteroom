@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactElement } from "react";
+import type { MouseEvent, ReactElement, ReactNode } from "react";
 import { PanelLeftCloseIcon, PanelLeftIcon, PanelRightCloseIcon, PanelRightIcon } from "lucide-react";
 import { Toggle } from "./ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -11,6 +11,7 @@ export function stopTitlebarDrag(event: MouseEvent<HTMLElement>) {
 
 interface Props {
   crumbs: WorkspaceCrumbs;
+  accountControls?: ReactNode;
   /** Listings sidebar is open. */
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
@@ -70,7 +71,7 @@ function PanelToggle({
  * the window's top edge in their own colours. With the listings sidebar open the
  * toggle sits over the sidebar and the crumbs start 20px into the main pane.
  */
-export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPanel }: Props) {
+export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPanel, accountControls }: Props) {
   return (
     <header className="workspace-topbar absolute inset-x-0 top-0 z-2 flex h-(--workspace-topbar-height) items-center gap-2 pr-2.5 pl-(--topbar-inset) select-none [--topbar-inset:--spacing(3)] max-[900px]:hidden [html.desktop-app_&]:[--topbar-inset:var(--traffic-light-inset)]">
       {/* The pywebview window drags by this layer; controls sit above it. */}
@@ -116,6 +117,7 @@ export function WorkspaceTopbar({ crumbs, sidebarOpen, onToggleSidebar, rightPan
           </PanelToggle>
         </div>
       )}
+      {accountControls && <div className="relative flex shrink-0 items-center gap-2 [-webkit-app-region:no-drag]">{accountControls}</div>}
     </header>
   );
 }

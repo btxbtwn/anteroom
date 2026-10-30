@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../app/runtime";
 import { GENERAL_LISTING_FIELDS } from "../generalListingFields";
 import { SellwildAccountChoices } from "./SellwildAccountChoices";
 import React from "react";
@@ -166,6 +167,7 @@ export function ListingEditor({
   onEditInventoryLocation,
   chat,
 }: Props) {
+  const runtime = useWorkspaceRuntime();
   const queryClient = useQueryClient();
   const edits = React.useMemo(() => listingEdits(queryClient, convId), [queryClient, convId]);
   const editState = React.useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
@@ -319,12 +321,12 @@ export function ListingEditor({
     if (onFacebook) selected.add("facebook");
     return [
       "general",
-      ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => id === "vinted" || selected.has(id)),
+      ...["ebay", "poshmark", "mercari", "depop", "etsy", "grailed", "vinted", "facebook", "sellwild"].filter((id) => (!runtime.hosted || runtime.marketplaceForms.has(id)) && (id === "vinted" || selected.has(id))),
     ];
-  }, [marketplaceSettings?.selected, onFacebook]);
+  }, [marketplaceSettings?.selected, onFacebook, runtime]);
 
   React.useEffect(() => {
-    if (!data?.current_revision_id || unsaved || !sessionActive) return;
+    if (runtime.hosted || !data?.current_revision_id || unsaved || !sessionActive) return;
     let cancelled = false;
     const remaining = tabs.filter(tab => tab !== "general");
     const warm = async () => {
@@ -336,7 +338,7 @@ export function ListingEditor({
     // Leave connections available for the selected form and the seller's edits.
     void Promise.all([warm(), warm()]);
     return () => { cancelled = true; };
-  }, [queryClient, convId, data, tabs, unsaved, sessionActive]);
+  }, [queryClient, convId, data, tabs, unsaved, sessionActive, runtime.hosted]);
 
   React.useEffect(() => {
     if (!tabs.includes(editTab)) setEditTab("general");
@@ -371,7 +373,7 @@ export function ListingEditor({
     refetchInterval: (query) => (sessionActive ? activityPollMs(Boolean(query.state.data?.busy)) : false),
   });
   const generating = chatBusy || Boolean(activity?.busy) || schemaProbeActive;
-  const askChat = generating ? undefined : onAskChat;
+  const askChat = generating || !runtime.features.has("generation") ? undefined : onAskChat;
 
   const listing = editState.draft ?? data?.listing ?? {};
   const listingTitle = String(listing.title || "Listing");
@@ -564,13 +566,13 @@ export function ListingEditor({
       <MarketplacesLayout key={convId} convId={convId} revisionId={data?.current_revision_id || null} title={listingTitle}
         disabled={generating || unsaved} etsyEligible={etsyEligible} onAskChat={askChat} onEditField={openBlocker} ids={tabs}
         onPrepare={(tab) => {
-          if (!unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
+          if (!runtime.hosted && !unsaved && data?.current_revision_id) void prefetchListingForm(queryClient, convId, tab, data.listing, data.current_revision_id);
         }}
         selected={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
-        railActions={<RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} />}
+        railActions={runtime.features.has("generation") ? <RegenerateListingButton convId={convId} variant="ghost-muted" onRegenerated={onCleared} /> : undefined}
         railStatus={<>
           {editState.saving && <span role="status" className="text-xs text-muted-foreground">Saving…</span>}
-          <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>
+          {!runtime.hosted && <span className="ms-auto"><ListingActionsMenu convId={convId} onCleared={onCleared} /></span>}
         </>}
         onSelect={(id) => {
           setFieldTarget(null);
@@ -604,7 +606,7 @@ export function ListingEditor({
             tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
             target={fieldTarget}
             onAskChat={askChat}
-            disabled={generating}
+            disabled={generating || (runtime.hosted && reviewTab === "forms" && editTab !== "general")}
             saving={unsaved}
             onChange={edits.save}
           />
@@ -725,6 +727,7 @@ export function StructuredEditor({
   saving?: boolean;
   onAskChat?: (text: string) => void;
 }) {
+  const runtime = useWorkspaceRuntime();
   const formRef = React.useRef<HTMLFieldSetElement>(null);
   const editingDisabled = React.useRef(Boolean(disabled));
   editingDisabled.current = Boolean(disabled);
@@ -752,7 +755,7 @@ export function StructuredEditor({
   const preflight = useQuery({
     queryKey: ["native-preflight", convId, revisionId],
     queryFn: () => api.nativeMarketplaces.preflight(convId),
-    enabled: nativeTab && Boolean(revisionId) && !saving,
+    enabled: runtime.features.has("marketplace_actions") && nativeTab && Boolean(revisionId) && !saving,
     staleTime: 15_000,
     placeholderData: (previous) => previous,
   });
@@ -761,7 +764,7 @@ export function StructuredEditor({
   const formsQuery = useQuery({
     queryKey: ["listing-fields", convId],
     queryFn: () => api.vendooApi.listingFields(convId),
-    enabled: !nativeTab,
+    enabled: !runtime.hosted && !nativeTab,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     placeholderData: (previous) => previous,
@@ -770,7 +773,7 @@ export function StructuredEditor({
   const dropdownQuery = useQuery({
     queryKey: ["catalog-dropdown-options"],
     queryFn: api.catalog.dropdownOptions,
-    enabled: !nativeTab,
+    enabled: !runtime.hosted && !nativeTab,
     staleTime: Infinity,
   });
   const { data: dropdownOptions } = dropdownQuery;

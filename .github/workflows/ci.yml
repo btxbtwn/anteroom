@@ -119,6 +119,12 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - name: Build hosted workspace
+        env:
+          ANTEROOM_HOSTED_BUILD: "1"
+          VITE_SUPABASE_URL: "https://build-validation.supabase.co"
+          VITE_SUPABASE_PUBLISHABLE_KEY: "public-build-validation"
+        run: npm run build
 
   studio-backend:
     name: Studio backend

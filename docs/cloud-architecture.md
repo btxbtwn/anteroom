@@ -1,6 +1,6 @@
 # Anteroom in the cloud: Mac, web and iPhone in sync
 
-Status: approved 2026-10-26, with Supabase and Fly.io. Building step 2: hosted sign-in, drafts, General editing and private photos.
+Status: approved 2026-10-26, with Supabase and Fly.io. Building step 2: hosted sign-in and the shared desktop React workspace. Inventory, General editing, seller notes, private photos and revision history use seller-scoped hosted endpoints. The separate cloud draft editor has been removed.
 Postgres support and the photo-store interface have merged (#790, #787).
 The hosted session-verification foundation is described in
 [hosted-auth.md](hosted-auth.md). The
@@ -8,6 +8,32 @@ The hosted session-verification foundation is described in
 and new records. [Hosted database isolation](seller-isolation.md) adds restricted
 seller sessions and row policies; seller-specific constraints protect draft routes. Photos now have private Storage
 scoping; account linking/import and other file-backed services remain separate work.
+
+## Shared workspace port
+
+The hosted entry point mounts `src/app/App.tsx` behind Supabase sign-in. It
+installs the authenticated transport used by the existing API client; private
+images use that transport too. Each account gets a new query client, and an
+account change reloads the document to clear module-level stores. The desktop
+entry keeps its local transport and full capabilities.
+
+`GET /api/runtime` declares the capabilities that have hosted implementations.
+The current cloud workspace supports inventory, General fields, notes, photo
+upload/view/delete/order, listing history/restore, and per-seller preferences.
+The existing Poshmark browser reader remains a read-only preview in the shared
+marketplace layout. A draft edit never queues generation or browser actions.
+
+The remaining port is backend work, rather than more frontend screens:
+
+- Move provider settings and generation to seller-scoped Vault and Storage.
+- Add reviewed, seller-approved marketplace write contracts to the Chrome Bridge.
+- Port settings, account linking/import, analytics and other file-backed services
+  before enabling their existing pages.
+- Connect the Mac worker for capabilities unavailable in a browser or on iPhone.
+
+The hosted app does not expose the desktop HTTP server, Keychain, filesystem,
+loopback extension socket, or desktop startup/background services. Local
+inventory remains local until the account linking/import step is implemented.
 
 ## Goal
 

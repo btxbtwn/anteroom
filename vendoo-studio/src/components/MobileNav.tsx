@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../app/runtime";
 import type { ComponentType } from "react";
 import {
   BoxIcon,
@@ -55,6 +56,7 @@ export function MobileNav({
   activeView: WorkspaceView;
   onNavigate: (target: MobileNavTarget) => void;
 }) {
+  const runtime = useWorkspaceRuntime();
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetPopup
@@ -74,6 +76,7 @@ export function MobileNav({
               <button
                 key={id}
                 type="button"
+                disabled={!runtime.views.has(id)}
                 data-active={active}
                 aria-current={active ? "page" : undefined}
                 className="flex min-h-12 w-full cursor-pointer items-center gap-3 rounded-xl px-3 text-left text-base font-medium text-foreground/85 outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:bg-accent data-[active=true]:text-foreground"

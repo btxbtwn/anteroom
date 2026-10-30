@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../app/runtime";
 /**
  * The photos and video at the top of one marketplace's form, laid out like
  * Vendoo's Photo Manager and the marketplaces' own forms: the tiles it sends
@@ -36,6 +37,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   /** Shown inside the marketplace's own form: its hint, slot captions, and file types. */
   page?: { hint?: string; slots?: string[]; accept?: string };
 }) {
+  const runtime = useWorkspaceRuntime();
   const queryClient = useQueryClient();
   const input = React.useRef<HTMLInputElement>(null);
   const dragRef = React.useRef<string | null>(null);
@@ -51,7 +53,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const { data: item = [] } = useQuery({ queryKey: ["photos", convId], queryFn: () => api.conversations.photos(convId) });
   const { data: own = [] } = useQuery({ queryKey: ownKey, queryFn: () => api.conversations.photos(convId, marketplace) });
   const { data: rules } = useQuery({ queryKey: ["marketplace-media"], queryFn: api.marketplaceMedia.rules, staleTime: Infinity });
-  const videoRules = rules?.video_rules?.[marketplace];
+  const videoRules = runtime.hosted ? undefined : rules?.video_rules?.[marketplace];
   const { data: library } = useQuery({
     queryKey: ["listing-videos", convId], queryFn: () => api.listingVideos.list(convId), enabled: Boolean(videoRules),
   });
@@ -297,9 +299,9 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       urls={all.map((photo) => photo.url)}
       index={previewIndex}
       onStep={(next) => setPreviewId(all[next].id)}
-      onRotate={(degrees) => void rotate(all[previewIndex].id, degrees)}
+      onRotate={runtime.features.has("photo_edits") ? (degrees) => void rotate(all[previewIndex].id, degrees) : undefined}
       edited={Boolean(all[previewIndex].edits)}
-      onEdit={() => { setEditingId(all[previewIndex].id); setPreviewId(null); }}
+      onEdit={runtime.features.has("photo_edits") ? () => { setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
       onMove={previewIndex < picked.length && !locked ? (delta) => {
         const next = moveItem(ids, previewIndex, previewIndex + delta);
         if (next !== ids) setPick(next);

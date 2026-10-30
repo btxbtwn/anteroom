@@ -1,3 +1,5 @@
+import { hostedBrowser } from "./hostedBrowser";
+import { studioFetch, hasHostedApiSession } from "./transport";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
 import type { ListingVideo, ListingVideoLibrary, MarketplaceMediaRules } from "./listingVideos";
@@ -117,7 +119,7 @@ export function errorMessage(body: ErrorBody, fallback: string): string {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await studioFetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
   });
@@ -204,7 +206,7 @@ async function followAssistant(
   handlers: AssistantStreamHandlers,
   signal?: AbortSignal,
 ): Promise<{ error: string }> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await studioFetch(`${BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
     body,
@@ -233,7 +235,7 @@ export const api = {
     upload: async (convId: string, file: File): Promise<ListingVideo> => {
       const form = new FormData();
       form.append("file", file);
-      const response = await fetch(`${BASE}/conversations/${convId}/videos`, { method: "POST", body: form });
+      const response = await studioFetch(`${BASE}/conversations/${convId}/videos`, { method: "POST", body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The video could not be uploaded.");
       return data;
@@ -314,7 +316,7 @@ export const api = {
       const form = new FormData();
       files.forEach((file) => form.append("files", file));
       form.append("garment", garment);
-      const response = await fetch(`${BASE}/measurements/read`, { method: "POST", body: form });
+      const response = await studioFetch(`${BASE}/measurements/read`, { method: "POST", body: form });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
       return data as MeasurementReadResult;
@@ -332,7 +334,7 @@ export const api = {
       const form = new FormData();
       files.forEach((file) => form.append("files", file));
       if (askingPrice != null) form.append("asking_price", String(askingPrice));
-      const response = await fetch(`${BASE}/scout`, { method: "POST", body: form });
+      const response = await studioFetch(`${BASE}/scout`, { method: "POST", body: form });
       const data = await response.json().catch(() => null);
       if (!response.ok) throw new Error(errorMessage(data, `Check failed: ${response.status}`));
       return data as ScoutCheck;
@@ -548,7 +550,7 @@ export const api = {
     vintedBrands: (convId: string, q: string, category: string) =>
       request<{ options: string[] }>(`/conversations/${convId}/native-marketplaces/vinted/brands?${new URLSearchParams({ q, category })}`),
     form: (convId: string, marketplace: string, revisionId?: string | null) =>
-      request<MarketplaceForm>(`/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
+      hostedBrowser()?.form(convId, marketplace, revisionId) ?? request<MarketplaceForm>(`/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
     preflight: (convId: string, sellwild?: { categoryId?: number; conditionId?: number }) => {
       const params = new URLSearchParams();
@@ -768,7 +770,7 @@ export const api = {
       request<Photo>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
     /** A smaller JPEG of unsaved edits; `crop: false` keeps the whole frame to draw the crop on. */
     previewPhotoEdits: async (convId: string, photoId: string, edits: PhotoEdits, crop: boolean, signal?: AbortSignal) => {
-      const res = await fetch(`${BASE}/conversations/${convId}/photos/${photoId}/edits/preview?crop=${crop}`, {
+      const res = await studioFetch(`${BASE}/conversations/${convId}/photos/${photoId}/edits/preview?crop=${crop}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(edits),
@@ -793,10 +795,22 @@ export const api = {
         body: JSON.stringify(orderedIds),
       }),
     uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => {
+      if (hasHostedApiSession()) return (async () => {
+        const ids: string[] = []; const errors: string[] = [];
+        for (const file of files) {
+          if (file.size > 10 * 1024 * 1024) { errors.push(`${file.name}: choose a photo smaller than 10 MB.`); continue; }
+          const query = marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : "";
+          const response = await studioFetch(`${BASE}/drafts/${encodeURIComponent(convId)}/photos${query}`, { method: "POST", body: file });
+          if (!response.ok) { errors.push(`${file.name}: could not upload this photo.`); continue; }
+          ids.push((await response.json()).id);
+        }
+        const photos = await request<Photo[]>(`/conversations/${encodeURIComponent(convId)}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`);
+        return { ok: errors.length === 0, count: ids.length, photos: photos.filter(photo => ids.includes(photo.id)), errors };
+      })();
       const form = new FormData();
       files.forEach((f) => form.append("files", f));
       if (marketplace) form.append("marketplace", marketplace);
-      return fetch(`${BASE}/conversations/${convId}/photos`, { method: "POST", body: form }).then(
+      return studioFetch(`${BASE}/conversations/${convId}/photos`, { method: "POST", body: form }).then(
         async (r) => {
           const data = await r.json();
           if (!r.ok) {
@@ -855,7 +869,7 @@ export const api = {
       },
       signal?: AbortSignal,
     ): Promise<void> => {
-      const res = await fetch(`${BASE}/conversations/${convId}/price-drop/comps`, {
+      const res = await studioFetch(`${BASE}/conversations/${convId}/price-drop/comps`, {
         method: "POST",
         headers: { Accept: "text/event-stream" },
         cache: "no-store",

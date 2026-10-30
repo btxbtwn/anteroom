@@ -1,3 +1,7 @@
+## 0.1.556 — 2026-10-30
+
+- Open your cloud inventory in the same Anteroom workspace as the desktop app, with listing fields, private photos, notes, and version history.
+
 # Changelog
 
 Every change to Anteroom, newest first. Anteroom bumps its patch version

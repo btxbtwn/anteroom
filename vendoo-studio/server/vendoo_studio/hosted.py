@@ -97,7 +97,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; "
             "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         )
@@ -105,6 +105,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
 
     from vendoo_studio.routes.hosted_drafts import router
     app.include_router(router)
+    from vendoo_studio.routes.hosted_workspace import router as workspace_router
+    app.include_router(workspace_router)
     from vendoo_studio.routes.hosted_photos import router as photo_router
     app.include_router(photo_router)
     if web_dir is not None:

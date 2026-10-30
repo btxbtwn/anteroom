@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../app/runtime";
 import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -28,6 +29,7 @@ interface Props {
 }
 
 export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
+  const runtime = useWorkspaceRuntime();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -302,7 +304,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
               onDragEnd={resetDrag}
               title={canReorder ? "Drag to set upload order" : undefined}
               onOpen={() => openPreview(p.id)}
-              onRotate={() => rotate(p.id, 90)}
+              onRotate={runtime.features.has("photo_edits") ? () => rotate(p.id, 90) : undefined}
               rotating={rotatingId === p.id}
               onRemove={() => deleteMutation.mutate(p.id)}
               controlsInViewerOnTouch
@@ -315,12 +317,12 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           urls={photos.map((photo) => photo.url)}
           index={previewIndex}
           rotating={rotateMutation.isPending}
-          onRotate={(degrees) => rotate(previewPhoto.id, degrees)}
+          onRotate={runtime.features.has("photo_edits") ? (degrees) => rotate(previewPhoto.id, degrees) : undefined}
           edited={Boolean(previewPhoto.edits)}
-          onEdit={() => {
+          onEdit={runtime.features.has("photo_edits") ? () => {
             setEditingId(previewPhoto.id);
             setPreviewId(null);
-          }}
+          } : undefined}
           onStep={(next) => setPreviewId(photos[next].id)}
           onMove={(delta) => {
             const next = moveItem(photos, previewIndex, previewIndex + delta);

@@ -1,3 +1,4 @@
+import { useWorkspaceRuntime } from "../app/runtime";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -38,6 +39,7 @@ type Row = {
  * outside cannot throw away what was typed.
  */
 export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }: Props) {
+  const runtime = useWorkspaceRuntime();
   const [defaults, setDefaults] = useState<BulkUploadDefaults>(EMPTY_DEFAULTS);
   const boxes = useQuery({ queryKey: BOXES_QUERY_KEY, queryFn: api.boxes.list }).data?.boxes ?? [];
   const box = boxes.find((row) => row.id === defaults.boxId);
@@ -148,7 +150,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
       }
       const { sku, garment, measurements } = rows[index]!;
       return { ...group, sku, garment, measurements, rotations };
-    }), generate);
+    }), generate && runtime.features.has("generation"));
   };
 
   // Enter moves on like a spreadsheet instead of submitting half a box.
@@ -389,7 +391,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           <button
             type="button"
             className="btn btn-secondary"
-            disabled={reading !== null}
+            disabled={reading !== null || !runtime.features.has("generation")}
             title="Fill blank measurements from photos with a yardstick on the item"
             onClick={() => void readFromPhotos()}
           >
@@ -398,9 +400,9 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           <button type="button" className="btn btn-secondary" disabled={invalidCog || reading !== null} onClick={() => confirm(false)}>
             Create drafts only
           </button>
-          <button type="submit" className="btn btn-primary" disabled={invalidCog || reading !== null}>
+          {runtime.features.has("generation") && <button type="submit" className="btn btn-primary" disabled={invalidCog || reading !== null}>
             Create and generate {count}
-          </button>
+          </button>}
         </div>
       </form>
       {zoom ? (
