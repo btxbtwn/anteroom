@@ -225,14 +225,17 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
             # Photo analysis and sold-comps research can take minutes; say so
             # before they start instead of leaving the chat silent.
             yield sse_event("status", "Reading the listing…")
+            from vendoo_studio.services.option_lookup import OptionCatalog, chat_with_options
+
+            option_catalog = OptionCatalog({})
             build_db = SessionLocal()
             try:
                 messages = attach_to_last_user_turn(
-                    await build_chat_messages(conv_id, build_db, body.text), attachments,
+                    await build_chat_messages(conv_id, build_db, body.text, option_catalog), attachments,
                 )
             finally:
                 build_db.close()
-            async for item in iter_with_keepalives(provider.chat(messages, stream=True)):
+            async for item in iter_with_keepalives(chat_with_options(provider, messages, option_catalog)):
                 if work.cancelled:
                     yield "data: [DONE]\n\n"
                     return

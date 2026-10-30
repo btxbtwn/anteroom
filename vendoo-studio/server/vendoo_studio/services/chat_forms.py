@@ -16,7 +16,7 @@ from vendoo_studio.services.marketplaces import get_selected_marketplaces
 from vendoo_studio.services.seller_overrides import get_path
 
 
-async def forms_prompt(db: Session, conv_id: str) -> str:
+async def forms_prompt(db: Session, conv_id: str, option_catalog=None) -> str:
     revisions = ListingRepo(db).get_revisions(conv_id)
     if not revisions or not isinstance(revisions[0].listing_json, dict):
         return ""
@@ -60,6 +60,12 @@ async def forms_prompt(db: Session, conv_id: str) -> str:
         unique = {row["key"]: row for row in fields}
         forms[market] = {"fields": _values(list(unique.values()), listing, market)}
     await _vinted_choices(forms["vinted"], listing)
+    from vendoo_studio.services.option_lookup import project_row
+
+    if option_catalog is not None:
+        option_catalog.add_forms(forms)
+    forms = {market: {**form, "fields": [project_row(row) for row in form.get("fields") or []]}
+             for market, form in forms.items()}
     return (
         "\n\n--- Current editable forms ---\n"
         "These current editor forms override historical, reference and saved native form instructions above. "

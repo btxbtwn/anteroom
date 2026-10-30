@@ -28,8 +28,6 @@ log = logging.getLogger("vendoo_studio.native_field_fill")
 
 MARKETS = ("ebay", "poshmark", "mercari", "depop", "sellwild")
 NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "sellwild": "Sellwild"}
-# Limit optional item-field choices; required categories use the native catalog.
-MAX_CHOICES = 300
 CATEGORY_PATHS = {f"direct_category_ids.{market}" for market in MARKETS} | {"sellwild_specifics.nativeCategoryId"}
 
 FILL_RULES = (
@@ -59,7 +57,7 @@ def fillable_rows(form: dict, market: str, listing: dict, *, evidence: str = "")
         row = native_contract.applicable_row(row, listing, form.get("fields") or [])
         path = _path(row)
         options = row.get("options") or []
-        if not path.startswith(prefix) or row.get("locked") or (not options and not strict) or len(options) > MAX_CHOICES:
+        if not path.startswith(prefix) or row.get("locked") or (not options and not strict):
             continue
         if not native_contract.item_field(row, market) or (not strict and not _empty(row.get("value"))):
             continue
@@ -116,7 +114,11 @@ def forms_prompt(rows_by_market: dict[str, list[dict]], forms: dict[str, dict]) 
             limit = _limit(row)
             pick = f"pick up to {limit}" if row.get("multi") else "pick one"
             label = str(row.get("label") or "").removesuffix(" *")
-            choices = "; ".join(row.get("options") or []) or f"{row.get('input_type') or 'text'}; max length {row.get('max_length') or 'unspecified'}"
+            from vendoo_studio.services.option_lookup import project_row
+
+            projected = project_row(row)
+            choices = (json.dumps({"options_lookup": projected["options_lookup"]}) if projected.get("options_lookup")
+                       else "; ".join(row.get("options") or []) or f"{row.get('input_type') or 'text'}; max length {row.get('max_length') or 'unspecified'}")
             lines.append(f"- {_path(row)} | {label} | {pick} | choices: " + choices)
         blocks.append(f"### {NAMES[market]} (category {category})\n" + "\n".join(lines))
     return "\n\n".join(blocks)
@@ -317,7 +319,10 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
         )},
     ]
     try:
-        text = await collect_provider_text(provider, messages)
+        from vendoo_studio.services.option_lookup import OptionCatalog
+
+        catalog = OptionCatalog({market: {"fields": rows} for market, rows in rows_by_market.items()})
+        text = await collect_provider_text(provider, messages, option_catalog=catalog)
     except Exception:
         log.exception("marketplace field fill request failed for %s", conv_id)
         return None

@@ -301,7 +301,9 @@ async def run_listing_generation(
         expected_revision_id = ConversationRepo(stream_db).current_revision_id(conv_id) or ""
         run.publish(sse_event("status", "thinking"))
 
-        async for item in iter_with_keepalives(provider.chat(messages, stream=True)):
+        from vendoo_studio.services.option_lookup import OptionCatalog, chat_with_options
+
+        async for item in iter_with_keepalives(chat_with_options(provider, messages, OptionCatalog(native_forms))):
             if item is None:
                 run.pulse()
                 continue

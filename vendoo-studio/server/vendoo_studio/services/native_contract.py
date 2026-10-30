@@ -241,16 +241,9 @@ def prompt(contracts: dict) -> str:
             options = [label for label in row.get("options") or [] if str(values.get(label, label)) == category_id]
             definition["options"] = options
             definition["option_values"] = {label: values.get(label, label) for label in options}
-        if path_of(row).endswith("_specifics.brand") and len(row.get("options") or []) > 300:
-            # Brand catalogs contain tens of thousands of unrelated names. Keep
-            # the complete editor/validation contract, but only offer the known
-            # brand in generation context; a brand choice is never evidence.
-            brand = str((contract.get("inputs") or {}).get("brand") or "").strip().casefold()
-            options = [label for label in row["options"] if label.casefold() == brand]
-            definition["options"] = options
-            if "option_values" in row:
-                definition["option_values"] = {label: row["option_values"][label] for label in options
-                                               if label in row["option_values"]}
+        from vendoo_studio.services.option_lookup import project_row
+
+        definition = project_row(definition)
         return definition
 
     contracts = {market: {**contract, "fields": [
@@ -261,6 +254,7 @@ def prompt(contracts: dict) -> str:
         "For these marketplaces, only the paths below may be generated. These native forms override "
         "generic templates, learned fields and Vendoo fields. Never invent a field or dropdown choice. "
         "Use the exact stored ID for a listed choice. Respect types, lengths and selection limits. "
+        "Use native dropdown lookup for fields marked options_lookup; leave unsupported choices empty. "
         "Category is already selected; do not change it. If a form is unavailable, omit its marketplace "
         "specifics and leave the draft incomplete. Use photos and seller evidence for product facts; "
         "a dropdown option is not evidence. Omit unsupported facts, including optional ones. "
