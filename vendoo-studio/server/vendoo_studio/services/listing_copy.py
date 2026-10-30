@@ -112,7 +112,7 @@ def batch_preview(db: Session, body: BatchPreviewRequest) -> dict:
 
 
 def copy_result(db: Session, source_id: str, request_id: str, *, source_kind: str = "listing") -> str:
-    receipt = db.get(ListingCopyReceipt, request_id, populate_existing=True)
+    receipt = db.query(ListingCopyReceipt).filter_by(request_id=request_id).populate_existing().one_or_none()
     if receipt is None or receipt.source_id != source_id or receipt.source_kind != source_kind:
         raise CopyError("No completed copy was found for this request.", 404)
     if not receipt.conversation_id or db.get(Conversation, receipt.conversation_id) is None:
@@ -121,7 +121,7 @@ def copy_result(db: Session, source_id: str, request_id: str, *, source_kind: st
 
 
 def completed_copy(db: Session, source_kind: str, source_id: str, request_id: str, fingerprint: str) -> str | None:
-    receipt = db.get(ListingCopyReceipt, request_id, populate_existing=True)
+    receipt = db.query(ListingCopyReceipt).filter_by(request_id=request_id).populate_existing().one_or_none()
     if receipt is None:
         return None
     if receipt.source_kind != source_kind or receipt.source_id != source_id or receipt.fingerprint != fingerprint:

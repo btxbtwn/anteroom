@@ -66,6 +66,39 @@ policy. SQLite ownership and snapshot tests still run on the Mac path.
 
 This increment adds no hosted listing routes and starts no cloud jobs. Existing
 desktop requests and background timers remain local. Before exposing hosted
-writes, natural-key uniqueness and parent/child references must be scoped to
-the seller, with tests for cross-seller references. Photo/settings file scoping,
+writes, parent/child references must also enforce matching owners, with tests
+for cross-seller references. Photo/settings file scoping,
 account import, Realtime policies and client sign-in also remain to be built.
+
+## Seller-specific keys (cloud step 1e)
+
+Revision `a4a9eee52599` scopes external and seller-chosen unique keys to
+`user_id`: observed category schemas and nodes, diagnostic observations,
+eBay offer rules, offer floors, the field registry and marketplace order
+lines. Copy-request receipts and photo fingerprints use composite primary
+keys `(user_id, request_id)` and `(user_id, checksum)`. Receipt lookups query
+inside the existing seller session, so its row policy selects the seller's
+receipt even when another account supplied the same request ID. Generated
+record IDs remain globally unique.
+
+The partial unique index for an eBay action in `sending` state now applies
+per seller. It still prevents two concurrent eBay writes from one account;
+one seller no longer holds that lock for every other shop. This change does
+not enable hosted marketplace actions or alter approval requirements.
+
+The migration retains rows and replaces only constraints and the partial
+index on Postgres, preserving row policies and grants. SQLite rebuilds the
+affected tables. Legacy adoption follows SQLite's documented
+[table-rebuild procedure](https://www.sqlite.org/lang_altertable.html#otheralter):
+it temporarily disables foreign-key enforcement on the migration connection,
+checks references before commit and restores enforcement before returning the
+connection. The existing pre-migration snapshot remains the recovery path;
+downgrading these keys would risk discarding another seller's records and is
+refused.
+
+Tests upgrade a populated database from revision `9664651bec7c`, compare every
+seeded record and the resulting schema, and prove identical keys are accepted
+for two owners while duplicates within an owner are rejected. Real restricted
+Postgres sessions also verify independent copy receipts, fingerprints and eBay
+locks. Same-owner parent/child constraints remain the next migration; hosted
+listing routes must stay closed until those are in place.

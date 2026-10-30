@@ -20,7 +20,7 @@ class MarketplaceSale(SellerOwned, Base):
     __tablename__ = "marketplace_sales"
     __table_args__ = (
         # One row per order line, however often the marketplace repeats itself.
-        UniqueConstraint("marketplace", "order_id", "line_id", name="uq_marketplace_sales_order_line"),
+        UniqueConstraint("user_id", "marketplace", "order_id", "line_id", name="uq_marketplace_sales_order_line"),
         Index("ix_marketplace_sales_state", "state"),
     )
 

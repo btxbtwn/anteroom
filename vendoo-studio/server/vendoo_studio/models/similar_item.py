@@ -5,7 +5,7 @@ items is hashed once and an edited photo gets a fingerprint of its own. Reviews
 are the seller's decisions on a pair, so a dismissed or merged pair is not
 suggested again.
 """
-from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint, PrimaryKeyConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -15,7 +15,9 @@ from vendoo_studio.models.conversation import new_id, utcnow
 class PhotoFingerprint(SellerOwned, Base):
     __tablename__ = "photo_fingerprints"
 
-    checksum = Column(String, primary_key=True)
+    __table_args__ = (PrimaryKeyConstraint("user_id", "checksum"),)
+
+    checksum = Column(String, nullable=False)
     # 64-bit difference hash as 16 hex digits; null when the file could not be read.
     dhash = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)

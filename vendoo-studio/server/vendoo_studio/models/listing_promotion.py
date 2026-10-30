@@ -47,7 +47,7 @@ class MarketplaceOfferFloor(SellerOwned, Base):
     """The lowest price the seller accepts for offers on one marketplace listing."""
 
     __tablename__ = "marketplace_offer_floors"
-    __table_args__ = (UniqueConstraint("marketplace", "listing_id", name="uq_marketplace_offer_floor_listing"),)
+    __table_args__ = (UniqueConstraint("user_id", "marketplace", "listing_id", name="uq_marketplace_offer_floor_listing"),)
 
     id = Column(String, primary_key=True, default=new_id)
     marketplace = Column(String, nullable=False)

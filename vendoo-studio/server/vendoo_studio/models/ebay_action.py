@@ -12,7 +12,7 @@ class EbayAction(SellerOwned, Base):
         Index("ix_ebay_actions_fingerprint", "account_id", "fingerprint"),
         # One eBay workspace write at a time, even from concurrent requests.
         Index(
-            "uq_ebay_action_in_flight", "state", unique=True,
+            "uq_ebay_action_in_flight", "user_id", "state", unique=True,
             sqlite_where=text("state = 'sending'"), postgresql_where=text("state = 'sending'"),
         ),
     )

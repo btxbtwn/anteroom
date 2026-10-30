@@ -27,7 +27,7 @@ class FieldRegistry(SellerOwned, Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "marketplace", "category_path", "normalized_label",
+            "user_id", "marketplace", "category_path", "normalized_label",
             name="uq_field_registry_identity"
         ),
     )
