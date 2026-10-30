@@ -24,6 +24,16 @@ export interface FacebookCheck {
   marketplace_message?: string | null;
   listings: MarketplaceListings;
 }
+/** What reading this item's live listings found just now: a sale it had not recorded yet, if any. */
+export interface SalesCheck {
+  ok: boolean;
+  /** Marketplaces read this time; each shop is read at most once a minute. */
+  checked: DelistMarketplace[];
+  /** Sale IDs recorded, empty when nothing had sold. */
+  recorded: string[];
+  skipped: string | null;
+  listings: MarketplaceListings;
+}
 /** The seller's correction to what Anteroom knows; it never changes the marketplace. */
 export type MarketplaceMark = "listed" | "sold" | "not_listed";
 export type MarketplaceListings = Partial<Record<DelistMarketplace, MarketplaceListing>>;

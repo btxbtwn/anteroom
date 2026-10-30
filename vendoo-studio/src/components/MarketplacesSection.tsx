@@ -212,6 +212,28 @@ export function MarketplacesLayout({
   const native = useQuery({ queryKey: nativeKey, queryFn: () => api.nativeMarketplaces.status(convId),
     refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? 1500 : false });
   const live = useQuery({ queryKey: liveKey, queryFn: () => api.marketplaceListings.get(convId) });
+  // Opening an item reads its own live listings once, so a sale shows while the
+  // seller looks at it instead of waiting for that shop's next turn. Each shop
+  // keeps its own gap between reads, so browsing items stays light.
+  const salesCheck = useMutation({
+    mutationFn: () => api.marketplaceListings.checkSales(convId),
+    onSuccess: (result) => {
+      if (!result.recorded.length) return;
+      queryClient.setQueryData(liveKey, result.listings);
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["sales-ledger"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    },
+    retry: false,
+  });
+  const checkedSalesFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (checkedSalesFor.current === convId) return;
+    checkedSalesFor.current = convId;
+    salesCheck.mutate();
+    // Only the item decides when this runs; the check itself is a read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId]);
   const drafts: NativeDrafts = native.data ?? {};
   const runningKey = Object.entries(drafts).filter(([, draft]) => isRunning(draft)).map(([name]) => name).join(",");
   const wasRunning = useRef(runningKey);

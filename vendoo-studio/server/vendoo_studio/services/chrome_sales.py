@@ -22,12 +22,18 @@ import re
 import time
 from types import SimpleNamespace
 
+from sqlalchemy.orm import Session
+
 from vendoo_studio.services.relay_sales import record_sale
 from vendoo_studio.services.user_settings import sale_detection_enabled
 
 log = logging.getLogger("vendoo_studio.chrome_sales")
 
 CHROME_MARKETS = ("poshmark", "mercari", "depop", "sellwild", "vinted", "facebook")
+# Facebook's check opens each listing's own page in Chrome, and the item already
+# has its own Check on Facebook, so opening an item must not start that by
+# itself. The timed pass still covers it.
+ITEM_CHECK_MARKETS = tuple(name for name in CHROME_MARKETS if name != "facebook")
 POLL_INTERVAL_S = 30
 MIN_GAP_S = 4 * 60
 MAX_GAP_S = 12 * 60
@@ -49,10 +55,15 @@ _LISTING_ID = {
 _HOST = {"poshmark": "poshmark.com", "mercari": "mercari.com", "depop": "depop.com", "sellwild": "sellwild.com",
          "vinted": "vinted.com", "facebook": "facebook.com"}
 
+# An item opened in Anteroom reads its own listings at most this often per
+# shop. Browsing items must not read a marketplace more than the timed checks do.
+ITEM_GAP_S = 60
+
 _task: asyncio.Task | None = None
 _next: dict[str, float] = {}
 _errors: dict[str, str] = {}
 _turn: dict[str, int] = {}
+_item_read: dict[str, float] = {}
 
 
 def check_errors() -> dict[str, str]:
@@ -97,8 +108,35 @@ def next_batch(marketplace: str, listing_ids: list[str]) -> list[str]:
     return (listing_ids[start:] + listing_ids[:start])[:size]
 
 
-def live_listing_ids(marketplace: str, *, session_factory=None) -> list[str]:
-    """Listing IDs Anteroom has live on this marketplace: not sold, delisted or marked not listed."""
+def _recorded_sales(db: Session, conv_ids, marketplace: str | None = None) -> dict[tuple[str, str], set[str | None]]:
+    """The listing IDs Anteroom itself recorded a sale for, by conversation and marketplace."""
+    from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
+
+    recorded: dict[tuple[str, str], set[str | None]] = {}
+    if not conv_ids:
+        return recorded
+    query = db.query(MarketplaceSale.conversation_id, MarketplaceSale.marketplace, MarketplaceSale.listing_id).filter(
+        MarketplaceSale.conversation_id.in_(list(conv_ids)), MarketplaceSale.order_status.in_(PAID_STATUSES))
+    if marketplace:
+        query = query.filter(MarketplaceSale.marketplace == marketplace)
+    for conv_id, name, listing_id in query.all():
+        recorded.setdefault((conv_id, name), set()).add(listing_id)
+    return recorded
+
+
+def _needs_sale_check(entry: dict, listing_id: str, recorded: set[str | None]) -> bool:
+    """False for a listing whose sale Anteroom recorded. A sale only the imported notes claim is still checked."""
+    return entry.get("state") == "live" and listing_id not in recorded and None not in recorded
+
+
+def live_listing_ids(marketplace: str, *, session_factory=None) -> dict[str, str]:
+    """Listing IDs to read for a sale, each mapped to the item that has it live.
+
+    Live means not delisted or marked not listed, and without a sale of its own
+    on the ledger: a sale only the imported notes claim is read, so the
+    marketplace confirms it. The item travels with the ID so a sale found on
+    the listing protects the item it belongs to, even when its link is odd.
+    """
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.marketplace_listing import MarketplaceListing
     from vendoo_studio.services.marketplace_delist import listings
@@ -107,23 +145,33 @@ def live_listing_ids(marketplace: str, *, session_factory=None) -> list[str]:
         from vendoo_studio.database import SessionLocal
 
         session_factory = SessionLocal
-    found: list[str] = []
+    found: dict[str, str] = {}
     with session_factory() as db:
         # Vendoo's links and the seller's marks live in the notes; direct listings have their own table.
         noted = db.query(Conversation.id).filter(Conversation.notes.contains(_HOST[marketplace]))
         direct = db.query(MarketplaceListing.conversation_id).filter(
             MarketplaceListing.marketplace == marketplace, MarketplaceListing.listing_url.isnot(None))
         conv_ids = dict.fromkeys(row[0] for row in [*direct.all(), *noted.all()])
+        recorded = _recorded_sales(db, conv_ids, marketplace)
         for conv_id in conv_ids:
             entry = listings(db, conv_id).get(marketplace) or {}
             listing_id = entry.get("listing_id")
-            if listing_id and entry.get("state") == "live" and not entry.get("sold_here") and listing_id not in found:
-                found.append(listing_id)
+            if listing_id and _needs_sale_check(entry, listing_id, recorded.get((conv_id, marketplace), set())) \
+                    and listing_id not in found:
+                found[listing_id] = conv_id
     return found
 
 
-def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_factory=None) -> list[str]:
-    """Store each sold listing once. Returns the new sale IDs."""
+def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_factory=None,
+                          conversation_ids: dict[str, str] | None = None) -> list[str]:
+    """Store each sold listing once, against the item that was read. Returns the new sale IDs.
+
+    A sale that arrived before its item could be matched is attached now: the
+    item came from the check itself, so the listing it found sold is protected
+    from then on, whatever its link looks like.
+    """
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
     if session_factory is None:
         from vendoo_studio.database import SessionLocal
 
@@ -131,6 +179,7 @@ def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_f
     created: list[str] = []
     with session_factory() as db:
         for listing_id in listing_ids:
+            conv_id = (conversation_ids or {}).get(listing_id)
             sale = record_sale(
                 db,
                 marketplace=marketplace,
@@ -139,9 +188,16 @@ def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_f
                 listing_id=listing_id,
                 quantity=None,
                 sold_at=None,
+                conversation_id=conv_id,
             )
             if sale:
                 created.append(sale.id)
+            elif conv_id:
+                db.query(MarketplaceSale).filter(
+                    MarketplaceSale.marketplace == marketplace, MarketplaceSale.listing_id == listing_id,
+                    MarketplaceSale.conversation_id.is_(None),
+                ).update({"conversation_id": conv_id}, synchronize_session=False)
+                db.commit()
     return created
 
 
@@ -154,7 +210,7 @@ async def check_marketplace(marketplace: str) -> bool:
         clear_check_error(marketplace)
         return True
     live = await asyncio.to_thread(live_listing_ids, marketplace)
-    listing_ids = next_batch(marketplace, live)
+    listing_ids = next_batch(marketplace, list(live))
     if not listing_ids:
         clear_check_error(marketplace)
         return True
@@ -175,7 +231,7 @@ async def check_marketplace(marketplace: str) -> bool:
     clear_check_error(marketplace)
     sold = [listing_id for listing_id in normalize_sales(marketplace, raw) if listing_id in live]
     if sold:
-        created = await asyncio.to_thread(record_reported_sales, marketplace, sold)
+        created = await asyncio.to_thread(record_reported_sales, marketplace, sold, conversation_ids=live)
         if created:
             await announce_sales(created)
     return True
@@ -185,6 +241,85 @@ async def check_now(marketplace: str) -> bool:
     """Check one shop when the seller asks. Its next timed check moves a full gap out."""
     arm_next(marketplace, time.time())
     return await check_marketplace(marketplace)
+
+
+def live_item_listings(db: Session, conv_id: str) -> dict[str, str]:
+    """Listing IDs this item has on marketplaces Chrome reads, and whose sale Anteroom has not seen itself.
+
+    A marketplace Anteroom recorded a sale for is settled. One that reads sold
+    only from the imported notes is still checked, so that claim is confirmed
+    on the marketplace instead of being believed.
+    """
+    from vendoo_studio.services.marketplace_delist import listings
+
+    recorded = _recorded_sales(db, [conv_id])
+    found: dict[str, str] = {}
+    for marketplace, entry in listings(db, conv_id).items():
+        listing_id = entry.get("listing_id")
+        if marketplace not in ITEM_CHECK_MARKETS or not listing_id:
+            continue
+        if _needs_sale_check(entry, listing_id, recorded.get((conv_id, marketplace), set())):
+            found[marketplace] = listing_id
+    return found
+
+
+async def check_item(db: Session, conv_id: str, *, session_factory=None) -> dict:
+    """Read this item's live listings now, so a sale shows while the seller looks at it.
+
+    Opening an item brings each of its shops' next check forward to this item
+    alone, which is what makes a sale read as live instead of waiting for the
+    shop's own turn. A shop is read at most once a minute however many items
+    the seller opens, and its timed checks keep their own schedule. A sale the
+    imported notes claim is checked the same way, so Anteroom believes only
+    what a marketplace tells it. Only the listing IDs travel, and nothing on
+    any marketplace changes.
+    """
+    from vendoo_studio.routes.extension import extension_manager
+    from vendoo_studio.services import browser_bridge
+
+    result: dict = {"ok": True, "checked": [], "recorded": [], "skipped": None}
+    wanted = {name: listing_id for name, listing_id in live_item_listings(db, conv_id).items()
+              if sale_detection_enabled(name)}
+    if not wanted:
+        result["skipped"] = "No live listing to check."
+        return result
+    if not extension_manager.connected:
+        result.update(ok=False, skipped="Connect Chrome first.")
+        return result
+    now = time.time()
+    due = {name: listing_id for name, listing_id in wanted.items()
+           if now - _item_read.get(name, 0) >= ITEM_GAP_S}
+    if not due:
+        result["skipped"] = "Just checked."
+        return result
+    sold: dict[str, str] = {}
+    for marketplace, listing_id in due.items():
+        try:
+            raw = await browser_bridge.request(
+                SimpleNamespace(id=None),
+                "marketplace.sales",
+                {"marketplace": marketplace, "listing_ids": [listing_id]},
+                timeout=90,
+            )
+        except browser_bridge.BrowserBridgeError:
+            continue
+        if not isinstance(raw, dict) or raw.get("skipped") is True or raw.get("ok") is not True:
+            continue
+        _item_read[marketplace] = time.time()
+        result["checked"].append(marketplace)
+        if listing_id in normalize_sales(marketplace, raw):
+            sold[marketplace] = listing_id
+    if not sold:
+        return result
+    from vendoo_studio.services.marketplace_accounts import announce_sales
+
+    for marketplace, listing_id in sold.items():
+        created = await asyncio.to_thread(record_reported_sales, marketplace, [listing_id], session_factory=session_factory,
+                                          conversation_ids={listing_id: conv_id})
+        result["recorded"].extend(created)
+    if result["recorded"]:
+        await announce_sales(result["recorded"], session_factory=session_factory)
+    return result
 
 
 async def check_due() -> None:

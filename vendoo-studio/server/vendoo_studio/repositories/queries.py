@@ -373,6 +373,10 @@ class ConversationRepo:
                 if not skip_job:
                     if job_status in busy_map:
                         next_status = busy_map[job_status]
+                    elif vendoo_status == "sold":
+                        # A sale outranks a send that broke before it: the item
+                        # is sold whatever happened to the copy that failed.
+                        next_status = "sold"
                     elif job_status == "failed":
                         next_status = "failed"
                     else:
@@ -380,6 +384,10 @@ class ConversationRepo:
                     if conv.status != next_status:
                         conv.status = next_status
                         changed = True
+                elif vendoo_status == "sold" and conv.status != "sold":
+                    # An old job's label cannot outrank a sale either.
+                    conv.status = "sold"
+                    changed = True
             elif conv.status == "listing":
                 # No job left to own the busy label — wear Vendoo's inventory tab.
                 conv.status = vendoo_status
