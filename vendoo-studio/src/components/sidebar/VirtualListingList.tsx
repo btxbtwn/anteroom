@@ -7,10 +7,12 @@ export function VirtualListingList<T extends { id: string }>({ rows, renderRow, 
   renderRow: (row: T) => ReactNode;
   children?: ReactNode;
 }) {
+  "use no memo"; // TanStack's mutable virtualizer must be read on every render.
   const listRef = useRef<HTMLDivElement>(null);
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches);
   const [scrollMargin, setScrollMargin] = useState(0);
   const getScrollElement = useCallback(() => mobile ? listRef.current?.closest("aside") ?? null : listRef.current, [mobile]);
+  // oxlint-disable-next-line react/incompatible-library -- This component explicitly opts out of compiler memoization above.
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement,
