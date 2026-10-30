@@ -84,3 +84,19 @@ saves. Owner and reference fields cannot enter through its strict request
 contract. Desktop listing, photo, generation, settings and marketplace routes
 remain absent. See `deploy/fly/README.md` for the public sign-in UI and deploy
 configuration.
+
+
+## Hosted inventory increment
+
+The hosted entry now serves searchable draft inventory, typed General edits and
+private photo routes under `/api/drafts`. The General field definition and form
+section rules are shared with the desktop editor. Saves create canonical listing
+revisions; a stale timestamp rejects the whole edit. Foreign seller/parent/history
+references are never accepted. Only known General values are returned.
+
+Photo metadata uses seller-scoped database sessions. Photo bytes live in a private
+Supabase Storage bucket with restrictive user-prefix policies and are requested
+with the verified seller JWT. No service key or local photo directory is used.
+See [deployment and limits](../deploy/fly/README.md#private-draft-photos-and-general-fields).
+This opens only draft editing and photos; it does not expose desktop routes,
+marketplace actions, settings, generation or historical/operational JSON.

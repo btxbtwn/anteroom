@@ -98,13 +98,15 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self'; "
-            "img-src 'self' data:; connect-src 'self' https://*.supabase.co; "
+            "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co; "
             "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         )
         return response
 
     from vendoo_studio.routes.hosted_drafts import router
     app.include_router(router)
+    from vendoo_studio.routes.hosted_photos import router as photo_router
+    app.include_router(photo_router)
     if web_dir is not None:
         app.mount("/assets", StaticFiles(directory=web_dir / "assets"), name="cloud-assets")
 
