@@ -1,0 +1,235 @@
+{
+  "followed_general": ["title", "description", "brand", "size", "department"],
+  "marketplace_price_keys": {
+    "ebay": "ebay_specifics.price",
+    "poshmark": "poshmark_specifics.poshmarkPrice",
+    "mercari": "mercari_specifics.price",
+    "depop": "depop_specifics.price",
+    "etsy": "etsy_specifics.price",
+    "vinted": "vinted_specifics.price",
+    "sellwild": "sellwild_specifics.price"
+  },
+  "general": [
+    {
+      "key": "title",
+      "label": "Title"
+    },
+    {
+      "key": "description",
+      "label": "Description"
+    },
+    {
+      "key": "price",
+      "label": "Price",
+      "type": "number"
+    },
+    {
+      "key": "cost",
+      "label": "Cost",
+      "type": "number"
+    },
+    {
+      "key": "quantity",
+      "label": "Quantity",
+      "type": "number"
+    },
+    {
+      "key": "brand",
+      "label": "Brand"
+    },
+    {
+      "key": "condition",
+      "label": "Condition"
+    },
+    {
+      "key": "primaryColor",
+      "label": "Primary Color"
+    },
+    {
+      "key": "secondaryColor",
+      "label": "Secondary Color"
+    },
+    {
+      "key": "size",
+      "label": "Size"
+    },
+    {
+      "key": "sku",
+      "label": "SKU"
+    },
+    {
+      "key": "zipCode",
+      "label": "Inventory location"
+    },
+    {
+      "key": "category_path",
+      "label": "Category *",
+      "required": true,
+      "help": "Applied to each marketplace form. Name the last category, such as Men > Shirts > Tees. Each marketplace form keeps its own category list."
+    },
+    {
+      "key": "department",
+      "label": "Department"
+    },
+    {
+      "key": "weight_oz",
+      "label": "Package Weight (oz)",
+      "type": "number"
+    },
+    {
+      "key": "package_dimensions_in",
+      "label": "Package Dimensions (LxWxH in)"
+    }
+  ],
+  "shared": [
+    {
+      "key": "title",
+      "label": "Title"
+    },
+    {
+      "key": "description",
+      "label": "Description"
+    },
+    {
+      "key": "price",
+      "label": "Price",
+      "type": "number"
+    },
+    {
+      "key": "brand",
+      "label": "Brand"
+    },
+    {
+      "key": "condition",
+      "label": "Condition"
+    },
+    {
+      "key": "primaryColor",
+      "label": "Primary Color"
+    },
+    {
+      "key": "secondaryColor",
+      "label": "Secondary Color"
+    },
+    {
+      "key": "quantity",
+      "label": "Quantity",
+      "type": "number"
+    },
+    {
+      "key": "size",
+      "label": "Size"
+    },
+    {
+      "key": "sku",
+      "label": "SKU"
+    },
+    {
+      "key": "category_path",
+      "label": "Category"
+    }
+  ],
+  "package": [
+    {
+      "key": "weight_oz",
+      "label": "Package Weight (oz)",
+      "type": "number"
+    },
+    {
+      "key": "package_dimensions_in",
+      "label": "Package Dimensions (LxWxH in)"
+    }
+  ],
+  "vinted": [
+    {
+      "key": "price",
+      "label": "Price",
+      "type": "number"
+    },
+    {
+      "key": "vinted_specifics.category",
+      "label": "Category *",
+      "required": true
+    },
+    {
+      "key": "vinted_specifics.condition",
+      "label": "Condition"
+    },
+    {
+      "key": "vinted_specifics.brand",
+      "label": "Brand"
+    },
+    {
+      "key": "vinted_specifics.size",
+      "label": "Size"
+    },
+    {
+      "key": "vinted_specifics.color",
+      "label": "Color"
+    },
+    {
+      "key": "vinted_specifics.packageSize",
+      "label": "Package size"
+    },
+    {
+      "key": "vinted_specifics.material",
+      "label": "Material"
+    }
+  ],
+  "etsy": [
+    {
+      "key": "etsy_specifics.whoMade",
+      "label": "Who Made It?"
+    },
+    {
+      "key": "etsy_specifics.whatIsIt",
+      "label": "What Is It?"
+    },
+    {
+      "key": "etsy_specifics.whenMade",
+      "label": "When Was It Made?"
+    }
+  ],
+  "etsy_optionals": [
+    {
+      "key": "clothingStyle",
+      "label": "Clothing style"
+    },
+    {
+      "key": "sleeveLength",
+      "label": "Sleeve length"
+    },
+    {
+      "key": "neckline",
+      "label": "Neckline"
+    },
+    {
+      "key": "closure",
+      "label": "Closure"
+    },
+    {
+      "key": "graphic",
+      "label": "Graphic"
+    },
+    {
+      "key": "collarStyle",
+      "label": "Collar style"
+    },
+    {
+      "key": "holiday",
+      "label": "Holiday"
+    },
+    {
+      "key": "occasion",
+      "label": "Occasion"
+    },
+    {
+      "key": "pattern",
+      "label": "Pattern"
+    },
+    {
+      "key": "sustainability",
+      "label": "Sustainability"
+    }
+  ]
+}

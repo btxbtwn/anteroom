@@ -82,6 +82,9 @@ class AnalyticsItem:
     # False for a sale of stock merged into another item: the sale counts, the
     # item does not, because its stock is counted on the item it joined.
     stock: bool = True
+    # True when a marketplace order or a Vendoo sale record stands behind this
+    # row, rather than a check finding a listing marked sold.
+    order_backed: bool = False
 
     @property
     def has_cost(self) -> bool:
@@ -224,6 +227,7 @@ def load_rows(db) -> list[AnalyticsItem]:
             vendoo = replace(
                 base,
                 status="sold",
+                order_backed=True,
                 sold_price=_amount(sale.get("price")),
                 sold_at=_parse_moment(sold_text),
                 days_listed=_days_between(listed_text, sold_text),
@@ -233,11 +237,11 @@ def load_rows(db) -> list[AnalyticsItem]:
                 missing_sale_details=tuple(str(gap) for gap in sale.get("missing") or ()),
             )
         # A send in flight keeps its one row, as before; its sales count once it settles.
-        own_lines = lines.get(conv_id, [])
+        sales = [] if effective in _BUSY else _item_sales(base, vendoo, lines.get(conv_id, []), listed_text)
         if effective == "sold":
-            # Nothing is left to sell: other marketplaces reading sold are cleanup.
-            own_lines = _without_cleanup_reports(own_lines)
-        sales = [] if effective in _BUSY else _item_sales(base, vendoo, own_lines, listed_text)
+            # Nothing is left to sell: reports from the other marketplaces are the
+            # same sale being cleared, not more stock going out.
+            sales = _stocked_sales(sales, derived.quantity)
         # Unsold stock merged into another item is counted there; its sales still count here.
         merged_away = bool(notes.get("mergedInto")) and effective != "sold"
         if (effective != "sold" or not sales) and not merged_away:
@@ -248,19 +252,21 @@ def load_rows(db) -> list[AnalyticsItem]:
     return rows
 
 
-def _without_cleanup_reports(lines: list) -> list:
-    """One sale, even when the seller marked the item sold on the other marketplaces.
+def _stocked_sales(sales: list[AnalyticsItem], quantity: int) -> list[AnalyticsItem]:
+    """A sold item's sales cannot outnumber the units it had in stock.
 
-    Once a marketplace has a real order for an item, another marketplace's
-    listing reading sold is cleanup, not a second sale. A marketplace whose
-    only evidence is that reading (Anteroom's checks) is dropped there; order
-    lines and the seller's own recorded sales always count.
+    When the seller sells on one marketplace and clears the item's other
+    listings, each check that reads one of those listings as sold used to add
+    a sale of its own. Those rows have no order behind them. Keep every sale
+    that does, and only as many of the rest as the item had units; a genuine
+    relist that sold again has its own order or listing report.
     """
-    ordered = [line for line in lines if line.is_order_backed]
-    if not ordered:
-        return lines
-    sold_on = {line.marketplace for line in ordered}
-    return [line for line in lines if line.is_order_backed or line.marketplace in sold_on]
+    limit = max(1, quantity)
+    ordered = [sale for sale in sales if sale.order_backed]
+    reported = [sale for sale in sales if not sale.order_backed]
+    room = max(0, limit - len(ordered))
+    keep = {id(sale) for sale in ordered} | {id(sale) for sale in reported[:room]}
+    return [sale for sale in sales if id(sale) in keep]
 
 
 def _item_sales(base: AnalyticsItem, vendoo: AnalyticsItem | None, lines: list, listed_text: str) -> list[AnalyticsItem]:
@@ -318,6 +324,7 @@ def _ledger_row(base: AnalyticsItem, line, listed_text: str, days_between) -> An
     return replace(
         base,
         status="sold",
+        order_backed=line.is_order_backed,
         sold_price=revenue,
         sold_at=sold_at,
         marketplace=line.marketplace,

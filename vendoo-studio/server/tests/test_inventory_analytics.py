@@ -666,3 +666,4 @@ class InventoryCountsItemsTest(unittest.TestCase):
             (inventory["sold"], inventory["active"], inventory["draft"], inventory["working"], inventory["failed"]),
             (1, 1, 1, 1, 1),
         )
+

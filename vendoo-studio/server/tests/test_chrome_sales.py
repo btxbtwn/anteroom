@@ -516,3 +516,17 @@ class MarkedSoldElsewhereTest(unittest.TestCase):
         with Session() as db:
             sale = db.query(MarketplaceSale).one()
             self.assertEqual(sale.sold_at, datetime(2026, 9, 2, 15, 0))
+
+    def test_a_second_marketplace_clearing_the_same_sale_adds_nothing(self):
+        Session = sessionmaker(bind=_engine())
+        conv_id = _listing(Session, {"vendooListingUrls": {
+            "depop": "https://www.depop.com/products/shop-tee-136d/",
+            "poshmark": "https://poshmark.com/listing/Wool-Coat-65a1b2c3d4e5f6a7b8c9d0e1",
+        }})
+        first = self.check(Session, conv_id, ["shop-tee-136d"])
+        self.assertEqual(len(first["recorded"]), 1)
+        chrome_sales._item_read.clear()
+        second = self.check(Session, conv_id, ["65a1b2c3d4e5f6a7b8c9d0e1"])
+        self.assertEqual(second["recorded"], [])
+        with Session() as db:
+            self.assertEqual([line.marketplace for line in db.query(MarketplaceSale).all()], ["depop"])

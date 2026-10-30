@@ -1,7 +1,3 @@
-## 0.1.556 — 2026-10-30
-
-- Open your cloud inventory in the same Anteroom workspace as the desktop app, with listing fields, private photos, notes, and version history.
-
 # Changelog
 
 Every change to Anteroom, newest first. Anteroom bumps its patch version
@@ -9,6 +5,22 @@ on each merged pull request, so a version here is one change. The app reads this
 file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
+
+## 0.1.559 — 2026-10-30
+
+- Open your cloud inventory in the same Anteroom workspace as the desktop app, with listing fields, private photos, notes, and version history.
+
+## 0.1.558 — 2026-10-30
+
+- Fix Mercari offer checks failing with HTTP 400 on every listing by supplying the required item ID type.
+
+## 0.1.557 — 2026-10-30
+
+- Listing chat can read every enabled marketplace form's current fields and complete choices, including optional fields, categories, brands and dependent options. Repairs save to that marketplace's own fields and explain when a connection is needed to load choices.
+
+## 0.1.556 — 2026-10-30
+
+- Analytics counts a sold item's sale once per unit again. When an item sold on one marketplace and the seller cleared its other listings, each marketplace that then read sold was counted as another sale, so the month's total read higher than the sales made (79 vs 55). Only reports within the item's unit count now count; every real order and Vendoo sale still does.
 
 ## 0.1.555 — 2026-10-30
 
