@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.580 — 2026-10-30
+## 0.1.581 — 2026-10-30
 
 - Keep marketplace choices, package and shipping defaults, listing formulas and hidden-field choices in your web account, with working save and restore controls.
+
+## 0.1.580 — 2026-10-30
+
+- Keep marketplace answers when editing prices, clear old corrections with a draft reset, and make listing generation and required-field checks more reliable. Preserve the packaged libraries needed to analyze photos.
 
 ## 0.1.579 — 2026-10-30
 

@@ -218,6 +218,9 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(updated["ebay_specifics"], {"Material": "Cotton", "Rise": "High"})
             self.assertEqual(native_contract.gaps(updated, "ebay"), [])
             self.assertNotIn("ebay_specifics.Material |", ask.call_args.args[1][1]["content"])
+            self.assertIn("--- Canonical listing rules ---", ask.call_args.args[1][0]["content"])
+            self.assertIn("Rules (VIOLATION = INCORRECT LISTING)", ask.call_args.args[1][0]["content"])
+            self.assertIn("sizeType = Regular", ask.call_args.args[1][0]["content"])
             ask.reset_mock()
             revision_id = self._current().id
             await fill_native_fields(self.db, self.conv.id, object(), evidence="100% cotton, high rise")
@@ -315,6 +318,32 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence=""))
         self.assertEqual(self._current().id, before)
 
+    async def test_provider_failure_is_reported_without_changing_the_listing(self):
+        before = self._current().id
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=RuntimeError("ChatGPT HTTP 503"))):
+            self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence="High rise"))
+        self.assertEqual(self._current().id, before)
+        messages = [message.text for message in ConversationRepo(self.db).get_messages(self.conv.id)]
+        self.assertTrue(any("Could not fill marketplace category fields" in text for text in messages))
+
+    async def test_malformed_field_response_is_reported_without_changing_the_listing(self):
+        before = self._current().id
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value="Not JSON")):
+            self.assertIsNone(await fill_native_fields(self.db, self.conv.id, object(), evidence="High rise"))
+        self.assertEqual(self._current().id, before)
+        messages = [message.text for message in ConversationRepo(self.db).get_messages(self.conv.id)]
+        self.assertTrue(any("unreadable marketplace field response" in text for text in messages))
+
+    async def test_malformed_field_response_gets_one_corrective_attempt(self):
+        ask = AsyncMock(side_effect=["Not JSON", json.dumps({"fields": {"ebay_specifics.Rise": "High"}})])
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": EBAY})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", ask):
+            result = await fill_native_fields(self.db, self.conv.id, object(), evidence="High rise")
+        self.assertEqual(result["ebay_specifics"]["Rise"], "High")
+        self.assertEqual(ask.await_count, 2)
+
     async def test_a_seller_edit_during_the_fill_wins(self):
         async def edit_then_reply(*_args, **_kwargs):
             self.repo.save_revision(self.conv.id, {"title": "Seller's title"}, source="editor")
@@ -377,6 +406,20 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
     async def test_no_fill_when_the_category_is_unchanged(self):
         listing = {**self.base, "title": "Levi's 505 jeans"}
         self.repo.save_revision(self.conv.id, listing, source="user_form")
+        await self.settle()
+        self.assertEqual(self.fills, [])
+
+    async def test_chat_native_answer_gets_evidence_checked_without_a_category_change(self):
+        listing = {**self.base, "ebay_specifics": {"Style": "Bootcut"}, "_native_forms": {
+            "ebay": {"fields": [row("ebay_specifics.Style", "Style", ["Bootcut", "Straight"], required=True)]},
+        }}
+        self.repo.save_revision(self.conv.id, listing, source="model_refinement")
+        await self.settle()
+        self.assertEqual(self.fills, [{"ebay"}])
+        self.fills.clear()
+        listing["_native_field_evidence"] = {"ebay_specifics.Style": {"value": "Bootcut", "quote": "Bootcut jeans"}}
+        self.repo.save_revision(self.conv.id, listing, source="native_fields")
+        self.repo.save_revision(self.conv.id, listing, source="model_refinement")
         await self.settle()
         self.assertEqual(self.fills, [])
 

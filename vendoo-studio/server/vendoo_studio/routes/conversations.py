@@ -571,6 +571,11 @@ async def reset_conversation(
         conv.notes = notes
     else:
         conv.notes = merge_notes(None, binding) if binding else None
+        # Clear removes this item's facts as well as its visible form. Otherwise
+        # generation and chat reuse corrections from the listing just erased.
+        from vendoo_studio.models.listing_evidence import ListingCorrection
+
+        db.query(ListingCorrection).filter_by(conversation_id=conv_id).delete(synchronize_session=False)
     conv.status = "draft"
     conv.settled_at = None
     conv.unsettled_at = None

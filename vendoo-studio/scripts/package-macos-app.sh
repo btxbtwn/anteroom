@@ -110,33 +110,25 @@ fi
 # Keep PyInstaller framework symlinks. Flattening them breaks the .app layout.
 # Nested Python.framework is often still signed with a different Team ID than the
 # app executable; dyld then refuses to load it ("different Team IDs"). Deep-sign
-# the whole bundle with one identity. Drop *.dist-info / *.egg-info first —
-# codesign --deep treats those metadata dirs as bundles and fails.
+# the whole bundle with one identity. Preserve distribution metadata: HTTP
+# clients used by catalog/photo analysis read it when they are imported.
 if ! command -v codesign >/dev/null 2>&1; then
   echo "codesign is required to package Anteroom.app" >&2
   exit 1
 fi
 "$PYTHON" - "$APP" <<'PY'
-import shutil
+import importlib.metadata
 import sys
 from pathlib import Path
 
-app = Path(sys.argv[1])
-removed = 0
-for pattern in ("*.dist-info", "*.egg-info"):
-    for path in app.rglob(pattern):
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-            removed += 1
-# PyInstaller adds Frameworks/<pkg>.dist-info links to Resources/. With the
-# directories gone those links point nowhere, and a dangling link fails the
-# strict signature check the updater runs before installing.
-dangling = 0
-for path in app.rglob("*"):
-    if path.is_symlink() and not path.exists():
-        path.unlink()
-        dangling += 1
-print(f"Removed {removed} package-metadata directories and {dangling} dangling links before deep sign")
+runtime = Path(sys.argv[1]) / "Contents" / "Frameworks"
+metadata = {dist.metadata["Name"].lower(): dist.version
+            for dist in importlib.metadata.distributions(path=[str(runtime)])}
+for name in ("httpx2", "httpcore2"):
+    expected = importlib.metadata.version(name)
+    if metadata.get(name) != expected:
+        raise SystemExit(f"Bundled {name} metadata is missing or differs from {expected}")
+print("Bundled HTTP client runtime metadata verified")
 PY
 echo "Deep-signing app with identity: $SIGN_IDENTITY"
 codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"

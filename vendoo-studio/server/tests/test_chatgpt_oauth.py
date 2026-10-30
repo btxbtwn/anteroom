@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import ssl
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -167,6 +168,42 @@ class ChatGPTModelChoiceTest(unittest.TestCase):
         self.assertEqual(payload["tool_choice"], "required")
         self.assertEqual(payload["include"], ["web_search_call.action.sources"])
         self.assertEqual(payload["reasoning"]["effort"], "low")
+
+
+class ChatGPTPhotoTransportTest(unittest.IsolatedAsyncioTestCase):
+    async def test_photo_retries_are_bounded_and_do_not_retry_authentication_errors(self):
+        for error, expected_calls in ((ssl.SSLError("bad record mac"), 2), (RuntimeError("HTTP 401"), 1)):
+            provider = ChatGPTCodexProvider.__new__(ChatGPTCodexProvider)
+            provider.vision_model = "test-vision"
+            calls = []
+
+            async def stream(*args, _calls=calls, _error=error, **kwargs):
+                _calls.append(args)
+                raise _error
+                yield  # pragma: no cover - an async iterator that fails before yielding
+
+            with patch.object(provider, "_stream", stream), \
+                    patch("vendoo_studio.providers.chatgpt_codex.encode_images", AsyncMock(return_value=[])):
+                result = await provider.analyze_photos(["audit.jpg"])
+            self.assertIn("error", result)
+            self.assertEqual(len(calls), expected_calls)
+
+    async def test_photo_transport_failure_is_retried_once(self):
+        provider = ChatGPTCodexProvider.__new__(ChatGPTCodexProvider)
+        provider.vision_model = "test-vision"
+        calls = []
+
+        async def stream(*args, **kwargs):
+            calls.append(args)
+            if len(calls) == 1:
+                raise ssl.SSLError("bad record mac")
+            yield '{"size":{"value":"M","source":"tag"}}'
+
+        with patch.object(provider, "_stream", stream), \
+                patch("vendoo_studio.providers.chatgpt_codex.encode_images", AsyncMock(return_value=[])):
+            result = await provider.analyze_photos(["audit.jpg"])
+        self.assertEqual(result["evidence"]["size"]["value"], "M")
+        self.assertEqual(len(calls), 2)
 
 
 class ChatGPTQuickChatTest(unittest.IsolatedAsyncioTestCase):

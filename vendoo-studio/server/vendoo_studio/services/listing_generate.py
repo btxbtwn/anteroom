@@ -197,13 +197,20 @@ def unreadable_tag_fields(evidence: dict) -> list[str]:
 
 
 async def analyze_photos_with_tag_retry(provider, paths: list[str], **kwargs) -> Any:
-    """Analyze downscaled photos; resend originals only when tag text was unreadable."""
+    """Retry an empty answer once; resend originals when tag text was unreadable."""
     from vendoo_studio.providers.xiaomi_mimo import VISION_MAX_SIDE, image_exceeds
 
     result = await provider.analyze_photos(paths, **kwargs)
     if not isinstance(result, dict) or result.get("error"):
         return result
     evidence = normalize_evidence(result.get("evidence") or {})
+    if not evidence and not result.get("raw"):
+        log.info("photo analysis returned no evidence; retrying once")
+        try:
+            return await provider.analyze_photos(paths, **kwargs)
+        except Exception:
+            log.exception("empty photo analysis retry failed")
+            return result
     flagged = unreadable_tag_fields(evidence)
     if not flagged or not any(image_exceeds(path, VISION_MAX_SIDE) for path in paths):
         return result

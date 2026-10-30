@@ -9,6 +9,14 @@ from vendoo_studio.services import depop_form
 
 
 class DepopFormTest(unittest.TestCase):
+    def test_unbranded_uses_depop_other_without_changing_general_brand(self):
+        for brand in ("Unbranded", "No brand"):
+            listing = {"brand": brand}
+            field = next(row for row in depop_form.form(listing)["fields"] if row["path"] == "depop_specifics.brand")
+            self.assertEqual(field["value"], "Other")
+            self.assertIn(field["value"], field["options"])
+            self.assertEqual(listing["brand"], brand)
+
     def test_brand_picker_uses_local_native_choices_and_preserves_the_seller_brand(self):
         for listing in ({"brand": "Nike"}, {"brand": "Nike", "depop_specifics": {"brand": ""}}):
             fields = {row["path"]: row for row in depop_form.form(listing)["fields"]}
