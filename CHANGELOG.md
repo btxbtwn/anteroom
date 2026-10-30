@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.560 — 2026-10-30
+
+- Editing a listing no longer repeatedly restarts category filling or clears filled answers just because a marketplace form is waiting to refresh.
+
 ## 0.1.559 — 2026-10-30
 
 - Open your cloud inventory in the same Anteroom workspace as the desktop app, with listing fields, private photos, notes, and version history.
