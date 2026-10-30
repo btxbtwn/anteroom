@@ -1,8 +1,7 @@
 # Anteroom hosted API on Fly.io
 
-This deploys `vendoo_studio.hosted:app`, not the desktop API. The cloud UI provides email-link sign-in and private draft shells (title and
-notes). `GET /api/health` is public; `/api/account` and every `/api/drafts` route
-require a verified seller session. Photo, job and marketplace routes are not exposed. Chrome, Keychain
+This deploys `vendoo_studio.hosted:app`, not the desktop API. The cloud UI provides email-link sign-in and private draft inventory, General listing fields and photos. `GET /api/health` is public; `/api/account` and every `/api/drafts` route
+require a verified seller session. Job and marketplace routes are not exposed. Chrome, Keychain
 and desktop timers do not run in this container.
 
 From the repository root, after signing in to Fly:
@@ -47,8 +46,7 @@ This is a public certificate, not a private key. Renew it if Supabase rotates
 the issuer. Supply the runtime URI via Fly secrets as `ANTEROOM_DATABASE_URL`;
 never put the URI or its password in fly.toml, source, logs or the frontend.
 
-The initial hosted API does not yet expose database-backed listing routes.
-Provisioning this connection is a prerequisite, not completion of cloud sync.
+The hosted API exposes only draft inventory and its General fields/photos. Full Mac inventory import and marketplace actions remain separate increments.
 
 The migration-version table intentionally has RLS enabled without a permissive
 policy: only its migration owner may read or change it. Supabase may report
@@ -88,3 +86,42 @@ The container's runtime directory is under the non-root user's home, not the
 root-owned application source. It holds only ephemeral runtime directories in
 this increment; draft data lives in Postgres. The API dependency refuses local
 SQLite if the cloud database is missing.
+
+
+## Private draft photos and General fields
+
+Apply the canonical Alembic head before deploying. Revision `c25ff7e26196`
+creates a private `anteroom-photos` bucket on Supabase and restrictive owner
+policies on `storage.objects`. On SQLite and ordinary Postgres, which do not
+have Supabase's managed `storage` schema, the revision leaves storage unchanged.
+Do not expose this bucket publicly or add service-role credentials to Fly.
+
+Supply `SUPABASE_PUBLISHABLE_KEY` to the hosted process (the same public key
+used by the browser build, through Fly secrets or deployment environment).
+Storage calls use that public key and the request's verified seller JWT.
+No elevated storage token is used. Objects live at
+`<verified-user-id>/<server-created-draft-id>/<random-id>.jpg`.
+
+Uploads are streamed with a 10 MB limit and accept JPEG, PNG and WebP up to
+25 megapixels. The server normalizes orientation, strips metadata and resizes
+to at most 2400 pixels before storing a JPEG. Each draft accepts 30 photos.
+The parent draft is locked during attachment, so simultaneous requests cannot
+exceed the count. A failed metadata commit triggers best-effort object cleanup;
+rare failed cleanup can leave a private unreferenced object for later maintenance.
+Photos save independently of the explicit Save draft action. Reads and removals
+check both the seller and parent draft; image bytes require bearer authentication
+and reach the browser as temporary blob URLs, revoked when the view closes.
+
+General edits create canonical `ListingRevision` records and update `Listing`
+inside the same optimistic timestamp transaction as title and notes. The API
+accepts only typed General fields, never arbitrary listing JSON or history IDs.
+Legacy revision pointers must match the same seller and draft before reading.
+Desktop and cloud General editors share the field definition and section rules.
+Search runs on seller-owned draft titles; Load more pages through 100 rows.
+Active/sold inventory, importing Mac data, generation and marketplace tabs are
+not enabled by this increment.
+
+Before accepting public users, test in two real browser accounts: upload a photo,
+save fields, reopen after reload, then confirm the other account cannot load or
+remove the first account's photo. Automated tests exercise the same ownership
+boundaries with real Postgres sessions; Storage HTTP transport is replaced locally.
