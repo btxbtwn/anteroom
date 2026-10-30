@@ -1296,12 +1296,19 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         listing_generation.SessionLocal = self._orig_session
 
     async def test_generate_stream_includes_keepalive_and_listing(self):
+        finishing = []
+        def spawn_finish(coro):
+            task = streaming.spawn(coro)
+            finishing.append(task)
+            return task
+
         transport = ASGITransport(app=app)
         body = ""
-        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
-            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
-                self.assertEqual(resp.status_code, 200)
-                body = "".join([chunk async for chunk in resp.aiter_text()])
+        with patch("vendoo_studio.services.listing_generation.spawn", side_effect=spawn_finish):
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    self.assertEqual(resp.status_code, 200)
+                    body = "".join([chunk async for chunk in resp.aiter_text()])
         self.assertIn(": keepalive", body)
         self.assertIn("event: status", body)
         self.assertIn("Analyzing photos", body)
@@ -1314,6 +1321,10 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual({agent["label"] for agent in agents}, {"Categories"})
         self.assertEqual(agents[-1]["status"], "done")
+        # The stream ends while native fields are still preparing. Only the
+        # completed finish task has recorded the final timing outcome.
+        self.assertEqual(len(finishing), 1)
+        await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
         # Every run's stage timings are saved.
         from vendoo_studio.database import SessionLocal as AppSession
         from vendoo_studio.services.generation_timing import for_conversation
