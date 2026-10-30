@@ -14,7 +14,7 @@ class CategorySchema(SellerOwned, Base):
     category_path = Column(String, nullable=False)
     fields = Column(JSON, nullable=False)
     observed_at = Column(DateTime, default=utcnow, onupdate=utcnow)
-    __table_args__ = (UniqueConstraint("general_path", "marketplace"),)
+    __table_args__ = (UniqueConstraint("user_id", "general_path", "marketplace", name="uq_category_schemas_seller"),)
 
 
 class CategoryFieldSchema(SellerOwned, Base):
@@ -32,7 +32,7 @@ class CategoryFieldSchema(SellerOwned, Base):
     category_id = Column(String, nullable=False)
     fields = Column(JSON, nullable=False)
     fetched_at = Column(DateTime, default=utcnow, onupdate=utcnow)
-    __table_args__ = (UniqueConstraint("marketplace", "category_id"),)
+    __table_args__ = (UniqueConstraint("user_id", "marketplace", "category_id", name="uq_category_field_schemas_seller"),)
 
 
 class CategoryNode(SellerOwned, Base):
@@ -44,7 +44,7 @@ class CategoryNode(SellerOwned, Base):
     parent_path = Column(String, nullable=False, default="")
     label = Column(String, nullable=False)
     observed_at = Column(DateTime, default=utcnow, onupdate=utcnow)
-    __table_args__ = (UniqueConstraint("marketplace", "path"),)
+    __table_args__ = (UniqueConstraint("user_id", "marketplace", "path", name="uq_category_nodes_seller"),)
 
 
 class CategoryTree(Base):

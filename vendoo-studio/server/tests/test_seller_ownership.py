@@ -107,7 +107,7 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
     before = read_rows(engine, names)
     inspector = sa.inspect(engine)
     foreign_keys = {name: inspector.get_foreign_keys(name) for name in inspector.get_table_names()}
-    old_indexes = {name: {index["name"] for index in inspector.get_indexes(name)} for name in inspector.get_table_names()}
+    old_indexes = {name: {index["name"] for index in inspector.get_indexes(name) if not index.get("duplicates_constraint")} for name in inspector.get_table_names()}
 
     assert schema_migrations.ensure_schema(engine) == CURRENT_REVISION
     assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION

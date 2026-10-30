@@ -1,5 +1,5 @@
 """Completed local copy requests, retained so retries cannot duplicate inventory."""
-from sqlalchemy import Column, DateTime, ForeignKey, String
+from sqlalchemy import Column, DateTime, ForeignKey, String, PrimaryKeyConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -9,7 +9,9 @@ from vendoo_studio.models.conversation import utcnow
 class ListingCopyReceipt(SellerOwned, Base):
     __tablename__ = "listing_copy_receipts"
 
-    request_id = Column(String, primary_key=True)
+    __table_args__ = (PrimaryKeyConstraint("user_id", "request_id"),)
+
+    request_id = Column(String, nullable=False)
     fingerprint = Column(String, nullable=False)
     source_kind = Column(String, nullable=False, server_default="listing")
     source_id = Column(String, nullable=False)

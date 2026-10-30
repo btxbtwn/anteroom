@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.535 — 2026-10-30
+
+- Prepare separate seller accounts so saved categories, copy requests, and marketplace actions do not block another seller using the same identifiers.
+
 ## 0.1.534 — 2026-10-29
 
 - Updates install again: downloading one no longer stops with "The update's code signature is damaged or does not match Anteroom's signing identity".

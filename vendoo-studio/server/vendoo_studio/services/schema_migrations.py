@@ -131,14 +131,24 @@ def _adopt_legacy(engine: Engine, config: Config) -> str:
     # handles that mixed schema without recreating tables or losing rows.
     scripts = ScriptDirectory.from_config(config)
     ownership = scripts.get_revision("d8b6f2a19c40")
-    with engine.begin() as connection, Operations.context(MigrationContext.configure(connection)):
-        ownership.module.upgrade()
-        # Adoption used to stamp head after ownership, silently skipping later
-        # revisions on pre-existing tables. Apply those revisions too, before
-        # drift verification and the final stamp. Their mixed-schema handling
-        # belongs to Alembic, never to BACKFILLED_COLUMNS.
-        for revision in reversed(list(scripts.iterate_revisions("head", ownership.revision))):
-            revision.module.upgrade()
+    with engine.connect() as connection:
+        # SQLite's documented table-rebuild procedure disables FK enforcement
+        # before the transaction. Otherwise rebuilding a parent can fail or
+        # cascade-delete its children. Verify all references before committing,
+        # and always restore enforcement before returning this pooled connection.
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
+        try:
+            with connection.begin(), Operations.context(MigrationContext.configure(connection)):
+                ownership.module.upgrade()
+                for revision in reversed(list(scripts.iterate_revisions("head", ownership.revision))):
+                    revision.module.upgrade()
+                if connection.exec_driver_sql("PRAGMA foreign_key_check").first() is not None:
+                    raise SchemaError("Database adoption found invalid references; restore the recovery snapshot.")
+        finally:
+            connection.rollback()
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()
 
     drift = inspect_database(database_path(engine))
     if not drift.clean:

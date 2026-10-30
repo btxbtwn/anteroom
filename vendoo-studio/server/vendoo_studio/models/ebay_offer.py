@@ -8,7 +8,7 @@ from vendoo_studio.models.conversation import new_id, utcnow
 
 class EbayOfferRule(SellerOwned, Base):
     __tablename__ = "ebay_offer_rules"
-    __table_args__ = (UniqueConstraint("account_id", "listing_id", name="uq_ebay_offer_rule_listing"),)
+    __table_args__ = (UniqueConstraint("user_id", "account_id", "listing_id", name="uq_ebay_offer_rule_listing"),)
 
     id = Column(String, primary_key=True, default=new_id)
     account_id = Column(String, nullable=False)
