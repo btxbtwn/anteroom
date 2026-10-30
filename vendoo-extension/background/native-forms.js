@@ -506,6 +506,15 @@ const MERCARI_CONDITION_CHOICES = [
   ['Poor', 'Major flaws, may be damaged, for parts.'],
 ];
 
+async function readPoshmarkEditorForm(listing, deadline) {
+  // Wait for every read to settle before releasing a caller's operation claim.
+  const results = await Promise.allSettled([poshmarkCatalogData(deadline), poshmarkCatalogDisplay(deadline),
+    poshmarkStyleTags(deadline), poshmarkShippingDiscounts(deadline)]);
+  const failed = results.find(result => result.status === 'rejected');
+  if (failed) throw failed.reason;
+  return poshmarkEditorForm(listing, ...results.map(result => result.value));
+}
+
 async function handleNativeMarketplaceForm(msg) {
   const { marketplace, listing = {} } = msg.payload || {};
   const deadline = Date.now() + 20000;
@@ -520,9 +529,7 @@ async function handleNativeMarketplaceForm(msg) {
   const timer = setTimeout(() => reply({ ok: false, error: 'The marketplace catalog did not answer in time. Refresh choices.' }), 20000);
   try {
     if (marketplace === 'poshmark') {
-      const [catalog, display, tags, discounts] = await Promise.all([poshmarkCatalogData(deadline), poshmarkCatalogDisplay(deadline),
-        poshmarkStyleTags(deadline), poshmarkShippingDiscounts(deadline)]);
-      reply({ ok: true, form: poshmarkEditorForm(listing, catalog, display, tags, discounts) });
+      reply({ ok: true, form: await readPoshmarkEditorForm(listing, deadline) });
     } else if (marketplace === 'depop') {
       // Address does not depend on taxonomy; parcel rates do. Start independent
       // reads together and bound optional account reads so they cannot consume

@@ -11,7 +11,9 @@ The extension runs in the background and connects Chrome to Anteroom. Listing re
 
 ## Hosted web connection
 
-Bridge 0.2.38 adds **Connect Chrome** at the hosted Anteroom site. Reload the updated extension and web page, sign in, choose Connect Chrome, and approve the extension window. No sign-in tokens are passed to the extension. This increment connects the browser; hosted marketplace actions are not enabled yet. See [the connection protocol and live test](../docs/cloud-extension.md).
+**Local-app users:** keep the Bridge installed by the local app’s Connect Chrome. Update the app and its bundled Bridge together. A standalone web-test ZIP has no matching app build stamp, so local marketplace actions reject it. To restore the local app, disable the standalone copy and reload `~/Library/Application Support/Anteroom/vendoo-extension`.
+
+Bridge 0.2.38 adds **Connect Chrome** at the hosted Anteroom site. Reload the updated extension and web page, sign in, choose Connect Chrome, and approve the extension window. No sign-in tokens are passed to the extension. Bridge 0.2.39 also reads Poshmark’s native form for the hosted draft preview. Hosted listing mutations are not enabled yet. See [the connection protocol and live test](../docs/cloud-extension.md).
 
 ## Usage
 
