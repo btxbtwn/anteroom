@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.589 — 2026-10-30
+
+- Etsy maker and manufacture-date answers now survive chat saves when their field names are normalized.
+
 ## 0.1.588 — 2026-10-30
 
 - The listing agent can use photo-supported custom answers when a marketplace field allows text, instead of leaving required fields blank because its suggestions do not fit.
