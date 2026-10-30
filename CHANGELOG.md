@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.556 — 2026-10-30
+
+- Analytics counts a sold item's sale once per unit again. When an item sold on one marketplace and the seller cleared its other listings, each marketplace that then read sold was counted as another sale, so the month's total read higher than the sales made (79 vs 55). Only reports within the item's unit count now count; every real order and Vendoo sale still does.
+
 ## 0.1.555 — 2026-10-30
 
 - Check recent Poshmark and Depop likes about every minute while Anteroom is running, so new likers can receive offers sooner. Keep price minimums and pause controls, and check all offer rules and eBay eligibility every 15 minutes. Turn existing Poshmark and Depop offer rules back on after reviewing the faster checks.
