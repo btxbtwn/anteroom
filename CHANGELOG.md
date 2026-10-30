@@ -6,7 +6,7 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.553 — 2026-10-30
+## 0.1.554 — 2026-10-30
 
 - Explain which Chrome Bridge to load when using the local and web apps, and how to restore local marketplace actions after testing a standalone web Bridge.
 
