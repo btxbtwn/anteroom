@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.579. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.581. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
@@ -157,7 +157,7 @@ owner/revision checks and no marketplace jobs or writes. Account-dependent forms
 and approved marketplace actions still need their browser/worker integration.
 
 The shared Poshmark/Depop forms merged in #992 and are deployed in 0.1.579.
-On `feat/hosted-listing-preferences`, reviewed shared preference handlers replace
+PR #994 is merged and deployed in 0.1.581. Reviewed shared preference handlers replace
 the Poshmark-only marketplace placeholder and read-only defaults. Marketplace
 selection, package/ZIP/location defaults, formulas and hide/restore controls use
 the seller-owned settings store. Listing-specific changes verify ownership before
@@ -170,3 +170,10 @@ The similar-item finder reads private account photos, stores owner-scoped hashes
 and reviews, and merges only explicitly chosen owned items. Active draft tasks
 block merges under the submission row locks. Vendoo controls remain unavailable
 in hosted mode until their approved browser actions are connected.
+
+Release 0.1.581 passed public health/version and unsigned private-route checks.
+Its release image also passed private startup, assets and synthetic-owner
+settings/database checks with the production runtime role, creating no account
+data. The API now runs in `ord` after a stalled image pull on its prior host;
+that stopped, stateless Machine was removed after the replacement was healthy.
+Fly's trial limit still requires billing for reliable uptime.
