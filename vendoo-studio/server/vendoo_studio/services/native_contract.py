@@ -24,7 +24,8 @@ SALE_FIELDS = re.compile(
 )
 _SCHEMA_KEYS = ("path", "key", "label", "required", "multi", "selection_only", "options", "option_values",
                 "max_values", "max_length", "min_value", "max_value", "step", "input_type", "locked",
-                "category_specific", "clears", "value_constraints", "help", "inventory_groups", "inventory_system")
+                "category_specific", "clears", "value_constraints", "help", "inventory_groups", "inventory_system",
+                "variation_aspects")
 _EDITOR_KEYS = ("section", "section_help", "width", "control_width", "presentation", "placeholder", "prefix", "suffix", "counter",
                 "label_hidden", "group", "group_help", "reveal", "cascade",
                 "option_groups", "option_help", "option_amounts", "slot_labels", "accept", "hashtag_max",

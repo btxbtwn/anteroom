@@ -1,4 +1,5 @@
 import { GENERAL_LISTING_FIELDS } from "../generalListingFields";
+import editorFields from "../../../skills/list-this/references/listing-editor-fields.json";
 import { SellwildAccountChoices } from "./SellwildAccountChoices";
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -1332,9 +1333,7 @@ function fieldLeaf(key: string): string {
   return (key.split(".").pop() || "").toLowerCase();
 }
 
-const FOLLOWED_GENERAL = new Set([
-  "title", "description", "brand", "size", "department",
-]);
+const FOLLOWED_GENERAL = new Set(editorFields.followed_general);
 
 /** General fills these. A marketplace edit is stored on that form alone. */
 function independentFieldKey(tab: string, key: string): string {
@@ -1400,24 +1399,9 @@ function selectionChoiceMatches(field: EditorField, value: unknown): boolean {
   return values.every((item) => field.options?.includes(item) || ids.has(item));
 }
 
-const SHARED_FORM_FIELDS: EditorField[] = [
-  { key: "title", label: "Title" },
-  { key: "description", label: "Description" },
-  { key: "price", label: "Price", type: "number" },
-  { key: "brand", label: "Brand" },
-  { key: "condition", label: "Condition" },
-  { key: "primaryColor", label: "Primary Color" },
-  { key: "secondaryColor", label: "Secondary Color" },
-  { key: "quantity", label: "Quantity", type: "number" },
-  { key: "size", label: "Size" },
-  { key: "sku", label: "SKU" },
-  { key: "category_path", label: "Category" },
-];
+const SHARED_FORM_FIELDS: EditorField[] = editorFields.shared;
 
-const PACKAGE_FORM_FIELDS: EditorField[] = [
-  { key: "weight_oz", label: "Package Weight (oz)", type: "number" },
-  { key: "package_dimensions_in", label: "Package Dimensions (LxWxH in)" },
-];
+const PACKAGE_FORM_FIELDS: EditorField[] = editorFields.package;
 
 const PACKAGE_MARKETPLACES = new Set(["etsy"]);
 /**
@@ -1462,15 +1446,7 @@ function sameField(a: EditorField, b: EditorField): boolean {
 
 const MERCARI_DERIVED_LABELS = new Set(["quantity", "shipping label", "delivery method", "who will pay for delivery?", "payer", "who pays"]);
 
-const MARKETPLACE_PRICE_KEYS: Record<string, string> = {
-  ebay: "ebay_specifics.price",
-  poshmark: "poshmark_specifics.poshmarkPrice",
-  mercari: "mercari_specifics.price",
-  depop: "depop_specifics.price",
-  etsy: "etsy_specifics.price",
-  vinted: "vinted_specifics.price",
-  sellwild: "sellwild_specifics.price",
-};
+const MARKETPLACE_PRICE_KEYS: Record<string, string> = editorFields.marketplace_price_keys;
 
 function marketplacePriceField(tab: string): EditorField | null {
   const key = MARKETPLACE_PRICE_KEYS[tab];
@@ -1774,9 +1750,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         "etsy_specifics",
         [
           ...liveCategoryFields(listing, "etsy"),
-          { key: "etsy_specifics.whoMade", label: "Who Made It?" },
-          { key: "etsy_specifics.whatIsIt", label: "What Is It?" },
-          { key: "etsy_specifics.whenMade", label: "When Was It Made?" },
+          ...editorFields.etsy,
           ...ETSY_CATEGORY_OPTIONALS.map((field) => ({
             key: `etsy_specifics.category_specifics.${field.key}`,
             label: field.label,
@@ -1784,16 +1758,7 @@ function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorF
         ],
       );
     case "vinted":
-      return [
-        { key: "price", label: "Price", type: "number" },
-        { key: "vinted_specifics.category", label: "Category *", required: true },
-        { key: "vinted_specifics.condition", label: "Condition" },
-        { key: "vinted_specifics.brand", label: "Brand" },
-        { key: "vinted_specifics.size", label: "Size" },
-        { key: "vinted_specifics.color", label: "Color" },
-        { key: "vinted_specifics.packageSize", label: "Package size" },
-        { key: "vinted_specifics.material", label: "Material" },
-      ];
+      return editorFields.vinted;
     case "grailed":
     case "facebook":
       // Their fields come from the category Vendoo maps to, once it is chosen.

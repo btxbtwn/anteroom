@@ -1,3 +1,5 @@
+import editorFields from "../../skills/list-this/references/listing-editor-fields.json";
+
 /** eBay category optional fields shown after Vendoo's "Show Optional Fields". */
 export const EBAY_CATEGORY_OPTIONALS: { key: string; label: string }[] = [
   { key: "accents", label: "Accents" },
@@ -41,18 +43,7 @@ export const EBAY_CATEGORY_CORE: { key: string; label: string }[] = [
   { key: "conditionDescription", label: "Condition Description" },
 ];
 
-export const ETSY_CATEGORY_OPTIONALS: { key: string; label: string }[] = [
-  { key: "clothingStyle", label: "Clothing style" },
-  { key: "sleeveLength", label: "Sleeve length" },
-  { key: "neckline", label: "Neckline" },
-  { key: "closure", label: "Closure" },
-  { key: "graphic", label: "Graphic" },
-  { key: "collarStyle", label: "Collar style" },
-  { key: "holiday", label: "Holiday" },
-  { key: "occasion", label: "Occasion" },
-  { key: "pattern", label: "Pattern" },
-  { key: "sustainability", label: "Sustainability" },
-];
+export const ETSY_CATEGORY_OPTIONALS: { key: string; label: string }[] = editorFields.etsy_optionals;
 
 /** Depop fields revealed after Vendoo's "Show Optional Fields". */
 export const DEPOP_CATEGORY_OPTIONALS: { key: string; label: string }[] = [
