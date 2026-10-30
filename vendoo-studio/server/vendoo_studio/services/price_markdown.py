@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.validation import normalize_listing_dropdowns, validate_listing
@@ -46,8 +47,11 @@ def listing_busy(conv_id: str, db: Session) -> bool:
     from vendoo_studio.models.job import ACTIVE_JOB_STATUSES
     from vendoo_studio.services import activity
     from vendoo_studio.services.streaming import active_generation
+    from vendoo_studio.models.background_task import BackgroundTask
 
-    return bool(active_generation(conv_id) or activity.running(conv_id) or any(
+    return bool(db.scalar(select(BackgroundTask.id).where(
+        BackgroundTask.conversation_id == conv_id, BackgroundTask.status.in_(("queued", "running"))).limit(1))
+        or active_generation(conv_id) or activity.running(conv_id) or any(
         job.status in ACTIVE_JOB_STATUSES for job in JobRepo(db).list_by_conversation(conv_id)
     ))
 
@@ -79,6 +83,16 @@ def apply_price_drop(
         sanitize_listing_sizes,
     )
     from vendoo_studio.services.schema_probe import is_schema_probe_job
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.background_task import BackgroundTask
+
+    # Serialize with draft submission before reading the reviewed revision.
+    if db.scalar(select(Conversation.id).where(Conversation.id == conv_id).with_for_update()) is None:
+        raise PriceDropError(NOT_FOUND, 404)
+    if db.scalar(select(BackgroundTask.id).where(
+            BackgroundTask.conversation_id == conv_id,
+            BackgroundTask.status.in_(("queued", "running"))).limit(1)):
+        raise PriceDropError(BUSY, 409)
 
     listing, revisions = current_listing(conv_id, db)
     if expected_revision_id is not None and revisions[0].id != expected_revision_id:

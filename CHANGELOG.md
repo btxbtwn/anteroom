@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.584 — 2026-10-30
+
+- Select multiple items on the web to make separate draft copies or review and save price markdowns, with checks for changed listings and work still in progress.
+
 ## 0.1.583 — 2026-10-30
 
 - Change your web app theme and sidebar listing names in General settings, read what changed in each release, and reload the current web version from About.
