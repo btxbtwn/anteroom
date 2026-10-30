@@ -124,6 +124,25 @@ class ConversationResetTest(unittest.TestCase):
         self.assertEqual(self.db.query(VendooDraftCache).count(), 0)
         self.assertEqual(self.db.query(Job).filter(Job.conversation_id == self.conv.id).count(), 0)
 
+    def test_clear_drops_old_corrections_but_regenerate_keeps_them(self):
+        from vendoo_studio.models.listing_evidence import ListingCorrection
+        from vendoo_studio.services.listing_evidence import corrections_context
+
+        revision = ListingRepo(self.db).get_revisions(self.conv.id)[0]
+        self.db.add(ListingCorrection(
+            conversation_id=self.conv.id, revision_id=revision.id, source="user_form",
+            category_path="Men > Jeans", brand="Nike",
+            changes={"size": {"before": "27", "after": "32"}},
+        ))
+        self.db.commit()
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset", json={"keep_inputs": True})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn("size", corrections_context(self.db, self.conv.id, {})["current_item_corrections"])
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset", json={"keep_inputs": False})
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(corrections_context(self.db, self.conv.id, {})["current_item_corrections"], {})
+
     def test_reset_wipes_listing_and_keeps_conversation(self):
         with photos_dir(self.photos_tmp.name):
             response = self.client.post(f"/api/conversations/{self.conv.id}/reset")

@@ -428,7 +428,7 @@ def normalize_listing_dropdowns(listing: dict) -> bool:
 
     if ensure_ebay_category_optionals(listing):
         changed = True
-    if ensure_etsy_category_optionals(listing):
+    if etsy_eligible(listing) and ensure_etsy_category_optionals(listing):
         changed = True
     if ensure_depop_category_optionals(listing):
         changed = True

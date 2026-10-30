@@ -86,6 +86,26 @@ class _Provider:
         return self.results[len(self.calls) - 1]
 
 
+def test_empty_analysis_is_retried_once_without_changing_provider(tmp_path):
+    path = _photo(tmp_path, (1200, 900))
+    recovered = {"evidence": {"brand": {"value": "Hanes", "source": "tag"}}}
+    provider = _Provider({"evidence": {}}, recovered)
+    assert asyncio.run(analyze_photos_with_tag_retry(provider, [path], notes="audit")) == recovered
+    assert provider.calls == [{"notes": "audit"}, {"notes": "audit"}]
+
+
+def test_repeated_empty_analysis_stays_unusable_after_one_retry(tmp_path):
+    from vendoo_studio.services.listing_generate import PhotoAnalysisError, require_photo_analysis
+    import pytest
+
+    path = _photo(tmp_path, (1200, 900))
+    provider = _Provider({"evidence": {}}, {"evidence": {}})
+    result = asyncio.run(analyze_photos_with_tag_retry(provider, [path]))
+    assert len(provider.calls) == 2
+    with pytest.raises(PhotoAnalysisError):
+        require_photo_analysis(result)
+
+
 def test_retry_at_full_resolution_merges_resolved_tag_fields(tmp_path):
     path = _photo(tmp_path, (4032, 3024))
     first = {"evidence": {

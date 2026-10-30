@@ -4,6 +4,12 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from vendoo_studio.database import Base
+from vendoo_studio.models.catalog import CategoryTree, CategoryTreeNode
+
 from vendoo_studio.services.direct_categories import (
     attach_direct_categories,
     live_category_id,
@@ -12,11 +18,43 @@ from vendoo_studio.services.direct_categories import (
     overlay_live_fields,
     pick_ebay_suggestion,
     pick_etsy_leaf,
+    search_text,
 )
 from vendoo_studio.services.ebay_listings import ebay_category_id
 
 
 class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.engine = create_engine("sqlite://")
+        Base.metadata.create_all(self.engine)
+        self.db = Session(self.engine)
+
+    def tearDown(self):
+        self.db.close()
+        self.engine.dispose()
+
+    async def test_generation_uses_the_exact_synced_ebay_leaf_without_a_suggestion_request(self):
+        path = "Clothing, Shoes & Accessories > Men > Men's Clothing > Jeans"
+        self.db.add(CategoryTree(marketplace="ebay", status="complete"))
+        for category_id, category_path in [("11483", path), ("11554", path.replace("Men", "Women"))]:
+            self.db.add(CategoryTreeNode(marketplace="ebay", category_id=category_id, parent_id="1",
+                                        label="Jeans", path=category_path, is_leaf=True, has_children=False))
+        self.db.commit()
+        listing = {"category_path": path}
+        with patch("vendoo_studio.services.direct_categories._ebay_leaf", AsyncMock(side_effect=AssertionError("network suggestion used"))) as search, \
+                patch("vendoo_studio.services.direct_categories._etsy_leaf", AsyncMock(return_value=None)):
+            await attach_direct_categories(self.db, listing)
+        search.assert_not_awaited()
+        self.assertEqual(listing["direct_category_ids"]["ebay"], "11483")
+        self.assertEqual(listing["direct_category_ids"]["ebay_path"], path)
+
+    def test_category_lookup_keeps_department_before_a_title_exists(self):
+        listing = {"title": "Draft listing", "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Jeans"}
+        query = search_text(listing)
+        self.assertIn("Women", query)
+        self.assertIn("Jeans", query)
+        self.assertNotIn("Draft listing", query)
+
     def test_ebay_suggestion_is_the_first_leaf_and_its_path(self):
         hit = pick_ebay_suggestion({"categorySuggestions": [{
             "category": {"categoryId": "15687", "categoryName": "T-Shirts"},
@@ -52,6 +90,15 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
             {"id": "2", "path": "Clothing > Tops > T-shirts"},
         ]
         self.assertEqual(pick_etsy_leaf(leaves, "Draft listing T-Shirts")["id"], "2")
+
+    def test_etsy_product_type_outweighs_shoes_in_the_source_root(self):
+        leaves = [
+            {"id": "1789", "path": "Weddings > Shoes > Men's Wedding Shoes"},
+            {"id": "30", "path": "Clothing > Men's Clothing > Shirts & Tees > T-shirts"},
+        ]
+        query = "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts"
+        self.assertEqual(pick_etsy_leaf(leaves, query)["id"], "30")
+        self.assertIsNone(pick_etsy_leaf(leaves[:1], query))
 
     def test_a_live_ebay_category_does_not_replace_vendoo(self):
         listing = {"marketplace_category_ids": {"ebay": "111"}, "direct_category_ids": {"ebay": "15687"}}
@@ -129,7 +176,7 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
              patch("vendoo_studio.services.direct_categories._etsy_leaf", new=AsyncMock(return_value={"id": "482", "path": "Clothing > Men > T-shirts"})), \
              patch("vendoo_studio.services.marketplace_schemas.etsy_taxonomy", etsy_taxonomy), \
              patch("vendoo_studio.services.chrome_catalog.live_preview", new=AsyncMock(return_value={})):
-            await attach_direct_categories(listing, "cotton tee")
+            await attach_direct_categories(self.db, listing, "cotton tee")
         self.assertEqual(listing["marketplace_category_ids"], {"ebay": "111", "etsy": "222"})
         self.assertEqual(listing["direct_category_ids"]["ebay"], "15687")
         self.assertEqual(listing["direct_category_ids"]["etsy"], "482")
@@ -144,7 +191,7 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
              patch("vendoo_studio.services.direct_categories._etsy_leaf", new=AsyncMock(return_value=None)), \
              patch("vendoo_studio.services.chrome_catalog.live_preview", new=AsyncMock(
                  side_effect=AssertionError("Chrome catalog used"))) as chrome_read:
-            await attach_direct_categories(listing, "")
+            await attach_direct_categories(self.db, listing, "")
         self.assertEqual(listing["marketplace_category_ids"], {"ebay": "111", "poshmark": "stale", "depop": "old_leaf"})
         chrome_read.assert_not_awaited()
         self.assertNotIn("poshmark", listing.get("direct_category_ids", {}))

@@ -300,7 +300,7 @@ async def prepare_generation_schema(
     seed_probe_general_fields(seed, conv.notes if conv else notes)
     if on_status:
         on_status("Loading marketplace categories and fields…")
-    await attach_direct_categories(seed, f"{analysis}\n{notes}")
+    await attach_direct_categories(db, seed, f"{analysis}\n{notes}")
     ListingRepo(db).save_revision(
         conv_id, seed, source="category_analysis",
         parent_revision_id=revisions[0].id if revisions else None,

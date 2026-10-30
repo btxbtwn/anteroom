@@ -38,6 +38,8 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     reject_corrupt_listing(updated)
     keep_direct_categories(previous, updated)
     align_depop_category(updated, previous)
+    native_blocks = {market: copy.deepcopy(updated.get(f"{market}_specifics") or {})
+                     for market in updated.get("_native_forms") or {}}
     prepare_user_listing(previous, updated, notes=notes)
     sanitize_listing_sizes(updated)
     previous_size = None if previous.get("size") is None else str(previous.get("size"))
@@ -47,6 +49,8 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
         normalize_listing_dropdowns(current)
 
     preserving_locks(updated, _normalize)
+    for market, block in native_blocks.items():
+        updated[f"{market}_specifics"] = block
     return updated
 
 

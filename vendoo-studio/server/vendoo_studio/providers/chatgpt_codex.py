@@ -6,6 +6,7 @@ from vendoo_studio.providers.photo_analysis import PHOTO_ANALYSIS_SYSTEM
 
 import asyncio
 import json
+import ssl
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -433,13 +434,19 @@ class ChatGPTCodexProvider:
             {"role": "user", "content": content_parts},
         ]
         try:
-            content = ""
-            async for chunk in self._stream(messages, self.vision_model):
-                kind, piece = unpack_stream_item(chunk)
-                if kind == "thinking":
-                    live_trace.emit("thinking", piece)
-                else:
-                    content += piece
+            for attempt in range(2):
+                content = ""
+                try:
+                    async for chunk in self._stream(messages, self.vision_model):
+                        kind, piece = unpack_stream_item(chunk)
+                        if kind == "thinking":
+                            live_trace.emit("thinking", piece)
+                        else:
+                            content += piece
+                    break
+                except (httpx.TransportError, ssl.SSLError):
+                    if attempt:
+                        raise
             if not content:
                 raise RuntimeError("ChatGPT returned an empty listing response")
             return self._parse_json_response(content)

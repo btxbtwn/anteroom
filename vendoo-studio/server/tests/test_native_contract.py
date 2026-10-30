@@ -47,6 +47,70 @@ def ebay_tshirt():
 
 
 class NativeContractTest(unittest.TestCase):
+    def test_editor_shows_the_same_inherited_size_type_that_validation_accepts(self):
+        listing = ebay_tshirt()
+        listing["sizeType"] = "Regular"
+        row = {"path": "ebay_specifics.Size Type", "label": "Size Type", "required": True,
+               "selection_only": True, "options": ["Regular", "Big & Tall"]}
+        form = {"category_id": "15687", "page_labels": True, "fields": [row]}
+        listing[contract.KEY] = contract.capture(listing, {"ebay": form}, ["ebay"])
+        rendered = contract.editor_form(listing, "ebay")
+        self.assertEqual(rendered["fields"][0]["value"], "Regular")
+        listing["ebay_specifics"]["Size Type"] = ""
+        self.assertEqual(contract.editor_form(listing, "ebay")["fields"][0]["value"], "")
+        self.assertTrue(any(gap["field"] == row["path"] for gap in contract.gaps(listing, "ebay")))
+        listing["seller_fields"] = ["ebay_specifics.Size Type"]
+        self.assertEqual(contract.editor_form(listing, "ebay")["fields"][0]["value"], "")
+        self.assertTrue(any(gap["field"] == row["path"] for gap in contract.gaps(listing, "ebay")))
+
+    def test_validate_route_keeps_native_size_before_checking_it(self):
+        from vendoo_studio.routes.listings import validate
+
+        listing = {"brand": "Hanes", "size": "XL", "ebay_specifics": {"Size": "XL"}}
+        form = {"category_id": "15687", "fields": [{"path": "ebay_specifics.Size", "label": "Size",
+                 "required": True, "selection_only": True, "options": ["XL"]}]}
+        listing[contract.KEY] = contract.capture(listing, {"ebay": form}, ["ebay"])
+        listing[contract.EVIDENCE_KEY] = {"ebay_specifics.Size": {"value": "XL", "quote": "Size XL"}}
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        try:
+            with sessionmaker(bind=engine)() as db:
+                conv = ConversationRepo(db).create(title="Tee")
+                ListingRepo(db).save_revision(conv.id, listing, source="native_schema")
+                result = validate(conv.id, db)
+                self.assertFalse(any(error["field"] == "ebay_specifics.Size" for error in result.errors))
+        finally:
+            engine.dispose()
+
+    def test_price_edit_preserves_other_native_marketplace_answers(self):
+        from vendoo_studio.services.listing_editor import prepared_listing
+
+        listing = {"price": 20, "size": "XL", "brand": "Hanes",
+                   "ebay_specifics": {"Size": "XL", "Department": "Men"},
+                   "depop_specifics": {"size": "XL"},
+                   contract.KEY: {"ebay": {}, "depop": {}}}
+        submitted = copy.deepcopy(listing)
+        submitted["poshmark_specifics"] = {"poshmarkPrice": 21}
+        updated = prepared_listing(listing, submitted)
+        self.assertEqual(updated["ebay_specifics"], listing["ebay_specifics"])
+        self.assertEqual(updated["depop_specifics"], listing["depop_specifics"])
+
+    def test_unrelated_edit_does_not_invent_etsy_fields_for_an_ineligible_item(self):
+        from vendoo_studio.services.listing_editor import prepared_listing
+
+        listing = seed()
+        listing["etsy_specifics"] = {"who_made": "Another company or person", "when_made": "2020 - 2026 (Recently)"}
+        submitted = copy.deepcopy(listing)
+        submitted.setdefault("poshmark_specifics", {})["poshmarkPrice"] = 25
+        updated = prepared_listing(listing, submitted)
+        self.assertEqual(updated["etsy_specifics"], listing["etsy_specifics"])
+
+    def test_marketplace_price_override_belongs_to_the_native_price_row(self):
+        listing = {"price": 20, "poshmark_specifics": {"poshmarkPrice": 21}}
+        form = {"category_id": "shirts", "fields": [{"path": "price", "label": "Listing Price", "required": True}]}
+        listing[contract.KEY] = contract.capture(listing, {"poshmark": form}, ["poshmark"])
+        self.assertEqual(contract.gaps(listing, "poshmark"), [])
+
     def test_copy_generation_receives_the_chosen_native_category_without_its_siblings(self):
         from vendoo_studio.services import mercari_form
 
