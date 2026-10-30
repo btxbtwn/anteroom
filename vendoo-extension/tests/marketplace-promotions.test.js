@@ -444,6 +444,24 @@ test('Depop reads the price from the offer preview when its product document has
   assert.ok(!priceless.requests.some(r => r.key === DEPOP_SEND));
 });
 
+test('Depop says plainly when nobody who liked a listing can get an offer', async () => {
+  // Live answers (2026-10-30): no likes is HTTP 400 code 1003; a liker who cannot get an offer leaves the recipient out.
+  const noLikes = { id: 'USER_ERROR', message: 'You are unable to submit an offer on this product. Does the product have variants and are you sending them?', code: 1003 };
+  const noRecipient = { product_id: 999, product_description: 'Vintage tee', price_currency: 'USD', variant_set: 1, variant_id: 2,
+    shipping_cost: '1.99', sellers_lowest_offer_value: '4.46', offer_expiration_hours: 24 };
+  for (const answer of [[400, noLikes], [200, noRecipient]]) {
+    const run = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: answer }));
+    await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+      listing_id: SLUG, discount_percent: 15 } });
+    assert.equal(run.results[0].ok, false);
+    assert.match(run.results[0].error, /Nobody who liked this Depop listing can get an offer/, JSON.stringify(run.results[0]));
+    const send = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: answer }));
+    await depopOffer(send);
+    assert.equal(send.results[0].ok, false);
+    assert.ok(!send.requests.some(r => r.key === DEPOP_SEND));
+  }
+});
+
 test('Depop submits one bulk job, waits for success, and never invents a delivered count or repeats the POST', async () => {
   const statuses = ['QUEUED', 'PROCESSING', 'SUCCESS'];
   const sent = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: () => [200, { status: statuses.shift() }] }));
