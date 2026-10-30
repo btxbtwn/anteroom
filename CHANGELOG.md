@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.586 — 2026-10-30
+
+- See your inventory Suggestions on the web, including items needing review and stale listings to mark down. Items with generation or chat still queued stay out of the feed.
+
 ## 0.1.585 — 2026-10-30
 
 - An offer round no longer says "between None% and None% off" when a marketplace's offer limits leave no discount to send on a listing; it says so plainly.

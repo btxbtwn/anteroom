@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.583. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.584. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
@@ -191,3 +191,10 @@ and price-markdown dialogs. Hosted price requests require owned items and the
 reviewed revision for every drop, with bounded batch sizes. Price writes share
 draft submission row locks and refuse queued/running tasks. Other bulk actions
 stay unavailable until their own service/browser workflows are ready.
+
+PR #997 is merged and deployed in 0.1.584; public health/version and unsigned
+bulk-price rejection checks passed. The Suggestions feed is being connected on
+`feat/hosted-suggestions` as an independent capability from the assistant and
+generation. The canonical rules use owned inventory, photos, sales and stale-day
+preferences; queued/running draft tasks stay out of the feed. Cards open existing
+listing controls or the reviewed markdown dialog. The assistant remains gated.

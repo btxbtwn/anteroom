@@ -81,7 +81,7 @@ def listing_response(db, identity):
 def runtime(request: Request):
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
-    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_copy', 'bulk_markdowns'] + (['generation', 'chat_attachments'] if generation else []),
+    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_copy', 'bulk_markdowns', 'suggestions'] + (['generation', 'chat_attachments'] if generation else []),
             'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark', 'depop']}
 
 
