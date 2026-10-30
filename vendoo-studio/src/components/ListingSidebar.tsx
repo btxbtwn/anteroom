@@ -34,6 +34,7 @@ import { cn } from "../lib/utils";
 import { Kbd } from "./ui/kbd";
 import { SIDEBAR_ICON_BUTTON, SIDEBAR_ROW } from "./sidebar/sidebarStyles";
 import { ListingRow } from "./sidebar/ListingRow";
+import { VirtualListingList } from "./sidebar/VirtualListingList";
 import { activeAnchorMs, settledAnchorMs, type Listing } from "./sidebar/listingShelves";
 import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
 import { SettingsSidebarNav } from "./sidebar/SettingsSidebarNav";
@@ -415,13 +416,7 @@ export function ListingSidebar({
             onChange={handleFiltersChange}
           />
 
-          <div
-            className={cn(
-              "min-h-0 flex-1 overflow-y-auto overscroll-contain px-(--sidebar-content-inset) pb-2",
-              "max-[900px]:flex-none max-[900px]:overflow-visible max-[900px]:pb-[calc(72px+env(safe-area-inset-bottom,0px))]",
-            )}
-          >
-            {shownListings.map((listing) => (
+          <VirtualListingList rows={shownListings} renderRow={(listing) => (
               <ListingRow
                 key={listing.id}
                 listing={listing}
@@ -439,7 +434,7 @@ export function ListingSidebar({
                 onSelect={onSelect}
                 onDelete={onDelete}
               />
-            ))}
+            )}>
 
             {(!conversations || conversations.length === 0) && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
@@ -447,7 +442,7 @@ export function ListingSidebar({
             {conversations && conversations.length > 0 && activeListings.length === 0 && settledListings.length === 0 && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No matching listings</p>
             )}
-          </div>
+          </VirtualListingList>
         </>
       )}
 

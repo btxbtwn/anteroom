@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.540 — 2026-10-29
+
+- Open listings and switch marketplace forms faster, keep editing while changes save, and switch inventory filters without loading every thread on screen.
+
 ## 0.1.539 — 2026-10-29
 
 - Manage eBay automatic offers from Automations alongside the other marketplaces.

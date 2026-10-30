@@ -22,7 +22,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from vendoo_studio.database import json_value
 from vendoo_studio.models.listing import ListingRevision
 from vendoo_studio.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
@@ -82,9 +81,9 @@ def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, d
         if first_sale is None or _time(created_at) <= first_sale or number > best.get(conv_id, 0):
             best[conv_id] = number
 
-    # Inventory polls need one scalar, not every historical listing body.
-    # Extract it in SQL so large revisions never enter Python's JSON decoder.
-    every = db.query(ListingRevision.conversation_id, json_value(ListingRevision.listing_json, "quantity"),
+    # This scalar is recorded on each immutable revision. JSON extraction here
+    # made each poll parse every historical marketplace form in the database.
+    every = db.query(ListingRevision.conversation_id, ListingRevision.inventory_quantity,
                      ListingRevision.created_at).order_by(ListingRevision.created_at)
     if conv_ids is not None:
         every = every.filter(ListingRevision.conversation_id.in_(conv_ids))
