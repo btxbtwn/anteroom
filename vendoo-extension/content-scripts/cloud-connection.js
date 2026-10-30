@@ -24,8 +24,9 @@
     }
     function respond(result) {
       if (data.action === 'poshmark_form') {
-        const form = result?.ok ? CloudMarketplaceProtocol.form(result.form) : null;
-        const code = ['not_connected', 'invalid_input', 'account_changed', 'busy', 'signed_out', 'challenge', 'rate_limited', 'schema_drift', 'network'].includes(result?.error_code) ? result.error_code : 'unavailable';
+        const changed = accountId !== data.accountId;
+        const form = !changed && result?.ok ? CloudMarketplaceProtocol.form(result.form) : null;
+        const code = changed ? 'account_changed' : ['not_connected', 'invalid_input', 'account_changed', 'busy', 'signed_out', 'challenge', 'rate_limited', 'schema_drift', 'network'].includes(result?.error_code) ? result.error_code : 'unavailable';
         window.postMessage({ source: 'anteroom-extension', version: 1, requestId: data.requestId,
           ok: Boolean(form), ...(form ? { form } : { error_code: code }) }, ORIGIN);
         return;

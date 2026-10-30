@@ -120,7 +120,11 @@
           const tab = await api.tabs.get(sender.tab.id);
           if (!site(tab.url)) return false;
           const reply = await api.tabs.sendMessage(sender.tab.id, { type: 'cloud.connection.probe', accountId: message.accountId }, { documentId: sender.documentId });
-          return reply?.current === true;
+          if (reply?.current !== true) return false;
+          return await serial(async () => {
+            const latest = (await read())[sender.tab.id];
+            return Boolean(latest?.approved && latest.accountId === message.accountId && latest.connectionId === connection);
+          });
         } catch { return false; }
       }
       if (!await current()) return { ok: false, error_code: 'account_changed' };

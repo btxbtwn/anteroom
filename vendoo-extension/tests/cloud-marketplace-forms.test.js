@@ -89,3 +89,16 @@ test('inspection holds the shared lock so the hosted reader cannot overlap it', 
   release([]); await inspecting;
   assert.equal(c.nativeOperationsRunning(), false);
 });
+
+test('disconnecting during the final document probe also discards the result', async () => {
+  const s = await connected(async () => ({ ok: true, form: FORM }));
+  let finish, entered; let calls = 0;
+  const started = new Promise(resolve => { entered = resolve; });
+  s.api.tabs.sendMessage = async () => {
+    if (++calls === 1) return { current: true };
+    entered(); return new Promise(resolve => { finish = resolve; });
+  };
+  const pending = s.page('poshmark_form', { listing: { title: 'Coat' } });
+  await started; await s.page('disconnect'); finish({ current: true });
+  assert.equal((await pending).error_code, 'account_changed');
+});
