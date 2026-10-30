@@ -110,8 +110,14 @@ def record_sale(
     listing_id: str | None,
     quantity: int | None,
     sold_at: datetime | None,
+    conversation_id: str | None = None,
 ) -> MarketplaceSale | None:
-    """Store one sold line, once. Returns the new row, or None if already known."""
+    """Store one sold line, once. Returns the new row, or None if already known.
+
+    ``conversation_id`` is the item a check read the listing for. It decides the
+    owner even when the marketplace link alone cannot: a sale always protects
+    the listing it was found on.
+    """
     exists = (
         db.query(MarketplaceSale.id)
         .filter_by(marketplace=marketplace, order_id=order_id, line_id=line_id)
@@ -119,7 +125,9 @@ def record_sale(
     )
     if exists:
         return None
-    conv = find_listing(db, marketplace, listing_id)
+    conv = db.get(Conversation, conversation_id) if conversation_id else None
+    if conv is None:
+        conv = find_listing(db, marketplace, listing_id)
     sale = MarketplaceSale(
         marketplace=marketplace,
         order_id=order_id,

@@ -4,9 +4,11 @@ Vendoo's synced label (``notes.vendooStatus``) is the imported history. On top
 of it, Anteroom's own records decide:
 
 - **Sold** once the units sold reach the item's quantity. A unit is a paid
-  line on the sales ledger (a marketplace sale or one the seller recorded with
-  Mark as sold), or an older seller mark "sold" on a marketplace with no line
-  of its own. A direct stock read showing the listing sold out also counts.
+  line on the sales ledger (a sale the marketplaces reported, or one the
+  seller recorded with Mark as sold), or an older seller mark "sold" on a
+  marketplace with no line of its own. A direct stock read showing the listing
+  sold out also counts. Vendoo's own sale records and dates are not evidence:
+  a sale is Anteroom's to see, on the marketplace itself.
 - **Active** while the item is live somewhere: a direct listing, a seller
   "listed" mark, or a Vendoo listing Anteroom has not delisted. An item with
   some units sold and some left stays Active, with ``units_sold`` set.

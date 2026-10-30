@@ -53,7 +53,8 @@ async def check(db: Session, conv_id: str) -> dict:
     result["sale_recorded"] = False
     watched = entry.get("state") == "live" and not entry.get("sold_here")
     if result["ok"] and result["state"] == "sold" and result["owner"] != "other" and watched:
-        created = await asyncio.to_thread(record_reported_sales, "facebook", [listing_id])
+        created = await asyncio.to_thread(record_reported_sales, "facebook", [listing_id],
+                                           conversation_ids={listing_id: conv_id})
         if created:
             await announce_sales(created)
         result["sale_recorded"] = bool(created)
