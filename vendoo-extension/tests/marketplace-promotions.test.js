@@ -135,6 +135,19 @@ test('offer to likers sends Poshmark’s own body and refuses below the floor or
   }
 });
 
+test('an offer without an extra discount keeps the listing’s own shipping discount', async () => {
+  const LISTED = 'd'.repeat(24);
+  const discounted = worker({ [`GET ${posh}`]: [200, { data: { ...livePost.data, seller_shipping_discount_id: LISTED } }],
+    [`POST ${offer}`]: [200, { data: {} }] });
+  await promote(discounted.c, { action: 'offer', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3500 });
+  assert.equal(discounted.results[0].ok, true);
+  assert.deepEqual(discounted.bodies[`POST ${offer}`].seller_shipping_discount, { id: LISTED });
+  const plain = worker({ [`POST ${offer}`]: [200, { data: {} }] });
+  await promote(plain.c, { action: 'offer', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3500 });
+  assert.equal(plain.results[0].ok, true);
+  assert.equal(plain.bodies[`POST ${offer}`].seller_shipping_discount, undefined);
+});
+
 test('no likers means no offer, and an unconfirmed action is refused', async () => {
   const none = worker({ [`GET ${posh}`]: [200, { data: { ...livePost.data, like_count: 0 } }] });
   await promote(none.c, { action: 'offer', price_cents: 5000, offer_price_cents: 4000, floor_cents: 3000 });
@@ -401,6 +414,34 @@ test('Depop verifies USD across product and preview without assuming missing cur
     assert.equal(run.results[0].ok, ok);
     assert.ok(run.requests.every(r => r.key.startsWith('GET')));
   }
+});
+
+test('Depop reads the price from the offer preview when its product document has none', async () => {
+  // Depop's product document (2026-10-30): no price or currency, sizes under variants_all,
+  // and a preview without a lowest offer.
+  const bare = { slug: SLUG, id: 999, user_id: 55, status: 'STATUS_ONSALE', variants_all: [{ id: 17, quantity: 1, status: 'STATUS_ONSALE', variant: 'M' }] };
+  const preview = depopPreview();
+  delete preview.sellers_lowest_offer_value;
+  const check = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, bare], [DEPOP_PREVIEW]: [200, preview] }));
+  await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+    listing_id: SLUG, discount_percent: 15 } });
+  assert.equal(check.results[0].ok, true, JSON.stringify(check.results[0]));
+  assert.equal(check.results[0].price_cents, 5000);
+  assert.equal(check.results[0].offer_price_cents, 4250);
+  const send = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, bare], [DEPOP_PREVIEW]: [200, preview] }));
+  await depopOffer(send);
+  assert.equal(send.results[0].ok, true, JSON.stringify(send.results[0]));
+  assert.equal(send.requests.filter(r => r.key === DEPOP_SEND).length, 1);
+  const sizes = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...bare,
+    variants_all: [{ id: 17, quantity: 1, variant: 'M' }, { id: 18, quantity: 1, variant: 'L' }] }], [DEPOP_PREVIEW]: [200, preview] }));
+  await depopOffer(sizes);
+  assert.equal(sizes.results[0].ok, false);
+  assert.ok(!sizes.requests.some(r => r.key === DEPOP_SEND));
+  const priceless = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, bare],
+    [DEPOP_PREVIEW]: [200, depopPreview({ prices: {} })] }));
+  await depopOffer(priceless);
+  assert.equal(priceless.results[0].ok, false);
+  assert.ok(!priceless.requests.some(r => r.key === DEPOP_SEND));
 });
 
 test('Depop submits one bulk job, waits for success, and never invents a delivered count or repeats the POST', async () => {

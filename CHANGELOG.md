@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.572 — 2026-10-30
+
+- Depop offers to likers send again. Depop stopped including the price on its listing details, so every listing was skipped with "Depop's listing price changed"; Anteroom now reads the price from Depop's own offer screen.
+- Poshmark offers to likers no longer fail with "Invalid shipping discount" on listings that already have a shipping discount. With no extra discount chosen, the offer keeps the listing's own, as Poshmark's offer form does.
+
 ## 0.1.571 — 2026-10-30
 
 - Crop, rotate and adjust your photos in the web editor, preview changes before saving, and reset to the original.

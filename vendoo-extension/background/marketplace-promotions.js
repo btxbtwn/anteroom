@@ -122,9 +122,12 @@ async function offerPoshmark(payload, deadline) {
     throw marketplaceError(`Poshmark needs offers to likers at least ${rules.minimum}% below the price. Review the offer again.`);
   }
   const body = { offer_amount: { val: String(offer / 100), currency_code: 'USD' }, offer_api_version: 3 };
-  if (payload.shipping_discount_id) {
-    if (!/^[a-f0-9]{24}$/.test(String(payload.shipping_discount_id))) throw marketplaceError('Choose the shipping discount again.');
-    body.seller_shipping_discount = { id: String(payload.shipping_discount_id) };
+  // No extra discount keeps the listing's own shipping discount, as Poshmark's
+  // offer form does; leaving it out makes Poshmark refuse the offer.
+  const discount = payload.shipping_discount_id || post.seller_shipping_discount_id;
+  if (discount) {
+    if (!/^[a-f0-9]{24}$/.test(String(discount))) throw marketplaceError('Choose the shipping discount again.');
+    body.seller_shipping_discount = { id: String(discount) };
   }
   await client.call('POST', `/vm-rest/posts/${payload.listing_id}/likes/users/offers`, body, { step: 'offer', what: 'the offer to likers' });
   return { ok: true, state: 'done', recipient_count: Number(post.like_count) || 0 };
@@ -314,15 +317,20 @@ function requireDepopOfferCurrency(product, preview = {}) {
 function depopOfferPreview(body, product) {
   const recipient = Number(body?.offer_recipient_id);
   const others = String(body?.offer_additional_recipients_count ?? '');
-  const lowest = depopOfferCents(body?.sellers_lowest_offer_value);
-  const current = body?.prices?.current_price?.price_break_down?.item_price;
+  // Depop leaves out its lowest offer on some listings; the seller's floor still applies.
+  const lowestValue = body?.sellers_lowest_offer_value;
+  const lowest = lowestValue == null ? null : depopOfferCents(lowestValue);
+  const prices = body?.prices;
+  const original = prices?.original_price?.price_break_down?.item_price;
+  const current = prices?.current_price?.price_break_down?.item_price;
+  const originalCents = original == null ? null : depopOfferCents(original);
   const currentCents = current == null ? null : depopOfferCents(current);
   if (String(body?.product_id) !== String(product.id) || !Number.isSafeInteger(recipient) || recipient <= 0 || !/^\d{1,6}$/.test(others)
-      || lowest == null || (current != null && currentCents == null)) {
+      || (lowestValue != null && lowest == null) || (original != null && originalCents == null) || (current != null && currentCents == null)) {
     throw depopOfferDrift('send-offer preview');
   }
   requireDepopOfferCurrency(product, body);
-  return { eligible_count: 1 + Number(others), lowest_cents: lowest, current_cents: currentCents };
+  return { eligible_count: 1 + Number(others), lowest_cents: lowest, original_cents: originalCents, current_cents: currentCents };
 }
 
 async function depopOfferState(requests, slug, deadline) {
@@ -334,9 +342,11 @@ async function depopOfferState(requests, slug, deadline) {
   if (owner == null || String(owner) !== String(me?.id)) throw marketplaceError('This Depop listing belongs to another account.');
   if (product.status !== 'STATUS_ONSALE' || product.sold === true) throw marketplaceError('This Depop listing has sold or is not on sale.');
   if (depopImportVariants(product).length > 1) throw marketplaceError('Depop does not send offers on listings with several sizes.');
-  const price = Math.round((depopProductPrice(product) || 0) * 100);
-  if (!(price > 0)) throw depopOfferDrift('listing price');
   const preview = requests.preview.read((await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview')).data, product);
+  // Depop's product document no longer carries the price; its offer preview does.
+  const listed = depopProductPrice(product);
+  const price = listed != null ? Math.round(listed * 100) : preview.original_cents;
+  if (!(price > 0)) throw depopOfferDrift('listing price');
   // A marked-down item is offered against its current price, as Depop's preview shows it.
   const basis = preview.current_cents ? Math.min(price, preview.current_cents) : price;
   return { product, price, likes: preview.eligible_count, preview, lowest: preview.lowest_cents, highest: centOffer(basis, DEPOP_OFFER_MIN_PERCENT) };
