@@ -47,6 +47,10 @@ def test_durable_chat_finishes_preparation_before_done_and_isolates_other_accoun
     monkeypatch.setattr('vendoo_studio.routes.chat.generate_listing', fake_generation)
     with TestClient(create_app(PROJECT_URL)) as client:
         alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+        assert 'generation' in client.get('/api/runtime', headers=alice).json()['features']
+        client.app.state.background_worker_enabled = False
+        assert 'generation' not in client.get('/api/runtime', headers=alice).json()['features']
+        client.app.state.background_worker_enabled = True
         identity = client.post('/api/conversations', headers=alice, json={'title': 'My coat'}).json()['id']
         with Session(migration_engine) as db:
             db.add(Photo(user_id=USER_ID, conversation_id=identity, original_filename='photo.jpg',

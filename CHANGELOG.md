@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.574 — 2026-10-30
+
+- Show Generate and listing chat in the web editor when the hosted draft worker is running, and recognize your connected AI provider.
+
 ## 0.1.573 — 2026-10-30
 
 - Connect your own AI API keys in the web app’s Providers settings, choose models and listing order, and keep credentials encrypted in your account.

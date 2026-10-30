@@ -111,3 +111,10 @@ settings sidebar currently exposes Providers; other sections remain pending
 their service integrations. Existing SDK provider preferences remain visible,
 with a Mac-worker notice rather than hosted sign-in/terminal controls. Generation
 and chat UI remain disabled until their request contracts are fully connected.
+
+On `feat/hosted-generation-flow`, runtime availability of the durable hosted
+worker controls Generate and listing text chat. Status now reports the seller’s
+configured provider. Chat image attachments remain gated until private durable
+attachment storage is connected; desktop attachments remain enabled. Suggestions
+retain the assistant capability gate until those endpoints are ported. The
+production worker setting remains disabled, so this is not deployed activation.

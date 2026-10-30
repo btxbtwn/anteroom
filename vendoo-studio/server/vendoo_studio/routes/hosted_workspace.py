@@ -77,15 +77,18 @@ def listing_response(db, identity):
 
 
 @router.get('/runtime')
-def runtime():
-    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits'],
+def runtime(request: Request):
+    worker = getattr(request.app.state, 'background_worker', None)
+    generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
+    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits'] + (['generation'] if generation else []),
             'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark']}
 
 
 @router.get('/status')
 def status(db=Depends(get_seller_db)):
+    from vendoo_studio.services.listing_provider import provider_is_configured
     active = db.scalars(select(Job.id).where(Job.status.in_(ACTIVE_JOB_STATUSES)).limit(1)).first()
-    return {'version': app_version(), 'provider_configured': False, 'extension_connected': False,
+    return {'version': app_version(), 'provider_configured': provider_is_configured(), 'extension_connected': False,
             'active_job_id': active, 'conversations': db.scalar(select(func.count()).select_from(Conversation)),
             'database_ok': True, 'packaged': False, 'chrome_available': False, 'setup_guide_dismissed': True}
 

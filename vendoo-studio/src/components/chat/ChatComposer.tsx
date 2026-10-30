@@ -4,6 +4,7 @@
  * MIT, © 2026 T3 Tools Inc.): the prompt editor, attached image chips, then
  * the model and effort pickers on the left and attach / send / stop on the right.
  */
+import { useWorkspaceRuntime } from "../../app/runtime";
 import { useState, type ReactNode, type RefObject } from "react";
 import { cn } from "../../lib/utils";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../ComposerPromptEditor";
@@ -90,10 +91,11 @@ export function ChatComposer({
   className,
 }: Props) {
   const [dragOver, setDragOver] = useState(false);
+  const runtime = useWorkspaceRuntime();
   const [usageOpen, setUsageOpen] = useState(false);
   // `/usage-limits` is answered here and never sent, as in T3 Code.
   const submit = () => {
-    if (isUsageLimitsCommand(input)) {
+    if (!runtime.hosted && isUsageLimitsCommand(input)) {
       onInputChange("");
       setUsageOpen(true);
       return;
@@ -103,6 +105,7 @@ export function ChatComposer({
   };
   const canSubmit = Boolean(input.trim() || images.images.length || hasOtherContent);
   const addImages = (files: File[]) => {
+    if (!runtime.features.has("chat_attachments")) return;
     if (images.addFiles(files)) composerRef.current?.focus();
   };
   return (
@@ -117,7 +120,7 @@ export function ChatComposer({
                 dragOver ? "bg-accent/45 ring-1 ring-inset ring-primary/70" : null,
               )}
               onDragOver={(event) => {
-                if (!dragHasFiles(event.dataTransfer)) return;
+                if (!runtime.features.has("chat_attachments") || !dragHasFiles(event.dataTransfer)) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
                 setDragOver(true);
@@ -127,7 +130,7 @@ export function ChatComposer({
               }}
               onDrop={(event) => {
                 setDragOver(false);
-                if (!dragHasFiles(event.dataTransfer)) return;
+                if (!runtime.features.has("chat_attachments") || !dragHasFiles(event.dataTransfer)) return;
                 // Claimed here: the listing panel's photo drop skips a handled drop.
                 event.preventDefault();
                 addImages(Array.from(event.dataTransfer.files));
@@ -145,7 +148,7 @@ export function ChatComposer({
                   placeholder={placeholder}
                   onPasteFiles={(files) => {
                     const pasted = files.filter((file) => composerImageMimeType(file));
-                    if (!pasted.length) return false;
+                    if (!runtime.features.has("chat_attachments") || !pasted.length) return false;
                     addImages(pasted);
                     return true;
                   }}
@@ -165,7 +168,7 @@ export function ChatComposer({
                   <ComposerModelControls disabled={busy} />
                 </div>
                 <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
-                  <ComposerAttachButton onFiles={addImages} />
+                  {runtime.features.has("chat_attachments") && <ComposerAttachButton onFiles={addImages} />}
                   <ComposerPrimaryActions
                     busy={busy}
                     stopping={stopping}
