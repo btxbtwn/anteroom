@@ -1380,14 +1380,14 @@ function sourceValue(listing: ListingData | undefined, field: EditorField, tab: 
 }
 
 /** What a control shows before it is mapped to a choice label. */
-function editorFieldValue(listing: ListingData | undefined, field: EditorField, tab: string): unknown {
+export function editorFieldValue(listing: ListingData | undefined, field: EditorField, tab: string): unknown {
   // eBay's category control shows the breadcrumb. The id lives beside it.
   if (field.key === "direct_category_ids.ebay") return resolvedEditorValue(field, listing);
   // A locked row keeps the form's computed value, such as a generated SKU.
   if (field.locked && field.defaultValue !== undefined) return field.defaultValue;
   const displayed = sourceValue(listing, field, tab);
   // A selection whose saved text is not one of the choices keeps the form's resolved id.
-  if (field.selectionOnly && field.defaultValue !== undefined && !selectionChoiceMatches(field, displayed)) {
+  if (field.selectionOnly && editorValuePresent(displayed) && field.defaultValue !== undefined && !selectionChoiceMatches(field, displayed)) {
     return field.defaultValue;
   }
   return displayed;

@@ -79,6 +79,9 @@ class AnalyticsItem:
     sale_id: str | None = None
     # The seller's labels from Item Details.
     labels: tuple[str, ...] = ()
+    # False for a sale of stock merged into another item: the sale counts, the
+    # item does not, because its stock is counted on the item it joined.
+    stock: bool = True
 
     @property
     def has_cost(self) -> bool:
@@ -237,7 +240,7 @@ def load_rows(db) -> list[AnalyticsItem]:
             # Not sold, or sold with no sale on record (a bare Vendoo label or mark).
             fallback_sold = effective == "sold" and not sales
             rows.append(replace(base, sold_at=derived.sold_at) if fallback_sold else base)
-        rows.extend(sales)
+        rows.extend([replace(sale, stock=False) for sale in sales] if merged_away else sales)
     return rows
 
 
@@ -484,22 +487,40 @@ def _category_label(value: Any) -> str:
 
 
 def _inventory(items: list[AnalyticsItem], now: datetime) -> dict[str, Any]:
+    """Stock by item, not by sale: one item with several sales is still one item.
+
+    Analytics keeps a row per sale, and an item that still has stock is an
+    active row beside its sale rows. The item's own row decides: a row that is
+    not sold says how much stock is left, and an item whose every row is a sale
+    is sold. This is the same count the Inventory tabs show.
+    """
+    state: dict[str, str] = {}
+    stock: dict[str, AnalyticsItem] = {}
+    for item in items:
+        if not item.stock:
+            continue
+        stock.setdefault(item.conversation_id, item)
+        if item.status != "sold":
+            state[item.conversation_id] = item.status
+    for conv_id, item in stock.items():
+        state.setdefault(conv_id, item.status)
     counts = {"active": 0, "draft": 0, "sold": 0, "failed": 0, "working": 0}
     asking = 0.0
-    for item in items:
-        if item.status == "active":
+    for conv_id, status in state.items():
+        item = stock[conv_id]
+        if status == "active":
             counts["active"] += 1
             asking += item.price
-        elif item.status == "sold":
+        elif status == "sold":
             counts["sold"] += 1
-        elif item.status == "failed":
+        elif status == "failed":
             counts["failed"] += 1
-        elif item.status in {"in_progress", "listing"}:
+        elif status in {"in_progress", "listing"}:
             counts["working"] += 1
         else:
             counts["draft"] += 1
     counts["asking_value"] = _money(asking)
-    active = [item for item in items if item.status == "active"]
+    active = [stock[conv_id] for conv_id, status in state.items() if status == "active"]
     stale = [item for item in active if item.listed_at and (now - item.listed_at).days >= 90]
     counts["cost_value"] = _money(sum(item.cost or 0.0 for item in active if item.has_cost))
     counts["cost_known"] = sum(item.has_cost for item in active)

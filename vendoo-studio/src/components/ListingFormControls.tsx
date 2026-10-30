@@ -522,6 +522,10 @@ export function SearchableMultiSelect({
         multiple items={items} value={value} disabled={disabled}
         onInputValueChange={setQuery}
         onValueChange={(next) => {
+          if (maxValues === 1 && next.length > 1) {
+            onChange(next.filter((item) => !value.includes(item)).slice(-1));
+            return;
+          }
           if (maxValues != null && next.length > maxValues && next.length > value.length) return;
           onChange(next);
         }}
@@ -547,7 +551,7 @@ export function SearchableMultiSelect({
               <span className="min-w-0 break-words">{item}</span>
               <button type="button" disabled={disabled} aria-label={`Remove ${item}`}
                 className="shrink-0 rounded px-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                onMouseDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
                 onClick={() => onChange(value.filter((entry) => entry !== item))}>×</button>
             </li>)}
           </ul>}
@@ -567,8 +571,8 @@ export function SearchableMultiSelect({
           />
           {clearable && <button type="button" aria-label="Clear values" title="Clear"
             className="absolute end-7.5 top-1/2 inline-flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md text-icon-muted opacity-80 outline-none hover:bg-accent hover:opacity-100 focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-3.5"
-            onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); onChange([]); }}
-            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onChange([]); } }}>
+            onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+            onClick={() => onChange([])}>
             <XIcon />
           </button>}
           <ComboboxTrigger
@@ -580,7 +584,7 @@ export function SearchableMultiSelect({
         <ComboboxPopup anchor={anchor}>
           <ComboboxEmpty>No matches.</ComboboxEmpty>
           <ComboboxList>{(item: string) => <ComboboxItem key={item} value={item}
-            disabled={maxValues != null && value.length >= maxValues && !value.includes(item)}>
+            disabled={maxValues != null && maxValues !== 1 && value.length >= maxValues && !value.includes(item)}>
             <span aria-hidden="true">{value.includes(item) ? "✓" : "○"}</span>
             {item === custom ? `Add “${item}”` : item}
           </ComboboxItem>}</ComboboxList>
