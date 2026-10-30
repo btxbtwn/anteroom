@@ -9,6 +9,7 @@ Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 ## 0.1.563 — 2026-10-30
 
 - Keep eBay size, size type, and waist answers when field names are normalized, and stop restarting category filling for those spelling changes.
+- Keep listing fields editable while the agent works, so you can make manual corrections without stopping chat.
 
 ## 0.1.562 — 2026-10-30
 
