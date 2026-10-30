@@ -40,8 +40,11 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
         session = await asyncio.to_thread(account_choices)
         result = sellwild_form(snapshot, conv_id, db, ship_from=session["ship_from"], coupons=session["coupons"],
                                default_parcel=session["default_parcel"])
+        result["account_connected"] = len(session.get("unavailable", [])) < 3
         if session.get("unavailable"):
-            result["notes"] = ["Some Sellwild account choices are unavailable. Sign in to Sellwild in Anteroom, then reload choices."]
+            result["notes"] = ["Some Sellwild account choices are unavailable. Reload choices to try again."
+                               if result["account_connected"] else
+                               "Sign in to Sellwild in Anteroom to load your account choices."]
         return result
     if not refresh:
         from vendoo_studio.services import native_contract

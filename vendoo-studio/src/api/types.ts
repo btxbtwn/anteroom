@@ -636,6 +636,7 @@ export interface MarketplaceFormField {
 
 /** A marketplace's form for one listing. ``known`` is false when no schema is cached. */
 export interface MarketplaceForm {
+  account_connected?: boolean;
   marketplace: string;
   native?: boolean;
   /** Labels are exactly the page's, required markers included, so none is added. */

@@ -6,9 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.546 — 2026-10-30
+## 0.1.548 — 2026-10-30
 
 - Connect the web app to Anteroom Bridge in desktop Chrome, approve the browser connection, and disconnect it when you sign out.
+
+## 0.1.547 — 2026-10-30
+
+- Set one optional minimum price for Poshmark, Mercari, and Depop offers across current and future listings. Existing offer rules pause for review before sending without individual minimums.
+
+## 0.1.546 — 2026-10-29
+
+- Vinted and Sellwild now recognise when I finish signing in and reload my choices automatically, instead of keeping the sign-in prompt on screen.
+
 
 ## 0.1.545 — 2026-10-30
 

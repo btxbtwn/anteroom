@@ -35,6 +35,7 @@ class PromotionAutomation(SellerOwned, Base):
     timezone = Column(String, nullable=True)
     # Offers only. No shipping label means no shipping discount.
     discount_percent = Column(Integer, nullable=True)
+    minimum_price_cents = Column(Integer, nullable=True)
     min_likes = Column(Integer, nullable=True)
     shipping_label = Column(String, nullable=True)
     paused_reason = Column(String, nullable=True)

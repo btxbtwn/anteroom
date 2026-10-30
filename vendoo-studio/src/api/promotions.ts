@@ -59,6 +59,7 @@ export interface PromotionAutomationBody {
   times?: string[];
   timezone?: string;
   discount_percent?: number;
+  minimum_price?: string | null;
   min_likes?: number;
   shipping_label?: string | null;
 }
@@ -109,5 +110,5 @@ export interface PromotionCoverageItem {
   too_new: boolean;
 }
 
-export interface PromotionCoverage { items: PromotionCoverageItem[]; included: number; missing_floor: number }
+export interface PromotionCoverage { items: PromotionCoverageItem[]; included: number }
 export interface PromotionActivity { runs: PromotionRun[]; sends: Promotion[] }
