@@ -1,8 +1,9 @@
 """Reviewed account price changes. These handlers never contact a marketplace."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 
-from vendoo_studio.repositories.queries import ConversationRepo
+from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.services import price_markdown
 from vendoo_studio.services.hosted_database import get_seller_db
 
@@ -27,9 +28,10 @@ class ApplyInput(BaseModel):
 
 
 def require_owned(db, identities):
-    for identity in set(identities):
-        if ConversationRepo(db).get(identity) is None:
-            raise HTTPException(404, 'Listing not found')
+    wanted = set(identities)
+    owned = set(db.scalars(select(Conversation.id).where(Conversation.id.in_(wanted))))
+    if wanted != owned:
+        raise HTTPException(404, 'Listing not found')
 
 
 @router.post('/preview')
