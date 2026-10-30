@@ -20,6 +20,7 @@ COPY vendoo-studio/server/vendoo_studio/ /app/vendoo-studio/server/vendoo_studio
 RUN pip install --no-cache-dir '/app/vendoo-studio[hosted]' \
     && useradd --create-home --uid 10001 anteroom
 COPY --from=web /src/dist /app/web
+ENV VENDOO_STUDIO_DATA_DIR=/home/anteroom/.local/share/anteroom
 USER anteroom
 EXPOSE 8080
 # Authentication callbacks can contain one-use codes; do not log request URLs.

@@ -83,3 +83,8 @@ contract accepts no owner, client-selected record ID, status, parent ID, file
 path, history pointer or marketplace action. It does not read settings, photos,
 listing history or operational JSON, and starts no timers. The remaining file
 and historical-reference audit still gates those later capabilities.
+
+The container's runtime directory is under the non-root user's home, not the
+root-owned application source. It holds only ephemeral runtime directories in
+this increment; draft data lives in Postgres. The API dependency refuses local
+SQLite if the cloud database is missing.
