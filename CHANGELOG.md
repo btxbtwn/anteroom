@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.585 — 2026-10-30
+
+- An offer round no longer says "between None% and None% off" when a marketplace's offer limits leave no discount to send on a listing; it says so plainly.
+
 ## 0.1.584 — 2026-10-30
 
 - Select multiple items on the web to make separate draft copies or review and save price markdowns, with checks for changed listings and work still in progress.
