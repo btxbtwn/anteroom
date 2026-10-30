@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.551 — 2026-10-30
+
+- Preview a cloud draft with Poshmark’s live fields and choices through your connected Chrome browser, using the same form as the Mac app.
+
 ## 0.1.550 — 2026-10-29
 
 - I can remove Depop Age, Source, and Style chips and choose replacements. Cleared selections stay empty across marketplace forms instead of bringing back the old answer.
