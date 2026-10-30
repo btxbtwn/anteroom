@@ -1,7 +1,7 @@
 """All current and future eBay offer policy
 
 Revision ID: 84bc2a03cbad
-Revises: bbbb148e3124
+Revises: 6dc4b77bc66e
 Create Date: 2026-10-29 20:56:12.420181
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = '84bc2a03cbad'
-down_revision = 'bbbb148e3124'
+down_revision = '6dc4b77bc66e'
 branch_labels = None
 depends_on = None
 
