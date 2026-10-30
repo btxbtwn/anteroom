@@ -252,6 +252,14 @@ class NativeContractTest(unittest.TestCase):
         listing[contract.EVIDENCE_KEY] = {"mercari_specifics.material": {"value": "wool", "quote": "100% wool"}}
         self.assertIn("evidence", contract.gaps(listing, "mercari")[0]["message"])
 
+    def test_optional_answers_do_not_repeat_evidence_reminders(self):
+        listing = seed()
+        listing["mercari_specifics"]["material"] = "cotton"
+        listing[contract.KEY]["mercari"]["fields"][0]["required"] = False
+        self.assertEqual(contract.gaps(listing, "mercari"), [])
+        listing["mercari_specifics"]["material"] = "not an allowed material"
+        self.assertTrue(contract.gaps(listing, "mercari"))
+
     def test_an_aspect_stored_under_another_spelling_answers_its_row(self):
         listing = ebay_tshirt()
         # The listing JSON keeps the aspect lowercase; the form names the row Style.
