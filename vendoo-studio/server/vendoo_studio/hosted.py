@@ -91,6 +91,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
         app.state.session_verifier = SessionVerifier(
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
+        app.state.chat_upload_slots = asyncio.Semaphore(1)
         worker = None
         if app.state.background_worker_enabled:
             from vendoo_studio.database import engine
@@ -149,6 +150,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
     app.include_router(keys_router)
     from vendoo_studio.routes.hosted_tasks import router as task_router
     app.include_router(task_router)
+    from vendoo_studio.routes.hosted_attachments import router as attachment_router
+    app.include_router(attachment_router)
     from vendoo_studio.routes import analytics, boxes, sale_calendar, sales_ledger
     for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router):
         app.include_router(shared_router)

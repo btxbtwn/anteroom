@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.578 — 2026-10-30
+
+- Attach images to listing chat in the web app. Images stay private, remain with the conversation after reload, and are removed when you delete the draft.
+
 ## 0.1.577 — 2026-10-30
 
 - Offer and share rounds now say why a marketplace refused a listing, in its own words, instead of only "Mercari refused the request."

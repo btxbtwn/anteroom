@@ -15,7 +15,7 @@ from vendoo_studio.services.service_context import current, use
 
 async def _execute(task_id, token):
     from vendoo_studio.database import SessionLocal
-    from vendoo_studio.routes.chat import ChatMessage, generate_listing, send_message
+    from vendoo_studio.routes.chat import ChatMessage, generate_listing, run_message
     from vendoo_studio.services.listing_generate import photo_fingerprint
 
     with SessionLocal() as db:
@@ -35,7 +35,8 @@ async def _execute(task_id, token):
         if kind == 'generate':
             response = await generate_listing(conversation_id, db=db)
         elif kind == 'chat':
-            response = await send_message(conversation_id, ChatMessage(text=payload['text']), db=db)
+            response = await run_message(conversation_id, ChatMessage(text=payload['text']), db=db,
+                                         stored_attachments=payload.get('attachments', []))
         else:
             raise ValueError('Unsupported draft task')
     frames, flushed_at, failed = [], time.monotonic(), False

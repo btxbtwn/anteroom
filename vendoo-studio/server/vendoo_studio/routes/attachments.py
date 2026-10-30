@@ -25,12 +25,12 @@ class AttachmentUpload(BaseModel):
     data_url: str = Field(min_length=1, max_length=15_000_000)
 
 
-def store_uploads(uploads: list[AttachmentUpload]) -> list[dict]:
+def store_uploads(uploads: list[AttachmentUpload], *, collection_id: str | None = None) -> list[dict]:
     """Save a message's images; a bad one refuses the whole message with a 400."""
     if len(uploads) > MAX_ATTACHMENTS:
         raise HTTPException(400, f"Attach at most {MAX_ATTACHMENTS} images to one message.")
     try:
-        return save_attachments([(item.name, item.data_url) for item in uploads])
+        return save_attachments([(item.name, item.data_url) for item in uploads], collection_id=collection_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

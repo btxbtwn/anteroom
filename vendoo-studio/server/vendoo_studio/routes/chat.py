@@ -169,6 +169,10 @@ def _reset_status(conv_id: str, reason: str) -> None:
 
 @router.post("/api/conversations/{conv_id}/messages")
 async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(get_db)):
+    return await run_message(conv_id, body, db)
+
+
+async def run_message(conv_id: str, body: ChatMessage, db: Session, *, stored_attachments=None):
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if not conv:
@@ -181,7 +185,7 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
         if not job or job.conversation_id != conv_id:
             raise HTTPException(404, "That Vendoo draft does not belong to this listing")
 
-    attachments = store_uploads(body.attachments)
+    attachments = stored_attachments if stored_attachments is not None else store_uploads(body.attachments, collection_id=conv_id)
     repo.add_message(conv_id, "user", _browser_message_text(body), attachments=attachments)
     provider = get_listing_provider()
     if provider is None:
@@ -232,11 +236,10 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
             option_catalog = OptionCatalog({})
             build_db = SessionLocal()
             try:
-                messages = attach_to_last_user_turn(
-                    await build_chat_messages(conv_id, build_db, body.text, option_catalog), attachments,
-                )
+                messages = await build_chat_messages(conv_id, build_db, body.text, option_catalog)
             finally:
                 build_db.close()
+            messages = await asyncio.to_thread(attach_to_last_user_turn, messages, attachments)
             def lock_targets(paths):
                 work.fields = tuple(sorted(set(work.fields) | set(paths)))
 

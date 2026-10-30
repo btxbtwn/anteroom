@@ -15,8 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The public release remains 0.1.561 until
-this work is verified. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The public release is now 0.1.574. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
@@ -28,16 +27,14 @@ before accessing local files, the Keychain or an unscoped database session.
 `1e3d624c0ae2` adds owner-scoped references to Vault credentials and consolidates
 the first cloud release's preferences behind the shared settings service. Only
 private, owner-checked SQL functions may access Vault; the application role has
-no grants on its secret tables or decrypted view. This revision is not applied
-to production yet.
+no grants on its secret tables or decrypted view. This revision is applied in production.
 
 `56b5ee7250ec` adds a durable draft-generation/chat queue and private event
 journal. The trusted worker claims work through a restricted function, then
 enters the claimed seller's service context. Every ORM save checks its lease;
 cancellation or expiry prevents late writes. Interrupted work keeps its saved
 draft and asks for review rather than replaying partial generation. Publishing
-and delisting cannot enter this queue. The worker remains disabled in the
-deployed configuration until the remaining integration is verified.
+and delisting cannot enter this queue. The hosted draft worker is enabled in the deployed 0.1.574 release.
 
 The branch now mounts the canonical provider-key/model settings, analytics,
 sales ledger/CSV exports, sale calendar, box records, and photo-edit handlers.
@@ -54,8 +51,8 @@ the export is loading.
 ## Completion checklist
 
 - Shared inventory/editor, draft fields, notes, history and private photo reads
-  are deployed. Crop, rotate, adjustments and reset are connected on branch
-  `feat/hosted-photo-editing`; background removal still needs the Mac worker.
+  are deployed, including crop, rotate, adjustments and reset. Background removal
+  still needs the Mac worker.
   Finish copy/templates UI, bulk actions,
   category options, and all field/default controls.
 - Finish provider settings, encrypted credentials, generation, chat, assistant,
@@ -109,8 +106,7 @@ Provider settings UI is connected on `feat/hosted-provider-settings`: API-key
 providers and MiMo use the shared controls with account Vault storage. The web
 settings sidebar currently exposes Providers; other sections remain pending
 their service integrations. Existing SDK provider preferences remain visible,
-with a Mac-worker notice rather than hosted sign-in/terminal controls. Generation
-and chat UI remain disabled until their request contracts are fully connected.
+with a Mac-worker notice rather than hosted sign-in/terminal controls. Generation and text chat are deployed; image attachments are the next increment.
 
 On `feat/hosted-generation-flow`, runtime availability of the durable hosted
 worker controls Generate and listing text chat. Status now reports the seller’s
@@ -119,30 +115,36 @@ attachment storage is connected; desktop attachments remain enabled. Suggestions
 retain the assistant capability gate until those endpoints are ported. The
 production worker setting remains disabled, so this is not deployed activation.
 
-## Prepared hosted draft release
+## Deployed hosted draft release
 
 PRs #982, #983, #985 and #986 are merged. The tested release image is
 `registry.fly.io/peaceful-meadowstone-6944:hosted-drafts-8823ab1a4`
 (digest `sha256:7cc3134596e0853b16212dbfc705c92e0e7dfb146454e4987a1e2e6f7af9f43f`).
 It passed private Fly startup, bundled assets, canonical rules and authentication
 checks on a temporary Machine in `ord`, exiting 0. Both temporary test Machines
-were removed. The public release is still the earlier image; this is preparation.
+were removed. Version 0.1.574 is deployed; public health/assets/authentication and the deployed worker/database isolation checks passed. Production is migrated to `56b5ee7250ec`, with a private consistent recovery copy of the prior public application records. Fly trial billing still affects uptime.
 
 Fly configuration enables the existing draft worker and keeps one Machine
 running. An idle-stop policy cannot guarantee work continues after a browser
 disconnects. This worker accepts generation and text chat only; marketplace
 publishing and delisting remain outside its queue.
 
-Before deployment: preserve a private recovery copy of existing account
-preferences (the migration consolidates their old keys), confirm the production
-revision is `c93392ae8c16`, and apply the tested Alembic revisions through
-`56b5ee7250ec` in coordination with the new image. Verify the restricted runtime
-role, all seller RLS policies and private worker-function grant. Deploy the exact
-tested image, then check health, authentication rejection, owned database
-access, worker status and private settings/media. No database should be reset.
+The completed deployment preserved a consistent private recovery copy of all
+public application records, then migrated from `c93392ae8c16` through
+`56b5ee7250ec`. Listing, photo and message counts were preserved. Restricted
+runtime access, seller row isolation, worker configuration, public health, assets
+and authentication rejection passed. No database was reset.
 The application and worker must never log credentials or session tokens.
 
 This release is an intermediate working web increment. Continue private chat
 attachments, native forms/options, approved browser actions, the outbound Mac
 worker, inventory import and the remaining views after deployment. Video stays
 excluded. Full parity has not been established.
+
+Private listing-chat attachments are implemented on `feat/hosted-chat-attachments`.
+Images upload before queue submission; durable payloads keep owned Storage
+references rather than data URLs. The shared chat handler consumes those references,
+and authenticated reads/thumbnails verify the conversation owner. Draft deletion
+removes both queued and message attachment objects after metadata commits.
+Request size and upload concurrency are bounded. The runtime advertises attachment
+controls only with an active draft worker. Full parity remains unfinished.

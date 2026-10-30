@@ -57,6 +57,10 @@ def test_durable_chat_finishes_preparation_before_done_and_isolates_other_accoun
                          stored_filename=f'{USER_ID}/{identity}/{"a" * 32}.jpg', size_bytes=1, mime_type='image/jpeg'))
             db.commit()
         path = f'/api/conversations/{identity}'
+        client.app.state.background_worker_enabled = False
+        assert client.post(path + '/stop', headers=alice).status_code == 200
+        assert client.post(path + '/stop', headers=bob).status_code == 404
+        client.app.state.background_worker_enabled = True
         assert client.post(path + '/generate', headers=bob).status_code == 404
         assert client.post(path + '/stop', headers=bob).status_code == 404
         response = client.post(path + '/generate', headers=alice)

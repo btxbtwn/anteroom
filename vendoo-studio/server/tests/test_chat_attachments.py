@@ -120,12 +120,21 @@ class SeeingProvider:
 def test_a_listing_chat_message_sends_its_images_and_keeps_them(listing_chat):
     client, conv_id = listing_chat
     provider = SeeingProvider()
+    from threading import get_ident
+    loop_threads = []
+    original_attach = chat_route.attach_to_last_user_turn
 
     async def build(conv_id, db, text, option_catalog=None):
+        loop_threads.append(get_ident())
         return [{"role": "system", "content": "rules"}, {"role": "user", "content": text}]
+
+    def attach(messages, attachments):
+        assert get_ident() != loop_threads[-1], 'Image reads must not block the API loop'
+        return original_attach(messages, attachments)
 
     with patch.object(chat_route, "get_listing_provider", return_value=provider), \
          patch.object(chat_route, "build_chat_messages", new=build), \
+         patch.object(chat_route, "attach_to_last_user_turn", new=attach), \
          patch.object(chat_route, "persist_chat_result", new=AsyncMock(return_value=(None, False))):
         response = client.post(f"/api/conversations/{conv_id}/messages", json={
             "text": "What color is it?",

@@ -80,7 +80,7 @@ def listing_response(db, identity):
 def runtime(request: Request):
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
-    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits'] + (['generation'] if generation else []),
+    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits'] + (['generation', 'chat_attachments'] if generation else []),
             'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark']}
 
 
@@ -216,7 +216,8 @@ def messages(identity: str, db=Depends(get_seller_db)):
     conversation(db, identity)
     rows = db.scalars(select(Message).where(Message.conversation_id == identity).order_by(Message.created_at, Message.id)).all()
     return [{'id': row.id, 'conversation_id': identity, 'role': row.role, 'text': row.text,
-             'provider': row.provider, 'model': row.model, 'created_at': row.created_at} for row in rows]
+             'provider': row.provider, 'model': row.model, 'created_at': row.created_at,
+             'attachments': row.attachments or []} for row in rows]
 
 
 @router.get('/conversations/{identity}/activity')
@@ -480,6 +481,15 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
             if key:
                 check_key(key, db.user_id, identity)
                 keys.add(key)
+    from vendoo_studio.models.background_task import BackgroundTask
+    attachments = [item for batch in db.scalars(select(Message.attachments).where(Message.conversation_id == identity))
+                   for item in (batch or [])]
+    for payload in db.scalars(select(BackgroundTask.payload).where(BackgroundTask.conversation_id == identity)):
+        attachments.extend(payload.get('attachments', []))
+    for item in attachments:
+        key = item['id']
+        check_key(key, db.user_id, identity)
+        keys.add(key)
     from vendoo_studio.services.background_tasks import delete_history
     delete_history(db, identity)
     for model in (Listing, ListingRevision, Photo, Message):
