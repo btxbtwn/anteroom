@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangleIcon, CheckCircle2Icon, CircleIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, Trash2Icon, XCircleIcon } from "lucide-react";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DelistMarketplace, FacebookCheck, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightGap } from "../api/nativeMarketplaces";
@@ -183,7 +183,7 @@ export function useReportFieldsShown(marketplace: string, fields: readonly strin
 
 export function MarketplacesLayout({
   convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField,
-  ids, selected, onSelect, railActions, railStatus, children,
+  ids, selected, onSelect, onPrepare, railActions, railStatus, children,
 }: MarketplaceProps & {
   ids: readonly string[];
   /** Listing-wide actions pinned above the rail's own, e.g. Regenerate. */
@@ -192,9 +192,15 @@ export function MarketplacesLayout({
   railStatus?: ReactNode;
   selected: string;
   onSelect: (id: string) => void;
+  onPrepare?: (id: string) => void;
   children?: ReactNode;
 }) {
   const queryClient = useQueryClient();
+  const paneRef = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    if (paneRef.current) paneRef.current.scrollTop = scrollPositions.current.get(selected) ?? 0;
+  }, [selected]);
   // Which fields the open form draws a row for, so an answer about one of them is
   // read there and not twice.
   const [fieldsShown, setFieldsShown] = useState<Partial<Record<string, ReadonlySet<string>>>>({});
@@ -655,6 +661,7 @@ export function MarketplacesLayout({
             return (
               <li key={id} aria-label={name} className="group relative flex items-start">
                 <button type="button" aria-selected={current} title={status?.label} onClick={() => onSelect(id)}
+                  onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
                   className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent",
                     current && "bg-accent shadow-[inset_2px_0_0_var(--primary)]")}>
                   {marketplace ? <MarketplaceLogo id={marketplace} label={name} size={16} /> : <span aria-hidden className="size-4 shrink-0" />}
@@ -701,7 +708,8 @@ export function MarketplacesLayout({
         </div>
       </nav>
       {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
-      <div className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
+      <div ref={paneRef} onScroll={event => scrollPositions.current.set(selected, event.currentTarget.scrollTop)}
+        className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
         {paneError && (
           <p role="alert" className="text-destructive-foreground text-xs">{paneError}</p>
         )}

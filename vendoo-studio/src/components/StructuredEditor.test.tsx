@@ -8,7 +8,8 @@ const { state, choices, inventories } = vi.hoisted(() => ({
   choices: vi.fn(),
   inventories: vi.fn(),
 }));
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async original => ({
+  ...await original<typeof import("@tanstack/react-query")>(),
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
     data: queryKey[0] === "native-editor-form"
       ? { marketplace: "mercari", native: true, fields: state.fields }
@@ -41,6 +42,13 @@ beforeEach(() => {
 });
 
 describe("native row layout", () => {
+  it("renders saved text and choice values on the first frame", () => {
+    state.fields = [field("title"), field("mercari_specifics.brand", { value: "Nike", options: ["Nike", "Adidas"] })];
+    const html = render();
+    expect(html).toContain('value="Original"');
+    expect(choices.mock.calls[0][0].value).toBe("Nike");
+  });
+
   it("uses native widths even for Category and preserves heading and field order", () => {
     state.fields = [
       field("mercari_specifics.categoryId", { label: "Category", width: "half", section: "Category" }),

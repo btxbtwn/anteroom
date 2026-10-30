@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.540 — 2026-10-29
+## 0.1.541 — 2026-10-29
 
 - Send eBay offers across all current and future listings with one discount and an optional minimum price.
+
+## 0.1.540 — 2026-10-29
+
+- Open listings and switch marketplace forms faster, keep editing while changes save, and switch inventory filters without loading every thread on screen.
 
 ## 0.1.539 — 2026-10-29
 

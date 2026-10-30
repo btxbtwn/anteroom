@@ -601,7 +601,7 @@ def test_policy_migration_upgrades_previous_release_preserving_offer_history(tmp
 
     path = tmp_path / "previous-offer-release.db"
     config = alembic_config(f"sqlite:///{path}")
-    command.upgrade(config, "b295f60b1610")
+    command.upgrade(config, "bbbb148e3124")
     engine = create_engine(f"sqlite:///{path}")
     with engine.begin() as connection:
         connection.execute(text("INSERT INTO ebay_offer_rules "

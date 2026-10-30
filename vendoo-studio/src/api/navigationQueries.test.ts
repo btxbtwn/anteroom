@@ -1,5 +1,5 @@
 import { QueryObserver } from "@tanstack/react-query";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createStudioQueryClient } from "./queryClient";
 import { api } from "./client";
 import { prefetchAssistantThread, prefetchListingReads } from "./navigationQueries";
@@ -7,6 +7,7 @@ import { photoThumbUrl } from "../photoThumb";
 import type { Photo } from "./types";
 
 afterEach(() => vi.restoreAllMocks());
+beforeEach(() => vi.spyOn(api.listings, "get").mockResolvedValue({ listing: { title: "Saved listing" }, current_revision_id: "saved" } as never));
 
 it("warms bounded versioned thumbnails, deduplicates intent, and retries failed images", async () => {
   const images: { src: string; fetchPriority: string; onload: () => void; onerror: () => void }[] = [];
@@ -61,7 +62,12 @@ it("warms only safe listing reads and reuses them on mount", async () => {
     expect(client.getQueryData(["conversation", "item"])).toEqual({ id: "item" });
     expect(client.getQueryData(["photos", "item"])).toEqual([]);
     expect(client.getQueryData(["messages", "item"])).toEqual([]);
-    expect(listing).not.toHaveBeenCalled();
+    expect(listing).toHaveBeenCalledExactlyOnceWith("item");
+    const observer = new QueryObserver(client, { queryKey: ["listing", "item"], queryFn: () => api.listings.get("item") });
+    const unsubscribe = observer.subscribe(() => {});
+    expect(observer.getCurrentResult().data?.listing.title).toBe("Saved listing");
+    expect(observer.getCurrentResult().isFetching).toBe(false);
+    unsubscribe();
   } finally { client.clear(); }
 });
 

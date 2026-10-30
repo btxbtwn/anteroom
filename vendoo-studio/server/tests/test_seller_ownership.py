@@ -113,7 +113,8 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
     assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     after = read_rows(engine, names)
     for name, rows in before.items():
-        assert after[name] == [dict(row, user_id=LOCAL_USER_ID) for row in rows]
+        assert after[name] == [dict(row, user_id=LOCAL_USER_ID,
+                                   **({"inventory_quantity": None} if name == "listing_revisions" else {})) for row in rows]
 
     inspector = sa.inspect(engine)
     for table in Base.metadata.tables.values():
@@ -163,7 +164,8 @@ def test_pre_alembic_database_gets_ownership_without_losing_rows(migration_engin
         connection.execute(sa.text("DROP TABLE similar_item_reviews"))
     assert schema_migrations.ensure_schema(engine) == CURRENT_REVISION
     for name, rows in before.items():
-        assert read_rows(engine, [name])[name] == [dict(row, user_id=LOCAL_USER_ID) for row in rows]
+        assert read_rows(engine, [name])[name] == [dict(row, user_id=LOCAL_USER_ID,
+            **({"inventory_quantity": None} if name == "listing_revisions" else {})) for row in rows]
     assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     assert len(backups.list_snapshots(backups.BACKUPS_DIR)) == 1
 

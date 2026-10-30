@@ -393,7 +393,6 @@ export function App() {
   const openListing = useCallback((id: string) => {
     preloadListingCode();
     void prefetchListingReads(queryClient, id);
-    void queryClient.prefetchQuery({ queryKey: ["listing", id], queryFn: () => api.listings.get(id) });
     setSelectedConvId(id);
     goListings();
     setMobilePane("workspace");

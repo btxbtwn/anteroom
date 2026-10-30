@@ -160,7 +160,7 @@ def test_chat_clear_without_status_is_remembered(context_db):
     assert listing["secondaryColor"] == "White"
 
 
-def test_listing_read_recovers_an_existing_saved_clear(context_db):
+def test_chat_clear_is_recorded_when_saving_without_a_write_on_read(context_db):
     from vendoo_studio.routes.listings import get_listing
 
     db, conv_id, _ = context_db
@@ -170,11 +170,14 @@ def test_listing_read_recovers_an_existing_saved_clear(context_db):
         '{"missing_fields":[{"marketplace":"general","field":"Secondary Color","value":""}]}')
     ListingRepo(db).save_revision(conv_id, parent.listing_json, source="model_refinement",
                                   parent_revision_id=parent.id)
+    assert ListingRepo(db).latest_revision(conv_id).listing_json["reviewed_empty_fields"] == [
+        {"marketplace": "general", "field": "Secondary Color"},
+    ]
+    count = len(ListingRepo(db).get_revisions(conv_id))
     response = get_listing(conv_id, db)
     assert response.listing["reviewed_empty_fields"] == [
         {"marketplace": "general", "field": "Secondary Color"},
     ]
-    count = len(ListingRepo(db).get_revisions(conv_id))
     get_listing(conv_id, db)
     assert len(ListingRepo(db).get_revisions(conv_id)) == count
 
