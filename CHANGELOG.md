@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.553 — 2026-10-30
+
+- Analytics counts each sale once. A listing marked sold on another marketplace after the item already sold was counted as a second sale, so the month's sold total read higher than the sales you made. Rows already recorded that way stop counting; the sales ledger keeps them. A sale Anteroom verifies from an import now keeps the date it sold instead of the day the check ran.
+
 ## 0.1.552 — 2026-10-30
 
 - Preview a cloud draft with Poshmark’s live fields and choices through your connected Chrome browser, using the same form as the Mac app.
