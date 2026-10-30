@@ -19,6 +19,7 @@ export interface PromotionAutomationForm {
   times: string;
   timezone: string;
   discount: string;
+  minimumPrice: string;
   minLikes: string;
   shippingLabel: string;
 }
@@ -28,7 +29,7 @@ export const ORDER_LABELS: Record<ShareOrder, string> = { newest: "Newest listed
 
 export function emptyPromotionForm(action: PromotionAction, marketplace: PromotionMarketplace = "poshmark", timezone = browserTimezone()): PromotionAutomationForm {
   return { id: null, marketplace, action, name: "", scope: "all", conversationIds: [], excludedIds: [], minDays: "0", order: "newest",
-    speed: "normal", dailyCap: "300", times: "09:00, 20:00", timezone, discount: "10", minLikes: "1", shippingLabel: "" };
+    speed: "normal", dailyCap: "300", times: "09:00, 20:00", timezone, discount: "10", minimumPrice: "", minLikes: "1", shippingLabel: "" };
 }
 
 export function formFromAutomation(row: PromotionAutomation): PromotionAutomationForm {
@@ -36,7 +37,7 @@ export function formFromAutomation(row: PromotionAutomation): PromotionAutomatio
     conversationIds: row.conversation_ids, excludedIds: row.excluded_ids, minDays: String(row.min_days_listed),
     order: row.share_order || "newest", speed: row.speed || "normal", dailyCap: String(row.daily_cap ?? 300),
     times: row.times.join(", "), discount: String(row.discount_percent ?? 10), minLikes: String(row.min_likes ?? 1),
-    shippingLabel: row.shipping_label || "" };
+    shippingLabel: row.shipping_label || "", minimumPrice: row.minimum_price ?? "" };
 }
 
 function whole(value: string, low: number, high: number): number | null {
@@ -65,7 +66,11 @@ export function bodyFromPromotionForm(form: PromotionAutomationForm, maxDailyCap
   if (discount === null) return { error: "Enter the discount as a whole percent from 1 to 99." };
   const likes = whole(form.minLikes, 1, 1000);
   if (likes === null) return { error: "Minimum likes is a whole number from 1 to 1,000." };
-  return { body: { ...base, discount_percent: discount, min_likes: likes, shipping_label: form.marketplace === "poshmark" ? form.shippingLabel.trim() || null : null } };
+  const minimum = form.minimumPrice.trim();
+  if (minimum && (!/^\d+(\.\d{1,2})?$/.test(minimum) || Number(minimum) <= 0 || Number(minimum) > 9999999.99)) {
+    return { error: "Enter a positive minimum price with at most two decimal places, or leave it blank." };
+  }
+  return { body: { ...base, discount_percent: discount, minimum_price: minimum || null, min_likes: likes, shipping_label: form.marketplace === "poshmark" ? form.shippingLabel.trim() || null : null } };
 }
 
 /** Include or leave out one listing, keeping the scope the seller chose. */
@@ -87,5 +92,9 @@ export function describePromotionAutomation(row: PromotionAutomation): string {
   }
   const shipping = row.marketplace === "poshmark" ? ` · ${row.shipping_label ? `shipping discount “${row.shipping_label}”` : "no shipping discount"}` : "";
   return `${row.discount_percent}% off to new likers on ${scope}${excluded}${age} with ${row.min_likes}+ ${row.min_likes === 1 ? "like" : "likes"}`
-    + ` · never below each listing's floor${shipping} · checks hourly on ${marketplaceName(row.marketplace)}`;
+    + ` · ${describePromotionMinimum(row)}${shipping} · checks hourly on ${marketplaceName(row.marketplace)}`;
+}
+
+export function describePromotionMinimum(row: PromotionAutomation): string {
+  return `${row.minimum_price ? `minimum $${row.minimum_price}` : "no shared minimum price"}; saved individual minimums also apply`;
 }

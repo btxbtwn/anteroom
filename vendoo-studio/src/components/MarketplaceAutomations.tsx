@@ -10,7 +10,7 @@ import type { PromotionAction, PromotionAutomation, PromotionMarketplace } from 
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
 import {
-  ORDER_LABELS, SPEED_LABELS, bodyFromPromotionForm, describePromotionAutomation, emptyPromotionForm, formFromAutomation, withListing,
+  ORDER_LABELS, SPEED_LABELS, bodyFromPromotionForm, describePromotionAutomation, describePromotionMinimum, emptyPromotionForm, formFromAutomation, withListing,
   type PromotionAutomationForm,
 } from "./promotionAutomationsFormat";
 import { Button } from "./ui/button";
@@ -44,7 +44,7 @@ function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel
         </label>
       ) : null}
       <fieldset className="flex flex-wrap gap-4"><legend className="mb-1">Listings</legend>
-        <label className="flex items-center gap-2"><input type="radio" checked={form.scope === "all"} onChange={() => set({ scope: "all" })} />All live listings</label>
+        <label className="flex items-center gap-2"><input type="radio" checked={form.scope === "all"} onChange={() => set({ scope: "all" })} />{form.action === "offer" ? "All current and future listings" : "All live listings"}</label>
         <label className="flex items-center gap-2"><input type="radio" checked={form.scope === "items"} onChange={() => set({ scope: "items" })} />Only listings I choose</label>
       </fieldset>
       <p className="text-xs text-muted-foreground">Choose listings and exclusions under Listings after saving.</p>
@@ -82,6 +82,10 @@ function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel
           <label className="flex items-center gap-2">At least
             <input className={`${FIELD} w-16`} inputMode="numeric" value={form.minLikes} onChange={(event) => set({ minLikes: event.target.value })} /> likes
           </label>
+          <label className="flex items-center gap-2">Minimum ($, optional)
+            <Input className="w-28" type="number" min="0.01" step="0.01" placeholder="No minimum" value={form.minimumPrice}
+              onChange={(event) => set({ minimumPrice: event.target.value })} />
+          </label>
         </div>
         {form.marketplace === "poshmark" ? (
           <label className="flex flex-col gap-1">Shipping discount
@@ -92,7 +96,7 @@ function Editor({ form, setForm, labels, waiting, maxCap, busy, onSave, onCancel
             <span className="text-xs text-muted-foreground">Labels come from offers you reviewed. A listing where Poshmark does not offer this one is skipped.</span>
           </label>
         ) : null}
-        <p className="text-xs text-muted-foreground">Offers go only to listings with a floor, with new likers since the last offer, at most once a day each, and never below the floor.</p>
+        <p className="text-xs text-muted-foreground">Leave the minimum blank to use only the discount. This applies to future listings too. Saved individual minimums still apply. Offers go to new likers at most once a day per listing.</p>
       </>}
       <div className="flex gap-2">
         <Button size="sm" disabled={busy} onClick={onSave}>{busy ? <Spinner /> : null}Save</Button>
@@ -122,8 +126,8 @@ function Details({ automation, onSaveListings, busy }: {
     <div className="mt-3 flex flex-col gap-3 text-sm">
       {error ? <p role="alert" className="text-xs text-destructive">{error.message}</p> : null}
       <div className="rounded-lg border border-border/60 p-3">
-        <p className="font-medium">Listings {coverage.data ? `· ${coverage.data.included} covered` : ""}
-          {automation.action === "offer" && coverage.data?.missing_floor ? ` · ${coverage.data.missing_floor} need a floor` : ""}</p>
+        <p className="font-medium">Listings {coverage.data ? `· ${coverage.data.included} covered` : ""}</p>
+        {automation.action === "offer" ? <p className="text-xs text-muted-foreground">Individual minimums are optional and can raise the rule's minimum. Clear one to use the rule's minimum.</p> : null}
         {coverage.isPending ? <Spinner /> : null}
         <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto">
           {(coverage.data?.items || []).map((item) => (
@@ -134,8 +138,8 @@ function Details({ automation, onSaveListings, busy }: {
                 <span className="truncate">{item.title || item.listing_id}</span>
                 <span className="text-muted-foreground">{item.listed_days != null ? `${item.listed_days} d` : ""}{item.too_new ? " · too new" : ""}</span>
               </label>
-              {automation.action === "offer" ? <span className="flex items-center gap-1">Floor $
-                <input className={`${FIELD} w-20`} inputMode="decimal" aria-label={`Floor for ${item.title || "listing"}`} placeholder="Required"
+              {automation.action === "offer" ? <span className="flex items-center gap-1">Minimum $
+                <input className={`${FIELD} w-20`} inputMode="decimal" aria-label={`Floor for ${item.title || "listing"}`} placeholder={automation.minimum_price || "None"}
                   value={floors[item.conversation_id] ?? item.floor ?? ""}
                   onChange={(event) => setFloors({ ...floors, [item.conversation_id]: event.target.value.replace(/[^0-9.]/g, "").slice(0, 10) })} />
               </span> : null}
@@ -202,7 +206,7 @@ export function MarketplaceAutomations() {
       }
       const what = row.action === "share"
         ? `Anteroom will share these ${marketplaceName(row.marketplace)} listings to your followers on its own at ${row.times.join(", ")} (${row.timezone}), up to ${(row.daily_cap ?? 0).toLocaleString()} a day.`
-        : `Anteroom will send ${row.discount_percent}% off offers to new likers on its own, checking every hour, never below each listing's floor.`;
+        : `Anteroom will send ${row.discount_percent}% off offers to new likers on its own, checking every hour; ${describePromotionMinimum(row)}.`;
       if (!(await confirmDialog(`Turn on “${row.name}”? ${what} It stops and turns itself off at the first limit or unconfirmed result. Nothing runs until the next round.`, { confirmLabel: "Turn on" }))) return null;
       return api.promotionAutomations.enable(row.id);
     },

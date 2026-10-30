@@ -8,7 +8,8 @@ at most once, and holds the single automation slot only while it is sent.
 A round stops at the marketplace's first limit, browser check or sign-out and
 pauses the automation. An unconfirmed result pauses it too, and that listing
 stays blocked until the seller checks it. Offers never cross the listing's
-floor and go only to listings with new likers since the last offer. Nothing
+saved individual minimum and optional shared minimum, and go only to listings
+with new likers since the last offer. Nothing
 here lists, publishes or delists.
 """
 from __future__ import annotations
@@ -30,7 +31,7 @@ from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services import listing_promotions as promotions
 from vendoo_studio.services.automation_age import load_listed_index, resolve_listed_at
 from vendoo_studio.services.automation_schedule import ScheduleError, as_utc, next_after, normalize_schedule, require_timezone
-from vendoo_studio.services.ebay_api import dollars
+from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_promotions import NAMES, STOP_CODES, PromotionError
 
 log = logging.getLogger("vendoo_studio.promotion_automations")
@@ -72,6 +73,7 @@ def out(db: Session, row: PromotionAutomation) -> dict:
         "min_days_listed": row.min_days_listed, "share_order": row.share_order, "speed": row.speed,
         "daily_cap": row.daily_cap, "times": row.times or [], "timezone": row.timezone,
         "discount_percent": row.discount_percent, "min_likes": row.min_likes, "shipping_label": row.shipping_label,
+        "minimum_price": dollars(row.minimum_price_cents) if row.minimum_price_cents is not None else None,
         "paused_reason": row.paused_reason, "next_run_at": _iso(row.next_run_at) if row.enabled else None,
         "last_run": run_out(last) if last else None, "available": promotions.available(row.marketplace, row.action),
     }
@@ -98,7 +100,7 @@ def _validate(body: dict) -> dict:
         "excluded_ids": _ids(body.get("excluded_ids"), "exclusions"),
         "min_days_listed": int(body.get("min_days_listed") or 0),
         "share_order": None, "speed": None, "daily_cap": None, "times": None, "timezone": None,
-        "discount_percent": None, "min_likes": None, "shipping_label": None,
+        "discount_percent": None, "min_likes": None, "shipping_label": None, "minimum_price_cents": None,
     }
     if scope == "items" and not fields["conversation_ids"]:
         raise PromotionError(400, "Choose at least one item.")
@@ -128,7 +130,11 @@ def _validate(body: dict) -> dict:
         label = str(body.get("shipping_label") or "").strip()[:80] or None
         if label and marketplace not in promotions.SHIPPING_DISCOUNTS:
             raise PromotionError(400, f"{NAMES[marketplace]} offers carry no shipping discount.")
-        fields.update(discount_percent=discount, min_likes=likes, shipping_label=label)
+        try:
+            minimum = money_cents(body["minimum_price"]) if body.get("minimum_price") not in (None, "") else None
+        except ValueError as exc:
+            raise PromotionError(400, "Enter a positive minimum price with at most two decimal places, or leave it blank.") from exc
+        fields.update(discount_percent=discount, min_likes=likes, shipping_label=label, minimum_price_cents=minimum)
     return fields
 
 
@@ -240,8 +246,7 @@ def coverage(db: Session, automation_id: str) -> dict:
                       "included": conv.id not in excluded and (row.scope == "all" or conv.id in chosen),
                       "too_new": bool(row.min_days_listed and (days is None or days < row.min_days_listed))})
     included = [item for item in items if item["included"]]
-    return {"items": items, "included": len(included),
-            "missing_floor": sum(1 for item in included if row.action == "offer" and not item["floor"])}
+    return {"items": items, "included": len(included)}
 
 
 def activity(db: Session, automation_id: str, limit: int = 50) -> dict:
@@ -297,10 +302,6 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 stop_note = f"Reached the daily cap of {row.daily_cap:,} shares."
                 break
             if row.action == "offer":
-                if not db.query(MarketplaceOfferFloor.id).filter_by(marketplace=row.marketplace, listing_id=listing_id).first():
-                    counts["skipped"] += 1
-                    reasons["no floor set"] += 1
-                    continue
                 if promotions.blocking(db, row.marketplace, listing_id, "offer"):
                     counts["skipped"] += 1
                     reasons["offered in the last 24 hours or unconfirmed"] += 1

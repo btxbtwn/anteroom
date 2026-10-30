@@ -27,6 +27,7 @@ class AutomationBody(BaseModel):
     times: Annotated[list[Annotated[str, Field(max_length=5)]], Field(max_length=promotion_automations.MAX_TIMES)] = Field(default_factory=list)
     timezone: Annotated[str, Field(max_length=64)] | None = None
     discount_percent: Annotated[int, Field(strict=True, ge=1, le=99)] | None = None
+    minimum_price: Annotated[str, Field(max_length=20)] | None = None
     min_likes: Annotated[int, Field(strict=True, ge=1, le=1000)] | None = None
     shipping_label: Annotated[str, Field(max_length=80)] | None = None
 
