@@ -11,7 +11,7 @@ function render(hosted: boolean, primary = "openai") {
   client.setQueryData(["ai-keys"], { providers: [{ id: primary, sign_in: true }] });
   return renderToStaticMarkup(
     <WorkspaceRuntimeProvider value={{ hosted, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set() }}>
-      <QueryClientProvider client={client}>{hosted ? <SettingsPage section="general" onOpenListing={() => {}} /> : <ProvidersSettings />}</QueryClientProvider>
+      <QueryClientProvider client={client}>{hosted ? <SettingsPage section="providers" onOpenListing={() => {}} /> : <ProvidersSettings />}</QueryClientProvider>
     </WorkspaceRuntimeProvider>,
   );
 }

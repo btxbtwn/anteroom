@@ -18,6 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY deploy/fly/supabase-prod-ca-2021.crt /app/supabase-prod-ca-2021.crt
 COPY vendoo-studio/pyproject.toml vendoo-studio/VERSION /app/vendoo-studio/
+COPY CHANGELOG.md /app/CHANGELOG.md
 COPY vendoo-studio/server/vendoo_studio/ /app/vendoo-studio/server/vendoo_studio/
 COPY skills/list-this/SKILL.md /app/skills/list-this/SKILL.md
 COPY skills/list-this/references/ /app/skills/list-this/references/

@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.581. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.582. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
@@ -177,3 +177,10 @@ settings/database checks with the production runtime role, creating no account
 data. The API now runs in `ord` after a stalled image pull on its prior host;
 that stopped, stateless Machine was removed after the replacement was healthy.
 Fly's trial limit still requires billing for reliable uptime.
+
+PR #995 is merged and deployed in 0.1.582. Public health/version and unsigned
+settings/duplicate-review rejection checks passed. General settings are being
+connected on `feat/hosted-general-settings`: appearance and listing-name choices
+use account preferences; About reloads the web bundle and reads the same bundled
+changelog as desktop. Desktop installation endpoints and its SDK/Brave setup
+tutorial remain unavailable in hosted mode. Other unported sections stay gated.

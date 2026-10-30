@@ -1,5 +1,6 @@
 # Allow only application source and deployment files into hosted builds.
 *
+!CHANGELOG.md
 !vendoo-studio/
 vendoo-studio/*
 !vendoo-studio/pyproject.toml

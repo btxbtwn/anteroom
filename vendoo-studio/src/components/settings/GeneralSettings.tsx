@@ -8,7 +8,8 @@ import { ChangelogDialog } from "../ChangelogDialog";
 import { applyTheme, normalizeTheme, type ThemePreference } from "../../theme";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
-import { SettingsCode, SettingsRow, SettingsSection, SettingsSelect } from "./SettingsLayout";
+import { SettingsCode, SettingsNote, SettingsRow, SettingsSection, SettingsSelect } from "./SettingsLayout";
+import { useWorkspaceRuntime } from "../../app/runtime";
 
 function AppearanceSection() {
   const queryClient = useQueryClient();
@@ -65,11 +66,14 @@ function AppearanceSection() {
           />
         }
       />
+      {mutation.error || namesMutation.error ? (
+        <SettingsNote tone="error">{mutation.error?.message || namesMutation.error?.message}</SettingsNote>
+      ) : null}
     </SettingsSection>
   );
 }
 
-function AboutVersionRow({ version }: { version: string }) {
+function DesktopAboutVersionRow({ version }: { version: string }) {
   const { available, busy, downloaded, description, iconTooltip, onClick, settingsLabel } = useStudioUpdate();
   const build = frontendBuildState(__STUDIO_BUILD__, version === "…" ? null : version);
   return (
@@ -98,6 +102,21 @@ function AboutVersionRow({ version }: { version: string }) {
   );
 }
 
+function AboutVersionRow({ version }: { version: string }) {
+  const { hosted } = useWorkspaceRuntime();
+  if (!hosted) return <DesktopAboutVersionRow version={version} />;
+  const build = frontendBuildState(__STUDIO_BUILD__, version === "…" ? null : version);
+  return (
+    <SettingsRow
+      title={<>Version<SettingsCode>{build.outdated ? build.label : version}</SettingsCode></>}
+      description={build.outdated
+        ? `This tab is running ${build.version}. The web app is on ${version}; reload to use that version.`
+        : "Web updates are installed on the server. Reload this tab to load the current version."}
+      control={<Button size="xs" variant="outline" onClick={() => window.location.reload()}>Reload app</Button>}
+    />
+  );
+}
+
 function WhatsNewRow() {
   const [open, setOpen] = useState(false);
   return (
@@ -117,6 +136,7 @@ function WhatsNewRow() {
 }
 
 export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () => void }) {
+  const { hosted } = useWorkspaceRuntime();
   const { data: status } = useQuery({
     queryKey: ["status"],
     queryFn: api.status,
@@ -124,7 +144,7 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
   return (
     <>
       <AppearanceSection />
-      <SettingsSection id="setup-guide" title="Setup guide">
+      {!hosted ? <SettingsSection id="setup-guide" title="Setup guide">
         <SettingsRow
           title="First-run tutorial"
           description="Walk through ChatGPT or MiMo, Brave Search, Connect Chrome, and how the listing workspace is laid out."
@@ -134,7 +154,7 @@ export function GeneralSettings({ onOpenSetupGuide }: { onOpenSetupGuide?: () =>
             </Button>
           }
         />
-      </SettingsSection>
+      </SettingsSection> : null}
       <SettingsSection id="about" title="About">
         <AboutVersionRow version={status?.version || "…"} />
         <WhatsNewRow />

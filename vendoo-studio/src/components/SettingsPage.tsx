@@ -47,7 +47,7 @@ export function SettingsPage({
   onOpenSetupGuide?: () => void;
 }) {
   const { hosted } = useWorkspaceRuntime();
-  if (hosted && section !== "listings") section = "providers";
+  if (hosted && !["general", "listings", "providers"].includes(section)) section = "providers";
   useEffect(() => {
     if (!targetId) return;
     const frame = window.requestAnimationFrame(() => {
