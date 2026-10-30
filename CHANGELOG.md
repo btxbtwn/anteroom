@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.540 — 2026-10-29
+
+- Send eBay offers across all current and future listings with one discount and an optional minimum price.
+
 ## 0.1.539 — 2026-10-29
 
 - Manage eBay automatic offers from Automations alongside the other marketplaces.

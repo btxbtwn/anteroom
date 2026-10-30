@@ -6,6 +6,19 @@ from vendoo_studio.models.ownership import SellerOwned
 from vendoo_studio.models.conversation import new_id, utcnow
 
 
+class EbayOfferPolicy(SellerOwned, Base):
+    """Explicit approval for current and future listings on one seller's eBay account."""
+    __tablename__ = "ebay_offer_policies"
+    __table_args__ = (UniqueConstraint("user_id", "account_id", name="uq_ebay_offer_policy_account"),)
+
+    id = Column(String, primary_key=True, default=new_id)
+    account_id = Column(String, nullable=False)
+    approval_id = Column(String, nullable=False, default=new_id)
+    discount_percent = Column(Integer, nullable=False)
+    minimum_price_cents = Column(Integer, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=False)
+
+
 class EbayOfferRule(SellerOwned, Base):
     __tablename__ = "ebay_offer_rules"
     __table_args__ = (

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import xml.etree.ElementTree as ET
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
@@ -19,7 +20,7 @@ from sqlalchemy.sql.dml import Update
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
 from vendoo_studio.models.conversation import Conversation
-from vendoo_studio.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
+from vendoo_studio.models.ebay_offer import EbayOfferAttempt, EbayOfferPolicy, EbayOfferRule
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.services import ebay_api, ebay_offers, marketplace_accounts
 from vendoo_studio.services.vendoo_import import merge_notes
@@ -51,7 +52,7 @@ class EbayStandIn(BaseHTTPRequestHandler):
         elif state.paginated and state.offsets[-1] == 0:
             self.reply(200, {"eligibleItems": [{"listingId": "111111111111"}], "next": "ignored-untrusted-url"})
         else:
-            self.reply(200, {"eligibleItems": [{"listingId": ITEM_ID}] if state.eligible else []})
+            self.reply(200, {"eligibleItems": [{"listingId": item_id} for item_id in state.eligible_ids] if state.eligible else []})
 
     def do_POST(self):
         state = self.server.state
@@ -61,8 +62,9 @@ class EbayStandIn(BaseHTTPRequestHandler):
             assert self.headers["X-EBAY-API-IAF-TOKEN"] == "test-token"
             assert raw.startswith(b'<?xml version="1.0" encoding="utf-8"?>')
             state.reads += 1
+            requested_id = ET.fromstring(raw).findtext("{urn:ebay:apis:eBLBaseComponents}ItemID")
             self.reply(200, f'''<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item>
-                <ItemID>{ITEM_ID}</ItemID><Site>US</Site><ListingType>FixedPriceItem</ListingType>
+                <ItemID>{requested_id}</ItemID><Site>US</Site><ListingType>FixedPriceItem</ListingType>
                 <SellingStatus><ListingStatus>{state.listing_status}</ListingStatus>
                 <CurrentPrice currencyID="{state.currency}">{state.price}</CurrentPrice></SellingStatus>
                 {"<Variations/>" if state.variations else ""}</Item></GetItemResponse>''', "text/xml")
@@ -77,7 +79,7 @@ class EbayStandIn(BaseHTTPRequestHandler):
 @pytest.fixture
 def ebay_server():
     state = SimpleNamespace(price="50.00", currency="USD", eligible=True, listing_status="Active", variations=False,
-                            read_status=200, send_status=200, paginated=False, offsets=[], reads=0, sends=[],
+                            read_status=200, send_status=200, paginated=False, offsets=[], reads=0, sends=[], eligible_ids=[ITEM_ID],
                             send_body={"offers": [{"offerId": "offer-1"}, {"offerId": "offer-2"}]})
     server = ThreadingHTTPServer(("127.0.0.1", 0), EbayStandIn)
     server.state = state
@@ -440,5 +442,174 @@ def test_new_migration_upgrades_a_previous_release_without_losing_inventory(tmp_
     command.upgrade(config, "head")
     with engine.connect() as connection:
         assert connection.execute(text("SELECT title FROM conversations WHERE id='keep'")).scalar() == "Keep this coat"
+    assert inspect_database(path).clean
+    engine.dispose()
+
+
+def enable_all(offers, discount=10, minimum=None):
+    return offers.client.post("/api/ebay-offers/enable-all", json={
+        "discount_percent": discount, "minimum_price": minimum, "confirm": True,
+    })
+
+
+def test_all_listings_requires_confirmation_and_valid_terms(offers):
+    for body in [{"discount_percent": 10}, {"discount_percent": 10, "confirm": False},
+                 *[{"discount_percent": value, "confirm": True} for value in (4, 100, True, 10.5)]]:
+        assert offers.client.post("/api/ebay-offers/enable-all", json=body).status_code == 422
+    for minimum in ("0", "-1", "NaN", "0.001"):
+        assert enable_all(offers, minimum=minimum).status_code == 409
+    assert offers.db.query(EbayOfferPolicy).count() == 0
+    assert offers.remote.sends == []
+
+
+def test_all_listings_covers_current_and_future_direct_listings_without_selection(offers):
+    from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+    assert enable_all(offers).status_code == 200
+    assert offers.remote.sends == []  # Enabling waits for the timer.
+    assert offers.client.get("/api/ebay-offers").json()["allListings"] == {
+        "enabled": True, "discountPercent": 10, "minimumPrice": "",
+    }
+    asyncio.run(ebay_offers.run_automation())
+    assert len(offers.remote.sends) == 1
+    # All scope is not subject to the manual preview's 50-listing limit.
+    for index in range(55):
+        offers.db.add(Conversation(id=f"cold-{index}", title=f"Cold listing {index}", status="active", notes=merge_notes(None, {
+            "vendooListingUrls": {"ebay": f"https://www.ebay.com/itm/{333333333333 + index}"},
+        })))
+    offers.db.add(Conversation(id="future", title="ZZ future listing", status="active"))
+    offers.db.commit()
+    MarketplaceListingRepo(offers.db).save("future", "ebay", {
+        "state": "published", "listing_url": "https://www.ebay.com/itm/222222222222",
+    })
+    offers.remote.eligible_ids.append("222222222222")
+    asyncio.run(ebay_offers.run_automation())
+    assert [row["offeredItems"][0]["listingId"] for row in offers.remote.sends] == [ITEM_ID, "222222222222"]
+    assert all(row["offeredItems"][0]["price"]["value"] == "45.00" for row in offers.remote.sends)
+    offers.client.post("/api/ebay-offers/pause")
+    offers.db.query(EbayOfferRule).update({"last_attempt_at": None})
+    offers.db.commit()
+    asyncio.run(ebay_offers.run_automation())
+    assert len(offers.remote.sends) == 2
+
+
+def test_all_listings_waits_for_eligibility_and_works_with_empty_inventory(offers):
+    offers.db.delete(offers.conv)
+    offers.db.commit()
+    assert enable_all(offers).status_code == 200
+    asyncio.run(ebay_offers.run_automation())
+    assert not offers.remote.sends
+    offers.db.add(Conversation(id="new", status="active", notes=merge_notes(None, {
+        "vendooListingUrls": {"ebay": f"https://www.ebay.com/itm/{ITEM_ID}"},
+    })))
+    offers.db.commit()
+    offers.remote.eligible = False
+    asyncio.run(ebay_offers.run_automation())
+    assert not offers.remote.sends
+    offers.remote.eligible = True
+    asyncio.run(ebay_offers.run_automation())
+    assert len(offers.remote.sends) == 1
+
+
+def test_all_listings_obeys_floor_sales_and_account_isolation(offers):
+    assert enable_all(offers, minimum="46").status_code == 200
+    asyncio.run(ebay_offers.run_automation())
+    assert not offers.remote.sends
+    assert enable_all(offers, minimum="30").status_code == 200
+    offers.db.add(MarketplaceSale(marketplace="etsy", order_id="sold", line_id="line", conversation_id="coat"))
+    offers.db.commit()
+    asyncio.run(ebay_offers.run_automation())
+    assert not offers.remote.sends
+    offers.account["ebay"]["accountId"] = "seller-2"
+    assert not offers.client.get("/api/ebay-offers").json()["allListings"]["enabled"]
+    asyncio.run(ebay_offers.run_automation())
+    assert not offers.remote.sends
+
+
+def test_all_listings_replaces_individual_rules_and_unknown_result_pauses_policy(offers):
+    row = preview(offers)
+    approve(offers, "enable", row["id"])
+    assert enable_all(offers).status_code == 200
+    offers.db.expire_all()
+    assert not offers.db.query(EbayOfferRule).one().enabled
+    assert approve(offers, "enable", preview(offers)["id"]).status_code == 409
+    offers.remote.send_status = 500
+    asyncio.run(ebay_offers.run_automation())
+    assert not offers.client.get("/api/ebay-offers").json()["allListings"]["enabled"]
+    assert enable_all(offers).status_code == 200
+    offers.db.query(EbayOfferRule).update({"last_attempt_at": ebay_offers.now() - timedelta(days=2)})
+    offers.db.commit()
+    asyncio.run(ebay_offers.run_automation())
+    assert len(offers.remote.sends) == 1  # Unresolved sends cannot be retried by a new policy.
+
+
+def test_all_listings_recovery_pauses_interrupted_sends_without_replaying(offers):
+    enable_all(offers)
+    row = preview(offers, floor="0.01")
+    attempt = offers.db.get(EbayOfferAttempt, row["id"])
+    attempt.state = "sending"
+    offers.db.commit()
+
+    async def restart():
+        ebay_offers.start()
+        await asyncio.sleep(0)
+        await ebay_offers.stop()
+
+    asyncio.run(restart())
+    offers.db.expire_all()
+    assert attempt.state == "unknown"
+    assert not offers.db.query(EbayOfferPolicy).filter_by(account_id="seller-1").one().enabled
+    asyncio.run(ebay_offers.run_automation())
+    assert not offers.remote.sends
+
+
+@pytest.mark.parametrize("change", ["pause", "edit"])
+def test_all_listings_reservation_honors_concurrent_policy_changes(offers, monkeypatch, change):
+    enable_all(offers)
+    approval = offers.db.query(EbayOfferPolicy).filter_by(account_id="seller-1").one().approval_id
+    row = preview(offers, floor="0.01")
+
+    async def scenario():
+        with offers.sessions() as db:
+            execute = db.execute
+            changed = False
+
+            def intercept(statement, *args, **kwargs):
+                nonlocal changed
+                if isinstance(statement, Update) and statement.table.name == "ebay_offer_policies" and not changed:
+                    changed = True
+                    with offers.sessions() as control:
+                        if change == "pause":
+                            ebay_offers.pause(control)
+                        else:
+                            ebay_offers.enable_all(control, 20, None)
+                return execute(statement, *args, **kwargs)
+
+            monkeypatch.setattr(db, "execute", intercept)
+            with pytest.raises(ebay_offers.OfferConflict, match="changed or was paused"):
+                await ebay_offers.send(db, row["id"], automatic=True, policy_approval=approval)
+            assert changed
+
+    asyncio.run(scenario())
+    assert not offers.remote.sends
+
+
+def test_policy_migration_upgrades_previous_release_preserving_offer_history(tmp_path):
+    from alembic import command
+    from vendoo_studio.services.schema_migrations import alembic_config
+    from vendoo_studio.services.schema_drift import inspect_database
+
+    path = tmp_path / "previous-offer-release.db"
+    config = alembic_config(f"sqlite:///{path}")
+    command.upgrade(config, "b295f60b1610")
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as connection:
+        connection.execute(text("INSERT INTO ebay_offer_rules "
+                                "(id, account_id, listing_id, discount_percent, minimum_price_cents, enabled, updated_at) "
+                                "VALUES ('keep', 'seller', '123', 10, 3000, false, CURRENT_TIMESTAMP)"))
+    command.upgrade(config, "head")
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT minimum_price_cents FROM ebay_offer_rules WHERE id='keep'")).scalar() == 3000
+        assert connection.execute(text("SELECT count(*) FROM ebay_offer_policies")).scalar() == 0
     assert inspect_database(path).clean
     engine.dispose()
