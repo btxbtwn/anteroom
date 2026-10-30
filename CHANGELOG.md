@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.536 — 2026-10-30
+
+- Keep each seller’s photos, listing history, sales links, and automation records tied to their own account as we prepare online sync.
+
 ## 0.1.535 — 2026-10-30
 
 - Prepare separate seller accounts so saved categories, copy requests, and marketplace actions do not block another seller using the same identifiers.

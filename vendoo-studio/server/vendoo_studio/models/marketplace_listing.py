@@ -8,7 +8,7 @@ here are what make a retry reuse the same listing instead of creating another.
 """
 from __future__ import annotations
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -26,7 +26,11 @@ LIVE_STATES = ("published", "pending_review")
 
 class MarketplaceListing(SellerOwned, Base):
     __tablename__ = "marketplace_listings"
-    __table_args__ = (UniqueConstraint("conversation_id", "marketplace", name="uq_marketplace_listings_item"),)
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "marketplace", name="uq_marketplace_listings_item"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_marketplace_listings_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     conversation_id = Column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)

@@ -4,7 +4,7 @@ An automation is saved off and does nothing until the seller turns it on. Any
 edit turns it off again. Each send it makes is a ``listing_promotions`` row
 carrying its ``automation_id``; each round is a ``promotion_runs`` row.
 """
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import ForeignKeyConstraint, UniqueConstraint, JSON, Boolean, Column, DateTime, ForeignKey, Integer, String
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -13,6 +13,9 @@ from vendoo_studio.models.conversation import new_id, utcnow
 
 class PromotionAutomation(SellerOwned, Base):
     __tablename__ = "promotion_automations"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_promotion_automations_seller_id"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     marketplace = Column(String, nullable=False)
@@ -43,6 +46,10 @@ class PromotionAutomation(SellerOwned, Base):
 
 class PromotionRun(SellerOwned, Base):
     __tablename__ = "promotion_runs"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "automation_id"], ["promotion_automations.user_id", "promotion_automations.id"],
+            name="fk_promotion_runs_seller_automation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     automation_id = Column(String, ForeignKey("promotion_automations.id", ondelete="CASCADE"), nullable=False, index=True)

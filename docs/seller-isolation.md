@@ -102,3 +102,44 @@ for two owners while duplicates within an owner are rejected. Real restricted
 Postgres sessions also verify independent copy receipts, fingerprints and eBay
 locks. Same-owner parent/child constraints remain the next migration; hosted
 listing routes must stay closed until those are in place.
+
+## Ownership of parent/child records (cloud step 1f)
+
+Revision `b295f60b1610` adds a composite `(user_id, parent_id)` foreign key
+alongside each of the 34 existing single-column foreign keys. Seven parent
+tables gain a matching `(user_id, id)` unique constraint. These guards apply
+to SQLite as well as Postgres and therefore also protect administrative SQL,
+not just sessions running under row-level security.
+
+The original foreign keys retain their existing deletion actions. A deleted
+listing still clears optional sale and copy-receipt links while preserving
+those records' owners, and existing cascades still remove dependent rows.
+The composite guards are `DEFERRABLE INITIALLY DEFERRED`, checking the final
+transaction state after the original delete actions. Updating a parent owner
+alone is rejected; an administrative import can explicitly transfer a whole
+graph in one transaction. Ordinary hosted sessions cannot transfer owners.
+This uses standard [Postgres foreign-key constraints](https://www.postgresql.org/docs/16/ddl-constraints.html).
+
+ORM relationships have explicit owner-aware joins and synchronize only the
+parent record ID. Assigning a relationship cannot silently overwrite a
+child's owner. Queries that infer a join from table foreign keys should use
+the mapped relationship or an explicit ON clause, since both the existing
+reference and its ownership guard now connect the tables.
+
+Before adding constraints, the migration checks all 34 relationships. A
+missing parent or mismatched owner refuses the upgrade without reassigning or
+deleting records. The existing snapshot/recovery path applies. Postgres adds
+constraints in place and retains its policies and grants. Legacy SQLite
+adoption skips constraints already present on newly created tables.
+
+Tests exercise SQL inserts and updates on every relationship, parent owner
+changes, explicit graph transfers, ORM loading and deletion, optional links,
+cascades, populated previous-release upgrades and refusal of mismatched old
+data. Restricted Postgres sessions also attempt each cross-seller reference.
+
+This covers durable relationships already declared as foreign keys. Historical
+and operational IDs stored without foreign keys still need an audit before
+hosted write routes are enabled: revision pointers and approved revision IDs,
+assistant thread IDs, automation run IDs, copy source IDs and IDs embedded in
+JSON. Their retention/deletion semantics must be settled before adding
+constraints. File scoping, account import and client sign-in remain pending.

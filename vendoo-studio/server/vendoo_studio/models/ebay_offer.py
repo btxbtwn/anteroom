@@ -1,5 +1,5 @@
 """Seller-approved offer rules and a durable journal of buyer-facing sends."""
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -8,7 +8,12 @@ from vendoo_studio.models.conversation import new_id, utcnow
 
 class EbayOfferRule(SellerOwned, Base):
     __tablename__ = "ebay_offer_rules"
-    __table_args__ = (UniqueConstraint("user_id", "account_id", "listing_id", name="uq_ebay_offer_rule_listing"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "account_id", "listing_id", name="uq_ebay_offer_rule_listing"),
+        UniqueConstraint("user_id", "id", name="uq_ebay_offer_rules_seller_id"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_ebay_offer_rules_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     account_id = Column(String, nullable=False)
@@ -24,6 +29,10 @@ class EbayOfferRule(SellerOwned, Base):
 
 class EbayOfferAttempt(SellerOwned, Base):
     __tablename__ = "ebay_offer_attempts"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "rule_id"], ["ebay_offer_rules.user_id", "ebay_offer_rules.id"],
+            name="fk_ebay_offer_attempts_seller_rule_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     rule_id = Column(String, ForeignKey("ebay_offer_rules.id", ondelete="CASCADE"), nullable=False, index=True)

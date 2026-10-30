@@ -77,7 +77,7 @@ def test_orm_raw_sql_and_joins_only_see_the_seller(seller_engine):
             assert db.scalars(select(Conversation.id)).all() == [item]
             assert db.execute(text("SELECT id FROM conversations")).scalars().all() == [item]
             assert db.get(Conversation, "bob" if item == "alice" else "alice") is None
-            assert db.scalars(select(Message.text).join(Conversation)).all() == [secret]
+            assert db.scalars(select(Message.text).join(Message.conversation)).all() == [secret]
             assert [m.text for m in db.get(Conversation, item).messages] == [secret]
 
 

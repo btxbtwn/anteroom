@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, JSON
+from sqlalchemy import ForeignKeyConstraint, Column, String, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 
 from vendoo_studio.database import Base
@@ -11,6 +11,10 @@ from vendoo_studio.models.conversation import new_id, utcnow
 
 class Listing(SellerOwned, Base):
     __tablename__ = "listings"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_listings_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     conversation_id = Column(String, ForeignKey("conversations.id"), primary_key=True)
     current_revision_id = Column(String, nullable=True)
@@ -18,11 +22,15 @@ class Listing(SellerOwned, Base):
     validation_errors = Column(JSON, nullable=True)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
-    conversation = relationship("Conversation", back_populates="listing")
+    conversation = relationship("Conversation", back_populates="listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)")
 
 
 class ListingRevision(SellerOwned, Base):
     __tablename__ = "listing_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_listing_revisions_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)

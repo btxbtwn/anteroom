@@ -1,7 +1,7 @@
 """Direct order-line ledger and seller-reviewed sale alerts. No buyer details."""
 from __future__ import annotations
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, JSON, Column, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -19,9 +19,10 @@ OTHER_MARKETPLACE = "other"
 class MarketplaceSale(SellerOwned, Base):
     __tablename__ = "marketplace_sales"
     __table_args__ = (
-        # One row per order line, however often the marketplace repeats itself.
         UniqueConstraint("user_id", "marketplace", "order_id", "line_id", name="uq_marketplace_sales_order_line"),
         Index("ix_marketplace_sales_state", "state"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_marketplace_sales_seller_conversation_id", deferrable=True, initially="DEFERRED"),
     )
 
     id = Column(String, primary_key=True, default=new_id)

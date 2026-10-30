@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKeyConstraint, JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
 
 from vendoo_studio.database import Base
 from vendoo_studio.models.ownership import SellerOwned
@@ -14,6 +14,10 @@ class ScoutCheck(SellerOwned, Base):
     against what the item actually sold for."""
 
     __tablename__ = "scout_checks"
+    __table_args__ = (
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_scout_checks_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
 
     id = Column(String, primary_key=True, default=new_id)
     status = Column(String, nullable=False, default="checking")  # checking | done | failed
