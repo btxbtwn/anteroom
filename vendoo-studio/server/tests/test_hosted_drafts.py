@@ -97,3 +97,36 @@ def test_missing_cloud_database_does_not_fall_back_to_local_data(jwks, signing_k
             assert response.json()['detail'] == 'The cloud database is not configured'
     finally:
         local.dispose()
+
+
+def test_fresh_hosted_process_uses_writable_runtime_directory(tmp_path):
+    """Match the non-root container: application resources are not writable."""
+    import os
+    import subprocess
+    import sys
+
+    resources = tmp_path / 'resources'
+    resources.mkdir()
+    web = tmp_path / 'web'
+    (web / 'assets').mkdir(parents=True)
+    (web / 'cloud.html').write_text('<title>Anteroom</title>')
+    resources.chmod(0o555)
+    runtime = tmp_path / 'runtime'
+    env = dict(os.environ, VENDOO_STUDIO_RESOURCE_DIR=str(resources), VENDOO_STUDIO_DATA_DIR=str(runtime),
+               ANTEROOM_WEB_DIR=str(web), SUPABASE_URL=PROJECT_URL)
+    script = '''
+from fastapi.testclient import TestClient
+from vendoo_studio.hosted import app
+with TestClient(app) as client:
+    assert client.get('/api/health').status_code == 200
+    assert client.get('/').status_code == 200
+    assert client.get('/api/drafts').status_code == 401
+'''
+    try:
+        result = subprocess.run([sys.executable, '-c', script], cwd=Path(__file__).resolve().parents[2],
+                                env=env, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stderr
+        assert runtime.is_dir()
+        assert not (resources / 'data').exists()
+    finally:
+        resources.chmod(0o755)
