@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.550 — 2026-10-29
+
+- I can remove Depop Age, Source, and Style chips and choose replacements. Cleared selections stay empty across marketplace forms instead of bringing back the old answer.
+
 ## 0.1.549 — 2026-10-30
 
 - Analytics counts current inventory by item again. A sold item with more than one sale, or one with stock left and a sale already recorded, was counted more than once, so the sold total in "Current inventory" read higher than the Sold tab in Inventory.

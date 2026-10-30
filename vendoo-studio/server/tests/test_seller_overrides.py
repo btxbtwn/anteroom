@@ -125,6 +125,16 @@ class PriceFollowTest(unittest.TestCase):
 
 
 class DepopStyleClearTest(unittest.TestCase):
+    def test_age_source_and_style_stay_cleared_through_the_editor_save(self):
+        from vendoo_studio.services.listing_editor import prepared_listing
+
+        for field, original in [("age", ["y2k"]), ("source", ["preloved"]), ("style", ["Casual"])]:
+            with self.subTest(field=field):
+                previous = {"title": "Y2K vintage jacket", "description": "Warm", "depop_specifics": {field: original}}
+                submitted = {**previous, "depop_specifics": {field: []}}
+                saved = prepared_listing(previous, submitted)
+                self.assertEqual(saved["depop_specifics"][field], [])
+
     def test_a_comma_joined_style_becomes_separate_choices(self):
         listing = {"depop_specifics": {"style": ["Casual, Minimalist, Indie"]}}
         from vendoo_studio.services.seller_overrides import expand_depop_multi
