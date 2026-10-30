@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.568 — 2026-10-30
+
+- Make Retry save recover your unsaved edits when a listing changes in the background, and tell you which field needs review if both copies changed it.
+
 ## 0.1.567 — 2026-10-30
 
 - Remove repeated yellow “Check this answer” reminders from optional marketplace fields.
