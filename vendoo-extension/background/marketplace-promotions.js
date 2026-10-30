@@ -314,7 +314,12 @@ function requireDepopOfferCurrency(product, preview = {}) {
   if (!currencies.length) throw depopOfferDrift('listing currency');
 }
 
+// Depop answers a listing nobody can get an offer on with HTTP 400 code 1003
+// (no likes), or with a preview that names no recipient (no eligible liker).
+const DEPOP_NO_LIKERS = 'Nobody who liked this Depop listing can get an offer right now.';
+
 function depopOfferPreview(body, product) {
+  if (String(body?.product_id) === String(product.id) && body?.offer_recipient_id == null) throw marketplaceError(DEPOP_NO_LIKERS);
   const recipient = Number(body?.offer_recipient_id);
   const others = String(body?.offer_additional_recipients_count ?? '');
   // Depop leaves out its lowest offer on some listings; the seller's floor still applies.
@@ -342,7 +347,14 @@ async function depopOfferState(requests, slug, deadline) {
   if (owner == null || String(owner) !== String(me?.id)) throw marketplaceError('This Depop listing belongs to another account.');
   if (product.status !== 'STATUS_ONSALE' || product.sold === true) throw marketplaceError('This Depop listing has sold or is not on sale.');
   if (depopImportVariants(product).length > 1) throw marketplaceError('Depop does not send offers on listings with several sizes.');
-  const preview = requests.preview.read((await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview')).data, product);
+  let reply;
+  try {
+    reply = await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview');
+  } catch (error) {
+    if (error?.status === 400 && error.response_data?.code === 1003) throw marketplaceError(DEPOP_NO_LIKERS);
+    throw error;
+  }
+  const preview = requests.preview.read(reply.data, product);
   // Depop's product document no longer carries the price; its offer preview does.
   const listed = depopProductPrice(product);
   const price = listed != null ? Math.round(listed * 100) : preview.original_cents;
