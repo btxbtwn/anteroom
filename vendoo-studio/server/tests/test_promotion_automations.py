@@ -7,7 +7,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, update
+from sqlalchemy.sql.dml import Update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -263,7 +264,7 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.db.commit()
         saved = self.create({**OFFER, "excluded_ids": [third.id]})
         coverage = self.client.get(f"/api/promotion-automations/{saved['id']}/coverage").json()
-        self.assertEqual((coverage["missing_floor"], coverage["included"], len(coverage["items"])), (0, 2, 3))
+        self.assertEqual((coverage["included"], len(coverage["items"])), (2, 3))
         self.assertEqual({item["conversation_id"]: item["included"] for item in coverage["items"]}[third.id], False)
         self.enable(saved["id"])
         self.due(saved["id"])
@@ -313,6 +314,108 @@ class PromotionAutomationsTest(unittest.TestCase):
         log = self.client.get(f"/api/promotion-automations/{saved['id']}/activity").json()
         self.assertEqual(len(log["runs"]), 1)
         self.assertEqual({send["state"] for send in log["sends"]}, {"done"})
+
+    def test_optional_minimum_includes_current_and_future_listings_on_every_marketplace(self):
+        for marketplace in ("poshmark", "mercari", "depop"):
+            with self.subTest(marketplace=marketplace):
+                for index, (conv, _post) in enumerate(self.items):
+                    item = f"m{index + 1:011d}" if marketplace == "mercari" else f"{index:024x}" if marketplace == "poshmark" else f"item-{index}"
+                    url = (f"https://www.mercari.com/us/item/{item}/" if marketplace == "mercari" else
+                           f"https://poshmark.com/listing/Item-{item}" if marketplace == "poshmark" else
+                           f"https://www.depop.com/products/{item}/")
+                    conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {marketplace: url}})
+                    self.likes[item] = 3
+                self.db.commit()
+                before = len(self.promoted())
+                saved = self.create({**OFFER, "marketplace": marketplace, "shipping_label": None})
+                self.assertIsNone(saved["minimum_price"])
+                self.enable(saved["id"])
+                self.due(saved["id"])
+                self.tick()
+                self.assertEqual(len(self.promoted()) - before, 3)
+                self.assertEqual({send["floor_cents"] for send in self.promoted()[before:]}, {1})
+                future = ConversationRepo(self.db).create(title="Future item")
+                item = "m99999999999" if marketplace == "mercari" else "f" * 24 if marketplace == "poshmark" else "future-item"
+                url = (f"https://www.mercari.com/us/item/{item}/" if marketplace == "mercari" else
+                       f"https://poshmark.com/listing/Item-{item}" if marketplace == "poshmark" else
+                       f"https://www.depop.com/products/{item}/")
+                future.notes = merge_notes(future.notes, {"vendooListingUrls": {marketplace: url}})
+                self.likes[item] = 3
+                self.db.commit()
+                self.due(saved["id"])
+                self.tick()
+                self.assertEqual(len(self.promoted()) - before, 4)
+                self.assertEqual(self.db.query(MarketplaceOfferFloor).count(), 0)
+
+    def test_shared_minimum_and_saved_individual_minimum_are_both_enforced(self):
+        conv, post = self.items[0]
+        self.db.add(MarketplaceOfferFloor(marketplace="poshmark", listing_id=post, conversation_id=conv.id, floor_cents=4500))
+        self.db.commit()
+        saved = self.create({**OFFER, "minimum_price": "35.00"})
+        self.assertEqual(saved["minimum_price"], "35.00")
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(len(self.promoted()), 2)
+        self.assertEqual({send["floor_cents"] for send in self.promoted()}, {3500})
+        self.assertNotIn(post, {send["listing_id"] for send in self.promoted()})
+
+    def test_optional_shared_minimum_validation_and_edits_stay_off(self):
+        for minimum in ("0", "-1", "NaN", "Infinity", "1.001", "10000000"):
+            self.assertEqual(self.client.post("/api/promotion-automations", json={**OFFER, "minimum_price": minimum}).status_code, 400)
+        saved = self.create({**OFFER, "minimum_price": "45"})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.promoted(), [])
+        edited = self.client.put(f"/api/promotion-automations/{saved['id']}", json={**OFFER, "minimum_price": None}).json()
+        self.assertFalse(edited["enabled"])
+        self.assertIsNone(edited["minimum_price"])
+
+    def test_shared_minimum_is_rechecked_after_reading_marketplace(self):
+        saved = self.create({**OFFER, "minimum_price": "30"})
+        def raise_minimum():
+            automation = self.db.get(PromotionAutomation, saved["id"])
+            automation.minimum_price_cents = 4500
+            self.db.commit()
+        self.on_check = raise_minimum
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.promoted(), [])
+
+    def test_changed_minimum_blocks_the_final_send_reservation(self):
+        saved = self.create({**OFFER, "minimum_price": "30"})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        execute = self.db.execute
+        changed = False
+
+        def intercept(statement, *args, **kwargs):
+            nonlocal changed
+            if isinstance(statement, Update) and statement.table.name == "promotion_automations" and not changed:
+                changed = True
+                execute(update(PromotionAutomation).where(PromotionAutomation.id == saved["id"]).values(minimum_price_cents=4500))
+                self.db.commit()
+            return execute(statement, *args, **kwargs)
+
+        with patch.object(self.db, "execute", side_effect=intercept):
+            self.tick()
+        self.assertTrue(changed)
+        self.assertEqual(self.promoted(), [])
+
+    def test_clearing_an_individual_minimum_uses_the_rule_minimum(self):
+        conv, post = self.items[0]
+        self.db.add(MarketplaceOfferFloor(marketplace="poshmark", listing_id=post, conversation_id=conv.id, floor_cents=4500))
+        self.db.commit()
+        response = self.client.put("/api/promotions/floors", json={"marketplace": "poshmark", "floors": {conv.id: ""}})
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.json()[conv.id]["floor"])
+        saved = self.create({**OFFER, "minimum_price": "35", "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual([send["floor_cents"] for send in self.promoted()], [3500])
 
     def test_pause_all_and_interrupted_sends_pause_their_automation(self):
         saved = self.create(SHARE)
