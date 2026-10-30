@@ -304,6 +304,7 @@ class PackagedUpdateTest(unittest.TestCase):
                 return type("Result", (), {"returncode": 0, "stdout": "",
                     "stderr": 'designated => anchor apple generic and certificate leaf[subject.OU] = "TRUSTEDTEAM"'})()
             self.assertEqual(args[:4], ["/usr/bin/codesign", "--verify", "--deep", "--strict"])
+            self.assertTrue(args[4].startswith("-R="), args[4])
             return type(
                 "Result", (), {"returncode": verify_code, "stdout": "", "stderr": verify_err}
             )()
@@ -319,9 +320,14 @@ class PackagedUpdateTest(unittest.TestCase):
         with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
             packaged_updates._verify_app_signature(app)
         self.assertEqual(len(calls), 3)
-        self.assertIn("-R", calls[-1])
-        self.assertIn('certificate leaf[subject.OU] = "TRUSTEDTEAM"', calls[-1][-2])
-        self.assertIn('identifier "local.listthis.studio"', calls[-1][-2])
+        self.assertIn('certificate leaf[subject.OU] = "TRUSTEDTEAM"', calls[-1][4])
+        # Passed through verbatim and attached with =, the only form codesign
+        # reads as the requirement rather than as a path. The requirement
+        # already names the app's identifier; it is not appended again.
+        self.assertEqual(
+            calls[-1][4],
+            '-R=anchor apple generic and certificate leaf[subject.OU] = "TRUSTEDTEAM"',
+        )
 
     def test_verify_app_signature_rejects_adhoc(self):
         app = Path(self.tmp.name) / "Anteroom.app"
@@ -342,7 +348,7 @@ class PackagedUpdateTest(unittest.TestCase):
         with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
             with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "signing identity"):
                 packaged_updates._verify_app_signature(app)
-        self.assertIn('"TRUSTEDTEAM"', calls[-1][-2])
+        self.assertIn('"TRUSTEDTEAM"', calls[-1][4])
 
     def test_verify_app_signature_requires_installed_signing_identity(self):
         from subprocess import CompletedProcess
@@ -366,7 +372,37 @@ class PackagedUpdateTest(unittest.TestCase):
             CompletedProcess([], 0, "", ""),
         ]) as run:
             packaged_updates._verify_app_signature(Path(self.tmp.name) / "Anteroom.app")
-        self.assertIn('identifier "local.listthis.studio" and anchor apple', run.call_args.args[0][-2])
+        self.assertEqual(
+            run.call_args.args[0][4],
+            '-R=identifier "local.listthis.studio" and anchor apple',
+        )
+
+    @unittest.skipUnless(sys.platform == "darwin", "codesign is macOS only")
+    def test_verify_app_signature_passes_a_requirement_codesign_can_parse(self):
+        """Guard the exact regression: a wrapped requirement is rejected by codesign."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = Path(tmp) / "Anteroom.app"
+            (app / "Contents" / "MacOS").mkdir(parents=True)
+            launcher = app / "Contents" / "MacOS" / "Anteroom"
+            launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+            launcher.chmod(0o755)
+            signed = subprocess.run(["/usr/bin/codesign", "--force", "-s", "-", str(app)],
+                                    capture_output=True, text=True)
+            self.assertEqual(signed.returncode, 0, signed.stderr)
+            designated = subprocess.run(["/usr/bin/codesign", "-dr", "-", str(app)],
+                                        capture_output=True, text=True)
+            requirement = next(line.split("designated =>", 1)[1].strip()
+                               for line in (designated.stdout + designated.stderr).splitlines()
+                               if line.lstrip("# ").startswith("designated =>"))
+            self.assertFalse(requirement.startswith("("))
+            verify = subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict",
+                                     f"-R={requirement}", str(app)], capture_output=True, text=True)
+            self.assertEqual(verify.returncode, 0, verify.stderr)
+            # The form the updater shipped with: codesign reads "-R <req> <app>"
+            # as a requirement naming a file and refuses every update.
+            separate = subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict",
+                                       "-R", requirement, str(app)], capture_output=True, text=True)
+            self.assertNotEqual(separate.returncode, 0, "codesign must not accept '-R <req>'")
 
     def test_verify_app_signature_rejects_broken_seal(self):
         app = Path(self.tmp.name) / "Anteroom.app"

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.534 — 2026-10-29
+
+- Updates install again: downloading one no longer stops with "The update's code signature is damaged or does not match Anteroom's signing identity".
+
 ## 0.1.533 — 2026-10-29
 
 - Give Anteroom more time to open while a large database is backed up during startup.
