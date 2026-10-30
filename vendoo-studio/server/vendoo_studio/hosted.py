@@ -157,10 +157,11 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) 
         app.include_router(shared_router)
     from vendoo_studio.routes.photos import edit_router
     app.include_router(edit_router)
-    from vendoo_studio.routes import listing_templates, listing_copies, similar_items
+    from vendoo_studio.routes import listing_templates, listing_copies, similar_items, changelog
     app.include_router(listing_templates.router)
     app.include_router(listing_copies.router)
     app.include_router(similar_items.router)
+    app.include_router(changelog.router)
     from vendoo_studio.routes.conversations import preview_copy, copy_conversation, copy_result, ConversationResponse
     app.add_api_route('/api/conversations/{conv_id}/copy-preview', preview_copy, methods=['GET'])
     app.add_api_route('/api/conversations/{conv_id}/copy', copy_conversation, methods=['POST'], response_model=ConversationResponse)

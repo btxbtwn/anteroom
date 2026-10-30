@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.583 — 2026-10-30
+
+- Change your web app theme and sidebar listing names in General settings, read what changed in each release, and reload the current web version from About.
+
 ## 0.1.582 — 2026-10-30
 
 - Open Listings settings on the web to manage templates, labels, shipping defaults and formulas, and review or merge duplicate items in your own inventory.

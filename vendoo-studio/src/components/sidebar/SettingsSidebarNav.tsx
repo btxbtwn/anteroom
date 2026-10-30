@@ -77,7 +77,7 @@ export function SettingsSidebarNav({
         </div>
       ) : (
         <nav aria-label="Settings sections" className="flex flex-col gap-1">
-          {SETTINGS_NAV_ITEMS.filter((item) => !hosted || ["providers", "listings"].includes(item.id)).map((item) => {
+          {SETTINGS_NAV_ITEMS.filter((item) => !hosted || ["general", "providers", "listings"].includes(item.id)).map((item) => {
             const Icon = SECTION_ICONS[item.id];
             return (
               <button
