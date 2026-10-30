@@ -421,6 +421,22 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.tick()
         self.assertEqual(self.promoted(), [])
 
+    def test_a_skip_names_the_marketplaces_own_reason(self):
+        conv, post = self.items[0]
+
+        async def refuse(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.promotion_check":
+                return {"ok": False, "error": "Poshmark refused the request.", "error_code": "rejected",
+                        "marketplace_message": "This item is reserved for a buyer."}
+            return await self.answer(job, message_type, payload, timeout)
+        self.bridge.side_effect = refuse
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.promoted(), [])
+        self.assertIn("Poshmark refused the request: This item is reserved for a buyer. (1)", self.db.query(PromotionRun).one().note)
+
     def test_minimum_days_listed_and_activity_log(self):
         saved = self.create({**SHARE, "min_days_listed": 20, "daily_cap": 10})
         self.enable(saved["id"])

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.577 — 2026-10-30
+
+- Offer and share rounds now say why a marketplace refused a listing, in its own words, instead of only "Mercari refused the request."
+
 ## 0.1.576 — 2026-10-30
 
 - Depop offers now go to a listing with a single eligible liker. Those were skipped with "Depop's send-offer preview changed".
