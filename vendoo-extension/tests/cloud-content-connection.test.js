@@ -49,3 +49,12 @@ test('late disconnect from an old account does not invalidate the new document i
   s.probe({ type: 'cloud.connection.probe', accountId: bob }, { id: 'bridge' }, reply => { current = reply.current; });
   assert.equal(current, true);
 });
+
+test('hosted transport is installed before page startup and never in subframes', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../manifest.json'), 'utf8'));
+  const script = manifest.content_scripts.find(script => script.js.includes('content-scripts/cloud-connection.js'));
+  assert.deepEqual(script.matches, [ORIGIN + '/*']);
+  assert.equal(script.run_at, 'document_start');
+  assert.equal(script.all_frames, false);
+  assert.equal(manifest.externally_connectable, undefined);
+});

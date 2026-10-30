@@ -105,7 +105,8 @@
       "js": [
         "content-scripts/cloud-connection.js"
       ],
-      "all_frames": false
+      "all_frames": false,
+      "run_at": "document_start"
     }
   ],
   "icons": {
