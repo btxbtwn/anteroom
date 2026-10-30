@@ -288,7 +288,7 @@ export function ListingSidebar({
             className="sidebar-select-btn"
             data-active={selecting}
             aria-pressed={selecting}
-            aria-label={selecting ? "Stop selecting" : "Select listings to regenerate"}
+            aria-label={selecting ? "Stop selecting" : "Select listings"}
             disabled={bulk.running || !runtime.features.has("bulk_actions")}
             onClick={() => {
               if (selecting) exitSelecting();
@@ -370,8 +370,8 @@ export function ListingSidebar({
               type="button"
               data-active={selecting}
               className={cn(SIDEBAR_ROW, "w-auto shrink-0 px-2 text-xs font-semibold")}
-              title={selecting ? "Stop selecting" : "Select listings to regenerate"}
-              aria-label={selecting ? "Stop selecting" : "Select listings to regenerate"}
+              title={selecting ? "Stop selecting" : "Select listings"}
+              aria-label={selecting ? "Stop selecting" : "Select listings"}
               aria-pressed={selecting}
               disabled={bulk.running || !runtime.features.has("bulk_actions")}
               onClick={() => {

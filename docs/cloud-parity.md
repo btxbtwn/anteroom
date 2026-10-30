@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.582. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.583. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
@@ -184,3 +184,10 @@ connected on `feat/hosted-general-settings`: appearance and listing-name choices
 use account preferences; About reloads the web bundle and reads the same bundled
 changelog as desktop. Desktop installation endpoints and its SDK/Brave setup
 tutorial remain unavailable in hosted mode. Other unported sections stay gated.
+
+PR #996 is merged and deployed in 0.1.583; public health reports that version.
+On `feat/hosted-bulk-inventory`, selection exposes the shared bulk-copy review
+and price-markdown dialogs. Hosted price requests require owned items and the
+reviewed revision for every drop, with bounded batch sizes. Price writes share
+draft submission row locks and refuse queued/running tasks. Other bulk actions
+stay unavailable until their own service/browser workflows are ready.
