@@ -93,6 +93,7 @@ export interface ConversationActivity {
   items: string[];
   message_count: number;
   last_message_id: string | null;
+  locked_fields?: string[];
 }
 
 export interface Photo {

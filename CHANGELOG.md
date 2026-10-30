@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.566 — 2026-10-30
+## 0.1.567 — 2026-10-30
 
 - Make Retry save recover your unsaved edits when a listing changes in the background, and tell you which field needs review if both copies changed it.
+
+## 0.1.566 — 2026-10-30
+
+- Ask chat about a field or name it in your message: only the fields the agent is editing are temporarily locked, with an “Agent editing” label. Other fields stay editable, and your unrelated corrections are preserved when chat saves.
 
 ## 0.1.565 — 2026-10-30
 
