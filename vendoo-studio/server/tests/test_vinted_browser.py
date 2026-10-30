@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from vendoo_studio.services import account_browser
 from vendoo_studio.services import vinted_browser as browser
 
 
@@ -24,9 +25,19 @@ class Event:
         return all(handler() is not False for handler in self.handlers)
 
 
-def window(rows):
+class Loaded:
+    def __init__(self, loaded=True):
+        self.loaded = loaded
+        self.waited = []
+
+    def wait(self, timeout=None):
+        self.waited.append(timeout)
+        return self.loaded
+
+
+def window(rows, loaded=True):
     item = Mock()
-    item.events = SimpleNamespace(closed=Event(), closing=Event())
+    item.events = SimpleNamespace(closed=Event(), closing=Event(), loaded=Loaded(loaded))
     item.get_current_url.return_value = 'https://www.vinted.com/items/new'
     item.evaluate_js.side_effect = lambda script, callback: callback({'ok': True, 'rows': rows})
     return item
@@ -53,6 +64,28 @@ def test_connection_opens_anteroom_window_without_exposing_python_api():
 def test_headless_server_does_not_open_chrome_or_fabricate_a_connection():
     with pytest.raises(browser.VintedConnectionError, match='Mac app'):
         browser.connect()
+
+
+def test_a_restart_reuses_the_saved_vinted_sign_in_without_a_sign_in_prompt():
+    item = window([{'id': 1, 'title': 'Women'}])
+    factory = Mock(return_value=item)
+    browser.install(factory)
+    assert browser.category_options(browser.category_rows()) == ['Women']
+    # The page opens hidden and is waited for, so no sign-in window interrupts the seller.
+    assert factory.call_args.kwargs['hidden'] is True
+    assert item.events.loaded.waited == [account_browser.RESTORE_TIMEOUT]
+    assert browser._session._window is item
+    item.show.assert_not_called()
+    browser.shutdown()
+
+
+def test_a_restored_window_that_does_not_load_asks_to_reload_instead_of_signing_in_again():
+    item = window([], loaded=False)
+    browser.install(Mock(return_value=item))
+    with pytest.raises(browser.VintedConnectionError, match='still opening'):
+        browser.category_rows()
+    item.evaluate_js.assert_not_called()
+    browser.shutdown()
 
 
 def test_catalog_read_is_same_origin_get_and_hides_the_signed_in_window():
