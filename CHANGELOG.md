@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.580 — 2026-10-30
+
+- Keep marketplace choices, package and shipping defaults, listing formulas and hidden-field choices in your web account, with working save and restore controls.
+
 ## 0.1.579 — 2026-10-30
 
 - Edit Poshmark and Depop drafts in the web app with the same form fields, category choices and saved values as desktop, without opening Chrome just to load the form.
