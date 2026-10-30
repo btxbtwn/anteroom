@@ -19,15 +19,39 @@ def fixed_options() -> dict:
     return {**catalog()["fixed_options"], "parcelSize": shipping["parcelSize"]}
 
 
+@lru_cache(maxsize=1)
+def _by_id() -> dict:
+    return {row["id"]: row for row in catalog()["categories"]}
+
+
+def size_label(category_id: str, size) -> str:
+    """The size as this category's own list spells it, else the size as written.
+
+    Depop lists a man's waist as 36", a top's as XL and a kid's as 16 years,
+    while the tag says 36, XL or 16. The form offers the page's spelling, so a
+    size is stored as the choice the page shows instead of a value its list
+    never carries.
+    """
+    from vendoo_studio.models.sizes import size_choice
+
+    written = str(size or "").strip()
+    if not written or not category_id:
+        return written
+    category = _by_id().get(category_id) or {}
+    options = next((row["options"] for row in category.get("fields") or [] if row["id"] == "variants"), [])
+    return size_choice(written, options) or written
+
+
 def form(listing: dict) -> dict:
     """Keep native rows and order; resolve labels to posting IDs only at publication."""
     from vendoo_studio.services.native_editor import field
 
     categories = catalog()["categories"]
     ids = listing.get("direct_category_ids") or {}
-    category_id = str(ids.get("depop") or (listing.get("marketplace_category_ids") or {}).get("depop") or "")
-    category = next((row for row in categories if row["id"] == category_id), None)
     specifics = listing.get("depop_specifics") or {}
+    category_id = str(ids.get("depop") or specifics.get("categoryId")
+                      or (listing.get("marketplace_category_ids") or {}).get("depop") or "")
+    category = next((row for row in categories if row["id"] == category_id), None)
     fixed = fixed_options()
 
     def value(path, default=""):
@@ -80,8 +104,12 @@ def form(listing: dict) -> dict:
                 row["help"] = f"Pick relevant tags to describe this item's style. Add up to {row['max_values']}"
             rows.append(row)
         elif key == "variants":
-            rows.append(choice("depop_specifics.size", label, captured["options"], required=True,
-                               category_specific=True, width="quarter"))
+            row = choice("depop_specifics.size", label, captured["options"], required=True,
+                         category_specific=True, width="quarter")
+            # The general size follows until this form sets its own, as brand and
+            # description do, and it is the page's own spelling of that size.
+            row["value"] = size_label(category_id, text("size"))
+            rows.append(row)
         elif key == "quantity":
             rows.append(field("quantity", label, listing.get("quantity", 1), input_type="number", min_value=1,
                               step=1, section="Info", width="quarter"))

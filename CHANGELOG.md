@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.569 — 2026-10-30
+
+- Depop keeps the size that its own form spells differently, so a 36 waist is shown and sent as 36" instead of leaving the size blank.
+
 ## 0.1.568 — 2026-10-30
 
 - Make Retry save recover your unsaved edits when a listing changes in the background, and tell you which field needs review if both copies changed it.

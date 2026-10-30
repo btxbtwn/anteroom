@@ -891,6 +891,26 @@ test('a kids jacket takes Depop\'s age size, its jacket type, and the ship-from 
     { address: 'New Orleans, LA, United States', geo_lat: 29.95, geo_lng: -90.07 });
 });
 
+test('a men\'s waist keeps the tag size when Depop spells it with inches', () => {
+  const c = loadWorker();
+  const attributes = { ...ATTRIBUTES,
+    category_size_mapping: [...ATTRIBUTES.category_size_mapping,
+      { department: 'menswear', group: 'bottoms', product_type: 'jeans', size_set_by_region: { US: 40 } },
+      { department: 'womenswear', group: 'bottoms', product_type: 'jeans', size_set_by_region: { US: 41 } }],
+    size_sets: [...ATTRIBUTES.size_sets,
+      { id: 40, sizes: [{ id: 70, name_i18n: { 'en-US': '36"' } }, { id: 71, name_i18n: { 'en-US': '38"' } }] },
+      { id: 41, sizes: [{ id: 80, name_i18n: { 'en-US': '36' } }, { id: 81, name_i18n: { 'en-US': '36"' } }] }] };
+  const category = { department: 'menswear', group: 'bottoms', productType: 'jeans', leaf: 'menswear_jeans', attributeIds: [] };
+  const found = c.depopSize({ ...listing, size: '36', depop_specifics: {} }, category, attributes);
+  assert.deepEqual([found.set, found.id], [40, 70]);
+  // A list that offers the plain number and the inch size keeps the plain one.
+  const women = { ...category, department: 'womenswear', leaf: 'womenswear_jeans' };
+  const both = c.depopSize({ ...listing, size: '36', depop_specifics: {} }, women, attributes);
+  assert.deepEqual([both.set, both.id], [41, 80]);
+  // A size this list does not carry still needs the seller.
+  assert.ok(c.depopSize({ ...listing, size: 'fits small', depop_specifics: {} }, category, attributes).problem);
+});
+
 test('Depop publish refuses a draft whose size or type is not the one sent', async () => {
   const { c, requests, payload } = page();
   const fields = { product_type: 'jackets', variant_set: 100, variants: { 23: 1 }, attributes: { 'jacket-type': ['windbreaker'] } };

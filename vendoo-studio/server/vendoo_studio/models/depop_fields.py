@@ -508,16 +508,20 @@ def depop_size_for(size: Any, listing: dict) -> str:
     """The general tag size as Depop's size for this listing's category.
 
     Petite tags keep the letter Depop lists (PM is M) and the grouping is Petite.
+    The size is spelled the way the category's own list spells it, so a man's 36
+    is 36", the label its page offers, not a value its dropdown never carries.
     """
+    from vendoo_studio.services.depop_form import size_label
+
     if depop_is_kids(listing):
-        return depop_kids_size(size)
+        return size_label(depop_category_id(listing), depop_kids_size(size))
     text = text_value(size)
     ebay = listing.get("ebay_specifics") if isinstance(listing.get("ebay_specifics"), dict) else {}
     size_type = text_value(listing.get("sizeType") or ebay.get("sizeType")).casefold()
     petite = re.fullmatch(r"p([sml])", text, re.I)
     if size_type in {"petite", "petites"} and petite:
-        return petite.group(1).upper()
-    return text
+        text = petite.group(1).upper()
+    return size_label(depop_category_id(listing), text)
 
 
 def depop_offers_sizes(listing: dict) -> bool:
