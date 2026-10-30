@@ -398,7 +398,10 @@ def changed_categories(before: dict, after: dict) -> set[str]:
     changed = {market for market in MARKETS
                if _category(after, market) and _category(after, market) != _category(before, market)}
     for market, contract in (before.get(native_contract.KEY) or {}).items():
-        if native_contract.changed_inputs(after, market, contract.get("fields") or [], contract.get("inputs")):
+        fields = contract.get("fields") or []
+        # A stale form is not a new edit. Compare the two revisions so an
+        # unrelated save cannot queue the same refill again.
+        if native_contract.changed_inputs(after, market, fields, native_contract.inputs(before, market, fields)):
             changed.add(market)
     return changed
 
