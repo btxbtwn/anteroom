@@ -105,6 +105,20 @@ class NativeContractTest(unittest.TestCase):
         updated = prepared_listing(listing, submitted)
         self.assertEqual(updated["etsy_specifics"], listing["etsy_specifics"])
 
+    def test_unrelated_edit_does_not_autofill_an_eligible_etsy_form(self):
+        from vendoo_studio.models.validation import validate_listing
+        from vendoo_studio.services.listing_editor import prepared_listing
+
+        listing = seed()
+        listing["etsy_specifics"] = {"who_made": "Another company or person", "what_is": "A finished product",
+                                    "when_made": "2000 - 2006 (Vintage)"}
+        submitted = copy.deepcopy(listing)
+        submitted.setdefault("poshmark_specifics", {})["poshmarkPrice"] = 25
+        updated = prepared_listing(listing, submitted)
+        validation = validate_listing(updated, require_photos=False, selected_marketplaces=["etsy"])
+        self.assertEqual(updated["etsy_specifics"], listing["etsy_specifics"])
+        self.assertFalse(any(issue["field"].startswith("etsy_specifics.") for issue in validation.errors), validation.errors)
+
     def test_marketplace_price_override_belongs_to_the_native_price_row(self):
         listing = {"price": 20, "poshmark_specifics": {"poshmarkPrice": 21}}
         form = {"category_id": "shirts", "fields": [{"path": "price", "label": "Listing Price", "required": True}]}
