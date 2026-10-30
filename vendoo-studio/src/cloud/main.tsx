@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
 import { cloudDrafts, type CloudDraft } from "../api/cloudDrafts";
 import { GeneralFields, type GeneralValues } from "./GeneralFields";
 import { Photos } from "./Photos";
+import { ChromeConnection } from "./ChromeConnection";
+import { cloudExtension } from "../api/cloudExtension";
 import "./style.css";
 
 const url = import.meta.env.VITE_SUPABASE_URL;
@@ -31,12 +33,20 @@ function App() {
     }).catch(() => { if (active) { setError("Could not restore your session. Please sign in again."); setReady(true); } });
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
+  const previousAccount = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousAccount.current;
+    previousAccount.current = session?.user.id || null;
+    if (previous && previous !== session?.user.id) {
+      void cloudExtension({ id: previous, email: "" }).disconnect();
+    }
+  }, [session?.user.id]);
   async function signOut() {
     if (dirty && !window.confirm("Sign out and discard unsaved changes?")) return;
     const { error } = await supabase.auth.signOut({ scope: "local" });
     if (error) setError("Could not sign out. Please try again.");
   }
-  return <div className="cloud"><header><a href="/" aria-label="Anteroom home">Anteroom</a>{session && <div><span>{session.user.email}</span><button onClick={() => void signOut()}>Sign out</button></div>}</header>
+  return <div className="cloud"><header><a href="/" aria-label="Anteroom home">Anteroom</a>{session && <div><span>{session.user.email}</span><ChromeConnection key={session.user.id} account={{ id: session.user.id, email: session.user.email || "" }}/><button onClick={() => void signOut()}>Sign out</button></div>}</header>
     {error && <p className="message" role="alert">{error}</p>}
     {!ready ? <main><p>Loading…</p></main> : session ? <Workspace key={session.user.id} client={supabase} dirty={dirty} onDirtyChange={setDirty}/> : <SignIn client={supabase}/>}
   </div>;
