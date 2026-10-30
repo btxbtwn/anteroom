@@ -3,8 +3,50 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createStudioQueryClient } from "./queryClient";
 import { api } from "./client";
 import { prefetchAssistantThread, prefetchListingReads } from "./navigationQueries";
+import { photoThumbUrl } from "../photoThumb";
+import type { Photo } from "./types";
 
 afterEach(() => vi.restoreAllMocks());
+
+it("warms bounded versioned thumbnails, deduplicates intent, and retries failed images", async () => {
+  const images: { src: string; fetchPriority: string; onload: () => void; onerror: () => void }[] = [];
+  vi.stubGlobal("Image", class {
+    src = "";
+    fetchPriority = "";
+    onload = () => {};
+    onerror = () => {};
+    constructor() { images.push(this); }
+  });
+  const client = createStudioQueryClient();
+  const photos = Array.from({ length: 8 }, (_, i) => ({ id: `warm-${i}`, url: `/api/photos/warm-${i}?v=1` }) as Photo);
+  vi.spyOn(api.conversations, "get").mockResolvedValue({ id: "warm" } as never);
+  vi.spyOn(api.conversations, "messages").mockResolvedValue([]);
+  vi.spyOn(api.conversations, "photos").mockResolvedValue(photos);
+  try {
+    await prefetchListingReads(client, "warm");
+    expect(images.map(image => image.src)).toEqual(photos.slice(0, 4).map(photoThumbUrl));
+    expect(images.every(image => image.fetchPriority === "low")).toBe(true);
+    await prefetchListingReads(client, "warm");
+    client.setQueryData(["photos", "other"], [{ id: "other", url: "/api/photos/other" }]);
+    await prefetchListingReads(client, "other");
+    expect(images).toHaveLength(4);
+    images.forEach(image => image.onload());
+    await prefetchListingReads(client, "warm");
+    expect(images).toHaveLength(4);
+
+    const edited = { ...photos[0], url: "/api/photos/warm-0?v=2" };
+    client.setQueryData(["photos", "warm"], [edited]);
+    await prefetchListingReads(client, "warm");
+    expect(images[4].src).toBe(photoThumbUrl(edited));
+    images[4].onerror();
+    await prefetchListingReads(client, "warm");
+    expect(images).toHaveLength(6);
+  } finally {
+    images.forEach(image => image.onerror());
+    client.clear();
+    vi.unstubAllGlobals();
+  }
+});
 
 it("warms only safe listing reads and reuses them on mount", async () => {
   const client = createStudioQueryClient();
