@@ -296,6 +296,38 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
         await self.settle()
         self.assertEqual(self.fills, [])
 
+    async def test_chat_style_edit_is_saved_without_starting_another_fill(self):
+        from vendoo_studio.services import native_contract
+        from vendoo_studio.services.chat_listing import apply_listing_payload
+
+        styles = ["Preppy", "Minimalist", "Casual"]
+        form = {"category_id": "menswear_jeans", "fields": [
+            row("depop_specifics.style", "Style", styles, multi=True, max_values=3),
+        ]}
+        listing = {**self.base, "brand": "Levi's", "condition": "Good",
+                   "depop_specifics": {"style": ["Preppy"]}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
+        self.repo.save_revision(self.conv.id, listing, source="native_schema")
+
+        _, saved = apply_listing_payload(self.db, self.conv.id, json.dumps([
+            {"op": "replace", "path": "/depop_specifics/style", "value": styles},
+        ]))
+        self.assertTrue(saved)
+        await self.settle()
+        current = self.repo.get_current(self.conv.id)
+        self.assertEqual(self.repo.get_revision(current.current_revision_id).listing_json["depop_specifics"]["style"], styles)
+        self.assertEqual(self.fills, [])
+
+    def test_dependent_choice_still_triggers_a_fill(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"fields": [row("depop_specifics.type", "Type", ["Jeans", "Chinos"],
+                               clears=["depop_specifics.attributes"])]}
+        before = {**self.base, "depop_specifics": {"type": "Jeans"}}
+        before[native_contract.KEY] = native_contract.capture(before, {"depop": form}, ["depop"])
+        after = {**before, "depop_specifics": {"type": "Chinos"}}
+        self.assertEqual(native_field_fill.changed_categories(before, after), {"depop"})
+
     async def test_its_own_revision_and_generation_do_not_start_a_fill(self):
         self.save({"depop": "menswear_trousers"}, source="native_fields")
         self.save({"ebay": "57989"}, source="generation_finalize")
