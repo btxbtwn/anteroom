@@ -401,3 +401,33 @@ def test_two_real_orders_on_one_item_both_count(env):
     payload = inventory_analytics(env.db, range_id="all")
     assert payload["sales"]["count"] == 2
     assert payload["sales"]["revenue"] == 50
+
+
+def test_cleanup_reports_on_other_marketplaces_count_one_sale(env):
+    """A sold item with only "listing reads sold" reports is one sale, not one per marketplace."""
+    item(env.db, "coat")
+    for marketplace, listing_id in (("depop", "shop-tee-136d"), ("poshmark", "65a1b2c3d4e5f6a7b8c9d0e1")):
+        env.db.add(MarketplaceSale(marketplace=marketplace, order_id=listing_id, line_id=listing_id,
+                                   listing_id=listing_id, conversation_id="coat"))
+    env.db.commit()
+    payload = inventory_analytics(env.db, range_id="all")
+    assert payload["sales"]["count"] == 1
+    assert payload["inventory"]["sold"] == 1
+
+
+def test_a_multi_unit_item_keeps_one_inferred_sale_per_unit(env):
+    item(env.db, "tees", quantity=2)
+    for marketplace, listing_id in (("depop", "shop-tee-136d"), ("poshmark", "65a1b2c3d4e5f6a7b8c9d0e1")):
+        env.db.add(MarketplaceSale(marketplace=marketplace, order_id=listing_id, line_id=listing_id,
+                                   listing_id=listing_id, conversation_id="tees"))
+    env.db.commit()
+    assert inventory_analytics(env.db, range_id="all")["sales"]["count"] == 2
+
+
+def test_real_orders_are_never_capped(env):
+    item(env.db, "coat")
+    line(env.db, "coat", "ebay", order="o1", order_line="l1", financials={"item_revenue": "20"})
+    line(env.db, "coat", "etsy", order="o2", order_line="l2", financials={"item_revenue": "30"})
+    payload = inventory_analytics(env.db, range_id="all")
+    assert payload["sales"]["count"] == 2
+    assert payload["sales"]["revenue"] == 50

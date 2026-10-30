@@ -163,21 +163,21 @@ def live_listing_ids(marketplace: str, *, session_factory=None) -> dict[str, str
     return found
 
 
-def _sold_elsewhere(db: Session, conv_id: str, marketplace: str) -> bool:
-    """True when every unit is sold on another marketplace by a real order.
+def _already_sold(db: Session, conv_id: str) -> bool:
+    """True when every unit is sold and a sale is already on the ledger.
 
-    Then a listing Anteroom reads as sold here is the seller clearing the other
-    listings, not another order. An item still on sale (a relist, or stock
-    left) keeps detecting sales here.
+    Then a listing Anteroom reads as sold is the seller clearing the other
+    listings, not another order, whatever marketplace it is on. An item still
+    on sale (a relist, or stock left) keeps detecting sales. An item that only
+    a label calls sold has no ledger sale yet, so its first report is recorded.
     """
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
     from vendoo_studio.services.item_status import status_for
     from vendoo_studio.services.vendoo_import import parse_notes
 
-    lines = db.query(MarketplaceSale).filter(
-        MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)).all()
-    if not any(line.is_order_backed and line.marketplace != marketplace for line in lines):
+    if not db.query(MarketplaceSale.id).filter(
+            MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)).first():
         return False
     conv = db.get(Conversation, conv_id)
     return bool(conv and status_for(db, conv_id, parse_notes(conv.notes)).status == "sold")
@@ -231,7 +231,7 @@ def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_f
     with session_factory() as db:
         for listing_id in listing_ids:
             conv_id = (conversation_ids or {}).get(listing_id)
-            if conv_id and _sold_elsewhere(db, conv_id, marketplace):
+            if conv_id and _already_sold(db, conv_id):
                 continue
             sale = record_sale(
                 db,
