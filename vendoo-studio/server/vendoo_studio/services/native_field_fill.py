@@ -318,6 +318,10 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
             f"--- Listing ---\n{json.dumps(summary, ensure_ascii=False)}"
         )},
     ]
+    from vendoo_studio.services import activity
+
+    work = activity.begin(conv_id, "Filling marketplace fields…")
+    work.fields = tuple(rows)
     try:
         from vendoo_studio.services.option_lookup import OptionCatalog
 
@@ -326,6 +330,8 @@ async def _fill_native_fields(db: Session, conv_id: str, provider, *, evidence: 
     except Exception:
         log.exception("marketplace field fill request failed for %s", conv_id)
         return None
+    finally:
+        activity.end(work)
     reply = _json_object(text)
     if reply is None or not isinstance(reply.get("fields"), dict):
         # A failed/truncated response is not an evidence check that rejected

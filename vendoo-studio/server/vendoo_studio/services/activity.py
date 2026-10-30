@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import copy
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 
@@ -20,6 +22,7 @@ class Work:
     label: str
     task: asyncio.Task | None = None
     cancelled: bool = False
+    fields: tuple[str, ...] = ()
 
     def cancel(self) -> None:
         self.cancelled = True
@@ -35,6 +38,34 @@ _work: dict[str, list[Work]] = {}
 # events carrying an older token (a cancelled run still unwinding) are dropped.
 _agents: dict[str, tuple[int, dict[str, dict]]] = {}
 _runs = itertools.count(1)
+edit_fields: ContextVar[tuple[str, ...] | None] = ContextVar("agent_edit_fields", default=None)
+
+
+def scoped_listing(previous: dict, candidate: dict, paths: tuple[str, ...]) -> dict:
+    """Merge only declared agent edits onto the seller's latest revision."""
+    from vendoo_studio.services.seller_overrides import set_path
+
+    result = copy.deepcopy(previous)
+    for path in paths:
+        set_path(result, path, copy.deepcopy(field_value(candidate, path)))
+    locks = set(previous.get("seller_fields") or [])
+    for path in paths:
+        if path in (candidate.get("seller_fields") or []):
+            locks.add(path)
+    if locks or "seller_fields" in result:
+        result["seller_fields"] = sorted(locks)
+    return result
+
+
+def field_value(listing: dict, path: str):
+    from vendoo_studio.services.seller_overrides import fold_key, get_path
+
+    value = get_path(listing, path)
+    if value is None and path.startswith("ebay_specifics."):
+        name = path.split(".", 1)[1]
+        value = next((value for key, value in (listing.get("ebay_specifics") or {}).items()
+                      if fold_key(key) == fold_key(name)), None)
+    return value
 
 
 def begin(conv_id: str, label: str) -> Work:
@@ -54,10 +85,11 @@ def end(work: Work) -> None:
         _work.pop(work.conv_id, None)
 
 
-def track_task(conv_id: str, label: str, task: asyncio.Task) -> asyncio.Task:
+def track_task(conv_id: str, label: str, task: asyncio.Task, *, fields: tuple[str, ...] = ()) -> asyncio.Task:
     """Register a background task until it finishes; Stop cancels it."""
     work = begin(conv_id, label)
     work.task = task
+    work.fields = fields
     task.add_done_callback(lambda _task: end(work))
     return task
 
@@ -65,6 +97,10 @@ def track_task(conv_id: str, label: str, task: asyncio.Task) -> asyncio.Task:
 def running(conv_id: str) -> list[str]:
     labels = [work.label for work in _work.get(conv_id, []) if not work.cancelled]
     return list(dict.fromkeys(labels))
+
+
+def locked_fields(conv_id: str) -> list[str]:
+    return sorted({path for work in _work.get(conv_id, []) if not work.cancelled for path in work.fields})
 
 
 def running_all() -> dict[str, list[str]]:

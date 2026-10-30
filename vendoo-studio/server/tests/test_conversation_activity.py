@@ -84,6 +84,39 @@ class ConversationActivityRouteTest(unittest.TestCase):
         self.assertEqual(body["message_count"], 1)
         self.assertEqual(body["last_message_id"], message.id)
 
+    def test_scoped_agent_revision_preserves_other_fields_and_reports_its_lock(self):
+        repo = ListingRepo(self.db)
+        repo.save_revision(self.conv.id, {"title": "New seller title", "price": 30,
+                           "ebay_specifics": {"Size": "34"}}, "generate")
+        work = activity.begin(self.conv.id, "Editing size")
+        work.fields = ("ebay_specifics.Size",)
+        self.assertEqual(self.activity()["locked_fields"], ["ebay_specifics.Size"])
+        token = activity.edit_fields.set(work.fields)
+        try:
+            repo.save_revision(self.conv.id, {"title": "Old agent title", "price": 10,
+                               "ebay_specifics": {"Size": "36"}}, "model_refinement")
+        finally:
+            activity.edit_fields.reset(token)
+        saved = repo.get_revision(repo.get_current(self.conv.id).current_revision_id).listing_json
+        self.assertEqual(saved["title"], "New seller title")
+        self.assertEqual(saved["price"], 30)
+        self.assertEqual(saved["ebay_specifics"]["Size"], "36")
+        activity.end(work)
+        self.assertEqual(self.activity()["locked_fields"], [])
+
+    def test_manual_save_of_agent_locked_field_is_rejected_without_touching_the_listing(self):
+        from fastapi import HTTPException
+        from vendoo_studio.services.listing_editor import save_listing_edit
+
+        repo = ListingRepo(self.db)
+        original = repo.save_revision(self.conv.id, {"title": "Tee", "ebay_specifics": {"Size": "34"}}, "generate")
+        work = activity.begin(self.conv.id, "Editing size")
+        work.fields = ("ebay_specifics.Size",)
+        with self.assertRaises(HTTPException) as error:
+            save_listing_edit(self.conv.id, {"title": "Tee", "ebay_specifics": {"Size": "36"}}, self.db)
+        self.assertEqual(error.exception.status_code, 409)
+        self.assertEqual(repo.get_current(self.conv.id).current_revision_id, original.id)
+
     def test_background_work_keeps_the_listing_busy(self):
         activity.begin(self.conv.id, "Filling discovered fields…")
         body = self.activity()
@@ -119,3 +152,41 @@ class ConversationActivityRouteTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FieldLockLifecycleTest(unittest.IsolatedAsyncioTestCase):
+    def tearDown(self):
+        activity.reset()
+
+    async def test_locks_survive_the_stream_until_save_finishes_and_release_on_cancel(self):
+        work = activity.begin('item', 'Editing size')
+        work.fields = ('ebay_specifics.Size',)
+        gate = asyncio.Event()
+        task = activity.track_task('item', 'Saving', asyncio.create_task(gate.wait()), fields=work.fields)
+        activity.end(work)
+        self.assertEqual(activity.locked_fields('item'), ['ebay_specifics.Size'])
+        self.assertEqual(activity.locked_fields('other'), [])
+        gate.set()
+        await task
+        await asyncio.sleep(0)
+        self.assertEqual(activity.locked_fields('item'), [])
+        work = activity.begin('item', 'Editing size')
+        work.fields = ('ebay_specifics.Size',)
+        activity.cancel('item')
+        self.assertEqual(activity.locked_fields('item'), [])
+
+    def test_targeted_save_preserves_unrelated_newer_seller_edits(self):
+        current = {'title': 'New seller title', 'price': 30, 'ebay_specifics': {'Size': '34'},
+                   'seller_fields': ['title']}
+        candidate = {'title': 'Old title', 'price': 10, 'ebay_specifics': {'size': '36'},
+                     'seller_fields': ['ebay_specifics.Size']}
+        saved = activity.scoped_listing(current, candidate, ('ebay_specifics.Size',))
+        self.assertEqual(saved['title'], 'New seller title')
+        self.assertEqual(saved['price'], 30)
+        self.assertEqual(saved['ebay_specifics']['Size'], '36')
+        self.assertEqual(saved['seller_fields'], ['ebay_specifics.Size', 'title'])
+        self.assertEqual(activity.scoped_listing(current, candidate, ()), current)
+        current['seller_fields'].append('ebay_specifics.Size')
+        candidate.pop('seller_fields')
+        self.assertIn('ebay_specifics.Size', activity.scoped_listing(current, candidate, ('ebay_specifics.Size',))['seller_fields'])
+        self.assertEqual(activity.field_value({'ebay_specifics': {'sizeType': 'Regular'}}, 'ebay_specifics.Size Type'), 'Regular')

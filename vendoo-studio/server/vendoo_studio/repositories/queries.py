@@ -537,6 +537,11 @@ class ListingRepo:
         current = self.get_current(conv_id)
         previous = self.get_revision(current.current_revision_id) if current and current.current_revision_id else None
         before = previous.listing_json if previous is not None and isinstance(previous.listing_json, dict) else {}
+        from vendoo_studio.services import activity
+
+        scope = activity.edit_fields.get()
+        if scope is not None and source in FILL_ON_SOURCES:
+            listing_json = activity.scoped_listing(before, listing_json, scope)
         from vendoo_studio.services import native_contract
 
         if source != "native_schema" and native_contract.KEY in before:

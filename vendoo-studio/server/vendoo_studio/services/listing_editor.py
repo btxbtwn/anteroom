@@ -75,6 +75,13 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     previous = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
     previous_json = previous.listing_json if previous and isinstance(previous.listing_json, dict) else {}
     changes = explicit_changes(previous_json, listing_data)
+    from vendoo_studio.services import activity
+
+    if activity.edit_fields.get() is None:
+        locked = [target for target in activity.locked_fields(conv_id)
+                  if activity.field_value(previous_json, target) != activity.field_value(listing_data, target)]
+        if locked:
+            raise HTTPException(409, "The agent is editing: " + ", ".join(sorted(set(locked))))
     from vendoo_studio.services.vendoo_import import parse_notes
 
     listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv_repo.get(conv_id).notes))

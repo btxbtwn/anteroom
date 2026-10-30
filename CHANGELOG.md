@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.566 — 2026-10-30
+
+- Ask chat about a field or name it in your message: only the fields the agent is editing are temporarily locked, with an “Agent editing” label. Other fields stay editable, and your unrelated corrections are preserved when chat saves.
+
 ## 0.1.565 — 2026-10-30
 
 - Let the listing assistant search large marketplace dropdowns on demand when writing or refining a draft.

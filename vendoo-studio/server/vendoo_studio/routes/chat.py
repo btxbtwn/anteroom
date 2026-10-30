@@ -147,11 +147,13 @@ async def _browser_fix_stream(conv_id: str, body: ChatMessage, provider, provide
     yield "data: [DONE]\n\n"
 
 
-async def _persist_chat_result(conv_id: str, full_text: str, provider, **kwargs):
+async def _persist_chat_result(conv_id: str, full_text: str, provider, *, field_paths=None, **kwargs):
     db = SessionLocal()
+    token = activity.edit_fields.set(field_paths)
     try:
         return await persist_chat_result(db, conv_id, full_text, provider, **kwargs)
     finally:
+        activity.edit_fields.reset(token)
         db.close()
 
 
@@ -235,7 +237,11 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
                 )
             finally:
                 build_db.close()
-            async for item in iter_with_keepalives(chat_with_options(provider, messages, option_catalog)):
+            def lock_targets(paths):
+                work.fields = tuple(sorted(set(work.fields) | set(paths)))
+
+            async for item in iter_with_keepalives(chat_with_options(
+                    provider, messages, option_catalog, on_targets=lock_targets if option_catalog.rows else None)):
                 if work.cancelled:
                     yield "data: [DONE]\n\n"
                     return
@@ -266,10 +272,11 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
                     provider_model=provider_model,
                     stream_error=stream_error,
                     user_message=citations_to_plain_text(body.text),
+                    field_paths=work.fields if option_catalog.rows else None,
                 )
             )
             # Tracked on its own: a dropped connection cancels this generator, not the save.
-            activity.track_task(conv_id, "Saving listing…", persist_task)
+            activity.track_task(conv_id, "Saving listing…", persist_task, fields=work.fields)
             async for _ in wait_task_keepalives(persist_task, timeout=2.0):
                 yield KEEPALIVE
             if persist_task.cancelled():
