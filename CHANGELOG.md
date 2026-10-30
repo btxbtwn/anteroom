@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.546 — 2026-10-30
+
+- Connect the web app to Anteroom Bridge in desktop Chrome, approve the browser connection, and disconnect it when you sign out.
+
 ## 0.1.545 — 2026-10-30
 
 - Find your online drafts in Inventory, edit their General listing fields, and add private photos that stay with your draft when you reopen it.

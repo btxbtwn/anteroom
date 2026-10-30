@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.37",
+  "version": "0.2.38",
   "minimum_chrome_version": "116",
   "description": "Connect Anteroom to automate marketplace listing drafts",
   "permissions": [
@@ -97,6 +97,15 @@
       "js": [
         "content-scripts/vinted.js"
       ]
+    },
+    {
+      "matches": [
+        "https://peaceful-meadowstone-6944.fly.dev/*"
+      ],
+      "js": [
+        "content-scripts/cloud-connection.js"
+      ],
+      "all_frames": false
     }
   ],
   "icons": {

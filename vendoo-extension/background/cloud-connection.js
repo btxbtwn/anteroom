@@ -1,0 +1,132 @@
+/* Browser-local site permission only. No cloud credentials or automation messages. */
+(function () {
+  const ORIGIN = 'https://peaceful-meadowstone-6944.fly.dev';
+  const KEY = 'anteroom_cloud_connections';
+  const TTL = 2 * 60 * 1000;
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
+  const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
+
+  function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID() } = {}) {
+    // Serializing state changes prevents two tabs from overwriting each other's
+    // session records across asynchronous chrome.storage operations.
+    let tail = Promise.resolve();
+    const serial = task => {
+      const result = tail.then(task);
+      tail = result.catch(() => {});
+      return result;
+    };
+    const site = value => { try { return new URL(value).origin === ORIGIN; } catch { return false; } };
+    const popup = sender => sender.id === api.runtime.id && typeof sender.url === 'string'
+      && sender.url.split('#')[0] === api.runtime.getURL('cloud-connect.html');
+    const page = sender => sender.id === api.runtime.id && Number.isInteger(sender.tab?.id)
+      && sender.frameId === 0 && typeof sender.documentId === 'string'
+      && site(sender.url) && site(sender.tab.url) && (!sender.origin || sender.origin === ORIGIN);
+    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [] });
+    async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
+    async function write(records) { await api.storage.session.set({ [KEY]: records }); }
+    async function closeApproval(record) {
+      if (Number.isInteger(record?.pending?.windowId)) {
+        try { await api.windows.remove(record.pending.windowId); } catch { /* Already closed. */ }
+      }
+    }
+    async function clear(tabId) {
+      const records = await read();
+      const record = records[tabId];
+      delete records[tabId];
+      await write(records);
+      await closeApproval(record);
+    }
+    async function handle(message, sender) {
+      if (!message || typeof message !== 'object' || message.type !== 'cloud.connection') return undefined;
+      if (PAGE_ACTIONS.has(message.action)) {
+        const allowed = ['type', 'action', 'accountId', ...(message.action === 'connect' ? ['email'] : [])];
+        if (!page(sender) || !UUID.test(message.accountId || '') || Object.keys(message).some(key => !allowed.includes(key))) return { ok: false };
+        if (message.action === 'connect' && (typeof message.email !== 'string' || message.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(message.email))) return { ok: false };
+        const records = await read();
+        const id = sender.tab.id;
+        let record = records[id];
+        if (message.action === 'disconnect') {
+          if (record?.accountId === message.accountId) await clear(id);
+          return status('disconnected');
+        }
+        // Identity labels are supplied by the signed-in page, not an API
+        // credential. Never revive a different account's connection in this tab.
+        if (record && record.accountId !== message.accountId) {
+          await closeApproval(record);
+          delete records[id];
+          record = null;
+          await write(records);
+        }
+        if (record?.pending && now() - record.pending.createdAt >= TTL) {
+          await closeApproval(record);
+          delete records[id];
+          record = null;
+          await write(records);
+        }
+        if (record?.approved) return status('connected');
+        if (record?.pending) return status('pending');
+        if (message.action === 'status') return status('disconnected');
+        const requestId = randomId();
+        const pending = { requestId, documentId: sender.documentId, createdAt: now(), email: message.email };
+        records[id] = { accountId: message.accountId, pending };
+        await write(records);
+        try {
+          const window = await api.windows.create({ url: api.runtime.getURL('cloud-connect.html') + '#' + requestId,
+            type: 'popup', width: 460, height: 440, focused: true });
+          pending.windowId = window.id;
+          await write(records);
+        } catch {
+          delete records[id]; await write(records); return { ok: false };
+        }
+        return status('pending');
+      }
+      if (!APPROVAL_ACTIONS.has(message.action) || !popup(sender)
+          || Object.keys(message).some(key => !['type', 'action', 'requestId'].includes(key)) || !UUID.test(message.requestId || '')) return { ok: false };
+      const records = await read();
+      const entry = Object.entries(records).find(([, record]) => record.pending?.requestId === message.requestId);
+      if (!entry) return { ok: false };
+      const [id, record] = entry;
+      if (now() - record.pending.createdAt >= TTL) { await clear(id); return { ok: false }; }
+      if (message.action === 'details') return { ok: true, email: record.pending.email };
+      if (message.action === 'deny') { await clear(id); return { ok: true }; }
+      try {
+        const tab = await api.tabs.get(Number(id));
+        if (!site(tab.url)) throw new Error('Tab moved');
+        // Target the exact document that requested approval. Reloading, closing
+        // or signing out before approving invalidates the outstanding request.
+        const reply = await api.tabs.sendMessage(Number(id), { type: 'cloud.connection.probe', accountId: record.accountId },
+          { documentId: record.pending.documentId });
+        if (reply?.current !== true) throw new Error('Account changed');
+      } catch { await clear(id); return { ok: false }; }
+      records[id] = { accountId: record.accountId, approved: true };
+      await write(records);
+      return { ok: true };
+    }
+    return {
+      handle: (message, sender) => serial(() => handle(message, sender)),
+      clear: id => serial(() => clear(id)),
+      navigated: (id, change) => change.url && !site(change.url) ? serial(() => clear(id)) : Promise.resolve(),
+      closedApproval: windowId => serial(async () => {
+        const records = await read();
+        let changed = false;
+        for (const [id, record] of Object.entries(records)) {
+          if (record.pending?.windowId === windowId) { delete records[id]; changed = true; }
+        }
+        if (changed) await write(records);
+      }),
+    };
+  }
+  if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN };
+  else {
+    const bridge = createCloudConnection(chrome);
+    chrome.runtime.onMessage.addListener((message, sender, reply) => {
+      if (message?.type !== 'cloud.connection') return;
+      bridge.handle(message, sender).then(reply).catch(() => reply({ ok: false }));
+      return true;
+    });
+    chrome.tabs.onRemoved.addListener(id => { void bridge.clear(id).catch(() => {}); });
+    chrome.tabs.onUpdated.addListener((id, change) => { void bridge.navigated(id, change).catch(() => {}); });
+    chrome.windows.onRemoved?.addListener(id => { void bridge.closedApproval(id).catch(() => {}); });
+  }
+})();

@@ -1,6 +1,6 @@
 # Anteroom Bridge
 
-The extension runs in the background and connects Chrome to Anteroom. Listing review, approved Sends, progress, and diagnostics live in Anteroom. The extension has no popup, on-page panel, or field highlighting.
+The extension runs in the background and connects Chrome to Anteroom. Listing review, approved Sends, progress, and diagnostics live in Anteroom. The extension has no toolbar popup, on-page panel, or field highlighting. Hosted connections use a separate approval window.
 
 ## Installation
 
@@ -8,6 +8,10 @@ The extension runs in the background and connects Chrome to Anteroom. Listing re
 2. Open `chrome://extensions/` and enable **Developer mode**.
 3. Click **Load unpacked** and select the repo's `vendoo-extension/` folder. Zip users select `~/Library/Application Support/Anteroom/vendoo-extension`.
 4. Keep Anteroom running. The extension pairs automatically with Anteroom on `127.0.0.1:4318`.
+
+## Hosted web connection
+
+Bridge 0.2.38 adds **Connect Chrome** at the hosted Anteroom site. Reload the updated extension and web page, sign in, choose Connect Chrome, and approve the extension window. No sign-in tokens are passed to the extension. This increment connects the browser; hosted marketplace actions are not enabled yet. See [the connection protocol and live test](../docs/cloud-extension.md).
 
 ## Usage
 
