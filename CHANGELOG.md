@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.588 — 2026-10-30
+
+- The listing agent can use photo-supported custom answers when a marketplace field allows text, instead of leaving required fields blank because its suggestions do not fit.
+
 ## 0.1.587 — 2026-10-30
 
 - eBay offers now clearly show when offers for all current and future listings are enabled, instead of keeping the blue Enable button. Changing the discount or minimum offers Save offer settings.

@@ -86,6 +86,21 @@ class FillableRowsTest(unittest.TestCase):
 class ValidatedValuesTest(unittest.TestCase):
     rows = {r["path"]: r for r in DEPOP["fields"] + EBAY["fields"]}
 
+    def test_native_free_text_is_advertised_and_kept_only_with_evidence(self):
+        path = "ebay_specifics.Style"
+        free = row(path, "Style", ["Casual", "Vintage"], selection_only=False, required=True, max_length=30)
+        selection = row("ebay_specifics.Fit", "Fit", ["Slim", "Regular"], selection_only=True)
+        prompt = native_field_fill.forms_prompt({"ebay": [free, selection]}, {"ebay": {"category_id": "11483"}})
+        self.assertIn("Style | free-text; custom text allowed", prompt)
+        self.assertIn("max length 30", prompt)
+        self.assertIn("Fit | selection-only", prompt)
+        evidence = "The tag says relaxed straight."
+        reply = {"fields": {path: {"value": "Relaxed straight", "evidence": "relaxed straight"}}}
+        self.assertEqual(validated_values(reply, {path: free}, evidence=evidence)[path][0], "Relaxed straight")
+        self.assertEqual(validated_values(reply, {path: free}, evidence="No style evidence"), {})
+        self.assertEqual(validated_values(reply, {path: {**free, "selection_only": True}}, evidence=evidence), {})
+        self.assertEqual(validated_values(reply, {path: {**free, "max_length": 3}}, evidence=evidence), {})
+
     def test_keeps_listed_choices_as_their_ids_and_drops_the_rest(self):
         reply = {"fields": {
             "depop_specifics.attributes.bottom-fit": ["ripped", "Faded", "Bleached", "Acid-washed"],
@@ -269,7 +284,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         first_prompt = ask.call_args_list[0].args[1][1]["content"]
         second_prompt = ask.call_args_list[1].args[1][1]["content"]
         self.assertNotIn("ebay_specifics.Size |", first_prompt)
-        self.assertIn("Size | pick one | choices: M", second_prompt)
+        self.assertIn("Size | selection-only | pick one | choices: M", second_prompt)
 
     async def test_saves_valid_picks_and_reports_them(self):
         reply = json.dumps({"fields": {"depop_specifics.attributes.bottom-fit": ["Ripped", "Torn"], "ebay_specifics.Rise": "High"}})
@@ -277,7 +292,7 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
             updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Ripped knees, high rise")
         prompt = ask.call_args.args[1][1]["content"]
-        self.assertIn("depop_specifics.attributes.bottom-fit | Type | pick up to 2 | choices: Ripped; Faded; Acid-washed", prompt)
+        self.assertIn("depop_specifics.attributes.bottom-fit | Type | selection-only | pick up to 2 | choices: Ripped; Faded; Acid-washed", prompt)
         self.assertNotIn("Package size", prompt)
         self.assertEqual(updated["depop_specifics"]["attributes"]["bottom-fit"], ["ripped"])
         self.assertEqual(updated["ebay_specifics"]["Rise"], "High")
