@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.582 — 2026-10-30
+
+- Open Listings settings on the web to manage templates, labels, shipping defaults and formulas, and review or merge duplicate items in your own inventory.
+
 ## 0.1.581 — 2026-10-30
 
 - Keep marketplace choices, package and shipping defaults, listing formulas and hidden-field choices in your web account, with working save and restore controls.

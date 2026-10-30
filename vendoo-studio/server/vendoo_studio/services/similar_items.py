@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import json_value
@@ -296,9 +297,19 @@ def merge(db: Session, keep_id: str, merge_id: str) -> dict[str, Any]:
 
     if keep_id == merge_id:
         raise MergeError(400, "Pick two different items to merge.")
-    keep, other = db.get(Conversation, keep_id), db.get(Conversation, merge_id)
+    # Use the same row locks as hosted draft submissions. Take both in ID order
+    # so simultaneous reversed merges cannot deadlock.
+    rows = db.scalars(select(Conversation).where(Conversation.id.in_([keep_id, merge_id]))
+                      .order_by(Conversation.id).with_for_update()).all()
+    owned = {row.id: row for row in rows}
+    keep, other = owned.get(keep_id), owned.get(merge_id)
     if keep is None or other is None:
         raise MergeError(404, "One of these items no longer exists.")
+    from vendoo_studio.models.background_task import BackgroundTask
+    if db.scalar(select(BackgroundTask.id).where(
+            BackgroundTask.conversation_id.in_([keep_id, merge_id]),
+            BackgroundTask.status.in_(("queued", "running"))).limit(1)):
+        raise MergeError(409, "Wait for the draft task to finish, or stop it before merging.")
     if parse_notes(other.notes).get("mergedInto") or parse_notes(keep.notes).get("mergedInto"):
         raise MergeError(409, "One of these items was already merged.")
     for conv in (keep, other):

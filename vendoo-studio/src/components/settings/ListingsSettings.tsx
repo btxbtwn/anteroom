@@ -16,6 +16,7 @@ import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 import { useVendooEnabled } from "../../vendooMode";
+import { useWorkspaceRuntime } from "../../app/runtime";
 
 function LoadingNote({ children }: { children: string }) {
   return (
@@ -449,10 +450,11 @@ function ListingFormulasSection() {
 
 export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string) => void }) {
   const vendooOn = useVendooEnabled();
+  const { hosted } = useWorkspaceRuntime();
   return (
     <>
       <ListingTemplatesSettings onOpenListing={onOpenListing} />
-      <VendooSection />
+      {!hosted ? <VendooSection /> : null}
       <MarketplacesSection />
       <InventorySettings />
       <PackageDimensionsSection />
