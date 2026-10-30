@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.546 — 2026-10-30
+## 0.1.547 — 2026-10-30
 
 - Analytics counts current inventory by item again. A sold item with more than one sale, or one with stock left and a sale already recorded, was counted more than once, so the sold total in "Current inventory" read higher than the Sold tab in Inventory.
+
+## 0.1.546 — 2026-10-29
+
+- Vinted and Sellwild now recognise when I finish signing in and reload my choices automatically, instead of keeping the sign-in prompt on screen.
 
 ## 0.1.545 — 2026-10-30
 

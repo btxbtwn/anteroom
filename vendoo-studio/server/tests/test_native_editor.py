@@ -328,6 +328,17 @@ class NativeEditorTest(unittest.TestCase):
         self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
         self.bridge.assert_not_called()
 
+    def test_sellwild_reports_account_connection_separately_from_missing_choices(self):
+        for unavailable, connected in [([], True), (["coupons"], True), (["address", "parcel", "coupons"], False)]:
+            with self.subTest(unavailable=unavailable):
+                self.sellwild.return_value = {"ship_from": None, "default_parcel": "", "coupons": [],
+                                             "unavailable": unavailable}
+                response = self.client.get(f"{self.url}/sellwild/form")
+                self.assertEqual(response.status_code, 200)
+                self.assertIs(response.json()["account_connected"], connected)
+                if connected:
+                    self.assertNotIn("Sign in", " ".join(response.json().get("notes", [])))
+
     def test_sellwild_discount_and_profile_package_follow_the_sell_page(self):
         self.sellwild.return_value = {"ship_from": "Pat Seller", "default_parcel": "USPS_SoftPack",
                                     "coupons": [{"id": 117, "name": "25OFF", "discountType": "percentage", "discountValue": 25}]}
