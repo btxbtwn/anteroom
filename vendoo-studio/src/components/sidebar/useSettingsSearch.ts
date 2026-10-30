@@ -20,7 +20,7 @@ export function useSettingsSearch(
   const { hosted } = useWorkspaceRuntime();
   const vendooOn = useVendooEnabled();
   const settingsResults = useMemo(
-    () => searchSettings(settingsQuery, settingsSearchItemsForMode(vendooOn).filter((item) => !hosted || item.section === "listings" || (item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)))),
+    () => searchSettings(settingsQuery, settingsSearchItemsForMode(vendooOn).filter((item) => !hosted || (item.section === "listings" && item.id !== "vendoo") || (item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)))),
     [settingsQuery, vendooOn, hosted],
   );
   const isSettingsSearching = settingsQuery.trim().length > 0;
