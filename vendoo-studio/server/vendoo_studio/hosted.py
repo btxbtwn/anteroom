@@ -6,10 +6,12 @@ Unlike the desktop app, this starts no Chrome, Keychain or automation services.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import Headers
@@ -33,7 +35,9 @@ class SellerSessionMiddleware:
             await send({"type": "websocket.close", "code": 1008})
             return
         if scope["type"] != "http" or (
-            scope["path"] == "/api/health" and scope["method"] == "GET"
+            (scope["path"] == "/api/health" and scope["method"] == "GET")
+            or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
+                and (scope["path"] == "/" or scope["path"].startswith("/assets/")))
         ):
             await self.app(scope, receive, send)
             return
@@ -69,7 +73,7 @@ class AccountResponse(BaseModel):
     user_id: str
 
 
-def create_app(supabase_url: str | None = None) -> FastAPI:
+def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Fail startup if the operator has not selected a project. No service
@@ -83,7 +87,30 @@ def create_app(supabase_url: str | None = None) -> FastAPI:
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
         docs_url=None, redoc_url=None, openapi_url=None,
     )
+    app.state.web_dir = web_dir
     app.add_middleware(SellerSessionMiddleware)
+
+    @app.middleware("http")
+    async def response_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "img-src 'self' data:; connect-src 'self' https://*.supabase.co; "
+            "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+        )
+        return response
+
+    from vendoo_studio.routes.hosted_drafts import router
+    app.include_router(router)
+    if web_dir is not None:
+        app.mount("/assets", StaticFiles(directory=web_dir / "assets"), name="cloud-assets")
+
+        @app.get("/", include_in_schema=False)
+        def web_index():
+            return FileResponse(web_dir / "cloud.html")
 
     @app.get("/api/health")
     def health():
@@ -98,4 +125,4 @@ def create_app(supabase_url: str | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+app = create_app(web_dir=Path(os.environ["ANTEROOM_WEB_DIR"]) if os.environ.get("ANTEROOM_WEB_DIR") else None)

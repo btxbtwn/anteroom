@@ -10,8 +10,10 @@ The desktop app continues to use `vendoo_studio.main:app` on loopback.
 - `GET /api/health` is public and contains only service health and version.
 - `GET /api/account` requires an `Authorization: Bearer` Supabase access token
   and returns only the verified `user_id`. It does not create a database account.
-- Every other HTTP request requires the same verification, including unknown
-  routes. WebSocket connections are rejected until a hosted protocol is added.
+- Every API/data request other than health requires the same verification,
+  including unknown routes. When a cloud bundle is configured, GET/HEAD for
+  the root sign-in page and `/assets/` files are public static resources. Other
+  paths remain protected. WebSocket connections are rejected until a hosted protocol is added.
 - Verification checks the signature, expiration, issue time, project issuer,
   `authenticated` audience and role, seller UUID and session UUID. Anonymous
   sessions and shared-secret/API-key tokens are rejected.
@@ -69,6 +71,16 @@ by the generated-token tests. Keep access tokens out of shell history and logs.
    work in cloud step 2.
 
 This increment is an identity foundation, not the complete accounts feature.
-The hosted app deliberately has no listing, photo, job, settings or marketplace
-routes yet. Do not deploy the desktop API as a substitute: it still assumes
+The hosted app exposes only draft shells and account verification. It has no
+photo, job, settings, generation or marketplace routes yet. Do not deploy the desktop API as a substitute: it still assumes
 one local seller and does not enforce hosted authentication or tenant isolation.
+
+## First cloud draft increment
+
+The hosted app now mounts `/api/drafts` for verified sellers, using only
+`SellerDatabaseSession`. It creates and updates draft shells with title and
+notes, returns only those fields and record timestamps, and rejects stale
+saves. Owner and reference fields cannot enter through its strict request
+contract. Desktop listing, photo, generation, settings and marketplace routes
+remain absent. See `deploy/fly/README.md` for the public sign-in UI and deploy
+configuration.
