@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-Branch: `feat/hosted-desktop-parity`, PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The public release remains 0.1.561 until
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The public release remains 0.1.561 until
 this work is verified. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
@@ -54,7 +54,9 @@ the export is loading.
 ## Completion checklist
 
 - Shared inventory/editor, draft fields, notes, history and private photo reads
-  are deployed. Finish full photo editing, copy/templates, bulk actions,
+  are deployed. Crop, rotate, adjustments and reset are connected on branch
+  `feat/hosted-photo-editing`; background removal still needs the Mac worker.
+  Finish copy/templates UI, bulk actions,
   category options, and all field/default controls.
 - Finish provider settings, encrypted credentials, generation, chat, assistant,
   measurements, comps and suggestions using the shared services. Credentials

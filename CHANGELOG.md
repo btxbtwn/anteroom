@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.571 — 2026-10-30
+
+- Crop, rotate and adjust your photos in the web editor, preview changes before saving, and reset to the original.
+
 ## 0.1.570 — 2026-10-30
 
 - Continue bringing desktop tools into the web workspace, with private account settings, photos, reports, CSV exports and independent draft copies.
