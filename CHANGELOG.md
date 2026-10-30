@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.589 — 2026-10-30
+## 0.1.590 — 2026-10-30
 
 - Review and save field, tag and label changes across multiple items on the web, with stale-review and queued-work checks before each save.
+
+## 0.1.589 — 2026-10-30
+
+- Etsy maker and manufacture-date answers now survive chat saves when their field names are normalized.
 
 ## 0.1.588 — 2026-10-30
 
