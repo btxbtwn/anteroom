@@ -1232,3 +1232,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     await reloadVendooTabs();
   }
 })();
+
+// Hosted connection permissions are isolated from the desktop socket protocol.
+importScripts('background/cloud-connection.js');

@@ -51,7 +51,8 @@ extension polls `queue/pull` every five minutes). Anteroom adopts the same shape
   Supabase. Polling gives way to Realtime subscriptions.
 - **Desktop Chrome** will connect the hosted web app directly to the installed
   extension for seller-approved marketplace form work in that browser. This
-  integration still needs authenticated extension pairing and has not shipped.
+  [browser connection and consent](cloud-extension.md) are available; marketplace
+  command contracts and approval/concurrency checks remain before actions ship.
   A Mac worker is needed only for desktop capabilities kept in the Mac app or
   for requesting that Mac’s browser work from another device.
 - **Mac app** shows the same web app in its window, and runs the **Mac worker**:

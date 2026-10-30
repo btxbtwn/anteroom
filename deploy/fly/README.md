@@ -123,3 +123,11 @@ Before accepting public users, test in two real browser accounts: upload a photo
 save fields, reopen after reload, then confirm the other account cannot load or
 remove the first account's photo. Automated tests exercise the same ownership
 boundaries with real Postgres sessions; Storage HTTP transport is replaced locally.
+
+
+## Desktop Chrome connection
+
+The hosted header offers Connect Chrome for Bridge 0.2.38 or later. This is a
+browser-local consent flow, not a server credential or a marketplace job. Users
+must load/reload the updated extension and refresh the page before connecting.
+See [the protocol and manual test](../../docs/cloud-extension.md).
