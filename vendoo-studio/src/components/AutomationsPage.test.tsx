@@ -6,7 +6,8 @@ import { AutomationsPage } from "./AutomationsPage";
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
     data: queryKey[0] === "ebay-offers"
-      ? { connected: true, listings: [], history: [], lastCheck: null, lastError: null }
+      ? { connected: true, listings: [], history: [], lastCheck: null, lastError: null,
+        allListings: { enabled: false, discountPercent: 10, minimumPrice: "" } }
       : [],
     isLoading: false,
     error: null,

@@ -32,6 +32,11 @@ class Confirm(BaseModel):
     confirm: Literal[True]
 
 
+class AllListingsApproval(Confirm):
+    discount_percent: Annotated[int, Field(strict=True, ge=5, le=99)]
+    minimum_price: str | None = Field(default=None, max_length=20)
+
+
 def _error(exc: Exception) -> HTTPException:
     if isinstance(exc, SignInRequired):
         return HTTPException(403, str(exc))
@@ -71,6 +76,14 @@ def pause_all(db: Session = Depends(get_db)):
     try:
         return ebay_offers.pause(db)
     except SignInRequired as exc:
+        raise _error(exc) from exc
+
+
+@router.post("/enable-all")
+def enable_all(body: AllListingsApproval, db: Session = Depends(get_db)):
+    try:
+        return ebay_offers.enable_all(db, body.discount_percent, body.minimum_price)
+    except (ValueError, SignInRequired) as exc:
         raise _error(exc) from exc
 
 
