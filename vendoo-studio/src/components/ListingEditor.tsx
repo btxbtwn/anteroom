@@ -598,7 +598,7 @@ export function ListingEditor({
           {/* A direct marketplace's form shows its photos where its own page has them. */}
           {reviewTab === "forms" && MEDIA_MARKETPLACES.has(editTab) && !DIRECT_FORM_MARKETS.has(editTab) && listing && (
             <MarketplaceMedia key={editTab} convId={convId} marketplace={editTab} listing={listing}
-              disabled={generating} onChange={edits.save} />
+              disabled={false} onChange={edits.save} />
           )}
           <StructuredEditor
             convId={convId}
@@ -607,7 +607,7 @@ export function ListingEditor({
             tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
             target={fieldTarget}
             onAskChat={askChat}
-            disabled={generating || (runtime.hosted && reviewTab === "forms" && editTab !== "general")}
+            disabled={runtime.hosted && reviewTab === "forms" && editTab !== "general"}
             saving={unsaved}
             onChange={edits.save}
           />
