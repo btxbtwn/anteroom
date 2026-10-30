@@ -102,10 +102,11 @@ def list_conversations(db=Depends(get_seller_db)):
     # Keep the existing sidebar's complete-list contract; it filters and
     # virtualizes locally. No historical pointers or fallback file URLs escape.
     rows = db.scalars(select(Conversation).options(defer(Conversation.notes)).order_by(Conversation.updated_at.desc(), Conversation.id.desc())).all()
-    ordered = select(Photo.conversation_id, Photo.id, func.row_number().over(
+    ordered = select(Photo.conversation_id, Photo.id, Photo.checksum, func.row_number().over(
         partition_by=Photo.conversation_id, order_by=(Photo.display_order, Photo.id)).label('position')).where(
             Photo.marketplace.is_(None)).subquery()
-    covers = dict(db.execute(select(ordered.c.conversation_id, ordered.c.id).where(ordered.c.position == 1)).all())
+    covers = {identity: (photo_id, checksum) for identity, photo_id, checksum in db.execute(
+        select(ordered.c.conversation_id, ordered.c.id, ordered.c.checksum).where(ordered.c.position == 1))}
     current = {}
     for identity, sku, price, quantity in db.execute(select(Listing.conversation_id,
             json_value(ListingRevision.listing_json, 'sku'), json_value(ListingRevision.listing_json, 'price'),
@@ -123,7 +124,8 @@ def list_conversations(db=Depends(get_seller_db)):
     for row in rows:
         summary = conversation_response(row, current.get(row.id), direct.get(row.id), include_notes=False)
         if row.id in covers:
-            summary['cover_photo_url'] = f"/api/photos/{covers[row.id]}/thumb?size=96"
+            from vendoo_studio.services.photos import cover_thumb_url
+            summary['cover_photo_url'] = cover_thumb_url(*covers[row.id])
         summaries.append(summary)
     return summaries
 
@@ -174,6 +176,8 @@ def save_listing(identity: str, body: ListingInput, db=Depends(get_seller_db)):
     payload = copy.deepcopy(editable_listing(body.listing))
     conversation(db, identity, lock=True)
     assert_idle(db, identity)
+    from vendoo_studio.services.hosted_listing_contract import validate_media
+    validate_media(db, identity, payload)
     before = hosted_drafts.current_fields_revision(db, identity)
     current = db.get(Listing, identity)
     # Inspect the protected pointer as well as the joined revision so a corrupt
@@ -357,6 +361,8 @@ def delete_photo(identity: str, photo_id: str, request: Request, db=Depends(get_
     if row.source_filename:
         check_key(row.source_filename, db.user_id, identity)
         keys.add(row.source_filename)
+    from vendoo_studio.services.hosted_listing_contract import remove_photo_selections
+    remove_photo_selections(db, identity, photo_id)
     db.delete(row)
     db.commit()
     # The durable deletion wins. A temporary Storage outage may leave a private

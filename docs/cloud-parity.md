@@ -6,6 +6,13 @@ as a completed workflow. Actions must load real account data, persist changes,
 report failures, and survive refresh. Marketplace publishing still requires an
 explicit seller request naming the marketplaces and carrying confirmation.
 
+## Agreed scope
+
+On 2026-10-30 the seller explicitly chose to skip video in the web version.
+Desktop video support stays intact. Web parity work excludes video upload,
+playback and marketplace video selection; no Supabase plan upgrade is needed
+for that feature. Keep video controls hidden in the hosted runtime.
+
 ## Work in progress
 
 Branch: `feat/hosted-desktop-parity`. The public release remains 0.1.561 until
@@ -47,7 +54,7 @@ the export is loading.
 ## Completion checklist
 
 - Shared inventory/editor, draft fields, notes, history and private photo reads
-  are deployed. Finish full media editing, videos, copy/templates, bulk actions,
+  are deployed. Finish full photo editing, copy/templates, bulk actions,
   category options, and all field/default controls.
 - Finish provider settings, encrypted credentials, generation, chat, assistant,
   measurements, comps and suggestions using the shared services. Credentials
