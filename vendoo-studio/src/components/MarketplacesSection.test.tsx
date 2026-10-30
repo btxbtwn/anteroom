@@ -21,7 +21,7 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
   preflight = { marketplaces: {} } as { marketplaces: Record<string, { ready: boolean; gaps: { field: string; message: string; blocking: boolean }[] }> } | undefined,
   preflightMissing = false, preflightPlaceholder = false, preflightError = false,
   nativeFields = [] as { key: string; path: string; label: string; value: string; required: boolean; options: string[] }[],
-  listing = {} as ListingData } = {}) {
+  listing = {} as ListingData, agentLocks = [] as string[] } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "native-editor-form" ? { data: { marketplace: selected, native: true, fields: nativeFields, notes: notes ?? [] } }
@@ -33,7 +33,7 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
   if (notes) return renderToStaticMarkup(
     <MarketplacesLayout convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
       ids={["general", "mercari"]} selected={selected} onSelect={() => {}} onEditField={onEditField} onAskChat={onAskChat}>
-      <StructuredEditor convId="item" listing={listing} tab={selected} target={null} onChange={() => {}} onAskChat={onAskChat} />
+      <StructuredEditor convId="item" listing={listing} tab={selected} target={null} onChange={() => {}} onAskChat={onAskChat} agentLocks={agentLocks} />
     </MarketplacesLayout>,
   );
   return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
@@ -433,4 +433,14 @@ describe("an answer is said once", () => {
     expect(saidBesideList(gaps, ["photos"]).map((gap) => gap.message)).toEqual(["Depop needs a parcel size."]);
     expect(saidBesideList(gaps, ["photos", "depop_specifics.parcelSize"])).toEqual([]);
   });
+});
+
+it("disables only the agent's target row and labels it while other fields stay editable", () => {
+  const html = render({}, {}, { selected: "ebay", notes: [], agentLocks: ["ebay_specifics.Size"],
+    nativeFields: ["Size", "Color"].map(label => ({ key: `ebay_specifics.${label}`, path: `ebay_specifics.${label}`,
+      label, value: "", required: true, options: ["36", "Blue"] })), onAskChat: vi.fn() });
+  expect(html).toContain('fieldset disabled="" data-listing-row="ebay_specifics.Size"');
+  expect(html).toContain('fieldset data-listing-row="ebay_specifics.Color"');
+  expect(html.match(/Agent editing/g)).toHaveLength(1);
+  expect(html).toContain('Ask chat');
 });

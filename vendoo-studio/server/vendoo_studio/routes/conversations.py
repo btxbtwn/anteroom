@@ -371,6 +371,7 @@ class ActivityResponse(BaseModel):
     # Marketplace fields are filled after that stream ends; this is how the
     # client still sees those agents.
     agents: list[dict] = []
+    locked_fields: list[str] = []
 
 
 def _job_activity_label(job) -> str:
@@ -428,6 +429,7 @@ def get_activity(conv_id: str, db: Session = Depends(get_db)):
         message_count=message_count,
         last_message_id=last_id,
         agents=activity.agents(conv_id),
+        locked_fields=activity.locked_fields(conv_id),
     )
 
 
