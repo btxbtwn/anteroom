@@ -324,6 +324,17 @@ class NativeContractTest(unittest.TestCase):
         self.assertNotIn("material", updated["mercari_specifics"])
         self.assertIn("changed", contract.gaps(updated, "mercari")[0]["message"])
 
+    def test_generated_ebay_size_aliases_are_saved_at_the_native_paths(self):
+        listing = {"ebay_specifics": {"sizeType": "Regular", "size": "36", "waistSize": "36 in"}}
+        form = {"fields": [
+            {"path": "ebay_specifics.Size Type", "options": ["Regular"], "selection_only": True},
+            {"path": "ebay_specifics.Size", "options": ["36"], "selection_only": True},
+            {"path": "ebay_specifics.Waist Size", "options": ["36 in"], "selection_only": True},
+        ]}
+        listing[contract.KEY] = contract.capture(listing, {"ebay": form}, ["ebay"])
+        contract.constrain_generated(listing, copy.deepcopy(listing))
+        self.assertEqual(listing["ebay_specifics"], {"Size Type": "Regular", "Size": "36", "Waist Size": "36 in"})
+
     def test_quote_must_come_from_original_evidence_not_the_generated_listing(self):
         rows = {row["path"]: row for row in seed()[contract.KEY]["mercari"]["fields"]}
         path = "mercari_specifics.material"

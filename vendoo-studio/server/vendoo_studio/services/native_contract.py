@@ -80,6 +80,16 @@ def _input_paths(market: str, fields: list[dict]) -> set[str]:
 def _raw_inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     """The choices as the listing itself stores them, before posting preparation."""
     result = {path: copy.deepcopy(get_path(listing, path)) for path in sorted(_input_paths(market, fields))}
+    if market == "ebay":
+        # Normalization writes sizeType while the native schema names Size
+        # Type. Both control the same dropdown; spelling changes are not edits.
+        aspects = listing.get("ebay_specifics") or {}
+        for path, value in result.items():
+            if not path.startswith("ebay_specifics.") or value not in (None, "", [], {}):
+                continue
+            name = path.split(".", 1)[1]
+            result[path] = copy.deepcopy(next((answer for key, answer in aspects.items()
+                                               if _fold(key) == _fold(name) and answer not in (None, "", [], {})), value))
     result["category_id"] = str(get_path(listing, f"direct_category_ids.{market}")
                                 or get_path(listing, f"marketplace_category_ids.{market}") or "")
     # Posting maps the shared path to the leaf its category picker names. Compare
@@ -436,6 +446,16 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
             continue
         rows = {path_of(row): row for row in contract.get("fields") or []}
         for path, value in list(_leaves(block, prefix, set(rows))):
+            if market == "ebay" and path not in rows:
+                native_path = next((name for name in rows if _fold(name) == _fold(path)), None)
+                if native_path:
+                    # Listing normalization uses sizeType/waistSize; retain
+                    # their answers under the native form's own aspect names.
+                    _remove(listing, path)
+                    if get_path(listing, native_path) in (None, "", [], {}):
+                        set_path(listing, native_path, value)
+                    path = native_path
+                    value = get_path(listing, path)
             if is_locked(seed, path):
                 set_path(listing, path, copy.deepcopy(get_path(seed, path)))
             elif path not in rows or value_error({**applicable_row(rows[path], listing, list(rows.values())), "required": False}, value):
