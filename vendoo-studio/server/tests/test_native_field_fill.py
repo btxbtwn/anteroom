@@ -67,6 +67,21 @@ class FillableRowsTest(unittest.TestCase):
                            row("ebay_specifics.Fit", "Fit", ["Slim"])]}
         self.assertEqual([r["path"] for r in fillable_rows(form, "ebay", {})], ["ebay_specifics.Fit"])
 
+    def test_preserved_proof_must_match_current_evidence_value_and_choices(self):
+        from vendoo_studio.services import native_contract
+
+        path = "ebay_specifics.Fit"
+        form = {"fields": [row(path, "Fit", ["Slim"])]}
+        listing = {native_contract.KEY: {}, "ebay_specifics": {"Fit": "Slim"},
+                   native_contract.EVIDENCE_KEY: {path: {"value": "Slim", "quote": "Slim fit"}}}
+        self.assertEqual(fillable_rows(form, "ebay", listing, evidence="Slim fit"), [])
+        self.assertTrue(fillable_rows(form, "ebay", listing, evidence="Relaxed fit"))
+        listing[native_contract.EVIDENCE_KEY][path]["value"] = "Relaxed"
+        self.assertTrue(fillable_rows(form, "ebay", listing, evidence="Slim fit"))
+        listing[native_contract.EVIDENCE_KEY][path]["value"] = "Slim"
+        form["fields"][0]["options"] = ["Relaxed"]
+        self.assertTrue(fillable_rows(form, "ebay", listing, evidence="Slim fit"))
+
 
 class ValidatedValuesTest(unittest.TestCase):
     rows = {r["path"]: r for r in DEPOP["fields"] + EBAY["fields"]}
@@ -158,6 +173,48 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(updated["mercari_specifics"]["material"], "")
         self.assertTrue(any(item["field"] == "mercari_specifics.material" for item in native_contract.gaps(updated, "mercari")))
 
+    async def test_refill_preserves_verified_answers_when_model_only_answers_missing_field(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"category_id": "12", "fields": [
+            row("ebay_specifics.Material", "Material", ["Cotton"], required=True),
+            row("ebay_specifics.Rise", "Rise", ["High"], required=True),
+        ]}
+        listing = {"ebay_specifics": {"Material": "Cotton"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        listing[native_contract.EVIDENCE_KEY] = {
+            "ebay_specifics.Material": {"value": "Cotton", "quote": "100% cotton"}}
+        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        reply = json.dumps({"fields": {"ebay_specifics.Rise": {"value": "High", "evidence": "high rise"}}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
+            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="100% cotton, high rise")
+            self.assertEqual(updated["ebay_specifics"], {"Material": "Cotton", "Rise": "High"})
+            self.assertEqual(native_contract.gaps(updated, "ebay"), [])
+            self.assertNotIn("ebay_specifics.Material |", ask.call_args.args[1][1]["content"])
+            ask.reset_mock()
+            revision_id = self._current().id
+            await fill_native_fields(self.db, self.conv.id, object(), evidence="100% cotton, high rise")
+            ask.assert_not_called()
+            self.assertEqual(self._current().id, revision_id)
+
+    async def test_malformed_refill_reply_does_not_clear_existing_answers(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"fields": [row("ebay_specifics.Rise", "Rise", ["High"], required=True)]}
+        listing = {"ebay_specifics": {"Rise": "High"}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        self.repo.save_revision(self.conv.id, listing, "native_schema")
+        for reply in ("", "Provider unavailable", '{"error": "Unavailable"}', '{"fields": []}'):
+            with self.subTest(reply=reply), \
+                    patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                    patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+                revision_id = self._current().id
+                await native_field_fill._fill_native_fields(
+                    self.db, self.conv.id, object(), evidence="high rise", markets={"ebay"}, categories=False)
+                self.assertEqual(self._current().id, revision_id)
+                self.assertEqual(self._current().listing_json["ebay_specifics"]["Rise"], "High")
+
     async def test_parent_selection_reloads_choices_before_filling_the_dependent_size(self):
         from vendoo_studio.services import native_contract
 
@@ -168,20 +225,21 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                 "M": [{"parentName": "Size Type", "parentValues": ["Petites"]}],
             }),
         ]}
-        listing = {"title": "Pants", "ebay_specifics": {"Size Type": "Regular"}}
+        listing = {"title": "Pants", "ebay_specifics": {"Size Type": "Regular", "Size": "S"}}
         listing[native_contract.KEY] = native_contract.capture(listing, {"ebay": form}, ["ebay"])
+        listing[native_contract.EVIDENCE_KEY] = {"ebay_specifics.Size": {"value": "S", "quote": "size S"}}
         self.repo.save_revision(self.conv.id, listing, "native_schema")
         replies = [json.dumps({"fields": {"ebay_specifics.Size Type": {"value": "Petites", "evidence": "Petites"}}}),
                    json.dumps({"fields": {"ebay_specifics.Size Type": {"value": "Petites", "evidence": "Petites"},
                                           "ebay_specifics.Size": {"value": "M", "evidence": "size M"}}})]
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
                 patch("vendoo_studio.services.listing_generate.collect_provider_text", AsyncMock(side_effect=replies)) as ask:
-            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Tag: Petites, size M.")
+            updated = await fill_native_fields(self.db, self.conv.id, object(), evidence="Earlier size S. Tag: Petites, size M.")
         self.assertEqual(updated["ebay_specifics"]["Size"], "M")
         self.assertEqual(ask.await_count, 2)
         first_prompt = ask.call_args_list[0].args[1][1]["content"]
         second_prompt = ask.call_args_list[1].args[1][1]["content"]
-        self.assertIn("Size | pick one | choices: S", first_prompt)
+        self.assertNotIn("ebay_specifics.Size |", first_prompt)
         self.assertIn("Size | pick one | choices: M", second_prompt)
 
     async def test_saves_valid_picks_and_reports_them(self):
