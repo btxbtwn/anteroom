@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.587 — 2026-10-30
+
+- eBay offers now clearly show when offers for all current and future listings are enabled, instead of keeping the blue Enable button. Changing the discount or minimum offers Save offer settings.
+
 ## 0.1.586 — 2026-10-30
 
 - See your inventory Suggestions on the web, including items needing review and stale listings to mark down. Items with generation or chat still queued stay out of the feed.

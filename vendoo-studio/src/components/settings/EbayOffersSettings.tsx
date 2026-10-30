@@ -71,6 +71,10 @@ export function EbayOffersSettings() {
   const data = status.data;
   const globalDiscount = allDiscount ?? String(data?.allListings.discountPercent ?? 10);
   const globalMinimum = allMinimum ?? data?.allListings.minimumPrice ?? "";
+  const allEnabled = data?.allListings.enabled === true;
+  const allUnchanged = allEnabled && Number(globalDiscount) === data.allListings.discountPercent
+    && (globalMinimum === "" ? data.allListings.minimumPrice === ""
+      : data.allListings.minimumPrice !== "" && Number(globalMinimum) === Number(data.allListings.minimumPrice));
   const activeScope = scope ?? (data?.allListings.enabled ? "all" : "selected");
   const globalValid = Number.isInteger(Number(globalDiscount)) && Number(globalDiscount) >= 5 && Number(globalDiscount) <= 99
     && (!globalMinimum || (/^\d+(\.\d{1,2})?$/.test(globalMinimum) && Number(globalMinimum) > 0));
@@ -134,10 +138,13 @@ export function EbayOffersSettings() {
                   value={globalMinimum} disabled={busy} onChange={(event) => { setAllMinimum(event.target.value); setNotice(null); }} />
               </label>
             </div>
-            <Button size="sm" disabled={busy || !globalValid} onClick={async () => {
+            <Button size="sm" variant={allEnabled ? "outline" : "default"} disabled={busy || !globalValid || allUnchanged}
+              aria-busy={enableAll.isPending} onClick={async () => {
               const approved = await confirmDialog(`Enable ${globalDiscount}% off offers on all current and future eBay listings in Anteroom? ${globalMinimum ? `Offers below $${globalMinimum} are skipped.` : "No minimum price will apply."} This replaces individual automatic offer rules. Anteroom checks every 15 minutes while running and sends to all buyers eBay marks eligible.`, { confirmLabel: "Enable automatic offers" });
               if (approved) enableAll.mutate({ discountPercent: Number(globalDiscount), minimumPrice: globalMinimum });
-            }}>Enable offers for all current and future listings</Button>
+            }}>{enableAll.isPending ? <><Spinner />Saving offer settings…</>
+              : allUnchanged ? "Offers enabled for all current and future listings"
+                : allEnabled ? "Save offer settings" : "Enable offers for all current and future listings"}</Button>
           </div> : <>
           {data.allListings.enabled ? <SettingsNote>Pause all offers before enabling individual rules.</SettingsNote> : null}
           <div className="flex flex-wrap items-end gap-3">

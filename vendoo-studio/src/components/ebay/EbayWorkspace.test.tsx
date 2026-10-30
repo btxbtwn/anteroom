@@ -67,7 +67,9 @@ describe("eBay offers", () => {
     expect(html).toContain("no minimum price");
     expect(html).toContain('aria-label="Discount for all eBay listings"');
     expect(html).toContain('value="15"');
-    expect(html).toContain("Enable offers for all current and future listings");
+    expect(html).toContain("Offers enabled for all current and future listings");
+    expect(html).not.toContain("Enable offers for all current and future listings");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Offers enabled for all current and future listings<\/button>/);
     expect(html).not.toContain("Preview selected listings");
     expect(html).not.toContain("No unsold listings with eBay links");
   });
