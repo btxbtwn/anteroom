@@ -5,7 +5,7 @@ RUN npm ci --no-audit --no-fund
 COPY vendoo-studio/ ./
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_PUBLISHABLE_KEY
-RUN test -n "$VITE_SUPABASE_URL" && test -n "$VITE_SUPABASE_PUBLISHABLE_KEY" \
+RUN node -e 'if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_PUBLISHABLE_KEY) throw new Error("Cloud public configuration is required")' \
     && ANTEROOM_HOSTED_BUILD=1 npm run build
 
 FROM python:3.12-slim
