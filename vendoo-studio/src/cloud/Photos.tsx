@@ -17,7 +17,7 @@ function PhotoImage({ photo, api }: { photo: CloudPhoto; api: ReturnType<typeof 
   return url ? <img src={url} alt="Listing photo" width={photo.width || undefined} height={photo.height || undefined}/> : <span>{error ? "Photo unavailable" : "Loading photo…"}</span>;
 }
 
-export function Photos({ client, draftId, disabled, onBusy }: { client: SupabaseClient; draftId: string; disabled: boolean; onBusy: (busy: boolean) => void }) {
+export function Photos({ client, draftId, disabled, onBusy, preview = false }: { client: SupabaseClient; draftId: string; disabled: boolean; preview?: boolean; onBusy: (busy: boolean) => void }) {
   const [api] = useState(() => cloudPhotos(client, draftId));
   const [photos, setPhotos] = useState<CloudPhoto[]>([]);
   const [pending, setPending] = useState(false);
@@ -45,6 +45,9 @@ export function Photos({ client, draftId, disabled, onBusy }: { client: Supabase
     catch (error) { setError((error as Error).message); }
     finally { setPending(false); onBusy(false); }
   }
+  if (preview) return <div className="photo-grid">{photos.map(photo => <figure key={photo.id}><PhotoImage photo={photo} api={api}/></figure>)}
+    {loaded && photos.length === 0 && <p>No photos added.</p>}{error && <p role="alert">{error}</p>}
+  </div>;
   return <div className="photo-section"><div className="list-heading"><h2>Photos</h2><span>{photos.length} / 30</span></div>
     <div className="photo-grid">{photos.map(photo => <figure key={photo.id}><PhotoImage photo={photo} api={api}/><button type="button" disabled={disabled || pending} onClick={() => void remove(photo)}>Remove photo</button></figure>)}</div>
     <label htmlFor="photos">Add photos</label><input id="photos" type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={disabled || pending || !loaded || photos.length >= 30}

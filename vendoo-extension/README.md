@@ -11,7 +11,7 @@ The extension runs in the background and connects Chrome to Anteroom. Listing re
 
 ## Hosted web connection
 
-Bridge 0.2.38 adds **Connect Chrome** at the hosted Anteroom site. Reload the updated extension and web page, sign in, choose Connect Chrome, and approve the extension window. No sign-in tokens are passed to the extension. This increment connects the browser; hosted marketplace actions are not enabled yet. See [the connection protocol and live test](../docs/cloud-extension.md).
+Bridge 0.2.38 adds **Connect Chrome** at the hosted Anteroom site. Reload the updated extension and web page, sign in, choose Connect Chrome, and approve the extension window. No sign-in tokens are passed to the extension. Bridge 0.2.39 also reads Poshmark’s native form for the hosted draft preview. Hosted listing mutations are not enabled yet. See [the connection protocol and live test](../docs/cloud-extension.md).
 
 ## Usage
 

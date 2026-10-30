@@ -1234,4 +1234,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 })();
 
 // Hosted connection permissions are isolated from the desktop socket protocol.
+importScripts('cloud-marketplace-protocol.js');
+importScripts('background/cloud-marketplace-forms.js');
 importScripts('background/cloud-connection.js');

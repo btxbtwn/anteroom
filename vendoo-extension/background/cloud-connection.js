@@ -7,7 +7,7 @@
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
 
-  function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID() } = {}) {
+  function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null } = {}) {
     // Serializing state changes prevents two tabs from overwriting each other's
     // session records across asynchronous chrome.storage operations.
     let tail = Promise.resolve();
@@ -22,7 +22,7 @@
     const page = sender => sender.id === api.runtime.id && Number.isInteger(sender.tab?.id)
       && sender.frameId === 0 && typeof sender.documentId === 'string'
       && site(sender.url) && site(sender.tab.url) && (!sender.origin || sender.origin === ORIGIN);
-    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [] });
+    const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: readForm ? ['poshmark.form.read'] : [] });
     async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
     async function write(records) { await api.storage.session.set({ [KEY]: records }); }
     async function closeApproval(record) {
@@ -99,12 +99,40 @@
           { documentId: record.pending.documentId });
         if (reply?.current !== true) throw new Error('Account changed');
       } catch { await clear(id); return { ok: false }; }
-      records[id] = { accountId: record.accountId, approved: true };
+      records[id] = { accountId: record.accountId, approved: true, connectionId: randomId() };
       await write(records);
       return { ok: true };
     }
+    async function readMarketplace(message, sender) {
+      if (!readForm || !page(sender) || !UUID.test(message.accountId || '')
+          || Object.keys(message).some(key => !['type', 'action', 'accountId', 'listing'].includes(key))) return { ok: false, error_code: 'not_connected' };
+      const listing = CloudMarketplaceProtocol.listing(message.listing);
+      if (!listing) return { ok: false, error_code: 'invalid_input' };
+      const connection = await serial(async () => {
+        const record = (await read())[sender.tab.id];
+        return record?.approved && record.accountId === message.accountId ? record.connectionId : null;
+      });
+      if (!connection) return { ok: false, error_code: 'not_connected' };
+      async function current() {
+        const record = await serial(async () => (await read())[sender.tab.id]);
+        if (!record?.approved || record.accountId !== message.accountId || record.connectionId !== connection) return false;
+        try {
+          const tab = await api.tabs.get(sender.tab.id);
+          if (!site(tab.url)) return false;
+          const reply = await api.tabs.sendMessage(sender.tab.id, { type: 'cloud.connection.probe', accountId: message.accountId }, { documentId: sender.documentId });
+          return reply?.current === true;
+        } catch { return false; }
+      }
+      if (!await current()) return { ok: false, error_code: 'account_changed' };
+      // Catalog I/O stays outside the state queue so sign-out can clear the
+      // permission immediately. Recheck both connection and document afterwards.
+      const result = await readForm(listing);
+      if (!await current()) return { ok: false, error_code: 'account_changed' };
+      return result;
+    }
     return {
-      handle: (message, sender) => serial(() => handle(message, sender)),
+      handle: (message, sender) => message?.type === 'cloud.connection' && message.action === 'poshmark_form'
+        ? readMarketplace(message, sender) : serial(() => handle(message, sender)),
       clear: id => serial(() => clear(id)),
       navigated: (id, change) => change.url && !site(change.url) ? serial(() => clear(id)) : Promise.resolve(),
       closedApproval: windowId => serial(async () => {
@@ -119,7 +147,7 @@
   }
   if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN };
   else {
-    const bridge = createCloudConnection(chrome);
+    const bridge = createCloudConnection(chrome, { readForm: readCloudPoshmarkForm });
     chrome.runtime.onMessage.addListener((message, sender, reply) => {
       if (message?.type !== 'cloud.connection') return;
       bridge.handle(message, sender).then(reply).catch(() => reply({ ok: false }));
