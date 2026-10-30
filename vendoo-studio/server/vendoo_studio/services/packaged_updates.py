@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from vendoo_studio.config import APP_NAME, BUNDLE_ID, is_frozen, resource_root, user_data_root
+from vendoo_studio.config import APP_NAME, is_frozen, resource_root, user_data_root
 from vendoo_studio.version import app_version
 
 GITHUB_API = os.environ.get("VENDOO_STUDIO_GITHUB_API", "https://api.github.com")
@@ -261,14 +261,21 @@ def _verify_app_signature(app_path: Path) -> None:
         capture_output=True,
         text=True,
     )
+    # codesign writes the requirement to stdout and only the executable path to
+    # stderr, so both streams are read.
     requirement = next((line.split("designated =>", 1)[1].strip()
-                        for line in (raw.lstrip("# ") for raw in (installed.stderr + "\n" + installed.stdout).splitlines())
+                        for line in (raw.lstrip("# ") for raw in
+                                     (installed.stdout + "\n" + installed.stderr).splitlines())
                         if line.startswith("designated =>")), "")
     if installed.returncode != 0 or not requirement:
         raise PackagedUpdateError("The installed app's signing identity could not be verified. Reinstall a trusted signed copy.")
+    # The requirement is passed as its own argument with -R=. codesign does not
+    # take a separate value here: "-R <requirement> <app>" is read as a
+    # requirement naming a file, so it fails with "No such file or directory /
+    # invalid requirement specification" and every update is refused.
     verify = subprocess.run(
-        ["/usr/bin/codesign", "--verify", "--deep", "--strict", "-R",
-         f'({requirement}) and identifier "{BUNDLE_ID}"', str(app_path)],
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict",
+         f"-R={requirement}", str(app_path)],
         capture_output=True,
         text=True,
     )
