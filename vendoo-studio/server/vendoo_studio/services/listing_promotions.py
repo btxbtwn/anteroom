@@ -6,8 +6,8 @@ at a time, holding the single automation slot: ``sending`` is committed before
 Chrome is asked, so a reply that never arrives leaves ``unknown`` and nothing is
 sent again. Checking an unknown row only reads what the extension journaled.
 
-Offers never go below the seller's floor for that listing, and a floor is
-required before an offer can be reviewed. A share or offer whose outcome is
+Offers honor saved individual minimums and an automation's optional shared
+minimum. Manual offers require an individual floor. A share or offer whose outcome is
 unknown blocks that action on that listing until the seller checks it.
 Seller-enabled automations (``promotion_automations``) review and send through
 the same functions. Nothing here lists, publishes or delists.
@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
-from sqlalchemy import update
+from sqlalchemy import or_, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation, new_id
@@ -141,7 +141,11 @@ def save_floors(db: Session, marketplace: str, prices: dict[str, str]) -> dict[s
     for conv_id, given in list(prices.items())[:MAX_ITEMS]:
         conv = db.get(Conversation, conv_id)
         listing_id = live_listing(db, conv, marketplace)[0] if conv else None
-        if not listing_id or given in (None, ""):
+        if not listing_id or given is None:
+            continue
+        if given == "":
+            db.query(MarketplaceOfferFloor).filter_by(marketplace=marketplace, listing_id=listing_id).delete()
+            db.commit()
             continue
         try:
             _save_floor(db, marketplace, listing_id, conv_id, money_cents(given))
@@ -173,6 +177,19 @@ def new_row(conv: Conversation, marketplace: str, action: str, batch_id: str, di
                             state="preview", expires_at=_now() + PREVIEW_TTL)
 
 
+def offer_floor(db: Session, row: ListingPromotion) -> int:
+    """Automation minimums are optional; a saved individual minimum can only raise them."""
+    saved = db.query(MarketplaceOfferFloor).filter_by(marketplace=row.marketplace, listing_id=row.listing_id).first()
+    if row.automation_id:
+        automation = db.query(PromotionAutomation).filter_by(id=row.automation_id).populate_existing().first()
+        if not automation or automation.action != "offer" or automation.marketplace != row.marketplace:
+            raise PromotionError(409, "This offer rule changed. Review it again.")
+        return max(automation.minimum_price_cents or 1, saved.floor_cents if saved else 1)
+    if not saved:
+        raise PromotionError(409, "Set the lowest price you accept for this listing before sending offers.")
+    return saved.floor_cents
+
+
 async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_price: str | None = None) -> None:
     """Read one listing now and fill in what would be sent. Raises PromotionError when it would not be."""
     listing_id, reason = live_listing(db, conv, row.marketplace)
@@ -186,10 +203,7 @@ async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_p
                 _save_floor(db, row.marketplace, listing_id, conv.id, money_cents(floor_price))
             except ValueError as exc:
                 raise PromotionError(400, "Enter the floor as a price, such as 25 or 25.00.") from exc
-        saved = db.query(MarketplaceOfferFloor).filter_by(marketplace=row.marketplace, listing_id=listing_id).first()
-        if not saved:
-            raise PromotionError(409, "Set the lowest price you accept for this listing before sending offers.")
-        row.floor_cents = saved.floor_cents
+        row.floor_cents = offer_floor(db, row)
     if blocked := blocking(db, row.marketplace, listing_id, row.action):
         raise PromotionError(409, blocked)
     try:
@@ -299,9 +313,10 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
     if row.action == "offer":
         if row.offer_price_cents is None or row.floor_cents is None or row.offer_price_cents < row.floor_cents:
             raise PromotionError(409, "This offer is below your floor.")
-        saved = db.query(MarketplaceOfferFloor).filter_by(marketplace=row.marketplace, listing_id=row.listing_id).first()
-        if not saved or row.offer_price_cents < saved.floor_cents:
+        minimum = offer_floor(db, row)
+        if row.offer_price_cents < minimum:
             raise PromotionError(409, "Your floor for this listing changed. Review the offer again.")
+        row.floor_cents = max(row.floor_cents, minimum)
         _choose_shipping(row, shipping_discount_id)
     require_chrome()
     repo = JobRepo(db)
@@ -317,13 +332,20 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
     try:
         if row.automation_id:
             # Committed with ``sending`` below, so a pause either lands first and stops this send or waits for it.
-            still_on = db.execute(update(PromotionAutomation).where(
+            approval = update(PromotionAutomation).where(
                 PromotionAutomation.id == row.automation_id, PromotionAutomation.enabled.is_(True),
-            ).values(enabled=True))
+            )
+            if row.action == "offer":
+                approval = approval.where(
+                    PromotionAutomation.discount_percent == row.discount_percent,
+                    or_(PromotionAutomation.minimum_price_cents.is_(None),
+                        PromotionAutomation.minimum_price_cents <= row.offer_price_cents),
+                )
+            still_on = db.execute(approval.values(enabled=True))
             if still_on.rowcount != 1:
                 db.rollback()
-                repo.update_status(job.id, "failed", STEP, error="The automation was turned off before this was sent.")
-                raise PromotionError(409, "This automation was turned off. Nothing was sent.", "paused")
+                repo.update_status(job.id, "failed", STEP, error="The automation changed or was turned off before this was sent.")
+                raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
         # Durable before Chrome is asked: a crash from here on is unknown, never resent.
         row.state, row.job_id, row.sent_at = "sending", job.id, _now()
         db.commit()

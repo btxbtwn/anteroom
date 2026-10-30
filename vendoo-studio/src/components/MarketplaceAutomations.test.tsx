@@ -8,7 +8,7 @@ vi.mock("@tanstack/react-query", () => ({ useMutation, useQuery, useQueryClient:
 
 const base = { marketplace: "poshmark", scope: "all", conversation_ids: [], excluded_ids: [], min_days_listed: 0, share_order: "newest",
   speed: "normal", daily_cap: 300, times: ["09:00"], timezone: "UTC", discount_percent: 10, min_likes: 1, shipping_label: null,
-  next_run_at: null, last_run: null };
+  minimum_price: null, next_run_at: null, last_run: null };
 
 beforeEach(() => {
   useMutation.mockReset();
@@ -35,6 +35,8 @@ describe("marketplace automations", () => {
     expect(turnOn.map((button) => button.includes('disabled=""'))).toEqual([false, true]);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Pause all<\/button>/);
     expect(enable).not.toHaveBeenCalled();
+    expect(html).toContain("no shared minimum price");
+    expect(html).not.toContain("need a floor");
     for (const [options] of useMutation.mock.calls) expect(options.retry).toBe(false);
   });
 });

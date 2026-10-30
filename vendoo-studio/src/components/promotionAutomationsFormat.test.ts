@@ -5,7 +5,7 @@ import { bodyFromPromotionForm, describePromotionAutomation, emptyPromotionForm,
 const automation = (overrides: Partial<PromotionAutomation> = {}): PromotionAutomation => ({
   id: "a1", marketplace: "poshmark", action: "share", name: "Closet", scope: "all", conversation_ids: [], excluded_ids: ["x"],
   min_days_listed: 0, share_order: "newest", speed: "slow", daily_cap: 300, times: ["09:00", "20:00"], timezone: "America/Chicago",
-  discount_percent: null, min_likes: null, shipping_label: null, enabled: false, available: true, paused_reason: null, next_run_at: null,
+  discount_percent: null, minimum_price: null, min_likes: null, shipping_label: null, enabled: false, available: true, paused_reason: null, next_run_at: null,
   last_run: null, ...overrides,
 });
 
@@ -39,6 +39,17 @@ describe("promotion automation form", () => {
   it("describes what each automation does in the seller's words", () => {
     expect(describePromotionAutomation(automation())).toBe("Shares all live listings, 1 excluded at 09:00, 20:00 (America/Chicago) · newest listed first · slow · up to 300 a day");
     expect(describePromotionAutomation(automation({ action: "offer", discount_percent: 15, min_likes: 2, excluded_ids: [] })))
-      .toContain("15% off to new likers on all live listings with 2+ likes · never below each listing's floor · no shipping discount");
+      .toContain("15% off to new likers on all live listings with 2+ likes · no shared minimum price; saved individual minimums also apply · no shipping discount");
+  });
+
+  it("saves an optional shared minimum and restores it when editing", () => {
+    const offer = emptyPromotionForm("offer");
+    expect(bodyFromPromotionForm(offer, 6000)).toMatchObject({ body: { minimum_price: null } });
+    expect(bodyFromPromotionForm({ ...offer, minimumPrice: "25.50" }, 6000)).toMatchObject({ body: { minimum_price: "25.50" } });
+    expect(formFromAutomation(automation({ minimum_price: "25.50" })).minimumPrice).toBe("25.50");
+    for (const minimumPrice of ["0", "-1", "1.001", "NaN", "10000000"]) {
+      expect(bodyFromPromotionForm({ ...offer, minimumPrice }, 6000)).toHaveProperty("error");
+    }
+    expect(describePromotionAutomation(automation({ action: "offer", minimum_price: "25.50" }))).toContain("minimum $25.50");
   });
 });

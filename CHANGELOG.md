@@ -6,9 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
-## 0.1.547 — 2026-10-30
+## 0.1.548 — 2026-10-30
 
 - Analytics counts current inventory by item again. A sold item with more than one sale, or one with stock left and a sale already recorded, was counted more than once, so the sold total in "Current inventory" read higher than the Sold tab in Inventory.
+
+## 0.1.547 — 2026-10-30
+
+- Set one optional minimum price for Poshmark, Mercari, and Depop offers across current and future listings. Existing offer rules pause for review before sending without individual minimums.
 
 ## 0.1.546 — 2026-10-29
 
