@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.579 — 2026-10-30
+
+- Edit Poshmark and Depop drafts in the web app with the same form fields, category choices and saved values as desktop, without opening Chrome just to load the form.
+
 ## 0.1.578 — 2026-10-30
 
 - Attach images to listing chat in the web app. Images stay private, remain with the conversation after reload, and are removed when you delete the draft.

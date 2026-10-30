@@ -3,6 +3,7 @@
 Every query uses the verified seller session. No desktop services are imported
 or started, and no request accepts an owner, file path or operational identity.
 """
+import asyncio
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -81,7 +82,7 @@ def runtime(request: Request):
     worker = getattr(request.app.state, 'background_worker', None)
     generation = bool(request.app.state.background_worker_enabled and worker is not None and not worker.done())
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits'] + (['generation', 'chat_attachments'] if generation else []),
-            'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark']}
+            'views': ['listings', 'analytics', 'settings'], 'marketplace_forms': ['poshmark', 'depop']}
 
 
 @router.get('/status')
@@ -502,3 +503,23 @@ def delete_conversation(identity: str, request: Request, db=Depends(get_seller_d
         except HTTPException:
             continue
     return {'ok': True, 'deleted_jobs': 0, 'deleted_photos': len(photos)}
+
+
+@router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
+async def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop'],
+                              revision_id: str | None = None, db=Depends(get_seller_db)):
+    from starlette.concurrency import run_in_threadpool
+    from vendoo_studio.services.native_editor import editor_form
+    from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
+
+    def load():
+        # These two canonical builders read verified catalogs and the owned
+        # snapshot. No browser/account operations or marketplace writes run.
+        try:
+            current = db.get(Listing, identity)
+            if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
+                raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
+            return asyncio.run(editor_form(identity, marketplace, revision_id, db))
+        except NativeMarketplaceError as error:
+            raise HTTPException(error.status_code, str(error)) from None
+    return await run_in_threadpool(load)
