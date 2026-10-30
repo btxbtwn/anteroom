@@ -1,0 +1,17 @@
+# Allow only application source and deployment files into hosted builds.
+*
+!vendoo-studio/
+vendoo-studio/*
+!vendoo-studio/pyproject.toml
+!vendoo-studio/VERSION
+!vendoo-studio/server/
+vendoo-studio/server/*
+!vendoo-studio/server/vendoo_studio/
+!vendoo-studio/server/vendoo_studio/**
+!deploy/
+!deploy/fly/
+!deploy/fly/**
+**/__pycache__/
+**/*.pyc
+**/.env*
+**/*.db*
