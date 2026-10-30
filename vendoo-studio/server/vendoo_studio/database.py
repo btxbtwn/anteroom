@@ -36,13 +36,13 @@ def make_engine(url: str):
             # connections are cheap; the bound that matters is SQLite's own
             # write lock.
             max_overflow=-1,
-            echo=False,
+            echo=False, hide_parameters=True,
         )
         event.listen(sqlite_engine, "connect", enable_wal)
         return sqlite_engine
     # Postgres connections are not cheap, so the pool is capped. pre_ping
     # replaces connections a hosted database dropped while idle.
-    return create_engine(url, pool_size=10, max_overflow=20, pool_pre_ping=True, echo=False)
+    return create_engine(url, pool_size=10, max_overflow=20, pool_pre_ping=True, echo=False, hide_parameters=True)
 
 
 def enable_wal(dbapi_connection, _connection_record):
@@ -58,7 +58,14 @@ def enable_wal(dbapi_connection, _connection_record):
 engine = make_engine(database_url())
 IS_SQLITE = engine.dialect.name == "sqlite"
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+_local_sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def SessionLocal():
+    """Open a session in the current execution's storage boundary."""
+    from vendoo_studio.services.service_context import current
+    context = current()
+    return context.session_factory() if context is not None else _local_sessions()
 
 
 class Base(DeclarativeBase):
@@ -98,6 +105,8 @@ def get_db():
 
 def load_models() -> None:
     """Import every model so ``Base.metadata`` describes the whole schema."""
+    from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskEvent  # noqa: F401
+    from vendoo_studio.models.user_secret import UserSecretReference  # noqa: F401
     from vendoo_studio.models.user_preference import UserPreference  # noqa: F401
     from vendoo_studio.models.listing_video import ListingVideo  # noqa: F401
     from vendoo_studio.models.conversation import Conversation  # noqa: F401

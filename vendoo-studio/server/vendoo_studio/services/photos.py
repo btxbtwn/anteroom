@@ -52,7 +52,7 @@ def _heic_to_jpeg(contents: bytes) -> bytes:
     return buf.getvalue()
 
 
-def process_bytes(contents: bytes, filename: str | None = None, content_type: str | None = None) -> dict:
+def process_bytes(contents: bytes, filename: str | None, content_type: str | None, *, collection_id: str) -> dict:
     mime_type = _normalize_mime(content_type, contents)
     size_mb = len(contents) / (1024 * 1024)
     if size_mb > MAX_PHOTO_SIZE_MB:
@@ -66,7 +66,12 @@ def process_bytes(contents: bytes, filename: str | None = None, content_type: st
     elif ext not in (".jpg", ".jpeg", ".png", ".webp"):
         ext = MIME_EXTENSIONS.get(mime_type, ".jpg")
 
-    stored_name = f"{uuid.uuid4().hex}{ext}"
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        if mime_type != 'image/jpeg':
+            contents = _heic_to_jpeg(contents)
+        mime_type, ext = 'image/jpeg', '.jpg'
+    stored_name = photo_store().new_key(collection_id, ext)
 
     checksum = hashlib.sha256(contents).hexdigest()
 
@@ -96,7 +101,7 @@ def process_bytes(contents: bytes, filename: str | None = None, content_type: st
 
 async def process_upload(conv_id: str, file: UploadFile):
     contents = await file.read()
-    return process_bytes(contents, file.filename, file.content_type)
+    return process_bytes(contents, file.filename, file.content_type, collection_id=conv_id)
 
 
 THUMBNAIL_SIZES = (96, 192)
@@ -167,7 +172,7 @@ def rotate_file(stored_filename: str, mime_type: str, degrees: int) -> dict:
     elif fmt == "WEBP":
         options.update(quality=95)
 
-    stored_name = f"{uuid.uuid4().hex}{source.suffix}"
+    stored_name = store.edited_key(stored_filename)
     buffer = BytesIO()
     rotated.save(buffer, fmt, **options)
     contents = buffer.getvalue()

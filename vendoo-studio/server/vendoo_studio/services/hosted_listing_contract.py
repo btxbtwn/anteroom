@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from vendoo_studio.services.hosted_fields import DraftFields
 
 MARKETS = frozenset({'ebay', 'poshmark', 'mercari', 'depop', 'etsy', 'sellwild', 'vinted', 'grailed', 'facebook'})
-ROOTS = frozenset(DraftFields.model_fields) | {'title', 'originalPrice', 'tags', 'material', 'style', 'care', 'flaws', 'measurements', 'direct_category_ids'} | {f'{market}_specifics' for market in MARKETS}
+ROOTS = frozenset(DraftFields.model_fields) | {'title', 'originalPrice', 'tags', 'material', 'style', 'care', 'flaws', 'measurements', 'direct_category_ids', 'marketplace_photos'} | {f'{market}_specifics' for market in MARKETS}
 BLOCKED = frozenset({'userid', 'conversationid', 'revisionid', 'parentrevisionid', 'apikey', 'token', 'accesstoken', 'refreshtoken',
                      'authorization', 'cookie', 'cookies', 'password', 'headers', 'postid', 'listingid', 'draftid', 'itemid',
                      'storedfilename', 'sourcefilename', 'filename', 'filepath', 'url', 'listingurl', 'drafturl', 'vendooitemid'})
@@ -57,3 +57,62 @@ def editable_listing(raw):
 
     validate(raw)
     return raw
+
+
+def validate_media(db, conversation_id, listing):
+    """Media selectors name saved assets on this item, never another row's IDs."""
+    from sqlalchemy import select
+    from vendoo_studio.models.conversation import Photo
+    from vendoo_studio.services.marketplace_media import PHOTO_LIMITS
+
+    picks = listing.get('marketplace_photos')
+    if picks is not None:
+        if not isinstance(picks, dict) or any(market not in PHOTO_LIMITS for market in picks):
+            raise HTTPException(422, 'Choose photos for a supported marketplace')
+        for market, identifiers in picks.items():
+            if (not isinstance(identifiers, list) or len(identifiers) > 100
+                    or any(not isinstance(value, str) for value in identifiers)
+                    or len(set(identifiers)) != len(identifiers)):
+                raise HTTPException(422, 'Choose each photo once, in the order to send it')
+            valid = set(db.scalars(select(Photo.id).where(Photo.conversation_id == conversation_id,
+                Photo.id.in_(identifiers), (Photo.marketplace.is_(None) | (Photo.marketplace == market)))))
+            if valid != set(identifiers):
+                raise HTTPException(422, 'Choose photos from this listing and marketplace form')
+    for market in MARKETS:
+        values = listing.get(f'{market}_specifics')
+        if values is not None and not isinstance(values, dict):
+            raise HTTPException(422, 'Marketplace fields must be an object')
+        if (values or {}).get('videoId'):
+            raise HTTPException(422, 'Listing videos are available in the desktop app')
+
+
+def remove_photo_selections(db, conversation_id, photo_id):
+    """Keep the current form picks usable after an explicitly deleted photo."""
+    import copy
+    from sqlalchemy import select
+    from vendoo_studio.models.listing import Listing, ListingRevision
+
+    listing = db.get(Listing, conversation_id)
+    if listing is None or not listing.current_revision_id:
+        return
+    revision = db.scalar(select(ListingRevision).where(ListingRevision.id == listing.current_revision_id,
+                                                       ListingRevision.conversation_id == conversation_id))
+    if revision is None or not isinstance(revision.listing_json, dict):
+        return
+    payload = copy.deepcopy(revision.listing_json)
+    picks = payload.get('marketplace_photos')
+    if not isinstance(picks, dict):
+        return
+    changed = False
+    for market, identifiers in list(picks.items()):
+        if isinstance(identifiers, list) and photo_id in identifiers:
+            picks[market] = [value for value in identifiers if value != photo_id]
+            changed = True
+    if changed:
+        updated = ListingRevision(conversation_id=conversation_id, listing_json=payload,
+                                  source='photo_removed', parent_revision_id=revision.id)
+        db.add(updated)
+        db.flush()
+        listing.current_revision_id = updated.id
+        listing.validation_status = None
+        listing.validation_errors = None

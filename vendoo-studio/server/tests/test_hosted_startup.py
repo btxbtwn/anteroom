@@ -16,7 +16,7 @@ with TestClient(create_app('https://startup-test.supabase.co')) as client:
     assert client.get('/api/health').status_code == 200
     assert client.get('/api/conversations').status_code == 401
     assert 'vendoo_studio.main' not in sys.modules
-"""], env={**os.environ, 'VENDOO_STUDIO_DATA_DIR': str(tmp_path),
+"""], env={**os.environ, 'VENDOO_STUDIO_DATA_DIR': str(tmp_path), 'ANTEROOM_HOSTED': '1',
              'PYTHONPATH': str(Path(__file__).resolve().parents[1])},
         capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stderr

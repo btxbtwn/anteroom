@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
-from vendoo_studio.models.conversation import Conversation, Photo
+from vendoo_studio.models.conversation import Conversation, Photo, new_id as new_conversation_id
 from vendoo_studio.models.listing import Listing, ListingRevision
 from vendoo_studio.models.listing_copy import ListingCopyReceipt
 from vendoo_studio.models.schema import ListingSchema
@@ -73,6 +73,14 @@ def reusable_listing(raw: dict) -> dict:
 
 
 def read_source(db: Session, conv_id: str):
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        from fastapi import HTTPException
+        from vendoo_studio.services.background_tasks import require_idle
+        try:
+            require_idle(db, conv_id)
+        except HTTPException as error:
+            raise CopyError(str(error.detail), error.status_code) from None
     db.expire_all()
     conv = db.get(Conversation, conv_id)
     if conv is None:
@@ -129,20 +137,18 @@ def completed_copy(db: Session, source_kind: str, source_id: str, request_id: st
     return copy_result(db, source_id, request_id, source_kind=source_kind)
 
 
-def _copy_file(name: str, mime_type: str, created_files: list[Path]) -> dict:
-    if Path(name).name != name:
-        raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422)
+def _copy_file(name: str, mime_type: str, created_files: list[str], target_id: str) -> dict:
     try:
-        meta = photos.process_bytes(photo_store().read(name), name, mime_type)
-        created_files.append(photo_store().local_path(meta["stored_filename"]))
+        meta = photos.process_bytes(photo_store().read(name), Path(name).name, mime_type, collection_id=target_id)
+        created_files.append(meta['stored_filename'])
     except (OSError, ValueError) as exc:
         raise CopyError("A saved photo is unavailable. Restore it or copy without photos.", 422) from exc
     return meta
 
 
-def add_draft(db: Session, title: str, notes: dict, listing: dict, images: list[dict], source: str) -> str:
+def add_draft(db: Session, title: str, notes: dict, listing: dict, images: list[dict], source: str, *, identity: str) -> str:
     """Stage a clean local draft. The caller commits it with its creation receipt."""
-    conv = Conversation(title=title, notes=json.dumps(notes), status="draft")
+    conv = Conversation(id=identity, title=title, notes=json.dumps(notes), status="draft")
     db.add(conv)
     db.flush()
     for index, image in enumerate(images):
@@ -158,6 +164,7 @@ def add_draft(db: Session, title: str, notes: dict, listing: dict, images: list[
 
 def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
     created_files = []
+    target_id = new_conversation_id()
     fingerprint = hashlib.sha256(json.dumps([conv_id, body.model_dump(exclude={"request_id"})], sort_keys=True).encode()).hexdigest()
     with start_gate():
         existing = completed_copy(db, "listing", conv_id, body.request_id, fingerprint)
@@ -185,19 +192,19 @@ def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
         try:
             copied_images = []
             for image in images if body.include_photos else []:
-                meta = _copy_file(image.stored_filename, image.mime_type, created_files)
+                meta = _copy_file(image.stored_filename, image.mime_type, created_files, target_id)
                 if image.source_filename:
                     # The copy keeps the original under its edits, so it can be reset too.
-                    meta["source_filename"] = _copy_file(image.source_filename, image.mime_type, created_files)["stored_filename"]
+                    meta["source_filename"] = _copy_file(image.source_filename, image.mime_type, created_files, target_id)["stored_filename"]
                     meta["edits"] = copy.deepcopy(image.edits)
                 meta["original_filename"] = image.original_filename
                 copied_images.append(meta)
-            new_id = add_draft(db, body.title, notes, data, copied_images, "copy")
+            new_id = add_draft(db, body.title, notes, data, copied_images, "copy", identity=target_id)
             db.add(ListingCopyReceipt(request_id=body.request_id, fingerprint=fingerprint, source_kind="listing", source_id=conv_id, conversation_id=new_id))
             db.commit()
             return new_id
         except BaseException:
             db.rollback()
-            for path in created_files:
-                path.unlink(missing_ok=True)
+            for key in created_files:
+                photo_store().delete(key)
             raise

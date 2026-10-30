@@ -32,6 +32,8 @@ def create(db, title, notes):
 
 
 def save(db, draft_id, title, notes, expected_updated_at, fields=None):
+    from vendoo_studio.services.background_tasks import require_idle
+    require_idle(db, draft_id)
     if expected_updated_at.tzinfo is not None:
         expected_updated_at = expected_updated_at.astimezone(UTC).replace(tzinfo=None)
     result = db.execute(update(Conversation).where(

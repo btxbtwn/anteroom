@@ -25,6 +25,17 @@ export async function studioFetch(input: string, options: RequestInit = {}): Pro
   const headers = new Headers(options.headers);
   headers.set("Authorization", `Bearer ${token}`);
   const response = await fetch(url.href, { ...options, headers, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
+  if (hostedSession !== session) throw new Error("Your account changed. Open the request again.");
   if (response.status === 401 && hostedSession === session) session.unauthorized();
   return response;
+}
+
+/** Read an authenticated export without putting a session in its URL. */
+export async function studioBlob(input: string): Promise<Blob> {
+  const session = hostedSession;
+  const response = await studioFetch(input);
+  if (!response.ok) throw new Error("Could not download this export. Please try again.");
+  const blob = await response.blob();
+  if (hostedSession !== session) throw new Error("Your account changed. Download the export again.");
+  return blob;
 }

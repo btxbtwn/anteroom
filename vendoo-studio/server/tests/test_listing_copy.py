@@ -52,7 +52,7 @@ def source(tmp_path, monkeypatch):
     for color in ("red", "blue"):
         image = BytesIO()
         Image.new("RGB", (24, 36), color).save(image, "PNG")
-        meta = photos.process_bytes(image.getvalue(), f"{color}.png", "image/png")
+        meta = photos.process_bytes(image.getvalue(), f"{color}.png", "image/png", collection_id="source")
         ConversationRepo(db).add_photo("source", **meta)
     app.dependency_overrides[get_db] = lambda: db
     client = TestClient(app)

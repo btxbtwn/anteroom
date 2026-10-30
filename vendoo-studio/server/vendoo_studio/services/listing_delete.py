@@ -33,6 +33,9 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
     jobs they name: their snapshots are what Check reads a result against.
     """
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+    from vendoo_studio.services.background_tasks import delete_history
+
+    delete_history(db, conv_id)
 
     records = MarketplaceListingRepo(db)
     kept_jobs = records.job_ids(conv_id) if keep_marketplace_listings else set()

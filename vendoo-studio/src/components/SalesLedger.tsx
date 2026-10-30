@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { DownloadLink } from "./DownloadLink";
 import { FINANCIAL_FIELDS, type FinancialEntry, type FinancialField, type SalesLedgerPage, type SalesLedgerRow } from "../api/salesLedger";
 import { pollMs } from "../api/polling";
 import { marketplaceName } from "./marketplaceNames";
@@ -50,8 +51,8 @@ export function SalesLedger({ onOpenListing }: { onOpenListing: (id: string) => 
     <PageHeader title="Analytics" description={vendooOn
       ? "Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales without Vendoo."
       : "Record sales amounts, fees, refunds and costs in Anteroom. Export your inventory and sales from here."} actions={<div className="flex flex-wrap gap-2">
-      <a className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} download>Export inventory CSV</a>
-      {valid ? <a className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.salesCsv(filters)} download>Export sales CSV</a> : <Button size="sm" variant="outline" disabled>Export sales CSV</Button>}
+      <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.inventoryCsv()} filename="anteroom-inventory.csv">Export inventory CSV</DownloadLink>
+      {valid ? <DownloadLink className={buttonVariants({ size: "sm", variant: "outline" })} href={api.salesLedger.salesCsv(filters)} filename="anteroom-sales.csv">Export sales CSV</DownloadLink> : <Button size="sm" variant="outline" disabled>Export sales CSV</Button>}
     </div>}>
       <div className="flex flex-wrap items-end gap-3 text-xs">
         <label className="space-y-1">Sales from (UTC)<Input type="date" min="1970-01-01" max={end || today} value={start} onChange={(event) => { setStart(event.target.value); setPage(1); }} /></label>

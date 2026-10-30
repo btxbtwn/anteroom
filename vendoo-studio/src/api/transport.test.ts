@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installHostedApiSession, studioFetch } from "./transport";
+import { installHostedApiSession, studioBlob, studioFetch } from "./transport";
 const ORIGIN = "https://anteroom.example";
 let dispose: (() => void) | undefined;
 afterEach(() => { dispose?.(); dispose = undefined; vi.unstubAllGlobals(); });
@@ -43,5 +43,21 @@ describe("shared desktop and cloud API transport", () => {
     dispose = installHostedApiSession({ origin: ORIGIN, accessToken: async () => "expired", unauthorized });
     await studioFetch("/api/conversations", { method: "POST" });
     expect(request).toHaveBeenCalledTimes(1); expect(unauthorized).toHaveBeenCalledOnce();
+  });
+  it("authenticates exports and discards a download if its account changes while reading", async () => {
+    let finish!: (blob: Blob) => void;
+    const blob = new Promise<Blob>(resolve => { finish = resolve; });
+    const reading = vi.fn(() => blob);
+    const request = vi.fn(async () => ({ ok: true, status: 200, blob: reading }));
+    vi.stubGlobal("fetch", request);
+    dispose = installHostedApiSession({ origin: ORIGIN, accessToken: async () => "alice", unauthorized: vi.fn() });
+    const pending = studioBlob("/api/sales-ledger/export/inventory.csv");
+    await vi.waitFor(() => expect(reading).toHaveBeenCalledOnce());
+    const [url, options] = request.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`${ORIGIN}/api/sales-ledger/export/inventory.csv`);
+    expect(new Headers(options.headers).get("Authorization")).toBe("Bearer alice");
+    dispose();
+    finish(new Blob(["alice inventory"]));
+    await expect(pending).rejects.toThrow("account changed");
   });
 });

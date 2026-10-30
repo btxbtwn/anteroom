@@ -68,6 +68,12 @@ def _key_provider(provider_id: str):
 
 
 def _provider_for(choice: str):
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        if context.provider_factory is None:
+            raise RuntimeError("Seller execution has no provider factory")
+        return context.provider_factory(choice)
     if choice in KEY_PROVIDERS:
         return _key_provider(choice)
     if choice == "mimo":
@@ -126,6 +132,9 @@ def get_photo_provider():
 
 
 def provider_is_configured() -> bool:
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        return any(_provider_for(choice) is not None for choice in PROVIDER_CHOICES)
     return (
         chatgpt_signed_in()
         or bool(get_api_key())

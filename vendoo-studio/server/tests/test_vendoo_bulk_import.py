@@ -177,7 +177,7 @@ class BulkImportRunTest(unittest.IsolatedAsyncioTestCase):
             patch(
                 "vendoo_studio.services.vendoo_import.download_vendoo_photos",
                 new_callable=AsyncMock,
-                side_effect=download or (lambda urls: [photo_meta(url) for url in urls]),
+                side_effect=download or (lambda urls, conv_id: [photo_meta(url) for url in urls]),
             ),
         ):
             await vendoo_bulk_import._run()
@@ -264,7 +264,7 @@ class BulkImportRunTest(unittest.IsolatedAsyncioTestCase):
         """A stamp is only written once the whole item landed."""
         pages = [[vendoo_item("a", title="Tee A", modified=5)]]
 
-        def boom(urls):
+        def boom(urls, conv_id):
             raise RuntimeError("network died")
 
         failed = await self._run(pages, download=boom)
@@ -280,7 +280,7 @@ class BulkImportRunTest(unittest.IsolatedAsyncioTestCase):
         """Fields can land while the photos do not; the next run fetches those."""
         pages = [[vendoo_item("a", title="Tee A", modified=5)]]
 
-        progress = await self._run(pages, download=lambda urls: [])
+        progress = await self._run(pages, download=lambda urls, conv_id: [])
         self.assertEqual(progress["imported"], 1)
         self.assertEqual(progress["photos"], 0)
         conv = ConversationRepo(self.db).list_all()[0]

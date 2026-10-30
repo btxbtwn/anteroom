@@ -12,12 +12,15 @@ RUN node -e 'if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_PU
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    ANTEROOM_HOSTED=1 \
     PYTHONPATH=/app/vendoo-studio/server \
     ANTEROOM_WEB_DIR=/app/web
 WORKDIR /app
 COPY deploy/fly/supabase-prod-ca-2021.crt /app/supabase-prod-ca-2021.crt
 COPY vendoo-studio/pyproject.toml vendoo-studio/VERSION /app/vendoo-studio/
 COPY vendoo-studio/server/vendoo_studio/ /app/vendoo-studio/server/vendoo_studio/
+COPY skills/list-this/SKILL.md /app/skills/list-this/SKILL.md
+COPY skills/list-this/references/ /app/skills/list-this/references/
 RUN pip install --no-cache-dir '/app/vendoo-studio[hosted]' \
     && useradd --create-home --uid 10001 anteroom
 COPY --from=web /src/vendoo-studio/dist /app/web

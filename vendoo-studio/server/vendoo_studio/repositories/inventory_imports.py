@@ -23,9 +23,9 @@ def owners_by_id(db: Session, marketplace: str, listing_id: str) -> list[Convers
     ).all()
 
 
-def create_import(db: Session, marketplace: str, snapshot: dict, listing_id: str, photos: list[dict], binding: dict | None = None) -> Conversation:
+def create_import(db: Session, marketplace: str, snapshot: dict, listing_id: str, photos: list[dict], binding: dict | None = None, *, identity: str) -> Conversation:
     public_url = public_listing_url(marketplace, listing_id)
-    conv = Conversation(id=new_id(), title=snapshot["title"], status="active")
+    conv = Conversation(id=identity, title=snapshot["title"], status="active")
     revision = ListingRevision(id=new_id(), conversation_id=conv.id, listing_json=snapshot, source=f"{marketplace}_import")
     try:
         db.add(conv)

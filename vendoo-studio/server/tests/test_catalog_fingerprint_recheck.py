@@ -13,12 +13,12 @@ class FingerprintRecheckTest(unittest.TestCase):
         self.addCleanup(catalog.reset_catalog_index_cache)
         self.fp = {"trees": {}}
         with catalog._INDEX_LOCK:
-            catalog._INDEX = object()
-            catalog._INDEX_FINGERPRINT = json.dumps(self.fp, sort_keys=True)
-            catalog._STALE = False
+            catalog._state().index = object()
+            catalog._state().fingerprint = json.dumps(self.fp, sort_keys=True)
+            catalog._state().stale = False
         meta = MagicMock()
         meta.is_file.return_value = True
-        meta.read_text.return_value = catalog._INDEX_FINGERPRINT
+        meta.read_text.return_value = catalog._state().fingerprint
         patcher = patch.object(catalog, "catalog_meta_path", return_value=meta)
         patcher.start()
         self.addCleanup(patcher.stop)

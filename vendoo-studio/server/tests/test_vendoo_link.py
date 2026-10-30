@@ -197,7 +197,7 @@ class LinkVendooDraftTest(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["photo_count"], 1)
         self.assertEqual(body["listing_title"], "Levi's 501 jeans")
-        download.assert_awaited_once_with(["https://cdn.example/a.jpg"])
+        download.assert_awaited_once_with(["https://cdn.example/a.jpg"], blank.id)
 
         self.db.expire_all()
         listing = ListingRepo(self.db).get_revisions(blank.id)[0].listing_json

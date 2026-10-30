@@ -10,7 +10,9 @@ from pydantic import BaseModel
 
 from vendoo_studio.services.ai_key_catalog import KEY_PROVIDERS, key_provider
 
-router = APIRouter(prefix="/api/settings/ai-keys", tags=["settings"])
+router = APIRouter()
+sign_in_router = APIRouter(prefix="/api/settings/ai-keys", tags=["settings"])
+key_router = APIRouter(prefix="/api/settings/ai-keys", tags=["settings"])
 
 
 class AIKeyConfig(BaseModel):
@@ -43,10 +45,15 @@ def _instance(provider_id: str):
     key = get_ai_key(provider_id)
     if not key:
         raise HTTPException(400, f"Add a {KEY_PROVIDERS[provider_id].label} API key first.")
-    return key_provider_instance(provider_id, key)
+    provider = key_provider_instance(provider_id, key)
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        from vendoo_studio.services.hosted_provider import HostedProvider
+        return HostedProvider(provider)
+    return provider
 
 
-@router.get("")
+@key_router.get("")
 def list_ai_keys():
     from vendoo_studio.services.keychain import get_ai_keys, mask_secret
     from vendoo_studio.services.user_settings import resolved_key_provider_models
@@ -69,7 +76,7 @@ def list_ai_keys():
     return {"providers": providers}
 
 
-@router.put("/{provider_id}")
+@key_router.put("/{provider_id}")
 def set_ai_key(provider_id: str, config: AIKeyConfig):
     from vendoo_studio.services.keychain import set_ai_key as save_key
 
@@ -83,7 +90,7 @@ def set_ai_key(provider_id: str, config: AIKeyConfig):
     return {"ok": True}
 
 
-@router.delete("/{provider_id}")
+@key_router.delete("/{provider_id}")
 def delete_ai_key(provider_id: str):
     from vendoo_studio.services.keychain import delete_ai_key as remove_key
 
@@ -92,7 +99,7 @@ def delete_ai_key(provider_id: str):
     return {"ok": True}
 
 
-@router.post("/{provider_id}/test")
+@key_router.post("/{provider_id}/test")
 async def test_ai_key(provider_id: str):
     provider = _instance(provider_id)
     try:
@@ -102,7 +109,7 @@ async def test_ai_key(provider_id: str):
     return {"ok": True}
 
 
-@router.get("/{provider_id}/models")
+@key_router.get("/{provider_id}/models")
 async def ai_key_models(provider_id: str):
     from vendoo_studio.services.user_settings import get_key_provider_reasoning
 
@@ -151,7 +158,7 @@ async def ai_key_models(provider_id: str):
     }
 
 
-@router.put("/{provider_id}/models")
+@key_router.put("/{provider_id}/models")
 def set_ai_key_models(provider_id: str, config: AIKeyModelsConfig):
     from vendoo_studio.services.user_settings import (
         clear_key_provider_reasoning,
@@ -188,7 +195,7 @@ def set_ai_key_models(provider_id: str, config: AIKeyModelsConfig):
     return {"ok": True, **models}
 
 
-@router.post("/openrouter/sign-in")
+@sign_in_router.post("/openrouter/sign-in")
 def openrouter_sign_in():
     """Open OpenRouter's sign-in on this Mac; the page also shows the link."""
     import webbrowser
@@ -211,7 +218,7 @@ def _page(title: str, message: str) -> HTMLResponse:
     )
 
 
-@router.get("/openrouter/callback", response_class=HTMLResponse)
+@sign_in_router.get("/openrouter/callback", response_class=HTMLResponse)
 async def openrouter_callback(code: str = "", state: str = "", error: str = ""):
     from vendoo_studio.services.openrouter_oauth import finish_sign_in
 
@@ -222,3 +229,7 @@ async def openrouter_callback(code: str = "", state: str = "", error: str = ""):
     except Exception as exc:
         return _page("OpenRouter sign-in did not finish", str(exc))
     return _page("OpenRouter is connected", "You can close this tab and go back to Anteroom.")
+
+
+router.include_router(key_router)
+router.include_router(sign_in_router)

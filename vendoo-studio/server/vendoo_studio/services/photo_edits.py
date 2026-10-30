@@ -253,7 +253,7 @@ def write_edit(source_filename: str, mime_type: str, edits: PhotoEdits) -> dict:
     buffer = BytesIO()
     img.save(buffer, fmt, **options)
     contents = buffer.getvalue()
-    stored_name = f"{uuid.uuid4().hex}{source.suffix}"
+    stored_name = photo_store().edited_key(source_filename)
     photo_store().put(stored_name, contents)
     return {
         "stored_filename": stored_name,

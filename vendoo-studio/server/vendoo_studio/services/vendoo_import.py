@@ -494,7 +494,7 @@ async def import_vendoo_draft(
         photo_count = len(existing_photos)
     else:
         urls = image_urls_from_vendoo(item, form, image_urls)
-        imported = await download_vendoo_photos(urls)
+        imported = await download_vendoo_photos(urls, conv_id)
         for meta in imported:
             conv_repo.add_photo(
                 conv_id=conv_id,
@@ -1070,7 +1070,7 @@ async def attach_vendoo_photos(db: Any, conv_id: str, item: dict | None, form: d
     if not urls:
         return 0
 
-    imported = await download_vendoo_photos(urls)
+    imported = await download_vendoo_photos(urls, conv_id)
     for meta in imported:
         conv_repo.add_photo(
             conv_id=conv_id,
@@ -1094,7 +1094,7 @@ async def attach_vendoo_photos(db: Any, conv_id: str, item: dict | None, form: d
 PHOTO_DOWNLOAD_CONCURRENCY = 6
 
 
-async def download_vendoo_photos(urls: list[str]) -> list[dict[str, Any]]:
+async def download_vendoo_photos(urls: list[str], conv_id: str) -> list[dict[str, Any]]:
     from vendoo_studio.services.safe_fetch import (
         DOWNLOAD_TIMEOUT_SEC,
     )
@@ -1123,7 +1123,7 @@ async def download_vendoo_photos(urls: list[str]) -> list[dict[str, Any]]:
             filename = _filename_from_url(final_url, index)
             try:
                 # Writing and decoding the file is blocking work; keep it off the loop.
-                return await asyncio.to_thread(process_bytes, content, filename, content_type)
+                return await asyncio.to_thread(process_bytes, content, filename, content_type, collection_id=conv_id)
             except Exception as exc:
                 log.warning("Vendoo photo rejected for %s: %s", final_url, exc)
                 return None

@@ -5,23 +5,35 @@ import io
 import os
 import uuid
 import warnings
+import threading
 
 import httpx
 from fastapi import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
+
+from vendoo_studio.config import MAX_PHOTO_COUNT, MAX_PHOTO_SIZE_MB
 
 BUCKET = 'anteroom-photos'
-MAX_BYTES = 10 * 1024 * 1024
-MAX_PHOTOS = 30
+MAX_BYTES = MAX_PHOTO_SIZE_MB * 1024 * 1024
+MAX_PHOTOS = MAX_PHOTO_COUNT
 MAX_PIXELS = 25_000_000
+register_heif_opener()
+_decode_slot = threading.Semaphore(1)
 
 
 def normalize(data: bytes) -> tuple[bytes, int, int]:
+    # Bound decoder memory on the shared API while uploads arrive concurrently.
+    with _decode_slot:
+        return _normalize(data)
+
+
+def _normalize(data: bytes) -> tuple[bytes, int, int]:
     try:
         with warnings.catch_warnings():
             warnings.simplefilter('error', Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as image:
-                if image.format not in {'JPEG', 'PNG', 'WEBP'} or image.width * image.height > MAX_PIXELS:
+                if image.format not in {'JPEG', 'PNG', 'WEBP', 'HEIF', 'HEIC'} or image.width * image.height > MAX_PIXELS:
                     raise ValueError
                 image = ImageOps.exif_transpose(image)
                 image.thumbnail((2400, 2400))
@@ -33,7 +45,7 @@ def normalize(data: bytes) -> tuple[bytes, int, int]:
                 result.save(output, format='JPEG', quality=90)
                 return output.getvalue(), result.width, result.height
     except (ValueError, OSError, UnidentifiedImageError, Image.DecompressionBombError, Image.DecompressionBombWarning):
-        raise HTTPException(422, 'Choose a JPEG, PNG or WebP photo under 25 megapixels') from None
+        raise HTTPException(422, 'Choose a JPEG, PNG, WebP or HEIC photo under 25 megapixels') from None
 
 
 def new_key(user_id: str, draft_id: str) -> str:

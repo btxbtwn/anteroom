@@ -52,6 +52,10 @@ _store_readable = False
 
 
 def mask_secret(value: str | None) -> str | None:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        return 'Configured' if value else None
     if not value:
         return None
     if len(value) > 12:
@@ -226,11 +230,19 @@ def _save_store() -> bool:
 
 
 def _get(account: str) -> str | None:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        return context.secrets.get(account)
     with _lock:
         return _secrets().get(account)
 
 
 def _set(account: str, value: str) -> bool:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        return context.secrets.set(account, value)
     with _lock:
         _secrets()[account] = value
         _touched.add(account)
@@ -239,6 +251,11 @@ def _set(account: str, value: str) -> bool:
 
 
 def _delete(account: str) -> None:
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        context.secrets.delete(account)
+        return
     with _lock:
         if _secrets().pop(account, None) is not None:
             _deleted.add(account)
@@ -337,26 +354,40 @@ def delete_relay_device():
     _delete(RELAY_DEVICE_ACCOUNT)
 
 
+def _update_json(account: str, mutate) -> None:
+    """Update an encrypted map atomically without clobbering another save."""
+    def change(raw):
+        try:
+            payload = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        mutate(payload)
+        return json.dumps(payload) if payload else None
+    from vendoo_studio.services.service_context import current
+    context = current()
+    if context is not None:
+        context.secrets.update(account, change)
+        return
+    with _lock:
+        value = change(_get(account))
+        if value is None:
+            _delete(account)
+        else:
+            _set(account, value)
+
+
 def get_marketplace_accounts() -> dict:
     return _get_json(MARKETPLACE_ACCOUNTS_ACCOUNT) or {}
 
 
 def set_marketplace_account(marketplace: str, account: dict):
-    with _lock:
-        accounts = get_marketplace_accounts()
-        accounts[marketplace] = account
-        _set(MARKETPLACE_ACCOUNTS_ACCOUNT, json.dumps(accounts))
+    _update_json(MARKETPLACE_ACCOUNTS_ACCOUNT, lambda accounts: accounts.update({marketplace: account}))
 
 
 def delete_marketplace_account(marketplace: str):
-    with _lock:
-        accounts = get_marketplace_accounts()
-        if accounts.pop(marketplace, None) is None:
-            return
-        if accounts:
-            _set(MARKETPLACE_ACCOUNTS_ACCOUNT, json.dumps(accounts))
-        else:
-            _delete(MARKETPLACE_ACCOUNTS_ACCOUNT)
+    _update_json(MARKETPLACE_ACCOUNTS_ACCOUNT, lambda accounts: accounts.pop(marketplace, None))
 
 
 def get_ai_keys() -> dict[str, str]:
@@ -369,21 +400,11 @@ def get_ai_key(provider_id: str) -> str | None:
 
 
 def set_ai_key(provider_id: str, key: str):
-    with _lock:
-        keys = get_ai_keys()
-        keys[provider_id] = key
-        _set(AI_KEYS_ACCOUNT, json.dumps(keys))
+    _update_json(AI_KEYS_ACCOUNT, lambda keys: keys.update({provider_id: key}))
 
 
 def delete_ai_key(provider_id: str):
-    with _lock:
-        keys = get_ai_keys()
-        if keys.pop(provider_id, None) is None:
-            return
-        if keys:
-            _set(AI_KEYS_ACCOUNT, json.dumps(keys))
-        else:
-            _delete(AI_KEYS_ACCOUNT)
+    _update_json(AI_KEYS_ACCOUNT, lambda keys: keys.pop(provider_id, None))
 
 
 REASONING_LADDER = ("none", "low", "medium", "high", "xhigh", "max")
