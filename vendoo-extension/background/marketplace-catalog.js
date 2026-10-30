@@ -97,7 +97,10 @@ function sizeEntryKeys(labels, { petite = false } = {}) {
     const key = sizeKey(label);
     if (!key) continue;
     tight.add(key);
-    let plain = key.replace(/^(?:WAIST|NECK|CHEST|INSEAM|LENGTH|US)\s+/, '').replace(/\s*\([^)]*\)\s*$/, '').replace(/\s+IN\.?$/, '');
+    // A waist is the same size with or without its label and unit: Depop lists
+    // a man's 36 as 36", and the tag says 36.
+    let plain = key.replace(/^(?:WAIST|NECK|CHEST|INSEAM|LENGTH|US)\s+/, '').replace(/\s*\([^)]*\)\s*$/, '')
+      .replace(/\s*(?:IN\.?|"|”|″)$/, '');
     if (petite && /^[0-9X]*[0-9SML]P$/.test(plain)) plain = plain.slice(0, -1);
     loose.add(plain);
   }

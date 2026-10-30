@@ -86,6 +86,7 @@ import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { savedDefaultFor } from "./fieldDefaults";
+import { agentFieldLocked } from "./agentFieldLocks";
 
 interface Props {
   convId: string;
@@ -598,7 +599,7 @@ export function ListingEditor({
           {/* A direct marketplace's form shows its photos where its own page has them. */}
           {reviewTab === "forms" && MEDIA_MARKETPLACES.has(editTab) && !DIRECT_FORM_MARKETS.has(editTab) && listing && (
             <MarketplaceMedia key={editTab} convId={convId} marketplace={editTab} listing={listing}
-              disabled={generating} onChange={edits.save} />
+              disabled={false} onChange={edits.save} />
           )}
           <StructuredEditor
             convId={convId}
@@ -607,8 +608,9 @@ export function ListingEditor({
             tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
             target={fieldTarget}
             onAskChat={askChat}
-            disabled={generating || (runtime.hosted && reviewTab === "forms" && editTab !== "general")}
+            disabled={runtime.hosted && reviewTab === "forms" && editTab !== "general"}
             saving={unsaved}
+            agentLocks={activity?.locked_fields}
             onChange={edits.save}
           />
           {/* Past versions are a look-back, so they close the form instead of crowding its header. */}
@@ -717,6 +719,7 @@ export function StructuredEditor({
   disabled,
   saving = false,
   onAskChat,
+  agentLocks = [],
 }: {
   convId: string;
   listing: ListingData;
@@ -727,6 +730,7 @@ export function StructuredEditor({
   disabled?: boolean;
   saving?: boolean;
   onAskChat?: (text: string) => void;
+  agentLocks?: string[];
 }) {
   const runtime = useWorkspaceRuntime();
   const formRef = React.useRef<HTMLFieldSetElement>(null);
@@ -932,7 +936,7 @@ export function StructuredEditor({
   };
 
   const handleBlur = (key: string) => {
-    if (editingDisabled.current || local[key] == null) return;
+    if (editingDisabled.current || agentFieldLocked(key, agentLocks) || local[key] == null) return;
     setDrafts(current => {
       const next = { ...current };
       delete next[`${tab}|${key}`];
@@ -964,7 +968,7 @@ export function StructuredEditor({
   };
 
   const commitField = (key: string, value: string | string[] | boolean) => {
-    if (editingDisabled.current || fields.find((field) => field.key === key)?.locked) return;
+    if (editingDisabled.current || agentFieldLocked(key, agentLocks) || fields.find((field) => field.key === key)?.locked) return;
     if (typeof value === "string" && value.trim() === "[object Object]") return;
     const updated = cloneListing(listing);
     const field = fields.find((entry) => entry.key === key);
@@ -980,7 +984,7 @@ export function StructuredEditor({
   };
 
   const setFieldDraft = (key: string, value: string) => {
-    if (editingDisabled.current || fields.find((field) => field.key === key)?.locked) return;
+    if (editingDisabled.current || agentFieldLocked(key, agentLocks) || fields.find((field) => field.key === key)?.locked) return;
     setDrafts((current) => ({ ...current, [`${tab}|${key}`]: value }));
   };
 
@@ -1026,7 +1030,7 @@ export function StructuredEditor({
     && fieldLeaf(f.key) !== "description";
   const control = (f: EditorField) => {
     const id = `listing-field-${f.key}`;
-    const locked = Boolean(disabled || f.locked);
+    const locked = Boolean(disabled || f.locked || agentFieldLocked(f.key, agentLocks));
     // A format or shipping change narrows the choices. Show the choice that fits
     // now when the typed value belonged to the previous set.
     const typed = formFieldText(local[f.key]);
@@ -1253,10 +1257,11 @@ export function StructuredEditor({
                     {f.groupHelp && <p className="mt-0.5 text-muted-foreground text-xs">{f.groupHelp}</p>}
                   </div>
                 )}
-                <div data-listing-row={f.key} className={cn("min-w-0", nativeTab
+                <fieldset disabled={agentFieldLocked(f.key, agentLocks)} data-listing-row={f.key} className={cn("min-w-0", nativeTab
                   ? f.width === "half" ? "@xl:col-span-6" : f.width === "third" ? "@xl:col-span-4"
                     : f.width === "quarter" ? "@xl:col-span-3" : "col-span-full"
                   : fullWidth(f) && "col-span-full")}>
+                  {agentFieldLocked(f.key, agentLocks) && <span role="status" className="text-xs text-muted-foreground">Agent editing…</span>}
                   {f.type !== "cascade" && f.presentation !== "button" && f.label && (f.hashtagMax != null ? (
                     <div className="mb-1.5 flex items-baseline justify-between gap-2">
                       <span className="flex min-w-0 items-center gap-1.5">
@@ -1285,6 +1290,9 @@ export function StructuredEditor({
                     </div>
                   ))}
                   <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f)}</div>
+                  {onAskChat && !f.locked && <InlineButton type="button" className="mt-1 text-xs" onClick={() => onAskChat(
+                    `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
+                  )}>Ask chat</InlineButton>}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {uniqueMarketplaceMessages(f.type === "photos" ? [] : fieldWarnings.get(f.key) ?? [], shownMessages).map((message) =>
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
@@ -1294,7 +1302,7 @@ export function StructuredEditor({
                   {!nativeTab && f.optionsSource && f.optionsSource !== "saved" && <p className="mt-1 text-xs text-muted-foreground">
                     {f.optionsSource === "marketplace" ? "Marketplace choices" : f.optionsSource === "vendoo" ? "Imported category choices" : "Reference choices"}
                   </p>}
-                </div>
+                </fieldset>
                 </React.Fragment>
                 );
               })}

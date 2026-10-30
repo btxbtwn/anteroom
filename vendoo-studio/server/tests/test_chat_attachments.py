@@ -121,7 +121,7 @@ def test_a_listing_chat_message_sends_its_images_and_keeps_them(listing_chat):
     client, conv_id = listing_chat
     provider = SeeingProvider()
 
-    async def build(conv_id, db, text):
+    async def build(conv_id, db, text, option_catalog=None):
         return [{"role": "system", "content": "rules"}, {"role": "user", "content": text}]
 
     with patch.object(chat_route, "get_listing_provider", return_value=provider), \

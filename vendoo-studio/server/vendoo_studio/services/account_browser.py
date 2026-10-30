@@ -1,13 +1,20 @@
-"""Private, in-memory account windows for read-only marketplace metadata.
+"""Account windows for read-only marketplace metadata.
 
 Only domain clients supply scripts; no endpoint or script is accepted from a route.
-Remote pages receive no Python API and their cookies never leave the webview.
+Remote pages receive no Python API, and their cookies stay inside WebKit's own
+store for the app: they never reach Python, the database, a log or a response.
+That store outlives Anteroom, so a marketplace the seller signed into once is
+still signed in on the next launch and the page can be reopened without asking.
 """
 from __future__ import annotations
 
 import json
 import threading
 from urllib.parse import urlparse
+
+# Waiting for the marketplace page to load before reading it is what makes a
+# saved sign-in answer by itself instead of showing the sign-in prompt again.
+RESTORE_TIMEOUT = 20.0
 
 
 class AccountConnectionError(RuntimeError):
@@ -30,32 +37,47 @@ class PrivateAccountWindow:
         if window is not None:
             window.destroy()
 
-    def connect(self) -> dict:
+    def _open(self, *, hidden: bool) -> tuple[object | None, bool]:
+        """The marketplace window, opening it (shown or hidden) when there is none."""
         with self._lock:
             if self._factory is None:
-                raise AccountConnectionError(f'Open the Anteroom Mac app to sign in to {self.name} without Chrome.')
-            if self._window is None:
-                window = self._factory(f'Sign in to {self.name}', self.origin + self.connect_path,
-                                       js_api=None, width=600, height=800)
-                self._window = window
+                return None, False
+            if self._window is not None:
+                return self._window, False
+            window = self._factory(f'Sign in to {self.name}', self.origin + self.connect_path,
+                                   js_api=None, width=600, height=800, hidden=hidden)
+            self._window = window
 
-                def closing(*_):
-                    with self._lock:
-                        keep_session = self._window is window
-                    if keep_session:
-                        window.hide()
-                        return False
-                    return True
+            def closing(*_):
+                with self._lock:
+                    keep_session = self._window is window
+                if keep_session:
+                    window.hide()
+                    return False
+                return True
 
-                def closed(*_):
-                    with self._lock:
-                        if self._window is window:
-                            self._window = None
-                window.events.closing += closing
-                window.events.closed += closed
-            else:
-                self._window.show()
+            def closed(*_):
+                with self._lock:
+                    if self._window is window:
+                        self._window = None
+            window.events.closing += closing
+            window.events.closed += closed
+            return window, True
+
+    def connect(self) -> dict:
+        window, opened = self._open(hidden=False)
+        if window is None:
+            raise AccountConnectionError(f'Open the Anteroom Mac app to sign in to {self.name} without Chrome.')
+        if not opened:
+            window.show()
         return {'ok': True}
+
+    def _restore(self):
+        """Open the marketplace hidden so a sign-in kept by WebKit answers by itself."""
+        window, _ = self._open(hidden=True)
+        if window is not None and not window.events.loaded.wait(RESTORE_TIMEOUT):
+            raise AccountConnectionError(f'{self.name} is still opening. Reload its choices in a moment.')
+        return window
 
     def read(self, path: str, extract: str, *, headers: str = "{Accept:'application/json'}") -> list:
         """Execute a fixed metadata GET and return only the client's selected fields."""
@@ -63,6 +85,8 @@ class PrivateAccountWindow:
             raise ValueError('Account metadata requests must stay on their marketplace.')
         with self._lock:
             window = self._window
+        if window is None:
+            window = self._restore()
         if window is None:
             raise AccountConnectionError(f'Sign in to {self.name} in Anteroom, then reload its choices.')
         try:

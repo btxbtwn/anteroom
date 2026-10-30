@@ -5,9 +5,10 @@ from unittest.mock import AsyncMock, patch
 from test_chat_field_context import context_db as context_db
 from vendoo_studio.services.chat_forms import forms_prompt
 from vendoo_studio.services.chat_prompts import build_chat_messages
+from vendoo_studio.services.option_lookup import OptionCatalog
 
 
-def test_every_native_field_choice_and_constraint_reaches_chat(context_db):
+def test_every_native_field_is_visible_and_large_choices_are_searchable(context_db):
     db, conv_id, _ = context_db
     markets = ['ebay', 'poshmark', 'mercari', 'depop', 'sellwild']
     choices = [f'Choice {n}' for n in range(350)]
@@ -17,17 +18,20 @@ def test_every_native_field_choice_and_constraint_reaches_chat(context_db):
         'required': False, 'max_values': 2, 'multi': True, 'locked': n == 0,
         'value_constraints': {'Choice 349': [{'parentName': 'Size', 'parentValues': ['M']}]},
     } for n in range(45)]} for market in markets}
+    catalog = OptionCatalog({})
     with patch('vendoo_studio.services.chat_forms.get_selected_marketplaces', return_value=markets), \
          patch('vendoo_studio.services.chat_forms.native_field_fill.load_forms', new=AsyncMock(return_value=forms)), \
          patch('vendoo_studio.services.chat_forms.vinted_browser.category_rows', return_value=[{'title': 'Straight-leg pants'}]):
-        prompt = asyncio.run(forms_prompt(db, conv_id))
+        prompt = asyncio.run(forms_prompt(db, conv_id, catalog))
     data = json.loads(prompt.split('\n')[-1])
     for market in markets:
         assert len(data[market]['fields']) == 45
         last = data[market]['fields'][-1]
-        assert last['options'] == choices
-        assert last['option_values']['Choice 349'] == '349'
-        assert last['value_constraints']
+        assert 'options' not in last
+        assert last['options_lookup']['count'] == 350
+        found = catalog.search({'marketplace': market, 'field': last['path'], 'query': 'Choice 349'})
+        assert found['results'][0]['value'] == '349'
+        assert found['results'][0]['constraints'] == [{'parentName': 'Size', 'parentValues': ['M']}]
         assert data[market]['fields'][0]['locked']
     assert {row['path'] for row in data['general']['fields']} >= {'cost', 'sku', 'department', 'quantity'}
     assert {row['path'] for row in data['vinted']['fields']} >= {'vinted_specifics.category', 'vinted_specifics.material'}

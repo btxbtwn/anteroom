@@ -73,7 +73,7 @@ def current_listing_prompt(db: Session, conv_id: str, *, include_native_forms: b
     )
 
 
-async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> list[dict]:
+async def build_chat_messages(conv_id: str, db: Session, user_message: str, option_catalog=None) -> list[dict]:
     repo = ConversationRepo(db)
     history = repo.get_messages(conv_id)
     photos = repo.get_photos(conv_id)
@@ -208,7 +208,7 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
     system_prompt["content"] += chat_field_context(db, conv_id)
     from vendoo_studio.services.chat_forms import forms_prompt
 
-    system_prompt["content"] += await forms_prompt(db, conv_id)
+    system_prompt["content"] += await forms_prompt(db, conv_id, option_catalog)
     from vendoo_studio.services.item_context import seller_messages
 
     system_prompt["content"] += item_decisions_prompt(db, conv_id)

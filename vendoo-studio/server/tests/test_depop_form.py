@@ -81,6 +81,26 @@ class DepopFormTest(unittest.TestCase):
             self.assertIn("depop_specifics.condition", fields)
             self.assertNotIn("depop_specifics.size", fields)
 
+    def test_the_size_row_shows_the_general_size_in_the_categorys_spelling(self):
+        def size_row(listing):
+            return {row["path"]: row for row in depop_form.form(listing)["fields"]}["depop_specifics.size"]
+
+        general = size_row({"direct_category_ids": {"depop": "menswear_jeans"}, "size": "36"})
+        self.assertEqual(general["value"], '36"')
+        self.assertIn(general["value"], general["options"])
+        own = size_row({"direct_category_ids": {"depop": "menswear_jeans"}, "size": "36",
+                        "depop_specifics": {"size": "38"}})
+        self.assertEqual(own["value"], '38"')
+        cleared = size_row({"direct_category_ids": {"depop": "menswear_jeans"}, "size": "36",
+                            "depop_specifics": {"size": ""}})
+        self.assertEqual(cleared["value"], "")
+
+    def test_a_depop_category_stored_only_on_the_specifics_still_shows_its_size_list(self):
+        form = depop_form.form({"depop_specifics": {"categoryId": "menswear_jeans"}, "size": "36"})
+        fields = {row["path"]: row for row in form["fields"]}
+        self.assertEqual(form["category_id"], "menswear_jeans")
+        self.assertEqual(fields["depop_specifics.size"]["value"], '36"')
+
     def test_seller_values_survive_without_mutating_the_catalog_or_listing(self):
         listing = {"description": "General", "direct_category_ids": {"depop": "menswear_jeans"},
                    "depop_specifics": {"description": "", "size": '32"', "condition": "used_good",

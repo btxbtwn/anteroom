@@ -147,11 +147,13 @@ async def _browser_fix_stream(conv_id: str, body: ChatMessage, provider, provide
     yield "data: [DONE]\n\n"
 
 
-async def _persist_chat_result(conv_id: str, full_text: str, provider, **kwargs):
+async def _persist_chat_result(conv_id: str, full_text: str, provider, *, field_paths=None, **kwargs):
     db = SessionLocal()
+    token = activity.edit_fields.set(field_paths)
     try:
         return await persist_chat_result(db, conv_id, full_text, provider, **kwargs)
     finally:
+        activity.edit_fields.reset(token)
         db.close()
 
 
@@ -225,14 +227,21 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
             # Photo analysis and sold-comps research can take minutes; say so
             # before they start instead of leaving the chat silent.
             yield sse_event("status", "Reading the listing…")
+            from vendoo_studio.services.option_lookup import OptionCatalog, chat_with_options
+
+            option_catalog = OptionCatalog({})
             build_db = SessionLocal()
             try:
                 messages = attach_to_last_user_turn(
-                    await build_chat_messages(conv_id, build_db, body.text), attachments,
+                    await build_chat_messages(conv_id, build_db, body.text, option_catalog), attachments,
                 )
             finally:
                 build_db.close()
-            async for item in iter_with_keepalives(provider.chat(messages, stream=True)):
+            def lock_targets(paths):
+                work.fields = tuple(sorted(set(work.fields) | set(paths)))
+
+            async for item in iter_with_keepalives(chat_with_options(
+                    provider, messages, option_catalog, on_targets=lock_targets if option_catalog.rows else None)):
                 if work.cancelled:
                     yield "data: [DONE]\n\n"
                     return
@@ -263,10 +272,11 @@ async def send_message(conv_id: str, body: ChatMessage, db: Session = Depends(ge
                     provider_model=provider_model,
                     stream_error=stream_error,
                     user_message=citations_to_plain_text(body.text),
+                    field_paths=work.fields if option_catalog.rows else None,
                 )
             )
             # Tracked on its own: a dropped connection cancels this generator, not the save.
-            activity.track_task(conv_id, "Saving listing…", persist_task)
+            activity.track_task(conv_id, "Saving listing…", persist_task, fields=work.fields)
             async for _ in wait_task_keepalives(persist_task, timeout=2.0):
                 yield KEEPALIVE
             if persist_task.cancelled():

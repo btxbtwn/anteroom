@@ -202,11 +202,18 @@ function centOffer(priceCents, percent) {
 // ``lowest`` is the marketplace's own lower limit when it gives one; $1 otherwise.
 function offerFacts(state, percent, round) {
   const lowest = state.lowest || 100;
-  const minimum = Math.max(1, Math.ceil(100 - state.highest * 100 / state.price));
-  const maximum = state.lowest ? Math.min(99, Math.floor(100 - lowest * 100 / state.price)) : 99;
+  // Validate after marketplace rounding: 10% off $17 is $15 on Mercari,
+  // which is valid even when its highest offer is only 88% of the price.
+  const allowed = percent => {
+    const offer = round(state.price, percent);
+    return offer >= lowest && offer <= state.highest;
+  };
+  const percentages = Array.from({ length: 99 }, (_, i) => i + 1).filter(allowed);
+  const minimum = percentages[0] ?? null;
+  const maximum = percentages.at(-1) ?? null;
   const offer = Number.isInteger(percent) ? round(state.price, percent) : 0;
   return { ok: true, price_cents: state.price, like_count: state.likes, minimum_discount_percent: minimum, maximum_discount_percent: maximum,
-    shipping_discounts: [], offer_price_cents: percent >= minimum && percent <= maximum && offer >= lowest && offer <= state.highest ? offer : null };
+    shipping_discounts: [], offer_price_cents: Number.isInteger(percent) && percent >= 1 && percent <= 99 && offer >= lowest && offer <= state.highest ? offer : null };
 }
 
 function checkedOffer(payload, wholeDollars) {
@@ -292,6 +299,18 @@ function depopOfferDrift(what) {
   return marketplaceError(`Depop’s ${what} changed. Anteroom needs an update before sending offers.`, { code: 'schema_drift' });
 }
 
+function requireDepopOfferCurrency(product, preview = {}) {
+  // Both documents describe this product. Missing currency is not a different
+  // currency, but never assume USD or ignore a conflicting explicit currency.
+  const currencies = [product.pricing?.currency, product.price_currency, product.pricing?.currency_name,
+    product.currency, preview.price_currency].filter(value => value != null && String(value).trim() !== '')
+    .map(value => String(value).trim().toUpperCase());
+  if (currencies.some(value => value !== 'USD')) {
+    throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.');
+  }
+  if (!currencies.length) throw depopOfferDrift('listing currency');
+}
+
 function depopOfferPreview(body, product) {
   const recipient = Number(body?.offer_recipient_id);
   const others = String(body?.offer_additional_recipients_count ?? '');
@@ -302,7 +321,7 @@ function depopOfferPreview(body, product) {
       || lowest == null || (current != null && currentCents == null)) {
     throw depopOfferDrift('send-offer preview');
   }
-  if (String(body.price_currency || '').toUpperCase() !== 'USD') throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.');
+  requireDepopOfferCurrency(product, body);
   return { eligible_count: 1 + Number(others), lowest_cents: lowest, current_cents: currentCents };
 }
 
@@ -315,9 +334,8 @@ async function depopOfferState(requests, slug, deadline) {
   if (owner == null || String(owner) !== String(me?.id)) throw marketplaceError('This Depop listing belongs to another account.');
   if (product.status !== 'STATUS_ONSALE' || product.sold === true) throw marketplaceError('This Depop listing has sold or is not on sale.');
   if (depopImportVariants(product).length > 1) throw marketplaceError('Depop does not send offers on listings with several sizes.');
-  const currency = String(product.pricing?.currency ?? product.price_currency ?? product.pricing?.currency_name ?? product.currency ?? '').toUpperCase();
   const price = Math.round((depopProductPrice(product) || 0) * 100);
-  if (currency !== 'USD' || !(price > 0)) throw marketplaceError('Anteroom sends Depop offers on listings priced in USD.', { code: 'schema_drift' });
+  if (!(price > 0)) throw depopOfferDrift('listing price');
   const preview = requests.preview.read((await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview')).data, product);
   // A marked-down item is offered against its current price, as Depop's preview shows it.
   const basis = preview.current_cents ? Math.min(price, preview.current_cents) : price;

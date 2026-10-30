@@ -850,7 +850,11 @@ def studio_window_kwargs() -> dict:
 
 def studio_start_kwargs() -> dict:
     icon = app_icon_path()
-    kwargs: dict = {"menu": studio_app_menu(), "private_mode": True}
+    # WebKit only keeps a marketplace sign-in between launches when the app is
+    # not private, which is what lets Vinted and Sellwild stay signed in. The
+    # store belongs to the app's own WebKit data: no cookie reaches Python, the
+    # database, a log or a response, and the everyday Chrome profile is untouched.
+    kwargs: dict = {"menu": studio_app_menu(), "private_mode": False}
     if icon is not None:
         kwargs["icon"] = str(icon)
     return kwargs

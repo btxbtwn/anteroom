@@ -61,7 +61,7 @@ class NativeContractTest(unittest.TestCase):
         self.assertLess(len(text), 20000)
         self.assertEqual(contracts, before)
 
-    def test_large_brand_catalog_stays_in_editor_but_only_known_brand_enters_prompt(self):
+    def test_large_brand_catalog_stays_in_editor_and_is_searchable_in_prompt(self):
         from vendoo_studio.services import depop_form
 
         for brand in ("nike", "", "Not a native brand"):
@@ -71,11 +71,30 @@ class NativeContractTest(unittest.TestCase):
             text = contract.prompt(contracts)
             projected = json.loads(text[text.index("{"):])
             field = next(row for row in projected["depop"]["fields"] if row["path"] == "depop_specifics.brand")
-            self.assertEqual(field["options"], ["Nike"] if brand == "nike" else [])
+            self.assertNotIn("options", field)
+            self.assertEqual(field["options_lookup"]["count"], 21697)
             self.assertEqual(contracts, before)
             self.assertLess(len(json.dumps(field)), 500)
             self.assertEqual(len(next(row for row in contracts["depop"]["fields"]
                                       if row["path"] == "depop_specifics.brand")["options"]), 21697)
+
+    def test_large_aspect_catalog_is_narrowed_without_changing_validation(self):
+        labels = [f"Player {i}" for i in range(5000)] + ["Tony Stewart"]
+        row = {"path": "ebay_specifics.player", "label": "Player", "options": labels,
+               "option_values": {label: str(i) for i, label in enumerate(labels)},
+               "value_constraints": {label: [{"parentName": "Sport", "parentValue": "Racing"}]
+                                     for label in labels}, "selection_only": True}
+        contracts = {"ebay": {"inputs": {}, "fields": [row]}}
+        before = copy.deepcopy(contracts)
+        text = contract.prompt(contracts)
+        field = json.loads(text[text.index("{"):])["ebay"]["fields"][0]
+        self.assertNotIn("options", field)
+        self.assertNotIn("option_values", field)
+        self.assertNotIn("value_constraints", field)
+        self.assertEqual(field["options_lookup"]["count"], 5001)
+        self.assertLess(len(text), 12000)
+        self.assertEqual(contracts, before)
+        self.assertIsNone(contract.value_error(row, "Player 4999"))
 
     def test_marketplace_overrides_do_not_make_the_saved_form_stale(self):
         from vendoo_studio.services.seller_overrides import apply_marketplace_overrides
@@ -233,6 +252,14 @@ class NativeContractTest(unittest.TestCase):
         listing[contract.EVIDENCE_KEY] = {"mercari_specifics.material": {"value": "wool", "quote": "100% wool"}}
         self.assertIn("evidence", contract.gaps(listing, "mercari")[0]["message"])
 
+    def test_optional_answers_do_not_repeat_evidence_reminders(self):
+        listing = seed()
+        listing["mercari_specifics"]["material"] = "cotton"
+        listing[contract.KEY]["mercari"]["fields"][0]["required"] = False
+        self.assertEqual(contract.gaps(listing, "mercari"), [])
+        listing["mercari_specifics"]["material"] = "not an allowed material"
+        self.assertTrue(contract.gaps(listing, "mercari"))
+
     def test_an_aspect_stored_under_another_spelling_answers_its_row(self):
         listing = ebay_tshirt()
         # The listing JSON keeps the aspect lowercase; the form names the row Style.
@@ -304,6 +331,32 @@ class NativeContractTest(unittest.TestCase):
         contract.invalidate_dependents(previous, updated)
         self.assertNotIn("material", updated["mercari_specifics"])
         self.assertIn("changed", contract.gaps(updated, "mercari")[0]["message"])
+
+    def test_generated_ebay_size_aliases_are_saved_at_the_native_paths(self):
+        listing = {"ebay_specifics": {"sizeType": "Regular", "size": "36", "waistSize": "36 in"}}
+        form = {"fields": [
+            {"path": "ebay_specifics.Size Type", "options": ["Regular"], "selection_only": True},
+            {"path": "ebay_specifics.Size", "options": ["36"], "selection_only": True},
+            {"path": "ebay_specifics.Waist Size", "options": ["36 in"], "selection_only": True},
+        ]}
+        listing[contract.KEY] = contract.capture(listing, {"ebay": form}, ["ebay"])
+        contract.constrain_generated(listing, copy.deepcopy(listing))
+        self.assertEqual(listing["ebay_specifics"], {"Size Type": "Regular", "Size": "36", "Waist Size": "36 in"})
+
+    def test_a_size_the_form_spells_with_inches_survives_as_that_choice(self):
+        listing = {"title": "Wrangler jeans", "brand": "Wrangler", "size": "36",
+                   "direct_category_ids": {"depop": "menswear_jeans"}, "depop_specifics": {"size": "36"}}
+        form = {"category_id": "menswear_jeans", "fields": [
+            {"path": "depop_specifics.size", "label": "Size", "required": True, "selection_only": True,
+             "options": ['26"', '36"', '38"'], "category_specific": True}]}
+        listing[contract.KEY] = contract.capture(listing, {"depop": form}, ["depop"])
+        original = copy.deepcopy(listing)
+        contract.constrain_generated(listing, original)
+        self.assertEqual(listing["depop_specifics"]["size"], '36"')
+        wrong = copy.deepcopy(original)
+        wrong["depop_specifics"] = {"size": "Huge"}
+        contract.constrain_generated(wrong, original)
+        self.assertEqual(wrong["depop_specifics"], {})
 
     def test_quote_must_come_from_original_evidence_not_the_generated_listing(self):
         rows = {row["path"]: row for row in seed()[contract.KEY]["mercari"]["fields"]}

@@ -94,3 +94,40 @@ def test_the_ebay_form_takes_the_size_from_its_categorys_own_choices():
     assert listing["ebay_specifics"]["size"] == "One Size"
     result = validate_listing(listing, require_photos=False, selected_marketplaces=["ebay"])
     assert not any(issue["field"] == "ebay_specifics.size" for issue in [*result.errors, *result.warnings])
+
+
+WAIST_SIZES = ['26"', '27"', '36"', '38"']
+
+
+@pytest.mark.parametrize(("size", "choices", "choice"), [
+    ("36", WAIST_SIZES, '36"'), ('36"', WAIST_SIZES, '36"'), ("Waist 36", WAIST_SIZES, '36"'),
+    ("Waist 36 in.", ["36", "38"], "36"), ("36", ["36", "38"], "36"),
+])
+def test_a_measurement_keeps_its_size_with_or_without_the_mark(size, choices, choice):
+    assert size_choice(size, choices) == choice
+
+
+def test_a_plain_number_keeps_the_plain_choice_when_the_list_has_both():
+    assert size_choice("36", ["36", '36"']) == "36"
+
+
+def test_a_number_that_is_no_size_of_this_list_matches_nothing():
+    assert size_choice("36", ["M", "L"]) is None
+
+
+def test_depop_spells_a_mans_waist_with_inches_on_its_form_and_in_the_listing():
+    listing = {"title": "Wrangler Straight Leg Jeans 36 Blue Denim", "brand": "Wrangler", "size": "36",
+               "description": "Blue jeans.", "price": 25, "condition": "Pre-Owned - Good",
+               "category_path": "Men > Bottoms > Jeans", "direct_category_ids": {"depop": "menswear_jeans"}}
+    align_size_fields(listing)
+    assert listing["depop_specifics"]["size"] == '36"'
+    assert listing["size"] == "36"
+
+
+def test_the_depop_form_offers_the_size_it_spells_for_the_category():
+    from vendoo_studio.services import depop_form
+
+    row = next(row for row in depop_form.form({"direct_category_ids": {"depop": "menswear_jeans"}, "size": "36"})["fields"]
+               if row["path"] == "depop_specifics.size")
+    assert row["value"] == '36"'
+    assert row["value"] in row["options"]

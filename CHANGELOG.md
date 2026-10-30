@@ -6,6 +6,39 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.569 — 2026-10-30
+
+- Depop keeps the size that its own form spells differently, so a 36 waist is shown and sent as 36" instead of leaving the size blank.
+
+## 0.1.568 — 2026-10-30
+
+- Make Retry save recover your unsaved edits when a listing changes in the background, and tell you which field needs review if both copies changed it.
+
+## 0.1.567 — 2026-10-30
+
+- Remove repeated yellow “Check this answer” reminders from optional marketplace fields.
+
+## 0.1.566 — 2026-10-30
+
+- Ask chat about a field or name it in your message: only the fields the agent is editing are temporarily locked, with an “Agent editing” label. Other fields stay editable, and your unrelated corrections are preserved when chat saves.
+
+## 0.1.565 — 2026-10-30
+
+- Let the listing assistant search large marketplace dropdowns on demand when writing or refining a draft.
+
+## 0.1.564 — 2026-10-30
+
+- Keep eBay size, size type, and waist answers when field names are normalized, and stop restarting category filling for those spelling changes.
+- Keep listing fields editable while the agent works, so you can make manual corrections without stopping chat.
+
+## 0.1.563 — 2026-10-30
+
+- Vinted and Sellwild stay signed in after you quit Anteroom: the next time a listing needs their categories or account choices, Anteroom reuses your saved sign-in and loads them without asking you to sign in again. Signing out on the marketplace's own page still signs Anteroom out.
+
+## 0.1.562 — 2026-10-30
+
+- Refilling marketplace fields keeps answers already verified from your photos or notes. An empty or broken AI reply no longer wipes existing answers, and unchanged forms no longer create extra saves.
+
 ## 0.1.561 — 2026-10-30
 
 - Open cloud inventory reliably after the server wakes from sleep.

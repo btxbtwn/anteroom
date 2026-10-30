@@ -80,6 +80,16 @@ def _input_paths(market: str, fields: list[dict]) -> set[str]:
 def _raw_inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     """The choices as the listing itself stores them, before posting preparation."""
     result = {path: copy.deepcopy(get_path(listing, path)) for path in sorted(_input_paths(market, fields))}
+    if market == "ebay":
+        # Normalization writes sizeType while the native schema names Size
+        # Type. Both control the same dropdown; spelling changes are not edits.
+        aspects = listing.get("ebay_specifics") or {}
+        for path, value in result.items():
+            if not path.startswith("ebay_specifics.") or value not in (None, "", [], {}):
+                continue
+            name = path.split(".", 1)[1]
+            result[path] = copy.deepcopy(next((answer for key, answer in aspects.items()
+                                               if _fold(key) == _fold(name) and answer not in (None, "", [], {})), value))
     result["category_id"] = str(get_path(listing, f"direct_category_ids.{market}")
                                 or get_path(listing, f"marketplace_category_ids.{market}") or "")
     # Posting maps the shared path to the leaf its category picker names. Compare
@@ -231,16 +241,9 @@ def prompt(contracts: dict) -> str:
             options = [label for label in row.get("options") or [] if str(values.get(label, label)) == category_id]
             definition["options"] = options
             definition["option_values"] = {label: values.get(label, label) for label in options}
-        if path_of(row).endswith("_specifics.brand") and len(row.get("options") or []) > 300:
-            # Brand catalogs contain tens of thousands of unrelated names. Keep
-            # the complete editor/validation contract, but only offer the known
-            # brand in generation context; a brand choice is never evidence.
-            brand = str((contract.get("inputs") or {}).get("brand") or "").strip().casefold()
-            options = [label for label in row["options"] if label.casefold() == brand]
-            definition["options"] = options
-            if "option_values" in row:
-                definition["option_values"] = {label: row["option_values"][label] for label in options
-                                               if label in row["option_values"]}
+        from vendoo_studio.services.option_lookup import project_row
+
+        definition = project_row(definition)
         return definition
 
     contracts = {market: {**contract, "fields": [
@@ -251,6 +254,7 @@ def prompt(contracts: dict) -> str:
         "For these marketplaces, only the paths below may be generated. These native forms override "
         "generic templates, learned fields and Vendoo fields. Never invent a field or dropdown choice. "
         "Use the exact stored ID for a listed choice. Respect types, lengths and selection limits. "
+        "Use native dropdown lookup for fields marked options_lookup; leave unsupported choices empty. "
         "Category is already selected; do not change it. If a form is unavailable, omit its marketplace "
         "specifics and leave the draft incomplete. Use photos and seller evidence for product facts; "
         "a dropdown option is not evidence. Omit unsupported facts, including optional ones. "
@@ -416,6 +420,26 @@ def _remove(listing: dict, path: str) -> None:
         parent.pop(parts[-1], None)
 
 
+def _size_spelling(row: dict, value) -> str | None:
+    """The field's own spelling of the size ``value`` names, when its list offers it.
+
+    Depop's men's waist is the label 36" where the tag reads 36, and a listing
+    save compares the answer with the form's choices. The same size written a
+    different way is an answer, not a refused choice, so it keeps its row.
+    """
+    if isinstance(value, (list, dict)) or not row.get("selection_only"):
+        return None
+    if "size" not in str(row.get("label") or "").casefold().split() \
+            and "size" not in path_of(row).casefold().split("."):
+        return None
+    options = [str(option) for option in row.get("options") or []]
+    if not options or str(value) in options:
+        return None
+    from vendoo_studio.models.sizes import size_choice
+
+    return size_choice(value, options)
+
+
 def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = True, keep_evidence: bool = False) -> dict:
     """Discard model-invented paths and invalid answers; preserve server-owned contracts."""
     contracts = seed.get(KEY)
@@ -442,6 +466,21 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
             continue
         rows = {path_of(row): row for row in contract.get("fields") or []}
         for path, value in list(_leaves(block, prefix, set(rows))):
+            if market == "ebay" and path not in rows:
+                native_path = next((name for name in rows if _fold(name) == _fold(path)), None)
+                if native_path:
+                    # Listing normalization uses sizeType/waistSize; retain
+                    # their answers under the native form's own aspect names.
+                    _remove(listing, path)
+                    if get_path(listing, native_path) in (None, "", [], {}):
+                        set_path(listing, native_path, value)
+                    path = native_path
+                    value = get_path(listing, path)
+            if path in rows:
+                spelling = _size_spelling(rows[path], value)
+                if spelling is not None:
+                    set_path(listing, path, spelling)
+                    value = spelling
             if is_locked(seed, path):
                 set_path(listing, path, copy.deepcopy(get_path(seed, path)))
             elif path not in rows or value_error({**applicable_row(rows[path], listing, list(rows.values())), "required": False}, value):
@@ -513,15 +552,13 @@ def gaps(listing: dict, market: str) -> list[dict]:
             # is said, not refused.
             found.append(gap(path, f"{row.get('label') or path}: {error}",
                              blocking=not account_resolved(row)))
-        elif (item_field(row, market) and not borrowed and value not in (None, "", [], {})
+        elif (row.get("required") and item_field(row, market) and not borrowed and value not in (None, "", [], {})
               and not is_locked(listing, path)):
             proof = _evidence(listing, path)
             if proof.get("value") != value or not proof.get("quote"):
-                # A required answer with no proof would be sent on the model's
-                # word alone, so it holds the listing. An optional one is only
-                # noted: dropping it changes nothing the marketplace demands.
+                # Required product facts still need evidence before listing.
                 found.append(gap(path, f"{row.get('label') or path}: Check this answer against photo or seller evidence before listing.",
-                                 blocking=bool(row.get("required"))))
+                                 blocking=True))
     return found
 
 

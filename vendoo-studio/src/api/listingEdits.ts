@@ -4,13 +4,20 @@ import type { ListingData, ListingResponse } from "./types";
 import { listingCategorySignature } from "../components/nativeFormStability";
 
 /** Keep newer field edits while accepting the server's normalized unchanged fields. */
-function rebase(saved: unknown, before: unknown, after: unknown): unknown {
+function rebase(saved: unknown, before: unknown, after: unknown, checkConflicts = false, path = ""): unknown {
   if (JSON.stringify(before) === JSON.stringify(after)) return saved;
-  if (!before || !after || typeof before !== "object" || typeof after !== "object" || Array.isArray(before) || Array.isArray(after)) return after;
+  if (JSON.stringify(saved) === JSON.stringify(after)) return saved;
+  if (!saved || !before || !after || typeof saved !== "object" || typeof before !== "object" || typeof after !== "object" || Array.isArray(saved) || Array.isArray(before) || Array.isArray(after)) {
+    if (checkConflicts && JSON.stringify(saved) !== JSON.stringify(before)) {
+      throw new Error(`The field ${path || "listing"} also changed in the saved listing. Your edits are kept. Copy them before using Discard and reload.`);
+    }
+    return after;
+  }
   const result = { ...(saved as Record<string, unknown>) };
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    if (!(key in after)) delete result[key];
-    else result[key] = rebase(result[key], (before as Record<string, unknown>)[key], (after as Record<string, unknown>)[key]);
+    const value = rebase(result[key], (before as Record<string, unknown>)[key], (after as Record<string, unknown>)[key], checkConflicts, path ? `${path}.${key}` : key);
+    if (!(key in after) && value === undefined) delete result[key];
+    else result[key] = value;
   }
   return result;
 }
@@ -19,6 +26,7 @@ class ListingEdits {
   private state: { draft: ListingData | null; saving: boolean; error: string | null } = { draft: null, saving: false, error: null };
   private listeners = new Set<() => void>();
   private revisionId = "";
+  private base: ListingData = {};
   constructor(private client: QueryClient, private id: string) {}
 
   getSnapshot = () => this.state;
@@ -29,7 +37,11 @@ class ListingEdits {
   }
 
   save = (listing: ListingData) => {
-    if (!this.state.draft) this.revisionId = this.client.getQueryData<ListingResponse>(["listing", this.id])?.current_revision_id ?? "";
+    if (!this.state.draft) {
+      const saved = this.client.getQueryData<ListingResponse>(["listing", this.id]);
+      this.revisionId = saved?.current_revision_id ?? "";
+      this.base = saved?.listing ?? {};
+    }
     void this.client.cancelQueries({ queryKey: ["listing", this.id], exact: true });
     this.update({ ...this.state, draft: listing });
     if (!this.state.saving && !this.state.error) void this.flush();
@@ -38,7 +50,7 @@ class ListingEdits {
   retry = () => {
     if (this.state.saving || !this.state.draft) return;
     this.update({ ...this.state, error: null });
-    void this.flush();
+    void this.flush(true);
   };
 
   discard = () => {
@@ -47,13 +59,21 @@ class ListingEdits {
     void this.client.invalidateQueries({ queryKey: ["listing", this.id] });
   };
 
-  private async flush() {
+  private async flush(refresh = false) {
     this.update({ ...this.state, saving: true });
     try {
+      if (refresh) {
+        const latest = await api.listings.get(this.id);
+        const merged = rebase(latest.listing, this.base, this.state.draft, true) as ListingData;
+        this.revisionId = latest.current_revision_id ?? "";
+        this.base = latest.listing;
+        this.update({ ...this.state, draft: merged });
+      }
       while (this.state.draft) {
         const submitted = this.state.draft;
         const result = await api.listings.update(this.id, submitted, this.revisionId);
         this.revisionId = result.revision_id;
+        this.base = result.listing;
         const pending = this.state.draft === submitted ? null : rebase(result.listing, submitted, this.state.draft) as ListingData;
         const previous = this.client.getQueryData<ListingResponse>(["listing", this.id]);
         this.client.setQueryData<ListingResponse>(["listing", this.id], {
@@ -71,7 +91,7 @@ class ListingEdits {
         this.update({ draft: pending, saving: Boolean(pending), error: null });
       }
     } catch (error) {
-      // Keep the latest draft and expected revision. A conflict never retries against someone else's revision.
+      // Retain the draft and its base so retry can merge without overwriting concurrent edits.
       this.update({ ...this.state, saving: false, error: error instanceof Error ? error.message : "Could not save your edits." });
     }
   }
