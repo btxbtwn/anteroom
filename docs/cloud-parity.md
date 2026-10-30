@@ -118,3 +118,31 @@ configured provider. Chat image attachments remain gated until private durable
 attachment storage is connected; desktop attachments remain enabled. Suggestions
 retain the assistant capability gate until those endpoints are ported. The
 production worker setting remains disabled, so this is not deployed activation.
+
+## Prepared hosted draft release
+
+PRs #982, #983, #985 and #986 are merged. The tested release image is
+`registry.fly.io/peaceful-meadowstone-6944:hosted-drafts-8823ab1a4`
+(digest `sha256:7cc3134596e0853b16212dbfc705c92e0e7dfb146454e4987a1e2e6f7af9f43f`).
+It passed private Fly startup, bundled assets, canonical rules and authentication
+checks on a temporary Machine in `ord`, exiting 0. Both temporary test Machines
+were removed. The public release is still the earlier image; this is preparation.
+
+Fly configuration enables the existing draft worker and keeps one Machine
+running. An idle-stop policy cannot guarantee work continues after a browser
+disconnects. This worker accepts generation and text chat only; marketplace
+publishing and delisting remain outside its queue.
+
+Before deployment: preserve a private recovery copy of existing account
+preferences (the migration consolidates their old keys), confirm the production
+revision is `c93392ae8c16`, and apply the tested Alembic revisions through
+`56b5ee7250ec` in coordination with the new image. Verify the restricted runtime
+role, all seller RLS policies and private worker-function grant. Deploy the exact
+tested image, then check health, authentication rejection, owned database
+access, worker status and private settings/media. No database should be reset.
+The application and worker must never log credentials or session tokens.
+
+This release is an intermediate working web increment. Continue private chat
+attachments, native forms/options, approved browser actions, the outbound Mac
+worker, inventory import and the remaining views after deployment. Video stays
+excluded. Full parity has not been established.
