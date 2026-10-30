@@ -321,7 +321,8 @@ const DEPOP_NO_LIKERS = 'Nobody who liked this Depop listing can get an offer ri
 function depopOfferPreview(body, product) {
   if (String(body?.product_id) === String(product.id) && body?.offer_recipient_id == null) throw marketplaceError(DEPOP_NO_LIKERS);
   const recipient = Number(body?.offer_recipient_id);
-  const others = String(body?.offer_additional_recipients_count ?? '');
+  // A listing with one eligible liker leaves the additional count out.
+  const others = String(body?.offer_additional_recipients_count ?? '0');
   // Depop leaves out its lowest offer on some listings; the seller's floor still applies.
   const lowestValue = body?.sellers_lowest_offer_value;
   const lowest = lowestValue == null ? null : depopOfferCents(lowestValue);

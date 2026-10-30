@@ -462,6 +462,20 @@ test('Depop says plainly when nobody who liked a listing can get an offer', asyn
   }
 });
 
+test('a Depop preview with one liker and no additional count still offers to that liker', async () => {
+  const preview = depopPreview();
+  delete preview.offer_additional_recipients_count;
+  const check = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: [200, preview] }));
+  await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+    listing_id: SLUG, discount_percent: 15 } });
+  assert.equal(check.results[0].ok, true, JSON.stringify(check.results[0]));
+  assert.equal(check.results[0].like_count, 1);
+  const bad = offerWorker('depop', depopAnswers({ [DEPOP_PREVIEW]: [200, depopPreview({ offer_additional_recipients_count: 'many' })] }));
+  await depopOffer(bad);
+  assert.equal(bad.results[0].ok, false);
+  assert.ok(!bad.requests.some(r => r.key === DEPOP_SEND));
+});
+
 test('Depop submits one bulk job, waits for success, and never invents a delivered count or repeats the POST', async () => {
   const statuses = ['QUEUED', 'PROCESSING', 'SUCCESS'];
   const sent = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: () => [200, { status: statuses.shift() }] }));
