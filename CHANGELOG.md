@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.563 — 2026-10-30
+
+- Keep eBay size, size type, and waist answers when field names are normalized, and stop restarting category filling for those spelling changes.
+
 ## 0.1.562 — 2026-10-30
 
 - Refilling marketplace fields keeps answers already verified from your photos or notes. An empty or broken AI reply no longer wipes existing answers, and unchanged forms no longer create extra saves.

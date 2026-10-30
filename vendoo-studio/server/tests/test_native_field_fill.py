@@ -386,6 +386,23 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
         after = {**before, "depop_specifics": {"type": "Chinos"}}
         self.assertEqual(native_field_fill.changed_categories(before, after), {"depop"})
 
+    def test_ebay_normalized_size_type_does_not_restart_filling(self):
+        from vendoo_studio.services import native_contract
+
+        form = {"fields": [
+            row("ebay_specifics.Size Type", "Size Type", ["Regular", "Petites"]),
+            row("ebay_specifics.Size", "Size", ["36"], value_constraints={
+                "36": [{"parentName": "Size Type", "parentValues": ["Regular"]}]}),
+        ]}
+        before = {**self.base, "ebay_specifics": {"Size Type": "Regular", "Size": "36"}}
+        before[native_contract.KEY] = native_contract.capture(before, {"ebay": form}, ["ebay"])
+        after = {**before, "ebay_specifics": {"sizeType": "Regular", "size": "36"}}
+        self.assertEqual(native_field_fill.changed_categories(before, after), set())
+        contract = before[native_contract.KEY]["ebay"]
+        self.assertTrue(native_contract.inputs_match(after, "ebay", form["fields"], contract["inputs"]))
+        after["ebay_specifics"]["sizeType"] = "Petites"
+        self.assertEqual(native_field_fill.changed_categories(before, after), {"ebay"})
+
     async def test_unrelated_saves_do_not_repeat_a_fill_for_a_stale_form(self):
         from vendoo_studio.services import native_contract
 
