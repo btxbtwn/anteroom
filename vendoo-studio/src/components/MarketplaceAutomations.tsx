@@ -10,7 +10,7 @@ import type { PromotionAction, PromotionAutomation, PromotionMarketplace } from 
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
 import {
-  ORDER_LABELS, SPEED_LABELS, bodyFromPromotionForm, describePromotionAutomation, describePromotionMinimum, emptyPromotionForm, formFromAutomation, withListing,
+  ORDER_LABELS, SPEED_LABELS, bodyFromPromotionForm, describeOfferChecks, describePromotionAutomation, describePromotionMinimum, emptyPromotionForm, formFromAutomation, withListing,
   type PromotionAutomationForm,
 } from "./promotionAutomationsFormat";
 import { Button } from "./ui/button";
@@ -206,7 +206,7 @@ export function MarketplaceAutomations() {
       }
       const what = row.action === "share"
         ? `Anteroom will share these ${marketplaceName(row.marketplace)} listings to your followers on its own at ${row.times.join(", ")} (${row.timezone}), up to ${(row.daily_cap ?? 0).toLocaleString()} a day.`
-        : `Anteroom will send ${row.discount_percent}% off offers to new likers on its own, checking every hour; ${describePromotionMinimum(row)}.`;
+        : `Anteroom will send ${row.discount_percent}% off offers to new likers on its own; ${describeOfferChecks(row.marketplace)}; ${describePromotionMinimum(row)}.`;
       if (!(await confirmDialog(`Turn on “${row.name}”? ${what} It stops and turns itself off at the first limit or unconfirmed result. Nothing runs until the next round.`, { confirmLabel: "Turn on" }))) return null;
       return api.promotionAutomations.enable(row.id);
     },

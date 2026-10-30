@@ -77,6 +77,123 @@ class PromotionAutomationsTest(unittest.TestCase):
     def promoted(self):
         return [call.args[2] for call in self.bridge.call_args_list if call.args[1] == "marketplace.promote"]
 
+    def like_feed(self, events):
+        async def answer(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.like_events":
+                return {"ok": True, "events": events}
+            return await self.answer(job, message_type, payload, timeout)
+        self.bridge.side_effect = answer
+
+    def check_likes(self):
+        return asyncio.run(promotion_automations.check_new_likes(self.db, sleep=AsyncMock()))
+
+    def test_recent_like_sends_before_round_due_and_repeated_feed_never_resends(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        due = row.next_run_at
+        at = _now() - timedelta(seconds=10)
+        row.like_events_since = at - timedelta(seconds=10)
+        self.db.commit()
+        self.like_feed([{"listing_id": self.items[0][1], "at": at.isoformat() + "Z"}])
+        self.assertEqual(self.check_likes(), 1)
+        self.assertEqual(len(self.promoted()), 1)
+        self.assertEqual(row.next_run_at, due)
+        # Durable journal also prevents replay after a new service/session load.
+        self.db.expire_all()
+        self.assertEqual(self.check_likes(), 0)
+        self.assertEqual(len(self.promoted()), 1)
+
+    def test_verified_new_like_can_follow_previous_offer_with_same_total_likes(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        self.due(row.id)
+        self.tick()
+        self.assertEqual(len(self.promoted()), 3)
+        first = self.db.query(ListingPromotion).filter_by(listing_id=self.items[0][1], state="done").one()
+        first.sent_at = _now() - timedelta(minutes=2)
+        row.like_events_since = _now() - timedelta(minutes=3)
+        self.db.commit()
+        self.like_feed([{"listing_id": self.items[0][1], "at": (_now() - timedelta(minutes=1)).isoformat() + "Z"}])
+        self.assertEqual(self.check_likes(), 1)
+        self.assertEqual(len(self.promoted()), 4)
+        self.assertEqual(self.check_likes(), 0)
+        self.assertIsNotNone(listing_promotions.blocking(self.db, "poshmark", self.items[0][1], "offer"))
+
+    def test_recent_like_respects_approval_exclusions_and_minimum(self):
+        saved = self.create({**OFFER, "excluded_ids": [self.items[0][0].id], "minimum_price": "45"})
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.like_events_since = _now() - timedelta(minutes=2)
+        self.db.commit()
+        self.like_feed([{"listing_id": post, "at": (_now() - timedelta(minutes=1)).isoformat() + "Z"}
+                        for _conv, post in self.items])
+        self.check_likes()
+        self.assertEqual(self.promoted(), [])
+        checked = [call.args[2]["listing_id"] for call in self.bridge.call_args_list if call.args[1] == "marketplace.promotion_check"]
+        self.assertNotIn(self.items[0][1], checked)
+        promotion_automations.pause(self.db, row.id)
+        self.bridge.reset_mock()
+        self.check_likes()
+        self.bridge.assert_not_awaited()
+
+    def test_old_future_malformed_and_unknown_likes_cannot_trigger(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        self.like_feed([
+            {"listing_id": self.items[0][1], "at": (_now() - timedelta(days=1)).isoformat() + "Z"},
+            {"listing_id": self.items[1][1], "at": (_now() + timedelta(days=1)).isoformat() + "Z"},
+            {"listing_id": "not-ours", "at": _now().isoformat() + "Z"},
+        ])
+        self.assertEqual(self.check_likes(), 0)
+        self.assertEqual(self.promoted(), [])
+        self.like_feed([{"listing_id": self.items[0][1], "at": "bad"}])
+        self.assertEqual(self.check_likes(), 0)
+        self.assertFalse(row.enabled)
+
+    def test_pause_during_like_check_prevents_send(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.like_events_since = _now() - timedelta(minutes=2)
+        self.db.commit()
+        self.like_feed([{"listing_id": self.items[0][1], "at": (_now() - timedelta(minutes=1)).isoformat() + "Z"}])
+        self.on_check = lambda: promotion_automations.pause(self.db, row.id)
+        self.check_likes()
+        self.assertEqual(self.promoted(), [])
+
+    def test_depop_recent_like_uses_the_same_approved_offer_path(self):
+        conv, _post = self.items[0]
+        slug = "seller-classic-blue-coat"
+        conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"depop": f"https://www.depop.com/products/{slug}/"}})
+        self.db.commit()
+        self.likes[slug] = 3
+        saved = self.create({**OFFER, "marketplace": "depop", "shipping_label": None})
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.like_events_since = _now() - timedelta(minutes=2)
+        self.db.commit()
+        self.like_feed([{"listing_id": slug, "at": (_now() - timedelta(minutes=1)).isoformat() + "Z"}])
+        self.assertEqual(self.check_likes(), 1)
+        self.assertEqual(self.promoted()[0]["marketplace"], "depop")
+        self.assertEqual(self.check_likes(), 0)
+
+    def test_new_like_never_bypasses_an_unconfirmed_offer(self):
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.like_events_since = _now() - timedelta(minutes=3)
+        conv, post = self.items[0]
+        send = listing_promotions.new_row(conv, "poshmark", "offer", "earlier", 20, row.id)
+        send.listing_id, send.state, send.sent_at = post, "unknown", _now() - timedelta(minutes=2)
+        self.db.add(send)
+        self.db.commit()
+        self.like_feed([{"listing_id": post, "at": (_now() - timedelta(minutes=1)).isoformat() + "Z"}])
+        self.assertEqual(self.check_likes(), 0)
+        self.assertEqual(self.promoted(), [])
+
     def create(self, body):
         response = self.client.post("/api/promotion-automations", json=body)
         self.assertEqual(response.status_code, 200, response.text)
@@ -443,3 +560,39 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertIn("Connect Chrome", self.db.query(PromotionRun).one().note)
         self.bridge.assert_not_called()
         self.assertTrue(self.db.get(PromotionAutomation, saved["id"]).enabled)
+
+    def test_offers_wait_fifteen_minutes_then_schedule_the_next_check(self):
+        moment = _now()
+        with patch.object(promotion_automations, "_now", return_value=moment):
+            saved = self.create({**OFFER, "scope": "items", "conversation_ids": [self.items[0][0].id]})
+            enabled = self.enable(saved["id"])
+        self.assertEqual(datetime.fromisoformat(enabled["next_run_at"].rstrip("Z")), moment + timedelta(minutes=15))
+        self.assertEqual(asyncio.run(promotion_automations.tick(self.db, now=moment + timedelta(minutes=14), sleep=AsyncMock())), 0)
+        self.assertEqual(self.promoted(), [])
+        with patch.object(promotion_automations, "_now", return_value=moment + timedelta(minutes=15)):
+            self.assertEqual(asyncio.run(promotion_automations.tick(self.db, now=moment + timedelta(minutes=15), sleep=AsyncMock())), 1)
+        self.assertEqual(len(self.promoted()), 1)
+        self.assertEqual(self.db.get(PromotionAutomation, saved["id"]).next_run_at, moment + timedelta(minutes=30))
+
+    def test_restart_shortens_existing_offer_schedules_without_changing_shares_or_pauses(self):
+        moment = _now()
+        old_due = moment + timedelta(hours=1)
+        offers = []
+        for marketplace in ("poshmark", "mercari", "depop"):
+            saved = self.create({**OFFER, "marketplace": marketplace, "shipping_label": None})
+            self.enable(saved["id"])
+            row = self.db.get(PromotionAutomation, saved["id"])
+            row.next_run_at = old_due
+            offers.append(row)
+        paused = self.create(OFFER)
+        share = self.create(SHARE)
+        self.enable(share["id"])
+        share_row = self.db.get(PromotionAutomation, share["id"])
+        share_row.next_run_at = old_due
+        self.db.commit()
+        with patch.object(promotion_automations, "_now", return_value=moment):
+            promotion_automations.recover(self.db)
+        self.assertEqual({row.next_run_at for row in offers}, {moment + timedelta(minutes=15)})
+        self.assertEqual(share_row.next_run_at, old_due)
+        self.assertFalse(self.db.get(PromotionAutomation, paused["id"]).enabled)
+        self.bridge.assert_not_called()

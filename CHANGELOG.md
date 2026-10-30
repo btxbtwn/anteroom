@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.552 — 2026-10-29
+
+- Check recent Poshmark and Depop likes about every minute while Anteroom is running, so new likers can receive offers sooner. Keep price minimums and pause controls, and check all offer rules and eBay eligibility every 15 minutes. Turn existing Poshmark and Depop offer rules back on after reviewing the faster checks.
+
 ## 0.1.551 — 2026-10-29
 
 - Depop styles saved through chat stay selected instead of being replaced by another automatic field fill.

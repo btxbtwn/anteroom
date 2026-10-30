@@ -613,3 +613,23 @@ def test_policy_migration_upgrades_previous_release_preserving_offer_history(tmp
         assert connection.execute(text("SELECT count(*) FROM ebay_offer_policies")).scalar() == 0
     assert inspect_database(path).clean
     engine.dispose()
+
+
+def test_ebay_checks_every_fifteen_minutes_and_waits_before_first_check(offers, monkeypatch):
+    events = []
+
+    async def sleep(seconds):
+        events.append(("wait", seconds))
+        if len(events) == 3:
+            raise asyncio.CancelledError
+
+    async def check():
+        events.append(("check", None))
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(ebay_offers.asyncio, "sleep", sleep)
+        patcher.setattr(ebay_offers, "run_automation", check)
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(ebay_offers._timer())
+    assert events == [("wait", 900), ("check", None), ("wait", 900)]
+    assert offers.client.get("/api/ebay-offers").json()["checkIntervalMinutes"] == 15

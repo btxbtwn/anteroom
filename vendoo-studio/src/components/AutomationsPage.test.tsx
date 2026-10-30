@@ -30,7 +30,7 @@ describe("AutomationsPage", () => {
     expect(html).toContain("Waiting for approval");
     expect(html).toContain("Nothing is waiting for approval.");
     expect(html).toContain('aria-label="eBay offers"');
-    expect(html).toContain("Automatic offers check every 30 minutes");
+    expect(html).toContain("Automatic offers check every 15 minutes");
     expect(html).toContain("No unsold listings with eBay links");
   });
 });
