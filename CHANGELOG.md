@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.561 — 2026-10-30
+
+- Open cloud inventory reliably after the server wakes from sleep.
+
 ## 0.1.560 — 2026-10-30
 
 - Editing a listing no longer repeatedly restarts category filling or clears filled answers just because a marketplace form is waiting to refresh.
