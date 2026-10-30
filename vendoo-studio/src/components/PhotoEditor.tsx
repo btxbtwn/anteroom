@@ -9,6 +9,7 @@ import { StudioImage } from "./StudioImage";
  */
 import { CropIcon, EraserIcon, RotateCcwIcon, RotateCwIcon, SunIcon, Undo2Icon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useWorkspaceRuntime } from "../app/runtime";
 import { api } from "../api/client";
 import type { CropBox, Photo, PhotoEdits } from "../api/types";
 import { cn } from "../lib/utils";
@@ -47,6 +48,7 @@ interface Props {
 }
 
 export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
+  const runtime = useWorkspaceRuntime();
   const saved = withDefaults(photo.edits);
   const [edits, setEdits] = useState<PhotoEdits>(saved);
   const [tool, setTool] = useState<Tool>("crop");
@@ -200,7 +202,7 @@ export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
             >
               <Toggle className="flex-1" value="crop"><CropIcon />Crop</Toggle>
               <Toggle className="flex-1" value="adjust"><SunIcon />Adjust</Toggle>
-              <Toggle className="flex-1" value="background"><EraserIcon />Background</Toggle>
+              {runtime.features.has("photo_background") && <Toggle className="flex-1" value="background"><EraserIcon />Background</Toggle>}
             </ToggleGroup>
 
             {tool === "crop" ? (
