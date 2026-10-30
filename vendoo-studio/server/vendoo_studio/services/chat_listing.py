@@ -52,14 +52,14 @@ def save_listing_revision(db: Session, conv_id: str, listing: dict, *, operation
 
     preserving_locks(stamped, _normalize)
     parent_id = revisions[0].id if revisions else None
-    ListingRepo(db).save_revision(
+    revision = ListingRepo(db).save_revision(
         conv_id,
         stamped,
         source="model_refinement",
         parent_revision_id=parent_id,
     )
-    _sync_category_override(db, conv_id, stamped)
-    return stamped
+    _sync_category_override(db, conv_id, revision.listing_json)
+    return revision.listing_json
 
 
 def _stamp_learned_fields(db: Session, listing: dict) -> dict:
@@ -343,7 +343,10 @@ async def persist_chat_result(
         operations, saved = await apply_listing_payload_with_repair(
             db, conv_id, full_text, provider, user_message=user_message
         )
-        if saved:
+        from vendoo_studio.services import activity
+
+        scope = activity.edit_fields.get()
+        if saved and (scope is None or any("categor" in path.casefold() for path in scope)):
             from vendoo_studio.services.agent_categories import apply_saved_agent_category
 
             await apply_saved_agent_category(db, conv_id, operations=operations, source_text=full_text)

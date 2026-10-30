@@ -130,3 +130,40 @@ def test_oversized_choice_metadata_does_not_overflow_context():
     result = lookup.OptionCatalog(source).search(search("Chase Authentics"))
     assert "error" in result
     assert len(json.dumps(result)) < 200
+
+
+def test_declares_field_targets_before_editing_and_keeps_protocol_out_of_answer():
+    catalog = lookup.OptionCatalog({'ebay': {'fields': [
+        {'path': 'ebay_specifics.Size', 'label': 'Size'},
+        {'path': 'ebay_specifics.Brand', 'label': 'Brand'},
+    ]}})
+    provider = Provider(['{"_field_targets":["ebay_specifics.Size"]}', 'Saved size 36.'])
+    targets = []
+
+    async def collect():
+        return [chunk async for chunk in lookup.chat_with_options(
+            provider, [{'role': 'user', 'content': 'Change the eBay size to 36'}], catalog,
+            on_targets=targets.append)]
+
+    assert asyncio.run(collect()) == ['Saved size 36.']
+    assert targets == [('ebay_specifics.Size',)]
+    assert 'Field targets acknowledged' in provider.messages[1][-1]['content']
+
+
+def test_unknown_and_readonly_field_targets_are_rejected_and_empty_targets_are_allowed():
+    catalog = lookup.OptionCatalog({'ebay': {'fields': [
+        {'path': 'ebay_specifics.Size'}, {'path': 'ebay_specifics.shipFrom', 'locked': True},
+    ]}})
+    provider = Provider(['{"_field_targets":["unknown"]}',
+                         '{"_field_targets":["ebay_specifics.shipFrom"]}',
+                         '{"_field_targets":[]}', 'Which size field do you mean?'])
+    targets = []
+
+    async def collect():
+        return [chunk async for chunk in lookup.chat_with_options(
+            provider, [], catalog, on_targets=targets.append)]
+
+    assert asyncio.run(collect()) == ['Which size field do you mean?']
+    assert targets == [()]
+    assert 'Invalid field targets' in provider.messages[1][-1]['content']
+    assert 'Invalid field targets' in provider.messages[2][-1]['content']

@@ -108,27 +108,40 @@ def _request(text: str) -> dict | None:
         result = json.loads(stripped)
     except ValueError:
         return None
-    return result if isinstance(result, dict) and "_option_search" in result else None
+    return result if isinstance(result, dict) and ("_option_search" in result or "_field_targets" in result) else None
 
 
-async def chat_with_options(provider, messages: list[dict], catalog: OptionCatalog, *, stream: bool = True):
+async def chat_with_options(provider, messages: list[dict], catalog: OptionCatalog, *, stream: bool = True, on_targets=None):
     """Execute bounded model-requested lookups, yielding only the final answer.
 
     Intermediate tool JSON never reaches listing persistence or the seller.
     Existing generation revision/fingerprint checks still guard the final save.
     """
-    if not catalog.needed:
+    if not catalog.needed and on_targets is None:
         async for chunk in provider.chat(messages, stream=stream):
             yield chunk
         return
     history = [dict(message) for message in messages]
+    rules = TOOL_RULES
+    if on_targets is not None:
+        rules += (
+            '\nBefore doing any work, reply ONLY with {"_field_targets":["exact.field.path"]}. '
+            'Identify the fields the seller is asking you to change from the current editable forms. '
+            'Use only those exact paths; respect the named marketplace. Do not lock other marketplaces '
+            'or unrelated fields. For a question or an ambiguous request, declare [] and ask for clarification '
+            'instead of changing fields. These fields are temporarily locked while you work. '
+            'After the acknowledgement, complete the request, modifying only declared fields.\n'
+        )
     for message in history:
         if message.get("role") == "system" and isinstance(message.get("content"), str):
-            message["content"] += TOOL_RULES
+            message["content"] += rules
             break
     else:
-        history.insert(0, {"role": "system", "content": TOOL_RULES})
+        history.insert(0, {"role": "system", "content": rules})
     searches = 0
+    targets_declared = on_targets is None
+    allowed_targets = {path for (_market, path), row in catalog.rows.items()
+                       if path and not row.get("locked") and row.get("input_type") not in {"note", "badge"}}
     for _round in range(MAX_ROUNDS + 1):
         parts = []
         async for chunk in provider.chat(history, stream=stream):
@@ -140,8 +153,26 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
         text = "".join(parts)
         request = _request(text)
         if request is None:
+            if not targets_declared:
+                history += [{"role": "assistant", "content": text},
+                            {"role": "user", "content": 'Declare _field_targets before answering or changing fields.'}]
+                continue
             yield text
             return
+        if "_field_targets" in request and on_targets is not None:
+            paths = request["_field_targets"]
+            valid = isinstance(paths, list) and all(isinstance(path, str) and path in allowed_targets for path in paths)
+            if valid:
+                on_targets(tuple(sorted(set(paths))))
+                targets_declared = True
+            history += [{"role": "assistant", "content": text}, {"role": "user", "content": (
+                'Field targets acknowledged. Complete the request using only these fields.' if valid else
+                'Invalid field targets. Declare exact editable paths from the current forms, or [] for no changes.')}]
+            continue
+        if not targets_declared:
+            history += [{"role": "assistant", "content": text},
+                        {"role": "user", "content": 'Declare _field_targets before looking up choices.'}]
+            continue
         batch = request.get("_option_search")
         if not isinstance(batch, list) or not 1 <= len(batch) <= 4:
             results = [{"error": "_option_search must contain one to four search objects."}]
