@@ -200,13 +200,15 @@ async def build_chat_messages(conv_id: str, db: Session, user_message: str) -> l
             + (f"\n{photo_analysis_text}\n\n" if photo_analysis_text else "") +
             comps_block +
             (f"\n--- Listing Rules ---\n\n{skill_rules}" if skill_rules else "")
-        ) + current_listing_prompt(db, conv_id) + learned_fields_prompt(db, conv_id),
+        ) + current_listing_prompt(db, conv_id, include_native_forms=False) + learned_fields_prompt(db, conv_id),
     }
 
     from vendoo_studio.services.chat_field_context import chat_field_context
 
     system_prompt["content"] += chat_field_context(db, conv_id)
-    system_prompt["content"] += _item_form_prompt(db, conv_id)
+    from vendoo_studio.services.chat_forms import forms_prompt
+
+    system_prompt["content"] += await forms_prompt(db, conv_id)
     from vendoo_studio.services.item_context import seller_messages
 
     system_prompt["content"] += item_decisions_prompt(db, conv_id)
