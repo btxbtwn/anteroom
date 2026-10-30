@@ -10,6 +10,7 @@ import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
+import { useWorkspaceRuntime } from "../app/runtime";
 
 const LABELS: Record<BulkField, string> = { title: "Title", description: "Description", brand: "Brand", size: "Size", sku: "SKU", price: "Price", cost: "Cost", quantity: "Quantity",
   condition: "Condition", primaryColor: "Primary color", secondaryColor: "Secondary color" };
@@ -31,6 +32,7 @@ function ListModeSelect({ label, value, onChange, disabled }: { label: string; v
 function show(value: unknown): string { return value == null ? "Not set" : typeof value === "string" ? value || "Empty" : JSON.stringify(value); }
 
 export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: string[]; onClose: () => void }) {
+  const { features } = useWorkspaceRuntime();
   const client = useQueryClient();
   const [fields, setFields] = useState<Partial<Record<BulkField, string>>>({});
   const [labelsMode, setLabelsMode] = useState<ListMode>("keep");
@@ -97,11 +99,11 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
       <label className="flex items-center gap-2 font-medium"><Checkbox disabled={Boolean(row.skip_reason) || busy} checked={!row.skip_reason && !skips.has(row.conversation_id)} onCheckedChange={(checked) => setSkips((previous) => { const next = new Set(previous); if (checked) next.delete(row.conversation_id); else next.add(row.conversation_id); return next; })} />{row.title}</label>
       {row.skip_reason ? <p className="text-muted-foreground">{row.skip_reason}</p> : row.changes.map((change) => <div key={change.field} className="break-words text-xs"><p className="font-medium">{change.field.replace(/_/g, " ")}</p><pre className="whitespace-pre-wrap break-words font-sans">{show(change.old)} → {show(change.new)}</pre></div>)}
     </li>)}</ul> : <div className="space-y-4">
-      <PageNote>Check only the fields to replace on every selected item. Unchecked fields stay as they are. Blank description, brand or SKU clears that field; blank cost means unknown. Categories must be picked from the search. Prices and quantities are whole numbers. Size and price changes include the editor’s dependent fields in the review.</PageNote>
+      <PageNote>Check only the fields to replace on every selected item. Unchecked fields stay as they are. Blank description, brand or SKU clears that field; blank cost means unknown. {features.has("catalog_categories") ? "Categories must be picked from the search. " : null}Prices and quantities are whole numbers. Size and price changes include the editor’s dependent fields in the review.</PageNote>
       {BULK_FIELDS.map((field) => <div key={field} className="space-y-1"><label className="flex items-center gap-2"><Checkbox checked={fields[field] !== undefined} disabled={busy} onCheckedChange={(checked) => setFields((previous) => { const next = { ...previous }; if (checked) next[field] = ""; else delete next[field]; return next; })} />Replace {LABELS[field]}</label>
         {fields[field] !== undefined ? fieldControl(field) : null}
       </div>)}
-      {CATEGORY_SCOPES.map(({ scope, label, note }) => <div key={scope} className="space-y-1">
+      {(features.has("catalog_categories") ? CATEGORY_SCOPES : []).map(({ scope, label, note }) => <div key={scope} className="space-y-1">
         <label className="flex items-center gap-2"><Checkbox checked={scope in categories} disabled={busy} onCheckedChange={(checked) => setCategories((previous) => { const next = { ...previous }; if (checked) next[scope] = null; else delete next[scope]; return next; })} />Replace {label}</label>
         {scope in categories ? <>
           {scope === "ebay"

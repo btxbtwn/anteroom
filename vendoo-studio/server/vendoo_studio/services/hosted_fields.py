@@ -14,6 +14,7 @@ class DraftFields(BaseModel):
     secondaryColor: str = Field(default='', max_length=200)
     size: str = Field(default='', max_length=200)
     sku: str = Field(default='', max_length=200)
+    labels: list[str] = Field(default_factory=list, max_length=30)
     zipCode: str = Field(default='', max_length=200)
     category_path: str = Field(default='', max_length=1000)
     department: str = Field(default='', max_length=200)

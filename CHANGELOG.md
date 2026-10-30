@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.591 — 2026-10-30
+
+- Review and save field, tag and label changes across multiple items on the web, with stale-review and queued-work checks before each save.
+
 ## 0.1.590 — 2026-10-30
 
 - Importing a Depop listing keeps its price again. Depop stopped including the price on a listing's details, so Anteroom now reads it from your Depop shop list.
