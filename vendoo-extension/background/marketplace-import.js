@@ -26,7 +26,7 @@ const IMPORT_MAX_PHOTOS = 20;
 const IMPORT_MIN_GAP_MS = 1200;
 const IMPORT_DEADLINE_MS = 60000;
 const MERCARI_CONDITIONS = { 1: 'New', 2: 'Like new', 3: 'Good', 4: 'Fair', 5: 'Poor' };
-const MERCARI_ITEM_DETAILS_QUERY = `query sellFetchItemsDetails($itemId: String) {
+const MERCARI_ITEM_DETAILS_QUERY = `query sellFetchItemsDetails($itemId: String!) {
   item(id: $itemId) {
     itemId: id
     name

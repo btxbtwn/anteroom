@@ -241,6 +241,23 @@ test('Mercari check reads eligibility and Mercari’s own offer range, in whole 
     && !('x-socure-device-token' in r.headers)));
 });
 
+test('Mercari offer preflight declares the required item ID as non-null', async () => {
+  const check = offerWorker('mercari', mercariAnswers());
+  const fetch = check.c.fetch;
+  check.c.fetch = async (url, options) => {
+    const body = JSON.parse(options?.body || '{}');
+    if (body.operationName === 'sellFetchItemsDetails' && !/\$itemId:\s*String!/.test(body.query)) {
+      return reply(400, { errors: [{ message: 'Variable "$itemId" of type "String" used in position expecting type "String!".' }] });
+    }
+    return fetch(url, options);
+  };
+  await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: {
+    marketplace: 'mercari', action: 'offer', listing_id: ITEM, discount_percent: 20,
+  } });
+  assert.equal(check.results[0].ok, true);
+  assert.ok(!check.requests.some(r => r.key === OFFER_SEND));
+});
+
 test('Mercari sends createOfferToLikers once, in cents, and answers a repeat from the journal', async () => {
   const sent = offerWorker('mercari', mercariAnswers());
   await mercariOffer(sent.c, { floor_cents: 3500 });
