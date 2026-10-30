@@ -55,7 +55,7 @@ class StudioWindowChromeTest(unittest.TestCase):
         titles = [item.title() for item in menu.itemArray()]
         self.assertEqual(titles, ["Paste"])
 
-    def test_start_kwargs_use_the_app_icon(self):
+    def test_start_kwargs_use_the_app_icon_and_keep_marketplace_sign_ins(self):
         with patch.object(desktop, "studio_app_menu", return_value=["menu"]):
             kwargs = desktop.studio_start_kwargs()
         icon = desktop.app_icon_path()
@@ -63,7 +63,9 @@ class StudioWindowChromeTest(unittest.TestCase):
         self.assertEqual(kwargs["icon"], str(icon))
         self.assertEqual(icon.name, "AppIcon.png")
         self.assertEqual(kwargs["menu"], ["menu"])
-        self.assertTrue(kwargs["private_mode"])
+        # Private mode wipes WebKit's website data at every window, which is what
+        # used to sign Vinted and Sellwild out on each launch.
+        self.assertFalse(kwargs["private_mode"])
 
     def test_studio_app_menu_includes_update_actions(self):
         menu_mod = SimpleNamespace(
