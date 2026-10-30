@@ -40,6 +40,8 @@ test('Depop request context is limited to this extension and the supported API p
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/attributes/'));
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/attributes/categories/size-mapping/'));
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/offers/me/products/'));
+  assert.ok(covered('https://webapi.depop.com/presentation/api/v1/shops/me/products/likes/'));
+  assert.equal(covered('https://webapi.depop.com/presentation/api/v1/shops/me/products/other/'), false);
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/offers/products/999/offers/send-all/'));
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/offers/products/999/offers/send-all/jobs/'));
   assert.ok(covered('https://webapi.depop.com/presentation/api/v1/offers/products/999/offers/send-all/jobs/offer-job-1/'));
@@ -121,7 +123,7 @@ test('Vinted draft, photo, wardrobe and package-size calls each have their own r
   c.chrome.declarativeNetRequest.updateSessionRules = async value => { updates.push(value); };
   await c.ensureMarketplaceRequestContext();
   const rules = Object.fromEntries(updates[0].addRules.map(rule => [rule.id, rule]));
-  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].removeRuleIds.filter(id => id >= 17025))), [17025, 17026, 17027, 17028, 17029]);
+  assert.deepEqual(JSON.parse(JSON.stringify(updates[0].removeRuleIds.filter(id => id >= 17025))), [17025, 17026, 17027, 17028, 17029, 17030]);
   const cases = [
     [17025, [
       'https://www.vinted.com/api/v2/item_upload/catalogs',

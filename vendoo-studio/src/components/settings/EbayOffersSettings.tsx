@@ -38,7 +38,7 @@ export function EbayOffersSettings() {
       } else if (kind === "enable") {
         await api.ebayOffers.enable(ids);
         setOffers(null);
-        setNotice(`Automatic offers enabled for ${ids.length} ${ids.length === 1 ? "listing" : "listings"}. The next check is within 30 minutes while Anteroom is running.`);
+        setNotice(`Automatic offers enabled for ${ids.length} ${ids.length === 1 ? "listing" : "listings"}. The next check is within 15 minutes while Anteroom is running.`);
       } else {
         await api.ebayOffers.checked(ids[0]);
         setNotice("Marked checked. Automation remains paused. Preview again to approve another offer after the cooldown.");
@@ -65,7 +65,7 @@ export function EbayOffersSettings() {
     mutationFn: ({ discountPercent, minimumPrice }: { discountPercent: number; minimumPrice: string }) =>
       api.ebayOffers.enableAll(discountPercent, minimumPrice),
     retry: false,
-    onSuccess: () => setNotice("Automatic offers enabled for all current and future eBay listings in Anteroom. The next check is within 30 minutes."),
+    onSuccess: () => setNotice("Automatic offers enabled for all current and future eBay listings in Anteroom. The next check is within 15 minutes."),
     onSettled: refresh,
   });
   const data = status.data;
@@ -99,7 +99,7 @@ export function EbayOffersSettings() {
           {connect.isPending ? <Spinner /> : null}{data?.connected ? "Reconnect eBay" : "Connect eBay"}
         </Button>}>
         <SettingsNote>
-          Automatic offers check every 30 minutes while Anteroom is running, with at most one send per listing every 24 hours.
+          Automatic offers check every 15 minutes while Anteroom is running, with at most one send per listing every 24 hours.
           Counteroffers are off. This supports US fixed-price listings without variations.
           Existing connections need to reconnect once to grant offer permissions.
         </SettingsNote>
@@ -135,7 +135,7 @@ export function EbayOffersSettings() {
               </label>
             </div>
             <Button size="sm" disabled={busy || !globalValid} onClick={async () => {
-              const approved = await confirmDialog(`Enable ${globalDiscount}% off offers on all current and future eBay listings in Anteroom? ${globalMinimum ? `Offers below $${globalMinimum} are skipped.` : "No minimum price will apply."} This replaces individual automatic offer rules. Anteroom checks every 30 minutes while running and sends to all buyers eBay marks eligible.`, { confirmLabel: "Enable automatic offers" });
+              const approved = await confirmDialog(`Enable ${globalDiscount}% off offers on all current and future eBay listings in Anteroom? ${globalMinimum ? `Offers below $${globalMinimum} are skipped.` : "No minimum price will apply."} This replaces individual automatic offer rules. Anteroom checks every 15 minutes while running and sends to all buyers eBay marks eligible.`, { confirmLabel: "Enable automatic offers" });
               if (approved) enableAll.mutate({ discountPercent: Number(globalDiscount), minimumPrice: globalMinimum });
             }}>Enable offers for all current and future listings</Button>
           </div> : <>

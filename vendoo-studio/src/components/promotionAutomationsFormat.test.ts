@@ -51,5 +51,6 @@ describe("promotion automation form", () => {
       expect(bodyFromPromotionForm({ ...offer, minimumPrice }, 6000)).toHaveProperty("error");
     }
     expect(describePromotionAutomation(automation({ action: "offer", minimum_price: "25.50" }))).toContain("minimum $25.50");
+    expect(describePromotionAutomation(automation({ action: "offer" }))).toContain("checks recent likes about every minute");
   });
 });

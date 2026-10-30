@@ -19,6 +19,7 @@ import logging
 import random
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
 
@@ -43,7 +44,7 @@ SHARE_ORDERS = ("newest", "oldest", "random")
 MAX_DAILY_SHARES = 6000
 MAX_TIMES = 6
 MAX_LISTED_ITEMS = 500
-OFFER_INTERVAL = timedelta(hours=1)
+OFFER_INTERVAL = timedelta(minutes=15)
 # Listing reads per offer check, spaced out; the rest are read in a later check.
 OFFER_READS = 60
 READ_GAP_S = 2.0
@@ -178,6 +179,7 @@ def enable(db: Session, automation_id: str) -> dict:
     now = _now()
     row.next_run_at = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
     row.enabled, row.paused_reason = True, None
+    row.like_events_since = now
     db.commit()
     return out(db, row)
 
@@ -275,13 +277,15 @@ def _skip_note(reasons: Counter) -> str:
     return "; ".join(f"{text} ({count})" for text, count in reasons.most_common(3))
 
 
-async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.sleep) -> PromotionRun:
+async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.sleep,
+                    like_events: dict[str, datetime] | None = None) -> PromotionRun:
     """One round: share the next listings, or offer on listings with new likers. Stops at the first limit."""
     now = _now()
     run = PromotionRun(automation_id=row.id, started_at=now)
     db.add(run)
     row.last_run_at = now
-    row.next_run_at = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
+    if like_events is None:
+        row.next_run_at = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
     db.commit()
     reasons: Counter = Counter()
     counts = Counter()
@@ -289,11 +293,13 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
     try:
         promotions.require_chrome()
         targets = [target for target in _order(row, _covered(db, row))
+                   if (like_events is None or target[1] in like_events)
                    if not row.min_days_listed or (target[2] and (now - target[2]).days >= row.min_days_listed)]
         remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
         reads = 0
         batch = new_id()
         for conv, listing_id, _listed_at in targets:
+            new_like_at = like_events.get(listing_id) if like_events is not None else None
             db.refresh(row)
             if not row.enabled:
                 stop_note = "Turned off during the round."
@@ -302,7 +308,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 stop_note = f"Reached the daily cap of {row.daily_cap:,} shares."
                 break
             if row.action == "offer":
-                if promotions.blocking(db, row.marketplace, listing_id, "offer"):
+                if promotions.blocking(db, row.marketplace, listing_id, "offer", new_like_at=new_like_at):
                     counts["skipped"] += 1
                     reasons["offered in the last 24 hours or unconfirmed"] += 1
                     continue
@@ -314,13 +320,13 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 reads += 1
             send = promotions.new_row(conv, row.marketplace, row.action, batch, row.discount_percent, row.id)
             try:
-                await promotions.review(db, send, conv)
+                await promotions.review(db, send, conv, new_like_at=new_like_at)
                 shipping = None
                 if row.action == "offer":
                     if send.like_count < (row.min_likes or 1):
                         raise PromotionError(409, "fewer likes than the rule needs")
                     last = promotions.likes_at_last_offer(db, row.marketplace, listing_id)
-                    if last is not None and send.like_count <= last:
+                    if new_like_at is None and last is not None and send.like_count <= last:
                         raise PromotionError(409, "no new likers since the last offer")
                     shipping = _shipping_choice(row, send)
             except PromotionError as exc:
@@ -338,6 +344,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
             db.commit()
             try:
                 result = await promotions.perform(db, send.id, shipping,
+                                                  new_like_at=new_like_at,
                                                   gap_ms=SHARE_SPEEDS.get(row.speed or "") if row.action == "share" else None)
             except PromotionError as exc:
                 db.rollback()
@@ -406,10 +413,78 @@ async def tick(db: Session, *, now: datetime | None = None, sleep=asyncio.sleep)
     return ran
 
 
+async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
+    """Check bounded recent-like feeds once per minute, only for approved rules.
+
+    The regular scan still catches older likes that fell out of these feeds.
+    Only events after approval qualify. Re-reading the recent feed also catches
+    late notifications; the send journal prevents replaying confirmed offers.
+    """
+    rows = db.query(PromotionAutomation).filter(
+        PromotionAutomation.enabled.is_(True), PromotionAutomation.action == "offer",
+        PromotionAutomation.marketplace.in_(("poshmark", "depop")),
+    ).all()
+    feeds: dict[str, tuple[datetime, dict]] = {}
+    ran = 0
+    for row in rows:
+        if JobRepo(db).get_active():
+            break
+        db.refresh(row)
+        if not row.enabled:
+            continue
+        if row.like_events_since is None:
+            # No historical feed replay when adopting the feature.
+            row.like_events_since = _now()
+            db.commit()
+            continue
+        if row.marketplace not in feeds:
+            try:
+                promotions.require_chrome()
+                started = _now()
+                answer = await promotions.browser_bridge.request(SimpleNamespace(id=f"likes-{row.id}"),
+                    "marketplace.like_events", {"marketplace": row.marketplace}, timeout=45)
+            except (promotions.browser_bridge.BrowserBridgeError, PromotionError):
+                continue
+            feeds[row.marketplace] = started, answer
+        started, answer = feeds[row.marketplace]
+        if answer.get("ok") is not True:
+            if answer.get("error_code") in STOP_CODES | {"schema_drift"}:
+                _pause(db, row, str(answer.get("error") or "The marketplace asked Anteroom to stop."))
+            continue
+        events: dict[str, datetime] = {}
+        try:
+            if not isinstance(answer.get("events"), list):
+                raise ValueError("Missing events")
+            for event in answer["events"]:
+                at = datetime.fromisoformat(event["at"].replace("Z", "+00:00"))
+                if at.tzinfo is None or not isinstance(event["listing_id"], str):
+                    raise ValueError("Invalid event")
+                at = at.astimezone(UTC).replace(tzinfo=None)
+                if row.like_events_since < at <= started:
+                    listing_id = event["listing_id"]
+                    events[listing_id] = max(events.get(listing_id, at), at)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            _pause(db, row, "The recent-like feed changed. Anteroom needs an update.")
+            continue
+        covered = {target[1] for target in _covered(db, row)}
+        events = {key: at for key, at in events.items() if key in covered
+                  and not promotions.blocking(db, row.marketplace, key, "offer", new_like_at=at)}
+        if events:
+            await run_round(db, row, sleep=sleep, like_events=events)
+            ran += 1
+    return ran
+
+
 def recover(db: Session) -> None:
     """Close rounds a stopped Anteroom left open. Their sends were already marked unknown."""
     for run in db.query(PromotionRun).filter(PromotionRun.finished_at.is_(None)).all():
         run.finished_at, run.note = _now(), INTERRUPTED
+    # Apply the shorter interval to already-enabled rules without sending at startup.
+    next_check = _now() + OFFER_INTERVAL
+    db.query(PromotionAutomation).filter(
+        PromotionAutomation.enabled.is_(True), PromotionAutomation.action == "offer",
+        PromotionAutomation.next_run_at > next_check,
+    ).update({"next_run_at": next_check}, synchronize_session="fetch")
     db.commit()
 
 
@@ -419,6 +494,7 @@ async def _timer() -> None:
         await asyncio.sleep(TICK_S)
         try:
             with SessionLocal() as db:
+                await check_new_likes(db)
                 await tick(db)
         except Exception:  # noqa: BLE001 - one bad round must not stop the clock
             log.exception("promotion automation tick failed; unconfirmed sends are never retried")

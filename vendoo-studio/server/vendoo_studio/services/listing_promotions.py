@@ -102,7 +102,7 @@ def live_listing(db: Session, conv: Conversation, marketplace: str) -> tuple[str
     return str(entry["listing_id"]), None
 
 
-def blocking(db: Session, marketplace: str, listing_id: str, action: str) -> str | None:
+def blocking(db: Session, marketplace: str, listing_id: str, action: str, *, new_like_at: datetime | None = None) -> str | None:
     """Why this action may not be sent on this listing now, if anything stops it."""
     rows = db.query(ListingPromotion).filter(
         ListingPromotion.marketplace == marketplace, ListingPromotion.listing_id == listing_id,
@@ -110,7 +110,8 @@ def blocking(db: Session, marketplace: str, listing_id: str, action: str) -> str
     ).all()
     if any(row.state in ("sending", "unknown") for row in rows):
         return f"An earlier {action} on this listing is unconfirmed. Check it first."
-    if action == "offer" and any(row.sent_at and row.sent_at > _now() - OFFER_COOLDOWN for row in rows):
+    if action == "offer" and any(row.sent_at and row.sent_at > _now() - OFFER_COOLDOWN
+                                 and (new_like_at is None or row.sent_at >= new_like_at) for row in rows):
         return "An offer was sent on this listing in the last 24 hours."
     return None
 
@@ -190,7 +191,8 @@ def offer_floor(db: Session, row: ListingPromotion) -> int:
     return saved.floor_cents
 
 
-async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_price: str | None = None) -> None:
+async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_price: str | None = None,
+                 *, new_like_at: datetime | None = None) -> None:
     """Read one listing now and fill in what would be sent. Raises PromotionError when it would not be."""
     listing_id, reason = live_listing(db, conv, row.marketplace)
     row.listing_id = listing_id or ""
@@ -204,7 +206,7 @@ async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_p
             except ValueError as exc:
                 raise PromotionError(400, "Enter the floor as a price, such as 25 or 25.00.") from exc
         row.floor_cents = offer_floor(db, row)
-    if blocked := blocking(db, row.marketplace, listing_id, row.action):
+    if blocked := blocking(db, row.marketplace, listing_id, row.action, new_like_at=new_like_at):
         raise PromotionError(409, blocked)
     try:
         facts = await browser_bridge.request(SimpleNamespace(id=f"promotion-{row.batch_id}"), "marketplace.promotion_check", {
@@ -293,7 +295,8 @@ def _choose_shipping(row: ListingPromotion, shipping_discount_id: str | None) ->
     row.shipping_discount_id, row.shipping_discount_label = shipping_discount_id, option.get("label")
 
 
-async def perform(db: Session, promotion_id: str, shipping_discount_id: str | None = None, *, gap_ms: int | None = None) -> dict:
+async def perform(db: Session, promotion_id: str, shipping_discount_id: str | None = None, *, gap_ms: int | None = None,
+                  new_like_at: datetime | None = None) -> dict:
     """Send one reviewed row, once. The caller has the seller's explicit confirmation or enabled automation."""
     from vendoo_studio.routes.extension import schedule_advance_job_queue
 
@@ -308,7 +311,7 @@ async def perform(db: Session, promotion_id: str, shipping_discount_id: str | No
     listing_id, reason = live_listing(db, conv, row.marketplace) if conv else (None, "This item was deleted.")
     if reason or listing_id != row.listing_id:
         raise PromotionError(409, reason or "This item's listing changed. Review it again.")
-    if blocked := blocking(db, row.marketplace, row.listing_id, row.action):
+    if blocked := blocking(db, row.marketplace, row.listing_id, row.action, new_like_at=new_like_at):
         raise PromotionError(409, blocked)
     if row.action == "offer":
         if row.offer_price_cents is None or row.floor_cents is None or row.offer_price_cents < row.floor_cents:

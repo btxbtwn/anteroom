@@ -47,6 +47,35 @@ def test_head_revision_is_resolvable():
     assert schema_migrations.migrations_dir().is_dir()
 
 
+def test_recent_like_upgrade_preserves_rules_and_requires_faster_offer_approval(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "4696bd599cea")
+    with engine.begin() as connection:
+        for marketplace, action in (("poshmark", "offer"), ("depop", "offer"), ("mercari", "offer"), ("poshmark", "share")):
+            connection.execute(text(
+                "INSERT INTO promotion_automations (id, marketplace, action, name, enabled, scope, conversation_ids, "
+                "excluded_ids, min_days_listed, created_at, updated_at, next_run_at) "
+                "VALUES (:id, :marketplace, :action, 'Keep rule', true, 'all', '[]', '[]', 0, "
+                "'2026-10-29', '2026-10-29', '2026-10-30')"
+            ), {"id": marketplace + action, "marketplace": marketplace, "action": action})
+    command.upgrade(config, "head")
+    with engine.connect() as connection:
+        rows = {row.id: row for row in connection.execute(text(
+            "SELECT id, name, enabled, next_run_at, like_events_since FROM promotion_automations"
+        ))}
+    assert len(rows) == 4
+    for key in ("poshmarkoffer", "depopoffer"):
+        assert not rows[key].enabled
+        assert rows[key].next_run_at is None
+        assert rows[key].like_events_since is None
+        assert rows[key].name == "Keep rule"
+    assert rows["mercarioffer"].enabled
+    assert rows["poshmarkshare"].enabled
+    assert inspect_database(engine.url.database).clean
+
+
 def test_quantity_history_upgrade_backfills_without_rewriting_listings(engine, snapshots):
     import json
     from alembic import command

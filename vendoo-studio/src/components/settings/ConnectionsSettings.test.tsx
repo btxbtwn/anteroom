@@ -56,7 +56,7 @@ describe("Connections settings", () => {
     expect(html).toContain("eBay inventory location");
     expect(html).not.toContain("Chrome sign-in");
     expect(html).not.toContain("ebay-offers");
-    expect(html).not.toContain("Automatic offers check every 30 minutes");
+    expect(html).not.toContain("Automatic offers check every 15 minutes");
   });
 
   it("offers to reconnect eBay when eBay refuses the listing policies", () => {

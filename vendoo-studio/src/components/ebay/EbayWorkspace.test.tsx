@@ -41,7 +41,7 @@ beforeEach(() => {
     }
     if (queryKey[0] === "ebay-offers") {
       return {
-        data: { connected: true, listings: [], history: [], checkIntervalMinutes: 30, lastCheck: null, lastError: null,
+        data: { connected: true, listings: [], history: [], checkIntervalMinutes: 15, lastCheck: null, lastError: null,
           allListings: { enabled: tab.allEnabled, discountPercent: 15, minimumPrice: "" } },
         isPending: false,
         error: null,
@@ -55,7 +55,7 @@ describe("eBay offers", () => {
   it("shows offer controls on the eBay Offers tab", () => {
     const html = renderToStaticMarkup(<EbayWorkspace onOpenListing={vi.fn()} />);
     expect(html).toContain("Offers to interested buyers");
-    expect(html).toContain("Automatic offers check every 30 minutes");
+    expect(html).toContain("Automatic offers check every 15 minutes");
     expect(html).toContain("No unsold listings with eBay links");
     expect(html).toContain("All current and future listings");
   });
@@ -77,6 +77,6 @@ describe("eBay offers", () => {
     const html = renderToStaticMarkup(<EbayWorkspace onOpenListing={vi.fn()} />);
     expect(html).toContain("Dashboard panel");
     expect(html).toContain(">Offers<");
-    expect(html).not.toContain("Automatic offers check every 30 minutes");
+    expect(html).not.toContain("Automatic offers check every 15 minutes");
   });
 });

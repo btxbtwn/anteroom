@@ -57,6 +57,7 @@ importScripts('background/facebook-native.js');
 importScripts('background/native-marketplaces.js');
 importScripts('background/marketplace-delete.js');
 importScripts('background/marketplace-promotions.js');
+importScripts('background/marketplace-likes.js');
 importScripts('background/marketplace-sessions.js');
 importScripts('background/marketplace-sales.js');
 importScripts('background/marketplace-import.js');
@@ -697,6 +698,11 @@ async function handleStudioMessage(msg) {
 
     case 'marketplace.listing_state': {
       await handleMarketplaceListingState(msg);
+      break;
+    }
+
+    case 'marketplace.like_events': {
+      sendBrowserResult(msg, await readMarketplaceLikes(msg.payload || {}));
       break;
     }
 

@@ -92,7 +92,13 @@ export function describePromotionAutomation(row: PromotionAutomation): string {
   }
   const shipping = row.marketplace === "poshmark" ? ` · ${row.shipping_label ? `shipping discount “${row.shipping_label}”` : "no shipping discount"}` : "";
   return `${row.discount_percent}% off to new likers on ${scope}${excluded}${age} with ${row.min_likes}+ ${row.min_likes === 1 ? "like" : "likes"}`
-    + ` · ${describePromotionMinimum(row)}${shipping} · checks hourly on ${marketplaceName(row.marketplace)}`;
+    + ` · ${describePromotionMinimum(row)}${shipping} · ${describeOfferChecks(row.marketplace)} on ${marketplaceName(row.marketplace)}`;
+}
+
+export function describeOfferChecks(marketplace: PromotionMarketplace): string {
+  return marketplace === "poshmark" || marketplace === "depop"
+    ? "checks recent likes about every minute; catch-up checks every 15 minutes"
+    : "checks every 15 minutes";
 }
 
 export function describePromotionMinimum(row: PromotionAutomation): string {

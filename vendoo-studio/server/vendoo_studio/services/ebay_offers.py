@@ -23,7 +23,7 @@ from vendoo_studio.services.keychain import get_marketplace_accounts
 from vendoo_studio.services.marketplace_accounts import SignInRequired
 
 log = logging.getLogger("vendoo_studio.ebay_offers")
-CHECK_INTERVAL_S = 30 * 60
+CHECK_INTERVAL_S = 15 * 60
 PREVIEW_TTL = timedelta(minutes=15)
 SEND_COOLDOWN = timedelta(hours=24)
 UNKNOWN_NOTE = "Send result unknown. Check offers in Seller Hub, then mark this checked. Automation is paused."
@@ -192,7 +192,7 @@ def enable(db: Session, attempt_ids: list[str]) -> dict:
         rule.minimum_price_cents = attempt.minimum_price_cents
         rule.enabled = True
         attempt.state = "enabled"
-        attempt.note = "Automatic offers approved. Anteroom checks every 30 minutes while running."
+        attempt.note = "Automatic offers approved. Anteroom checks every 15 minutes while running."
     db.commit()
     return {"ok": True}
 

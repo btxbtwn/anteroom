@@ -41,6 +41,7 @@ class PromotionAutomation(SellerOwned, Base):
     paused_reason = Column(String, nullable=True)
     next_run_at = Column(DateTime, nullable=True)
     last_run_at = Column(DateTime, nullable=True)
+    like_events_since = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utcnow)
     updated_at = Column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
 
