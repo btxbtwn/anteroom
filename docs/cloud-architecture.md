@@ -1,13 +1,13 @@
 # Anteroom in the cloud: Mac, web and iPhone in sync
 
-Status: approved 2026-10-26, with Supabase and Fly.io. Building step 1.
+Status: approved 2026-10-26, with Supabase and Fly.io. Building step 2: hosted sign-in, drafts, General editing and private photos.
 Postgres support and the photo-store interface have merged (#790, #787).
 The hosted session-verification foundation is described in
 [hosted-auth.md](hosted-auth.md). The
 [seller ownership schema](seller-ownership.md) assigns ownership to existing
 and new records. [Hosted database isolation](seller-isolation.md) adds restricted
-seller sessions and row policies; seller-specific constraints, file scoping and
-account linking remain before hosted listing routes open.
+seller sessions and row policies; seller-specific constraints protect draft routes. Photos now have private Storage
+scoping; account linking/import and other file-backed services remain separate work.
 
 ## Goal
 
@@ -49,6 +49,11 @@ extension polls `queue/pull` every five minutes). Anteroom adopts the same shape
   It verifies the Supabase session on every request.
 - **Web app** is today's React frontend, served from the host, signed in with
   Supabase. Polling gives way to Realtime subscriptions.
+- **Desktop Chrome** will connect the hosted web app directly to the installed
+  extension for seller-approved marketplace form work in that browser. This
+  integration still needs authenticated extension pairing and has not shipped.
+  A Mac worker is needed only for desktop capabilities kept in the Mac app or
+  for requesting that Mac’s browser work from another device.
 - **Mac app** shows the same web app in its window, and runs the **Mac worker**:
   the extension bridge and Chrome automation, which can only run where Chrome
   runs. It connects outbound to the API and takes queued fill jobs, so the

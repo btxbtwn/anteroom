@@ -1,3 +1,4 @@
+import { GENERAL_LISTING_FIELDS } from "../generalListingFields";
 import { SellwildAccountChoices } from "./SellwildAccountChoices";
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -1766,25 +1767,7 @@ function liveCategoryFields(listing: ListingData | undefined, marketplace: "ebay
 function getFieldsForTab(listing: ListingData | undefined, tab: string): EditorField[] {
   switch (tab) {
     case "general":
-      return [
-        { key: "title", label: "Title" },
-        { key: "description", label: "Description" },
-        { key: "price", label: "Price", type: "number" },
-        { key: "cost", label: "Cost", type: "number" },
-        { key: "quantity", label: "Quantity", type: "number" },
-        { key: "brand", label: "Brand" },
-        { key: "condition", label: "Condition" },
-        { key: "primaryColor", label: "Primary Color" },
-        { key: "secondaryColor", label: "Secondary Color" },
-        { key: "size", label: "Size" },
-        { key: "sku", label: "SKU" },
-        { key: "zipCode", label: "Inventory location" },
-        { key: "category_path", label: "Category *", required: true,
-          help: "Applied to each marketplace form. Name the last category, such as Men > Shirts > Tees. Each marketplace form keeps its own category list." },
-        { key: "department", label: "Department" },
-        { key: "weight_oz", label: "Package Weight (oz)", type: "number" },
-        { key: "package_dimensions_in", label: "Package Dimensions (LxWxH in)" },
-      ];
+      return GENERAL_LISTING_FIELDS;
     case "etsy":
       return mergeSpecificsWithDefaults(
         listing?.etsy_specifics,

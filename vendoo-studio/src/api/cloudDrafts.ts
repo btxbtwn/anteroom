@@ -6,6 +6,7 @@ export interface CloudDraft {
   notes: string | null;
   created_at: string | null;
   updated_at: string | null;
+  fields?: Record<string, string | number | null>;
 }
 
 export class CloudRequestError extends Error {
@@ -32,11 +33,11 @@ export function cloudDrafts(auth: Pick<SupabaseClient, "auth">, request = fetch)
     return response.json() as Promise<T>;
   }
   return {
-    list: () => call<CloudDraft[]>(""),
+    list: (offset = 0, search = "") => call<CloudDraft[]>(offset || search ? `?offset=${offset}&search=${encodeURIComponent(search)}` : ""),
     get: (id: string) => call<CloudDraft>(`/${encodeURIComponent(id)}`),
     create: (title: string) => call<CloudDraft>("", "POST", { title, notes: "" }),
-    save: (draft: CloudDraft, title: string, notes: string) => call<CloudDraft>(`/${encodeURIComponent(draft.id)}`, "PATCH", {
-      title, notes, expected_updated_at: draft.updated_at,
+    save: (draft: CloudDraft, title: string, notes: string, fields?: Record<string, string | number | null>) => call<CloudDraft>(`/${encodeURIComponent(draft.id)}`, "PATCH", {
+      title, notes, ...(fields ? { fields } : {}), expected_updated_at: draft.updated_at,
     }),
   };
 }
