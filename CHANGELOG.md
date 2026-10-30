@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.590 — 2026-10-30
+
+- Importing a Depop listing keeps its price again. Depop stopped including the price on a listing's details, so Anteroom now reads it from your Depop shop list.
+
 ## 0.1.589 — 2026-10-30
 
 - Etsy maker and manufacture-date answers now survive chat saves when their field names are normalized.
