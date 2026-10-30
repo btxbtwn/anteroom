@@ -54,9 +54,13 @@ def item(db, conv_id, *, quantity=1, notes=None, price=40, cost=5):
     ListingRepo(db).save_revision(conv_id, {"title": "Coat", "price": price, "quantity": quantity, "cost": cost}, "user")
 
 
-def line(db, conv_id, marketplace="ebay", *, quantity=1, financials=None, order="o1", when=None, listing_id="123456789012"):
-    sale = MarketplaceSale(marketplace=marketplace, order_id=order, line_id=order, listing_id=listing_id, quantity=quantity,
-                           conversation_id=conv_id, sold_at=when or datetime.now(UTC).replace(tzinfo=None))
+def line(db, conv_id, marketplace="ebay", *, quantity=1, financials=None, order="o1", order_line=None, when=None,
+         listing_id="123456789012"):
+    # A marketplace order names its order and its line; Chrome's listing-sold
+    # reports name the listing as both (see the cleanup tests below).
+    sale = MarketplaceSale(marketplace=marketplace, order_id=order, line_id=order_line or f"{order}-line",
+                           listing_id=listing_id, quantity=quantity, conversation_id=conv_id,
+                           sold_at=when or datetime.now(UTC).replace(tzinfo=None))
     db.add(sale)
     db.commit()
     if financials:
@@ -370,3 +374,30 @@ def test_analytics_counts_a_partly_sold_item_as_active_not_sold(env):
     assert payload["sales"]["count"] == 1
     assert payload["inventory"]["active"] == 1
     assert payload["inventory"]["sold"] == 0
+
+
+def test_a_listing_marked_sold_elsewhere_is_not_a_second_sale(env):
+    """The seller clearing other marketplaces after a sale is not another sale."""
+    item(env.db, "coat")
+    line(env.db, "coat", "ebay", order="o1", order_line="l1", listing_id="123456789012",
+         financials={"item_revenue": "40", "fees": "5"})
+    # What a Chrome check records for a listing it reads sold: the listing as
+    # its own order, no amounts, no order date.
+    env.db.add(MarketplaceSale(marketplace="depop", order_id="shop-tee-136d", line_id="shop-tee-136d",
+                               listing_id="shop-tee-136d", conversation_id="coat"))
+    env.db.commit()
+    payload = inventory_analytics(env.db, range_id="all")
+    assert payload["sales"]["count"] == 1
+    assert payload["sales"]["revenue"] == 40
+    assert payload["inventory"]["sold"] == 1
+    assert env.db.query(MarketplaceSale).count() == 2
+
+
+def test_two_real_orders_on_one_item_both_count(env):
+    item(env.db, "tees", quantity=2)
+    line(env.db, "tees", "ebay", order="o1", order_line="l1", financials={"item_revenue": "20"})
+    line(env.db, "tees", "depop", order="o2", order_line="l2", listing_id="shop-tee-136d",
+         financials={"item_revenue": "30"})
+    payload = inventory_analytics(env.db, range_id="all")
+    assert payload["sales"]["count"] == 2
+    assert payload["sales"]["revenue"] == 50

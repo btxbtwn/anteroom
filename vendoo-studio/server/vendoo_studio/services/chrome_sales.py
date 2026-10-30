@@ -20,6 +20,7 @@ import logging
 import random
 import re
 import time
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from sqlalchemy.orm import Session
@@ -162,6 +163,52 @@ def live_listing_ids(marketplace: str, *, session_factory=None) -> dict[str, str
     return found
 
 
+def _sold_elsewhere(db: Session, conv_id: str, marketplace: str) -> bool:
+    """True when every unit is sold on another marketplace by a real order.
+
+    Then a listing Anteroom reads as sold here is the seller clearing the other
+    listings, not another order. An item still on sale (a relist, or stock
+    left) keeps detecting sales here.
+    """
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
+    from vendoo_studio.services.item_status import status_for
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    lines = db.query(MarketplaceSale).filter(
+        MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)).all()
+    if not any(line.is_order_backed and line.marketplace != marketplace for line in lines):
+        return False
+    conv = db.get(Conversation, conv_id)
+    return bool(conv and status_for(db, conv_id, parse_notes(conv.notes)).status == "sold")
+
+
+def _claimed_sold_at(db: Session, conv_id: str, marketplace: str) -> datetime | None:
+    """When the imported notes say this marketplace sold the item, if they do.
+
+    A check confirms a claim Anteroom already has; the sale keeps the date it
+    was made instead of landing in the month the check ran.
+    """
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    conv = db.get(Conversation, conv_id)
+    notes = parse_notes(conv.notes) if conv else {}
+    sale = notes.get("vendooSale") if isinstance(notes.get("vendooSale"), dict) else {}
+    dates = notes.get("vendooDates") if isinstance(notes.get("vendooDates"), dict) else {}
+    sold_by = dates.get("soldByMarketplace") if isinstance(dates.get("soldByMarketplace"), dict) else {}
+    claimed = sold_by.get(marketplace)
+    if not claimed and str(sale.get("marketplace") or "") == marketplace:
+        claimed = sale.get("soldAt")
+    if not claimed:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(claimed).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
 def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_factory=None,
                           conversation_ids: dict[str, str] | None = None) -> list[str]:
     """Store each sold listing once, against the item that was read. Returns the new sale IDs.
@@ -169,6 +216,10 @@ def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_f
     A sale that arrived before its item could be matched is attached now: the
     item came from the check itself, so the listing it found sold is protected
     from then on, whatever its link looks like.
+
+    A listing reading sold is not a sale when the item already sold on another
+    marketplace: that is the seller clearing the other listings, not a second
+    order.
     """
     from vendoo_studio.models.marketplace_sale import MarketplaceSale
 
@@ -180,6 +231,8 @@ def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_f
     with session_factory() as db:
         for listing_id in listing_ids:
             conv_id = (conversation_ids or {}).get(listing_id)
+            if conv_id and _sold_elsewhere(db, conv_id, marketplace):
+                continue
             sale = record_sale(
                 db,
                 marketplace=marketplace,
@@ -187,7 +240,7 @@ def record_reported_sales(marketplace: str, listing_ids: list[str], *, session_f
                 line_id=listing_id,
                 listing_id=listing_id,
                 quantity=None,
-                sold_at=None,
+                sold_at=_claimed_sold_at(db, conv_id, marketplace) if conv_id else None,
                 conversation_id=conv_id,
             )
             if sale:

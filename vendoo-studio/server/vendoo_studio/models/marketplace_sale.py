@@ -45,3 +45,14 @@ class MarketplaceSale(SellerOwned, Base):
     received_at = Column(DateTime, nullable=False, default=utcnow)
     resolved_at = Column(DateTime, nullable=True)
     source = Column(String, nullable=False, default="marketplace", server_default="marketplace")
+
+    @property
+    def is_order_backed(self) -> bool:
+        """True for a real order, not a listing a check found marked sold.
+
+        A check that reads a listing as sold has no order of its own: it names
+        the listing as both order and line. A marketplace order, a webhook and
+        the seller's Mark as sold all carry their own order or line identity,
+        or recorded amounts.
+        """
+        return bool(self.financials or (self.order_id and self.order_id != self.line_id))
