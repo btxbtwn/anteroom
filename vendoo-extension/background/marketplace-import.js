@@ -255,9 +255,12 @@ async function depopImportPage(cursor, deadline) {
 }
 
 function depopImportVariants(product) {
-  const variants = product?.variants && typeof product.variants === 'object' ? product.variants : null;
+  // Depop's product document names its sizes variants_all, each with a variant name.
+  const raw = product?.variants ?? product?.variants_all;
+  const variants = raw && typeof raw === 'object' ? raw : null;
   if (Array.isArray(variants)) {
-    return variants.map(row => ({ id: String(row?.id ?? row?.size_id ?? ''), quantity: importCount(row?.quantity), name: row?.name ?? row?.size }));
+    return variants.map(row => ({ id: String(row?.id ?? row?.size_id ?? ''), quantity: importCount(row?.quantity),
+      name: row?.name ?? row?.size ?? row?.variant }));
   }
   return variants ? Object.entries(variants).map(([key, value]) => ({ id: key, quantity: importCount(value?.quantity ?? value), name: value?.name })) : [];
 }

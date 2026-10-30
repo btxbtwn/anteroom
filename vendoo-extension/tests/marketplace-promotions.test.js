@@ -416,6 +416,34 @@ test('Depop verifies USD across product and preview without assuming missing cur
   }
 });
 
+test('Depop reads the price from the offer preview when its product document has none', async () => {
+  // Depop's product document (2026-10-30): no price or currency, sizes under variants_all,
+  // and a preview without a lowest offer.
+  const bare = { slug: SLUG, id: 999, user_id: 55, status: 'STATUS_ONSALE', variants_all: [{ id: 17, quantity: 1, status: 'STATUS_ONSALE', variant: 'M' }] };
+  const preview = depopPreview();
+  delete preview.sellers_lowest_offer_value;
+  const check = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, bare], [DEPOP_PREVIEW]: [200, preview] }));
+  await check.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: { marketplace: 'depop', action: 'offer',
+    listing_id: SLUG, discount_percent: 15 } });
+  assert.equal(check.results[0].ok, true, JSON.stringify(check.results[0]));
+  assert.equal(check.results[0].price_cents, 5000);
+  assert.equal(check.results[0].offer_price_cents, 4250);
+  const send = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, bare], [DEPOP_PREVIEW]: [200, preview] }));
+  await depopOffer(send);
+  assert.equal(send.results[0].ok, true, JSON.stringify(send.results[0]));
+  assert.equal(send.requests.filter(r => r.key === DEPOP_SEND).length, 1);
+  const sizes = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, { ...bare,
+    variants_all: [{ id: 17, quantity: 1, variant: 'M' }, { id: 18, quantity: 1, variant: 'L' }] }], [DEPOP_PREVIEW]: [200, preview] }));
+  await depopOffer(sizes);
+  assert.equal(sizes.results[0].ok, false);
+  assert.ok(!sizes.requests.some(r => r.key === DEPOP_SEND));
+  const priceless = offerWorker('depop', depopAnswers({ [`GET ${DEPOP}/products/by-slug/${SLUG}/`]: [200, bare],
+    [DEPOP_PREVIEW]: [200, depopPreview({ prices: {} })] }));
+  await depopOffer(priceless);
+  assert.equal(priceless.results[0].ok, false);
+  assert.ok(!priceless.requests.some(r => r.key === DEPOP_SEND));
+});
+
 test('Depop submits one bulk job, waits for success, and never invents a delivered count or repeats the POST', async () => {
   const statuses = ['QUEUED', 'PROCESSING', 'SUCCESS'];
   const sent = offerWorker('depop', depopAnswers({ [DEPOP_JOB]: () => [200, { status: statuses.shift() }] }));
