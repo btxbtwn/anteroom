@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The public release is now 0.1.574. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.578. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
@@ -106,7 +106,7 @@ Provider settings UI is connected on `feat/hosted-provider-settings`: API-key
 providers and MiMo use the shared controls with account Vault storage. The web
 settings sidebar currently exposes Providers; other sections remain pending
 their service integrations. Existing SDK provider preferences remain visible,
-with a Mac-worker notice rather than hosted sign-in/terminal controls. Generation and text chat are deployed; image attachments are the next increment.
+with a Mac-worker notice rather than hosted sign-in/terminal controls. Generation, text chat and private image attachments are deployed.
 
 On `feat/hosted-generation-flow`, runtime availability of the durable hosted
 worker controls Generate and listing text chat. Status now reports the seller’s
@@ -141,10 +141,17 @@ attachments, native forms/options, approved browser actions, the outbound Mac
 worker, inventory import and the remaining views after deployment. Video stays
 excluded. Full parity has not been established.
 
-Private listing-chat attachments are implemented on `feat/hosted-chat-attachments`.
+Private listing-chat attachments merged in #991 and are deployed in 0.1.578.
 Images upload before queue submission; durable payloads keep owned Storage
 references rather than data URLs. The shared chat handler consumes those references,
 and authenticated reads/thumbnails verify the conversation owner. Draft deletion
 removes both queued and message attachment objects after metadata commits.
 Request size and upload concurrency are bounded. The runtime advertises attachment
 controls only with an active draft worker. Full parity remains unfinished.
+
+On `feat/hosted-native-catalog-forms`, hosted Poshmark and Depop use the exact
+canonical native form builders and authenticated HTTP contract used by desktop.
+The Chrome-only form transport override is removed. Categories, category-dependent
+choices, sections, row widths and saved values come from those builders, with
+owner/revision checks and no marketplace jobs or writes. Account-dependent forms
+and approved marketplace actions still need their browser/worker integration.

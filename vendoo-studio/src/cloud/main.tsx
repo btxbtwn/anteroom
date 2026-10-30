@@ -4,8 +4,6 @@ import { createClient, type Session, type SupabaseClient } from "@supabase/supab
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createStudioQueryClient } from "../api/queryClient";
 import { installHostedApiSession, studioFetch } from "../api/transport";
-import { installHostedBrowser } from "../api/hostedBrowser";
-import { api } from "../api/client";
 import { App } from "../app/App";
 import { WorkspaceRuntimeProvider, type WorkspaceFeature } from "../app/runtime";
 import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
@@ -70,26 +68,12 @@ function HostedWorkspace({ session }: { session: Session }) {
       },
       unauthorized: () => { void supabase.auth.signOut({ scope: "local" }); },
     });
-    const bridge = cloudExtension({ id: session.user.id, email: session.user.email || "" });
-    const removeBrowser = installHostedBrowser({ form: async (id, marketplace, revisionId) => {
-      if (marketplace !== "poshmark") throw new Error("This marketplace is still being connected to the hosted workspace.");
-      const saved = await api.listings.get(id);
-      if (revisionId && saved.current_revision_id !== revisionId) throw new Error("The listing changed. Reload its form.");
-      // Bridge's reviewed read contract accepts listing copy, never sessions,
-      // database identities, paths or operational marketplace identifiers.
-      const copy: Record<string, string | number | null> = {};
-      for (const name of ["title", "description", "price", "brand", "size", "condition", "primaryColor", "secondaryColor", "category_path", "sku", "zipCode", "department", "quantity", "cost", "weight_oz", "package_dimensions_in"]) {
-        const value = saved.listing[name];
-        if (typeof value === "string" || typeof value === "number") copy[name] = value;
-      }
-      return bridge.readPoshmarkForm(copy);
-    } });
     void studioFetch("/api/runtime").then(async response => {
       if (!response.ok) throw new Error("Could not open your workspace. Reload to try again.");
       const value = await response.json();
       if (active) setRuntime(value);
     }).catch(error => { if (active) setError(error.message); });
-    return () => { active = false; removeBrowser(); remove(); queryClient.clear(); };
+    return () => { active = false; remove(); queryClient.clear(); };
   }, [session.user.id, session.user.email, queryClient]);
   const controls = <div className="cloud-account"><ChromeConnection account={{ id: session.user.id, email: session.user.email || "" }}/><button type="button" onClick={() => void supabase.auth.signOut({ scope: "local" }).then(({ error }) => { if (error) setError("Could not sign out. Please try again."); })}>Sign out</button></div>;
   if (!runtime) return <main className="cloud-auth" role={error ? "alert" : "status"}>{error || "Opening your workspace…"}</main>;

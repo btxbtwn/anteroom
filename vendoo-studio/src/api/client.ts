@@ -1,4 +1,3 @@
-import { hostedBrowser } from "./hostedBrowser";
 import { studioFetch, hasHostedApiSession } from "./transport";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
@@ -550,7 +549,7 @@ export const api = {
     vintedBrands: (convId: string, q: string, category: string) =>
       request<{ options: string[] }>(`/conversations/${convId}/native-marketplaces/vinted/brands?${new URLSearchParams({ q, category })}`),
     form: (convId: string, marketplace: string, revisionId?: string | null) =>
-      hostedBrowser()?.form(convId, marketplace, revisionId) ?? request<MarketplaceForm>(`/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
+      request<MarketplaceForm>(`/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
     preflight: (convId: string, sellwild?: { categoryId?: number; conditionId?: number }) => {
       const params = new URLSearchParams();
