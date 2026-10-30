@@ -1491,15 +1491,26 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
             provider_patch.start()
             self.patches[index] = provider_patch
 
+        finishing = []
+        def spawn_finish(coro):
+            task = streaming.spawn(coro)
+            finishing.append(task)
+            return task
+
         transport = ASGITransport(app=app)
         body = ""
-        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
-            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
-                self.assertEqual(resp.status_code, 200)
-                body = "".join([chunk async for chunk in resp.aiter_text()])
+        with patch("vendoo_studio.services.listing_generation.spawn", side_effect=spawn_finish):
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    self.assertEqual(resp.status_code, 200)
+                    body = "".join([chunk async for chunk in resp.aiter_text()])
         self.assertIn("Repairing listing JSON", body)
         self.assertIn("Filling required fields", body)
         self.assertGreaterEqual(self.provider.chat_calls, 2)
+        # The stream ends before the native-field finish posts its saved
+        # summary. Await that work instead of racing the database read in CI.
+        self.assertEqual(len(finishing), 1)
+        await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
         db = self.Session()
         revisions = ListingRepo(db).get_revisions(self.conv_id)
         messages = ConversationRepo(db).get_messages(self.conv_id)

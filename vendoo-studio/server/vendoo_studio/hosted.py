@@ -76,6 +76,12 @@ class AccountResponse(BaseModel):
 def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        # ORM relationship names must resolve before a route constructs its
+        # first query, which happens before the session's after_begin hook.
+        from vendoo_studio.database import load_models
+        from sqlalchemy.orm import configure_mappers
+        load_models()
+        configure_mappers()
         # Fail startup if the operator has not selected a project. No service
         # role key, shared signing secret or database password is needed here.
         app.state.session_verifier = SessionVerifier(
