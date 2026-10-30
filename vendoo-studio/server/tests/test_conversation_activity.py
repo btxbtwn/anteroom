@@ -25,6 +25,12 @@ class ActivityRegistryTest(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         activity.reset()
 
+    def test_exact_clear_takes_precedence_over_another_field_spelling(self):
+        for value in (None, ""):
+            with self.subTest(value=value):
+                self.assertEqual(activity.field_value({"etsy_specifics": {
+                    "whoMade": value, "who_made": "Another company or person"}}, "etsy_specifics.whoMade"), value)
+
     async def test_task_is_listed_until_it_finishes(self):
         gate = asyncio.Event()
         task = activity.track_task("c1", "Filling discovered fields…", asyncio.create_task(gate.wait()))
@@ -116,6 +122,29 @@ class ConversationActivityRouteTest(unittest.TestCase):
             save_listing_edit(self.conv.id, {"title": "Tee", "ebay_specifics": {"Size": "36"}}, self.db)
         self.assertEqual(error.exception.status_code, 409)
         self.assertEqual(repo.get_current(self.conv.id).current_revision_id, original.id)
+
+    def test_scoped_etsy_patch_survives_key_normalization_and_readback(self):
+        from vendoo_studio.models.etsy_fields import etsy_who_raw, etsy_when_raw
+        from vendoo_studio.services.chat_listing import save_listing_revision
+        from vendoo_studio.services.listing_patch import apply_json_patch
+
+        repo = ListingRepo(self.db)
+        before = {"title": "Vintage tee", "price": 30, "etsy_specifics": {},
+                  "ebay_specifics": {"Size": "XL"}}
+        repo.save_revision(self.conv.id, before, "model")
+        ops = [{"op": "add", "path": "/etsy_specifics/whoMade", "value": "Another company or person"},
+               {"op": "add", "path": "/etsy_specifics/whenMade", "value": "2005"}]
+        token = activity.edit_fields.set(("etsy_specifics.whoMade", "etsy_specifics.whenMade"))
+        try:
+            save_listing_revision(self.db, self.conv.id, apply_json_patch(before, ops), operations=ops)
+        finally:
+            activity.edit_fields.reset(token)
+        self.db.expire_all()
+        saved = repo.get_revision(repo.get_current(self.conv.id).current_revision_id).listing_json
+        self.assertEqual(etsy_who_raw(saved["etsy_specifics"]), "Another company or person")
+        self.assertTrue(etsy_when_raw(saved["etsy_specifics"], saved))
+        self.assertEqual(saved["price"], 30)
+        self.assertEqual(saved["ebay_specifics"], {"Size": "XL"})
 
     def test_background_work_keeps_the_listing_busy(self):
         activity.begin(self.conv.id, "Filling discovered fields…")
