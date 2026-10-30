@@ -26,10 +26,10 @@ to confirm a requested connection. Chrome on iPhone cannot run this extension.
 
 A manifest content script runs only on the exact hosted HTTPS origin, in the
 isolated world and top frame. The page uses origin-targeted `window.postMessage`;
-the content script forwards only `status`, `connect` and `disconnect` fields to
+the content script forwards explicit connection requests to
 the extension worker. Both ends reject extra fields. Supabase access/refresh
-tokens, API keys, listing JSON, photos and marketplace commands never cross this
-transport. There is no arbitrary fetch, script execution, tab navigation, cookie
+tokens, API keys, photos and marketplace mutation commands never cross this
+connection transport. The optional Poshmark reader is described below. There is no arbitrary fetch, script execution, tab navigation, cookie
 or automation proxy exposed to the page.
 
 The worker independently checks Chrome's sender extension ID, frame ID, document
@@ -37,7 +37,7 @@ ID, sender origin/URL and tab URL. It keeps per-tab account labels and pending
 approval in `chrome.storage.session`, which is not exposed to content scripts by
 default. A serialized mutation chain prevents concurrent tabs from losing each
 other's records. Status responses contain only connection state, extension
-version and an empty supported-actions list, never another account's identity.
+version and an explicit supported-actions list, never another account's identity.
 
 Only the extension's own `cloud-connect.html` page can approve or deny a request.
 Requests expire after two minutes. Approval probes the exact document that asked
@@ -52,7 +52,7 @@ The hosted API still verifies Supabase sessions and enforces seller-scoped
 Postgres/Storage access. No data API accepts a browser connection record as a
 credential. Future marketplace actions need explicit contracts, approval,
 concurrency checks and owner verification before the supported-actions list can
-grow. This increment does not expose them or publish/delist anything.
+grow. Bridge 0.2.39 adds only [Poshmark form reads](cloud-marketplace-forms.md); listing mutations are not exposed.
 
 This follows Chrome's documented [content-script isolation](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts),
 [message passing and sender checks](https://developer.chrome.com/docs/extensions/develop/concepts/messaging),
@@ -72,3 +72,7 @@ connect and approve; refresh and check it stays connected; disconnect and reconn
 sign out and verify it no longer reports connected for a new account. Approving an
 old request after signing out or reloading must fail. This test does not perform
 marketplace actions or touch listings.
+
+Bridge 0.2.39 adds a strictly bounded read-only General-field payload and native
+form response for Poshmark previews. The original connection protocol remains
+unchanged; no cloud credential is added. See [form previews](cloud-marketplace-forms.md).
