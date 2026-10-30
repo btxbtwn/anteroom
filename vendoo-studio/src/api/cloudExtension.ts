@@ -48,7 +48,7 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
     readPoshmarkForm: async (listing: Record<string, string | number | null>): Promise<MarketplaceForm> => {
       const connection = await status();
       if (!connection.ok || connection.state !== "connected") throw new Error(ERRORS.not_connected);
-      if (!connection.supportedActions?.includes("poshmark.form.read")) throw new Error("Update Anteroom Bridge to 0.2.39 or later, then reload this page.");
+      if (!connection.supportedActions?.includes("poshmark.form.read")) throw new Error("Use Anteroom Bridge 0.2.39 or later. If you also use the local app, update Anteroom and use its Connect Chrome, then reload this page.");
       const result = await send("poshmark_form", listing);
       const form = result.form as MarketplaceForm | undefined;
       if (!result.ok || form?.marketplace !== "poshmark" || form.native !== true || !Array.isArray(form.fields)) {

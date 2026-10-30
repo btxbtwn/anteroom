@@ -37,6 +37,6 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
   </div>{expanded && <div className="connection-help" role="status">
     {connected ? <p>This Chrome tab is connected to your account.{connection.extensionVersion ? ` Bridge ${connection.extensionVersion}.` : ""}</p>
       : pending ? <p>Choose Connect browser in the Anteroom Bridge window. Keep this page open.</p>
-      : <><p>Use desktop Chrome with Anteroom Bridge 0.2.38 or later.</p><p>In chrome://extensions, reload Anteroom Bridge—or use Load unpacked to select the updated vendoo-extension folder. Then reload this page and choose Connect Chrome.</p></>}
+      : <><p>Use desktop Chrome with Anteroom Bridge 0.2.38 or later.</p><p>Using the local Anteroom app? Update it and choose Connect Chrome there, then keep its managed Bridge enabled. Standalone web-test ZIPs do not support local marketplace actions. For web-only use, load the updated Bridge in chrome://extensions, then reload this page.</p></>}
   </div>}</div>;
 }
