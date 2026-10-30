@@ -121,6 +121,7 @@ export function resolvedEditorValue(field: NativeFormRow, listing: ListingData |
   }
   const listingValue = getListingEditorValue(listing, field.key);
   if (field.locked && field.defaultValue !== undefined) return field.defaultValue;
+  if (listingValue !== undefined && !editorValuePresent(listingValue)) return listingValue;
   if (editorValuePresent(listingValue) && (!field.selectionOnly || choiceMatches(field, listingValue))) return listingValue;
   if (field.defaultValue !== undefined) return field.defaultValue;
   return listingValue;

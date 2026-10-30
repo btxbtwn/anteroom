@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.549 — 2026-10-29
+
+- I can remove Depop Age, Source, and Style chips and choose replacements. Cleared selections stay empty across marketplace forms instead of bringing back the old answer.
+
 ## 0.1.548 — 2026-10-30
 
 - Connect the web app to Anteroom Bridge in desktop Chrome, approve the browser connection, and disconnect it when you sign out.
