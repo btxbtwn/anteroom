@@ -470,3 +470,49 @@ class DetectedSaleProtectionTest(unittest.TestCase):
             self.assertEqual((entry["listing_id"], entry["sold_here"]), ("shop-tee-v2-136d", False))
             live, fresh = automation_actions._partition(db, conv_id, ["depop"])
             self.assertIn("depop", live + fresh)
+
+
+class MarkedSoldElsewhereTest(unittest.TestCase):
+    """Clearing the other listings after a sale is not another sale."""
+
+    def setUp(self):
+        chrome_sales._item_read.clear()
+
+    def tearDown(self):
+        chrome_sales._item_read.clear()
+
+    def check(self, Session, conv_id, reported):
+        async def request(_job, _message_type, payload=None, timeout=40):
+            return {"ok": True, "sales": [{"listing_id": sold} for sold in reported]}
+
+        with mock.patch("vendoo_studio.services.browser_bridge.request", request), \
+                mock.patch("vendoo_studio.routes.extension.extension_manager", mock.Mock(connected=True)), \
+                mock.patch("vendoo_studio.services.marketplace_accounts.announce_sales", mock.AsyncMock()):
+            with Session() as db:
+                return asyncio.run(chrome_sales.check_item(db, conv_id, session_factory=Session))
+
+    def test_the_listing_marked_sold_elsewhere_adds_no_second_sale(self):
+        Session = sessionmaker(bind=_engine())
+        conv_id = _listing(Session, {"vendooListingUrls": {"depop": "https://www.depop.com/products/shop-tee-136d/"}})
+        with Session() as db:
+            db.add(MarketplaceSale(marketplace="ebay", order_id="o1", line_id="l1", listing_id="123456789012",
+                                   conversation_id=conv_id))
+            db.commit()
+        result = self.check(Session, conv_id, ["shop-tee-136d"])
+        self.assertEqual(result["recorded"], [])
+        with Session() as db:
+            self.assertEqual([line.marketplace for line in db.query(MarketplaceSale).all()], ["ebay"])
+
+    def test_a_verified_claim_keeps_the_date_the_sale_was_made(self):
+        from datetime import datetime
+
+        Session = sessionmaker(bind=_engine())
+        conv_id = _listing(Session, {
+            "vendooListingUrls": {"depop": "https://www.depop.com/products/shop-tee-136d/"},
+            "vendooDates": {"soldByMarketplace": {"depop": "2026-09-02T15:00:00Z"}},
+        })
+        result = self.check(Session, conv_id, ["shop-tee-136d"])
+        self.assertEqual(len(result["recorded"]), 1)
+        with Session() as db:
+            sale = db.query(MarketplaceSale).one()
+            self.assertEqual(sale.sold_at, datetime(2026, 9, 2, 15, 0))

@@ -233,7 +233,11 @@ def load_rows(db) -> list[AnalyticsItem]:
                 missing_sale_details=tuple(str(gap) for gap in sale.get("missing") or ()),
             )
         # A send in flight keeps its one row, as before; its sales count once it settles.
-        sales = [] if effective in _BUSY else _item_sales(base, vendoo, lines.get(conv_id, []), listed_text)
+        own_lines = lines.get(conv_id, [])
+        if effective == "sold":
+            # Nothing is left to sell: other marketplaces reading sold are cleanup.
+            own_lines = _without_cleanup_reports(own_lines)
+        sales = [] if effective in _BUSY else _item_sales(base, vendoo, own_lines, listed_text)
         # Unsold stock merged into another item is counted there; its sales still count here.
         merged_away = bool(notes.get("mergedInto")) and effective != "sold"
         if (effective != "sold" or not sales) and not merged_away:
@@ -242,6 +246,21 @@ def load_rows(db) -> list[AnalyticsItem]:
             rows.append(replace(base, sold_at=derived.sold_at) if fallback_sold else base)
         rows.extend([replace(sale, stock=False) for sale in sales] if merged_away else sales)
     return rows
+
+
+def _without_cleanup_reports(lines: list) -> list:
+    """One sale, even when the seller marked the item sold on the other marketplaces.
+
+    Once a marketplace has a real order for an item, another marketplace's
+    listing reading sold is cleanup, not a second sale. A marketplace whose
+    only evidence is that reading (Anteroom's checks) is dropped there; order
+    lines and the seller's own recorded sales always count.
+    """
+    ordered = [line for line in lines if line.is_order_backed]
+    if not ordered:
+        return lines
+    sold_on = {line.marketplace for line in ordered}
+    return [line for line in lines if line.is_order_backed or line.marketplace in sold_on]
 
 
 def _item_sales(base: AnalyticsItem, vendoo: AnalyticsItem | None, lines: list, listed_text: str) -> list[AnalyticsItem]:
