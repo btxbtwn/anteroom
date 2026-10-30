@@ -60,12 +60,15 @@ def scoped_listing(previous: dict, candidate: dict, paths: tuple[str, ...]) -> d
 def field_value(listing: dict, path: str):
     from vendoo_studio.services.seller_overrides import fold_key, get_path
 
-    value = get_path(listing, path)
-    if value is None and path.startswith("ebay_specifics."):
-        name = path.split(".", 1)[1]
-        value = next((value for key, value in (listing.get("ebay_specifics") or {}).items()
-                      if fold_key(key) == fold_key(name)), None)
-    return value
+    parent_path, _, name = path.rpartition(".")
+    parent = get_path(listing, parent_path) if parent_path else listing
+    if not isinstance(parent, dict):
+        return None
+    if name in parent:
+        return parent[name]
+    # Normalization can rename a declared edit before its scoped save. Match
+    # that same field in every form without copying unrelated agent changes.
+    return next((value for key, value in parent.items() if fold_key(key) == fold_key(name)), None)
 
 
 def begin(conv_id: str, label: str) -> Work:
