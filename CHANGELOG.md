@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.576 — 2026-10-30
+
+- Depop offers now go to a listing with a single eligible liker. Those were skipped with "Depop's send-offer preview changed".
+
 ## 0.1.575 — 2026-10-30
 
 - Depop offer rounds now say "Nobody who liked this Depop listing can get an offer right now" for listings without likes, or whose likers cannot get an offer, instead of "HTTP 400" or "Anteroom needs an update".
