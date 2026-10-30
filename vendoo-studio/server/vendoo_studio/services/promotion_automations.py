@@ -273,6 +273,15 @@ def _order(row: PromotionAutomation, targets: list) -> list:
     return sorted(targets, key=lambda target: target[2] or oldest, reverse=row.share_order == "newest")
 
 
+def _skip_reason(exc: PromotionError, send: ListingPromotion) -> str:
+    """The skip text, with the marketplace's own words when it gave them."""
+    text = str(exc)
+    own = (send.marketplace_message or "").strip()
+    if own and own not in text:
+        text = f"{text.rstrip('.')}: {own}"
+    return text[:120]
+
+
 def _skip_note(reasons: Counter) -> str:
     return "; ".join(f"{text} ({count})" for text, count in reasons.most_common(3))
 
@@ -338,7 +347,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 if exc.code in ("chrome", "network"):
                     stop_note = str(exc)
                     break
-                reasons[str(exc)[:120]] += 1
+                reasons[_skip_reason(exc, send)] += 1
                 continue
             db.add(send)
             db.commit()
@@ -355,7 +364,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     counts["skipped"] += 1
                     break
                 counts["skipped"] += 1
-                reasons[str(exc)[:120]] += 1
+                reasons[_skip_reason(exc, send)] += 1
                 continue
             if result["state"] == "done":
                 counts["sent"] += 1
