@@ -257,33 +257,6 @@ def save_ui(body: UiInput, db=Depends(get_seller_db)):
     return ui(db)
 
 
-@router.get('/settings/marketplaces')
-def markets():
-    return {'available': [{'id': 'poshmark', 'label': 'Poshmark', 'fillable': False}], 'selected': ['poshmark'], 'fillable': []}
-
-
-@router.get('/settings/listing-defaults')
-def listing_defaults(db=Depends(get_seller_db)):
-    return {'defaults': user_settings.get_listing_field_defaults()}
-
-
-@router.get('/settings/ebay-inventory-location')
-def inventory_location(db=Depends(get_seller_db)):
-    return {'location': user_settings.get_ebay_inventory_location()}
-
-
-@router.get('/settings/package-dimensions')
-def package_dimensions(db=Depends(get_seller_db)):
-    return user_settings.get_package_dimensions()
-
-
-@router.get('/settings/hidden-fields')
-def hidden_fields(conversation_id: str | None = None, db=Depends(get_seller_db)):
-    if conversation_id:
-        conversation(db, conversation_id)
-    from vendoo_studio.services.hidden_fields import hidden_fields as read_hidden_fields
-    return read_hidden_fields(conversation_id)
-
 
 def job_response(row):
     return {key: getattr(row, key) for key in ('id', 'conversation_id', 'approved_revision_id', 'status',

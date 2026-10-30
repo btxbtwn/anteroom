@@ -15,7 +15,7 @@ for that feature. Keep video controls hidden in the hosted runtime.
 
 ## Work in progress
 
-The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.578. Do not describe the currently deployed inventory/editor
+The shared service foundation merged in PR [#982](https://github.com/btxbtwn/list-this-vendoo-suite/pull/982). The deployed public release is now 0.1.579. Do not describe the currently deployed inventory/editor
 as a complete web port.
 
 The service boundary is `services/service_context.py`. A verified hosted request
@@ -155,3 +155,11 @@ The Chrome-only form transport override is removed. Categories, category-depende
 choices, sections, row widths and saved values come from those builders, with
 owner/revision checks and no marketplace jobs or writes. Account-dependent forms
 and approved marketplace actions still need their browser/worker integration.
+
+The shared Poshmark/Depop forms merged in #992 and are deployed in 0.1.579.
+On `feat/hosted-listing-preferences`, reviewed shared preference handlers replace
+the Poshmark-only marketplace placeholder and read-only defaults. Marketplace
+selection, package/ZIP/location defaults, formulas and hide/restore controls use
+the seller-owned settings store. Listing-specific changes verify ownership before
+calling the shared service. Other settings sections and account actions remain
+pending their reviewed integrations.
