@@ -1,7 +1,7 @@
 """Optional shared minimum for offer rules
 
 Revision ID: 4696bd599cea
-Revises: 84bc2a03cbad
+Revises: c25ff7e26196
 Create Date: 2026-10-29 21:51:27.997810
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = '4696bd599cea'
-down_revision = '84bc2a03cbad'
+down_revision = 'c25ff7e26196'
 branch_labels = None
 depends_on = None
 

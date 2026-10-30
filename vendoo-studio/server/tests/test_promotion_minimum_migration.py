@@ -13,7 +13,7 @@ from vendoo_studio.models.promotion_automation import PromotionAutomation
 def test_upgrade_preserves_minimums_and_pauses_only_enabled_offer_rules(migration_engine):  # noqa: F811
     engine = migration_engine
     config = migration_config(engine)
-    command.upgrade(config, "84bc2a03cbad")
+    command.upgrade(config, "c25ff7e26196")
     table = PromotionAutomation.__table__
     with engine.begin() as connection:
         for name, action, enabled in [("offers", "offer", True), ("off", "offer", False), ("sharing", "share", True)]:
