@@ -13,11 +13,13 @@ from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services.inventory_analytics import AnalyticsItem, load_rows, summarize
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=UTC)
+_next_item = iter(range(1, 10_000))
 
 
 def _item(**overrides) -> AnalyticsItem:
+    """One item, with its own conversation ID unless the test names one."""
     fields = {
-        "conversation_id": "c1",
+        "conversation_id": f"c{next(_next_item)}",
         "title": "Nike Tee",
         "status": "sold",
         "price": 48,
@@ -522,6 +524,22 @@ class LoadAnalyticsTest(unittest.TestCase):
         self.assertEqual(rows[self.sold.id].labels, ("A19", "Closet"))
         self.assertNotIn(merged.id, rows)
 
+    def test_a_merged_items_sales_do_not_count_it_back_into_inventory(self):
+        from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
+        merged = ConversationRepo(self.db).create(title="Duplicate tee")
+        merged.notes = json.dumps({"mergedInto": self.sold.id})
+        ListingRepo(self.db).save_revision(merged.id, {"title": "Duplicate tee", "quantity": 3}, source="import")
+        self.db.add(MarketplaceSale(marketplace="depop", order_id="o9", line_id="l9", listing_id="shop-tee-136d",
+                                    conversation_id=merged.id, quantity=1))
+        self.db.commit()
+        rows = load_rows(self.db)
+        sale = next(row for row in rows if row.conversation_id == merged.id)
+        self.assertFalse(sale.stock)
+        inventory = summarize(rows, range_id="all", now=NOW)["inventory"]
+        # The partial sale counts in Sales; its stock belongs to the item it joined.
+        self.assertEqual((inventory["sold"], inventory["active"]), (1, 0))
+
     def test_loader_preserves_zero_sale_cost_and_unknown_sale_price(self):
         notes = json.loads(self.sold.notes)
         notes["vendooSale"]["cost"] = 0
@@ -612,3 +630,39 @@ class StaleListingsTest(unittest.TestCase):
         self.assertIsNone(row["lowest_price"])
         self.assertEqual(row["discount_percent"], 35)
         self.assertEqual(row["sale_price"], 19.5)
+
+
+class InventoryCountsItemsTest(unittest.TestCase):
+    """The strip counts stock the way the Inventory tabs do: one item, however many sales."""
+
+    def test_several_sales_of_one_item_are_one_sold_item(self):
+        payload = summarize([
+            _item(conversation_id="tee", sold_price=20),
+            _item(conversation_id="tee", sold_price=22),
+        ], range_id="all", now=NOW)
+        self.assertEqual(payload["sales"]["count"], 2)
+        self.assertEqual(payload["inventory"]["sold"], 1)
+        self.assertEqual(payload["inventory"]["active"], 0)
+
+    def test_a_partly_sold_item_is_active_and_not_also_sold(self):
+        payload = summarize([
+            _item(conversation_id="bundle", status="sold", sold_price=15),
+            _item(conversation_id="bundle", status="active", sold_at=None, sold_price=None),
+        ], range_id="all", now=NOW)
+        self.assertEqual(payload["sales"]["count"], 1)
+        self.assertEqual(payload["inventory"]["sold"], 0)
+        self.assertEqual(payload["inventory"]["active"], 1)
+
+    def test_each_item_counts_once_under_its_own_state(self):
+        payload = summarize([
+            _item(conversation_id="sold", status="sold"),
+            _item(conversation_id="live", status="active", sold_at=None, sold_price=None),
+            _item(conversation_id="draft", status="draft"),
+            _item(conversation_id="working", status="listing"),
+            _item(conversation_id="failed", status="failed"),
+        ], range_id="all", now=NOW)
+        inventory = payload["inventory"]
+        self.assertEqual(
+            (inventory["sold"], inventory["active"], inventory["draft"], inventory["working"], inventory["failed"]),
+            (1, 1, 1, 1, 1),
+        )
